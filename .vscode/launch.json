@@ -1,0 +1,20 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "API Server",
+      "type": "python",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["interfaces.api.server:create_app", "--reload", "--port", "8000"],
+      "jinja": true
+    },
+    {
+      "name": "Run Tests",
+      "type": "python",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["-v"]
+    }
+  ]
+}

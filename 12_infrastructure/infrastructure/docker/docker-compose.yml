@@ -1,0 +1,29 @@
+version: "3.9"
+
+services:
+  api:
+    build:
+      context: ../../../
+      dockerfile: 12_infrastructure/infrastructure/docker/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - VAYREN_ENVIRONMENT=development
+      - PYTHONPATH=/app/01_foundation:/app/02_platform:/app/03_market:/app/04_signals:/app/05_strategies:/app/06_risk:/app/07_execution:/app/08_portfolio:/app/09_analytics:/app/10_research:/app/11_interfaces:/app/12_infrastructure:/app/13_knowledge
+    volumes:
+      - ../../../:/app
+    command: uvicorn interfaces.api.server:create_app --host 0.0.0.0 --port 8000 --reload
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ../../../12_infrastructure/infrastructure/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin

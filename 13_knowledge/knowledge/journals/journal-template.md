@@ -1,0 +1,13 @@
+# Journal: YYYY-MM-DD
+
+## Trades
+- ...
+
+## Decisions
+- ...
+
+## Observations
+- ...
+
+## Tomorrow
+- ...

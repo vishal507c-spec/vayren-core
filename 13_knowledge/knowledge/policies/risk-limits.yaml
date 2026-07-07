@@ -1,0 +1,6 @@
+# Risk Limit Policy
+max_position_size: 1000
+max_order_value: 50000
+max_daily_loss: 2000
+max_portfolio_concentration: 0.25
+max_leverage: 1.0

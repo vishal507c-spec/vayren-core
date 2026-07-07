@@ -1,0 +1,5 @@
+# Data Retention Policy
+market_data_days: 365
+trade_log_days: 730
+journal_entries: permanent
+experiment_results: permanent

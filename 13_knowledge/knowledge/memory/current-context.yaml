@@ -1,0 +1,24 @@
+# Current Context — Updated after each session
+last_session: ""
+current_focus: "Repository scaffold initialization"
+active_domains:
+  - market
+  - signals
+  - strategies
+  - execution
+  - portfolio
+  - risk
+  - analytics
+  - research
+  - platform
+  - interfaces
+  - infrastructure
+  - knowledge
+  - lib
+next_priorities:
+  - "Create first strategy implementation"
+  - "Connect Polygon data adapter"
+  - "Write backtest engine"
+decisions_pending: []
+recent_experiments: []
+notes: ""
