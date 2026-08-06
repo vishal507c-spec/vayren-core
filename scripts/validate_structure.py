@@ -1,7 +1,7 @@
 """Validate that the repository structure follows the blueprint.
 
-Domains are now inside numbered navigation folders (NN_CHAPTER/domain/).
-This script discovers them by scanning all NN_* directories at the repo root.
+Domains live inside numbered startup-flow chapters (NN_CHAPTER/domain/).
+Archived modules in 99_archive and knowledge in 90_brain are excluded.
 """
 
 from pathlib import Path
@@ -9,36 +9,51 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 DOMAIN_STRUCTURE: dict[str, list[str]] = {
-    "market": ["__init__.py", "README.md", "models/__init__.py", "services/__init__.py", "events/__init__.py", "tests/__init__.py", "conftest.py"],
-    "signals": ["__init__.py", "README.md", "models/__init__.py", "services/__init__.py", "events/__init__.py", "tests/__init__.py", "conftest.py"],
-    "strategies": ["__init__.py", "README.md", "models/__init__.py", "services/__init__.py", "events/__init__.py", "tests/__init__.py", "conftest.py"],
-    "execution": ["__init__.py", "README.md", "models/__init__.py", "services/__init__.py", "events/__init__.py", "tests/__init__.py", "conftest.py"],
-    "portfolio": ["__init__.py", "README.md", "models/__init__.py", "services/__init__.py", "events/__init__.py", "tests/__init__.py", "conftest.py"],
-    "risk": ["__init__.py", "README.md", "models/__init__.py", "services/__init__.py", "events/__init__.py", "tests/__init__.py", "conftest.py"],
-    "analytics": ["__init__.py", "README.md", "models/__init__.py", "services/__init__.py", "events/__init__.py", "tests/__init__.py", "conftest.py"],
-    "research": ["__init__.py", "README.md", "tests/__init__.py", "conftest.py"],
-    "platform": ["__init__.py", "README.md", "models/__init__.py", "services/__init__.py", "tests/__init__.py", "conftest.py"],
-    "interfaces": ["__init__.py", "README.md", "tests/__init__.py", "conftest.py"],
-    "infrastructure": ["README.md"],
-    "knowledge": ["README.md"],
-    "lib": ["__init__.py", "README.md", "tests/__init__.py", "conftest.py"],
+    "app": [
+        "__init__.py",
+        "README.md",
+        "bootstrap/__init__.py",
+        "lifecycle/__init__.py",
+        "tests/__init__.py",
+    ],
+    "core": [
+        "__init__.py",
+        "README.md",
+        "event_bus/__init__.py",
+        "events/__init__.py",
+        "logger/__init__.py",
+        "registry/__init__.py",
+        "tests/__init__.py",
+    ],
+    "market": [
+        "__init__.py",
+        "README.md",
+        "models/__init__.py",
+        "database/__init__.py",
+        "repository/__init__.py",
+        "loader/__init__.py",
+        "events/__init__.py",
+        "tests/__init__.py",
+    ],
+    "chart": [
+        "__init__.py",
+        "README.md",
+        "models/__init__.py",
+        "engine/__init__.py",
+        "renderer/__init__.py",
+        "widgets/__init__.py",
+        "windows/__init__.py",
+        "events/__init__.py",
+        "tests/__init__.py",
+    ],
 }
 
 # Map domain names to their numbered chapter folders
 DOMAIN_CHAPTERS: dict[str, str] = {
-    "lib": "01_foundation",
-    "platform": "02_platform",
-    "market": "03_market",
-    "signals": "04_signals",
-    "strategies": "05_strategies",
-    "risk": "06_risk",
-    "execution": "07_execution",
-    "portfolio": "08_portfolio",
-    "analytics": "09_analytics",
-    "research": "10_research",
-    "interfaces": "11_interfaces",
-    "infrastructure": "12_infrastructure",
-    "knowledge": "13_knowledge",
+    "app": "00_app",
+    "core": "01_core",
+    "market": "02_market",
+    "chart": "03_chart",
 }
 
 
