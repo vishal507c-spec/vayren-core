@@ -12,24 +12,23 @@ from app.bootstrap.bootstrap import Bootstrap
 
 logger = get_logger(__name__)
 
-DEFAULT_DATABASE = "data/vayren.db"
-DEFAULT_SYMBOL = "SPY"
-DEFAULT_LIMIT = 5000
+DEFAULT_DATA_DIR = r"D:\ZerodhaTradingData"
+DEFAULT_LIMIT: int | None = None
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(prog="vayren", description="Vayren desktop charting platform")
     parser.add_argument(
-        "--symbol", default=os.environ.get("VAYREN_SYMBOL", DEFAULT_SYMBOL), help="Symbol to chart"
+        "--data-dir",
+        default=os.environ.get("VAYREN_DATA_DIR", DEFAULT_DATA_DIR),
+        help="Folder containing one SQLite database per stock",
     )
     parser.add_argument(
-        "--db",
-        default=os.environ.get("VAYREN_DB", DEFAULT_DATABASE),
-        help="Path to the candle SQLite database",
-    )
-    parser.add_argument(
-        "--limit", type=int, default=DEFAULT_LIMIT, help="Maximum number of candles to load"
+        "--limit",
+        type=int,
+        default=None,
+        help="Maximum number of candles to load (default: entire history)",
     )
     parser.add_argument("--log-level", default="INFO", help="Logging level")
     return parser.parse_args(argv)
@@ -44,13 +43,8 @@ class App:
         args = parse_args(argv)
         configure_logging(args.log_level)
 
-        database_path = Path(args.db)
-        if not database_path.is_file():
-            print(f"ERROR: candle database not found: {database_path}", file=sys.stderr)
-            return 2
-
         qt_app = QApplication(argv if argv is not None else sys.argv)
-        bootstrap = Bootstrap(database_path=database_path, symbol=args.symbol, limit=args.limit)
+        bootstrap = Bootstrap(data_dir=Path(args.data_dir), limit=args.limit)
         try:
             bootstrap.start()
         except Exception:

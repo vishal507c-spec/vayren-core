@@ -34,3 +34,14 @@ def test_get_candles_respects_limit(candle_database_path: Path) -> None:
     finally:
         database.close()
     assert [bar.timestamp for bar in bars] == ["2026-01-08", "2026-01-09", "2026-01-10"]
+
+
+def test_get_candles_all_history_when_limit_none(candle_database_path: Path) -> None:
+    database = SqliteCandleDatabase(candle_database_path)
+    database.connect()
+    try:
+        repository = CandleRepository(database)
+        bars = repository.get_candles("SPY", None)
+    finally:
+        database.close()
+    assert [bar.timestamp for bar in bars] == [f"2026-01-{day:02d}" for day in range(1, 11)]

@@ -2,39 +2,33 @@
 
 import pytest
 
-from app import parse_args
+from app import DEFAULT_DATA_DIR, parse_args
 
 
 def test_defaults() -> None:
     args = parse_args([])
-    assert args.symbol == "SPY"
-    assert args.db == "data/vayren.db"
-    assert args.limit == 5000
+    assert args.data_dir == DEFAULT_DATA_DIR
+    assert args.limit is None
     assert args.log_level == "INFO"
 
 
 def test_explicit_values() -> None:
-    args = parse_args(
-        ["--symbol", "AAPL", "--db", "custom.db", "--limit", "100", "--log-level", "DEBUG"]
-    )
-    assert args.symbol == "AAPL"
-    assert args.db == "custom.db"
+    args = parse_args(["--data-dir", "D:/Market", "--limit", "100", "--log-level", "DEBUG"])
+    assert args.data_dir == "D:/Market"
     assert args.limit == 100
     assert args.log_level == "DEBUG"
 
 
 def test_environment_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("VAYREN_SYMBOL", "QQQ")
-    monkeypatch.setenv("VAYREN_DB", "env.db")
+    monkeypatch.setenv("VAYREN_DATA_DIR", "D:/env-data")
     args = parse_args([])
-    assert args.symbol == "QQQ"
-    assert args.db == "env.db"
+    assert args.data_dir == "D:/env-data"
 
 
 def test_cli_overrides_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("VAYREN_SYMBOL", "QQQ")
-    args = parse_args(["--symbol", "AAPL"])
-    assert args.symbol == "AAPL"
+    monkeypatch.setenv("VAYREN_DATA_DIR", "D:/env-data")
+    args = parse_args(["--data-dir", "D:/cli-data"])
+    assert args.data_dir == "D:/cli-data"
 
 
 def test_invalid_limit_rejected() -> None:

@@ -35,16 +35,26 @@ class SqliteCandleDatabase:
             raise RuntimeError(f"Candle database has no '{_CANDLES_TABLE}' table: {self._path}")
         self._connection = connection
 
-    def fetch_candles(self, symbol: str, limit: int) -> list[sqlite3.Row]:
-        """Return the most recent `limit` candles for `symbol`, ascending by timestamp."""
+    def fetch_candles(self, symbol: str, limit: int | None) -> list[sqlite3.Row]:
+        """Return candles for `symbol`, ascending by timestamp.
+
+        ``limit`` of ``None`` requests the entire available history.
+        """
         connection = self._require_connection()
-        cursor = connection.execute(
-            "SELECT symbol, timestamp, open, high, low, close, volume "
-            "FROM ("
-            "  SELECT * FROM candles WHERE symbol = ? ORDER BY timestamp DESC LIMIT ?"
-            ") ORDER BY timestamp ASC",
-            (symbol, limit),
-        )
+        if limit is None:
+            cursor = connection.execute(
+                "SELECT symbol, timestamp, open, high, low, close, volume "
+                "FROM candles WHERE symbol = ? ORDER BY timestamp ASC",
+                (symbol,),
+            )
+        else:
+            cursor = connection.execute(
+                "SELECT symbol, timestamp, open, high, low, close, volume "
+                "FROM ("
+                "  SELECT * FROM candles WHERE symbol = ? ORDER BY timestamp DESC LIMIT ?"
+                ") ORDER BY timestamp ASC",
+                (symbol, limit),
+            )
         return list(cursor.fetchall())
 
     def close(self) -> None:
