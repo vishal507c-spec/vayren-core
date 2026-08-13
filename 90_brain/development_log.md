@@ -2,6 +2,35 @@
 
 **Nya entry hamesha upar likho.**
 
+## 2026-08-13 — Right-Click Context Menu (Reset Chart View)
+
+### Kya hua tha?
+
+Chart par right-click kuch nahi karta tha (default OS menu ke bajaye kuch nahi), aur viewport ko fresh-chart state (fit-all) par wapas lane ka koi ek-jagah command nahi tha — `_reset_price_scale` sirf price strip ka manual scale reset karta tha.
+
+### Decision
+
+- **Ek hi reset command — do trigger.** `CandleChartWidget.reset_view()` naya public method (viewport-only: `_first`/`_last` → `_fit_all_count` + `_anchor_first`, `_price_manual = None`, `_follow_latest = True`, crosshair clear, grid cache invalidate). Dono paths — menu click aur `Alt+R` — ek hi `QAction` (`↩ Reset chart view`, shortcut `QKeySequence(Alt+R)`) se `triggered → reset_view` chalte hain. Koi duplicate reset logic nahi.
+- **QAction widget par add** (`addAction`) — default `WindowShortcut` context, isliye `Alt+R` poore main window mein active hai (focus kisi bhi child par ho). No new dependency, no focus-policy change.
+- **Right-click press par menu** (`mousePressEvent` RightButton branch) — `QMenu` ek hi action ke saath, cursor position par `exec()` (Qt khud click-outside/Escape/selection par band karta hai, screen bounds clamp bhi Qt ka). `contextMenuEvent` override = default OS/Qt menu suppress.
+- **Scope pakka: sirf widget UI.** Reset sirf viewport (pan + zoom + visible/logical range + price auto-fit) — data reload, symbol/timeframe/candles/indicators sab untouched. `set_model` fresh-chart lifecycle, pan/zoom/crosshair/touch — sab waisa hi.
+
+### Kya kiya?
+
+| File | Change |
+|---|---|
+| `03_chart/chart/widgets/candle_chart_widget.py` | `QAction` `↩ Reset chart view` (Alt+R) + `addAction`; `reset_view()`; `mousePressEvent` right-button → `_show_context_menu`; `_context_menu`/`_show_context_menu`/`contextMenuEvent` (suppress default); class docstring interactions update |
+| `03_chart/chart/tests/test_chart_context_menu.py` | Naya — 10 tests: action text/shortcut, single-action menu, contextMenuEvent suppressed, right-click wiring (menu stub ke saath — offscreen `QMenu.exec` auto-trigger quirk), crosshair/drag state untouched, action trigger → viewport reset, price auto-fit restore, model identity untouched, no-model noop |
+
+### Verification
+
+- `pytest` = **182 passed** (172 + 10 naye); chart 113, app+core+market 69
+- `ruff check` ✓ + `ruff format --check` ✓ (1 file formatted)
+- `pyright` = **0 errors**
+- `validate_structure.py` + `validate_imports.py` = PASSED
+
+---
+
 ## 2026-08-13 — TradingView-Style Free Chart Panning
 
 ### Kya hua tha?

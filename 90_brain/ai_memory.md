@@ -1,6 +1,6 @@
 # AI Memory — Abhi Kya State Hai
 
-**Last update:** 2026-08-10 (Release v1.1.0 — version control setup)
+**Last update:** 2026-08-13 (Context menu + Alt+R reset view)
 
 ## 1. Ye kya hai?
 
@@ -37,6 +37,7 @@ Ye document AI ko batata hai ki **abhi platform kahan hai** — kya bana, kya ba
 | Window layout | `ChartWindow` → QSplitter (sidebar | container); container QVBoxLayout: toolbar (stretch 0) + chart (stretch 1) — toolbar min-height, chart baaki sab vertical space. Phase 5B fix (blank space above chart) |
 | Crosshair | `CrosshairRenderer` + snap to candle (`CrosshairValue`) + 4 overlay labels (Phase 4+5A+bugfix): symbol/timeframe/exchange + OHLC top bar, right price at crosshair Y, bottom time centered at crosshair X — timeframe-aware format (intraday: `Tue 04 Aug '26\n13:00`, daily: date only, weekly: `Week 32\n2026`, monthly: `Aug 2026`). `LabelRenderer` supports multi-line text |
 | Free pan (Phase 5E) | `CandleChartWidget` drag ab **2D pan** karta hai — horizontal (time window via `_first`/`_last`) + vertical (price range, span/zoom unchanged via `_price_manual`). Pointer `grabMouse()`/`releaseMouse()` = capture. 2-finger touch ab vertical bhi pan karta hai. Zoom kabhi nahi badalta — sirf viewport position |
+| Context menu + Alt+R (Phase 5F) | `CandleChartWidget` right-click par **single-action QMenu** (`↩ Reset chart view`, shortcut `Alt+R`) — ek hi `QAction` widget par `addAction` (WindowShortcut → poore window mein `Alt+R` chalta hai). Dono paths → `reset_view()`: viewport-only fresh-chart restore (`_fit_all_count` + `_anchor_first` + `_price_manual=None` + follow-latest) — data/symbol/timeframe kabhi nahi chhute. `contextMenuEvent` suppress karta hai default menu. Menu Qt se band hota hai (selection/Escape/click-outside) |
 
 ## 4. Workflow — AI Agent Ke Liye
 

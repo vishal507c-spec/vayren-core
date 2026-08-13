@@ -6,6 +6,9 @@ from math import ceil, hypot
 from market.models.bar import Bar
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, Qt
 from PySide6.QtGui import (
+    QAction,
+    QContextMenuEvent,
+    QKeySequence,
     QMouseEvent,
     QNativeGestureEvent,
     QPainter,
@@ -15,7 +18,7 @@ from PySide6.QtGui import (
     QTouchEvent,
     QWheelEvent,
 )
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QMenu, QWidget
 
 from chart.models.chart_model import ChartModel
 from chart.models.crosshair_value import CrosshairValue
@@ -30,20 +33,22 @@ logger = getLogger(__name__)
 class CandleChartWidget(QWidget):
     """Renders a ChartModel and manages the viewport.
 
-        Interactions:
-    wheel              — zoom anchored at the cursor
-         wheel over price scale — vertical price zoom only (time viewport untouched)
-         horizontal wheel   — pan
-         left-drag          — pan; dropping at the right edge re-engages follow
-         left-drag over the price scale — manual vertical scaling (up compresses,
-                              down expands)
-         double-click over the price scale — reset to auto-fit
-         touch screen       — one finger crosshair, two fingers pan, pinch zoom
-         precise trackpad   — native pinch zoom; horizontal scroll pans
+    Interactions:
+     wheel              — zoom anchored at the cursor
+     wheel over price scale — vertical price zoom only (time viewport untouched)
+     horizontal wheel   — pan
+     left-drag          — pan; dropping at the right edge re-engages follow
+     left-drag over the price scale — manual vertical scaling (up compresses,
+                          down expands)
+     double-click over the price scale — reset to auto-fit
+     right-click        — chart context menu (single action: reset view)
+     Alt+R              — reset chart view (same action as the menu)
+     touch screen       — one finger crosshair, two fingers pan, pinch zoom
+     precise trackpad   — native pinch zoom; horizontal scroll pans
 
-        The latest bar is kept at ``RIGHT_MARGIN_FRACTION`` of the plot width with
-        empty space to its right; when new bars arrive the view re-anchors while
-        follow mode is engaged. Holds no events, no SQL, no data loading.
+    The latest bar is kept at ``RIGHT_MARGIN_FRACTION`` of the plot width with
+    empty space to its right; when new bars arrive the view re-anchors while
+    follow mode is engaged. Holds no events, no SQL, no data loading.
     """
 
     MIN_VISIBLE_BARS = 10
@@ -78,6 +83,10 @@ class CandleChartWidget(QWidget):
         self._price_manual: tuple[float, float] | None = None
         self._price_drag_active = False
         self._price_drag_anchor_y = 0.0
+        self._reset_action = QAction("↩ Reset chart view", self)
+        self._reset_action.setShortcut(QKeySequence(Qt.Modifier.ALT | Qt.Key.Key_R))
+        self._reset_action.triggered.connect(self.reset_view)
+        self.addAction(self._reset_action)
         self.setMouseTracking(True)
         self.setMinimumSize(480, 300)
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
@@ -117,6 +126,27 @@ class CandleChartWidget(QWidget):
         self._grid_cache = None
         self._grid_key = None
         self._log_data_range(model)
+        self.update()
+
+    def reset_view(self) -> None:
+        """Restore the fresh-chart viewport — pan, zoom, price auto-fit.
+
+        Mirrors the initial viewport that ``set_model`` builds for a new
+        symbol: the whole history fits and the latest bar sits at the right
+        margin. Viewport-only: never reloads data, never changes the
+        symbol/timeframe, never touches the model.
+        """
+        if self._model is None:
+            return
+        total = len(self._model.bars)
+        count = self._fit_all_count(total)
+        self._first = self._anchor_first(total, count)
+        self._last = self._first + count
+        self._follow_latest = True
+        self._price_manual = None
+        self._clear_crosshair()
+        self._grid_cache = None
+        self._grid_key = None
         self.update()
 
     def _fit_all_count(self, total: int) -> int:
@@ -187,6 +217,25 @@ class CandleChartWidget(QWidget):
         volume = QRect(0, height - volume_height - axis_height, width, volume_height)
         axis = QRect(0, height - axis_height, width, axis_height)
         return chart, volume, axis
+
+    # ── context menu ─────────────────────────────────────────────────
+
+    def _context_menu(self) -> QMenu:
+        """The chart's context menu — exactly one action: reset view."""
+        menu = QMenu(self)
+        menu.addAction(self._reset_action)
+        return menu
+
+    def _show_context_menu(self, event: QMouseEvent) -> None:
+        """Open the context menu at the cursor.
+
+        Qt closes it on selection, Escape or clicking outside.
+        """
+        self._context_menu().exec(event.globalPosition().toPoint())
+
+    def contextMenuEvent(self, event: QContextMenuEvent) -> None:
+        """Suppress the default context menu — right-click is handled on press."""
+        event.accept()
 
     # ── price scale ───────────────────────────────────────────────────
 
@@ -430,6 +479,10 @@ class CandleChartWidget(QWidget):
         super().mouseDoubleClickEvent(event)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.RightButton:
+            self._show_context_menu(event)
+            event.accept()
+            return
         if event.button() != Qt.MouseButton.LeftButton or self._model is None:
             return
         position = event.position()
