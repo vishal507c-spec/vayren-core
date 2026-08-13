@@ -64,7 +64,10 @@ class CandleChartWidget(QWidget):
         self._last = 0
         self._follow_latest = True
         self._drag_origin_x: float | None = None
+        self._drag_origin_y: float | None = None
         self._drag_first = 0
+        self._drag_price_low = 0.0
+        self._drag_price_high = 0.0
         self._crosshair_pos: QPoint | None = None
         self._crosshair_value: CrosshairValue | None = None
         self._grid_cache: QPixmap | None = None
@@ -436,7 +439,12 @@ class CandleChartWidget(QWidget):
             self.setCursor(Qt.CursorShape.SizeVerCursor)
             return
         self._drag_origin_x = position.x()
+        self._drag_origin_y = position.y()
         self._drag_first = self._first
+        price_low, price_high = self._price_range()
+        self._drag_price_low = price_low
+        self._drag_price_high = price_high
+        self.grabMouse()
         self.setCursor(Qt.CursorShape.ClosedHandCursor)
         self._clear_crosshair()
 
@@ -445,7 +453,8 @@ class CandleChartWidget(QWidget):
             self._drag_price_from(event.position().y())
             return
         if self._drag_origin_x is not None:
-            self._pan_from_drag(event.position().x())
+            position = event.position()
+            self._pan_from_drag(position.x(), position.y())
             return
         position = QPoint(int(event.position().x()), int(event.position().y()))
         if position != self._crosshair_pos:
@@ -462,6 +471,8 @@ class CandleChartWidget(QWidget):
             self.unsetCursor()
             return
         self._drag_origin_x = None
+        self._drag_origin_y = None
+        self.releaseMouse()
         self.unsetCursor()
         if self._model is not None and self._first >= self._max_first():
             self._follow_latest = True
@@ -533,6 +544,8 @@ class CandleChartWidget(QWidget):
             self._zoom_at_px(centroid.x(), previous_dist / distance)
         delta_x = centroid.x() - previous_centroid.x()
         self._pan_delta_px(delta_x)
+        delta_y = centroid.y() - previous_centroid.y()
+        self._pan_price_delta_px(delta_y)
 
     @staticmethod
     def _point_distance(first: QPointF, second: QPointF) -> float:
@@ -540,22 +553,60 @@ class CandleChartWidget(QWidget):
 
     # ── crosshair ─────────────────────────────────────────────────────
 
-    def _pan_from_drag(self, cursor_x: float) -> None:
-        if self._model is None or self._drag_origin_x is None:
+    def _pan_from_drag(self, cursor_x: float, cursor_y: float) -> None:
+        """Pan the viewport so the chart content follows the drag.
+
+        Horizontal movement shifts the visible time window; vertical movement
+        shifts the visible price range by the same span (zoom unchanged). The
+        pointer is grabbed, so dragging continues even when it leaves the chart.
+        """
+        if self._model is None or self._drag_origin_x is None or self._drag_origin_y is None:
             return
         chart_rect, _, _ = self._chart_rects()
         count = self._window_size()
         if chart_rect.width() <= 0 or count <= 0:
             return
+        changed = False
         delta_x = cursor_x - self._drag_origin_x
         delta_bars = -delta_x / chart_rect.width() * count
         new_first = self._clamp_first(self._drag_first + round(delta_bars))
-        if new_first == self._first:
+        if new_first != self._first:
+            self._first = new_first
+            self._last = new_first + count
+            self._follow_latest = new_first >= self._max_first()
+            changed = True
+        height = chart_rect.height()
+        span = self._drag_price_high - self._drag_price_low
+        if height > 0 and span > 0.0:
+            delta_y = cursor_y - self._drag_origin_y
+            if delta_y != 0.0:
+                shift = span / height * delta_y
+                self._price_manual = (
+                    self._drag_price_low + shift,
+                    self._drag_price_high + shift,
+                )
+                self._grid_cache = None
+                self._grid_key = None
+                changed = True
+        if changed:
+            self.update()
+
+    def _pan_price_delta_px(self, delta_y_px: float) -> None:
+        """Pan the visible price range vertically by a pixel delta (span unchanged)."""
+        chart_rect, _, _ = self._chart_rects()
+        height = chart_rect.height()
+        low, high = self._price_range()
+        span = high - low
+        if height <= 0 or span <= 0.0 or delta_y_px == 0.0:
             return
-        self._first = new_first
-        self._last = new_first + count
-        self._follow_latest = new_first >= self._max_first()
-        self.update()
+        shift = span / height * delta_y_px
+        new_manual = (low + shift, high + shift)
+        if new_manual == self._price_manual:
+            return
+        self._price_manual = new_manual
+        self._grid_cache = None
+        self._grid_key = None
+        self.update(chart_rect)
 
     def _snap_crosshair(self, position: QPoint) -> None:
         """Snap the crosshair to the nearest candle and compute its value."""

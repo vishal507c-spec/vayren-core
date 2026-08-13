@@ -2,6 +2,36 @@
 
 **Nya entry hamesha upar likho.**
 
+## 2026-08-13 — TradingView-Style Free Chart Panning
+
+### Kya hua tha?
+
+Chart drag sirf **horizontal** pan karta tha (`_pan_from_drag` sirf x use karta tha); vertical (price) pan nahi tha aur pointer capture nahi tha. User chahta tha TradingView jaisa free pan: press+hold karke chart ko left/right **aur** up/down le jaao, zoom change kiye bina.
+
+### Decision
+
+- **Ek hi existing system mein integrate kiya** — naya panning system nahi banaya. Existing `mousePressEvent`/`mouseMoveEvent`/`mouseReleaseEvent` drag flow ko extend kiya.
+- **Vertical pan = price range shift.** Chart ki vertical dimension price hai. Vertical drag `_price_range()` ko same span (zoom) rakh ke shift karta hai, existing `_price_manual` override ke through — span badalta nahi → zoom unchanged. Sirf jab user vertically drag karta hai tab `_price_manual` set hota hai; horizontal-only drag pe auto-fit wahi rehta hai (existing behaviour preserved).
+- **Pointer capture.** `grabMouse()`/`releaseMouse()` — mouse press ke baad drag chart se bahar nikalne par bhi active rehta hai (web `setPointerCapture` ka Qt equivalent). Touch `TouchEnd`/`TouchCancel` pehle se hi state reset karta hai.
+- **Touch:** 2-finger pan ab vertical bhi karta hai (`_pan_price_delta_px`) — horizontal + vertical dono. 1-finger crosshair aur pinch zoom wahi. Dedicated interactions (price-strip drag scaling, double-click reset) untouched.
+- **Zoom unchanged:** time zoom `_first`/`_last` ke beech `count` fixed rehta hai; price zoom `span` fixed rehta hai. Siraf viewport position badalti hai. Candle data/OHLC/timeframe/indicator — kuch nahi chhua.
+
+### Kya kiya?
+
+| File | Change |
+|---|---|
+| `03_chart/chart/widgets/candle_chart_widget.py` | `_drag_origin_y`/`_drag_price_low`/`_drag_price_high` state; `mousePressEvent` me `grabMouse()`; `mouseMoveEvent` me x+y dono; `_pan_from_drag(x, y)` vertical price pan; naya `_pan_price_delta_px(y)`; `mouseReleaseEvent` me `releaseMouse()`; 2-finger touch vertical pan |
+| `03_chart/chart/tests/test_chart_viewport.py` | 4 naye tests: vertical pan (span/zoom unchanged), horizontal-only keeps auto price, diagonal pans both axes, touch 2-finger vertical pan |
+
+### Verification
+
+- `pytest` = **172 passed** (168 + 4 naye)
+- `ruff check` + `ruff format --check` ✓ (2 files auto-formatted)
+- `pyright` = **0 errors**
+- `validate_structure.py` + `validate_imports.py` = PASSED
+
+---
+
 ## 2026-08-10 — Release v1.1.0: Version Control Setup
 
 ### Kya hua?

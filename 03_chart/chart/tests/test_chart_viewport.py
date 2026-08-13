@@ -509,3 +509,124 @@ def test_price_reset_leaves_every_visible_candle_inside() -> None:
     bars = widget._model.bars[first:last]
     assert min(bar.low for bar in bars) >= low
     assert max(bar.high for bar in bars) <= high
+
+
+# ── TradingView-style free panning ──────────────────────────────────────
+
+
+def test_drag_vertical_pans_price_keeps_span_and_zoom() -> None:
+    widget = _widget(count=500)
+    count_before = widget._last - widget._first
+    low_before, high_before = widget._price_range()
+    span_before = high_before - low_before
+    # Drag straight down by 100 px -> content follows -> price range shifts up.
+    widget.mousePressEvent(
+        _mouse_event(
+            QEvent.Type.MouseButtonPress,
+            250,
+            100,
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+        )
+    )
+    widget.mouseMoveEvent(
+        _mouse_event(
+            QEvent.Type.MouseMove, 250, 200, Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton
+        )
+    )
+    widget.mouseReleaseEvent(
+        _mouse_event(
+            QEvent.Type.MouseButtonRelease,
+            250,
+            200,
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.NoButton,
+        )
+    )
+    low_after, high_after = widget._price_range()
+    assert widget._price_manual is not None
+    assert low_after > low_before
+    assert high_after > high_before
+    assert high_after - low_after == span_before  # zoom (span) unchanged
+    assert widget._first == 0  # no horizontal movement
+    assert widget._last - widget._first == count_before  # time zoom unchanged
+
+
+def test_drag_horizontal_only_keeps_price_auto_scale() -> None:
+    widget = _widget(count=500)
+    _trailing(widget, CandleChartWidget.INITIAL_BARS)
+    widget.mousePressEvent(
+        _mouse_event(
+            QEvent.Type.MouseButtonPress,
+            250,
+            100,
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+        )
+    )
+    widget.mouseMoveEvent(
+        _mouse_event(
+            QEvent.Type.MouseMove, 350, 100, Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton
+        )
+    )
+    widget.mouseReleaseEvent(
+        _mouse_event(
+            QEvent.Type.MouseButtonRelease,
+            350,
+            100,
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.NoButton,
+        )
+    )
+    assert widget._first != 0
+    assert widget._price_manual is None  # no vertical movement -> auto-fit stays
+
+
+def test_drag_diagonal_pans_both_axes() -> None:
+    widget = _widget(count=500)
+    span_before = _price_span(widget)
+    widget._first = 64
+    widget._last = 64 + CandleChartWidget.INITIAL_BARS
+    count_before = widget._last - widget._first
+    first_before = widget._first
+    widget.mousePressEvent(
+        _mouse_event(
+            QEvent.Type.MouseButtonPress,
+            250,
+            100,
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+        )
+    )
+    widget.mouseMoveEvent(
+        _mouse_event(
+            QEvent.Type.MouseMove, 150, 60, Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton
+        )
+    )
+    widget.mouseReleaseEvent(
+        _mouse_event(
+            QEvent.Type.MouseButtonRelease,
+            150,
+            60,
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.NoButton,
+        )
+    )
+    assert widget._first > first_before  # horizontal pan right
+    assert widget._last - widget._first == count_before  # time zoom unchanged
+    assert widget._price_manual is not None
+    assert _price_span(widget) == span_before  # vertical pan, zoom unchanged
+
+
+def test_touch_two_fingers_pans_vertically() -> None:
+    widget = _widget(count=500)
+    span_before = _price_span(widget)
+    low_before, _ = widget._price_range()
+    widget._touch_points = {1: QPointF(100, 100), 2: QPointF(200, 100)}
+    widget._handle_touch_points()
+    widget._touch_points = {1: QPointF(100, 130), 2: QPointF(200, 130)}
+    widget._handle_touch_points()
+    low_after, _ = widget._price_range()
+    assert widget._price_manual is not None
+    assert low_after > low_before
+    assert _price_span(widget) == span_before
