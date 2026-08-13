@@ -2,7 +2,11 @@
 
 Given a sequence of bars, this infers the most likely timeframe string
 (e.g. "1d", "30m", "1h") from the median gap between consecutive candles.
-This is a pure-function helper with no Qt, no SQL, no events.
+The median is computed over a sampled prefix of the series (the first
+``_INFERENCE_SAMPLE`` gaps) — identical for regular candle series, and
+bounded work for very long histories (a 60k-bar series no longer parses
+every timestamp). This is a pure-function helper with no Qt, no SQL, no
+events.
 """
 
 from __future__ import annotations
@@ -12,6 +16,8 @@ from datetime import datetime
 from statistics import median
 
 from market.models.bar import Bar
+
+_INFERENCE_SAMPLE = 2048
 
 _SECONDS_LADDER = (
     60,
@@ -65,7 +71,7 @@ def _median_gaps(bars: tuple[Bar, ...]) -> list[float]:
 
 def _parse_times(bars: tuple[Bar, ...]) -> list[float]:
     times: list[float] = []
-    for bar in bars:
+    for bar in bars[: _INFERENCE_SAMPLE + 1]:
         dt = _parse_ts(bar.timestamp)
         if dt is not None:
             times.append(dt.timestamp())

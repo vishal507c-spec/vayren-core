@@ -4,6 +4,7 @@ from logging import getLogger
 
 from core.event_bus.event_bus import EventBus
 from market.events.data_loaded import DataLoaded
+from market.models.bar import Bar
 
 from chart.events.chart_ready import ChartReady
 from chart.models.chart_model import ChartModel
@@ -12,6 +13,11 @@ from chart.models.timeframe import infer_timeframe
 logger = getLogger(__name__)
 
 _DEFAULT_EXCHANGE = "NSE"
+
+
+def _ascending(bars: tuple[Bar, ...]) -> bool:
+    """True when bars are already ascending by timestamp (no copy needed)."""
+    return all(bars[index - 1].timestamp <= bars[index].timestamp for index in range(1, len(bars)))
 
 
 class ChartEngine:
@@ -28,7 +34,11 @@ class ChartEngine:
         if not event.bars:
             logger.warning("No candles to chart for %s", event.symbol)
             return
-        bars = tuple(sorted(event.bars, key=lambda bar: bar.timestamp))
+        bars = (
+            event.bars
+            if _ascending(event.bars)
+            else tuple(sorted(event.bars, key=lambda bar: bar.timestamp))
+        )
         model = ChartModel(
             symbol=event.symbol,
             bars=bars,

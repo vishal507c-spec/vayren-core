@@ -13,41 +13,50 @@ from PySide6.QtWidgets import QMainWindow, QSplitter, QVBoxLayout, QWidget
 
 from chart.events.chart_ready import ChartReady
 from chart.events.window_rendered import WindowRendered
+from chart.theme import APP_STYLE
 from chart.widgets.candle_chart_widget import CandleChartWidget
-from chart.widgets.symbol_list_widget import SymbolListWidget
+from chart.widgets.options_panel import OptionsPanel
 from chart.widgets.timeframe_toolbar import TimeframeToolbar
+from chart.widgets.watchlist_widget import WatchlistWidget
 
 logger = getLogger(__name__)
 
 
 class ChartWindow(QMainWindow):
-    """Displays a ChartModel via CandleChartWidget, with a stock sidebar and
-    a timeframe toolbar.
+    """Displays a ChartModel via CandleChartWidget, with a watchlist panel, an
+    options column and a timeframe toolbar.
 
-    Clicking a symbol publishes LoadSymbol and ListTimeframes; clicking a
-    timeframe publishes TimeframeChanged. Subscriptions are wired by
-    bootstrap; this class only handles incoming events and publishes the
-    terminal results.
+    Layout: watchlist | options | chart. Clicking a symbol publishes
+    LoadSymbol (first load) or TimeframeChanged at the currently selected
+    timeframe (so symbol switches never reset the timeframe), plus
+    ListTimeframes; clicking a timeframe publishes TimeframeChanged; the
+    watchlist tool button reuses the chart's reset-view action. Subscriptions
+    are wired by bootstrap; this class only handles incoming events and
+    publishes the terminal results.
     """
 
     def __init__(
         self,
         widget: CandleChartWidget,
-        sidebar: SymbolListWidget,
+        watchlist: WatchlistWidget,
+        options: OptionsPanel,
         toolbar: TimeframeToolbar,
         bus: EventBus,
         limit: int | None = None,
     ) -> None:
         super().__init__()
         self._widget = widget
-        self._sidebar = sidebar
+        self._watchlist = watchlist
+        self._options = options
         self._toolbar = toolbar
         self._bus = bus
         self._limit = limit
         self._current_symbol: str | None = None
+        self._current_timeframe: str | None = None
 
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
-        splitter.addWidget(sidebar)
+        splitter.addWidget(watchlist)
+        splitter.addWidget(options)
         container = QWidget(splitter)
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -58,19 +67,23 @@ class ChartWindow(QMainWindow):
         layout.setStretchFactor(widget, 1)
         splitter.addWidget(container)
         splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
-        splitter.setSizes([220, 1060])
+        splitter.setStretchFactor(1, 0)
+        splitter.setStretchFactor(2, 1)
+        splitter.setSizes([220, OptionsPanel.OPTIONS_WIDTH, 1004])
+        splitter.setHandleWidth(1)
         self.setCentralWidget(splitter)
         self.resize(1280, 760)
         self.setWindowTitle("VAYREN")
+        self.setStyleSheet(APP_STYLE)
 
-        sidebar.symbol_selected.connect(self._on_symbol_selected)
+        watchlist.symbol_selected.connect(self._on_symbol_selected)
+        watchlist.reset_requested.connect(self._widget.reset_view)
         toolbar.timeframe_selected.connect(self._on_timeframe_selected)
 
     def on_symbols_listed(self, event: SymbolsListed) -> None:
-        """Populate the sidebar with the discovered stock symbols."""
-        self._sidebar.set_symbols(event.symbols)
-        logger.info("Symbol sidebar populated (%d stocks)", len(event.symbols))
+        """Populate the watchlist with the discovered stock symbols."""
+        self._watchlist.set_symbols(event.symbols)
+        logger.info("Watchlist populated (%d stocks)", len(event.symbols))
 
     def on_timeframes_listed(self, event: TimeframesListed) -> None:
         """Populate the timeframe toolbar with the detected timeframes."""
@@ -78,9 +91,14 @@ class ChartWindow(QMainWindow):
         logger.info("Timeframe toolbar populated (%d timeframes)", len(event.timeframes))
 
     @property
-    def sidebar(self) -> SymbolListWidget:
-        """The stock sidebar widget."""
-        return self._sidebar
+    def watchlist(self) -> WatchlistWidget:
+        """The watchlist panel widget."""
+        return self._watchlist
+
+    @property
+    def options(self) -> OptionsPanel:
+        """The options column widget."""
+        return self._options
 
     @property
     def toolbar(self) -> TimeframeToolbar:
@@ -91,8 +109,9 @@ class ChartWindow(QMainWindow):
         """Display the prepared chart model and highlight its symbol."""
         model = event.model
         self._current_symbol = model.symbol
+        self._current_timeframe = model.timeframe
         self._widget.set_model(model)
-        self._sidebar.select_symbol(model.symbol)
+        self._watchlist.select_symbol(model.symbol)
         self._toolbar.select_timeframe(model.timeframe)
         self.setWindowTitle(f"VAYREN — {model.symbol}")
         self.show()
@@ -102,7 +121,13 @@ class ChartWindow(QMainWindow):
     def _on_symbol_selected(self, symbol: str) -> None:
         logger.info("User selected symbol: %s", symbol)
         self._current_symbol = symbol
-        self._bus.publish(LoadSymbol(symbol=symbol, limit=self._limit))
+        timeframe = self._current_timeframe
+        if timeframe is None:
+            self._bus.publish(LoadSymbol(symbol=symbol, limit=self._limit))
+        else:
+            self._bus.publish(
+                TimeframeChanged(symbol=symbol, timeframe=timeframe, limit=self._limit)
+            )
         self._bus.publish(ListTimeframes(symbol=symbol))
 
     def _on_timeframe_selected(self, timeframe: str) -> None:
@@ -111,4 +136,5 @@ class ChartWindow(QMainWindow):
             logger.warning("No symbol loaded — ignoring timeframe %s", timeframe)
             return
         logger.info("User selected timeframe %s for %s", timeframe, symbol)
+        self._current_timeframe = timeframe
         self._bus.publish(TimeframeChanged(symbol=symbol, timeframe=timeframe, limit=self._limit))

@@ -122,20 +122,23 @@ def _latest_fraction(widget: CandleChartWidget) -> float:
 # ── BUG 4: right margin + follow latest ───────────────────────────────────
 
 
-def test_new_symbol_viewport_spans_entire_history() -> None:
+def test_new_symbol_shows_latest_initial_bars() -> None:
     widget = _widget(count=500)
-    assert widget._first == 0
-    assert widget._last - widget._first >= 500
+    assert widget._last - widget._first == CandleChartWidget.INITIAL_BARS
+    assert widget._first > 0
+    assert widget._visible_range()[1] == 500
     assert widget._follow_latest
     assert _latest_fraction(widget) <= 1.0 - _MARGIN
 
 
-def test_new_symbol_large_history_shows_first_candle() -> None:
+def test_new_symbol_large_history_skips_first_candle() -> None:
     widget = _widget(count=10000)
-    assert widget._first == 0
-    assert widget._visible_range() == (0, 10000)
+    assert widget._first == widget._anchor_first(10000, CandleChartWidget.INITIAL_BARS)
+    assert widget._first > 0
+    assert widget._last - widget._first == CandleChartWidget.INITIAL_BARS
     assert widget._model is not None
-    assert widget._model.bars[0].timestamp == datetime(2026, 4, 6, 9, 15, 0).isoformat(sep=" ")
+    assert widget._model.bars[0].timestamp != widget._model.bars[widget._first].timestamp
+    assert _latest_fraction(widget) <= 1.0 - _MARGIN
 
 
 def test_follow_latest_reanchors_when_new_bars_arrive() -> None:
@@ -159,14 +162,48 @@ def test_manual_pan_keeps_viewport_when_new_bars_arrive() -> None:
     assert _latest_fraction(widget) != 1.0 - _MARGIN
 
 
-def test_switch_symbol_resets_viewport() -> None:
+def test_switch_symbol_resets_to_latest_initial_bars() -> None:
     widget = _widget(count=500)
     _drag(widget, from_x=250, to_x=350, y=100)
     other = ChartModel(symbol="TCS", bars=_bars(300), timeframe="15m", exchange="NSE")
     widget.set_model(other)
-    assert widget._first == 0
-    assert widget._last - widget._first >= 300
+    assert widget._first == widget._anchor_first(300, CandleChartWidget.INITIAL_BARS)
+    assert widget._last - widget._first == CandleChartWidget.INITIAL_BARS
     assert widget._follow_latest
+
+
+def test_timeframe_change_resets_to_latest_initial_bars() -> None:
+    widget = _widget(count=500)
+    _trailing(widget, CandleChartWidget.INITIAL_BARS)
+    widget._zoom_at_px(250.0, 0.5)
+    zoomed_count = widget._last - widget._first
+    assert zoomed_count < CandleChartWidget.INITIAL_BARS
+    other = ChartModel(symbol="SPY", bars=_bars(500), timeframe="1h", exchange="NSE")
+    widget.set_model(other)
+    assert widget._last - widget._first == CandleChartWidget.INITIAL_BARS
+    assert widget._first == widget._anchor_first(500, CandleChartWidget.INITIAL_BARS)
+    assert widget._follow_latest
+
+
+def test_same_series_reload_keeps_zoom_window() -> None:
+    widget = _widget(count=500)
+    _trailing(widget, CandleChartWidget.INITIAL_BARS)
+    widget._zoom_at_px(250.0, 0.5)
+    zoomed_count = widget._last - widget._first
+    assert zoomed_count < CandleChartWidget.INITIAL_BARS
+    widget.set_model(_model(count=500))
+    assert widget._last - widget._first == zoomed_count
+
+
+def test_initial_view_reaches_older_candles_by_pan_and_zoom() -> None:
+    widget = _widget(count=1000)
+    initial_first = widget._first
+    assert initial_first > 0
+    _drag(widget, from_x=250, to_x=10000, y=100)
+    assert widget._first == 0
+    _drag(widget, from_x=250, to_x=80, y=100)
+    widget._zoom_at_px(250.0, 2.0)
+    assert widget._last - widget._first > CandleChartWidget.INITIAL_BARS
 
 
 def test_pan_clamps_at_left_edge() -> None:
@@ -517,6 +554,7 @@ def test_price_reset_leaves_every_visible_candle_inside() -> None:
 def test_drag_vertical_pans_price_keeps_span_and_zoom() -> None:
     widget = _widget(count=500)
     count_before = widget._last - widget._first
+    first_before = widget._first
     low_before, high_before = widget._price_range()
     span_before = high_before - low_before
     # Drag straight down by 100 px -> content follows -> price range shifts up.
@@ -548,7 +586,7 @@ def test_drag_vertical_pans_price_keeps_span_and_zoom() -> None:
     assert low_after > low_before
     assert high_after > high_before
     assert high_after - low_after == span_before  # zoom (span) unchanged
-    assert widget._first == 0  # no horizontal movement
+    assert widget._first == first_before  # no horizontal movement
     assert widget._last - widget._first == count_before  # time zoom unchanged
 
 

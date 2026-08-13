@@ -27,14 +27,14 @@ def test_full_event_flow_reaches_window_rendered(qt_app: QApplication, tmp_path:
     assert window.windowTitle() == "VAYREN"
     assert window.isVisible()
 
-    sidebar = window.sidebar
-    assert [sidebar.item(i).text() for i in range(sidebar.count())] == ["AMBUJACEM", "BPCL"]
+    watchlist = window.watchlist
+    assert watchlist.symbols == ("AMBUJACEM", "BPCL")
 
-    sidebar.symbol_selected.emit("AMBUJACEM")
+    watchlist.symbol_selected.emit("AMBUJACEM")
 
     assert len(rendered) == 1
     assert window.windowTitle() == "VAYREN — AMBUJACEM"
-    assert sidebar.currentItem().text() == "AMBUJACEM"
+    assert watchlist.current_symbol == "AMBUJACEM"
 
 
 def test_switch_symbol_replaces_chart(qt_app: QApplication, tmp_path: Path) -> None:
@@ -47,12 +47,12 @@ def test_switch_symbol_replaces_chart(qt_app: QApplication, tmp_path: Path) -> N
 
     bootstrap.start()
     window = bootstrap.services.get("chart_window")
-    window.sidebar.symbol_selected.emit("AMBUJACEM")
-    window.sidebar.symbol_selected.emit("BPCL")
+    window.watchlist.symbol_selected.emit("AMBUJACEM")
+    window.watchlist.symbol_selected.emit("BPCL")
 
     assert len(rendered) == 2
     assert window.windowTitle() == "VAYREN — BPCL"
-    assert window.sidebar.currentItem().text() == "BPCL"
+    assert window.watchlist.current_symbol == "BPCL"
 
 
 def test_bootstrap_registers_all_services(qt_app: QApplication, tmp_path: Path) -> None:

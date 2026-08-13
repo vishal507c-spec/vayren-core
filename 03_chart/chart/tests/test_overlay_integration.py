@@ -190,22 +190,123 @@ def test_paint_renders_overlay_labels() -> None:
     assert len(time_calls) == 1
 
 
-def test_no_overlays_without_crosshair() -> None:
+def test_header_painted_without_crosshair() -> None:
     _app()
     widget = _widget()
     symbol_calls: list = []
     original = OverlayRenderer.paint_symbol_info
 
-    def recording(*args) -> None:
+    def recording(*args):
         symbol_calls.append(args)
-        original(*args)
+        return original(*args)
 
     OverlayRenderer.paint_symbol_info = staticmethod(recording)  # type: ignore[assignment]
     try:
         widget.paintEvent(QPaintEvent(widget.rect()))
     finally:
         OverlayRenderer.paint_symbol_info = staticmethod(original)  # type: ignore[assignment]
-    assert symbol_calls == []
+    assert len(symbol_calls) == 1
+
+
+def test_header_painted_immediately_after_model_load() -> None:
+    _app()
+    widget = _widget()
+    symbol_calls: list = []
+    original = OverlayRenderer.paint_symbol_info
+
+    def recording(*args):
+        symbol_calls.append(args)
+        return original(*args)
+
+    OverlayRenderer.paint_symbol_info = staticmethod(recording)  # type: ignore[assignment]
+    try:
+        widget.paintEvent(QPaintEvent(widget.rect()))
+    finally:
+        OverlayRenderer.paint_symbol_info = staticmethod(original)  # type: ignore[assignment]
+    assert len(symbol_calls) == 1
+    symbol, timeframe, exchange = symbol_calls[0][1], symbol_calls[0][2], symbol_calls[0][3]
+    assert symbol == "SPY"
+    assert timeframe == "1h"
+    assert exchange == "NSE"
+
+
+def test_header_shows_latest_bar_ohlc() -> None:
+    _app()
+    widget = _widget()
+    ohlc_calls: list = []
+    original = OverlayRenderer.paint_ohlc
+
+    def recording(_painter, bar, _top_bar, **_kwargs) -> None:
+        ohlc_calls.append(bar)
+        original(_painter, bar, _top_bar, **_kwargs)
+
+    OverlayRenderer.paint_ohlc = staticmethod(recording)  # type: ignore[assignment]
+    try:
+        widget.paintEvent(QPaintEvent(widget.rect()))
+    finally:
+        OverlayRenderer.paint_ohlc = staticmethod(original)  # type: ignore[assignment]
+    assert len(ohlc_calls) == 1
+    assert widget._model is not None
+    assert ohlc_calls[0] is widget._model.bars[-1]
+
+
+def test_header_updates_when_model_changes() -> None:
+    _app()
+    widget = _widget()
+    widget.set_model(ChartModel(symbol="TCS", bars=_hours(90), timeframe="30m", exchange="NSE"))
+    symbol_calls: list = []
+    ohlc_calls: list = []
+    orig_symbol = OverlayRenderer.paint_symbol_info
+    orig_ohlc = OverlayRenderer.paint_ohlc
+
+    def rec_symbol(*args):
+        symbol_calls.append(args)
+        return orig_symbol(*args)
+
+    def rec_ohlc(_painter, bar, _top_bar, **_kwargs) -> None:
+        ohlc_calls.append(bar)
+        orig_ohlc(_painter, bar, _top_bar, **_kwargs)
+
+    OverlayRenderer.paint_symbol_info = staticmethod(rec_symbol)  # type: ignore[assignment]
+    OverlayRenderer.paint_ohlc = staticmethod(rec_ohlc)  # type: ignore[assignment]
+    try:
+        widget.paintEvent(QPaintEvent(widget.rect()))
+    finally:
+        OverlayRenderer.paint_symbol_info = staticmethod(orig_symbol)  # type: ignore[assignment]
+        OverlayRenderer.paint_ohlc = staticmethod(orig_ohlc)  # type: ignore[assignment]
+    assert len(symbol_calls) == 1
+    assert symbol_calls[0][1] == "TCS"
+    assert symbol_calls[0][2] == "30m"
+    assert symbol_calls[0][3] == "NSE"
+    assert len(ohlc_calls) == 1
+    assert widget._model is not None
+    assert ohlc_calls[0] is widget._model.bars[-1]
+
+
+def test_header_independent_of_crosshair_visibility() -> None:
+    _app()
+    widget = _widget()
+    symbol_calls: list = []
+    original = OverlayRenderer.paint_symbol_info
+
+    def recording(*args):
+        symbol_calls.append(args)
+        return original(*args)
+
+    OverlayRenderer.paint_symbol_info = staticmethod(recording)  # type: ignore[assignment]
+    try:
+        widget.paintEvent(QPaintEvent(widget.rect()))
+        widget.mouseMoveEvent(
+            _mouse_event(
+                QEvent.Type.MouseMove, 250, 150, Qt.MouseButton.NoButton, Qt.MouseButton.NoButton
+            )
+        )
+        widget.paintEvent(QPaintEvent(widget.rect()))
+        widget.leaveEvent(QEvent(QEvent.Type.Leave))
+        widget.paintEvent(QPaintEvent(widget.rect()))
+    finally:
+        OverlayRenderer.paint_symbol_info = staticmethod(original)  # type: ignore[assignment]
+    assert len(symbol_calls) == 3
 
 
 def test_no_overlays_without_model() -> None:

@@ -4,6 +4,11 @@ Pure math over database rows. No SQL, no events. Session-anchored for
 intraday buckets (detected from the data), calendar-aligned for daily
 (00:00) and weekly (Monday 00:00) buckets. Only real rows are merged —
 never fabricated values.
+
+Speed note: timestamps are parsed with ``datetime.fromisoformat`` (no
+locale work — ``strptime`` re-reads the locale per call and is ~100x
+slower on this hot path), and buckets accumulate OHLCV in a single pass
+with running max/min/sum instead of per-bucket generator scans.
 """
 
 import sqlite3
@@ -13,18 +18,17 @@ from datetime import date, datetime, timedelta
 
 from market.models.bar import Bar
 
-_TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
-_DATE_FORMAT = "%Y-%m-%d"
 _DAY_SECONDS = 86400
+_TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 
 def _parse_timestamp(value: str) -> datetime:
-    for fmt in (_TIMESTAMP_FORMAT, _DATE_FORMAT):
-        try:
-            return datetime.strptime(value, fmt)
-        except ValueError:
-            continue
-    raise ValueError(f"Unrecognized candle timestamp: {value!r}")
+    """Parse ``YYYY-MM-DD HH:MM:SS`` or ``YYYY-MM-DD`` into a datetime.
+
+    `datetime.fromisoformat` accepts both (any single date/time separator)
+    and does no locale lookup, unlike strptime.
+    """
+    return datetime.fromisoformat(value)
 
 
 def detect_bar_duration(timestamps: Sequence[str]) -> int | None:
@@ -93,28 +97,38 @@ def aggregate_bars(
 
     Rows are grouped by bucket; OHLCV comes from real rows only: open = first
     row's open, high = max, low = min, close = last row's close, volume = sum.
+    Accumulators run in a single pass — no per-bucket re-scans.
     """
     if not rows:
         return []
-    buckets: dict[tuple[date, int], list[tuple[sqlite3.Row, datetime]]] = {}
+    buckets: dict[tuple[date, int], list[float]] = {}
+    symbols: dict[tuple[date, int], str] = {}
     for row in rows:
         dt = _parse_timestamp(row["timestamp"])
         key = _bucket_key(dt, timeframe_seconds, session_start)
-        buckets.setdefault(key, []).append((row, dt))
+        acc = buckets.get(key)
+        if acc is None:
+            buckets[key] = [row["open"], row["high"], row["low"], row["close"], row["volume"]]
+            symbols[key] = row["symbol"]
+        else:
+            if row["high"] > acc[1]:
+                acc[1] = row["high"]
+            if row["low"] < acc[2]:
+                acc[2] = row["low"]
+            acc[3] = row["close"]
+            acc[4] += row["volume"]
 
     bars: list[Bar] = []
-    for key, bucket_rows in buckets.items():
+    for key, acc in buckets.items():
         bucket_start, index = key
-        first_row = bucket_rows[0][0]
-        last_row = bucket_rows[-1][0]
         bars.append(
             Bar(
-                symbol=first_row["symbol"],
-                open=first_row["open"],
-                high=max(row["high"] for row, _ in bucket_rows),
-                low=min(row["low"] for row, _ in bucket_rows),
-                close=last_row["close"],
-                volume=sum(row["volume"] for row, _ in bucket_rows),
+                symbol=symbols[key],
+                open=acc[0],
+                high=acc[1],
+                low=acc[2],
+                close=acc[3],
+                volume=int(acc[4]),
                 timestamp=_bar_timestamp(bucket_start, timeframe_seconds, index, session_start),
                 bar_size=label,
             )

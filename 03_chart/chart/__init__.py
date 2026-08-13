@@ -15,8 +15,10 @@ from chart.renderer.label_renderer import LabelRenderer
 from chart.renderer.overlay_renderer import OverlayRenderer
 from chart.renderer.time_axis_renderer import TimeAxisRenderer
 from chart.widgets.candle_chart_widget import CandleChartWidget
+from chart.widgets.options_panel import OptionsPanel
 from chart.widgets.symbol_list_widget import SymbolListWidget
 from chart.widgets.timeframe_toolbar import TimeframeToolbar
+from chart.widgets.watchlist_widget import WatchlistWidget
 from chart.windows.chart_window import ChartWindow
 
 __all__ = [
@@ -32,6 +34,8 @@ __all__ = [
     "CandleChartWidget",
     "SymbolListWidget",
     "TimeframeToolbar",
+    "WatchlistWidget",
+    "OptionsPanel",
     "ChartWindow",
     "ChartReady",
     "WindowRendered",

@@ -7,8 +7,9 @@ from chart.engine.chart_engine import ChartEngine
 from chart.events.chart_ready import ChartReady
 from chart.events.window_rendered import WindowRendered
 from chart.widgets.candle_chart_widget import CandleChartWidget
-from chart.widgets.symbol_list_widget import SymbolListWidget
+from chart.widgets.options_panel import OptionsPanel
 from chart.widgets.timeframe_toolbar import TimeframeToolbar
+from chart.widgets.watchlist_widget import WatchlistWidget
 from chart.windows.chart_window import ChartWindow
 from core.event_bus.event_bus import EventBus
 from core.events.app_started import AppStarted
@@ -45,9 +46,10 @@ class Bootstrap:
         timeframe_loader = TimeframeListLoader(repository, self._bus)
         engine = ChartEngine(self._bus)
         widget = CandleChartWidget()
-        sidebar = SymbolListWidget()
+        watchlist = WatchlistWidget()
+        options = OptionsPanel()
         toolbar = TimeframeToolbar()
-        window = ChartWindow(widget, sidebar, toolbar, self._bus, limit=limit)
+        window = ChartWindow(widget, watchlist, options, toolbar, self._bus, limit=limit)
         lifecycle = AppLifecycle(self._bus)
 
         self._register_services(

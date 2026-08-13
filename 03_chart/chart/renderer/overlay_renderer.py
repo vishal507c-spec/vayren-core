@@ -1,9 +1,12 @@
 """OverlayRenderer — stateless QPainter of floating chart UI labels.
 
-Paints four overlay labels that follow the crosshair / chart state:
+Paints two independent groups of labels:
 
-  1. Symbol info bar   — top-of-plot, single line (SYMBOL • timeframe • exchange)
-  2. OHLC readout      — same top bar, single line (O H L C + change + %)
+  Permanent header (every paint, latest bar):
+  1. Symbol info bar — top-of-plot, single line (SYMBOL • timeframe • exchange)
+  2. OHLC readout     — same top bar, single line (O H L C + change + %)
+
+  Crosshair-following (only while the crosshair is active):
   3. Right price label — right scale, vertically aligned with crosshair
   4. Bottom time label — time-axis strip, horizontally centered at crosshair
 
@@ -18,9 +21,10 @@ from datetime import datetime
 
 from market.models.bar import Bar
 from PySide6.QtCore import QRect, QRectF
-from PySide6.QtGui import QFont, QPainter
+from PySide6.QtGui import QColor, QFont, QPainter
 
 from chart.models.crosshair_value import CrosshairValue
+from chart.renderer.candle_renderer import CandleRenderer
 from chart.renderer.label_renderer import LabelRenderer
 
 
@@ -31,6 +35,8 @@ class OverlayRenderer:
     OHLC_FONT = QFont("Segoe UI", 8)
     PRICE_FONT = QFont("Segoe UI", 8)
     TIME_FONT = QFont("Segoe UI", 8)
+
+    HEADER_BAND = QColor(16, 20, 24, 110)
 
     @staticmethod
     def paint_symbol_info(
@@ -63,29 +69,41 @@ class OverlayRenderer:
         """Paint the OHLC readout on a single line in the top info bar.
 
         TradingView style: `O 100.50  H 105.00  L 95.00  C 102.00  +2.00 (+2.0%)`.
-        `left_margin` is the right edge of the symbol info label so the OHLC
-        bar starts just to its right.
+        The change segment is tinted with the candle bull/bear accent so the
+        direction reads at a glance. `left_margin` is the right edge of the
+        symbol info label so the OHLC bar starts just to its right.
         """
         change = bar.close - bar.open
         pct = bar.return_pct
         sign = "+" if change >= 0 else ""
-        text = (
-            f"O {bar.open:.2f}  H {bar.high:.2f}  "
-            f"L {bar.low:.2f}  C {bar.close:.2f}  "
-            f"{sign}{change:.2f} ({sign}{pct:.1f}%)"
-        )
+        prefix = f"O {bar.open:.2f}  H {bar.high:.2f}  L {bar.low:.2f}  C {bar.close:.2f}"
+        suffix = f"{sign}{change:.2f} ({sign}{pct:.1f}%)"
         position = QRectF(
             left_margin + 6,
             top_bar.top(),
             top_bar.width() - left_margin - 6,
             top_bar.height(),
         )
-        return LabelRenderer.paint_left(
+        prefix_rect = LabelRenderer.paint_left(
             painter,
-            text,
+            prefix,
             OverlayRenderer.OHLC_FONT,
             position,
         )
+        suffix_position = QRectF(
+            prefix_rect.right() + 8,
+            top_bar.top(),
+            top_bar.width() - prefix_rect.right() - 8,
+            top_bar.height(),
+        )
+        LabelRenderer.paint_left(
+            painter,
+            suffix,
+            OverlayRenderer.OHLC_FONT,
+            suffix_position,
+            text_color=CandleRenderer.BULL if change >= 0 else CandleRenderer.BEAR,
+        )
+        return prefix_rect
 
     @staticmethod
     def paint_price(

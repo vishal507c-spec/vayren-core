@@ -151,10 +151,11 @@ def test_action_trigger_resets_viewport() -> None:
     widget._zoom_at_px(125.0, 0.5)
     widget._zoom_price_at(60.0, 0.5)
     assert widget._price_manual is not None
-    assert widget._last - widget._first < 500
+    assert widget._last - widget._first < CandleChartWidget.INITIAL_BARS
     widget._reset_action.trigger()
-    assert widget._first == 0
-    assert widget._last - widget._first >= 500
+    assert widget._first == widget._anchor_first(500, CandleChartWidget.INITIAL_BARS)
+    assert widget._last - widget._first == CandleChartWidget.INITIAL_BARS
+    assert widget._first > 0
     assert widget._follow_latest
     assert widget._price_manual is None
 

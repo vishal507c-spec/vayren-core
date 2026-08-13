@@ -1,12 +1,13 @@
 """CandleChartWidget — candlestick viewport: zoom, pan, touch, crosshair + overlays."""
 
 from logging import getLogger
-from math import ceil, hypot
+from math import hypot
 
 from market.models.bar import Bar
-from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, Qt
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt
 from PySide6.QtGui import (
     QAction,
+    QBrush,
     QContextMenuEvent,
     QKeySequence,
     QMouseEvent,
@@ -48,7 +49,10 @@ class CandleChartWidget(QWidget):
 
     The latest bar is kept at ``RIGHT_MARGIN_FRACTION`` of the plot width with
     empty space to its right; when new bars arrive the view re-anchors while
-    follow mode is engaged. Holds no events, no SQL, no data loading.
+    follow mode is engaged. A permanent header at the top of the plot always
+    shows the symbol, timeframe, exchange and the latest bar's OHLC — it is
+    independent of the crosshair, which only paints its price/time labels.
+    Holds no events, no SQL, no data loading.
     """
 
     MIN_VISIBLE_BARS = 10
@@ -61,6 +65,8 @@ class CandleChartWidget(QWidget):
     PRICE_STRIP_WIDTH = 96
     PRICE_ZOOM_STEP = 1.25
     PRICE_EDGE_MARGIN = 0.05
+
+    _HEADER_BAND_BRUSH = QBrush(OverlayRenderer.HEADER_BAND)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -77,6 +83,10 @@ class CandleChartWidget(QWidget):
         self._crosshair_value: CrosshairValue | None = None
         self._grid_cache: QPixmap | None = None
         self._grid_key: tuple[int, int, int, int, float, float] | None = None
+        self._static_cache: QPixmap | None = None
+        self._static_key: tuple[object, ...] | None = None
+        self._stats_cache: tuple[float, float, int] | None = None
+        self._stats_key: tuple[object, ...] | None = None
         self._touch_points: dict[int, QPointF] = {}
         self._touch_centroid: QPointF | None = None
         self._touch_dist: float | None = None
@@ -98,22 +108,24 @@ class CandleChartWidget(QWidget):
     def set_model(self, model: ChartModel) -> None:
         """Replace the chart data and reset the viewport.
 
-        A new symbol resets to the initial zoom. For the same symbol:
-        follow-latest re-anchors the latest bar at the right margin, otherwise
-        the window is shifted so the same bars stay in place.
+        A fresh lifecycle (first load, new symbol or timeframe change) opens
+        at the latest ``INITIAL_BARS``, never the whole history. For the same
+        symbol/timeframe: follow-latest re-anchors the latest bar at the right
+        margin, otherwise the window is shifted so the same bars stay in place.
         """
         previous = self._model
         previous_total = len(previous.bars) if previous else 0
         previous_count = self._window_size() or self.INITIAL_BARS
         same_symbol = previous is not None and previous.symbol == model.symbol
+        same_series = same_symbol and previous is not None and previous.timeframe == model.timeframe
         self._model = model
         self._price_manual = None
         total = len(model.bars)
-        if not same_symbol or self._follow_latest:
-            if same_symbol:
+        if not same_series or self._follow_latest:
+            if same_series:
                 count = max(self.MIN_VISIBLE_BARS, min(previous_count, max(total, 1)))
             else:
-                count = self._fit_all_count(total)
+                count = self._initial_count(total)
             first = self._anchor_first(total, count)
             self._first = first
             self._last = first + count
@@ -125,21 +137,25 @@ class CandleChartWidget(QWidget):
         self._clear_crosshair()
         self._grid_cache = None
         self._grid_key = None
+        self._static_cache = None
+        self._static_key = None
+        self._stats_cache = None
+        self._stats_key = None
         self._log_data_range(model)
         self.update()
 
     def reset_view(self) -> None:
-        """Restore the fresh-chart viewport — pan, zoom, price auto-fit.
+        """Restore the fresh-chart viewport — latest ``INITIAL_BARS``, price
+        auto-fit, follow-latest.
 
-        Mirrors the initial viewport that ``set_model`` builds for a new
-        symbol: the whole history fits and the latest bar sits at the right
-        margin. Viewport-only: never reloads data, never changes the
+        Mirrors the initial viewport that ``set_model`` builds for a fresh
+        lifecycle. Viewport-only: never reloads data, never changes the
         symbol/timeframe, never touches the model.
         """
         if self._model is None:
             return
         total = len(self._model.bars)
-        count = self._fit_all_count(total)
+        count = self._initial_count(total)
         self._first = self._anchor_first(total, count)
         self._last = self._first + count
         self._follow_latest = True
@@ -147,19 +163,20 @@ class CandleChartWidget(QWidget):
         self._clear_crosshair()
         self._grid_cache = None
         self._grid_key = None
+        self._static_cache = None
+        self._static_key = None
+        self._stats_cache = None
+        self._stats_key = None
         self.update()
 
-    def _fit_all_count(self, total: int) -> int:
-        """Window count that keeps the entire history visible.
+    def _initial_count(self, total: int) -> int:
+        """Window count for a fresh viewport: the latest ``INITIAL_BARS``.
 
-        Sized so the latest bar still lands at the right margin, leaving the
-        whole dataset (starting at the first candle) within the viewport.
+        The whole history stays loaded; only the visible window is limited.
         """
         if total <= 0:
-            return max(self.MIN_VISIBLE_BARS, self.INITIAL_BARS)
-        fraction = 1.0 - self.RIGHT_MARGIN_FRACTION
-        count = ceil((total - 0.5) / fraction)
-        return max(total, self.MIN_VISIBLE_BARS, count)
+            return self.INITIAL_BARS
+        return max(self.MIN_VISIBLE_BARS, min(self.INITIAL_BARS, total))
 
     def _log_data_range(self, model: ChartModel) -> None:
         first, last = self._visible_range()
@@ -244,23 +261,71 @@ class CandleChartWidget(QWidget):
 
         ``_price_manual`` overrides the automatic fit (user zoomed/dragged the
         price scale). Auto-fit spans visible bars plus a small top/bottom
-        margin so every visible candle stays inside the chart.
+        margin so every visible candle stays inside the chart. The visible
+        extremes come from the cached window stats — mouse-only repaints
+        never rescan the window.
         """
         if self._price_manual is not None:
             low, high = self._price_manual
             if high > low:
                 return low, high
-        first, last = self._visible_range()
-        if self._model is None or last <= first:
+        if self._model is None:
             return 0.0, 1.0
-        window = self._model.bars[first:last]
-        low = min(bar.low for bar in window)
-        high = max(bar.high for bar in window)
+        first, last = self._visible_range()
+        if last <= first:
+            return 0.0, 1.0
+        low, high, _ = self._window_stats()
         span = high - low
         if span <= 0.0:
             span = abs(high) * 0.01 or 0.01
         pad = span * self.PRICE_EDGE_MARGIN
         return low - pad, high + pad
+
+    def _window_stats(self) -> tuple[float, float, int]:
+        """Visible-window extremes ``(price_low, price_high, volume_max)``.
+
+        A single pass over the visible bars computes all three; the result is
+        cached and only recomputed when the model, window or price range
+        changes — so crosshair-move repaints never touch the bars.
+        """
+        key = (id(self._model), self._first, self._last, self._price_manual)
+        if self._stats_key == key and self._stats_cache is not None:
+            return self._stats_cache
+        if self._model is None:
+            result = (0.0, 1.0, 0)
+        else:
+            first, last = self._visible_range()
+            if last <= first:
+                result = (0.0, 1.0, 0)
+            elif self._price_manual is not None:
+                low, high = self._price_manual
+                if high <= low:
+                    result = (0.0, 1.0, 0)
+                else:
+                    bars = self._model.bars
+                    volume_max = 0
+                    for index in range(first, last):
+                        volume = bars[index].volume
+                        if volume > volume_max:
+                            volume_max = volume
+                    result = (low, high, volume_max)
+            else:
+                bars = self._model.bars
+                low = bars[first].low
+                high = bars[first].high
+                volume_max = bars[first].volume
+                for index in range(first + 1, last):
+                    bar = bars[index]
+                    if bar.low < low:
+                        low = bar.low
+                    if bar.high > high:
+                        high = bar.high
+                    if bar.volume > volume_max:
+                        volume_max = bar.volume
+                result = (low, high, volume_max)
+        self._stats_cache = result
+        self._stats_key = key
+        return result
 
     def _over_price_strip(self, x: float, y: float) -> bool:
         """True when (x, y) hits the right-side price scale column."""
@@ -327,17 +392,62 @@ class CandleChartWidget(QWidget):
         if last <= first:
             return
         chart_rect, volume_rect, axis_rect = self._chart_rects()
-        visible_bars = self._model.bars
         price_low, price_high = self._price_range()
-        volume_max = max(bar.volume for bar in visible_bars[first:last])
+        _, _, volume_max = self._window_stats()
+        painter.drawPixmap(
+            0,
+            0,
+            self._static_pixmap(
+                chart_rect, volume_rect, axis_rect, price_low, price_high, volume_max
+            ),
+        )
+        self._paint_header(painter, chart_rect)
+        crosshair = self._crosshair_pos
+        if crosshair is not None and chart_rect.contains(crosshair):
+            CrosshairRenderer.paint(painter, crosshair, chart_rect)
+            if self._crosshair_value is not None:
+                self._paint_overlays(painter, crosshair, chart_rect, axis_rect)
+
+    def _static_pixmap(
+        self,
+        chart_rect: QRect,
+        volume_rect: QRect,
+        axis_rect: QRect,
+        price_low: float,
+        price_high: float,
+        volume_max: int,
+    ) -> QPixmap:
+        """Cached widget-sized frame: grid + candles + time axis.
+
+        Everything that does not change on mouse-only repaints is baked into
+        one pixmap, so crosshair movement costs a single blit instead of a
+        full redraw. Rebuilt whenever the model, window, price range or size
+        changes (all part of the key).
+        """
+        key = (
+            id(self._model),
+            self._first,
+            self._last,
+            price_low,
+            price_high,
+            volume_max,
+            self.width(),
+            self.height(),
+        )
+        if self._static_cache is not None and self._static_key == key:
+            return self._static_cache
+        pixmap = QPixmap(self.size())
+        pixmap.fill(CandleRenderer.BACKGROUND)
+        painter = QPainter(pixmap)
         painter.drawPixmap(
             chart_rect,
             self._grid_pixmap(chart_rect, price_low, price_high),
-            chart_rect,
+            QRect(QPoint(0, 0), chart_rect.size()),
         )
+        bars = self._model.bars if self._model is not None else ()
         CandleRenderer.paint_bars(
             painter,
-            visible_bars,
+            bars,
             self._first,
             self._last,
             price_low,
@@ -346,12 +456,11 @@ class CandleChartWidget(QWidget):
             chart_rect,
             volume_rect,
         )
-        TimeAxisRenderer.paint(painter, visible_bars, self._first, self._last, axis_rect)
-        crosshair = self._crosshair_pos
-        if crosshair is not None and chart_rect.contains(crosshair):
-            CrosshairRenderer.paint(painter, crosshair, chart_rect)
-            if self._crosshair_value is not None:
-                self._paint_overlays(painter, crosshair, chart_rect, axis_rect)
+        TimeAxisRenderer.paint(painter, bars, self._first, self._last, axis_rect)
+        painter.end()
+        self._static_cache = pixmap
+        self._static_key = key
+        return pixmap
 
     def _grid_pixmap(self, chart_rect: QRect, price_low: float, price_high: float) -> QPixmap:
         """Return the cached static grid pixmap for the current viewport."""
@@ -378,24 +487,30 @@ class CandleChartWidget(QWidget):
             self._grid_key = key
         return self._grid_cache
 
-    def _paint_overlays(
-        self,
-        painter: QPainter,
-        crosshair_pos: QPoint,
-        chart_rect: QRect,
-        axis_rect: QRect,
-    ) -> None:
-        if self._model is None or self._crosshair_value is None:
+    def _paint_header(self, painter: QPainter, chart_rect: QRect) -> None:
+        """Paint the permanent top info bar: symbol • timeframe • exchange and
+        the latest bar's OHLC (real model data).
+
+        Rendered on every paint once a model is loaded — independent of the
+        crosshair. Updates automatically when the model changes because the
+        text is derived from the current model.
+        """
+        if self._model is None or not self._model.bars:
             return
         model = self._model
-        value = self._crosshair_value
-        bar = self._model.bars[value.bar_index]
         top_bar = QRect(
             chart_rect.left(),
             chart_rect.top(),
             chart_rect.width(),
             self.SYMBOL_HEIGHT,
         )
+        band = QRectF(top_bar)
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(self._HEADER_BAND_BRUSH)
+        painter.drawRoundedRect(band, 6.0, 6.0)
+        painter.restore()
         symbol_rect = OverlayRenderer.paint_symbol_info(
             painter,
             model.symbol,
@@ -403,9 +518,36 @@ class CandleChartWidget(QWidget):
             model.exchange,
             top_bar,
         )
-        OverlayRenderer.paint_ohlc(painter, bar, top_bar, left_margin=symbol_rect.right())
+        OverlayRenderer.paint_ohlc(
+            painter,
+            model.bars[-1],
+            top_bar,
+            left_margin=symbol_rect.right(),
+        )
+
+    def _paint_overlays(
+        self,
+        painter: QPainter,
+        crosshair_pos: QPoint,
+        chart_rect: QRect,
+        axis_rect: QRect,
+    ) -> None:
+        """Paint the crosshair-only labels: right price and bottom time.
+
+        The top info bar belongs to the permanent header (``_paint_header``),
+        so the crosshair overlays stay fully independent of it.
+        """
+        if self._model is None or self._crosshair_value is None:
+            return
+        value = self._crosshair_value
         OverlayRenderer.paint_price(painter, value, crosshair_pos.y(), chart_rect)
-        OverlayRenderer.paint_time(painter, value, model.timeframe, crosshair_pos.x(), axis_rect)
+        OverlayRenderer.paint_time(
+            painter,
+            value,
+            self._model.timeframe,
+            crosshair_pos.x(),
+            axis_rect,
+        )
 
     # ── zoom / pan ────────────────────────────────────────────────────
 
@@ -716,7 +858,6 @@ class CandleChartWidget(QWidget):
             rects.append(QRect(pos.x(), chart_rect.top(), 1, chart_rect.height()))
             rects.append(QRect(chart_rect.left(), pos.y(), chart_rect.width(), 1))
         if self._crosshair_value is not None:
-            rects.append(QRect(0, chart_rect.top(), self.width(), self.SYMBOL_HEIGHT))
             rects.append(
                 QRect(
                     chart_rect.right() - self.PRICE_STRIP_WIDTH,

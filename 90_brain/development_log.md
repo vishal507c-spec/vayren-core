@@ -2,6 +2,331 @@
 
 **Nya entry hamesha upar likho.**
 
+## 2026-08-13 — Extreme UI Responsiveness Pass (Phase 5L)
+
+### Approach: MEASURE FIRST (task rule — kabhi guess nahi)
+
+Real dataset (`D:\ZerodhaTradingData`, 527 stocks, ~60k rows/stock) par profiler script se har interaction measure kiya BEFORE kuch chhua. Profile points: data layer, engine, full event pipeline, per-frame paint, watchlist.
+
+### Bottlenecks found (BEFORE)
+
+| Path | Latency |
+|---|---|
+| Timeframe click 1D → chart ready | **1874 ms** |
+| Timeframe click 1W (full history) → ready | **2296 ms** |
+| paintEvent (full frame) | **10.0 ms** (~100 FPS max) |
+| Crosshair move + repaint | **11.0 ms/frame** |
+| Pan step + repaint | **12.1 ms/frame** |
+| Symbol click → chart ready | **43 ms** |
+| `ChartEngine.on_data_loaded` (60k bars) | **85 ms** |
+| `detect_timeframes` (per symbol click) | **56 ms** |
+| Watchlist `set_symbols` (527 rows, har click par) | **7 ms** |
+
+cProfile root cause: `aggregate_bars` = 2.2s, usme **`strptime` 58k calls = 2.1s** (har call locale lookup `_getlang` → `getlocale`!). `infer_timeframe` har 60k timestamp parse karta tha.
+
+### Optimizations (sab measured hotspots, behavior untouched)
+
+| File | Change | Win |
+|---|---|---|
+| `02_market/market/timeframe/aggregate.py` | `strptime` (2-format try/except, locale lookup) → `datetime.fromisoformat` (~100x faster parse); bucket aggregation single-pass running max/min/sum (pehle per-bucket generator re-scans + row/dt tuple lists) | 1D agg 1849 → 542 ms; 1W 2316 → 633 ms |
+| `03_chart/chart/widgets/candle_chart_widget.py` | **Static-layer pixmap cache**: grid + candles + time axis ek widget-sized pixmap mein baked (key = model id, window, price range, volume_max, size); paintEvent = blit + header + crosshair. Crosshair-move frames kabhi bars nahi chhoote. Visible-window stats (low/high/volume_max) single-pass + cached (`_window_stats`, key par kabhi stale nahi) — `_price_range` auto-fill bhi cache se. `_price_range` per-frame slice+3 generator scans gaye | paint 10.0 → **0.93 ms** (10.7x); crosshair frame ~1.8 ms; pan frame 12.1 → **1.65 ms**; zoom 3.6 → **1.6 ms** |
+| `03_chart/chart/widgets/watchlist_widget.py` + `symbol_list_widget.py` | `set_symbols`: identical symbol set = **no-op** (symbol clicks wahi universe re-publish karte hain — rows kabhi nahi recreate hote); rebuild ab `setUpdatesEnabled(False)` + `addItems` batch (ek layout+repaint) | 7 ms → **0.002 ms** per symbol click |
+| `03_chart/chart/engine/chart_engine.py` | `_ascending` check — already-sorted bars par sort skip (contract "ascending bars" same, sirf O(n) verify) | 85 → 14 ms (60k bars) |
+| `03_chart/chart/models/timeframe.py` | `infer_timeframe` ab pehle `_INFERENCE_SAMPLE = 2048` bars ka sampled median gap (regular series par bilkul same; 60k-bar load par 102 ms parse → ~1 ms) | engine pipeline ka bada hissa |
+
+### Verification (AFTER)
+
+| Path | BEFORE | AFTER | Speedup |
+|---|---|---|---|
+| Symbol click → chart ready | 43.5 ms | **16.1 ms** | 2.7x |
+| Timeframe click 1D → chart ready | 1874 ms | **551 ms** | 3.4x |
+| Timeframe click 1W → ready | 2296 ms | **632 ms** | 3.6x |
+| paintEvent (full frame) | 10.03 ms | **0.93 ms** | 10.7x |
+| Crosshair move + paint | 11.0 ms/frame | **1.8 ms/frame** | 6.1x |
+| Pan step + paint | 12.1 ms/frame | **1.65 ms/frame** | 7.3x |
+| Zoom step + paint | 3.6 ms/frame | **1.6 ms/frame** | 2.2x |
+| `on_data_loaded` (60k) | 85 ms | **14.2 ms** | 6x |
+| `detect_timeframes` | 56 ms | **21 ms** | 2.7x |
+| Watchlist `set_symbols` | 7 ms | **0.002 ms** | ~3500x |
+| Crosshair handler | — | **43 µs** | — |
+| Watchlist scroll step | — | **4 µs** | — |
+
+### Remaining bottleneck (documented)
+
+Timeframe click 1D = **551 ms** — ab SQLite fetch (48k rows, ~170 ms) + pure-Python aggregation loop (~160 ms) + Bar construction ka honest cost hai. Aage jaane ke liye SQL-side aggregation (GROUP BY) chahiye — database architecture change = out of scope (correctness + architecture rules). Default click flow (base 15m) 16 ms hai — 550 ms sirf explicit higher-timeframe click par.
+
+### Tests
+
+`pytest` = **221 passed** (sab green, koi regression nahi). `ruff` ✓, `pyright` **0 errors**, validators PASSED. Static-layer cache grid-cache tests ke contracts se match karta hai (paint_grid sirf cache rebuild par, header har paint par live).
+
+---
+
+## 2026-08-13 — UI Polish Pass (Phase 5K)
+
+### Kya hua tha?
+
+Functionality theek thi — sirf visual polish chahiye tha. Task: behavior bilkul mat badlo, sirf UI ko smoother/cleaner/professional banao. No fake data, no new controls, no new framework.
+
+### Decisions
+
+- **Central theme** (`chart/theme.py`): ek hi palette-based QSS string, `ChartWindow` par apply — sab controls ek hi visual language share karte hain: 4px radius, transparent resting buttons, soft hover/pressed, highlight accent active state, framed menus, hairline separators. Koi hardcoded color nahi — sirf `palette(...)` roles (system palette ke saath auto-adjust).
+- **Watchlist rows** (`symbol_list_widget.py`): padding 4/8, separators ab `palette(midlight)` (subtle), hover state `palette(alternate-base)`, selection = smooth rounded highlight (bulky box gaya), `outline: 0` (focus rect hataya), slim 8px rounded scrollbar (transparent track, hidden arrows).
+- **Top controls / sort header** (`watchlist_widget.py`): buttons theme se consistent height/padding; "Symbol" label muted (`palette(placeholder-text)`) — typography hierarchy clear.
+- **Timeframe bar**: `QPushButton` theme — borderless rounded buttons, hover midlight, **checked = highlight pill** (obvious par subtle). Functionality untouched.
+- **Menus**: QMenu framed + rounded, selected item highlight, disabled item muted.
+- **Panel separators**: `QSplitter::handleWidth(1)` — 1px hairline panel boundaries.
+- **Chart header**: `_paint_header` mein subtle translucent rounded backdrop band (`OverlayRenderer.HEADER_BAND`, alpha 110) — header integrated feel, candles dominate. OHLC readout split: prefix muted + change segment bull/bear color (`CandleRenderer.BULL/BEAR`) — direction at a glance. Math/format bilkul waisa hi (close−open, sign, pct). `LabelRenderer.paint_left` ko optional `text_color` param mila (additive, default = waisa hi).
+
+### Kya kiya?
+
+| File | Change |
+|---|---|
+| `03_chart/chart/theme.py` | **Naya** — `APP_STYLE` centralized QSS |
+| `03_chart/chart/widgets/symbol_list_widget.py` | Row/hover/selection/scrollbar QSS polish |
+| `03_chart/chart/widgets/watchlist_widget.py` | Muted "Symbol" label |
+| `03_chart/chart/windows/chart_window.py` | Theme apply + `setHandleWidth(1)` |
+| `03_chart/chart/renderer/label_renderer.py` | `paint_left`/`_draw_label` mein optional `text_color` |
+| `03_chart/chart/renderer/overlay_renderer.py` | OHLC change segment colored (bull/bear), `HEADER_BAND` constant |
+| `03_chart/chart/widgets/candle_chart_widget.py` | Header backdrop band (cached brush) |
+| `03_chart/chart/tests/test_chart_window.py` | 2 naye pinning tests (theme applied, hairline splitter) |
+
+### Verification
+
+- `pytest` = **221 passed** (219 + 2 naye) — 152 chart tests bhi green
+- `ruff check` ✓ + `ruff format --check` ✓
+- `pyright` = **0 errors**
+- `validate_structure.py` + `validate_imports.py` = PASSED
+- Stylesheet parse warnings: none (Qt silent)
+
+---
+
+## 2026-08-13 — Timeframe Persistence on Symbol Switch (Phase 5J)
+
+### Kya hua tha?
+
+Bug: symbol switch par timeframe default par reset ho jaata tha — `Stock A (30m) → Stock B` par Stock B base timeframe (15m) par khulta tha.
+
+### Root cause
+
+`ChartWindow._on_symbol_selected` hamesha `LoadSymbol` publish karta tha — aur `MarketDataLoader.on_load_symbol` sirf **base candles** load karta hai (koi timeframe nahi). Selected timeframe state chart session ka hai, stock ka nahi — par symbol click usse kabhi use hi nahi karta tha.
+
+### Decision
+
+- `ChartWindow` ab `_current_timeframe: str | None` track karta hai — single source of truth:
+  - `on_chart_ready` → `model.timeframe` se sync (jo chart abhi dikha raha hai)
+  - `_on_timeframe_selected` → explicit user selection par set
+  - `__init__` → `None` (default abhi tak select nahi hua)
+- `_on_symbol_selected` ab:
+  - `_current_timeframe is None` (pehli baar load) → `LoadSymbol` (base bars, waisa hi)
+  - timeframe selected hai → `TimeframeChanged(symbol, timeframe, limit)` — existing market aggregation path reuse, koi naya event/path nahi
+  - dono case mein `ListTimeframes` (waisa hi)
+- `ChartEngine`/`MarketDataLoader`/repository — **koi change nahi**. Unavailable/at-or-below-base timeframe → repository ka existing fallback (plain fetch) handle karta hai, label wahi dikhta hai jo chart dikhata hai.
+- Refresh feature app mein exist nahi karta (grep confirmed — sirf watchlist internal `_refresh_*` helpers) — koi refresh-reset path tha hi nahi.
+
+### Kya kiya?
+
+| File | Change |
+|---|---|
+| `03_chart/chart/windows/chart_window.py` | `_current_timeframe` state; `_on_symbol_selected` ab selected timeframe par `TimeframeChanged` bhejta hai (LoadSymbol sirf default case); `on_chart_ready`/`_on_timeframe_selected` state sync; docstring |
+| `03_chart/chart/tests/test_chart_window.py` | `_model` helper mein `timeframe` param; 2 naye tests: chart-loaded symbol switch `30m` rehta hai (LoadSymbol nahi), explicit `1D` selection 3 stock switches mein persistent |
+
+### Verification
+
+- `pytest` = **219 passed** (217 + 2 naye)
+- `ruff check` ✓ + `ruff format --check` ✓
+- `pyright` = **0 errors**
+- `validate_structure.py` + `validate_imports.py` = PASSED
+
+---
+
+## 2026-08-13 — Permanent Chart Header (Crosshair se Independent)
+
+### Kya hua tha?
+
+Problem: chart header (`SYMBOL · TIMEFRAME · EXCHANGE` + OHLC top bar) sirf crosshair active hone par dikhta tha — mouse chart se bahar jaate hi gayab. Requirement: header **hamesha visible**, crosshair se bilkul independent, latest bar ka OHLC + Change/Change% (sirf real model data), symbol/timeframe badalne par turant update.
+
+### Root cause
+
+`_paint_overlays` (candle_chart_widget.py) top bar (symbol info + OHLC) ko crosshair ke saath paint karta tha — `paintEvent` mein `if crosshair is not None and chart_rect.contains(crosshair)` ke andar. Crosshair clear → header bhi clear.
+
+### Decision
+
+- **`_paint_header(painter, chart_rect)`** — naya method: har `paintEvent` mein model loaded hote hi paint hota hai (crosshair condition ke BAHAR). Content: `paint_symbol_info` (model.symbol/timeframe/exchange) + `paint_ohlc` (model.bars[-1] = **latest bar**, left_margin = symbol rect). Existing `OverlayRenderer` rendering reuse — koi duplicate header nahi, koi fake data nahi (sab model se).
+- **`_paint_overlays`** ab sirf crosshair labels: right price + bottom time. Top bar crosshair se nikal kar permanent header mein — "Separate the header rendering from the crosshair visibility/update logic" waisa hi.
+- **`_crosshair_dirty_rect`** se top-bar rect hata diya (ab crosshair-move par top bar repaint ki zaroorat nahi).
+- Change/Change% pehle jaisa hi: `paint_ohlc` me `close - open` + `bar.return_pct` — real data se computed.
+
+### Kya kiya?
+
+| File | Change |
+|---|---|
+| `03_chart/chart/widgets/candle_chart_widget.py` | `_paint_header` (permanent, latest bar), `_paint_overlays` ab sirf price+time, dirty-rect cleanup, docstring |
+| `03_chart/chart/renderer/overlay_renderer.py` | Module docstring: permanent header vs crosshair-following labels |
+| `03_chart/chart/tests/test_overlay_integration.py` | `test_no_overlays_without_crosshair` → `test_header_painted_without_crosshair` (header ab bina crosshair bhi paint hota hai); naye tests: immediate paint after load, symbol/timeframe/exchange from model, latest bar OHLC, model change → header update (TCS), crosshair visibility independence (3 paints) |
+
+### Verification
+
+- `pytest` = **217 passed** (213 + 4 naye)
+- `ruff check` ✓ + `ruff format --check` ✓
+- `pyright` = **0 errors**
+- `validate_structure.py` + `validate_imports.py` = PASSED
+
+---
+
+## 2026-08-13 — Watchlist Layout Rebuild (Target-Layout-Conformant, Real Data Only)
+
+### Kya hua tha?
+
+Task: watchlist panel ko TradingView-style target layout se match karna — 2-line rows (price/company/change), filter row [S][G][T], bottom bar [Grid][Edit][⋯], vertical toolbar watchlist ke right. User clarification (2 questions) ne scope fix kiya:
+
+- **No fake data**: rows sirf real symbol dikhate hain (NETWEB, TCS...). Price/company/change/logo ka data app mein hai hi nahi — invent nahi kiya. "No data → no field." Row layout future fields ke liye design-ready, par ab sirf symbol.
+- **No fake controls**: [S][G][T] filter row, [Grid][Edit][⋯] bottom bar, extra more button — inme se koi existing nahi → **banaye nahi**. Existing functionality only.
+- **Vertical toolbar**: app mein sirf `OptionsPanel` column hai (◉ ◇ placeholders) — task ke §11 (`WATCHLIST | VERTICAL TOOLBAR | CHART`) ke hisaab se splitter order badala: ab **watchlist | options | chart** (pehle options far-left tha).
+
+### Kya kiya?
+
+| File | Change |
+|---|---|
+| `03_chart/chart/windows/chart_window.py` | Splitter order: watchlist (0) \| options (1) \| container (2); sizes `[220, 56, 1004]`; docstring |
+| `03_chart/chart/widgets/symbol_list_widget.py` | Stock row styling (palette-based QSS — koi hardcoded color nahi): `border: none`, item padding 3px 6px, subtle row separators (`palette(mid)` bottom border), selected row = rounded (4px) border + highlight background. Consistent compact rows. API/behavior unchanged |
+| `03_chart/chart/widgets/watchlist_widget.py` | Header ke neeche + Sort row ke neeche `QFrame.HLine` separators (clear visual separation); fixed top (header/sort) vs sirf list scroll — pehle se aisa tha, ab documented + tested |
+| `03_chart/chart/tests/test_options_panel.py` | Order test: watchlist → options → chart |
+| `03_chart/chart/tests/test_watchlist_widget.py` | 3 naye tests: separator ordering, row styling (QSS content), sirf list scrolls (header/sort fixed) |
+
+### Verification
+
+- `pytest` = **213 passed** (210 + 3 naye)
+- `ruff check` ✓ + `ruff format --check` ✓
+- `pyright` = **0 errors**
+- `validate_structure.py` + `validate_imports.py` = PASSED
+
+---
+
+## 2026-08-13 — Panel Order Fix (OPTIONS | WATCHLIST | CHART) + Placeholder Buttons
+
+### Kya hua tha?
+
+Task: sirf layout order badalna tha — Options panel far-left, watchlist uske turant right, chart sabse right. Options panel mein exactly 2 chhote icon buttons vertically (◉, ◇) — UI placeholders, koi functionality nahi: no click, no popup, no menu, no data.
+
+### Decision
+
+- **Splitter order** (`ChartWindow`): ab `options (0) | watchlist (1) | container/chart (2)` — pehle `watchlist | options` tha. Stretch 0,0,1; `setSizes([56, 220, 1004])`. Kuch aur nahi chhua — watchlist/chart/data/interactions untouched.
+- **`OptionsPanel`** ab empty nahi: 2 placeholder `QToolButton` (glyphs `◉`/`◇`), `BUTTON_SIZE = 28`, vertically stacked (QVBoxLayout, top-aligned, `AlignHCenter`), panel `OPTIONS_WIDTH = 56` fixed. Buttons **disabled** (`setEnabled(False)`) — click physically impossible, koi connection/menu/popup nahi. Sirf visuals, functionality zero.
+
+### Kya kiya?
+
+| File | Change |
+|---|---|
+| `03_chart/chart/widgets/options_panel.py` | 2 placeholder buttons (◉, ◇) vertically — disabled, no connections |
+| `03_chart/chart/windows/chart_window.py` | Splitter order: options | watchlist | chart; sizes `[56, 220, 1004]`; docstring order fix |
+| `03_chart/chart/tests/test_options_panel.py` | Order test (options→watchlist→chart), 2 placeholder buttons (exact glyphs, size, vertical stack, disabled/inert, no menu), baaki geometry tests wahi |
+
+### Verification
+
+- `pytest` = **210 passed** (208 + 2 naye)
+- `ruff check` ✓ + `ruff format --check` ✓
+- `pyright` = **0 errors**
+- `validate_structure.py` + `validate_imports.py` = PASSED
+
+---
+
+## 2026-08-13 — Left Options Section (Empty Container Beside Chart)
+
+### Kya hua tha?
+
+Task: sirf layout badalna tha — chart ke LEFT side par ek narrow options column: `WATCHLIST | OPTIONS | CHART`. Sirf options section add karna tha — chart, candles, watchlist, timeframe, data, interactions — sab untouched. Empty container, koi buttons/functionality nahi.
+
+### Decision
+
+- **Naya `OptionsPanel`** (`03_chart/chart/widgets/options_panel.py`) — pure UI empty container, `OPTIONS_WIDTH = 56`, `setFixedWidth` (narrow + fixed; splitter user-resize nahi ho sakta). Koi layout, koi child widget nahi — options tooling (indicators/drawing) aage ke phases mein yahan aayega.
+- **Layout**: `ChartWindow` splitter ab 3 items: watchlist (0) | options (1) | container(chart+toolbar) (2). Options stretch 0, container stretch 1; `setSizes([220, 56, 1004])`. Splitter handles hi clean separator hain (app mein koi QSS nahi — existing styling = plain widgets). Options column poori height tak jaata hai (toolbar row ke saath), chart se kabhi overlap nahi — pan/zoom chart ke andar hota hai, options bahar hai.
+- Chart/window ctor signature: `ChartWindow(widget, watchlist, options, toolbar, bus, limit=None)` — bootstrap ab `OptionsPanel()` construct karke pass karta hai. Chart, watchlist, toolbar, events — koi change nahi.
+
+### Kya kiya?
+
+| File | Change |
+|---|---|
+| `03_chart/chart/widgets/options_panel.py` | Naya `OptionsPanel` — empty fixed-width (56px) container |
+| `03_chart/chart/windows/chart_window.py` | Splitter 3 items (watchlist \| options \| chart), `options` param + property, sizes `[220, 56, 1004]` |
+| `00_app/app/bootstrap/bootstrap.py` | `OptionsPanel()` construct + ChartWindow ko pass |
+| `03_chart/chart/__init__.py` | `OptionsPanel` export |
+| `03_chart/chart/tests/test_options_panel.py` | Naya — 6 tests: order (watchlist→options→chart), fixed width, vertical span, no overlap, splitter sibling (pan/zoom se hila nahi sakta), empty container |
+| `03_chart/chart/tests/test_chart_window.py` | Helper mein options param; splitter container ab index 2 (pehle 1) |
+
+### Verification
+
+- `pytest` = **208 passed** (202 + 6 naye)
+- `ruff check` ✓ + `ruff format --check` ✓
+- `pyright` = **0 errors**
+- `validate_structure.py` + `validate_imports.py` = PASSED
+
+---
+
+## 2026-08-13 — Watchlist Panel (Header Row + Sort Row + Stock List)
+
+### Kya hua tha?
+
+Task: watchlist header layout `[Watchlist ▼] [+  Tool  ⋯]` ke saath, neeche `Symbol / Sort by ▼` row aur stock list. Repository mein watchlist koi nahi thi (sirf plain `SymbolListWidget` sidebar) — user ne naya feature banane ka approve kiya (no fake data).
+
+### Decision
+
+- **Naya `WatchlistWidget`** (`03_chart/chart/widgets/watchlist_widget.py`) — pure UI, `SymbolListWidget` ko compose karta hai (existing list + `symbol_selected` signal reused, duplicate nahi). Row 1: watchlist selector (name + dropdown arrow, InstantPopup), `+` (new watchlist), `↩` (reset chart view tool), `⋯` (more menu). Row 2: `Symbol` label + `Sort by ▼`. Row 3: stock list (stretch 1). Sab horizontally aligned, compact (QToolButton autoRaise, margins 4/2).
+- **Real behaviors, koi fake data nahi**: watchlists session-local in-memory (`dict name → symbols`), seeded `"All Stocks"` = asli symbol universe (`SymbolsListed` se). `+` naya khali watchlist banata hai, `⋯` menu = New/Remove watchlist (All Stocks kabhi remove nahi). `Sort by ▼` asli sorting (A→Z / Z→A). `↩` emits `reset_requested` → `ChartWindow` existing `reset_view()` ko call karta hai (reuse, duplicate nahi).
+- **Wiring**: `ChartWindow` ab `WatchlistWidget` leta hai (`sidebar` property → `watchlist`); `on_symbols_listed` → `set_symbols`; symbol click → `LoadSymbol`/`ListTimeframes` (waisa hi); `on_chart_ready` → `select_symbol`. `Bootstrap` ab `WatchlistWidget` banata hai. `SymbolListWidget` ab watchlist ke andar list hai (still exported, still used). Chart/market/data — kuch nahi chhua.
+- `SymbolListWidget.__init__` parent type `QListWidget | None` → `QWidget | None` (pyright, composition ke liye).
+
+### Kya kiya?
+
+| File | Change |
+|---|---|
+| `03_chart/chart/widgets/watchlist_widget.py` | Naya `WatchlistWidget` — header/sort/list rows, watchlists in-memory, sort, `symbol_selected`/`reset_requested` signals, `symbols`/`watchlists`/`active_watchlist`/`current_symbol` properties |
+| `03_chart/chart/windows/chart_window.py` | `sidebar` → `watchlist` param/property; `on_symbols_listed`/`on_chart_ready` watchlist par; `reset_requested → widget.reset_view` |
+| `00_app/app/bootstrap/bootstrap.py` | `SymbolListWidget` → `WatchlistWidget` construct |
+| `03_chart/chart/widgets/symbol_list_widget.py` | Parent type fix (`QWidget \| None`), docstring update |
+| `03_chart/chart/__init__.py` | `WatchlistWidget` export |
+| `03_chart/chart/tests/test_watchlist_widget.py` | Naya — 16 tests: header order/same-row, dropdown mode, sort row below, list population, click → signal, sort A→Z/Z→A + menu, add/remove/switch watchlists, more-menu enable state, reset tool signal |
+| `03_chart/chart/tests/test_chart_window.py` | `sidebar` → `watchlist`; naya test: watchlist reset tool reuses chart reset_view |
+| `00_app/app/tests/test_smoke.py` | `window.sidebar` → `window.watchlist` (symbols/current_symbol public API) |
+
+### Verification
+
+- `pytest` = **202 passed** (185 + 17 naye)
+- `ruff check` ✓ + `ruff format --check` ✓
+- `pyright` = **0 errors**
+- `validate_structure.py` + `validate_imports.py` = PASSED
+
+---
+
+## 2026-08-13 — Initial Viewport Fix: Latest INITIAL_BARS (TradingView-Style)
+
+### Kya hua tha?
+
+Fresh chart lifecycle (naya symbol / first open) par viewport **poori history fit** karta tha (`_fit_all_count` — `ceil((total-0.5)/(1-RIGHT_MARGIN_FRACTION))`), isliye 10 saal ke candles ek screen pe squeeze ho jaate the. Timeframe change par previous viewport inherit hota tha. TradingView-style behavior chahiye: data poori load ho, par initial viewport sirf **latest INITIAL_BARS** dikhaye.
+
+### Decision
+
+- **Fresh lifecycle → latest `INITIAL_BARS` (150).** `set_model` mein naya `_initial_count(total)` = `max(MIN_VISIBLE_BARS, min(INITIAL_BARS, total))` — poori history loaded rehti hai, sirf visible window limited hai. `_fit_all_count` delete (dead code — ab kahin use nahi hota).
+- **Fresh lifecycle = naya symbol YA timeframe change** (`same_series = same symbol AND same timeframe`). Timeframe change ab previous viewport inherit nahi karta — wahi latest `INITIAL_BARS` window. Pehla open bhi wahi (previous=None).
+- **Same series reload (data growth / follow-latest) waisa hi** — follow-latest re-anchor / manual-pan shift preserved (existing tests intact). App mein koi refresh feature nahi hai; user-triggered loads = symbol click (naya symbol) ya timeframe click (timeframe change), dono ab fresh `INITIAL_BARS` se khulte hain.
+- **`reset_view` (right-click menu / Alt+R) bhi latest `INITIAL_BARS`** — pehle fit-all karta tha. Pan/zoom/crosshair, fresh-chart isolation, context menu — sab untouched. Data kabhi delete nahi hota: `_first` > 0 par shift hota hai, pan/zoom-out se purane candles accessible.
+
+### Kya kiya?
+
+| File | Change |
+|---|---|
+| `03_chart/chart/widgets/candle_chart_widget.py` | `set_model`: `same_series` check (symbol+timeframe); fresh → `_initial_count`; `_fit_all_count` → `_initial_count` (delete); `reset_view` → `_initial_count`; `ceil` import hata |
+| `03_chart/chart/tests/test_chart_viewport.py` | `test_new_symbol_viewport_spans_entire_history` → `test_new_symbol_shows_latest_initial_bars`; `test_new_symbol_large_history_shows_first_candle` → `test_new_symbol_large_history_skips_first_candle`; `test_switch_symbol_resets_viewport` → `test_switch_symbol_resets_to_latest_initial_bars`; naye: `test_timeframe_change_resets_to_latest_initial_bars`, `test_same_series_reload_keeps_zoom_window`, `test_initial_view_reaches_older_candles_by_pan_and_zoom`; `test_drag_vertical_pans_price_keeps_span_and_zoom` ka `_first == 0` assumption fix (ab `first_before`) |
+| `03_chart/chart/tests/test_chart_context_menu.py` | `test_action_trigger_resets_viewport`: reset ab latest `INITIAL_BARS` (`_anchor_first(500, 150)`), fit-all nahi |
+
+### Verification
+
+- `pytest` = **185 passed** (182 + 3 naye / 2 updated); chart 116, app+core+market 69
+- `ruff check` ✓ + `ruff format --check` ✓ (1 file formatted)
+- `pyright` = **0 errors**
+- `validate_structure.py` + `validate_imports.py` = PASSED
+
+---
+
 ## 2026-08-13 — Right-Click Context Menu (Reset Chart View)
 
 ### Kya hua tha?
@@ -10,7 +335,7 @@ Chart par right-click kuch nahi karta tha (default OS menu ke bajaye kuch nahi),
 
 ### Decision
 
-- **Ek hi reset command — do trigger.** `CandleChartWidget.reset_view()` naya public method (viewport-only: `_first`/`_last` → `_fit_all_count` + `_anchor_first`, `_price_manual = None`, `_follow_latest = True`, crosshair clear, grid cache invalidate). Dono paths — menu click aur `Alt+R` — ek hi `QAction` (`↩ Reset chart view`, shortcut `QKeySequence(Alt+R)`) se `triggered → reset_view` chalte hain. Koi duplicate reset logic nahi.
+- **Ek hi reset command — do trigger.** `CandleChartWidget.reset_view()` naya public method (viewport-only: `_first`/`_last` → `_initial_count` + `_anchor_first`, `_price_manual = None`, `_follow_latest = True`, crosshair clear, grid cache invalidate). Dono paths — menu click aur `Alt+R` — ek hi `QAction` (`↩ Reset chart view`, shortcut `QKeySequence(Alt+R)`) se `triggered → reset_view` chalte hain. Koi duplicate reset logic nahi.
 - **QAction widget par add** (`addAction`) — default `WindowShortcut` context, isliye `Alt+R` poore main window mein active hai (focus kisi bhi child par ho). No new dependency, no focus-policy change.
 - **Right-click press par menu** (`mousePressEvent` RightButton branch) — `QMenu` ek hi action ke saath, cursor position par `exec()` (Qt khud click-outside/Escape/selection par band karta hai, screen bounds clamp bhi Qt ka). `contextMenuEvent` override = default OS/Qt menu suppress.
 - **Scope pakka: sirf widget UI.** Reset sirf viewport (pan + zoom + visible/logical range + price auto-fit) — data reload, symbol/timeframe/candles/indicators sab untouched. `set_model` fresh-chart lifecycle, pan/zoom/crosshair/touch — sab waisa hi.

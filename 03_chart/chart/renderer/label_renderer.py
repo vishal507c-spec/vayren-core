@@ -67,10 +67,12 @@ class LabelRenderer:
         font: QFont,
         position: QRectF,
         padding: float = 6.0,
+        text_color: QColor | None = None,
     ) -> QRect:
         """Paint `text` in a framed label left-aligned to `position.left()`.
 
-        Returns the pixel rect the label occupied.
+        `text_color` overrides the default label text color (used to accent
+        the OHLC change readout). Returns the pixel rect the label occupied.
         """
         painter.save()
         fm = painter.fontMetrics()
@@ -86,7 +88,7 @@ class LabelRenderer:
             y = position.top()
 
         rect = QRectF(x, y, label_w, label_h)
-        LabelRenderer._draw_label(painter, rect, text, font, padding)
+        LabelRenderer._draw_label(painter, rect, text, font, padding, text_color)
         painter.restore()
         return rect.toRect()
 
@@ -141,13 +143,14 @@ class LabelRenderer:
         text: str,
         font: QFont,
         padding: float,
+        text_color: QColor | None = None,
     ) -> None:
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
         painter.setBrush(LabelRenderer._bg_brush)
         painter.setPen(LabelRenderer._border_pen)
         painter.drawRoundedRect(rect, 3.0, 3.0)
-        painter.setPen(LabelRenderer._text_pen)
+        painter.setPen(LabelRenderer._text_pen if text_color is None else QPen(text_color, 1))
         painter.setFont(font)
         text_rect = QRectF(
             rect.left() + padding,
