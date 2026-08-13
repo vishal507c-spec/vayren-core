@@ -18,10 +18,12 @@ from market.events.data_loaded import DataLoaded
 from market.events.list_symbols import ListSymbols
 from market.events.list_timeframes import ListTimeframes
 from market.events.load_symbol import LoadSymbol
+from market.events.quotes_loaded import QuotesLoaded
 from market.events.symbols_listed import SymbolsListed
 from market.events.timeframe_changed import TimeframeChanged
 from market.events.timeframes_listed import TimeframesListed
 from market.loader.market_data_loader import MarketDataLoader
+from market.loader.quote_loader import QuoteLoader
 from market.loader.symbol_list_loader import SymbolListLoader
 from market.loader.timeframe_list_loader import TimeframeListLoader
 from market.repository.symbol_repository import SymbolRepository
@@ -43,6 +45,7 @@ class Bootstrap:
         repository = SymbolRepository(data_dir)
         loader = MarketDataLoader(repository, self._bus)
         symbol_loader = SymbolListLoader(repository, self._bus)
+        quote_loader = QuoteLoader(repository, self._bus)
         timeframe_loader = TimeframeListLoader(repository, self._bus)
         engine = ChartEngine(self._bus)
         widget = CandleChartWidget()
@@ -53,15 +56,25 @@ class Bootstrap:
         lifecycle = AppLifecycle(self._bus)
 
         self._register_services(
-            repository, loader, symbol_loader, timeframe_loader, engine, window, lifecycle
+            repository,
+            loader,
+            symbol_loader,
+            quote_loader,
+            timeframe_loader,
+            engine,
+            window,
+            lifecycle,
         )
-        self._wire_events(loader, symbol_loader, timeframe_loader, engine, window, lifecycle)
+        self._wire_events(
+            loader, symbol_loader, quote_loader, timeframe_loader, engine, window, lifecycle
+        )
 
     def _register_services(
         self,
         repository: SymbolRepository,
         loader: MarketDataLoader,
         symbol_loader: SymbolListLoader,
+        quote_loader: QuoteLoader,
         timeframe_loader: TimeframeListLoader,
         engine: ChartEngine,
         window: ChartWindow,
@@ -70,6 +83,7 @@ class Bootstrap:
         self._services.register("symbol_repository", repository)
         self._services.register("market_data_loader", loader)
         self._services.register("symbol_list_loader", symbol_loader)
+        self._services.register("quote_loader", quote_loader)
         self._services.register("timeframe_list_loader", timeframe_loader)
         self._services.register("chart_engine", engine)
         self._services.register("chart_window", window)
@@ -79,6 +93,7 @@ class Bootstrap:
         self,
         loader: MarketDataLoader,
         symbol_loader: SymbolListLoader,
+        quote_loader: QuoteLoader,
         timeframe_loader: TimeframeListLoader,
         engine: ChartEngine,
         window: ChartWindow,
@@ -87,6 +102,8 @@ class Bootstrap:
         self._bus.subscribe(AppStarted, lifecycle.on_app_started)
         self._bus.subscribe(ListSymbols, symbol_loader.on_list_symbols)
         self._bus.subscribe(SymbolsListed, window.on_symbols_listed)
+        self._bus.subscribe(SymbolsListed, quote_loader.on_symbols_listed)
+        self._bus.subscribe(QuotesLoaded, window.on_quotes_loaded)
         self._bus.subscribe(LoadSymbol, loader.on_load_symbol)
         self._bus.subscribe(TimeframeChanged, loader.on_timeframe_changed)
         self._bus.subscribe(ListTimeframes, timeframe_loader.on_list_timeframes)

@@ -4,7 +4,8 @@ symbol selection wiring.
 State-level tests (no pixel grabs — unreliable offscreen).
 """
 
-from PySide6.QtCore import QCoreApplication
+from market.models.symbol_quote import SymbolQuote
+from PySide6.QtCore import QCoreApplication, Qt
 from PySide6.QtWidgets import QApplication, QFrame
 
 from chart.widgets.watchlist_widget import WatchlistWidget
@@ -12,6 +13,19 @@ from chart.widgets.watchlist_widget import WatchlistWidget
 _KEEP_APP: QCoreApplication | None = None
 
 _SYMBOLS = ("NETWEB", "TCS", "VOLTAMP", "SPY")
+
+
+def _quote(symbol: str = "TCS") -> SymbolQuote:
+    return SymbolQuote(
+        symbol=symbol, price=2151.8, change_pct=-0.24, timestamp="2026-06-10 15:15:00"
+    )
+
+
+def _quote_by_symbol(widget: WatchlistWidget) -> dict[str, object]:
+    return {
+        widget._list.item(i).text(): widget._list.item(i).data(Qt.ItemDataRole.UserRole)
+        for i in range(widget._list.count())
+    }
 
 
 def _app() -> QApplication:
@@ -140,6 +154,45 @@ def test_stock_rows_styled_with_separators_and_selection_border() -> None:
     assert "border-radius" in sheet
     assert "palette(highlight)" in sheet
     assert widget._list.visualItemRect(widget._list.item(0)).height() > 0
+
+
+def test_rows_are_uniform_two_line_height() -> None:
+    widget = _widget()
+    widget.show()
+    _app().processEvents()
+    heights = {
+        widget._list.visualItemRect(widget._list.item(i)).height()
+        for i in range(widget._list.count())
+    }
+    assert heights == {widget._list.visualItemRect(widget._list.item(0)).height()}
+    assert widget._list.visualItemRect(widget._list.item(0)).height() >= 30
+
+
+def test_set_quotes_attaches_real_quote_to_rows() -> None:
+    widget = _widget()
+    widget.set_quotes((_quote(),))
+    by_symbol = _quote_by_symbol(widget)
+    assert by_symbol["TCS"] == _quote()
+    assert by_symbol["NETWEB"] is None
+    assert by_symbol["SPY"] is None
+
+
+def test_quotes_survive_sort_rebuild() -> None:
+    widget = _widget()
+    widget.set_quotes((_quote("SPY"),))
+    widget.sort_by_name(False)
+    by_symbol = _quote_by_symbol(widget)
+    assert by_symbol["SPY"] == _quote("SPY")
+    assert widget.symbols == tuple(sorted(_SYMBOLS, reverse=True))
+
+
+def test_quotes_survive_watchlist_switch_back() -> None:
+    widget = _widget()
+    widget.set_quotes((_quote("TCS"),))
+    widget.add_watchlist()
+    widget._set_active(WatchlistWidget.ALL_STOCKS)
+    by_symbol = _quote_by_symbol(widget)
+    assert by_symbol["TCS"] == _quote()
 
 
 def test_only_list_scrolls_header_and_sort_fixed() -> None:

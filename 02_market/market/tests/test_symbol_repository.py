@@ -34,6 +34,30 @@ def test_get_candles_unknown_symbol_raises(symbol_directory: Path) -> None:
         repository.get_candles("NOTALISTED", 10)
 
 
+def test_get_quotes_returns_latest_real_quote(symbol_directory: Path) -> None:
+    repository = SymbolRepository(symbol_directory)
+    quotes = repository.get_quotes(("AMBUJACEM", "BPCL", "RELIANCE"))
+    assert [quote.symbol for quote in quotes] == ["AMBUJACEM", "BPCL", "RELIANCE"]
+    ambu = quotes[0]  # 12 bars: latest open 112.0, close 113.0
+    assert ambu.price == 113.0
+    assert ambu.timestamp == "2026-01-12 09:15:00"
+    assert ambu.change_pct == pytest.approx(100.0 * (113.0 - 112.0) / 112.0)
+    reliance = quotes[2]  # 5 bars: latest open 105.0, close 106.0
+    assert reliance.price == 106.0
+    assert reliance.change_pct == pytest.approx(100.0 * (106.0 - 105.0) / 105.0)
+
+
+def test_get_quotes_skips_missing_files(symbol_directory: Path) -> None:
+    repository = SymbolRepository(symbol_directory)
+    quotes = repository.get_quotes(("AMBUJACEM", "GHOST"))
+    assert [quote.symbol for quote in quotes] == ["AMBUJACEM"]
+
+
+def test_get_quotes_empty_universe(symbol_directory: Path) -> None:
+    repository = SymbolRepository(symbol_directory)
+    assert repository.get_quotes(()) == ()
+
+
 def test_get_candles_missing_directory_raises(tmp_path: Path) -> None:
     repository = SymbolRepository(tmp_path / "nowhere")
     assert repository.list_symbols() == ()

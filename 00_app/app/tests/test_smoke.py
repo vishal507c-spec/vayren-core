@@ -64,6 +64,7 @@ def test_bootstrap_registers_all_services(qt_app: QApplication, tmp_path: Path) 
         "chart_engine",
         "chart_window",
         "market_data_loader",
+        "quote_loader",
         "symbol_list_loader",
         "symbol_repository",
         "timeframe_list_loader",

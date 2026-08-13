@@ -2,9 +2,13 @@
 
 Paints two independent groups of labels:
 
-  Permanent header (every paint, latest bar):
-  1. Symbol info bar — top-of-plot, single line (SYMBOL • timeframe • exchange)
-  2. OHLC readout     — same top bar, single line (O H L C + change + %)
+  Permanent header strip (every paint, latest bar):
+  1. Symbol info — top-of-plot, single line (SYMBOL • timeframe • exchange),
+     two-tone: bright bold symbol, muted meta. Unframed — the strip
+     background is drawn by the widget.
+  2. OHLC readout — same top bar, single line (O H L C + change + %),
+     muted field letters with light values; the change segment is tinted
+     with the candle bull/bear accent.
 
   Crosshair-following (only while the crosshair is active):
   3. Right price label — right scale, vertically aligned with crosshair
@@ -21,7 +25,7 @@ from datetime import datetime
 
 from market.models.bar import Bar
 from PySide6.QtCore import QRect, QRectF
-from PySide6.QtGui import QColor, QFont, QPainter
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
 
 from chart.models.crosshair_value import CrosshairValue
 from chart.renderer.candle_renderer import CandleRenderer
@@ -32,11 +36,18 @@ class OverlayRenderer:
     """Draws floating UI labels (symbol, OHLC, price, time) over the chart."""
 
     SYMBOL_FONT = QFont("Segoe UI", 9, QFont.Weight.Bold)
+    META_FONT = QFont("Segoe UI", 8)
+    OHLC_LABEL_FONT = QFont("Segoe UI", 8)
     OHLC_FONT = QFont("Segoe UI", 8)
     PRICE_FONT = QFont("Segoe UI", 8)
     TIME_FONT = QFont("Segoe UI", 8)
 
-    HEADER_BAND = QColor(16, 20, 24, 110)
+    STRIP_BG = QColor("#141922")
+    STRIP_BORDER = QColor("#232936")
+    SYMBOL_TEXT = QColor("#e8eef5")
+    META_TEXT = QColor("#8a93a6")
+    OHLC_LABEL_TEXT = QColor("#5d6778")
+    OHLC_VALUE_TEXT = QColor("#b7c0cc")
 
     @staticmethod
     def paint_symbol_info(
@@ -46,17 +57,36 @@ class OverlayRenderer:
         exchange: str,
         top_bar: QRect,
     ) -> QRect:
-        """Paint the top-left symbol info label (SYMBOL • timeframe • exchange).
+        """Paint the top-left symbol info (SYMBOL • timeframe • exchange).
 
-        Returns the pixel rect the label occupied so callers can place the
-        OHLC readout to its right without overlap.
+        Two-tone and unframed: the symbol is bright and bold, the trailing
+        timeframe • exchange meta is muted; the strip background itself is
+        drawn by the widget. Returns the pixel rect the text occupied so
+        callers can place the OHLC readout to its right without overlap.
         """
-        text = f"{symbol} \u2022 {timeframe} \u2022 {exchange}"
-        return LabelRenderer.paint_left(
-            painter,
-            text,
-            OverlayRenderer.SYMBOL_FONT,
-            QRectF(top_bar),
+        segments = (
+            (symbol, OverlayRenderer.SYMBOL_FONT, OverlayRenderer.SYMBOL_TEXT),
+            ("  \u2022  ", OverlayRenderer.META_FONT, OverlayRenderer.META_TEXT),
+            (timeframe, OverlayRenderer.META_FONT, OverlayRenderer.META_TEXT),
+            ("  \u2022  ", OverlayRenderer.META_FONT, OverlayRenderer.META_TEXT),
+            (exchange, OverlayRenderer.META_FONT, OverlayRenderer.META_TEXT),
+        )
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+        metrics = QFontMetrics(OverlayRenderer.SYMBOL_FONT)
+        baseline = top_bar.top() + (top_bar.height() + metrics.ascent() - metrics.descent()) / 2.0
+        x = top_bar.left() + 8
+        for text, font, color in segments:
+            painter.setFont(font)
+            painter.setPen(QPen(color, 1))
+            painter.drawText(int(x), int(baseline), text)
+            x += painter.fontMetrics().horizontalAdvance(text)
+        painter.restore()
+        return QRect(
+            top_bar.left() + 8,
+            top_bar.top(),
+            x - (top_bar.left() + 8),
+            top_bar.height(),
         )
 
     @staticmethod
@@ -66,44 +96,44 @@ class OverlayRenderer:
         top_bar: QRect,
         left_margin: int = 0,
     ) -> QRect:
-        """Paint the OHLC readout on a single line in the top info bar.
+        """Paint the OHLC readout on a single line in the top info strip.
 
-        TradingView style: `O 100.50  H 105.00  L 95.00  C 102.00  +2.00 (+2.0%)`.
-        The change segment is tinted with the candle bull/bear accent so the
-        direction reads at a glance. `left_margin` is the right edge of the
-        symbol info label so the OHLC bar starts just to its right.
+        Institutional style: muted field letters with light values
+        (`O 100.50  H 105.00  L 95.00  C 102.00`), then the change readout
+        `+2.00 (+2.0%)` tinted with the candle bull/bear accent so the
+        direction reads at a glance. Unframed — the strip background is
+        drawn by the widget. `left_margin` is the right edge of the symbol
+        info label so the OHLC bar starts just to its right.
         """
         change = bar.close - bar.open
         pct = bar.return_pct
         sign = "+" if change >= 0 else ""
-        prefix = f"O {bar.open:.2f}  H {bar.high:.2f}  L {bar.low:.2f}  C {bar.close:.2f}"
+        fields = (
+            ("O", f"{bar.open:.2f}"),
+            ("H", f"{bar.high:.2f}"),
+            ("L", f"{bar.low:.2f}"),
+            ("C", f"{bar.close:.2f}"),
+        )
         suffix = f"{sign}{change:.2f} ({sign}{pct:.1f}%)"
-        position = QRectF(
-            left_margin + 6,
-            top_bar.top(),
-            top_bar.width() - left_margin - 6,
-            top_bar.height(),
-        )
-        prefix_rect = LabelRenderer.paint_left(
-            painter,
-            prefix,
-            OverlayRenderer.OHLC_FONT,
-            position,
-        )
-        suffix_position = QRectF(
-            prefix_rect.right() + 8,
-            top_bar.top(),
-            top_bar.width() - prefix_rect.right() - 8,
-            top_bar.height(),
-        )
-        LabelRenderer.paint_left(
-            painter,
-            suffix,
-            OverlayRenderer.OHLC_FONT,
-            suffix_position,
-            text_color=CandleRenderer.BULL if change >= 0 else CandleRenderer.BEAR,
-        )
-        return prefix_rect
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+        metrics = QFontMetrics(OverlayRenderer.OHLC_FONT)
+        baseline = top_bar.top() + (top_bar.height() + metrics.ascent() - metrics.descent()) / 2.0
+        x = left_margin + 8
+        for label, value in fields:
+            painter.setFont(OverlayRenderer.OHLC_LABEL_FONT)
+            painter.setPen(QPen(OverlayRenderer.OHLC_LABEL_TEXT, 1))
+            painter.drawText(int(x), int(baseline), label)
+            x += painter.fontMetrics().horizontalAdvance(label) + 2
+            painter.setFont(OverlayRenderer.OHLC_FONT)
+            painter.setPen(QPen(OverlayRenderer.OHLC_VALUE_TEXT, 1))
+            painter.drawText(int(x), int(baseline), value)
+            x += painter.fontMetrics().horizontalAdvance(value) + 10
+        prefix_end = x - 10
+        painter.setPen(QPen(CandleRenderer.BULL if change >= 0 else CandleRenderer.BEAR, 1))
+        painter.drawText(int(x + 12), int(baseline), suffix)
+        painter.restore()
+        return QRect(left_margin, top_bar.top(), prefix_end - left_margin, top_bar.height())
 
     @staticmethod
     def paint_price(

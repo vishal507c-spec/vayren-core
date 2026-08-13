@@ -1,5 +1,6 @@
 """WatchlistWidget — watchlist panel: header actions, sort row and stock list."""
 
+from market.models.symbol_quote import SymbolQuote
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QFrame,
@@ -13,7 +14,9 @@ from PySide6.QtWidgets import (
 
 from chart.widgets.symbol_list_widget import SymbolListWidget
 
-_SYMBOL_LABEL_STYLE = "color: palette(placeholder-text);"
+_SYMBOL_LABEL_STYLE = "color: palette(placeholder-text); font-size: 11px; font-weight: 600;"
+_ICON_SIZE = 24
+_SEPARATOR_STYLE = "background: palette(midlight); border: none;"
 
 
 class WatchlistWidget(QWidget):
@@ -40,6 +43,7 @@ class WatchlistWidget(QWidget):
         self._watchlists: dict[str, tuple[str, ...]] = {self.ALL_STOCKS: ()}
         self._active = self.ALL_STOCKS
         self._sort_ascending = True
+        self._quotes: dict[str, SymbolQuote] = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -64,33 +68,40 @@ class WatchlistWidget(QWidget):
         line = QFrame(self)
         line.setFrameShape(QFrame.Shape.HLine)
         line.setFrameShadow(QFrame.Shadow.Plain)
+        line.setFixedHeight(1)
+        line.setStyleSheet(_SEPARATOR_STYLE)
         return line
 
     def _build_header_row(self) -> QWidget:
         row = QWidget(self)
         layout = QHBoxLayout(row)
-        layout.setContentsMargins(4, 2, 4, 2)
-        layout.setSpacing(4)
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setSpacing(2)
 
         self._watchlist_button = QToolButton(row)
         self._watchlist_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self._watchlist_button.setToolTip("Select watchlist")
+        self._watchlist_button.setFixedHeight(_ICON_SIZE)
+        self._watchlist_button.setStyleSheet("font-weight: 600;")
         self._watchlist_menu = QMenu(self._watchlist_button)
         self._watchlist_menu.aboutToShow.connect(self._refresh_watchlist_menu)
         self._watchlist_button.setMenu(self._watchlist_menu)
 
         self._add_button = QToolButton(row)
         self._add_button.setText("+")
+        self._add_button.setFixedSize(_ICON_SIZE, _ICON_SIZE)
         self._add_button.setToolTip("New watchlist")
         self._add_button.clicked.connect(self.add_watchlist)
 
         self._tool_button = QToolButton(row)
         self._tool_button.setText("↩")
+        self._tool_button.setFixedSize(_ICON_SIZE, _ICON_SIZE)
         self._tool_button.setToolTip("Reset chart view (Alt+R)")
         self._tool_button.clicked.connect(self.reset_requested)
 
         self._more_button = QToolButton(row)
         self._more_button.setText("⋯")
+        self._more_button.setFixedSize(_ICON_SIZE, _ICON_SIZE)
         self._more_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self._more_button.setToolTip("More watchlist actions")
         self._more_menu = QMenu(self._more_button)
@@ -115,10 +126,10 @@ class WatchlistWidget(QWidget):
     def _build_sort_row(self) -> QWidget:
         row = QWidget(self)
         layout = QHBoxLayout(row)
-        layout.setContentsMargins(4, 0, 4, 0)
+        layout.setContentsMargins(12, 3, 6, 3)
         layout.setSpacing(4)
 
-        symbol_label = QLabel("Symbol", row)
+        symbol_label = QLabel("SYMBOL", row)
         symbol_label.setStyleSheet(_SYMBOL_LABEL_STYLE)
 
         self._sort_button = QToolButton(row)
@@ -148,6 +159,16 @@ class WatchlistWidget(QWidget):
         self._all_symbols = symbols
         self._watchlists[self.ALL_STOCKS] = symbols
         self._refresh_list()
+
+    def set_quotes(self, quotes: tuple[SymbolQuote, ...]) -> None:
+        """Attach the latest real quote per symbol to the list rows.
+
+        Pure presentation state: quotes arrive once per universe (never
+        re-queried) and are re-attached to rows on any reorder or watchlist
+        switch. Symbols without a quote stay symbol-only.
+        """
+        self._quotes = {quote.symbol: quote for quote in quotes}
+        self._list.set_quotes(self._quotes)
 
     def select_symbol(self, symbol: str) -> None:
         """Highlight `symbol` in the list (passthrough to the list widget)."""
@@ -217,3 +238,4 @@ class WatchlistWidget(QWidget):
         members = self._watchlists.get(self._active, ())
         ordered = sorted(members, reverse=not self._sort_ascending)
         self._list.set_symbols(tuple(ordered))
+        self._list.set_quotes(self._quotes)

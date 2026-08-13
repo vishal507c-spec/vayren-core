@@ -4,29 +4,30 @@
 
 Ye **saare events ki list** hai jo platform mein chalte hain. Sabse pakka document — yahan jo likha hai, wahi hota hai.
 
-Phase 5C mein **10 events** hain. Upar-se-neeche:
+Phase 5C mein **10 events** hain. Phase 5N mein **11** hua. Upar-se-neeche:
 
 ```
-AppStarted → ListSymbols → SymbolsListed → (sidebar)
+AppStarted → ListSymbols → SymbolsListed → (sidebar) → QuotesLoaded → (watchlist rows)
 click → LoadSymbol → TimeframesListed → (timeframe list)
 select timeframe → TimeframeChanged → DataLoaded → ChartReady → WindowRendered
 click → LoadSymbol → DataLoaded → ChartReady → WindowRendered
 ```
 
-## 2. Table — 10 Events
+## 2. Table — 11 Events
 
 | # | Event | Kaun bhejta hai | Kaun sunta hai | Andar kya hota hai |
 |---|---|---|---|---|
 | 1 | `AppStarted` | `Bootstrap.start()` | `AppLifecycle.on_app_started` | — |
 | 2 | `ListSymbols` | `AppLifecycle` | `SymbolListLoader.on_list_symbols` | — |
-| 3 | `SymbolsListed` | `SymbolListLoader` | `ChartWindow.on_symbols_listed` | `symbols: tuple[str, ...]` |
-| 4 | `LoadSymbol` | `ChartWindow` (sidebar click) | `MarketDataLoader.on_load_symbol` | `symbol: str`, `limit: int | None` (None = poori history) |
-| 5 | `ListTimeframes` | UI (symbol select) | `TimeframeListLoader.on_list_timeframes` | `symbol: str` |
-| 6 | `TimeframesListed` | `TimeframeListLoader` | (selector UI) | `symbol: str`, `timeframes: tuple[str, ...]` |
-| 7 | `TimeframeChanged` | UI (timeframe select) | `MarketDataLoader.on_timeframe_changed` | `symbol: str`, `timeframe: str`, `limit: int | None` (None = poori history) |
-| 8 | `DataLoaded` | `MarketDataLoader` | `ChartEngine.on_data_loaded` | `symbol: str`, `bars: tuple[Bar, ...]` |
-| 9 | `ChartReady` | `ChartEngine` | `ChartWindow.on_chart_ready` | `model: ChartModel` |
-| 10 | `WindowRendered` | `ChartWindow` | `AppLifecycle.on_window_rendered` | — |
+| 3 | `SymbolsListed` | `SymbolListLoader` | `ChartWindow.on_symbols_listed` → `QuoteLoader.on_symbols_listed` (isi order mein subscribe — watchlist pehle) | `symbols: tuple[str, ...]` |
+| 4 | `QuotesLoaded` | `QuoteLoader` | `ChartWindow.on_quotes_loaded` | `quotes: tuple[SymbolQuote, ...]` (latest close, change %, timestamp — real SQLite) |
+| 5 | `LoadSymbol` | `ChartWindow` (sidebar click) | `MarketDataLoader.on_load_symbol` | `symbol: str`, `limit: int | None` (None = poori history) |
+| 6 | `ListTimeframes` | UI (symbol select) | `TimeframeListLoader.on_list_timeframes` | `symbol: str` |
+| 7 | `TimeframesListed` | `TimeframeListLoader` | (selector UI) | `symbol: str`, `timeframes: tuple[str, ...]` |
+| 8 | `TimeframeChanged` | UI (timeframe select) | `MarketDataLoader.on_timeframe_changed` | `symbol: str`, `timeframe: str`, `limit: int | None` (None = poori history) |
+| 9 | `DataLoaded` | `MarketDataLoader` | `ChartEngine.on_data_loaded` | `symbol: str`, `bars: tuple[Bar, ...]` |
+| 10 | `ChartReady` | `ChartEngine` | `ChartWindow.on_chart_ready` | `model: ChartModel` |
+| 11 | `WindowRendered` | `ChartWindow` | `AppLifecycle.on_window_rendered` | — |
 
 ## 3. Flow Diagram
 
@@ -36,6 +37,8 @@ AppStarted
 ListSymbols          ← "kaunse stocks hain?"
     ↓
 SymbolsListed        ← "527 stocks — sidebar bharo"
+    ↓
+QuotesLoaded         ← "527 latest quotes — watchlist rows bharo" (ek baar, phir cached)
     ↓
 [user sidebar mein click karta hai]
     ↓
@@ -59,7 +62,7 @@ WindowRendered       ← "window khul gayi, sab dikh raha hai"
 | Module | Events jo uski hain |
 |---|---|
 | `01_core/events` | `Event` (base), `AppStarted` |
-| `02_market/events` | `ListSymbols` (request), `SymbolsListed` (result), `LoadSymbol` (request), `DataLoaded` (result), `TimeframeChanged` (request), `ListTimeframes` (request), `TimeframesListed` (result) |
+| `02_market/events` | `ListSymbols` (request), `SymbolsListed` (result), `QuotesLoaded` (result), `LoadSymbol` (request), `DataLoaded` (result), `TimeframeChanged` (request), `ListTimeframes` (request), `TimeframesListed` (result) |
 | `03_chart/events` | `ChartReady` (result), `WindowRendered` (result) |
 
 ## 5. Rules — Events Ke
@@ -108,7 +111,7 @@ class TimeframeChanged(Event):
 
 ## 8. Ye Kya Nahi Karega
 
-- Phase 5C mein **10 events** hain — `TimeframeChanged`, `ListTimeframes`, `TimeframesListed` naye aaye (exact `ListSymbols`/`SymbolsListed` pattern); `LoadSymbol`/`TimeframeChanged.limit` ab `int | None = None` (poori history default)
+- Phase 5N mein **11 events** hain — `QuotesLoaded` naya aaya (result; `SymbolsListed` ke turant baad, ek baar universe load par — `QuoteLoader` identical universe par no-op karta hai, kabhi re-query nahi)
 - Events business logic nahi rakhte — sirf data
 - `LoadSymbol`, `TimeframeChanged`, `ListTimeframes`, `ListSymbols` requests hain (commands); baaki sab past-tense facts
 
@@ -116,4 +119,4 @@ class TimeframeChanged(Event):
 
 `04_indicator` aayega → `IndicatorCalculated` jaisa event catalog mein add hoga. Wahi pattern.
 
-> 10 events, 10 messages, 1 post office. Catalog padho — sab clear.
+> 11 events, 11 messages, 1 post office. Catalog padho — sab clear.

@@ -14,6 +14,7 @@ from PySide6.QtGui import (
     QNativeGestureEvent,
     QPainter,
     QPaintEvent,
+    QPen,
     QPixmap,
     QResizeEvent,
     QTouchEvent,
@@ -66,7 +67,8 @@ class CandleChartWidget(QWidget):
     PRICE_ZOOM_STEP = 1.25
     PRICE_EDGE_MARGIN = 0.05
 
-    _HEADER_BAND_BRUSH = QBrush(OverlayRenderer.HEADER_BAND)
+    _STRIP_BRUSH = QBrush(OverlayRenderer.STRIP_BG)
+    _STRIP_BORDER_PEN = QPen(OverlayRenderer.STRIP_BORDER, 1)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -488,12 +490,13 @@ class CandleChartWidget(QWidget):
         return self._grid_cache
 
     def _paint_header(self, painter: QPainter, chart_rect: QRect) -> None:
-        """Paint the permanent top info bar: symbol • timeframe • exchange and
-        the latest bar's OHLC (real model data).
+        """Paint the permanent top info strip: symbol • timeframe • exchange
+        and the latest bar's OHLC (real model data).
 
         Rendered on every paint once a model is loaded — independent of the
         crosshair. Updates automatically when the model changes because the
-        text is derived from the current model.
+        text is derived from the current model. The strip is a solid panel
+        with a hairline at its bottom edge, framing the plot below it.
         """
         if self._model is None or not self._model.bars:
             return
@@ -504,12 +507,20 @@ class CandleChartWidget(QWidget):
             chart_rect.width(),
             self.SYMBOL_HEIGHT,
         )
-        band = QRectF(top_bar)
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(self._HEADER_BAND_BRUSH)
-        painter.drawRoundedRect(band, 6.0, 6.0)
+        painter.setBrush(self._STRIP_BRUSH)
+        painter.drawRoundedRect(QRectF(top_bar), 3.0, 3.0)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+        painter.setPen(self._STRIP_BORDER_PEN)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawLine(
+            top_bar.left() + 2,
+            top_bar.bottom() - 1,
+            top_bar.right() - 2,
+            top_bar.bottom() - 1,
+        )
         painter.restore()
         symbol_rect = OverlayRenderer.paint_symbol_info(
             painter,

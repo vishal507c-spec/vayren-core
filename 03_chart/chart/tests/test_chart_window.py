@@ -5,10 +5,12 @@ from datetime import datetime, timedelta
 from core.event_bus.event_bus import EventBus
 from market.events.list_timeframes import ListTimeframes
 from market.events.load_symbol import LoadSymbol
+from market.events.quotes_loaded import QuotesLoaded
 from market.events.timeframe_changed import TimeframeChanged
 from market.events.timeframes_listed import TimeframesListed
 from market.models.bar import Bar
-from PySide6.QtCore import QCoreApplication
+from market.models.symbol_quote import SymbolQuote
+from PySide6.QtCore import QCoreApplication, Qt
 from PySide6.QtWidgets import QApplication, QSplitter
 
 from chart.events.chart_ready import ChartReady
@@ -64,6 +66,17 @@ def test_on_timeframes_listed_populates_toolbar() -> None:
     window, _ = _window()
     window.on_timeframes_listed(TimeframesListed(symbol="SPY", timeframes=("1m", "5m", "1D")))
     assert window.toolbar.timeframes == ("1m", "5m", "1D")
+
+
+def test_quotes_loaded_attaches_quotes_to_watchlist() -> None:
+    window, _ = _window()
+    window.watchlist.set_symbols(("SPY", "TCS"))
+    quote = SymbolQuote(symbol="SPY", price=100.0, change_pct=0.49, timestamp="2026-06-10")
+    window.on_quotes_loaded(QuotesLoaded(quotes=(quote,)))
+    spy_item = window.watchlist._list.item(0)
+    assert spy_item.data(Qt.ItemDataRole.UserRole) == quote
+    tcs_item = window.watchlist._list.item(1)
+    assert tcs_item.data(Qt.ItemDataRole.UserRole) is None
 
 
 def test_symbol_selection_publishes_load_and_list() -> None:
@@ -185,9 +198,29 @@ def test_window_applies_polished_theme() -> None:
     assert "QPushButton:checked" in sheet
     assert "QMenu::item:selected" in sheet
     assert "QSplitter::handle" in sheet
+    assert "TimeframeToolbar QPushButton" in sheet
+    assert "QMenu::item:checked" in sheet
+    assert "QToolTip" in sheet
     list_sheet = window.watchlist._list.styleSheet()
     assert "QScrollBar" in list_sheet
     assert "::item:hover" in list_sheet
+
+
+def test_window_applies_institutional_palette() -> None:
+    from PySide6.QtGui import QPalette
+
+    from chart.theme import APP_PALETTE
+
+    window, _ = _window()
+    assert window.palette().color(QPalette.ColorRole.Window) == APP_PALETTE.color(
+        QPalette.ColorRole.Window
+    )
+    assert window.palette().color(QPalette.ColorRole.Highlight) == APP_PALETTE.color(
+        QPalette.ColorRole.Highlight
+    )
+    assert _app().palette().color(QPalette.ColorRole.Highlight) == APP_PALETTE.color(
+        QPalette.ColorRole.Highlight
+    )
 
 
 def test_splitter_handles_are_hairline() -> None:

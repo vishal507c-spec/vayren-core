@@ -2,6 +2,68 @@
 
 **Nya entry hamesha upar likho.**
 
+## 2026-08-13 — Watchlist Rows: Complete Market Information (Phase 5N)
+
+### Goal
+Watchlist rows ko institutional 2-line format: line 1 = SYMBOL (left) + PRICE (right), line 2 = change % (right, bull/bear colored). **Sirf real data** — company name/icon/marker app mein kahin exist nahi karta (real DB schema sirf OHLCV hai) → gracefully omitted. No fake data, watchlist functionality untouched, fast, do NOT commit/push.
+
+### Data decision (user-approved)
+Watchlist model mein sirf symbols the. User ne **real batch quotes** approve kiya: `SymbolRepository.get_quotes` — har symbol ke DB ka **sirf latest candle** read karta hai (`fetch_candles(symbol, 1)` → `ORDER BY candle_time DESC LIMIT 1`, kabhi full history nahi), `SymbolQuote(symbol, price=close, change_pct=return_pct, timestamp)`. Change % = wahi `(close−open)/open` semantics jo chart header use karta hai. Missing file → gracefully skip. Measured: **~1 ms/symbol, 527 stocks ≈ 0.4–0.55 s total, ek baar at startup, phir cached** — kabhi re-query nahi.
+
+### Changes
+| File | Change |
+|---|---|
+| `02_market/market/models/symbol_quote.py` | **Naya** `SymbolQuote` — frozen dataclass (symbol, price, change_pct, timestamp) |
+| `02_market/market/events/quotes_loaded.py` | **Naya** `QuotesLoaded(quotes: tuple[SymbolQuote, ...])` |
+| `02_market/market/repository/symbol_repository.py` | `get_quotes(symbols)` — per-symbol latest-candle read; missing file skip |
+| `02_market/market/loader/quote_loader.py` | **Naya** `QuoteLoader.on_symbols_listed` → `get_quotes` → `QuotesLoaded`; **identical universe = no-op** (`_last_symbols` guard, `None` initial — pehla listing hamesha publish hota hai) |
+| `00_app/app/bootstrap/bootstrap.py` | `quote_loader` service register; `SymbolsListed → [window.on_symbols_listed, quote_loader.on_symbols_listed]` (order = watchlist pehle); `QuotesLoaded → window.on_quotes_loaded` |
+| `03_chart/chart/windows/chart_window.py` | `on_quotes_loaded` → `watchlist.set_quotes` |
+| `03_chart/chart/widgets/watchlist_widget.py` | `set_quotes` — `dict[symbol → SymbolQuote]` presentation state; `_refresh_list` (sort/watchlist switch) par re-attach |
+| `03_chart/chart/widgets/symbol_list_widget.py` | **`_SymbolRowDelegate`** (QStyledItemDelegate): 2-line rows — line 1 symbol (DemiBold, left) + price (`,.2f`, right-aligned), line 2 change % (11px, bull `#26a69a`/bear `#ef5350`, right). Bina quote wali rows symbol-only vertically centered. **Selected = midlight bg + 2px teal accent edge + Text color** (HighlightedText #0b0f13 midlight par invisible tha — contrast fix) — change % colors selected par bhi readable. Hover = alternate-base, hairline separators sab rows. Quote item ke `UserRole` data mein (row-scoped). Uniform height = 2×line + padding |
+
+### Verification
+- **Real data (`D:\ZerodhaTradingData`, 527 stocks)**: startup total **414–556 ms** (quote batch included), **527/527 rows quoted** — e.g. `360ONE 1,073.30 +0.05% @ 2026-06-05 15:15:00`, `AARTIIND 430.60 -0.59%`.
+- **Pixel checks 8/8**: selected midlight bg + teal edge, unselected window bg, hairline, price/symbol Text pixels, bull `#26a69a` pixel (360ONE), bear `#ef5350` pixel (AARTIIND). Screenshots: `Temp\opencode\shots_watchlist\`.
+- **Perf**: `set_quotes(527)` = **0.72 ms**; sort rebuild + re-attach = **4.84 ms**; quotes survive sort (527/527). Per-repaint/per-mousemove DB queries: none. No per-symbol re-query after the one-time batch.
+- `pytest` = **234 passed** (11 naye: 3 repo, 4 loader, 3 watchlist, 1 window), ruff ✓, pyright 0 errors, validators PASSED.
+- NOT committed (task rule).
+
+---
+
+## 2026-08-13 — Institutional UI Redesign (Phase 5M)
+
+### Goal
+Default-looking Qt UI → serious trading terminal feel. **UI-only task**: functionality, data flow, EventBus, layout (watchlist | options | chart) sab untouched. Koi fake data nahi (sirf symbol + real OHLC).
+
+### Problem (root causes)
+1. Theme sirf palette-role QSS tha — OS theme ke hisaab se light/blue default Qt look (generic).
+2. Chart header floating pills the (LabelRenderer framed labels), terminal strip jaisa nahi.
+3. Rows/padding/scrollbar bulkier the; options panel plain.
+
+### Changes (presentation only)
+| File | Change |
+|---|---|
+| `03_chart/chart/theme.py` | **`APP_PALETTE`** — fixed dark terminal palette (cool near-black `#101418` family, single teal accent `#26a69a`, muted grays). **Refined `APP_STYLE`**: 3px radius, hairline structural separators, `QMenu::item:checked` accent+600, `QMenu::separator`, `QSplitter::handle:hover`, `QToolTip` styled, `TimeframeToolbar QPushButton` uniform segments (min-width 44, min-height 24) |
+| `03_chart/chart/windows/chart_window.py` | **QSS `palette()` Qt ke behavior se application palette resolve hota hai** — `QApplication.setPalette(APP_PALETTE)` (window par bhi `setPalette`). Explicit `Segoe UI 9pt`. **Race fix**: `on_timeframes_listed` ab `_current_timeframe` re-apply karta hai — symbol switch par active button hamesha sahi checked (TimeframesListed ChartReady ke baad aata hai) |
+| `03_chart/chart/widgets/symbol_list_widget.py` | Dense rows: padding 3px 8px, radius 2, hairline separators, selection = **teal accent + bold + dark text** (default blue OS box nahi). Scrollbar 6px, slim handle, hover dark |
+| `03_chart/chart/widgets/watchlist_widget.py` | Header: compact margins, 24px normalized icon buttons (+ ↩ ⋯), selector fixed height 24 + weight 600. Sort row: uppercase `SYMBOL` muted table-header (11px, weight 600), aligned 12px baseline. Separators = explicit 1px hairline (`_SEPARATOR_STYLE`, midlight) |
+| `03_chart/chart/widgets/options_panel.py` | Rail tint (`alternate-base`) — **`WA_StyledBackground`** (plain QWidget QSS bg ke liye zaroori), margins (8,10,8,8) |
+| `03_chart/chart/widgets/timeframe_toolbar.py` | Compact margins (8,4,8,4), spacing 2, **`WA_StyledBackground`** — iske bina `TimeframeToolbar { border-bottom }` kabhi render nahi hota tha (latent bug) |
+| `03_chart/chart/renderer/overlay_renderer.py` | **Header strip redesign**: `HEADER_BAND` (translucent pill) → solid `STRIP_BG #141922` + `STRIP_BORDER` hairline. `paint_symbol_info` = **two-tone unframed** (symbol bright bold `#e8eef5`, • meta muted `#8a93a6`). `paint_ohlc` = **institutional two-tone fields** (O/H/L/C letters muted `#5d6778`, values light `#b7c0cc`) + bull/bear change suffix. Signatures/contracts unchanged (tests pin call counts + args) |
+| `03_chart/chart/widgets/candle_chart_widget.py` | `_paint_header`: solid strip + 3px radius + bottom hairline (grid-color) |
+
+### Verification
+- **Pixel-level rendering checks** (offscreen grab sampling): options rail tint, toolbar hairline border, active timeframe teal pill, header strip + hairline + text pixels, selected row teal fill, separators, chart bg — **15/15 pass**.
+- `pytest` = **222 passed** (1 new: institutional palette applied), ruff ✓, pyright 0 errors, validators PASSED.
+- Koi functional path nahi chhua: symbol/timeframe switching, header data (latest bar OHLC), crosshair pills, pan/zoom, reset — sab tests green.
+- Screenshots: `C:\Users\visha\AppData\Local\Temp\opencode\shots\` (window, watchlist, chart, toolbar, options, selected row, crosshair).
+
+### Design system (VAYREN identity)
+Dense + precise + calm: cool near-black `#101418` surfaces, hairline `#2a3342` structure, teal `#26a69a` = only accent (active/selected + bull), muted `#8a93a6`/`#5d6778` secondary. No gradients, no shadows, no animation. Typography: 9pt Segoe UI, 12px controls, bold selected/active, muted labels.
+
+---
+
 ## 2026-08-13 — Extreme UI Responsiveness Pass (Phase 5L)
 
 ### Approach: MEASURE FIRST (task rule — kabhi guess nahi)

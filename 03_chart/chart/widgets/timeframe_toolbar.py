@@ -1,6 +1,6 @@
 """TimeframeToolbar — horizontal row of timeframe selector buttons."""
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QButtonGroup, QHBoxLayout, QPushButton, QWidget
 
 
@@ -16,9 +16,10 @@ class TimeframeToolbar(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._layout = QHBoxLayout(self)
-        self._layout.setContentsMargins(6, 4, 6, 4)
-        self._layout.setSpacing(4)
+        self._layout.setContentsMargins(8, 4, 8, 4)
+        self._layout.setSpacing(2)
         self._group = QButtonGroup(self)
         self._group.setExclusive(True)
         self._buttons: dict[str, QPushButton] = {}

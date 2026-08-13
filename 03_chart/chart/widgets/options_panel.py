@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QToolButton, QVBoxLayout, QWidget
 
 
 class OptionsPanel(QWidget):
-    """The far-left panel of the window splitter (options | watchlist | chart).
+    """The far-left panel of the window splitter (watchlist | options | chart).
 
     Contains exactly two small placeholder icon buttons, stacked vertically.
     They are UI placeholders only — disabled, no connections, no menus — so
@@ -21,11 +21,13 @@ class OptionsPanel(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setFixedWidth(self.OPTIONS_WIDTH)
+        self.setStyleSheet("OptionsPanel { background: palette(alternate-base); border: none; }")
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 0)
-        layout.setSpacing(8)
+        layout.setContentsMargins(8, 10, 8, 8)
+        layout.setSpacing(10)
 
         self._button_top = self._placeholder_button("◉")
         self._button_bottom = self._placeholder_button("◇")

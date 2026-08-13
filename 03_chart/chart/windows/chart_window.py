@@ -5,15 +5,17 @@ from logging import getLogger
 from core.event_bus.event_bus import EventBus
 from market.events.list_timeframes import ListTimeframes
 from market.events.load_symbol import LoadSymbol
+from market.events.quotes_loaded import QuotesLoaded
 from market.events.symbols_listed import SymbolsListed
 from market.events.timeframe_changed import TimeframeChanged
 from market.events.timeframes_listed import TimeframesListed
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QMainWindow, QSplitter, QVBoxLayout, QWidget
+from PySide6.QtGui import QFont
+from PySide6.QtWidgets import QApplication, QMainWindow, QSplitter, QVBoxLayout, QWidget
 
 from chart.events.chart_ready import ChartReady
 from chart.events.window_rendered import WindowRendered
-from chart.theme import APP_STYLE
+from chart.theme import APP_PALETTE, APP_STYLE
 from chart.widgets.candle_chart_widget import CandleChartWidget
 from chart.widgets.options_panel import OptionsPanel
 from chart.widgets.timeframe_toolbar import TimeframeToolbar
@@ -74,6 +76,11 @@ class ChartWindow(QMainWindow):
         self.setCentralWidget(splitter)
         self.resize(1280, 760)
         self.setWindowTitle("VAYREN")
+        app = QApplication.instance()
+        if isinstance(app, QApplication):
+            app.setPalette(APP_PALETTE)
+        self.setPalette(APP_PALETTE)
+        self.setFont(QFont("Segoe UI", 9))
         self.setStyleSheet(APP_STYLE)
 
         watchlist.symbol_selected.connect(self._on_symbol_selected)
@@ -85,9 +92,21 @@ class ChartWindow(QMainWindow):
         self._watchlist.set_symbols(event.symbols)
         logger.info("Watchlist populated (%d stocks)", len(event.symbols))
 
+    def on_quotes_loaded(self, event: QuotesLoaded) -> None:
+        """Attach the latest real quotes to the watchlist rows."""
+        self._watchlist.set_quotes(event.quotes)
+        logger.info("Watchlist quotes attached (%d)", len(event.quotes))
+
     def on_timeframes_listed(self, event: TimeframesListed) -> None:
-        """Populate the timeframe toolbar with the detected timeframes."""
+        """Populate the timeframe toolbar with the detected timeframes.
+
+        When the toolbar is populated after a chart already loaded (the
+        timeframes list always lags the chart in the event chain), re-apply
+        the current timeframe so the active button stays visibly correct.
+        """
         self._toolbar.set_timeframes(event.timeframes)
+        if self._current_timeframe is not None:
+            self._toolbar.select_timeframe(self._current_timeframe)
         logger.info("Timeframe toolbar populated (%d timeframes)", len(event.timeframes))
 
     @property
