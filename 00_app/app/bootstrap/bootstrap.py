@@ -6,6 +6,7 @@ from typing import Any
 from chart.engine.chart_engine import ChartEngine
 from chart.events.chart_ready import ChartReady
 from chart.events.window_rendered import WindowRendered
+from chart.manifest import chart_manifest
 from chart.widgets.candle_chart_widget import CandleChartWidget
 from chart.widgets.options_panel import OptionsPanel
 from chart.widgets.timeframe_toolbar import TimeframeToolbar
@@ -13,7 +14,9 @@ from chart.widgets.watchlist_widget import WatchlistWidget
 from chart.windows.chart_window import ChartWindow
 from core.event_bus.event_bus import EventBus
 from core.events.app_started import AppStarted
+from core.registry.component_registry import ComponentRegistry
 from core.registry.registry import Registry
+from core.system.system_model import SystemModel
 from market.events.data_loaded import DataLoaded
 from market.events.list_symbols import ListSymbols
 from market.events.list_timeframes import ListTimeframes
@@ -26,6 +29,7 @@ from market.loader.market_data_loader import MarketDataLoader
 from market.loader.quote_loader import QuoteLoader
 from market.loader.symbol_list_loader import SymbolListLoader
 from market.loader.timeframe_list_loader import TimeframeListLoader
+from market.manifest import market_manifest
 from market.repository.symbol_repository import SymbolRepository
 
 from app.lifecycle.lifecycle import AppLifecycle
@@ -68,6 +72,27 @@ class Bootstrap:
         self._wire_events(
             loader, symbol_loader, quote_loader, timeframe_loader, engine, window, lifecycle
         )
+        self._build_architecture(repository, engine)
+
+    def _build_architecture(self, repository: SymbolRepository, engine: ChartEngine) -> None:
+        """Register the real components and build the system model.
+
+        Runs once at startup. The existing runtime is untouched: the real
+        service instances remain the implementations, and the old Registry
+        keeps its names. This model is metadata for discovery and AI context.
+        """
+        self._components = ComponentRegistry()
+        self._components.register(
+            market_manifest(),
+            implementations={
+                "data.query.candles": repository,
+                "data.query.timeframes": repository,
+                "data.query.quotes": repository,
+                "data.transform.aggregate": repository,
+            },
+        )
+        self._components.register(chart_manifest(), implementations={"chart.render": engine})
+        self._system_model = SystemModel(self._components)
 
     def _register_services(
         self,
@@ -124,3 +149,13 @@ class Bootstrap:
     @property
     def services(self) -> Registry[Any]:
         return self._services
+
+    @property
+    def components(self) -> ComponentRegistry:
+        """The registered components with their capabilities (new lookup)."""
+        return self._components
+
+    @property
+    def system_model(self) -> SystemModel:
+        """The in-memory architecture model of the running system."""
+        return self._system_model

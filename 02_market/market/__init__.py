@@ -17,6 +17,7 @@ from market.loader.market_data_loader import MarketDataLoader
 from market.loader.quote_loader import QuoteLoader
 from market.loader.symbol_list_loader import SymbolListLoader
 from market.loader.timeframe_list_loader import TimeframeListLoader
+from market.manifest import market_manifest
 from market.models.bar import Bar
 from market.models.symbol_quote import SymbolQuote
 from market.repository.candle_repository import CandleRepository
@@ -39,6 +40,7 @@ __all__ = [
     "SymbolListLoader",
     "TimeframeListLoader",
     "QuoteLoader",
+    "market_manifest",
     "LoadSymbol",
     "ListSymbols",
     "DataLoaded",

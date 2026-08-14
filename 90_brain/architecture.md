@@ -14,9 +14,47 @@ Ye document batata hai ki **poora system kaise juda hai** — kaun kahan hai, ka
 | Module | Kaam | Depend karta hai |
 |---|---|---|
 | `00_app` | bootstrap, wiring, lifecycle, entry | core, market, chart |
-| `01_core` | EventBus, events, logger, registry | kuch nahi |
+| `01_core` | EventBus, events, logger, registry + Universal Foundation (`contracts`/`registry`/`system`/`ai`) | kuch nahi |
 | `02_market` | SQLite candles: database→repository→loader | core |
 | `03_chart` | chart model, engine, renderer, widgets, windows | core, market |
+
+## 3. Core ke Andar — Layer Map
+
+```
+contracts/   (Component DNA, Capability contracts — kya cheez hai)
+    ↓
+registry/    (ComponentRegistry + CapabilityRegistry — kaun hai)
+    ↓
+system/      (SystemModel: graphs, change impact, snapshot — system kaisa hai)
+    ↓
+ai/          (Part 3: intent → plan → validator → simulation → sandbox
+              → memories → optimization; sab deterministic, AI optional)
+```
+
+**Part 3 principle — AI proposes, VAYREN validates:**
+- `core/ai/` pure model/observation layer hai — koi LLM call nahi, koi runtime change nahi
+- `AiBoundary` fail-closed: forbidden actions (trade execution, risk bypass, contract override...) hamesha denied
+- `Sandbox.deploy()` = recorded decision only — "deterministic runtime remains authoritative"
+- `OptimizationStudy.adopt()` hamesha error deta hai — self-optimization guarded
+- Providers (`AiProviderRegistry`) optional — bina provider sab kuch kaam karta hai
+
+## 4. Runtime Integration (Part 4) — Naya Architecture, Purana Runtime
+
+```
+Bootstrap (ek hi composition root)
+    ├── services (old Registry — names: symbol_repository, chart_engine, ...)   [unchanged]
+    ├── bus + subscriptions                                                       [unchanged]
+    └── _build_architecture()  ← startup par ek baar
+            ├── market_manifest()  → ComponentRegistry (implementations = live SymbolRepository)
+            ├── chart_manifest()   → ComponentRegistry (implementations = live ChartEngine)
+            └── SystemModel(registry)  → components / system_model properties
+```
+
+- **Ek hi runtime** — EventBus wahi, Bootstrap wahi, hot paths wahi
+- Lookup dono taraf: `bootstrap.services.get("symbol_repository")` (old) + `bootstrap.components.providers("data.query.candles")` (new)
+- Real implementations hi implementations hain — koi adapter, koi wrapper nahi
+- SystemModel construction **startup par ek baar** (0.134 ms = 2% of startup) — har event/candle/tick par kabhi nahi
+- Explicit registration (`market_manifest()` / `chart_manifest()`) — koi plugin scanner, koi reflection nahi
 
 ## 3. Ek Module Ke Andar Bhi Layers Hain
 

@@ -2,6 +2,209 @@
 
 **Nya entry hamesha upar likho.**
 
+## 2026-08-14 — Universal Foundation Part 4 (Runtime Integration)
+
+### Goal
+Naya architecture (manifests, registries, SystemModel) ko **asli runtime se jodna** — bina kuch replace kiye. Do real components integrated: **market + chart**. Ek hi runtime rehta hai (existing Bootstrap + EventBus). Koi naya runtime, koi naya event system, koi naya registry nahi. **"Do less, but make it correct."**
+
+### Audit (pehle, code change se pehle)
+- Bootstrap = composition root (services create + old `Registry` names + sab subscriptions) — ✅ reuse kiya, naya composition root nahi banaya
+- EventBus — ✅ chhua nahi (0 changes)
+- Old `Registry` — ✅ untouched, names same (`symbol_repository`, `chart_engine`, ...)
+- POC (`core/tests/test_component_poc.py`) ke pas already **factual** market/chart manifests the — production mein move karna tha, kuch naya design nahi
+- `SystemSnapshot` already serializable tha (names only, koi live object nahi) — section 12 verify hua, koi fix nahi lagi
+- Registry compatibility: dono lookup side-by-side — old names + new capability lookup
+
+### Changes
+| File | Kaam |
+|---|---|
+| `02_market/market/manifest.py` (NEW) | `market_manifest()` — asli market component ka production manifest (storage type, 4 capabilities: data.query.candles/timeframes/quotes + data.transform.aggregate, events consumed/produced, dependency core) — POC se move, sirf imports badle |
+| `03_chart/chart/manifest.py` (NEW) | `chart_manifest()` — asli chart component ka production manifest (presentation type, chart.render capability, consumes data.query.candles, deps core+market) |
+| `02_market/market/__init__.py` | `market_manifest` export |
+| `03_chart/chart/__init__.py` | `chart_manifest` export |
+| `00_app/app/bootstrap/bootstrap.py` | `_build_architecture()` — startup par 2 real components register karta hai (`ComponentRegistry`) with **live service instances** as implementations (SymbolRepository ×4 capabilities, ChartEngine), phir `SystemModel` build. Naye properties: `components`, `system_model`. Existing wiring/service registration bilkul unchanged |
+| `01_core/core/tests/test_component_poc.py` | Local manifest defs hata ke production manifests import kiye — **ek hi source of truth**; implementations mapping same (classes) |
+| `scripts/validate_structure.py` | `market/manifest.py` + `chart/manifest.py` required |
+| `00_app/app/tests/test_runtime_integration.py` (NEW) | 10 required integration tests |
+
+### Real components integrated (sirf 2 — intentional)
+1. **market** — `data.query.candles`, `data.query.timeframes`, `data.query.quotes`, `data.transform.aggregate` → implementations = live `SymbolRepository` instance
+2. **chart** — `chart.render` → implementation = live `ChartEngine` instance
+
+### How it connects
+```
+Bootstrap.__init__
+  → existing services + wiring (unchanged)
+  → _build_architecture(repository, engine)
+      → ComponentRegistry.register(market_manifest, {capabilities → live instances})
+      → ComponentRegistry.register(chart_manifest, {chart.render → engine})
+      → SystemModel(registry)          # startup par ek baar, hot path par kabhi nahi
+bootstrap.components   → capability lookup (naya)
+bootstrap.services     → old name lookup (wahi)
+bootstrap.system_model → architecture model (AI-readable)
+```
+
+### Tests (10 naye → 522 total, sab green)
+1. Real components have valid manifests (register validate karta hai) 2. Capabilities discoverable (`find("data.")` = 4) 3. Old registry still works (names + instances) 4. Capability lookup works (chart.render → live engine instance) 5. SystemModel sees real components (chart, market + deps) 6. SystemModel sees capabilities (find_capability, consumers("data.query.candles") == ("chart",)) 7. EventBus behavior unchanged (publish/start flow) 8. Startup flow unchanged (title, visibility, full chain to WindowRendered) 9. Snapshot serializable (JSON, no "object at"/"at 0x") 10. No unnecessary overhead (bounds)
+
+### Performance (measured, offscreen, seed 2 symbols)
+| Cheez | Value |
+|---|---|
+| Full startup (Bootstrap ctor) | 6.54 ms |
+| Architecture build (register×2 + model + snapshot) | **0.134 ms = 2.05% of startup** |
+| Capability lookup (`providers`) | 2.3 µs |
+| Event dispatch (no-op) | 0.3 µs — EventBus code 0 changes, hot path untouched |
+| Snapshot build | 0.024 ms |
+
+Overhead negligible → koi optimization zaroori nahi. SystemModel construction sirf startup par (har event/candle/tick par kabhi nahi).
+
+### Deliberately NOT built (over-engineering audit)
+- Koi naya runtime / event system / registry / DI framework / service locator / adapter layer nahi
+- Koi plugin scanner, koi reflection, koi dynamic import nahi — explicit registration (`market_manifest()` / `chart_manifest()`)
+- Koi naya config system, koi database nahi
+- Koi manager/wrapper/interface nahi — manifests plain functions, Bootstrap wahi composition root
+- Migrate nahi kiya: Historical Download, Strategy, Risk, Execution, etc. — sirf 2 components (intentional)
+
+### Verification
+- `pytest` = **522 passed** (512 → 522, 10 naye integration tests)
+- `ruff check` ✓ + `ruff format --check` ✓, `pyright` **0 errors**
+- `validate_structure.py` PASSED (4 domains), `validate_imports.py` PASSED
+- NOT committed (task rule).
+
+### Remaining (Part 5+)
+Workflow **execution engine** (model declarative hai), `vayren --describe` CLI (SystemModel se AI-readable description print), baaki components ka incremental migration (same pattern: manifest.py + Bootstrap registration), health polling, config source.
+
+---
+
+## 2026-08-14 — Universal Foundation Part 3 (AI Engineering + Evolution Layer)
+
+### Goal
+Part 2 ke system model ke upar **deterministic, AI-optional intelligence layer**: AI propose kar sakta hai, VAYREN deterministic policies se validate karta hai, runtime kabhi AI ke haath mein nahi. **"AI proposes. VAYREN validates. Deterministic runtime executes."** Koi LLM call nahi, koi self-modification nahi, koi production behavior change nahi. Part 3 uses Part 2's SystemModel; Part 1/2 ki tarah pure stdlib.
+
+### Created (01_core/core/ai/)
+| File | Kaam |
+|---|---|
+| `intent.py` | `IntentKind` (CREATE_WORKFLOW/ADD_COMPONENT/ADD_DATA_SOURCE/CREATE_STRATEGY/IMPROVE_PERFORMANCE/OTHER) + `Intent` (goal/constraints/requested_capabilities/inputs/expected_outputs/risk_level default LOW) + `classify()` keyword rules + `parse_intent`/`validate_intent` + `IntentValidationError` |
+| `plan.py` | `PlanChangeKind` (ADD/MODIFY/REMOVE) + `PlanChange` + `PlanRisk` (level/reason) + `Rollback` (steps) + `Plan` (id regex `^[a-z][a-z0-9_]*$`, summary, requirements, reused/new capabilities — **overlap rejected**, components, changes — target component list mein hona zaroori, tests, benchmarks, risks, rollback) + `risk_rank()` (LOW 0 < MEDIUM 1 < HIGH 2) + `plan_risk()` (max declared, default LOW) + `validate_plan` + `PlanValidationError` |
+| `plan_validator.py` | `Policy` (protected_components, forbidden_capabilities, max_risk, allowed_change_kinds, requires_rollback_above) + `PlanValidator.validate(plan, system)` — reused capability system mein hona chahiye, nayi capability pehle se provided nahi honi chahiye, MODIFY/REMOVE unknown component = reject, phir har policy check. Deterministic errors, order fixed |
+| `change_simulation.py` | `simulate_plan(system, plan)` — Part 2 `analyze_change` per component: affected components (sorted union + self), capabilities (provided + affected), workflows, `required_tests` (`regression:<component>` labels + plan.tests), `estimated_risk` = max, sorted `reasons` |
+| `sandbox.py` | `SandboxStage` strict lifecycle: PLAN → SANDBOX (simulate) → TEST → BENCHMARK → VALIDATE → APPROVE → DEPLOY — **stage skip = `SandboxError`**, history records every transition. `deploy()` = **recorded decision only** (`SandboxDeployment`, note: "deterministic runtime remains authoritative"), kuch execute nahi hota. Invalid plan → approve `SandboxError("cannot approve an invalid plan")`. Lazy simulation/validation caches |
+| `boundary.py` | `ActionKind` — 9 allowed (understand, plan, propose, simulate, benchmark, validate, compare, suggest, report) + 6 **forbidden** (execute_trade, bypass_risk, delete_production_data, modify_protected_system, deploy_unvalidated, override_contract). `AiBoundary` fail-closed: `classify()` keyword verbs (banned verb wins over allowed), `request`/`require` (`BoundaryViolation`), `request_text` unknown → denied "unrecognized action request" |
+| `providers.py` | `AiProvider` ABC (name/available/describe) + `OfflineProvider` (default, hamesha unavailable) + `AiProviderRegistry` (register dupes rejected, `select(preferred)` → None on unavailable = **graceful AI optionality**, `status()`) |
+| `memory/engineering.py` | `Decision` (ACCEPTED/REJECTED/DEFERRED) + `EngineeringEntry` (problem/hypothesis/experiment/change/benchmark/result/decision/reason/evidence — `matches()` case-insensitive across ALL text fields) + `EngineeringMemory` (add auto-id, get (KeyError), search deterministic, decisions() = accepted+rejected only, problems() unique ordered) |
+| `memory/performance.py` | `METRICS` fixed: latency_ms/throughput/cpu_percent/memory_mb/io_ops/error_rate; `LOWER_IS_BETTER` = sab minus throughput. `PerformanceRecord` + `PerformanceMemory` — `record()` **requires ≥1 metric** ("performance claims require measurements"), `for_subject`/`latest`/`best` (min for lower-is-better, max for throughput)/`average`/`summary`/`subjects` |
+| `optimization.py` | `Candidate` (label/description) + `OptimizationStudy` (current + add_candidate dupes rejected) — `benchmark` (unknown metric → `OptimizationError`), `compare`/`recommend` (measured candidates only, lower-better ascending / throughput descending), **`adopt()` hamesha `OptimizationError`** — "adoption requires a validated plan and sandbox approval" (guarded self-optimization) |
+| `context.py` | `SECTIONS` canonical order + `ContextRequest` (unknown section → ValueError) + `ContextBuilder.build()` (bina request = sab sections) — components/capabilities (providers mapping)/contracts/dependencies/workflows/events/system_state (live counts + snapshot gaps)/architecture_history/engineering_memory (search) — sab deterministic text + `AiContext.render()`/`to_json()` |
+| `__init__.py` | Package exports (sab public API `core.ai` se) |
+
+### Modified
+- `core/__init__.py` — Part 3 exports + `__all__` (Intent*, Plan*, Policy/PlanValidator, ChangeSimulation, Sandbox*, AiBoundary/ActionKind, EngineeringMemory, PerformanceMemory, OptimizationStudy, AiProvider/Registry/OfflineProvider, ContextBuilder/AiContext)
+- `scripts/validate_structure.py` — `core/ai/` + `core/ai/memory/` required files
+- `core/tests/test_dependency_isolation.py` — `FOUNDATION_MODULES` mein 13 ai module paths (isolation check ab ai layer ko bhi cover karta hai: app/market/chart/PySide6/httpx/requests/numpy/pandas banned)
+- `core/ai/context.py` — `build()` request optional (bina request = full context)
+- `core/ai/optimization.py` — `benchmark()` unknown metric validation + explicit metric mapping (pyright-safe)
+
+### Tests (85 naye → core total 512)
+`test_intent.py` (8: spec examples Add broker/Create workflow/Improve performance/Add data source/Create strategy), `test_plan.py` (7: id regex, summary, reused∩new, changes require components, target listed, empty component, plan_risk max), `test_plan_validator.py` (11: protected component reject — **spec example**, reused-not-provided, new-already-provided, unknown component, forbidden capability, change kind not allowed, risk over limit, rollback required, multi-policy), `test_change_simulation.py` (7: market change reaches chart via capability graph, workflow impact, risk aggregation, deterministic), `test_sandbox.py` (10: happy path to deploy, deployment = record, no skips, invalid plan can't approve, lazy caches, history), `test_engineering_memory.py` (8: spec batch-size example, auto-id, search cross-field case-insensitive, decisions filter), `test_performance_memory.py` (10: ≥1 metric required, best min/max, unknown metric, average/latest/subjects/summary), `test_optimization.py` (7: candidates, dupe reject, benchmark validation, compare rank, recommend, adopt never automatic), `test_ai_boundary.py` (6: allowed all pass, forbidden all denied, spec coverage, require raises, classify verbs, unknown fails closed, end-to-end protected plan → validator → sandbox), `test_ai_providers.py` (7: offline default, graceful None, preferred selection, dupe reject, ordered), `test_ai_context.py` (15: canonical order, subset, unknown section, ground truth content, deterministic).
+
+### Verification
+- `pytest` = **512 passed** (core 172 → 512)
+- `ruff check` ✓ + `ruff format --check` ✓, `pyright` **0 errors/0 warnings**
+- `validate_structure.py` PASSED, `validate_imports.py` PASSED
+- NOT committed (task rule).
+
+### Remaining (Part 4+)
+Workflow **execution engine** (model declarative hai), `vayren --describe` CLI, per-chapter manifests (`market/components.py` style), declarative composition root, health polling, config source. Part 3 ka ai layer abhi pure model/observation hai — provider adapter (LLM) kabhi add ho to `AiProviderRegistry` se, runtime boundary kabhi nahi badalta.
+
+---
+
+## 2026-08-14 — Universal Foundation Part 2 (System Intelligence Layer)
+
+### Goal
+Part 1 ke foundation ke upar **machine-readable architecture model**: poora registered system queryable, deterministic, AI/human-readable — bina kisi production behavior change. Koi engine, koi EventBus, koi market/chart code touch nahi hua.
+
+### Created (01_core/core/system/)
+| File | Kaam |
+|---|---|
+| `component_graph.py` | `ComponentGraph` — manifests se deps/dependents (hard + optional dono reverse-edges banate hain), transitive closure dono direction, `find_cycle()` (Kahn's + leftover walk, deterministic sorted). Referenced-but-unregistered deps bhi nodes ban jaate hain |
+| `capability_graph.py` | `CapabilityGraph` — capability → providers/consumers (`capabilities_consumed` se), `capabilities_of`, `consumed_by`, `unresolved_consumers()` |
+| `event_graph.py` | `EventGraph` — event → producers/consumers, `unproduced()`, `unconsumed()`, `events_of` |
+| `data_flow.py` | `DataFlowModel` — component inputs/outputs, workflow `data_path` (step, capability, output) triples |
+| `workflow.py` | `WorkflowStep`/`Workflow` (id regex `^[a-z][a-z0-9_]*$`, duplicate step ids rejected), `WorkflowRegistry` (register/get/list sorted/find_by_capability/`in`/len) |
+| `change_impact.py` | `RiskLevel` (LOW/MEDIUM/HIGH) + `ChangeImpact` + `analyze_change` (auto-dispatch: `.` → capability, registered id → workflow, warna component). Risk rules: HIGH = indirect dependents ya workflows; MEDIUM = direct dependents/consumers; LOW = kuch nahi. `SystemModel` sirf `TYPE_CHECKING` import (circular import fix) |
+| `snapshot.py` | `SystemSnapshot` (components/capabilities/events/workflows/gaps) + `build_snapshot` — deterministic, `to_dict`/`to_json`/`render`. Gaps: unresolved_consumers, unproduced_events, unconsumed_events, dependency_cycles. `SystemModel` sirf `TYPE_CHECKING` |
+| `system_model.py` | `SystemModel` — queryable facade: `registry` + optional `WorkflowRegistry`; `components()`/`find_component`/`capabilities()`/`find_capability(prefix)`/`find_implementations` (asli provider objects registry se)/`find_dependents`/`find_dependencies`/`find_consumers`/`find_workflows`/`analyze_change`/`snapshot()` |
+| `__init__.py` | Public exports |
+
+### Modified
+- `core/contracts/manifest.py` — `ComponentManifest.capabilities_consumed: tuple[CapabilityId, ...]` + validation: duplicate capabilities, duplicate consumed, **own capability consume rejected**, duplicate events_consumed
+- `core/__init__.py` — system exports (SystemModel, ChangeImpact, RiskLevel, SystemSnapshot, Workflow, WorkflowRegistry, WorkflowStep, analyze_*, build_snapshot)
+- `scripts/validate_structure.py` — `system/__init__.py` required
+- `core/tests/test_component_poc.py` — chart manifest ab `data.query.candles` consume karta hai
+
+### Tests (66 naye → core total 172)
+`test_component_graph.py` (9: sorted deps, reverse edges incl. optional, transitive, cycle detection), `test_capability_graph.py` (6), `test_event_graph.py` (6), `test_data_flow.py` (5), `test_workflow.py` (8), `test_change_impact.py` (10: HIGH/MEDIUM/LOW + dispatch), `test_system_model.py` (8), `test_snapshot.py` (6), `test_manifest.py` (+2: duplicate consumed, self-consumption).
+
+### Bugs found & fixed during verification
+1. `manifest.py` mein `CapabilityId` import missing (NameError) — fixed
+2. `component_graph.py` dependents loop mein stale `name` variable (edit regression) — proper `for name, edges` loops
+3. `change_impact.py` — `elif direct` ne indirect se set HIGH ko MEDIUM par overwrite kar diya — risk ab last condition se compute hota hai (reasons independent)
+4. `data_flow.py` — `components()` mein bina data wale components bhi aate the — ab sirf declared inputs/outputs
+5. Pyright: `implementation.__name__` object type par — test `is CandleRepository` identity check karta hai
+
+### Verification
+- `pytest 01_core/core/tests` = **172 passed** (sab green)
+- `ruff check` ✓ + `ruff format --check` ✓, `pyright` **0 errors**
+- `validate_structure.py` PASSED (4 domains)
+- NOT committed (task rule).
+
+### Remaining (Part 3+)
+`vayren --describe` CLI, per-chapter manifests (`market/components.py` style), declarative composition root, workflow **execution engine** (model abhi declarative hai), health polling, config source, engineering memory.
+
+---
+
+## 2026-08-14 — Universal Foundation Part 1 (Component + Capability + Manifest + Registry)
+
+### Goal
+Approved universal architecture ka Part 1: ek chhota, clean, stdlib-only foundation jo VAYREN ko component-oriented, capability-oriented, contract-driven aur self-describing banata hai. Sirf foundation — koi migration nahi, koi engine rewrite nahi, AI/Part 2/3 nahi.
+
+### Safety list (approved)
+- **KEEP**: EventBus, Registry, logger, events, market/chart/app production code, pyproject, Makefile — sab untouched
+- **MODIFY**: `01_core/core/__init__.py` (exports), `01_core/core/registry/__init__.py` (exports), `scripts/validate_structure.py` (core ke liye naye required files)
+- **CREATE**: `01_core/core/contracts/` package + 2 naye registries + 9 test files
+- **DO NOT TOUCH**: 02_market, 03_chart, 00_app code, EventBus, existing Registry
+
+### Created (01_core/core/contracts/)
+| File | Kaam |
+|---|---|
+| `component.py` | `ComponentId` (lowercase snake validation), `ComponentVersion` (semver parse), `ComponentStatus` enum, `ComponentMetadata` |
+| `capability.py` | `CapabilityId` (dot-id `data.query.candles`, ≥2 segments, prefix matching), `BehavioralRules` (can/must/must_not/guarantees/failure_modes), `CapabilityContract`, `CapabilityDecl`, `CapabilityProvider` |
+| `contract.py` | `ComponentContract` (invariants + capability contracts) |
+| `health.py` | `HealthStatus`, `Health`, `HealthCheck` callable type |
+| `manifest.py` | `ComponentManifest` (Component DNA: identity, version, type, capabilities, inputs, outputs, dependencies, optional deps, events consumed/produced, health, resources, side effects, metadata, contract) + `validate_manifest` + `ManifestError` + `ManifestValidationResult` |
+
+### Created (registries)
+- `01_core/core/registry/capability_registry.py` — **`CapabilityRegistry`**: capability → implementations (multiple allowed, same-component duplicate rejected), `providers()`, `capabilities()` (sorted), `find(prefix)` glob discovery, `has`/`__contains__`/`__len__`. Backward compatible — existing `Registry` untouched.
+- `01_core/core/registry/component_registry.py` — **`ComponentRegistry`** + `RegisteredComponent` + `ComponentRegistryError`: `register(manifest, implementations)` (har declared capability ka implementation zaroori, har implementation declared, duplicate component rejected, invalid manifest → `ManifestError`), `component()`/`components()`/`capabilities()`/`providers()`/`find()`/`summary()` (deterministic AI-readable text).
+
+### Proof of concept (Part 10)
+`01_core/core/tests/test_component_poc.py` — asli `market` + `chart` components ko factual manifests ke saath register karta hai (koi production change nahi):
+- `data.query.candles`, `data.query.timeframes`, `data.query.quotes`, `data.transform.aggregate` → market; `chart.render` → chart
+- Discovery answers: "kaun data.query.candles deta hai?" → market; "chart kya depend karta hai?" → core + market
+- Chain proven: Component → Manifest → Capabilities → Registry → Discovery
+
+### Tests (106 naye, deterministic, Qt-free)
+1. identity, 2. capability definition, 3. manifest validation, 4. capability registration, 5. discovery, 6. multiple implementations, 7. invalid manifest rejection, 8. **dependency isolation** (AST scan: foundation modules sirf stdlib + core import karte hain — no app/market/chart/PySide6/httpx), 9. Registry backward compatibility.
+
+### Verification
+- `pytest` = **340 passed** (234 baseline + 106 naye; existing 228 app+market+chart+core-old tests **zero changes**, sab green)
+- `ruff check` ✓, `ruff format --check` ✓, `pyright` **0 errors**, validators PASSED (structure ab naye core packages enforce karta hai)
+- **Perf sanity**: register 1000 capabilities = 8.8 ms (8.8 µs each); lookup = **2.74 µs**; 200 component registrations (validation sahit) = 6 ms; `summary()` = pure text. Pure dict-based — koi reflection/serialization/factory nahi.
+- NOT committed (task rule).
+
+### Remaining for Part 2 (not implemented)
+SystemModel builder + `vayren --describe`, manifests per chapter (market/components.py etc.), declarative composition root, workflows, health polling, config source, engineering memory.
+
 ## 2026-08-13 — Watchlist Rows: Complete Market Information (Phase 5N)
 
 ### Goal

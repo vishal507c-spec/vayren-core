@@ -16,7 +16,7 @@ Jab do modules baat karte hain, toh kya bol sakte hain — ye wahi list hai.
 | Public cheez | Kaam |
 |---|---|
 | `App.main(argv)` | Entry point: args → logging → QApplication → bootstrap → Qt loop |
-| `Bootstrap(data_dir, limit=None)` | Bus + services + registry banata hai; **subscriptions sirf yahan**; `start()` = window show + `AppStarted`. `limit=None` = asli DB ki poori history load hoti hai |
+| `Bootstrap(data_dir, limit=None)` | Bus + services + registry banata hai; **subscriptions sirf yahan**; `start()` = window show + `AppStarted`. `limit=None` = asli DB ki poori history load hoti hai. **Part 4**: `_build_architecture()` startup par real `market_manifest()` + `chart_manifest()` ko `ComponentRegistry` mein register karta hai (**implementations = live service instances** — market ke 4 capabilities → `SymbolRepository` instance, chart.render → `ChartEngine` instance) + `SystemModel` build (startup par ek baar). Properties: `bus`, `services` (old name lookup — **unchanged**), `components` (new capability lookup), `system_model` (architecture model). Naya runtime nahi — existing wiring wahi hai |
 | `AppLifecycle(bus)` | `on_app_started` → `ListSymbols`; `on_window_rendered` = terminal |
 
 Entry: `python -m app --data-dir D:\ZerodhaTradingData` ya `vayren` command. Env override: `VAYREN_DATA_DIR`.
@@ -30,6 +30,26 @@ Entry: `python -m app --data-dir D:\ZerodhaTradingData` ya `vayren` command. Env
 | `AppStarted` | Startup fact |
 | `configure_logging(level, log_file)` / `get_logger(name)` | Logging setup |
 | `Registry[T]` | `register/get/list/__contains__/__len__/__iter__` — services yahan register hote hain |
+
+### 3.1 AI Engineering + Evolution Layer (Part 3) — `core.ai`
+
+**Motto: "AI proposes. VAYREN validates. Deterministic runtime executes."** — pure model/observation layer, stdlib-only, koi LLM call nahi, runtime kabhi AI se change nahi hota. `core.ai` sirf `core.system` + `core.contracts` import karta hai.
+
+| Public cheez | Kaam |
+|---|---|
+| `Intent` / `IntentKind` | User goal ka typed model (CREATE_WORKFLOW/ADD_COMPONENT/ADD_DATA_SOURCE/CREATE_STRATEGY/IMPROVE_PERFORMANCE/OTHER) + `constraints`/`requested_capabilities`/`inputs`/`expected_outputs`/`risk_level` (default LOW) |
+| `classify(goal)` / `parse_intent(goal)` / `validate_intent(intent)` | Keyword rules se IntentKind; `parse_intent` invalid par `IntentValidationError` |
+| `Plan` / `PlanChange` / `PlanChangeKind` / `PlanRisk` / `Rollback` | Plan model — `id` regex `^[a-z][a-z0-9_]*$`, reused∩new overlap rejected, change targets components list mein |
+| `validate_plan(plan)` / `risk_rank(level)` / `plan_risk(plan)` | Structural validation + risk ordering (LOW 0 < MEDIUM 1 < HIGH 2); plan risk = max declared (default LOW) |
+| `Policy` / `PlanValidator` | `Policy` = `protected_components`/`forbidden_capabilities`/`max_risk`/`allowed_change_kinds`/`requires_rollback_above`. `PlanValidator.validate(plan, system)` — reused capability provided honi chahiye, nayi capability pehle se na ho, MODIFY/REMOVE sirf known components, phir har policy. Errors deterministic |
+| `simulate_plan(system, plan)` / `ChangeSimulation` | Part 2 `analyze_change` per component → `affected_components`/`affected_capabilities`/`affected_workflows`/`required_tests` (`regression:<component>` + plan.tests)/`estimated_risk` (max)/sorted `reasons` |
+| `Sandbox` / `SandboxStage` / `SandboxDeployment` / `SandboxError` | Strict lifecycle: PLAN→SANDBOX→TEST→BENCHMARK→VALIDATE→APPROVE→DEPLOY — **stage skip = `SandboxError`**. `deploy()` = recorded decision only (note: "deterministic runtime remains authoritative"); invalid plan approve nahi ho sakta; `simulation`/`validation` lazy |
+| `AiBoundary` / `ActionKind` / `BoundaryDecision` / `BoundaryViolation` | 9 allowed actions + 6 **forbidden** (execute_trade, bypass_risk, delete_production_data, modify_protected_system, deploy_unvalidated, override_contract). Fail-closed: `classify()` unknown → None → `request_text` denied "unrecognized action request"; `require()` forbidden → `BoundaryViolation` (PermissionError) |
+| `AiProvider` / `OfflineProvider` / `AiProviderRegistry` | Provider-agnostic boundary. `OfflineProvider` default (hamesha unavailable); `select(preferred)` → None on unavailable = **graceful AI optionality**; dupe register → ValueError |
+| `EngineeringMemory` / `EngineeringEntry` / `Decision` | Engineering decisions (problem/hypothesis/experiment/change/benchmark/result/decision/reason/evidence) — `search()` case-insensitive sab fields, `decisions()` = ACCEPTED+REJECTED (DEFERRED excluded), `problems()` unique |
+| `PerformanceMemory` / `PerformanceRecord` / `METRICS` / `LOWER_IS_BETTER` | Measured facts only — `record()` **≥1 metric required** (`ValueError`). `METRICS` = latency_ms/throughput/cpu_percent/memory_mb/io_ops/error_rate; `best()` min for lower-is-better (sab minus throughput), max for throughput; `average`/`latest`/`summary`/`subjects` |
+| `OptimizationStudy` / `Candidate` / `RankedResult` / `OptimizationError` | Benchmark current vs candidates → `compare`/`recommend` (measured only). **`adopt()` hamesha `OptimizationError`** — adoption requires validated plan + sandbox approval (guarded self-optimization) |
+| `ContextBuilder` / `ContextRequest` / `AiContext` / `SECTIONS` | Deterministic provider context — sections in canonical order (components/capabilities/contracts/dependencies/workflows/events/system_state/architecture_history/engineering_memory), `build()` default = all; unknown section → ValueError; `render()`/`to_json()` |
 
 ## 4. 02_market — `market` (Godown)
 
@@ -49,6 +69,7 @@ Entry: `python -m app --data-dir D:\ZerodhaTradingData` ya `vayren` command. Env
 | `timeframe_seconds(name)` / `timeframe_name(seconds)` | Ladder (aur generated `90m`/`2D`/`2W`) ↔ seconds conversion |
 | `available_timeframes(base_seconds)` | Ladder entries jo `base` ke whole multiple hain + base itself (generated label agar ladder mein nahi) — **existence hamesha DB se** |
 | `LoadSymbol`, `ListSymbols`, `DataLoaded`, `SymbolsListed`, `QuotesLoaded`, `TimeframeChanged`, `ListTimeframes`, `TimeframesListed` | Events (catalog dekho) |
+| `market_manifest()` | **Production manifest (Part 4)** — asli market component: storage, v1.0.0, capabilities `data.query.candles` / `data.query.timeframes` / `data.query.quotes` / `data.transform.aggregate` (contracts + inputs/outputs), deps `core`, events consumed (LoadSymbol, TimeframeChanged, ListSymbols, ListTimeframes) + produced (SymbolsListed, QuotesLoaded, DataLoaded, TimeframesListed), contract invariants. Registry registration hi validation hai |
 
 ### Timeframe Aggregation (Phase 5B)
 
@@ -92,6 +113,7 @@ CREATE TABLE ohlcv (
 | `OptionsPanel(QWidget)` | Watchlist ke right (splitter: watchlist \| options \| chart). `OPTIONS_WIDTH = 56` fixed, `BUTTON_SIZE = 28`. **Rail tint** (`palette(alternate-base)` bg — `WA_StyledBackground` zaroori) + margins (8,10,8,8). Exactly 2 placeholder `QToolButton` vertically (glyphs `◉`/`◇`) — **disabled**, koi connection/menu/popup nahi (UI placeholders only). Options tooling (indicators/drawing) yahan aayega. No bus, no SQL — pure UI |
 | `ChartWindow(QMainWindow)` | Splitter host (**watchlist + options + chart**, isi order mein); ctor `ChartWindow(widget, watchlist, options, toolbar, bus, limit=None)`; `on_symbols_listed` → `watchlist.set_symbols`; **`on_quotes_loaded` → `watchlist.set_quotes`** (Phase 5N); `on_chart_ready` → model + title `VAYREN — SYMBOL` + `WindowRendered`. Symbol click: `_current_timeframe` selected → `TimeframeChanged` (timeframe symbol switch par persist rehta hai), warna `LoadSymbol`; dono mein `ListTimeframes`. Timeframe click → `TimeframeChanged` + `_current_timeframe` update. **Theme (Phase 5M)**: `setPalette(APP_PALETTE)` + `QApplication.setPalette(APP_PALETTE)` (QSS palette() resolution) + `setFont(Segoe UI 9pt)` + `setStyleSheet(APP_STYLE)`. **`on_timeframes_listed` `_current_timeframe` re-apply** karta hai — TimeframesListed ChartReady ke baad aata hai, isliye active button symbol switch par hamesha sahi checked (visual state fix, data flow untouched). Watchlist reset tool → existing `widget.reset_view()`. Properties `watchlist`, `options` |
 | `ChartReady` / `WindowRendered` | Events (catalog dekho) |
+| `chart_manifest()` | **Production manifest (Part 4)** — asli chart component: presentation, v1.0.0, capability `chart.render` (contract: model bars ascending), **consumes `data.query.candles`**, deps `core` + `market`, events consumed (DataLoaded) + produced (ChartReady, WindowRendered), resources (qt, display) |
 
 ## 6. 99_archive — Retired Modules (Museum)
 

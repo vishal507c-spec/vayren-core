@@ -6,6 +6,7 @@ Depends on: core, market (Bar only).
 from chart.engine.chart_engine import ChartEngine
 from chart.events.chart_ready import ChartReady
 from chart.events.window_rendered import WindowRendered
+from chart.manifest import chart_manifest
 from chart.models.chart_model import ChartModel
 from chart.models.crosshair_value import CrosshairValue
 from chart.models.timeframe import infer_timeframe
@@ -37,6 +38,7 @@ __all__ = [
     "WatchlistWidget",
     "OptionsPanel",
     "ChartWindow",
+    "chart_manifest",
     "ChartReady",
     "WindowRendered",
 ]
