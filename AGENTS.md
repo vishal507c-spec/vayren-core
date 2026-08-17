@@ -20,18 +20,19 @@ Code badalne ke baad **dono** update karo: `development_log.md` aur `ai_memory.m
 
 ## Repository Structure
 
-Numbered chapters = **startup flow** + dependency direction:
+Numbered chapters = **development story order** (numbers organizational hain, strict dependency nahi):
 
 ```
-00_app/   app/    bootstrap, lifecycle, entry point   depends on: core, market, chart
-01_core/  core/   EventBus, events, logger, registry  depends on: kuch nahi
-02_market/ market/ SQLite candles (database→repository→loader)  depends on: core
-03_chart/ chart/  ChartEngine, renderer, widgets, windows  depends on: core, market
+00_app/   app/     bootstrap, lifecycle, entry point      depends on: core, data, market, chart
+01_core/  core/    EventBus, events, logger, registry     depends on: kuch nahi
+02_data/  data/    historical download engine (write)     depends on: core
+03_market/ market/ SQLite candles (database→repository→loader)  depends on: core
+04_chart/ chart/   ChartEngine, renderer, widgets, windows  depends on: core, market
 90_brain/  (docs) permanent knowledge
 99_archive/ (retired modules — kabhi import mat karo)
 ```
 
-Aage ke modules usi order mein: `04_indicator, 05_drawing, 06_replay, 07_strategy, 08_backtest, 09_scanner, 10_execution, 11_portfolio, 12_broker, 13_workspace, 14_plugin`.
+Aage ke modules usi order mein: `05_strategy, 06_backtest, 07_risk, 08_execution, 09_portfolio` (phir `10_scanner, 11_indicator, 12_drawing, 13_replay, 14_workspace, 15_plugin`).
 
 ## Architecture Rules
 
@@ -62,7 +63,7 @@ from chart import *                                          # star import
 
 | Cheez | Rule | Example |
 |---|---|---|
-| Chapters | Numbered, lower_snake | `00_app`, `03_chart` |
+| Chapters | Numbered, lower_snake | `00_app`, `04_chart` |
 | Packages/files | snake_case, singular | `market/`, `candle_repository.py` |
 | Classes | PascalCase | `CandleChartWidget` |
 | Events | Past tense, PascalCase | `DataLoaded`, `ChartReady` |
@@ -75,7 +76,10 @@ from chart import *                                          # star import
 □ 90_brain/ padho (project_rules, architecture, event_catalog, module_contracts, coding_standards, naming_conventions, ai_memory)
 □ 99_archive/ sirf reference ke liye dekho
 □ Module contracts ke hisaab se implement karo
+□ Coding-time forensics: `python scripts/forensics/__main__.py mark --phase PHASE --action ...` evidence do,
+  `run --phase PHASE -- <cmd>` lambi commands wrap karo; task ka session apne aap open/close hota hai
 □ make check chalao (lint + format + typecheck + test + validators)
+□ Task end par LAST command: `python scripts/forensics/__main__.py report --name "..."` (report auto-append bhi hota hai next task par)
 □ 90_brain/development_log.md aur 90_brain/ai_memory.md update karo
 ```
 

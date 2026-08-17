@@ -13,7 +13,7 @@ select timeframe → TimeframeChanged → DataLoaded → ChartReady → WindowRe
 click → LoadSymbol → DataLoaded → ChartReady → WindowRendered
 ```
 
-## 2. Table — 11 Events
+## 2. Table — 19 Events
 
 | # | Event | Kaun bhejta hai | Kaun sunta hai | Andar kya hota hai |
 |---|---|---|---|---|
@@ -21,13 +21,21 @@ click → LoadSymbol → DataLoaded → ChartReady → WindowRendered
 | 2 | `ListSymbols` | `AppLifecycle` | `SymbolListLoader.on_list_symbols` | — |
 | 3 | `SymbolsListed` | `SymbolListLoader` | `ChartWindow.on_symbols_listed` → `QuoteLoader.on_symbols_listed` (isi order mein subscribe — watchlist pehle) | `symbols: tuple[str, ...]` |
 | 4 | `QuotesLoaded` | `QuoteLoader` | `ChartWindow.on_quotes_loaded` | `quotes: tuple[SymbolQuote, ...]` (latest close, change %, timestamp — real SQLite) |
-| 5 | `LoadSymbol` | `ChartWindow` (sidebar click) | `MarketDataLoader.on_load_symbol` | `symbol: str`, `limit: int | None` (None = poori history) |
+| 5 | `LoadSymbol` | `ChartWindow` (sidebar click) | `MarketDataLoader.on_load_symbol` | `symbol: str`, `limit: int \| None` (None = poori history) |
 | 6 | `ListTimeframes` | UI (symbol select) | `TimeframeListLoader.on_list_timeframes` | `symbol: str` |
 | 7 | `TimeframesListed` | `TimeframeListLoader` | (selector UI) | `symbol: str`, `timeframes: tuple[str, ...]` |
-| 8 | `TimeframeChanged` | UI (timeframe select) | `MarketDataLoader.on_timeframe_changed` | `symbol: str`, `timeframe: str`, `limit: int | None` (None = poori history) |
+| 8 | `TimeframeChanged` | UI (timeframe select) | `MarketDataLoader.on_timeframe_changed` | `symbol: str`, `timeframe: str`, `limit: int \| None` (None = poori history) |
 | 9 | `DataLoaded` | `MarketDataLoader` | `ChartEngine.on_data_loaded` | `symbol: str`, `bars: tuple[Bar, ...]` |
 | 10 | `ChartReady` | `ChartEngine` | `ChartWindow.on_chart_ready` | `model: ChartModel` |
 | 11 | `WindowRendered` | `ChartWindow` | `AppLifecycle.on_window_rendered` | — |
+| 12 | `DownloadRequest` | Data window (UI) | `DownloadWorker` (via Bootstrap bridge) | `symbol: str`, `interval: str`, `from_date: str`, `to_date: str` |
+| 13 | `CoverageRequest` | Data window (UI) | `DownloadWorker` | `symbol: str`, `interval: str` |
+| 14 | `CancelDownload` | Data window (UI) | `DownloadWorker` | `request_id: str` |
+| 15 | `DownloadStarted` | `DownloadWorker` | Data window | `request_id: str`, `symbol: str`, `interval: str`, `from_date`, `to_date` |
+| 16 | `DownloadProgress` | `DownloadWorker` | Data window | `request_id: str`, `symbol: str`, `interval: str`, `message: str` |
+| 17 | `DownloadCompleted` | `DownloadWorker` | Data window | `request_id: str`, `symbol: str`, `interval: str`, `new_rows: int`, `db_total: int` |
+| 18 | `DownloadFailed` | `DownloadWorker` | Data window | `request_id: str`, `symbol: str`, `interval: str`, `error: str` |
+| 19 | `DownloadCoverage` | `DownloadWorker` | Data window | `request_id: str`, `symbol: str`, `interval: str`, `info: SymbolInfo` |
 
 ## 3. Flow Diagram
 
@@ -62,8 +70,9 @@ WindowRendered       ← "window khul gayi, sab dikh raha hai"
 | Module | Events jo uski hain |
 |---|---|
 | `01_core/events` | `Event` (base), `AppStarted` |
-| `02_market/events` | `ListSymbols` (request), `SymbolsListed` (result), `QuotesLoaded` (result), `LoadSymbol` (request), `DataLoaded` (result), `TimeframeChanged` (request), `ListTimeframes` (request), `TimeframesListed` (result) |
-| `03_chart/events` | `ChartReady` (result), `WindowRendered` (result) |
+| `03_market/events` | `ListSymbols` (request), `SymbolsListed` (result), `QuotesLoaded` (result), `LoadSymbol` (request), `DataLoaded` (result), `TimeframeChanged` (request), `ListTimeframes` (request), `TimeframesListed` (result) |
+| `04_chart/events` | `ChartReady` (result), `WindowRendered` (result) |
+| `02_data/events` | `DownloadRequest` (request), `CoverageRequest` (request), `CancelDownload` (request), `DownloadStarted` (result), `DownloadProgress` (result), `DownloadCompleted` (result), `DownloadFailed` (result), `DownloadCoverage` (result) |
 
 ## 5. Rules — Events Ke
 
@@ -117,6 +126,6 @@ class TimeframeChanged(Event):
 
 ## 9. Future
 
-`04_indicator` aayega → `IndicatorCalculated` jaisa event catalog mein add hoga. Wahi pattern.
+`05_strategy` aayega → `StrategyCalculated` jaisa event catalog mein add hoga. Wahi pattern.
 
 > 11 events, 11 messages, 1 post office. Catalog padho — sab clear.

@@ -45,7 +45,7 @@ Seedha call — **mana hai**.
 Dependency hamesha ek hi taraf:
 
 ```
-00_app → 01_core → 02_market → 03_chart
+00_app → 01_core → 02_data → 03_market → 04_chart
 ```
 
 Upar se neeche. Aage-piche — mana.
@@ -55,10 +55,10 @@ Upar se neeche. Aage-piche — mana.
 Number priority nahi hai, **order** hai — kaun pehle start hota hai.
 
 ```
-00_app → 01_core → 02_market → 03_chart
+00_app → 01_core → 02_data → 03_market → 04_chart
 ```
 
-Aage: `04_indicator … 14_plugin` (usi order mein).
+Aage: `05_strategy → 06_backtest → 07_risk → 08_execution → 09_portfolio → 10_scanner → 11_indicator → 12_drawing → 13_replay → 14_workspace → 15_plugin` (usi order mein; `02_data` aa chuka hai).
 
 ### Rule 6: Naya Feature = Naya Module
 

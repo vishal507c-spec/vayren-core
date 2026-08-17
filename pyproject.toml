@@ -26,6 +26,14 @@ dev = [
     "pre-commit>=3.0",
 ]
 
+# ── Data Domain Extras (historical downloader) ─────────────────
+data = [
+    "kiteconnect>=4.1",
+    "pyotp>=2.9",
+    "selenium>=4.0",
+    "chromedriver-autoinstaller>=0.4",
+]
+
 [project.scripts]
 vayren = "app:main"
 
@@ -49,7 +57,8 @@ indent-style = "space"
 line-ending = "auto"
 
 [tool.ruff.lint.per-file-ignores]
-"03_chart/chart/widgets/*.py" = ["N802"]  # Qt event handlers are camelCase by framework convention
+"04_chart/chart/widgets/*.py" = ["N802"]  # Qt event handlers are camelCase by framework convention
+"02_data/data/ui/*.py" = ["N802"]  # Qt signal handlers are camelCase by framework convention
 
 # ── Pyright (Type Checker) ────────────────────────────────────
 [tool.pyright]
@@ -57,9 +66,14 @@ typeCheckingMode = "standard"
 include = [
     "00_app/app",
     "01_core/core",
-    "02_market/market",
-    "03_chart/chart",
+    "02_data/data",
+    "03_market/market",
+    "04_chart/chart",
     "scripts",
+]
+extraPaths = [
+    "02_data",
+    "scripts/forensics",
 ]
 
 # ── Pytest (Test Runner) ──────────────────────────────────────
@@ -67,8 +81,10 @@ include = [
 testpaths = [
     "00_app/app/tests",
     "01_core/core/tests",
-    "02_market/market/tests",
-    "03_chart/chart/tests",
+    "02_data/data/tests",
+    "03_market/market/tests",
+    "04_chart/chart/tests",
+    "scripts/forensics/tests",
 ]
 addopts = "-v --tb=short"
 
@@ -77,8 +93,9 @@ addopts = "-v --tb=short"
 source = [
     "00_app/app",
     "01_core/core",
-    "02_market/market",
-    "03_chart/chart",
+    "02_data/data",
+    "03_market/market",
+    "04_chart/chart",
 ]
 
 [tool.coverage.report]
@@ -92,8 +109,9 @@ exclude_lines = ["pragma: no cover", "def __repr__", "if __name__ == .__main__.:
 packages = [
     "00_app/app",
     "01_core/core",
-    "02_market/market",
-    "03_chart/chart",
+    "02_data/data",
+    "03_market/market",
+    "04_chart/chart",
 ]
 
 [build-system]

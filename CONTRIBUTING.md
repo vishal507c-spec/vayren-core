@@ -79,7 +79,7 @@ Examples:
 ```
 feat: add candle zoom for the chart widget
 fix: correct bar timestamp ordering in the repository
-docs: rewrite 03_chart README in teaching style
+docs: rewrite 04_chart README in teaching style
 test: add repository limit tests
 ```
 

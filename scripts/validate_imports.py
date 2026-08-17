@@ -4,7 +4,9 @@ Domains live inside numbered startup-flow chapters (NN_CHAPTER/domain/).
 Files under 90_brain (docs) and 99_archive (retired modules) are excluded.
 """
 
+import argparse
 import ast
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -15,16 +17,18 @@ EXCLUDED_TOP_DIRS = {"90_brain", "99_archive"}
 DOMAIN_CHAPTERS: dict[str, str] = {
     "app": "00_app",
     "core": "01_core",
-    "market": "02_market",
-    "chart": "03_chart",
+    "market": "03_market",
+    "chart": "04_chart",
+    "data": "02_data",
 }
 
 # Domains that should only import from lib/ and immediate upstream
 DOMAIN_DEPS: dict[str, set[str]] = {
-    "app": {"core", "market", "chart"},
+    "app": {"core", "market", "chart", "data"},
     "core": set(),
     "market": {"core"},
     "chart": {"core", "market"},
+    "data": {"core"},
 }
 
 
@@ -38,7 +42,7 @@ def check_file_domain(filepath: Path) -> str | None:
         return None
     if parts[0] in EXCLUDED_TOP_DIRS:
         return None
-    # parts[0] is the numbered folder (e.g. "02_market")
+    # parts[0] is the numbered folder (e.g. "03_market")
     # parts[1] is the domain package name (e.g. "market")
     if parts[1] in DOMAIN_DEPS:
         return parts[1]
@@ -46,6 +50,9 @@ def check_file_domain(filepath: Path) -> str | None:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="Validate import rules across the repository")
+    parser.add_argument("--json", action="store_true", help="print a JSON summary instead of text")
+    args = parser.parse_args()
     errors: list[str] = []
     for pyfile in ROOT.rglob("*.py"):
         domain = check_file_domain(pyfile)
@@ -79,6 +86,9 @@ def main() -> int:
                 and node.module.split(".")[0] not in allowed_imports
             ):
                 errors.append(f"{pyfile}: imports {node.module} (not allowed from {domain})")
+    if args.json:
+        print(json.dumps({"ok": not errors, "error_count": len(errors), "errors": errors}))
+        return 1 if errors else 0
     if errors:
         print("Import validation FAILED:")
         for e in errors:

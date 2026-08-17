@@ -35,9 +35,9 @@ Chart dikhana. Sirf ye.
 | ❌ Nahi karega | Kyu |
 |---|---|
 | Trading logic | Ye charting platform hai, broker nahi |
-| Indicators | Future module `04_indicator` ka kaam |
-| Strategies | Future module `07_strategy` ka kaam |
-| Portfolio | Future module `11_portfolio` ka kaam |
+| Indicators | Future module `11_indicator` ka kaam |
+| Strategies | Future module `05_strategy` ka kaam |
+| Portfolio | Future module `09_portfolio` ka kaam |
 | Watchlists, replay, backtest | Sab future modules ka kaam |
 
 Rule: **naya feature = naya module**. Purane module kabhi badha nahi jate.
@@ -62,9 +62,11 @@ Sabko alag-alag bolne ki zaroorat nahi. Sab **Post Office** se baat karte hain.
    ↓
 01_core (Post Office — EventBus)
    ↓
-02_market (Godown — SQLite candles)
+02_data (Data Writer — historical candles download karta hai)
    ↓
-03_chart (Painter — chart banata hai)
+03_market (Godown — SQLite candles)
+   ↓
+04_chart (Painter — chart banata hai)
 ```
 
 Event flow:
@@ -110,9 +112,9 @@ Chart kholne ke baad:
 Roadmap fixed hai — har feature apna alag chapter:
 
 ```
-04_indicator → 05_drawing → 06_replay → 07_strategy → 08_backtest
-→ 09_scanner → 10_execution → 11_portfolio → 12_broker
-→ 13_workspace → 14_plugin
+05_strategy → 06_backtest → 07_risk → 08_execution → 09_portfolio
+→ 10_scanner → 11_indicator → 12_drawing → 13_replay
+→ 14_workspace → 15_plugin
 ```
 
 ---

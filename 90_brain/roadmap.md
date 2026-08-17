@@ -10,29 +10,30 @@ Platform ka future plan. Chapter numbers pehle se fixed hain — har naye kaam k
 
 | Kaam | Status |
 |---|---|
-| Refactor: `00_app / 01_core / 02_market / 03_chart` | ✅ |
+| Refactor: `00_app / 01_core / 02_data / 03_market / 04_chart` | ✅ |
 | EventBus → `01_core` | ✅ |
 | SQLite database + repository + loader | ✅ |
 | Chart engine, renderer, widget (zoom/pan/resize), window | ✅ |
 | Bootstrap wiring, lifecycle, `python -m app` | ✅ |
 | Legacy modules → `99_archive/` | ✅ |
+| **02_data: Historical download engine (Phase 6)** | ✅ (2026-08-14) — ported KITE-CANDLE-DOWNLOAD, worker thread + UI + events + manifest |
 
 ## 3. Future Modules — Fixed Order
 
-Har feature apna module, isi order mein:
+Har feature apna module, isi order mein — development story: data → market → chart → **strategy → backtest → risk → execution → portfolio** (phir tooling):
 
 ```
-04_indicator   → indicators
-05_drawing     → chart par drawing tools
-06_replay      → data replay
-07_strategy    → strategies
-08_backtest    → backtesting
-09_scanner     → market scanning
-10_execution   → order execution
-11_portfolio   → portfolio tracking
-12_broker      → broker integration
-13_workspace   → multi-window workspace
-14_plugin      → plugin system
+05_strategy   → trading strategy logic
+06_backtest   → historical strategy testing
+07_risk       → risk management
+08_execution  → order execution
+09_portfolio  → portfolio/position management
+10_scanner    → market scanning
+11_indicator  → indicators
+12_drawing    → chart par drawing tools
+13_replay     → data replay
+14_workspace  → multi-window workspace
+15_plugin     → plugin system
 ```
 
 ## 4. Har Naye Phase Ke Pakke Rules
@@ -58,22 +59,23 @@ Floor 4 par indicator aayega, floor 12 par broker. Naksha badalne ki zaroorat na
 
 ```
 ┌─────────────────────────────┐
-│  14_plugin                  │
-│  13_workspace               │
-│  12_broker                  │
-│  11_portfolio               │
-│  10_execution               │
-│  09_scanner                 │
-│  08_backtest                │
-│  07_strategy                │
-│  06_replay                  │
-│  05_drawing                 │
-│  04_indicator               │
+│  15_plugin                  │
+│  14_workspace               │
+│  13_replay                  │
+│  12_drawing                 │
+│  11_indicator               │
+│  10_scanner                 │
+│  09_portfolio               │
+│  08_execution               │
+│  07_risk                    │
+│  06_backtest                │
+│  05_strategy                │
 ├─────────────────────────────┤
-│  03_chart  ← abhi yahan hai │
-│  02_market                  │
-│  01_core                    │
-│  00_app                     │
+│  04_chart     ← abhi yahan hai│
+│  03_market                   │
+│  02_data                     │
+│  01_core                     │
+│  00_app                      │
 └─────────────────────────────┘
 ```
 
@@ -85,10 +87,10 @@ Floor 4 par indicator aayega, floor 12 par broker. Naksha badalne ki zaroorat na
 
 ## 8. Example — Naya Module Kaise Aayega
 
-`04_indicator` aane par:
+`05_strategy` aane par:
 
 ```
-1. 04_indicator/indicator/ banao
+1. 05_strategy/strategy/ banao
 2. Event catalog mein naya event
 3. Module contracts mein API likho
 4. make check chalao

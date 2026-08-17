@@ -8,7 +8,7 @@ Har cheez ka naam kaise rakhna hai — ye table. Naam sahi ho toh code khud bolt
 
 | Cheez | Rule | Example |
 |---|---|---|
-| Chapters | Numbered (startup flow), lower_snake | `00_app`, `01_core`, `02_market`, `03_chart` |
+| Chapters | Numbered (story order), lower_snake | `00_app`, `01_core`, `02_data`, `03_market`, `04_chart` |
 | Python packages | Lowercase, singular | `market`, `chart` |
 | Python files | snake_case | `candle_repository.py`, `market_data_loader.py` |
 | Classes | PascalCase | `CandleChartWidget`, `SqliteCandleDatabase` |
@@ -80,6 +80,6 @@ Naam hi pehchaan hai.
 
 ## 6. Future
 
-Naye modules (`04_indicator`...) isi table ke rules follow karenge.
+Naye modules (`05_strategy`...) isi table ke rules follow karenge.
 
 > Naam sahi → code khud document. Naam galat → koi samjhega nahi.

@@ -12,8 +12,9 @@ from pathlib import Path
 
 from chart.engine.chart_engine import ChartEngine
 from chart.events.window_rendered import WindowRendered
+from core.contracts.component import ComponentId
 from market.repository.symbol_repository import SymbolRepository
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QSplitter
 
 from app.bootstrap.bootstrap import Bootstrap
 from app.tests.conftest import seed_symbol_directory
@@ -29,12 +30,16 @@ def test_real_components_have_valid_manifests(qt_app: QApplication, tmp_path: Pa
     bootstrap = make_bootstrap(qt_app, tmp_path)
     assert "market" in bootstrap.components
     assert "chart" in bootstrap.components
+    assert "historical_data" in bootstrap.components
     market = bootstrap.components.component("market").manifest
     chart = bootstrap.components.component("chart").manifest
+    data = bootstrap.components.component("historical_data").manifest
     assert market.identity.name == "market"
     assert str(market.version) == "1.0.0"
     assert chart.identity.name == "chart"
     assert chart.capabilities_consumed[0].value == "data.query.candles"
+    assert data.identity.name == "historical_data"
+    assert data.dependencies == (ComponentId("core"),)
 
 
 def test_real_capabilities_are_discoverable(qt_app: QApplication, tmp_path: Path) -> None:
@@ -58,6 +63,9 @@ def test_existing_registry_still_works(qt_app: QApplication, tmp_path: Path) -> 
         "app_lifecycle",
         "chart_engine",
         "chart_window",
+        "data_engine",
+        "data_window",
+        "data_worker",
         "market_data_loader",
         "quote_loader",
         "symbol_list_loader",
@@ -77,9 +85,14 @@ def test_new_capability_lookup_works(qt_app: QApplication, tmp_path: Path) -> No
 
 def test_system_model_sees_real_components(qt_app: QApplication, tmp_path: Path) -> None:
     model = make_bootstrap(qt_app, tmp_path).system_model
-    assert [manifest.identity.name for manifest in model.components()] == ["chart", "market"]
+    assert [manifest.identity.name for manifest in model.components()] == [
+        "chart",
+        "historical_data",
+        "market",
+    ]
     assert model.has_component("market")
     assert model.find_dependencies("chart") == ("core", "market")
+    assert model.find_dependencies("historical_data") == ("core",)
 
 
 def test_system_model_sees_capabilities(qt_app: QApplication, tmp_path: Path) -> None:
@@ -122,6 +135,24 @@ def test_startup_flow_unchanged(qt_app: QApplication, tmp_path: Path) -> None:
     assert window.windowTitle() == "VAYREN — AMBUJACEM"
 
 
+def test_download_panel_is_embedded_in_main_window(qt_app: QApplication, tmp_path: Path) -> None:
+    bootstrap = make_bootstrap(qt_app, tmp_path)
+    bootstrap.start()
+    window = bootstrap.services.get("chart_window")
+    panel = bootstrap.services.get("data_window")
+    assert panel is window.download
+    assert isinstance(panel.parentWidget(), QSplitter)
+    assert panel.symbols == ("AMBUJACEM", "BPCL")
+    assert not panel.isVisible()
+    window.tools.download_button.click()
+    assert panel.isVisible()
+    assert not window.watchlist.isVisible()
+    assert window.active_panel == "download"
+    window.tools.download_button.click()
+    assert not panel.isVisible()
+    assert window.active_panel is None
+
+
 def test_snapshot_is_serializable(qt_app: QApplication, tmp_path: Path) -> None:
     snapshot = make_bootstrap(qt_app, tmp_path).system_model.snapshot()
     data = json.loads(snapshot.to_json())
@@ -129,9 +160,10 @@ def test_snapshot_is_serializable(qt_app: QApplication, tmp_path: Path) -> None:
     assert "object at" not in json.dumps(data)
     assert "at 0x" not in json.dumps(data)
     names = [component["name"] for component in data["components"]]
-    assert names == ["chart", "market"]
+    assert names == ["chart", "historical_data", "market"]
     assert data["capabilities"]["data.query.candles"] == ["market"]
     assert data["capabilities"]["chart.render"] == ["chart"]
+    assert data["capabilities"]["historical_data.download"] == ["historical_data"]
 
 
 def test_no_unnecessary_runtime_overhead(qt_app: QApplication, tmp_path: Path) -> None:

@@ -7,16 +7,17 @@ Ye document batata hai ki **poora system kaise juda hai** — kaun kahan hai, ka
 ## 2. Ek Nazar Mein — Modules
 
 ```
-00_app ──► 01_core ──► 02_market ──► 03_chart
- (Manager) (Post Office) (Godown)     (Painter)
+00_app ──► 01_core ──► 02_data ──► 03_market ──► 04_chart
+ (Manager) (Post Office) (Data Writer) (Godown)   (Painter)
 ```
 
 | Module | Kaam | Depend karta hai |
 |---|---|---|
-| `00_app` | bootstrap, wiring, lifecycle, entry | core, market, chart |
+| `00_app` | bootstrap, wiring, lifecycle, entry | core, data, market, chart |
 | `01_core` | EventBus, events, logger, registry + Universal Foundation (`contracts`/`registry`/`system`/`ai`) | kuch nahi |
-| `02_market` | SQLite candles: database→repository→loader | core |
-| `03_chart` | chart model, engine, renderer, widgets, windows | core, market |
+| `02_data` | historical candle download: engine, worker thread, UI, storage | core |
+| `03_market` | SQLite candles: database→repository→loader | core |
+| `04_chart` | chart model, engine, renderer, widgets, windows | core, market |
 
 ## 3. Core ke Andar — Layer Map
 
@@ -141,6 +142,6 @@ Dono `make check` ka hissa hain.
 
 ## 9. Future
 
-Naya module aayega toh ye chain aage badhegi — `04_indicator → 05_drawing → …` — architecture wahi rahega.
+Naya module aayega toh ye chain aage badhegi — `05_strategy → 06_backtest → 07_risk → 08_execution → 09_portfolio → 10_scanner → 11_indicator → 12_drawing → 13_replay → 14_workspace → 15_plugin` — architecture wahi rahega.
 
 > Naksha yaad rakho: Manager → Post Office → Godown → Painter.

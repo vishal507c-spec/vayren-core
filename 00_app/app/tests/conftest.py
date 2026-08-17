@@ -8,6 +8,7 @@ import sqlite3
 from pathlib import Path
 
 import pytest
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication
 
 SCHEMA = """
@@ -104,4 +105,28 @@ def qt_app() -> QApplication:
     instance = QApplication.instance()
     if isinstance(instance, QApplication):
         return instance
-    return QApplication([])
+    app = QApplication([])
+    _load_real_font()
+    app.setFont(QFont("Segoe UI", 9))
+    return app
+
+
+def _load_real_font() -> None:
+    """Load a real Windows TTF so offscreen metrics match production fonts.
+
+    The offscreen platform has an empty font database; every family name
+    falls back to the same wide substitute, which doubles text widths and
+    breaks pixel/layout tests. Loading Segoe UI gives realistic metrics.
+    """
+    from pathlib import Path
+
+    from PySide6.QtGui import QFontDatabase
+
+    for path in (
+        "C:/Windows/Fonts/segoeui.ttf",
+        "C:/Windows/Fonts/arial.ttf",
+        "C:/Windows/Fonts/tahoma.ttf",
+    ):
+        if Path(path).exists():
+            QFontDatabase.addApplicationFont(path)
+            break

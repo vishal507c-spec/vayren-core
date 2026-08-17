@@ -69,8 +69,8 @@ VAYREN_SYMBOL=QQQ VAYREN_DB=data/q.db python -m app
 | ❌ Nahi karega | Kyu |
 |---|---|
 | Business logic | Manager kaam karta hai, kaam kisi aur ka hai |
-| SQL | Database `02_market` ki jagah hai |
-| Chart painting | Painter `03_chart` mein hai |
+| SQL | Database `03_market` ki jagah hai |
+| Chart painting | Painter `04_chart` mein hai |
 | Subscribe kisi aur jagah | Wiring sirf Bootstrap ki |
 
 ## 8. Future

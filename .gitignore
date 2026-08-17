@@ -34,7 +34,7 @@ Thumbs.db
 *.parquet
 *.h5
 *.feather
-data/
+/data/
 market/data/
 
 # Logs
@@ -49,6 +49,9 @@ docker-compose.override.yml
 knowledge/experiments/*/runs/
 knowledge/experiments/*/artifacts/
 knowledge/memory/session-logs/
+
+# Coding-time forensics traces
+.forensics/
 
 # Secrets
 credentials.yaml
