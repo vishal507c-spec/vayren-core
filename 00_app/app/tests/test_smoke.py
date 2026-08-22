@@ -24,15 +24,17 @@ def test_full_event_flow_reaches_window_rendered(qt_app: QApplication, tmp_path:
 
     bootstrap.start()
     window = bootstrap.services.get("chart_window")
-    assert window.windowTitle() == "VAYREN"
+    # Auto-load: first symbol charted on open
+    assert window.windowTitle() == "VAYREN — AMBUJACEM"
     assert window.isVisible()
+    assert len(rendered) == 1
 
     watchlist = window.watchlist
     assert watchlist.symbols == ("AMBUJACEM", "BPCL")
 
     watchlist.symbol_selected.emit("AMBUJACEM")
 
-    assert len(rendered) == 1
+    assert len(rendered) == 2
     assert window.windowTitle() == "VAYREN — AMBUJACEM"
     assert watchlist.current_symbol == "AMBUJACEM"
 
@@ -47,10 +49,11 @@ def test_switch_symbol_replaces_chart(qt_app: QApplication, tmp_path: Path) -> N
 
     bootstrap.start()
     window = bootstrap.services.get("chart_window")
+    # Auto-load gives first render for AMBUJACEM; next two emits give total 3
     window.watchlist.symbol_selected.emit("AMBUJACEM")
     window.watchlist.symbol_selected.emit("BPCL")
 
-    assert len(rendered) == 2
+    assert len(rendered) == 3
     assert window.windowTitle() == "VAYREN — BPCL"
     assert window.watchlist.current_symbol == "BPCL"
 
@@ -59,7 +62,8 @@ def test_bootstrap_registers_all_services(qt_app: QApplication, tmp_path: Path) 
     assert qt_app is not None
     data_dir = seed_symbol_directory(tmp_path / "data", {"AMBUJACEM": 10})
     bootstrap = Bootstrap(data_dir=data_dir, limit=10)
-    assert sorted(bootstrap.services.list()) == [
+    services = sorted(bootstrap.services.list())
+    for name in (
         "app_lifecycle",
         "chart_engine",
         "chart_window",
@@ -71,4 +75,5 @@ def test_bootstrap_registers_all_services(qt_app: QApplication, tmp_path: Path) 
         "symbol_list_loader",
         "symbol_repository",
         "timeframe_list_loader",
-    ]
+    ):
+        assert name in services

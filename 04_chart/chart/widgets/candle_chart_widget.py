@@ -23,6 +23,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QMenu, QWidget
 
 from chart.models.chart_model import ChartModel
+from chart.models.chart_viewport import ChartOverlay, ChartViewport
 from chart.models.crosshair_value import CrosshairValue
 from chart.renderer.candle_renderer import CandleRenderer
 from chart.renderer.crosshair_renderer import CrosshairRenderer
@@ -95,6 +96,7 @@ class CandleChartWidget(QWidget):
         self._price_manual: tuple[float, float] | None = None
         self._price_drag_active = False
         self._price_drag_anchor_y = 0.0
+        self._overlay: ChartOverlay | None = None
         self._reset_action = QAction("↩ Reset chart view", self)
         self._reset_action.setShortcut(QKeySequence(Qt.Modifier.ALT | Qt.Key.Key_R))
         self._reset_action.triggered.connect(self.reset_view)
@@ -104,6 +106,58 @@ class CandleChartWidget(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents, True)
+
+    # ── overlay hook ────────────────────────────────────────────────
+
+    @property
+    def overlay(self) -> ChartOverlay | None:
+        """Currently installed chart overlay, if any."""
+        return self._overlay
+
+    def set_overlay(self, overlay: ChartOverlay | None) -> None:
+        """Install or remove a :class:`ChartOverlay` extension.
+
+        The overlay's :meth:`paint_overlay` is called on every paint with a
+        viewport snapshot (bars, window, price range, rects) so it can map
+        indices/prices → pixels using the chart's own math.
+        """
+        self._overlay = overlay
+        self.update()
+
+    def _paint_strategy_overlay(
+        self,
+        painter: QPainter,
+        chart_rect: QRect,
+        volume_rect: QRect,
+        axis_rect: QRect,
+        price_low: float,
+        price_high: float,
+        volume_max: int,
+    ) -> None:
+        """Delegate painting to the installed overlay, if any.
+
+        Builds a :class:`ChartViewport` snapshot from the current model /
+        window / price range and forwards it. No-ops when no overlay or no
+        model is loaded — cheap enough to call on every paint.
+        """
+        overlay = self._overlay
+        if overlay is None or self._model is None or not self._model.bars:
+            return
+        viewport = ChartViewport(
+            bars=self._model.bars,
+            first=self._first,
+            last=self._last,
+            price_low=price_low,
+            price_high=price_high,
+            volume_max=volume_max,
+            chart_rect=chart_rect,
+            volume_rect=volume_rect,
+            axis_rect=axis_rect,
+        )
+        try:
+            overlay.paint_overlay(painter, viewport)
+        except Exception:  # noqa: BLE001
+            logger.exception("Overlay paint failed")
 
     # ── model + viewport ──────────────────────────────────────────────
 
@@ -386,12 +440,19 @@ class CandleChartWidget(QWidget):
     # ── painting ──────────────────────────────────────────────────────
 
     def paintEvent(self, _event: QPaintEvent) -> None:
-        if self._model is None or not self._model.bars:
-            return
         painter = QPainter(self)
         painter.fillRect(self.rect(), CandleRenderer.BACKGROUND)
+        if self._model is None:
+            self._paint_empty_state(painter, "Loading chart…")
+            return
+        if not self._model.bars:
+            tf = getattr(self._model, "timeframe", "")
+            msg = f"No {tf} data available" if tf else "No data available"
+            self._paint_empty_state(painter, msg)
+            return
         first, last = self._visible_range()
         if last <= first:
+            self._paint_empty_state(painter, "No data in viewport")
             return
         chart_rect, volume_rect, axis_rect = self._chart_rects()
         price_low, price_high = self._price_range()
@@ -404,6 +465,9 @@ class CandleChartWidget(QWidget):
             ),
         )
         self._paint_header(painter, chart_rect)
+        self._paint_strategy_overlay(
+            painter, chart_rect, volume_rect, axis_rect, price_low, price_high, volume_max
+        )
         crosshair = self._crosshair_pos
         if crosshair is not None and chart_rect.contains(crosshair):
             CrosshairRenderer.paint(painter, crosshair, chart_rect)
@@ -559,6 +623,27 @@ class CandleChartWidget(QWidget):
             crosshair_pos.x(),
             axis_rect,
         )
+
+    def _paint_empty_state(self, painter: QPainter, message: str) -> None:
+        """Centered subtle message for empty/loading states.
+
+        Uses the VAYREN muted text on the chart background so it never looks
+        like an unexplained black void. The chart header is intentionally not
+        drawn in this state — the message itself communicates the status.
+        """
+        from PySide6.QtGui import QColor, QFont
+
+        chart_rect, _, _ = self._chart_rects()
+        # Use full widget rect if chart_rect is degenerate (e.g., zero size)
+        target = chart_rect if chart_rect.width() > 40 and chart_rect.height() > 40 else self.rect()
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+        font = QFont("Segoe UI", 9)
+        font.setStyleHint(QFont.StyleHint.SansSerif)
+        painter.setFont(font)
+        painter.setPen(QColor("#5d6778"))
+        painter.drawText(target, Qt.AlignmentFlag.AlignCenter, message)
+        painter.restore()
 
     # ── zoom / pan ────────────────────────────────────────────────────
 

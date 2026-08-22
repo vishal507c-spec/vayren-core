@@ -66,12 +66,15 @@ def seed_database(path: Path, symbol: str = "SPY", count: int = 10) -> Path:
 
 def seed_ohlcv_database(path: Path, count: int = 10) -> Path:
     """Create a real-schema per-stock database with `count` ascending bars."""
+    from datetime import datetime, timedelta
+
     connection = sqlite3.connect(path)
     try:
         connection.executescript(OHLCV_SCHEMA)
+        base = datetime(2026, 1, 1, 9, 15, 0)
         rows = [
             (
-                f"2026-01-{day:02d} 09:15:00",
+                (base + timedelta(days=day - 1)).strftime("%Y-%m-%d %H:%M:%S"),
                 float(100 + day),
                 float(102 + day),
                 float(99 + day),

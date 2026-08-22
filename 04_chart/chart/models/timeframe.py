@@ -21,28 +21,36 @@ _INFERENCE_SAMPLE = 2048
 
 _SECONDS_LADDER = (
     60,
+    180,
     300,
     900,
     1800,
+    2700,
     3600,
     7200,
     10800,
+    14400,
     21600,
     43200,
     86400,
+    604800,
 )
 
 _FORMATTERS: dict[int, Callable[[int], str]] = {
     60: lambda s: f"{s // 60}m",
+    180: lambda s: f"{s // 60}m",
     300: lambda s: f"{s // 60}m",
     900: lambda s: f"{s // 60}m",
     1800: lambda s: f"{s // 60}m",
+    2700: lambda s: f"{s // 60}m",
     3600: lambda s: f"{s // 3600}h",
     7200: lambda s: f"{s // 3600}h",
     10800: lambda s: f"{s // 3600}h",
+    14400: lambda s: f"{s // 3600}h",
     21600: lambda s: f"{s // 3600}h",
     43200: lambda s: f"{s // 43200}d",
     86400: lambda s: f"{s // 86400}d",
+    604800: lambda _: "1W",
 }
 
 

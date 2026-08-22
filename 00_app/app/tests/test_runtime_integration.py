@@ -59,7 +59,9 @@ def test_existing_registry_still_works(qt_app: QApplication, tmp_path: Path) -> 
     bootstrap = make_bootstrap(qt_app, tmp_path)
     assert isinstance(bootstrap.services.get("symbol_repository"), SymbolRepository)
     assert isinstance(bootstrap.services.get("chart_engine"), ChartEngine)
-    assert sorted(bootstrap.services.list()) == [
+    # New services (strategy/backtest/lab) coexist with the original 11
+    services = sorted(bootstrap.services.list())
+    for name in (
         "app_lifecycle",
         "chart_engine",
         "chart_window",
@@ -71,7 +73,11 @@ def test_existing_registry_still_works(qt_app: QApplication, tmp_path: Path) -> 
         "symbol_list_loader",
         "symbol_repository",
         "timeframe_list_loader",
-    ]
+    ):
+        assert name in services
+    # Lab platform services are now registered as well
+    assert "strategy_registry" in services
+    assert "backtest_runner" in services
 
 
 def test_new_capability_lookup_works(qt_app: QApplication, tmp_path: Path) -> None:
@@ -85,11 +91,8 @@ def test_new_capability_lookup_works(qt_app: QApplication, tmp_path: Path) -> No
 
 def test_system_model_sees_real_components(qt_app: QApplication, tmp_path: Path) -> None:
     model = make_bootstrap(qt_app, tmp_path).system_model
-    assert [manifest.identity.name for manifest in model.components()] == [
-        "chart",
-        "historical_data",
-        "market",
-    ]
+    names = sorted(manifest.identity.name for manifest in model.components())
+    assert names == ["backtest", "chart", "historical_data", "market", "strategy"]
     assert model.has_component("market")
     assert model.find_dependencies("chart") == ("core", "market")
     assert model.find_dependencies("historical_data") == ("core",)
@@ -114,10 +117,11 @@ def test_event_bus_behavior_unchanged(qt_app: QApplication, tmp_path: Path) -> N
     received: list[WindowRendered] = []
     bootstrap.bus.subscribe(WindowRendered, received.append)
     bootstrap.start()
-    assert received == []
+    # Chart now auto-loads the first symbol on startup (TradingView-style)
+    assert len(received) == 1
     window = bootstrap.services.get("chart_window")
     window.watchlist.symbol_selected.emit("AMBUJACEM")
-    assert len(received) == 1
+    assert len(received) == 2
 
 
 def test_startup_flow_unchanged(qt_app: QApplication, tmp_path: Path) -> None:
@@ -126,12 +130,15 @@ def test_startup_flow_unchanged(qt_app: QApplication, tmp_path: Path) -> None:
     bootstrap.bus.subscribe(WindowRendered, rendered.append)
     bootstrap.start()
     window = bootstrap.services.get("chart_window")
-    assert window.windowTitle() == "VAYREN"
+    # Auto-load: first symbol (AMBUJACEM) is charted immediately on open
+    assert window.windowTitle() == "VAYREN — AMBUJACEM"
     assert window.isVisible()
     watchlist = window.watchlist
     assert watchlist.symbols == ("AMBUJACEM", "BPCL")
-    watchlist.symbol_selected.emit("AMBUJACEM")
     assert len(rendered) == 1
+    # Emitting the same symbol again still produces a second render (TimeframeChanged)
+    watchlist.symbol_selected.emit("AMBUJACEM")
+    assert len(rendered) == 2
     assert window.windowTitle() == "VAYREN — AMBUJACEM"
 
 
@@ -159,8 +166,8 @@ def test_snapshot_is_serializable(qt_app: QApplication, tmp_path: Path) -> None:
     assert set(data) == {"components", "capabilities", "events", "workflows", "gaps"}
     assert "object at" not in json.dumps(data)
     assert "at 0x" not in json.dumps(data)
-    names = [component["name"] for component in data["components"]]
-    assert names == ["chart", "historical_data", "market"]
+    names = sorted(component["name"] for component in data["components"])
+    assert names == ["backtest", "chart", "historical_data", "market", "strategy"]
     assert data["capabilities"]["data.query.candles"] == ["market"]
     assert data["capabilities"]["chart.render"] == ["chart"]
     assert data["capabilities"]["historical_data.download"] == ["historical_data"]

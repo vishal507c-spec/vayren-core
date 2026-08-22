@@ -97,12 +97,45 @@ QPushButton:checked {
 }
 TimeframeToolbar {
     border-bottom: 1px solid palette(mid);
+    background: palette(window);
 }
 TimeframeToolbar QPushButton {
-    min-width: 44px;
+    min-width: 52px;
     min-height: 24px;
-    padding: 3px 8px;
+    padding: 4px 10px;
     font-weight: 500;
+    border-radius: 3px;
+}
+TimeframeToolbar QPushButton:checked {
+    background: palette(highlight);
+    color: palette(highlighted-text);
+    font-weight: 600;
+}
+TimeframeToolbar QScrollArea {
+    background: transparent;
+    border: none;
+}
+TimeframeToolbar QScrollBar:horizontal {
+    height: 4px;
+    background: transparent;
+    border: none;
+    margin: 0;
+}
+TimeframeToolbar QScrollBar::handle:horizontal {
+    background: palette(mid);
+    border-radius: 2px;
+    min-width: 24px;
+}
+TimeframeToolbar QScrollBar::add-line:horizontal,
+TimeframeToolbar QScrollBar::sub-line:horizontal {
+    width: 0;
+    height: 0;
+    border: none;
+    background: transparent;
+}
+TimeframeToolbar QScrollBar::add-page:horizontal,
+TimeframeToolbar QScrollBar::sub-page:horizontal {
+    background: transparent;
 }
 QMenu {
     background: palette(base);

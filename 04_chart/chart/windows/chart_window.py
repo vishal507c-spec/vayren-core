@@ -1,5 +1,6 @@
 """ChartWindow — hosts the symbol sidebar, timeframe toolbar and candle chart."""
 
+import contextlib
 from logging import getLogger
 
 from core.event_bus.event_bus import EventBus
@@ -13,8 +14,10 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QApplication,
+    QHBoxLayout,
     QMainWindow,
     QSplitter,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -61,6 +64,11 @@ class ChartWindow(QMainWindow):
         bus: EventBus,
         limit: int | None = None,
         download: QWidget | None = None,
+        nav: QWidget | None = None,
+        left_extra: QWidget | None = None,
+        lab_workspace: QWidget | None = None,
+        event_log: QWidget | None = None,
+        system_health: QWidget | None = None,
     ) -> None:
         super().__init__()
         self._widget = widget
@@ -70,9 +78,16 @@ class ChartWindow(QMainWindow):
         self._bus = bus
         self._limit = limit
         self._download = download
+        self._nav = nav
+        self._left_extra = left_extra
+        self._lab_workspace = lab_workspace
+        self._event_log = event_log
+        self._system_health = system_health
         self._current_symbol: str | None = None
         self._current_timeframe: str | None = None
         self._active_panel: str | None = "watchlist"
+        self._lab_active = False
+        self._bottom_visible = False
 
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
         splitter.addWidget(tools)
@@ -99,7 +114,69 @@ class ChartWindow(QMainWindow):
             splitter.setSizes([TOOLBAR_WIDTH, WATCHLIST_PANEL_WIDTH, 1018])
         splitter.setHandleWidth(1)
         self._splitter = splitter
-        self.setCentralWidget(splitter)
+        self._market_container = splitter
+
+        # ── Enhanced layout when lab/nav are injected (bootstrap lab mode) ──
+        has_lab = any(
+            x is not None for x in (nav, lab_workspace, event_log, system_health, left_extra)
+        )
+        if has_lab:
+            # bottom area: event log + system health side-by-side, hidden by default
+            bottom: QWidget | None = None
+            if event_log is not None or system_health is not None:
+                bottom = QWidget(self)
+                b_lay = QHBoxLayout(bottom)
+                b_lay.setContentsMargins(0, 0, 0, 0)
+                b_lay.setSpacing(0)
+                if event_log is not None and system_health is not None:
+                    split_b = QSplitter(Qt.Orientation.Horizontal, bottom)
+                    split_b.addWidget(event_log)
+                    split_b.addWidget(system_health)
+                    split_b.setSizes([640, 640])
+                    split_b.setHandleWidth(1)
+                    b_lay.addWidget(split_b)
+                elif event_log is not None:
+                    b_lay.addWidget(event_log)
+                else:
+                    b_lay.addWidget(system_health)  # type: ignore[arg-type]
+                bottom.setVisible(False)
+                bottom.setMaximumHeight(220)
+            self._bottom = bottom
+
+            # stacked middle: market splitter vs lab workspace
+            if lab_workspace is not None:
+                self._stack = QStackedWidget(self)
+                self._stack.addWidget(splitter)
+                self._stack.addWidget(lab_workspace)
+                self._stack.setCurrentIndex(0)
+            else:
+                self._stack = None  # type: ignore[assignment]
+
+            outer = QWidget(self)
+            o_lay = QVBoxLayout(outer)
+            o_lay.setContentsMargins(0, 0, 0, 0)
+            o_lay.setSpacing(0)
+            if nav is not None:
+                o_lay.addWidget(nav)
+            if left_extra is not None:
+                # left_extra as a small left dock below nav, above market/lab
+                # For minimal fix keep it hidden-collapsible next to market; simplest:
+                # add as a widget above the stack but compact
+                left_extra.setVisible(False)
+                o_lay.addWidget(left_extra)
+                self._left_extra_widget = left_extra
+            if lab_workspace is not None:
+                o_lay.addWidget(self._stack, 1)  # type: ignore[arg-type]
+            else:
+                o_lay.addWidget(splitter, 1)
+            if bottom is not None:
+                o_lay.addWidget(bottom)
+            self.setCentralWidget(outer)
+            self._outer = outer
+        else:
+            self._stack = None  # type: ignore[assignment]
+            self._bottom = None  # type: ignore[assignment]
+            self.setCentralWidget(splitter)
         self._apply_panel_state()
         self.resize(1280, 760)
         self.setWindowTitle("VAYREN")
@@ -171,9 +248,21 @@ class ChartWindow(QMainWindow):
             self._splitter.setSizes([TOOLBAR_WIDTH, 0, 0, max(1, width - TOOLBAR_WIDTH)])
 
     def on_symbols_listed(self, event: SymbolsListed) -> None:
-        """Populate the watchlist with the discovered stock symbols."""
+        """Populate the watchlist with the discovered stock symbols.
+
+        If no chart is loaded yet, automatically select the first symbol so
+        the market chart appears immediately without requiring a manual click
+        (TradingView-style: open = chart visible).
+        """
         self._watchlist.set_symbols(event.symbols)
         logger.info("Watchlist populated (%d stocks)", len(event.symbols))
+        if not event.symbols:
+            return
+        if self._current_symbol is None:
+            first = event.symbols[0]
+            # Highlight first row and trigger the same flow as a user click
+            self._watchlist.select_symbol(first)
+            self._on_symbol_selected(first)
 
     def on_quotes_loaded(self, event: QuotesLoaded) -> None:
         """Attach the latest real quotes to the watchlist rows."""
@@ -211,6 +300,46 @@ class ChartWindow(QMainWindow):
     def download(self) -> QWidget | None:
         """The historical download side panel (injected by bootstrap), or None."""
         return self._download
+
+    @property
+    def current_symbol(self) -> str | None:
+        """Currently loaded symbol, or None before the first chart."""
+        return self._current_symbol
+
+    @property
+    def current_timeframe(self) -> str | None:
+        """Currently active timeframe, or None before the first chart."""
+        return self._current_timeframe
+
+    def show_market(self) -> None:
+        """Switch to the market chart view."""
+        self._lab_active = False
+        if getattr(self, "_stack", None) is not None and self._stack is not None:
+            self._stack.setCurrentIndex(0)
+        if self._nav is not None and hasattr(self._nav, "set_active"):
+            with contextlib.suppress(Exception):
+                self._nav.set_active("MARKET")  # type: ignore[attr-defined]
+
+    def show_lab(self) -> None:
+        """Switch to the Strategy Lab workspace."""
+        self._lab_active = True
+        if getattr(self, "_stack", None) is not None and self._stack is not None:
+            self._stack.setCurrentIndex(1)
+        if self._nav is not None and hasattr(self._nav, "set_active"):
+            with contextlib.suppress(Exception):
+                self._nav.set_active("STRATEGY LAB")  # type: ignore[attr-defined]
+
+    def toggle_bottom(self) -> None:
+        """Toggle the bottom system/event panels."""
+        self._bottom_visible = not self._bottom_visible
+        bottom = getattr(self, "_bottom", None)
+        if bottom is not None:
+            bottom.setVisible(self._bottom_visible)
+        # left extra toggles with bottom as well (market status)
+        left = getattr(self, "_left_extra", None)
+        if left is not None:
+            with contextlib.suppress(Exception):
+                left.setVisible(self._bottom_visible)
 
     def on_chart_ready(self, event: ChartReady) -> None:
         """Display the prepared chart model and highlight its symbol."""

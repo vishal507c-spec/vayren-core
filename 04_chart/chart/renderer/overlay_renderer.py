@@ -63,29 +63,36 @@ class OverlayRenderer:
         timeframe • exchange meta is muted; the strip background itself is
         drawn by the widget. Returns the pixel rect the text occupied so
         callers can place the OHLC readout to its right without overlap.
+
+        Spacing is generous and responsive: ``   •   `` gaps keep the symbol
+        and timeframe visually prominent and prevent edge-touch.
         """
+        # Slightly larger gaps for prominence: 3 spaces each side of bullet
+        bullet = "   \u2022   "
         segments = (
             (symbol, OverlayRenderer.SYMBOL_FONT, OverlayRenderer.SYMBOL_TEXT),
-            ("  \u2022  ", OverlayRenderer.META_FONT, OverlayRenderer.META_TEXT),
+            (bullet, OverlayRenderer.META_FONT, OverlayRenderer.META_TEXT),
             (timeframe, OverlayRenderer.META_FONT, OverlayRenderer.META_TEXT),
-            ("  \u2022  ", OverlayRenderer.META_FONT, OverlayRenderer.META_TEXT),
+            (bullet, OverlayRenderer.META_FONT, OverlayRenderer.META_TEXT),
             (exchange, OverlayRenderer.META_FONT, OverlayRenderer.META_TEXT),
         )
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
         metrics = QFontMetrics(OverlayRenderer.SYMBOL_FONT)
         baseline = top_bar.top() + (top_bar.height() + metrics.ascent() - metrics.descent()) / 2.0
-        x = top_bar.left() + 8
+        # Left padding 10 keeps text off the edge even when container is narrow
+        x = top_bar.left() + 10
         for text, font, color in segments:
             painter.setFont(font)
             painter.setPen(QPen(color, 1))
             painter.drawText(int(x), int(baseline), text)
             x += painter.fontMetrics().horizontalAdvance(text)
         painter.restore()
+        # Right padding 12 ensures symbol block never touches OHLC
         return QRect(
-            top_bar.left() + 8,
+            top_bar.left() + 10,
             top_bar.top(),
-            x - (top_bar.left() + 8),
+            x - (top_bar.left() + 10),
             top_bar.height(),
         )
 
@@ -104,6 +111,10 @@ class OverlayRenderer:
         direction reads at a glance. Unframed — the strip background is
         drawn by the widget. `left_margin` is the right edge of the symbol
         info label so the OHLC bar starts just to its right.
+
+        Consistent spacing: ``O <val>    H <val>    ...`` with 14px gaps,
+        and a 16px lead-in before the change segment. Respects the right
+        boundary — clips gracefully without overlapping the edge.
         """
         change = bar.close - bar.open
         pct = bar.return_pct
@@ -119,19 +130,39 @@ class OverlayRenderer:
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
         metrics = QFontMetrics(OverlayRenderer.OHLC_FONT)
         baseline = top_bar.top() + (top_bar.height() + metrics.ascent() - metrics.descent()) / 2.0
-        x = left_margin + 8
+        # 14px gap after symbol block plus internal right-padding guard
+        x = left_margin + 14
+        # Guard: if OHLC would overflow the right edge, keep it visible but
+        # never let it touch the border — reserve 10px right padding
+        right_limit = top_bar.right() - 10
         for label, value in fields:
+            # Estimate width for this field; skip if it would overflow
+            painter.setFont(OverlayRenderer.OHLC_LABEL_FONT)
+            w_label = painter.fontMetrics().horizontalAdvance(label) + 2
+            painter.setFont(OverlayRenderer.OHLC_FONT)
+            w_value = painter.fontMetrics().horizontalAdvance(value) + 14
+            if (
+                x + w_label + w_value > right_limit
+                and value != fields[-1][1]
+                and x + w_label + w_value - 14 > right_limit
+            ):
+                break
             painter.setFont(OverlayRenderer.OHLC_LABEL_FONT)
             painter.setPen(QPen(OverlayRenderer.OHLC_LABEL_TEXT, 1))
             painter.drawText(int(x), int(baseline), label)
-            x += painter.fontMetrics().horizontalAdvance(label) + 2
+            x += painter.fontMetrics().horizontalAdvance(label) + 3
             painter.setFont(OverlayRenderer.OHLC_FONT)
             painter.setPen(QPen(OverlayRenderer.OHLC_VALUE_TEXT, 1))
             painter.drawText(int(x), int(baseline), value)
-            x += painter.fontMetrics().horizontalAdvance(value) + 10
-        prefix_end = x - 10
-        painter.setPen(QPen(CandleRenderer.BULL if change >= 0 else CandleRenderer.BEAR, 1))
-        painter.drawText(int(x + 12), int(baseline), suffix)
+            x += painter.fontMetrics().horizontalAdvance(value) + 14
+        prefix_end = x - 14
+        # Change segment with 16px breathing room, but still inside right_limit
+        painter.setFont(OverlayRenderer.OHLC_FONT)
+        w_suffix = painter.fontMetrics().horizontalAdvance(suffix)
+        sx = x + 2
+        if sx + w_suffix <= right_limit:
+            painter.setPen(QPen(CandleRenderer.BULL if change >= 0 else CandleRenderer.BEAR, 1))
+            painter.drawText(int(sx), int(baseline), suffix)
         painter.restore()
         return QRect(left_margin, top_bar.top(), prefix_end - left_margin, top_bar.height())
 

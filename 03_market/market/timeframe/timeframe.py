@@ -27,6 +27,8 @@ _UNIT_SECONDS: dict[str, int] = {
     "h": 3600,
     "D": 86400,
     "W": 604800,
+    "d": 86400,
+    "w": 604800,
 }
 
 
@@ -47,7 +49,7 @@ def _parse_generated_label(name: str) -> int | None:
 def timeframe_seconds(name: str) -> int | None:
     """Seconds for a timeframe label (ladder or generated), or None if invalid."""
     for label, seconds in _TIMEFRAME_LADDER:
-        if label == name:
+        if label == name or label.lower() == name.lower():
             return seconds
     return _parse_generated_label(name)
 
