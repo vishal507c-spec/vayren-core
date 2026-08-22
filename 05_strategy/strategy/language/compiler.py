@@ -75,6 +75,14 @@ class CompiledStrategy:
     warmup: int = 20
 
     def create_logic(self, params: StrategyParameters) -> StrategyLogic:
+        # Phase 4: prefer generic VM via IR if available
+        if self.ir is not None:
+            try:
+                from strategy.vm import vm_from_ir
+
+                return vm_from_ir(self.ir, params)
+            except Exception:
+                pass
         # params may contain overrides; merge with defaults by label
         # StrategyParameters is keyed by whatever the validator extracted; for now we use labels as keys? But StrategyParameters uses keys like "C1 Range"? That's okay.
         # We'll map labels to values: if params has label, use it, else default
