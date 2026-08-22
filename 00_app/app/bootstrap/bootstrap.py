@@ -104,6 +104,14 @@ class Bootstrap:
             except Exception:  # noqa: BLE001, SIM105
                 pass
 
+        # ── Phase 2: ensure generic Strategy Library has initial file records ──
+        try:
+            from strategy.language.storage import ensure_builtin_strategies
+
+            ensure_builtin_strategies(data_dir)
+        except Exception:
+            pass
+
         backtest_runner = BacktestRunner(repository, strategy_registry)
         backtest_worker = BacktestWorker(backtest_runner)
         trade_overlay = TradeOverlay()
@@ -117,10 +125,31 @@ class Bootstrap:
         from backtest.ui.performance_panel import PerformancePanel
 
         performance_panel = PerformancePanel()
-        # sync initial OBR SELL params into workspace detail
+        # Phase 2: sync params from currently selected file strategy if any,
+        # fallback to obr-sell for backward compatibility
         try:
-            obr_def = strategy_registry.get("obr-sell")
-            lab_workspace.center_detail.set_params(dict(obr_def.params))
+            current_name = ""
+            try:
+                current_name = lab_workspace.current_tab_name().strip()  # type: ignore[attr-defined]
+            except Exception:
+                pass
+            if not current_name:
+                try:
+                    current_name = lab_workspace.left_nav.current_name() or ""  # type: ignore[attr-defined]
+                except Exception:
+                    pass
+            # Try registry first for the selected name
+            target_id = (current_name or "obr-sell").lower().replace(" ", "-")
+            obr_def = None
+            try:
+                obr_def = strategy_registry.get(target_id)
+            except Exception:
+                try:
+                    obr_def = strategy_registry.get("obr-sell")
+                except Exception:
+                    pass
+            if obr_def is not None:
+                lab_workspace.center_detail.set_params(dict(obr_def.params))
         except Exception:
             pass
 
@@ -588,27 +617,55 @@ class Bootstrap:
                 lambda e: lab_workspace.right_settings.select_timeframe(e.model.timeframe),
             )  # noqa: E501
 
-            # also sync center detail params to registry single OBR SELL
-            def _on_workspace_param(key: str, value: float) -> None:
+            # Phase 2: generic param sync for currently selected strategy
+            def _current_strategy_id() -> str:
                 try:
-                    cur = strategy_registry.get("obr-sell")
+                    name = lab_workspace.current_tab_name().strip()  # type: ignore[attr-defined]
+                    if name:
+                        return name.lower().replace(" ", "-")
+                except Exception:
+                    pass
+                try:
+                    name = lab_workspace.left_nav.current_name()  # type: ignore[attr-defined]
+                    if name:
+                        return str(name).lower().replace(" ", "-")
+                except Exception:
+                    pass
+                return "obr-sell"
+
+            def _on_workspace_param(key: str, value: float) -> None:
+                sid = _current_strategy_id()
+                try:
+                    cur = strategy_registry.get(sid)
+                except Exception:
+                    try:
+                        cur = strategy_registry.get("obr-sell")
+                        sid = "obr-sell"
+                    except Exception as exc:  # noqa: BLE001
+                        event_log.add_entry("ERROR", str(exc))
+                        return
+                try:
                     new_params = dict(cur.params)
                     new_params[key] = float(value)
                     from strategy.models.parameters import StrategyParameters
 
-                    strategy_registry.set_params("obr-sell", StrategyParameters(new_params))
+                    strategy_registry.set_params(sid, StrategyParameters(new_params))
                 except Exception as exc:  # noqa: BLE001
                     event_log.add_entry("ERROR", str(exc))
 
             lab_workspace.param_changed.connect(_on_workspace_param)
 
-            # workspace run → same validation as lab_control but for single strategy
+            # workspace run → generic: currently selected strategy
             def _on_workspace_run(cfg: Any) -> None:
                 from backtest.validation import validate_backtest_form
                 from strategy.models.form import BacktestForm
 
+                sid = _current_strategy_id()
+                # Fallback to obr-sell if selected not in registry
+                if not strategy_registry.contains(sid):
+                    sid = "obr-sell" if strategy_registry.contains("obr-sell") else sid
                 form = BacktestForm(
-                    strategy_id="obr-sell",
+                    strategy_id=sid,
                     timeframe=cfg.get("timeframe", ""),
                     start_date=cfg.get("start_date", ""),
                     end_date=cfg.get("end_date", ""),
@@ -627,7 +684,7 @@ class Bootstrap:
                 self._bus.publish(
                     RunBacktest(
                         request_id=request_id,
-                        strategy_ids=("obr-sell",),
+                        strategy_ids=(sid,),
                         symbol=symbol,  # type: ignore[arg-type]
                         timeframe=form.timeframe,
                         start_date=form.start_date,
@@ -738,22 +795,66 @@ class Bootstrap:
                     from strategy.language import compile_strategy
 
                     compiled = compile_strategy(code)
-                    # store and register as obr-sell factory
                     self._compiled_strategy = compiled  # type: ignore[attr-defined]
 
                     def _factory(params):  # type: ignore[no-untyped-def]
                         return compiled.create_logic(params)
 
-                    strategy_registry._kinds["obr_sell"] = _factory  # type: ignore[attr-defined]
+                    # Phase 2: register under currently selected strategy's kind, fallback to generic
+                    sid = _current_strategy_id()
+                    kind = sid.replace("-", "_")
+                    # Use file strategy's kind if it exists in registry, otherwise use selected kind
+                    target_kind = (
+                        kind if strategy_registry.has_kind(kind) else sid.replace("-", "_")
+                    )
+                    # For user strategies, register under their own kind; for builtins keep obr_sell
+                    if not strategy_registry.has_kind(target_kind):
+                        target_kind = "obr_sell" if sid == "obr-sell" else kind
+                    # Ensure kind exists — register if new, otherwise overwrite factory for live update
+                    if strategy_registry.has_kind(target_kind):
+                        strategy_registry._kinds[target_kind] = _factory  # type: ignore[attr-defined]
+                    else:
+                        # Register new kind for this user strategy (generic)
+                        try:
+                            from strategy.models.parameters import ParameterSpec
+
+                            specs = tuple(
+                                ParameterSpec(
+                                    key=k,
+                                    label=k,
+                                    default=float(v),
+                                    minimum=0,
+                                    maximum=1e9,
+                                    decimals=2,
+                                )
+                                for k, v in compiled.param_defaults.items()
+                            )
+                            strategy_registry.register_kind(target_kind, _factory, specs)
+                            # Also create a definition for backtest if missing
+                            if not strategy_registry.contains(sid):
+                                from strategy.models.definition import StrategyDefinition
+                                from strategy.models.parameters import StrategyParameters
+
+                                definition = StrategyDefinition(
+                                    id=sid,
+                                    name=lab_workspace.current_tab_name().strip() or sid,  # type: ignore[attr-defined]
+                                    version="1.0",
+                                    kind=target_kind,
+                                    params=StrategyParameters(compiled.param_defaults),
+                                )
+                                try:
+                                    strategy_registry.register_definition(definition)
+                                except Exception:
+                                    pass
+                        except Exception:
+                            strategy_registry._kinds[target_kind] = _factory  # type: ignore[attr-defined]
                     # also refresh params UI from compiled defaults
                     lab_workspace.center_detail._refresh_params_from_code(code)  # type: ignore[attr-defined]
-                    # sync registry params to compiled defaults
+                    # sync registry params to compiled defaults for current strategy
                     try:
                         from strategy.models.parameters import StrategyParameters
 
                         new_params = {k: float(v) for k, v in compiled.param_defaults.items()}
-                        # map label keys to registry param keys: if registry uses c1/c4/rsi_threshold, map by heuristic
-                        # compiled uses label as key; registry uses c1/c4/rsi_threshold - try direct, else fallback
                         mapped = {}
                         for lk, lv in compiled.param_defaults.items():
                             lk_lower = lk.lower().replace(" ", "_").replace("-", "_")
@@ -765,11 +866,21 @@ class Bootstrap:
                                 mapped["rsi_threshold"] = lv
                             else:
                                 mapped[lk] = lv
-                        # if mapping produced c1/c4/rsi, use those; else use raw compiled dict if it matches registry spec
                         try:
-                            strategy_registry.set_params("obr-sell", StrategyParameters(mapped))
+                            strategy_registry.set_params(sid, StrategyParameters(mapped))
                         except Exception:
-                            strategy_registry.set_params("obr-sell", StrategyParameters(new_params))
+                            try:
+                                strategy_registry.set_params(sid, StrategyParameters(new_params))
+                            except Exception:
+                                # Fallback to obr-sell for legacy
+                                try:
+                                    strategy_registry.set_params(
+                                        "obr-sell", StrategyParameters(mapped)
+                                    )
+                                except Exception:
+                                    strategy_registry.set_params(
+                                        "obr-sell", StrategyParameters(new_params)
+                                    )
                     except Exception:
                         pass
                     msg = f"Strategy compiled successfully ({len(compiled.param_defaults)} params)"
