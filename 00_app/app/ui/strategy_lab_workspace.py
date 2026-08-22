@@ -37,9 +37,9 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from strategy.ui.code_editor import CodeEditor
 
 from app.ui import lab_theme as t
-from strategy.ui.code_editor import CodeEditor
 
 _DEFAULT_SLIPPAGE_PCT = 0.02
 _DEFAULT_COMMISSION_PCT = 0.03
