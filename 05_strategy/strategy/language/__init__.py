@@ -1,6 +1,7 @@
-"""Strategy Language — sandbox parser/compiler."""
+"""Strategy Language — sandbox parser/compiler + generic IR."""
 
-from .compiler import CompiledStrategy, StrategyLanguageError, compile_strategy
+from .compiler import CompiledStrategy, StrategyLanguageError, compile_strategy, compile_to_ir
+from .ir import IR_VERSION, StrategyIR
 from .parser import CompileError, parse_and_validate
 from .storage import (
     DEFAULT_CODE,
@@ -27,8 +28,11 @@ from .storage import (
 __all__ = [
     "CompiledStrategy",
     "StrategyLanguageError",
+    "StrategyIR",
+    "IR_VERSION",
     "CompileError",
     "compile_strategy",
+    "compile_to_ir",
     "parse_and_validate",
     "DEFAULT_CODE",
     "DEFAULT_NAME",

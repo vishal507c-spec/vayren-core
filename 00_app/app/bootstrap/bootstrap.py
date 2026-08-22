@@ -125,8 +125,7 @@ class Bootstrap:
         from backtest.ui.performance_panel import PerformancePanel
 
         performance_panel = PerformancePanel()
-        # Phase 2: sync params from currently selected file strategy if any,
-        # fallback to obr-sell for backward compatibility
+        # Phase 3: generic — sync params from currently selected strategy, fallback to first available
         try:
             current_name = ""
             try:
@@ -138,14 +137,18 @@ class Bootstrap:
                     current_name = lab_workspace.left_nav.current_name() or ""  # type: ignore[attr-defined]
                 except Exception:
                     pass
-            # Try registry first for the selected name
-            target_id = (current_name or "obr-sell").lower().replace(" ", "-")
+            target_id = (current_name or "").lower().replace(" ", "-") if current_name else ""
             obr_def = None
-            try:
-                obr_def = strategy_registry.get(target_id)
-            except Exception:
+            if target_id:
                 try:
-                    obr_def = strategy_registry.get("obr-sell")
+                    obr_def = strategy_registry.get(target_id)
+                except Exception:
+                    pass
+            if obr_def is None:
+                try:
+                    defs = strategy_registry.list()
+                    if defs:
+                        obr_def = defs[0]
                 except Exception:
                     pass
             if obr_def is not None:
@@ -617,7 +620,7 @@ class Bootstrap:
                 lambda e: lab_workspace.right_settings.select_timeframe(e.model.timeframe),
             )  # noqa: E501
 
-            # Phase 2: generic param sync for currently selected strategy
+            # Phase 3: generic — no hard-coded fallback, uses selected or first available
             def _current_strategy_id() -> str:
                 try:
                     name = lab_workspace.current_tab_name().strip()  # type: ignore[attr-defined]
@@ -631,16 +634,27 @@ class Bootstrap:
                         return str(name).lower().replace(" ", "-")
                 except Exception:
                     pass
-                return "obr-sell"
+                try:
+                    defs = strategy_registry.list()
+                    if defs:
+                        return defs[0].id
+                except Exception:
+                    pass
+                return ""
 
             def _on_workspace_param(key: str, value: float) -> None:
                 sid = _current_strategy_id()
                 try:
                     cur = strategy_registry.get(sid)
                 except Exception:
+                    # Generic fallback: first available strategy
                     try:
-                        cur = strategy_registry.get("obr-sell")
-                        sid = "obr-sell"
+                        defs = strategy_registry.list()
+                        if defs:
+                            cur = defs[0]
+                            sid = cur.id
+                        else:
+                            raise
                     except Exception as exc:  # noqa: BLE001
                         event_log.add_entry("ERROR", str(exc))
                         return
@@ -661,9 +675,14 @@ class Bootstrap:
                 from strategy.models.form import BacktestForm
 
                 sid = _current_strategy_id()
-                # Fallback to obr-sell if selected not in registry
+                # Generic fallback: first available strategy if selected not in registry
                 if not strategy_registry.contains(sid):
-                    sid = "obr-sell" if strategy_registry.contains("obr-sell") else sid
+                    try:
+                        defs = strategy_registry.list()
+                        if defs and not strategy_registry.contains(sid):
+                            sid = defs[0].id
+                    except Exception:
+                        pass
                 form = BacktestForm(
                     strategy_id=sid,
                     timeframe=cfg.get("timeframe", ""),
@@ -800,16 +819,10 @@ class Bootstrap:
                     def _factory(params):  # type: ignore[no-untyped-def]
                         return compiled.create_logic(params)
 
-                    # Phase 2: register under currently selected strategy's kind, fallback to generic
+                    # Phase 3: generic — register under currently selected strategy's kind
                     sid = _current_strategy_id()
                     kind = sid.replace("-", "_")
-                    # Use file strategy's kind if it exists in registry, otherwise use selected kind
-                    target_kind = (
-                        kind if strategy_registry.has_kind(kind) else sid.replace("-", "_")
-                    )
-                    # For user strategies, register under their own kind; for builtins keep obr_sell
-                    if not strategy_registry.has_kind(target_kind):
-                        target_kind = "obr_sell" if sid == "obr-sell" else kind
+                    target_kind = kind
                     # Ensure kind exists — register if new, otherwise overwrite factory for live update
                     if strategy_registry.has_kind(target_kind):
                         strategy_registry._kinds[target_kind] = _factory  # type: ignore[attr-defined]
@@ -869,21 +882,19 @@ class Bootstrap:
                         try:
                             strategy_registry.set_params(sid, StrategyParameters(mapped))
                         except Exception:
-                            try:
-                                strategy_registry.set_params(sid, StrategyParameters(new_params))
-                            except Exception:
-                                # Fallback to obr-sell for legacy
-                                try:
-                                    strategy_registry.set_params(
-                                        "obr-sell", StrategyParameters(mapped)
-                                    )
-                                except Exception:
-                                    strategy_registry.set_params(
-                                        "obr-sell", StrategyParameters(new_params)
-                                    )
+                            strategy_registry.set_params(sid, StrategyParameters(new_params))
                     except Exception:
                         pass
-                    msg = f"Strategy compiled successfully ({len(compiled.param_defaults)} params)"
+                    # Phase 3: show generic IR info
+                    ir = getattr(compiled, "ir", None)
+                    if ir is not None:
+                        msg = (
+                            f"✓ COMPILED (IR v{ir.ir_version} · "
+                            f"{len(ir.parameters)} params · {len(ir.statements)} stmts · "
+                            f"{len(ir.data_requirements)} data req)"
+                        )
+                    else:
+                        msg = f"Strategy compiled successfully ({len(compiled.param_defaults)} params)"
                     lab_workspace.center_detail.show_compile_result(True, msg)
                     event_log.add_entry("SUCCESS", msg)
                 except Exception as exc:  # noqa: BLE001

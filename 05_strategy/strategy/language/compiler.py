@@ -7,6 +7,7 @@ from typing import Any
 
 from market.models.bar import Bar
 
+from strategy.language.ir import StrategyIR, build_ir
 from strategy.language.parser import CompileError, parse_and_validate
 from strategy.models.parameters import StrategyParameters
 from strategy.models.signal import Signal, SignalKind
@@ -70,6 +71,7 @@ class CompiledStrategy:
     tree: ast.Module
     param_defaults: dict[str, float]  # label -> default
     code: str
+    ir: StrategyIR | None = None
     warmup: int = 20
 
     def create_logic(self, params: StrategyParameters) -> StrategyLogic:
@@ -245,4 +247,19 @@ def compile_strategy(code: str) -> CompiledStrategy:
         defaults[p.label] = float(p.default)
     # also need to handle input without label case: validator used synthetic param_N — keep those too
     # If no params but code uses input, defaults will have synthetic keys; that's okay, UI will show them as param_1
-    return CompiledStrategy(tree=tree, param_defaults=defaults, code=code)
+    # Build generic IR (deterministic, versioned)
+    try:
+        ir = build_ir(code, tree, param_infos)
+    except Exception:
+        ir = None  # IR build should not fail compilation; diagnostics come from parser
+    return CompiledStrategy(tree=tree, param_defaults=defaults, code=code, ir=ir)
+
+
+def compile_to_ir(code: str) -> StrategyIR:
+    """Compile source to generic IR — no execution, deterministic."""
+    tree, errors, param_infos = parse_and_validate(code)
+    if errors:
+        raise StrategyLanguageError(errors)
+    if tree is None:
+        raise StrategyLanguageError([CompileError(line=1, col=0, message="Empty source")])
+    return build_ir(code, tree, param_infos)
