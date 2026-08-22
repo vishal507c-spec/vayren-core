@@ -1,5 +1,18 @@
 """Research Engine — generic, read-only analysis of Strategy Versions and Execution Histories."""
 
+from .advanced_validation import (
+    AdvancedValidationResult,
+    CPCVConfig,
+    CPCVResult,
+    DSRResult,
+    EvidenceGrade,
+    MultipleTestingResult,
+    PBOResult,
+    ValidationPolicy,
+    correct_multiple_testing,
+    grade_evidence,
+    run_cpcv,
+)
 from .analysis import ResearchAnalysis, analyze_dataset
 from .dataset import ResearchDataset
 from .discovery import Discovery, create_discovery
@@ -26,4 +39,15 @@ __all__ = [
     "Discovery",
     "create_discovery",
     "ResearchEngine",
+    "AdvancedValidationResult",
+    "CPCVConfig",
+    "CPCVResult",
+    "DSRResult",
+    "EvidenceGrade",
+    "MultipleTestingResult",
+    "PBOResult",
+    "ValidationPolicy",
+    "correct_multiple_testing",
+    "grade_evidence",
+    "run_cpcv",
 ]
