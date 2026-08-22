@@ -793,6 +793,44 @@ class Bootstrap:
                                 target_name = candidate_name
 
                     save_strategy(code, target_name, data_dir)
+                    # Phase 5: create immutable version for this save
+                    try:
+                        from strategy.language import compile_to_ir
+                        from strategy.language.storage import load_strategy_record
+                        from strategy.version import create_version, list_versions
+                        import hashlib
+
+                        rec = load_strategy_record(target_name, data_dir)
+                        strategy_id = rec.id if rec else target_name
+                        # Determine parent version (latest)
+                        parent_id = None
+                        try:
+                            versions = list_versions(strategy_id, data_dir)
+                            if versions:
+                                parent_id = versions[-1].version_id
+                        except Exception:
+                            pass
+                        # Build IR hash if possible
+                        ir_hash = ""
+                        ir_version = 1
+                        try:
+                            ir = compile_to_ir(code)
+                            ir_hash = hashlib.sha256(ir.to_json().encode("utf-8")).hexdigest()
+                            ir_version = ir.ir_version
+                        except Exception:
+                            ir_hash = hashlib.sha256(code.encode("utf-8")).hexdigest()
+                        source_hash = hashlib.sha256(code.encode("utf-8")).hexdigest()
+                        create_version(
+                            strategy_id,
+                            code,
+                            ir_version=ir_version,
+                            ir_hash=ir_hash,
+                            parent_version_id=parent_id,
+                            data_dir=data_dir,
+                            metadata={"name": target_name, "source_hash": source_hash},
+                        )
+                    except Exception:
+                        pass
                     event_log.add_entry("SUCCESS", f"Strategy saved: {target_name}")
                     lab_workspace.center_detail.mark_saved()  # type: ignore[attr-defined]
                     if not is_update and target_name != current_id:
@@ -1143,6 +1181,100 @@ class Bootstrap:
                 "SUCCESS",
                 f"Backtest completed: {first.name} — {len(first.trades)} trades, net ₹{first.metrics.net_profit:+,.0f}",  # noqa: E501  # noqa: E501
             )
+            # Phase 5: create immutable execution history (snapshot + events)
+            try:
+                from strategy.language.storage import load_strategy
+                from strategy.version import list_versions
+                from backtest.execution import ExecutionEvent, ExecutionHistory, create_snapshot, save_history
+                from strategy.language import compile_to_ir
+                import hashlib
+
+                data_dir = getattr(self._services.get("symbol_repository"), "_directory", None)
+                data_dir = str(data_dir) if data_dir else None
+                for res in result.results:
+                    # Find strategy definition and its latest version
+                    try:
+                        definition = self._strategy_registry.get(res.strategy_id)
+                        strategy_id = definition.id
+                        # Load source for IR hash
+                        source = load_strategy(definition.name, data_dir) or ""
+                        if not source:
+                            # Try by id
+                            source = load_strategy(strategy_id, data_dir) or ""
+                        # Find latest version for this strategy
+                        versions = list_versions(strategy_id, data_dir)
+                        if versions:
+                            version = versions[-1]
+                            source_hash = version.source_hash
+                            ir_hash = version.ir_hash
+                            ir_version = version.ir_version
+                            version_id = version.version_id
+                        else:
+                            # Create ephemeral version for this execution
+                            source_hash = hashlib.sha256(source.encode("utf-8")).hexdigest() if source else ""
+                            ir_hash = source_hash
+                            ir_version = 1
+                            version_id = "v0"
+                        # Compile to get IR for data requirements
+                        try:
+                            ir = compile_to_ir(source) if source else None
+                            if ir:
+                                ir_hash = hashlib.sha256(ir.to_json().encode("utf-8")).hexdigest()
+                                ir_version = ir.ir_version
+                        except Exception:
+                            pass
+                        # Build snapshot
+                        snap = create_snapshot(
+                            strategy_id, version_id, source_hash, ir if ir else type("IR", (), {"ir_version": ir_version, "to_json": lambda: "{}"})(),  # type: ignore[arg-type]
+                            dict(definition.params) if hasattr(definition, "params") else {},
+                            res.config,  # type: ignore[attr-defined]
+                            data_dir,
+                        )
+                        # Build generic events from trades
+                        events = []
+                        seq = 0
+                        for t in res.trades:
+                            events.append(
+                                ExecutionEvent(
+                                    execution_id=snap.execution_id,
+                                    sequence=seq,
+                                    event_type="TradeClosed",
+                                    timestamp=t.exit_time,
+                                    data={"symbol": t.symbol, "side": t.side, "pnl": t.pnl, "entry": t.entry_price, "exit": t.exit_price},
+                                )
+                            )
+                            seq += 1
+                        # Also add BarProcessed-like for replay determinism (using equity curve length)
+                        for idx, pt in enumerate(res.equity_curve[:5]):
+                            events.append(
+                                ExecutionEvent(
+                                    execution_id=snap.execution_id,
+                                    sequence=seq,
+                                    event_type="BarProcessed",
+                                    timestamp=pt.timestamp,
+                                    data={"index": idx},
+                                )
+                            )
+                            seq += 1
+                        signals = [
+                            {"index": t.entry_index, "kind": "BUY" if t.side == "LONG" else "SELL", "price": t.entry_price, "timestamp": t.entry_time}
+                            for t in res.trades
+                        ]
+                        history = ExecutionHistory(snapshot=snap, events=events, signals=signals)
+                        save_history(history, data_dir)
+                        event_log.add_entry("INFO", f"Execution {snap.execution_id} saved (v{version_id[:8]})")
+                        # Expose to lab workspace for replay UI if available
+                        try:
+                            if hasattr(self, "_lab_workspace") and self._lab_workspace is not None:
+                                # Store last execution for replay button
+                                self._last_execution_id = snap.execution_id  # type: ignore[attr-defined]
+                                self._last_execution_ir = ir  # type: ignore[attr-defined]
+                        except Exception:
+                            pass
+                    except Exception as e:  # noqa: BLE001
+                        event_log.add_entry("WARN", f"History save failed: {e}")
+            except Exception:
+                pass
         system_health.set_engine_state("Backtest Engine", "Idle")
 
     def _on_backtest_failed(
