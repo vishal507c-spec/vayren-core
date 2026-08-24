@@ -18,6 +18,9 @@ FUNCTIONS = {
     "take_profit": {"args": 1, "desc": "take_profit(price)"},
     "time_exit": {"args": 1, "desc": 'time_exit("HH:MM")'},
     "exit_time": {"args": 1, "desc": 'exit_time("15:15") alias'},
+    "is_new_day": {"args": 0, "desc": "is_new_day() true on first bar of new session"},
+    "prev_day_close": {"args": 0, "desc": "prev_day_close() previous session close"},
+    "after_time": {"args": 1, "desc": 'after_time("HH:MM") true when bar time >= HH:MM'},
 }
 
 VARIABLES = {"close", "open", "high", "low", "volume", "bar", "time"}
@@ -37,4 +40,7 @@ HIGHLIGHT_FUNCTIONS = [
     "take_profit",
     "time_exit",
     "exit_time",
+    "is_new_day",
+    "prev_day_close",
+    "after_time",
 ]  # noqa: E501

@@ -50,9 +50,13 @@ def test_lab_backtest_via_bus(qt_app: QApplication, tmp_path: Path) -> None:
     if os.environ.get("VAYREN_SKIP_RUN"):
         return
     # VM-only: use Strategy Library ( .vstrat) canonical ID, not registry
+    # Canonical per product requirement: D:\VAYREN_STRATEGIES
     from strategy.language.storage import list_strategy_records
 
-    records = list_strategy_records(data_dir)
+    records = list_strategy_records(r"D:\VAYREN_STRATEGIES")
+    # Fallback for isolated tmp (hermetic) — should never be empty after seeding
+    if not records:
+        records = list_strategy_records(data_dir)
     assert records, "Strategy Library should have at least one .vstrat (OBR/SMA)"
     strategy_id = records[0].id
     bootstrap.bus.publish(

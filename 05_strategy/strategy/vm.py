@@ -45,6 +45,10 @@ class VMState:
     pending_sl: float | None = None
     pending_tp: float | None = None
     pending_time_exit: str | None = None
+    # Generic session tracking — not OBR-specific, usable by any intraday strategy
+    current_day: str | None = None
+    prev_day_close: float = 0.0
+    is_new_day_flag: bool = False
 
 
 class StrategyVM:
@@ -86,7 +90,24 @@ class StrategyVM:
 
     def on_bar(self, view: BarView) -> Signal | None:
         bar = view.bar
-        # Update indicator history
+        # Generic session tracking (is_new_day / prev_day_close)  # noqa: E501
+        try:
+            cur_day = str(bar.timestamp)[:10]
+        except Exception:
+            cur_day = ""
+        is_new = self._state.current_day is None or cur_day != self._state.current_day
+        if is_new and self._state.current_day is not None and self._state.closes:
+            # previous day's last close is the most recent close before today
+            try:
+                self._state.prev_day_close = float(self._state.closes[-1])
+            except Exception:
+                self._state.prev_day_close = 0.0
+        elif self._state.current_day is None:
+            self._state.prev_day_close = 0.0
+        self._state.is_new_day_flag = bool(is_new)
+        if is_new:
+            self._state.current_day = cur_day
+        # Update indicator history (after session calc so prev_day_close reflects prior day)
         self._state.closes.append(bar.close)
         self._state.highs.append(bar.high)
         self._state.lows.append(bar.low)
@@ -310,6 +331,20 @@ class StrategyVM:
             return None
         if func == "strategy":
             return None
+        if func == "is_new_day":
+            return bool(self._state.is_new_day_flag)
+        if func == "prev_day_close":
+            return float(self._state.prev_day_close)
+        if func == "after_time":
+            if not args:
+                return False
+            try:
+                target = str(args[0])
+                # bar time HH:MM is at timestamp[11:16]
+                hhmm = bar.timestamp[11:16]
+                return hhmm >= target
+            except Exception:
+                return False
         # Unknown function — for determinism return 0, but could raise
         return 0
 

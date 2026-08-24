@@ -102,8 +102,11 @@ class Bootstrap:
         # ``ensure_builtin_strategies`` is now a deprecated no-op kept only
         # for backward compat; no seeding on VAYREN START.
 
-        # BacktestRunner is VM-only: .vstrat → IR → VM → Signal
-        backtest_runner = BacktestRunner(repository, registry=strategy_registry, data_dir=data_dir)
+        # BacktestRunner is VM-only: .vstrat -> IR -> VM -> Signal
+        # canonical strategy source D:\VAYREN_STRATEGIES  # noqa: E501
+        backtest_runner = BacktestRunner(
+            repository, registry=strategy_registry, data_dir=r"D:\VAYREN_STRATEGIES"
+        )
         backtest_worker = BacktestWorker(backtest_runner)
         trade_overlay = TradeOverlay()
         widget.set_overlay(trade_overlay)
@@ -745,9 +748,11 @@ class Bootstrap:
             lab_workspace.journal.trade_clicked.connect(_on_trade_focus)
 
             # ── code editor SAVE / COMPILE ──
+            # Canonical per product requirement: UI ↔ D:\VAYREN_STRATEGIES
+            # symbol_repository directory is for market data (D:\ZerodhaTradingData),
+            # NOT for strategy source. Canonical is fixed.
             def _strategy_data_dir() -> str | None:
-                raw = getattr(self._services.get("symbol_repository"), "_directory", None)
-                return str(raw) if raw is not None else None
+                return r"D:\VAYREN_STRATEGIES"
 
             def _refresh_my_strategies() -> None:
                 try:
@@ -1225,8 +1230,8 @@ class Bootstrap:
                 )
                 from strategy.version import list_versions
 
-                data_dir = getattr(self._services.get("symbol_repository"), "_directory", None)
-                data_dir = str(data_dir) if data_dir else None
+                # Canonical strategy source versions live with D:\VAYREN_STRATEGIES  # noqa: E501
+                data_dir = r"D:\VAYREN_STRATEGIES"
                 for res in result.results:
                     # Find strategy definition and resolve canonical UUID via library
                     try:

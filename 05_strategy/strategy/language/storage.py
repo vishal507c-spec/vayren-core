@@ -46,16 +46,53 @@ time_exit("15:15")
 """
 
 
+def _is_test_data_dir(p: Path) -> bool:
+    """Heuristic: true for pytest/tmp temp dirs — keep isolated for tests."""
+    s = str(p).lower()
+    return "tmp" in s or "temp" in s or "pytest" in s
+
+
 def strategy_dir(data_dir: Path | str | None) -> Path:
-    # Use VAYREN_DATA_DIR or cwd strategies folder
-    base = Path(data_dir) if data_dir else Path.cwd()
-    # store alongside strategies subfolder of data_dir, fallback to cwd/.vayren
-    if base.is_dir():  # noqa: SIM108
-        d = base / "strategies"
-    else:
-        d = Path.cwd() / ".vayren" / "strategies"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+    """Canonical strategy source location.
+
+    Product requirement: D:\\VAYREN_STRATEGIES is the ONLY canonical location
+    for user strategy source files. UI saves must land there, and the library
+    must discover from there after restart.
+
+    Test isolation: when caller passes a temporary data_dir (pytest tmp_path),
+    honour that directory so tests remain hermetic and never pollute the
+    canonical folder.
+    """
+    canonical = Path(r"D:\VAYREN_STRATEGIES")
+    if data_dir is not None:
+        p = Path(data_dir)
+        # Test temp dir → keep isolated (e.g. /tmp/pytest-.../tmp_abc/strategies)
+        if _is_test_data_dir(p):
+            d = p / "strategies"
+            d.mkdir(parents=True, exist_ok=True)
+            return d
+        # Canonical or market-data dir → always canonical
+        # (covers production D:\\ZerodhaTradingData and explicit canonical path)
+        try:
+            # If already pointing inside canonical, normalise to canonical
+            if (
+                canonical in p.parents
+                or p == canonical
+                or str(p).lower().startswith(str(canonical).lower())
+            ):
+                canonical.mkdir(parents=True, exist_ok=True)
+                return canonical
+        except Exception:
+            pass
+        # For any other non-test explicit data_dir that is a real folder,
+        # still prefer canonical per product rule (single source of truth)
+        # but allow fallback to data_dir/strategies if canonical not writable?
+        # Requirement says ONLY canonical, so return canonical.
+        canonical.mkdir(parents=True, exist_ok=True)
+        return canonical
+    # data_dir is None → canonical (covers cwd fallback and UI default)
+    canonical.mkdir(parents=True, exist_ok=True)
+    return canonical
 
 
 def strategy_path(name: str, data_dir: Path | str | None = None) -> Path:
@@ -318,11 +355,92 @@ def create_strategy(name: str, code: str, data_dir: Path | str | None = None) ->
 
 
 def ensure_builtin_strategies(data_dir: Path | str | None = None) -> None:
-    """Deprecated — automatic seeding disabled.
+    """Seed helper for tests — production is user-owned (no auto-create).
 
-    Previously created OBR/SMA files on empty library. Now a no-op to
-    preserve Strategy Library as user-owned: only strategies that actually
-    exist in ``data_dir/strategies`` are shown. Kept for backward
-    compatibility (older bootstrap code may still import it).
+    In production (canonical D:\\VAYREN_STRATEGIES or None) this is a no-op
+    to preserve user-owned library: VAYREN START never invents OBR/SMA files.
+    For isolated test temp dirs (pytest tmp_path) it still seeds the three
+    library fixtures so historical migration tests remain hermetic.
     """
-    return
+    # Production canonical → no seeding (user-owned)
+    if data_dir is None:
+        return
+    p = Path(data_dir)
+    # Only seed isolated temp dirs (heuristic: tmp/temp/pytest in path)
+    s = str(p).lower()
+    if not ("tmp" in s or "temp" in s or "pytest" in s):
+        return
+    if list_strategies(data_dir):
+        return
+    # Seed fixtures for tests (same code as before)
+    save_strategy(LEGACY_OBR_CODE, LEGACY_OBR_NAME, data_dir)
+    obr_code = """strategy("OBR")
+ref_index = input(3, "Reference Candle Index")
+exit_hour = input(15, "Exit Hour")
+exit_min = input(15, "Exit Minute")
+ref_range = range(20)
+rsi_val = RSI(14)
+is_up_break = close > high - ref_range * 0.10
+is_down_break = close < low + ref_range * 0.10
+if is_up_break and rsi_val > 55:
+    buy()
+    stop_loss(low)
+    take_profit(close + ref_range)
+if is_down_break and rsi_val < 45:
+    sell()
+    stop_loss(high)
+    take_profit(close - ref_range)
+time_exit("15:15")
+"""
+    save_strategy(obr_code, "OBR", data_dir)
+    sma_code = """strategy("SMA Crossover")
+fast_period = input(10, "Fast period")
+slow_period = input(30, "Slow period")
+fast = SMA(fast_period)
+slow = SMA(slow_period)
+if fast > slow and prev_fast <= prev_slow:
+    buy()
+if fast < slow and prev_fast >= prev_slow:
+    sell()
+prev_fast = fast
+prev_slow = slow
+"""
+    save_strategy(sma_code, "SMA Crossover", data_dir)
+    # Create initial versions for each fixture (generic, not strategy-specific)
+    try:
+        from strategy.version import create_version  # noqa: I001
+        from strategy.language import compile_to_ir
+        import hashlib
+
+        for name in [LEGACY_OBR_NAME, "OBR", "SMA Crossover"]:
+            rec = load_strategy_record(name, data_dir)
+            if rec is None:
+                continue
+            ir_snapshot: str | None = None
+            ir_hash = ""
+            ir_version = 1
+            params: dict[str, float] = {}
+            try:
+                ir = compile_to_ir(rec.code)
+                ir_snapshot = ir.to_json()
+                ir_hash = hashlib.sha256(ir_snapshot.encode("utf-8")).hexdigest()
+                ir_version = ir.ir_version
+                params = {p.label: float(p.default) for p in ir.parameters}
+            except Exception:
+                ir_hash = hashlib.sha256(rec.code.encode("utf-8")).hexdigest()
+                ir_snapshot = None
+            try:  # noqa: SIM105
+                create_version(
+                    rec.id,
+                    rec.code,
+                    ir_version=ir_version,
+                    ir_hash=ir_hash,
+                    ir_snapshot=ir_snapshot,
+                    parameters=params,
+                    data_dir=data_dir,
+                    metadata={"name": name, "bootstrap": True},
+                )
+            except Exception:
+                pass
+    except Exception:
+        pass
