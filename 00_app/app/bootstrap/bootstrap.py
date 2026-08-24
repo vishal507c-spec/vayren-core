@@ -98,13 +98,9 @@ class Bootstrap:
 
         strategy_registry = StrategyRegistry()
 
-        # ── Generic Strategy Library — .vstrat is canonical (OBR/SMA as .vstrat via VM) ──
-        try:
-            from strategy.language.storage import ensure_builtin_strategies
-
-            ensure_builtin_strategies(data_dir)
-        except Exception:
-            pass
+        # Strategy Library is user-owned — do NOT auto-create OBR/SMA files.
+        # ``ensure_builtin_strategies`` is now a deprecated no-op kept only
+        # for backward compat; no seeding on VAYREN START.
 
         # BacktestRunner is VM-only: .vstrat → IR → VM → Signal
         backtest_runner = BacktestRunner(repository, registry=strategy_registry, data_dir=data_dir)

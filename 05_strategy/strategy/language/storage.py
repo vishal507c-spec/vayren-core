@@ -318,86 +318,11 @@ def create_strategy(name: str, code: str, data_dir: Path | str | None = None) ->
 
 
 def ensure_builtin_strategies(data_dir: Path | str | None = None) -> None:
-    """Create initial library records for builtins if directory is empty.
+    """Deprecated — automatic seeding disabled.
 
-    Uses LEGACY_OBR_CODE for OBR SELL and simple placeholders for OBR/SMA.
-    Also creates initial V1 for each strategy in the version graph.
-    Safe to call on every startup — creates only when no strategies exist.
+    Previously created OBR/SMA files on empty library. Now a no-op to
+    preserve Strategy Library as user-owned: only strategies that actually
+    exist in ``data_dir/strategies`` are shown. Kept for backward
+    compatibility (older bootstrap code may still import it).
     """
-    if list_strategies(data_dir):
-        return
-    # OBR SELL v1.0 — from legacy code
-    save_strategy(LEGACY_OBR_CODE, LEGACY_OBR_NAME, data_dir)
-    # OBR — generic breakout (VM-only, no Python factory)
-    obr_code = """strategy("OBR")
-ref_index = input(3, "Reference Candle Index")
-exit_hour = input(15, "Exit Hour")
-exit_min = input(15, "Exit Minute")
-ref_range = range(20)
-rsi_val = RSI(14)
-is_up_break = close > high - ref_range * 0.10
-is_down_break = close < low + ref_range * 0.10
-if is_up_break and rsi_val > 55:
-    buy()
-    stop_loss(low)
-    take_profit(close + ref_range)
-if is_down_break and rsi_val < 45:
-    sell()
-    stop_loss(high)
-    take_profit(close - ref_range)
-time_exit("15:15")
-"""
-    save_strategy(obr_code, "OBR", data_dir)
-    # SMA Crossover — generic cross (VM-only)
-    sma_code = """strategy("SMA Crossover")
-fast_period = input(10, "Fast period")
-slow_period = input(30, "Slow period")
-fast = SMA(fast_period)
-slow = SMA(slow_period)
-if fast > slow and prev_fast <= prev_slow:
-    buy()
-if fast < slow and prev_fast >= prev_slow:
-    sell()
-prev_fast = fast
-prev_slow = slow
-"""
-    save_strategy(sma_code, "SMA Crossover", data_dir)
-    # Create initial versions for each builtin (generic, not strategy-specific)
-    try:
-        from strategy.version import create_version  # noqa: I001
-        from strategy.language import compile_to_ir
-        import hashlib
-        import json as _json  # noqa: F401
-
-        for name in [LEGACY_OBR_NAME, "OBR", "SMA Crossover"]:
-            rec = load_strategy_record(name, data_dir)
-            if rec is None:
-                continue
-            ir_snapshot: str | None = None
-            ir_hash = ""
-            ir_version = 1
-            params: dict[str, float] = {}
-            try:
-                ir = compile_to_ir(rec.code)
-                ir_snapshot = ir.to_json()
-                ir_hash = hashlib.sha256(ir_snapshot.encode("utf-8")).hexdigest()
-                ir_version = ir.ir_version
-                params = {p.label: float(p.default) for p in ir.parameters}
-            except Exception:
-                ir_hash = hashlib.sha256(rec.code.encode("utf-8")).hexdigest()
-                ir_snapshot = None
-            try:  # noqa: SIM105
-                create_version(
-                    rec.id,
-                    rec.code,
-                    ir_version=ir_version,
-                    ir_hash=ir_hash,
-                    ir_snapshot=ir_snapshot,
-                    parameters=params,
-                    data_dir=data_dir,
-                    metadata={"name": name, "bootstrap": True},
-                )
-            except Exception:
-                pass
-    except Exception:
-        pass
+    return
