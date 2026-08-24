@@ -26,6 +26,7 @@ from chart.events.chart_ready import ChartReady
 from chart.events.window_rendered import WindowRendered
 from chart.theme import APP_PALETTE, APP_STYLE
 from chart.widgets.candle_chart_widget import CandleChartWidget
+from chart.widgets.indicators_toolbar import IndicatorsToolbar
 from chart.widgets.timeframe_toolbar import TimeframeToolbar
 from chart.widgets.tools_toolbar import TOOLBAR_WIDTH, ChartToolsToolbar
 from chart.widgets.watchlist_widget import WatchlistWidget
@@ -89,6 +90,9 @@ class ChartWindow(QMainWindow):
         self._lab_active = False
         self._bottom_visible = False
 
+        # ── Chart top bar: ONE horizontal line (TradingView-style) ──
+        # 15m 30m 45m 1h 2h 4h ▾ INDICATORS
+        self._indicators = IndicatorsToolbar(self)
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
         splitter.addWidget(tools)
         splitter.addWidget(watchlist)
@@ -98,9 +102,20 @@ class ChartWindow(QMainWindow):
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        layout.addWidget(toolbar)
+        # Single row: timeframes + ▼ + INDICATORS grouped together (left-aligned),
+        # empty space AFTER the group — INDICATORS never pushed to the right edge.
+        top_row = QWidget(container)
+        top_row.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        top_row.setObjectName("MarketTopBar")
+        top_lay = QHBoxLayout(top_row)
+        top_lay.setContentsMargins(0, 0, 0, 0)
+        top_lay.setSpacing(6)
+        top_lay.addWidget(toolbar, 0)
+        top_lay.addWidget(self._indicators, 0)
+        top_lay.addStretch(1)
+        layout.addWidget(top_row)
         layout.addWidget(widget)
-        layout.setStretchFactor(toolbar, 0)
+        layout.setStretchFactor(top_row, 0)
         layout.setStretchFactor(widget, 1)
         splitter.addWidget(container)
         splitter.setStretchFactor(0, 0)
@@ -192,6 +207,8 @@ class ChartWindow(QMainWindow):
         toolbar.timeframe_selected.connect(self._on_timeframe_selected)
         tools.watchlist_clicked.connect(lambda: self.toggle_panel("watchlist"))
         tools.download_clicked.connect(lambda: self.toggle_panel("download"))
+        self._indicators.strategy_selected.connect(self._on_indicator_strategy_selected)
+        self._indicators.indicator_selected.connect(self._on_indicator_selected)
 
     @property
     def active_panel(self) -> str | None:
@@ -374,3 +391,22 @@ class ChartWindow(QMainWindow):
         logger.info("User selected timeframe %s for %s", timeframe, symbol)
         self._current_timeframe = timeframe
         self._bus.publish(TimeframeChanged(symbol=symbol, timeframe=timeframe, limit=self._limit))
+
+    @property
+    def indicators(self) -> IndicatorsToolbar:
+        """Single INDICATORS control at top of chart."""
+        return self._indicators
+
+    def _on_indicator_strategy_selected(self, name: str) -> None:
+        """Forward strategy selection — app layer handles VM execution."""
+        logger.info("Indicators strategy selected: %s (forwarded to app layer)", name)
+
+    def _on_indicator_selected(self, name: str, category: str) -> None:
+        """Non-strategy indicator selected — placeholder (future overlay)."""
+        logger.info("Indicator selected: %s (%s) — no strategy execution", name, category)
+        _ = name, category
+
+    def set_indicator_strategies(self, names: tuple[str, ...]) -> None:
+        """Inject strategy names into the INDICATORS menu (called by bootstrap)."""
+        with contextlib.suppress(Exception):
+            self._indicators.set_strategies(names)

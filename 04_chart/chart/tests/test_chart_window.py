@@ -114,7 +114,11 @@ def test_symbol_switch_keeps_explicitly_selected_timeframe() -> None:
     bus.subscribe(TimeframeChanged, changed.append)
     window.on_chart_ready(ChartReady(model=_model("TCS")))
     window.toolbar.set_timeframes(("15m", "1D"))
-    window.toolbar._buttons["1D"].click()
+    # 1D lives in the ▾ dropdown now — same signal path
+    menu = window.toolbar._menu
+    assert menu is not None
+    actions = {a.text(): a for a in menu.actions()}
+    actions["1D"].trigger()
     window.watchlist.symbol_selected.emit("SPY")
     window.watchlist.symbol_selected.emit("NETWEB")
     assert [event.timeframe for event in changed] == ["1D", "1D", "1D"]
@@ -137,7 +141,11 @@ def test_timeframe_click_publishes_timeframe_changed() -> None:
     changed: list[TimeframeChanged] = []
     bus.subscribe(TimeframeChanged, changed.append)
     window.toolbar.set_timeframes(("15m", "1D"))
-    window.toolbar._buttons["1D"].click()
+    # 1D lives in the ▾ dropdown now — same signal path
+    menu = window.toolbar._menu
+    assert menu is not None
+    actions = {a.text(): a for a in menu.actions()}
+    actions["1D"].trigger()
     assert len(changed) == 1
     assert changed[0].symbol == "TCS"
     assert changed[0].timeframe == "1D"
@@ -149,7 +157,11 @@ def test_timeframe_click_without_symbol_is_ignored() -> None:
     changed: list[TimeframeChanged] = []
     bus.subscribe(TimeframeChanged, changed.append)
     window.toolbar.set_timeframes(("1D",))
-    window.toolbar._buttons["1D"].click()
+    # 1D lives in the ▾ dropdown now — same signal path
+    menu = window.toolbar._menu
+    assert menu is not None
+    actions = {a.text(): a for a in menu.actions()}
+    actions["1D"].trigger()
     assert changed == []
 
 
@@ -167,15 +179,22 @@ def test_chart_fills_remaining_space_below_toolbar() -> None:
     window.resize(1280, 760)
     window.show()
     _app().processEvents()
-    toolbar_bottom = window.toolbar.y() + window.toolbar.height()
+    # ONE horizontal line: timeframes + ▾ + INDICATORS share a single top row
+    assert window.indicators.isVisible()
+    assert window.indicators.height() == 32
     assert window.toolbar.height() == window.toolbar.sizeHint().height()
-    assert window._widget.y() == toolbar_bottom
+    top_row = window.toolbar.parentWidget()
+    assert top_row is not None
+    assert top_row is window.indicators.parentWidget()
+    assert window.toolbar.y() == 0
+    assert window.indicators.y() == 0
+    assert window._widget.y() == top_row.height()
     splitter = window.findChild(QSplitter)
     assert splitter is not None
     assert splitter.count() == 3
     container = splitter.widget(2)
     assert container is not None
-    assert window._widget.height() == container.height() - window.toolbar.height()
+    assert window._widget.height() == container.height() - top_row.height()
 
 
 def test_chart_expands_with_window_resize_no_gap() -> None:
@@ -186,8 +205,11 @@ def test_chart_expands_with_window_resize_no_gap() -> None:
     for width, height in ((1200, 760), (1200, 1500), (900, 500)):
         window.resize(width, height)
         _app().processEvents()
-        toolbar_bottom = window.toolbar.y() + window.toolbar.height()
-        assert window._widget.y() == toolbar_bottom
+        assert window.toolbar.y() == 0
+        assert window.indicators.y() == 0
+        row = window.toolbar.parentWidget()
+        assert row is not None
+        assert window._widget.y() == row.height()
         assert window._widget.height() >= height - 100
 
 

@@ -26,6 +26,8 @@ class CandleRenderer:
     BULL = QColor("#26a69a")
     BEAR = QColor("#ef5350")
     VOLUME = QColor(38, 166, 154, 90)
+    VOLUME_BULL = QColor(38, 166, 154, 110)
+    VOLUME_BEAR = QColor(239, 83, 80, 110)
 
     _FONT = QFont("Segoe UI", 8)
     _grid_pen = QPen(_GRID, 1)
@@ -33,6 +35,8 @@ class CandleRenderer:
     _bull_pen = QPen(BULL, 1)
     _bear_pen = QPen(BEAR, 1)
     _volume_brush = QBrush(VOLUME)
+    _volume_bull_brush = QBrush(VOLUME_BULL)
+    _volume_bear_brush = QBrush(VOLUME_BEAR)
 
     @staticmethod
     def paint(
@@ -142,16 +146,26 @@ class CandleRenderer:
             body = QRectF(center_x - body_width / 2.0, top, body_width, max(bottom - top, 1.0))
             painter.fillRect(body, color)
 
+            # TradingView-style volume: same x as candle, height proportional to volume_max,
+            # color follows candle direction (green for bull, red for bear), aligned to time scale
+            is_bull = bar.close >= bar.open
             volume_height = (
                 volume_rect.height() * (bar.volume / volume_max) if volume_max > 0 else 0.0
             )
+            # Clamp to avoid 1px gap at top when volume_max is outlier; keep natural resize
+            volume_height = max(1.0, volume_height) if bar.volume > 0 else 0.0
+            if volume_height > volume_rect.height():
+                volume_height = float(volume_rect.height())
             volume = QRectF(
                 center_x - body_width / 2.0,
                 volume_rect.bottom() - volume_height,
                 body_width,
                 volume_height,
             )
-            painter.fillRect(volume, CandleRenderer._volume_brush)
+            vol_brush = (
+                CandleRenderer._volume_bull_brush if is_bull else CandleRenderer._volume_bear_brush
+            )
+            painter.fillRect(volume, vol_brush)
 
         painter.restore()
 

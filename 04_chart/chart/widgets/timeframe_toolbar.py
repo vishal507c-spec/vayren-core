@@ -1,17 +1,16 @@
-"""TimeframeToolbar — horizontal row of timeframe selector buttons.
+"""TimeframeToolbar — single-line timeframe row (TradingView-inspired).
 
-Full-width equal distribution with proper padding, responsive stretch and
-active state. No fixed pixel coordinates — the layout expands to fill the
-available container width and keeps the active button fully visible.
+Premium minimal: 15m 30m 45m 1h 2h 4h ▾  — no separators, no wrapping,
+one horizontal line, flexbox, responsive. Overflow (1D,1W,…) lives in the
+small ▾ dropdown. Active timeframe highlighted via existing VAYREN palette.
 """
 
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import (
     QButtonGroup,
-    QFrame,
     QHBoxLayout,
+    QMenu,
     QPushButton,
-    QScrollArea,
     QSizePolicy,
     QWidget,
 )
@@ -20,6 +19,10 @@ from PySide6.QtWidgets import (
 class TimeframeToolbar(QWidget):
     """Shows the timeframes detected for the current symbol as buttons.
 
+    Single horizontal line, no separators, no wrapping, no scrollbar —
+    flexbox via QHBoxLayout. Visible: 15m,30m,45m,1h,2h,4h. Overflow (1D,1W,…)
+    inside a small ▾ dropdown. Active highlighted via palette(highlight).
+
     A click emits ``timeframe_selected`` with the timeframe label. Pure UI:
     no bus, no SQL, no events — the window turns the signal into events.
     Labels come from the market-side detection (SQLite), never hardcoded.
@@ -27,82 +30,106 @@ class TimeframeToolbar(QWidget):
 
     timeframe_selected = Signal(str)
 
+    # Canonical visible order (TradingView-inspired, premium compact)
+    _VISIBLE_ORDER: tuple[str, ...] = ("5m", "15m", "30m", "45m", "1h", "2h", "4h")
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        # Outer layout holds a horizontal scroll area so narrow containers scroll
-        # rather than squash or clip the active button.
-        outer = QHBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(0)
-
-        self._scroll = QScrollArea(self)
-        self._scroll.setWidgetResizable(True)
-        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self._scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
-        self._scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self._scroll.setFixedHeight(32)
-
-        container = QWidget(self._scroll)
-        container.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self._layout = QHBoxLayout(container)
-        # Proper right-side padding so last button never touches the edge
-        self._layout.setContentsMargins(6, 3, 6, 3)
-        self._layout.setSpacing(4)
-        self._layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-
-        self._scroll.setWidget(container)
-        outer.addWidget(self._scroll)
+        self.setFixedHeight(32)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(6, 3, 6, 3)
+        lay.setSpacing(4)
+        lay.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        self._layout = lay
 
         self._group = QButtonGroup(self)
         self._group.setExclusive(True)
         self._buttons: dict[str, QPushButton] = {}
-        self._separators: list[QFrame] = []
+        self._overflow: tuple[str, ...] = ()
+        self._dropdown: QPushButton | None = None
+        self._menu: QMenu | None = None
+        self._active: str | None = None
+        self._all_timeframes: tuple[str, ...] = ()
 
     def set_timeframes(self, timeframes: tuple[str, ...]) -> None:
-        """Replace the buttons with one per detected timeframe."""
+        """Replace the buttons: 15m 30m 45m 1h 2h 4h + ▾ (1D,1W,…). No separators."""
         self.clear()
-        for index, timeframe in enumerate(timeframes):
-            button = QPushButton(timeframe, self._scroll.widget())
+        self._all_timeframes = tuple(timeframes)
+        available = set(timeframes)
+        visible = [tf for tf in self._VISIBLE_ORDER if tf in available]
+        overflow = tuple(tf for tf in timeframes if tf not in visible)
+        self._overflow = overflow
+
+        for timeframe in visible:
+            button = QPushButton(timeframe, self)
             button.setCheckable(True)
-            # Equal width: each button expands to share available space
-            button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            button.setMinimumWidth(52)
+            button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+            button.setMinimumWidth(44)
             button.setFixedHeight(24)
-            # Ensure text vertically centered via stylesheet padding handled in theme
-            self._layout.addWidget(button, 1)
+            button.setMinimumHeight(24)
+            self._layout.addWidget(button)
             self._group.addButton(button)
             self._buttons[timeframe] = button
             button.clicked.connect(
                 lambda _checked=False, tf=timeframe: self.timeframe_selected.emit(tf)
             )
-            # Subtle vertical separator between buttons (except after last)
-            if index < len(timeframes) - 1:
-                sep = QFrame(self._scroll.widget())
-                sep.setFrameShape(QFrame.Shape.VLine)
-                sep.setFrameShadow(QFrame.Shadow.Plain)
-                sep.setFixedWidth(1)
-                sep.setFixedHeight(16)
-                sep.setStyleSheet("color: palette(mid); background: palette(mid); border: none;")
-                self._layout.addWidget(sep)
-                self._separators.append(sep)
+
+        # Small dropdown for overflow (1D,1W,…) — no large dropdown
+        self._dropdown = QPushButton("▼", self)
+        self._dropdown.setCheckable(True)
+        self._dropdown.setFixedWidth(28)
+        self._dropdown.setFixedHeight(24)
+        self._dropdown.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self._dropdown.setStyleSheet(
+            "QPushButton { font-size: 10px; padding: 0px; }"  # noqa: E501
+            "QPushButton:checked { background: palette(highlight); color: palette(highlighted-text); }"  # noqa: E501
+        )
+        self._menu = QMenu(self._dropdown)
+        self._menu.setStyleSheet("QMenu { min-width: 64px; }")
+        for tf in overflow:
+            act = self._menu.addAction(tf)
+            act.triggered.connect(lambda _checked=False, t=tf: self.timeframe_selected.emit(t))
+        self._dropdown.clicked.connect(self._show_menu)
+        self._layout.addWidget(self._dropdown)
+
+        # Stretch to keep everything left-aligned, no wrapping, no scrollbar
+        self._layout.addStretch(1)
 
     def clear(self) -> None:
-        """Remove all timeframe buttons."""
+        """Remove all timeframe buttons and dropdown."""
         for _label, button in list(self._buttons.items()):
             self._group.removeButton(button)
             self._layout.removeWidget(button)
             button.deleteLater()
         self._buttons.clear()
-        for sep in self._separators:
-            self._layout.removeWidget(sep)
-            sep.deleteLater()
-        self._separators.clear()
+        if self._dropdown is not None:
+            self._layout.removeWidget(self._dropdown)
+            self._dropdown.deleteLater()
+            self._dropdown = None
+        if self._menu is not None:
+            self._menu.deleteLater()
+            self._menu = None
+        self._overflow = ()
+
+    def _show_menu(self) -> None:
+        if self._menu is None or self._dropdown is None:
+            return
+        # Rebuild menu in case timeframes changed (keeps 1D/1W working exactly as before)
+        self._menu.clear()
+        for tf in self._overflow:
+            act = self._menu.addAction(tf)
+            act.triggered.connect(lambda _checked=False, t=tf: self.timeframe_selected.emit(t))
+        # Highlight active if overflow contains it
+        for act in self._menu.actions():
+            act.setCheckable(True)
+            act.setChecked(act.text().lower() == (self._active or "").lower())
+        pos = self._dropdown.mapToGlobal(self._dropdown.rect().bottomLeft())
+        self._menu.exec(pos)
 
     def select_timeframe(self, timeframe: str) -> None:
-        """Check the button matching `timeframe` (case-insensitive), if present."""
+        """Check the button matching `timeframe` (visible or dropdown)."""
+        self._active = timeframe
         target = None
         for label, button in self._buttons.items():
             if label.lower() == timeframe.lower():
@@ -110,13 +137,26 @@ class TimeframeToolbar(QWidget):
                 break
         if target is not None:
             target.setChecked(True)
-            # Keep active fully visible even when scrolled
-            self._scroll.ensureWidgetVisible(target, 8, 0)
+            if self._dropdown is not None:
+                self._dropdown.setChecked(False)
+            return
+        # Overflow active → highlight dropdown arrow (case-insensitive)
+        if any(tf.lower() == timeframe.lower() for tf in self._overflow):
+            for _, b in self._buttons.items():
+                b.setChecked(False)
+            if self._dropdown is not None:
+                self._dropdown.setChecked(True)
+            return
+        # Fallback: clear all
+        for _, b in self._buttons.items():
+            b.setChecked(False)
+        if self._dropdown is not None:
+            self._dropdown.setChecked(False)
 
     @property
     def timeframes(self) -> tuple[str, ...]:
-        """The currently displayed timeframe labels, in order."""
-        return tuple(self._buttons.keys())
+        """All timeframes (visible + overflow) in original order."""
+        return self._all_timeframes
 
     def sizeHint(self) -> QSize:
         return QSize(480, 32)

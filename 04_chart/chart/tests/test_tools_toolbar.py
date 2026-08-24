@@ -159,7 +159,14 @@ def test_toolbar_first_watchlist_second_chart_last() -> None:
     assert container.x() > watchlist.x() + watchlist.width()
     assert widget.x() == 0
     assert widget.width() == container.width()
-    assert widget.y() == window.toolbar.height()
+    # ONE horizontal line: timeframes + INDICATORS share a single top row (32px)
+    assert window.indicators.isVisible()
+    top_row = window.toolbar.parentWidget()
+    assert top_row is not None
+    assert top_row is window.indicators.parentWidget()
+    assert window.toolbar.y() == 0
+    assert window.indicators.y() == 0
+    assert widget.y() == top_row.height()
     assert container.x() + container.width() <= splitter.width()
 
 

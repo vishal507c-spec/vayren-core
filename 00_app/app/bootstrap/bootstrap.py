@@ -762,6 +762,70 @@ class Bootstrap:
                     lab_workspace.left_nav.set_strategies(items)  # type: ignore[attr-defined]
                 except Exception:
                     pass
+                # Keep INDICATORS → STRATEGIES in sync (single control, same storage)
+                try:
+                    from strategy.language.storage import list_strategies
+
+                    names = tuple(sorted(list_strategies(r"D:\VAYREN_STRATEGIES")))
+                    window.set_indicator_strategies(names)
+                except Exception:
+                    pass
+
+            def _refresh_indicator_strategies() -> None:
+                try:
+                    from strategy.language.storage import list_strategies
+
+                    names = tuple(sorted(list_strategies(r"D:\VAYREN_STRATEGIES")))
+                    window.set_indicator_strategies(names)
+                except Exception:
+                    pass
+
+            _refresh_indicator_strategies()
+
+            def _on_chart_indicator_strategy(name: str) -> None:
+                try:
+                    from strategy.language.storage import load_strategy_record
+
+                    rec = load_strategy_record(name, r"D:\VAYREN_STRATEGIES")
+                    if rec is None:
+                        event_log.add_entry("WARN", f"Strategy not found: {name}")
+                        return
+                    strategy_id = rec.id
+                    symbol = window.current_symbol
+                    timeframe = window.current_timeframe
+                    if symbol is None or timeframe is None:
+                        event_log.add_entry("WARN", f"No chart loaded — cannot run {name}")
+                        return
+                    start_date = "2024-01-01"
+                    end_date = "2026-12-31"
+                    try:
+                        model = getattr(window._widget, "_model", None)  # type: ignore[attr-defined]
+                        if model is not None and getattr(model, "bars", None):
+                            bars = model.bars  # type: ignore[attr-defined]
+                            if bars:
+                                start_date = bars[0].timestamp[:10]  # type: ignore[index]
+                                end_date = bars[-1].timestamp[:10]  # type: ignore[index]
+                    except Exception:
+                        pass
+                    import uuid
+
+                    from backtest.events import RunBacktest
+
+                    self._bus.publish(
+                        RunBacktest(
+                            request_id=uuid.uuid4().hex[:8],
+                            strategy_ids=(strategy_id,),
+                            symbol=symbol,  # type: ignore[arg-type]
+                            timeframe=timeframe,
+                            start_date=start_date,
+                            end_date=end_date,
+                        )
+                    )
+                    event_log.add_entry("INFO", f"Indicator strategy run: {name}")
+                except Exception as exc:  # noqa: BLE001
+                    event_log.add_entry("ERROR", str(exc))
+
+            window.indicators.strategy_selected.connect(_on_chart_indicator_strategy)  # type: ignore[attr-defined]
 
             def _on_save(code: str) -> None:
                 try:
