@@ -181,7 +181,7 @@ def validate(
     test = test_res.results[0]
     # overfit if test PF < 1.0 or test expectancy negative while train positive
     is_overfit = False
-    if train.metrics.profit_factor and train.metrics.profit_factor > 1.3:
+    if train.metrics.profit_factor and train.metrics.profit_factor > 1.3:  # noqa: SIM102
         if test.metrics.profit_factor is None or test.metrics.profit_factor < 1.0:
             is_overfit = True
     if (

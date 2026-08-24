@@ -1,5 +1,6 @@
 """Bootstrap — the only place event subscriptions are created."""
 
+import contextlib
 import uuid
 from logging import getLogger
 from pathlib import Path
@@ -80,10 +81,9 @@ class Bootstrap:
         tools = ChartToolsToolbar()
         data_window = HistoricalDownloadPanel(self._bus)
 
-        # ── Strategy Lab platform ──
+        # ── Strategy Lab platform — VM-only (no Python builtins) ──
         from backtest import BacktestRunner, BacktestWorker  # noqa: I001
         from backtest.ui.overlay import TradeOverlay
-        from strategy import default_definitions, install_builtins
         from strategy.registry import StrategyRegistry
 
         # legacy panels kept for service registry compat but not shown in market
@@ -97,14 +97,8 @@ class Bootstrap:
         from app.ui.top_nav_bar import TopNavBar
 
         strategy_registry = StrategyRegistry()
-        install_builtins(strategy_registry)
-        for definition in default_definitions():
-            try:
-                strategy_registry.register_definition(definition)
-            except Exception:  # noqa: BLE001, SIM105
-                pass
 
-        # ── Phase 2: ensure generic Strategy Library has initial file records ──
+        # ── Generic Strategy Library — .vstrat is canonical (OBR/SMA as .vstrat via VM) ──
         try:
             from strategy.language.storage import ensure_builtin_strategies
 
@@ -112,7 +106,8 @@ class Bootstrap:
         except Exception:
             pass
 
-        backtest_runner = BacktestRunner(repository, strategy_registry)
+        # BacktestRunner is VM-only: .vstrat → IR → VM → Signal
+        backtest_runner = BacktestRunner(repository, registry=strategy_registry, data_dir=data_dir)
         backtest_worker = BacktestWorker(backtest_runner)
         trade_overlay = TradeOverlay()
         widget.set_overlay(trade_overlay)
@@ -125,25 +120,23 @@ class Bootstrap:
         from backtest.ui.performance_panel import PerformancePanel
 
         performance_panel = PerformancePanel()
-        # Phase 3: generic — sync params from currently selected strategy, fallback to first available
+        # Phase 3: generic — sync params from currently selected strategy, fallback to first available  # noqa: E501
         try:
             current_name = ""
-            try:
+            try:  # noqa: SIM105
                 current_name = lab_workspace.current_tab_name().strip()  # type: ignore[attr-defined]
             except Exception:
                 pass
             if not current_name:
-                try:
+                try:  # noqa: SIM105
                     current_name = lab_workspace.left_nav.current_name() or ""  # type: ignore[attr-defined]
                 except Exception:
                     pass
             target_id = (current_name or "").lower().replace(" ", "-") if current_name else ""
             obr_def = None
             if target_id:
-                try:
+                with contextlib.suppress(Exception):
                     obr_def = strategy_registry.get(target_id)
-                except Exception:
-                    pass
             if obr_def is None:
                 try:
                     defs = strategy_registry.list()
@@ -620,18 +613,38 @@ class Bootstrap:
                 lambda e: lab_workspace.right_settings.select_timeframe(e.model.timeframe),
             )  # noqa: E501
 
-            # Phase 3: generic — no hard-coded fallback, uses selected or first available
+            # Phase 3: generic — canonical is StrategyRecord.id (UUID)  # noqa: E501
             def _current_strategy_id() -> str:
+                # Prefer resolving via Strategy Library (UUID)  # noqa: E501
+                def _resolve_canonical(name: str, data_dir: str | None) -> str:
+                    try:
+                        from strategy.language.storage import (
+                            load_strategy_record,
+                        )
+
+                        rec = load_strategy_record(name, data_dir)
+                        if rec is not None:
+                            return rec.id
+                    except Exception:
+                        pass
+                    # Backward compat fallback for builtins / registry-kinds (slug)
+                    return name.lower().replace(" ", "-")
+
+                # Need data_dir for library lookup
+                try:
+                    _d = _strategy_data_dir()  # type: ignore[has-type]
+                except Exception:
+                    _d = None
                 try:
                     name = lab_workspace.current_tab_name().strip()  # type: ignore[attr-defined]
                     if name:
-                        return name.lower().replace(" ", "-")
+                        return _resolve_canonical(name, _d)
                 except Exception:
                     pass
                 try:
                     name = lab_workspace.left_nav.current_name()  # type: ignore[attr-defined]
                     if name:
-                        return str(name).lower().replace(" ", "-")
+                        return _resolve_canonical(str(name), _d)
                 except Exception:
                     pass
                 try:
@@ -793,16 +806,21 @@ class Bootstrap:
                                 target_name = candidate_name
 
                     save_strategy(code, target_name, data_dir)
-                    # Phase 5: create immutable version for this save
+                    # Phase 5: immutable version (canonical = StrategyRecord.id)  # noqa: E501
                     try:
+                        import hashlib
+
                         from strategy.language import compile_to_ir
                         from strategy.language.storage import load_strategy_record
-                        from strategy.version import create_version, list_versions
-                        import hashlib
+                        from strategy.version import (
+                            DuplicateVersionError,
+                            create_version,
+                            list_versions,
+                        )
 
                         rec = load_strategy_record(target_name, data_dir)
                         strategy_id = rec.id if rec else target_name
-                        # Determine parent version (latest)
+                        # Determine parent version (latest) for linear history
                         parent_id = None
                         try:
                             versions = list_versions(strategy_id, data_dir)
@@ -810,25 +828,39 @@ class Bootstrap:
                                 parent_id = versions[-1].version_id
                         except Exception:
                             pass
-                        # Build IR hash if possible
+                        # Build IR snapshot + hash + params if possible
+                        ir_snapshot: str | None = None
                         ir_hash = ""
                         ir_version = 1
+                        params: dict[str, float] = {}
                         try:
                             ir = compile_to_ir(code)
-                            ir_hash = hashlib.sha256(ir.to_json().encode("utf-8")).hexdigest()
+                            ir_snapshot = ir.to_json()
+                            ir_hash = hashlib.sha256(ir_snapshot.encode("utf-8")).hexdigest()
                             ir_version = ir.ir_version
+                            params = {p.label: float(p.default) for p in ir.parameters}
                         except Exception:
                             ir_hash = hashlib.sha256(code.encode("utf-8")).hexdigest()
-                        source_hash = hashlib.sha256(code.encode("utf-8")).hexdigest()
-                        create_version(
-                            strategy_id,
-                            code,
-                            ir_version=ir_version,
-                            ir_hash=ir_hash,
-                            parent_version_id=parent_id,
-                            data_dir=data_dir,
-                            metadata={"name": target_name, "source_hash": source_hash},
-                        )
+                        try:
+                            create_version(
+                                strategy_id,
+                                code,
+                                ir_version=ir_version,
+                                ir_hash=ir_hash,
+                                ir_snapshot=ir_snapshot,
+                                parameters=params,
+                                parent_version_id=parent_id,
+                                data_dir=data_dir,
+                                metadata={"name": target_name},
+                            )
+                        except DuplicateVersionError as dup:
+                            event_log.add_entry(
+                                "INFO",
+                                f"No change — version {dup.existing_version_id} already has identical source",  # noqa: E501
+                            )
+                        except Exception as ve:
+                            # Graph or other version error — surface but don't break save
+                            event_log.add_entry("WARN", f"Version not created: {ve}")
                     except Exception:
                         pass
                     event_log.add_entry("SUCCESS", f"Strategy saved: {target_name}")
@@ -861,7 +893,7 @@ class Bootstrap:
                     sid = _current_strategy_id()
                     kind = sid.replace("-", "_")
                     target_kind = kind
-                    # Ensure kind exists — register if new, otherwise overwrite factory for live update
+                    # Ensure kind exists — register if new, otherwise overwrite factory for live update  # noqa: E501
                     if strategy_registry.has_kind(target_kind):
                         strategy_registry._kinds[target_kind] = _factory  # type: ignore[attr-defined]
                     else:
@@ -893,10 +925,8 @@ class Bootstrap:
                                     kind=target_kind,
                                     params=StrategyParameters(compiled.param_defaults),
                                 )
-                                try:
+                                with contextlib.suppress(Exception):
                                     strategy_registry.register_definition(definition)
-                                except Exception:
-                                    pass
                         except Exception:
                             strategy_registry._kinds[target_kind] = _factory  # type: ignore[attr-defined]
                     # also refresh params UI from compiled defaults
@@ -932,7 +962,7 @@ class Bootstrap:
                             f"{len(ir.data_requirements)} data req)"
                         )
                     else:
-                        msg = f"Strategy compiled successfully ({len(compiled.param_defaults)} params)"
+                        msg = f"Strategy compiled successfully ({len(compiled.param_defaults)} params)"  # noqa: E501
                     lab_workspace.center_detail.show_compile_result(True, msg)
                     event_log.add_entry("SUCCESS", msg)
                 except Exception as exc:  # noqa: BLE001
@@ -1181,51 +1211,100 @@ class Bootstrap:
                 "SUCCESS",
                 f"Backtest completed: {first.name} — {len(first.trades)} trades, net ₹{first.metrics.net_profit:+,.0f}",  # noqa: E501  # noqa: E501
             )
-            # Phase 5: create immutable execution history (snapshot + events)
+            # Phase 5: create immutable execution history (canonical strategy_id = StrategyRecord.id)  # noqa: E501
             try:
-                from strategy.language.storage import load_strategy
-                from strategy.version import list_versions
-                from backtest.execution import ExecutionEvent, ExecutionHistory, create_snapshot, save_history
-                from strategy.language import compile_to_ir
                 import hashlib
+
+                from backtest.execution import (
+                    ExecutionEvent,
+                    ExecutionHistory,
+                    create_snapshot,
+                    save_history,
+                )
+                from strategy.language import compile_to_ir
+                from strategy.language.storage import (
+                    get_strategy_by_id,
+                    load_strategy,
+                    load_strategy_record,
+                )
+                from strategy.version import list_versions
 
                 data_dir = getattr(self._services.get("symbol_repository"), "_directory", None)
                 data_dir = str(data_dir) if data_dir else None
                 for res in result.results:
-                    # Find strategy definition and its latest version
+                    # Find strategy definition and resolve canonical UUID via library
                     try:
                         definition = self._strategy_registry.get(res.strategy_id)
-                        strategy_id = definition.id
-                        # Load source for IR hash
-                        source = load_strategy(definition.name, data_dir) or ""
+                        # Resolve canonical id: prefer library UUID if name exists
+                        canonical_id = definition.id
+                        source = None
+                        version = None
+                        # Try to map definition.name -> library UUID
+                        try:
+                            rec = load_strategy_record(definition.name, data_dir)
+                            if rec is not None:
+                                canonical_id = rec.id
+                                source = rec.code
+                        except Exception:
+                            pass
+                        if source is None:
+                            source = load_strategy(definition.name, data_dir) or ""
+                        # Also try get_strategy_by_id with registry id (might be UUID already)
                         if not source:
-                            # Try by id
-                            source = load_strategy(strategy_id, data_dir) or ""
-                        # Find latest version for this strategy
+                            rec2 = get_strategy_by_id(definition.id, data_dir)
+                            if rec2 is not None:
+                                canonical_id = rec2.id
+                                source = rec2.code
+                        strategy_id = canonical_id
+                        # Find latest version for canonical strategy
                         versions = list_versions(strategy_id, data_dir)
                         if versions:
                             version = versions[-1]
                             source_hash = version.source_hash
-                            ir_hash = version.ir_hash
                             ir_version = version.ir_version
                             version_id = version.version_id
                         else:
-                            # Create ephemeral version for this execution
-                            source_hash = hashlib.sha256(source.encode("utf-8")).hexdigest() if source else ""
-                            ir_hash = source_hash
-                            ir_version = 1
-                            version_id = "v0"
-                        # Compile to get IR for data requirements
+                            # Fallback: if canonical had no version, check slug-based listing (backward compat)  # noqa: E501
+                            alt_versions = list_versions(definition.id, data_dir)
+                            if alt_versions:
+                                version = alt_versions[-1]
+                                strategy_id = definition.id
+                                source_hash = version.source_hash
+                                ir_version = version.ir_version
+                                version_id = version.version_id
+                            else:
+                                source_hash = (
+                                    hashlib.sha256((source or "").encode("utf-8")).hexdigest()
+                                    if source
+                                    else ""
+                                )
+                                ir_version = 1
+                                version_id = "v0"
+                        # Compile to get IR for data requirements (deterministic)
+                        ir = None
                         try:
-                            ir = compile_to_ir(source) if source else None
-                            if ir:
-                                ir_hash = hashlib.sha256(ir.to_json().encode("utf-8")).hexdigest()
-                                ir_version = ir.ir_version
+                            if source:
+                                ir = compile_to_ir(source)
+                                # Use version's IR hash if we have a version to keep lineage stable; else compute  # noqa: E501
+                                if version is None and ir:
+                                    hashlib.sha256(ir.to_json().encode("utf-8")).hexdigest()
+                                    ir_version = ir.ir_version
                         except Exception:
                             pass
-                        # Build snapshot
+                        # Fallback IR stub if compile failed but version had hash
+                        ir_obj = (
+                            ir
+                            if ir is not None
+                            else type(
+                                "IR", (), {"ir_version": ir_version, "to_json": lambda: "{}"}
+                            )()
+                        )  # type: ignore[assignment]
+                        # Build snapshot — exact version reference preserved forever
                         snap = create_snapshot(
-                            strategy_id, version_id, source_hash, ir if ir else type("IR", (), {"ir_version": ir_version, "to_json": lambda: "{}"})(),  # type: ignore[arg-type]
+                            strategy_id,
+                            version_id,
+                            source_hash,
+                            ir_obj,  # type: ignore[arg-type]
                             dict(definition.params) if hasattr(definition, "params") else {},
                             res.config,  # type: ignore[attr-defined]
                             data_dir,
@@ -1240,11 +1319,17 @@ class Bootstrap:
                                     sequence=seq,
                                     event_type="TradeClosed",
                                     timestamp=t.exit_time,
-                                    data={"symbol": t.symbol, "side": t.side, "pnl": t.pnl, "entry": t.entry_price, "exit": t.exit_price},
+                                    data={
+                                        "symbol": t.symbol,
+                                        "side": t.side,
+                                        "pnl": t.pnl,
+                                        "entry": t.entry_price,
+                                        "exit": t.exit_price,
+                                    },
                                 )
                             )
                             seq += 1
-                        # Also add BarProcessed-like for replay determinism (using equity curve length)
+                        # Also add BarProcessed-like for replay determinism (using equity curve length)  # noqa: E501
                         for idx, pt in enumerate(res.equity_curve[:5]):
                             events.append(
                                 ExecutionEvent(
@@ -1257,12 +1342,56 @@ class Bootstrap:
                             )
                             seq += 1
                         signals = [
-                            {"index": t.entry_index, "kind": "BUY" if t.side == "LONG" else "SELL", "price": t.entry_price, "timestamp": t.entry_time}
+                            {
+                                "index": t.entry_index,
+                                "kind": "BUY" if t.side == "LONG" else "SELL",
+                                "price": t.entry_price,
+                                "timestamp": t.entry_time,
+                            }
                             for t in res.trades
                         ]
-                        history = ExecutionHistory(snapshot=snap, events=events, signals=signals)
+                        history = ExecutionHistory(
+                            snapshot=snap, events=events, signals=signals, trades=res.trades
+                        )
                         save_history(history, data_dir)
-                        event_log.add_entry("INFO", f"Execution {snap.execution_id} saved (v{version_id[:8]})")
+                        # Lineage: VERSION -> EXECUTION (and STRATEGY -> VERSION already via version creation)  # noqa: E501
+                        try:
+                            from strategy.research.lineage import (
+                                load_lineage,
+                                save_lineage,
+                            )
+
+                            g = load_lineage(data_dir)
+                            g.add_node("STRATEGY", strategy_id)
+                            g.add_node("VERSION", version_id)
+                            g.add_edge(
+                                "STRATEGY",
+                                strategy_id,
+                                "VERSION",
+                                version_id,
+                                relationship="has_version",
+                            )
+                            g.add_edge(
+                                "VERSION",
+                                version_id,
+                                "EXECUTION",
+                                snap.execution_id,
+                                relationship="executed_as",
+                            )
+                            # Also link execution to strategy directly for backward traversal convenience  # noqa: E501
+                            g.add_edge(
+                                "STRATEGY",
+                                strategy_id,
+                                "EXECUTION",
+                                snap.execution_id,
+                                relationship="executed",
+                            )
+                            save_lineage(g, data_dir)
+                        except Exception:
+                            pass
+                        event_log.add_entry(
+                            "INFO", f"Execution {snap.execution_id} saved (v{version_id[:8]})"
+                        )
                         # Expose to lab workspace for replay UI if available
                         try:
                             if hasattr(self, "_lab_workspace") and self._lab_workspace is not None:

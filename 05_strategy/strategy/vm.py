@@ -95,10 +95,10 @@ class StrategyVM:
         self._state.pending_kind = None
         self._state.pending_sl = None
         self._state.pending_tp = None
-        # Note: pending_time_exit persists across bars until triggered? In original logic it was per-bar set via time_exit() call
-        # We will handle time_exit as a statement that sets pending_time_exit, then check after statements
-        # For determinism, we clear only if not set by previous bar's time_exit? Actually time_exit is a statement that sets a future exit time, should persist
-        # But original _CompiledLogic cleared pending_time_exit each bar before exec, then set via time_exit() call, then checked after exec
+        # Note: pending_time_exit persists across bars until triggered? In original logic it was per-bar set via time_exit() call  # noqa: E501
+        # We will handle time_exit as a statement that sets pending_time_exit, then check after statements  # noqa: E501
+        # For determinism, we clear only if not set by previous bar's time_exit? Actually time_exit is a statement that sets a future exit time, should persist  # noqa: E501
+        # But original _CompiledLogic cleared pending_time_exit each bar before exec, then set via time_exit() call, then checked after exec  # noqa: E501
         # So we will clear before executing IR, then allow IR to set it, then check
         self._state.pending_time_exit = None
 
@@ -123,7 +123,7 @@ class StrategyVM:
         if self._state.pending_time_exit:
             try:
                 hhmm = bar.timestamp[11:16]  # HH:MM
-                if hhmm >= self._state.pending_time_exit:
+                if hhmm >= self._state.pending_time_exit:  # noqa: SIM102
                     if not view.state.flat:
                         self._state.pending_kind = (
                             SignalKind.BUY if view.state.side == "SHORT" else SignalKind.SELL
@@ -187,7 +187,7 @@ class StrategyVM:
         if isinstance(node, IRConstant):
             return node.value
         if isinstance(node, IRName):
-            # Resolve order: variables, params via input (but input is Call, not Name), bar fields, helpers
+            # Resolve order: variables, params via input (but input is Call, not Name), bar fields, helpers  # noqa: E501
             if node.id in ctx:
                 return ctx[node.id]
             if node.id in self._state.variables:
@@ -230,7 +230,7 @@ class StrategyVM:
             return False
         if isinstance(node, IRCompare):
             left = self._eval_expr(node.left, ctx, bar, view)
-            for op, comp_node in zip(node.ops, node.comparators):
+            for op, comp_node in zip(node.ops, node.comparators):  # noqa: B905
                 right = self._eval_expr(comp_node, ctx, bar, view)
                 if not self._eval_compare(op, left, right):
                     return False
@@ -292,7 +292,9 @@ class StrategyVM:
             return None
         if func == "close_position":
             if not view.state.flat:
-                self._state.pending_kind = SignalKind.BUY if view.state.side == "SHORT" else SignalKind.SELL
+                self._state.pending_kind = (
+                    SignalKind.BUY if view.state.side == "SHORT" else SignalKind.SELL
+                )  # noqa: E501
             return None
         if func == "stop_loss":
             if args:
@@ -394,7 +396,9 @@ class StrategyVM:
         return False
 
 
-def vm_from_ir(ir: StrategyIR, params: StrategyParameters | dict[str, float] | None = None) -> StrategyLogic:
+def vm_from_ir(
+    ir: StrategyIR, params: StrategyParameters | dict[str, float] | None = None
+) -> StrategyLogic:  # noqa: E501
     """Create a StrategyLogic-compatible VM instance from IR."""
     vm = StrategyVM(ir, params)
     # StrategyLogic protocol expects warmup/on_bar

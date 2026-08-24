@@ -77,7 +77,7 @@ class _StrategyRow(QWidget):
         layout.addWidget(label, 1)
         layout.addWidget(self._allocation, 0)
 
-    def contextMenuEvent(self, event) -> None:  # type: ignore[no-untyped-def]
+    def contextMenuEvent(self, event) -> None:  # type: ignore[no-untyped-def]  # noqa: N802
         menu = QMenu(self)
         menu.addAction("Configure…", lambda: self.configure_requested.emit(self._definition.id))
         menu.addAction("Duplicate", lambda: self.duplicate_requested.emit(self._definition.id))

@@ -49,8 +49,12 @@ def test_lab_backtest_via_bus(qt_app: QApplication, tmp_path: Path) -> None:
 
     if os.environ.get("VAYREN_SKIP_RUN"):
         return
-    registry = bootstrap.services.get("strategy_registry")
-    strategy_id = registry.list()[0].id
+    # VM-only: use Strategy Library ( .vstrat) canonical ID, not registry
+    from strategy.language.storage import list_strategy_records
+
+    records = list_strategy_records(data_dir)
+    assert records, "Strategy Library should have at least one .vstrat (OBR/SMA)"
+    strategy_id = records[0].id
     bootstrap.bus.publish(
         RunBacktest(
             request_id="test-lab",

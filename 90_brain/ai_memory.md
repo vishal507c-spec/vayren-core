@@ -1,6 +1,6 @@
-# AI Memory â€” Abhi Kya State Hai
+# AI Memory — Abhi Kya State Hai
 
-**Last update:** 2026-08-17 (Phase 6N in-app Provider Credentials Manager — secure Windows CredMan/file store, 5-field Zerodha schema, layered store→env→none, status refresh bina restart; 6M canonical vocabulary, 6L provider decoupling)
+**Last update:** 2026-08-24 (Builtin Removal & VM Migration — VM-only .vstrat→IR→VM, no exec fallback, OBR/SMA/user same VM, BacktestRunner VM-only, 4 builtin files deleted, 12 migration tests, 55+13+760+ total pass)
 
 ## 1. Ye kya hai?
 

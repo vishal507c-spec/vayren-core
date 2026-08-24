@@ -1,4 +1,4 @@
-"""Backtest runner end-to-end with a real repository."""
+"""Backtest runner end-to-end with VM-only path (.vstrat → IR → VM)."""
 
 import os
 
@@ -9,10 +9,7 @@ import tempfile
 from pathlib import Path
 
 from market.repository.symbol_repository import SymbolRepository
-from strategy.builtins import SMA_CROSSOVER_KIND, SMA_CROSSOVER_SPECS, install_builtins
-from strategy.models.definition import StrategyDefinition
-from strategy.models.parameters import StrategyParameters
-from strategy.registry import StrategyRegistry
+from strategy.language.storage import create_strategy
 
 from backtest.models.config import BacktestConfig
 from backtest.runner import BacktestRunner
@@ -39,22 +36,29 @@ def _seed_repo(tmp: Path, symbol: str, closes: list[float]) -> SymbolRepository:
     return SymbolRepository(tmp)
 
 
+SMA_CODE = """strategy("SMA Crossover")
+fast_period = input(10, "Fast period")
+slow_period = input(30, "Slow period")
+fast = SMA(fast_period)
+slow = SMA(slow_period)
+if fast > slow and prev_fast <= prev_slow:
+    buy()
+if fast < slow and prev_fast >= prev_slow:
+    sell()
+prev_fast = fast
+prev_slow = slow
+"""
+
+
 def test_runner_produces_metrics():
     with tempfile.TemporaryDirectory() as d:
         closes = [100.0 + (i % 10) for i in range(60)]
         closes[10:15] = [120.0, 122.0, 125.0, 123.0, 121.0]
-        repo = _seed_repo(Path(d), "TEST", closes)
-        registry = StrategyRegistry()
-        install_builtins(registry)
-        definition = StrategyDefinition(
-            id="sma-crossover",
-            name="SMA Crossover",
-            version="1.0",
-            kind=SMA_CROSSOVER_KIND,
-            params=StrategyParameters.from_specs(SMA_CROSSOVER_SPECS),
-        )
-        registry.register_definition(definition)
-        runner = BacktestRunner(repo, registry)
+        tmp = Path(d)
+        repo = _seed_repo(tmp, "TEST", closes)
+        # Create .vstrat strategy (VM-only, no builtin factory)
+        rec = create_strategy("SMA Crossover", SMA_CODE, data_dir=tmp)
+        runner = BacktestRunner(repo, data_dir=tmp)
         config = BacktestConfig(
             symbol="TEST",
             timeframe="15m",
@@ -62,30 +66,25 @@ def test_runner_produces_metrics():
             end_date="2026-01-30",
             initial_capital=1_000_000,
         )
-        result = runner.run(config, ("sma-crossover",))
+        result = runner.run(config, (rec.id,))
         assert not result.has_error
         assert len(result.results) == 1
         strategy_result = result.results[0]
         assert strategy_result.bars_used > 0
         assert strategy_result.equity_curve
         assert strategy_result.metrics.starting_capital == 1_000_000
+        # Also test by name lookup (VM path supports both)
+        result2 = runner.run(config, (rec.name,))
+        assert not result2.has_error
+        assert len(result2.results) == 1
 
 
 def test_runner_empty_range():
     with tempfile.TemporaryDirectory() as d:
-        repo = _seed_repo(Path(d), "TEST", [100.0, 101.0, 102.0])
-        registry = StrategyRegistry()
-        install_builtins(registry)
-        registry.register_definition(
-            StrategyDefinition(
-                id="s",
-                name="S",
-                version="1.0",
-                kind=SMA_CROSSOVER_KIND,
-                params=StrategyParameters.from_specs(SMA_CROSSOVER_SPECS),
-            )
-        )
-        runner = BacktestRunner(repo, registry)
+        tmp = Path(d)
+        repo = _seed_repo(tmp, "TEST", [100.0, 101.0, 102.0])
+        rec = create_strategy("EmptyTest", SMA_CODE, data_dir=tmp)
+        runner = BacktestRunner(repo, data_dir=tmp)
         config = BacktestConfig(
             symbol="TEST",
             timeframe="15m",
@@ -93,5 +92,25 @@ def test_runner_empty_range():
             end_date="2025-01-02",
             initial_capital=1_000_000,
         )
-        result = runner.run(config, ("s",))
+        result = runner.run(config, (rec.id,))
         assert result.has_error
+        assert result.results == ()
+
+
+def test_runner_vm_is_only_path():
+    # Prove no builtin import and VM is used
+    import pathlib
+
+    runner_text = pathlib.Path("06_backtest/backtest/runner.py").read_text(encoding="utf-8")
+    # Should not import builtins
+    assert "builtins" not in runner_text
+    assert "install_builtins" not in runner_text
+    assert "sma_crossover" not in runner_text.lower()
+    # Should use VM path
+    assert "vm_from_ir" in runner_text or "compile_strategy" in runner_text
+    # Compiler should have no exec fallback
+    comp_text = pathlib.Path("05_strategy/strategy/language/compiler.py").read_text(
+        encoding="utf-8"
+    )
+    assert "exec(" not in comp_text
+    assert "_CompiledLogic" not in comp_text

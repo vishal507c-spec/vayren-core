@@ -1,19 +1,18 @@
 """Timeframe inference — derive a human-readable candle period from bar spacing.
 
 Given a sequence of bars, this infers the most likely timeframe string
-(e.g. "1d", "30m", "1h") from the median gap between consecutive candles.
-The median is computed over a sampled prefix of the series (the first
-``_INFERENCE_SAMPLE`` gaps) — identical for regular candle series, and
-bounded work for very long histories (a 60k-bar series no longer parses
-every timestamp). This is a pure-function helper with no Qt, no SQL, no
-events.
+(e.g. "1D", "30m", "1h") from the dominant gap between consecutive candles.
+The dominant (most common) gap is computed over a sampled prefix of the
+series (the first ``_INFERENCE_SAMPLE`` gaps) — robust against overnight
+and weekend gaps that skew the median for sparse intraday timeframes
+(e.g. 4h). This is a pure-function helper with no Qt, no SQL, no events.
 """
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Callable
 from datetime import datetime
-from statistics import median
 
 from market.models.bar import Bar
 
@@ -48,33 +47,45 @@ _FORMATTERS: dict[int, Callable[[int], str]] = {
     10800: lambda s: f"{s // 3600}h",
     14400: lambda s: f"{s // 3600}h",
     21600: lambda s: f"{s // 3600}h",
-    43200: lambda s: f"{s // 43200}d",
-    86400: lambda s: f"{s // 86400}d",
+    43200: lambda s: f"{s // 3600}h",
+    86400: lambda s: f"{s // 86400}D",
     604800: lambda _: "1W",
 }
 
 
 def infer_timeframe(bars: tuple[Bar, ...]) -> str:
-    """Return a timeframe string inferred from the median bar-to-bar gap.
+    """Return a timeframe string inferred from the dominant bar-to-bar gap.
 
-    Falls back to ``"1d"`` when there are fewer than two bars or timestamps
+    Uses the most common gap (mode) to be robust against overnight/weekend
+    gaps that skew the median for sparse intraday timeframes (e.g. 4h has
+    2 bars/day, median of [14400,72000] would be 43200 -> "1D" bug). Falls
+    back to ``"1D"`` when there are fewer than two bars or timestamps
     do not parse.
     """
     if len(bars) < 2:
-        return "1d"
-    gaps = _median_gaps(bars)
+        return "1D"
+    gaps = _gaps(bars)
     if not gaps:
-        return "1d"
-    median_gap = median(gaps)
-    rounded = min(_SECONDS_LADDER, key=lambda step: abs(step - median_gap))
+        return "1D"
+    counter = Counter(gaps)
+    most_common = counter.most_common()
+    max_count = most_common[0][1]
+    candidates = [gap for gap, cnt in most_common if cnt == max_count]
+    mode_gap = min(candidates)
+    rounded = min(_SECONDS_LADDER, key=lambda step: abs(step - mode_gap))
     return _format_seconds(rounded)
 
 
-def _median_gaps(bars: tuple[Bar, ...]) -> list[float]:
+def _gaps(bars: tuple[Bar, ...]) -> list[float]:
     times = _parse_times(bars)
     if len(times) < 2:
         return []
     return [t2 - t1 for t1, t2 in zip(times, times[1:], strict=False) if t2 > t1]
+
+
+def _median_gaps(bars: tuple[Bar, ...]) -> list[float]:
+    """Backward compat alias — use _gaps (mode)."""
+    return _gaps(bars)
 
 
 def _parse_times(bars: tuple[Bar, ...]) -> list[float]:
@@ -97,4 +108,4 @@ def _format_seconds(seconds: int) -> str:
     fmt = _FORMATTERS.get(seconds)
     if fmt is not None:
         return fmt(seconds)
-    return f"{seconds // 86400}d"
+    return f"{seconds // 86400}D"

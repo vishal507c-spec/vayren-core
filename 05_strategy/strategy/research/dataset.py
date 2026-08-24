@@ -40,9 +40,10 @@ class ResearchDataset:
         parameters: dict[str, Any] | None = None,
     ) -> ResearchDataset:
         execution_ids = tuple(h.snapshot.execution_id for h in histories)
-        trades = tuple(t for h in histories for t in h.signals)  # signals as proxy for trades
-        # For real trades, use backtest Trade objects if available via history.signals
-        # Here we aggregate signals
+        # Pull actual TradeRecord objects from execution histories.
+        # Previously signals were incorrectly used as a proxy for trades.
+        # Now: trades come from the backtest's completed TradeRecords.
+        trades = tuple(t for h in histories for t in h.trades)
         signals = tuple(s for h in histories for s in h.signals)
         # Data identity from first history if exists
         data_identity = dict(histories[0].snapshot.data_identity) if histories else {}

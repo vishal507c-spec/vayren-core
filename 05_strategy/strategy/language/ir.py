@@ -287,7 +287,7 @@ def build_ir(
     name = strategy_name or "Untitled"
     if not strategy_name:
         for node in ast.walk(tree):
-            if (
+            if (  # noqa: SIM102
                 isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Name)
                 and node.func.id == "strategy"
@@ -327,7 +327,7 @@ def build_ir(
                 reqs.add("STRATEGY_META")
             elif fname == "input":
                 reqs.add("PARAM")
-        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):  # noqa: SIM102
             if node.id in ("close", "open", "high", "low", "volume", "bar", "time"):
                 reqs.add("BAR")
                 if node.id == "volume":

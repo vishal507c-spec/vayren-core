@@ -1,4 +1,4 @@
-"""Strategy UI smoke tests."""
+"""Strategy UI smoke tests — generic, no builtin factory."""
 
 import os
 
@@ -6,11 +6,15 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
 
-from strategy.builtins import SMA_CROSSOVER_KIND, SMA_CROSSOVER_SPECS
 from strategy.models.definition import StrategyDefinition
-from strategy.models.parameters import StrategyParameters
+from strategy.models.parameters import ParameterSpec, StrategyParameters
 from strategy.ui.control_panel import StrategyControlPanel
 from strategy.ui.strategy_list_panel import StrategyListPanel
+
+DUMMY_KIND = "dummy_ui_kind"
+DUMMY_SPECS: tuple[ParameterSpec, ...] = (
+    ParameterSpec(key="p1", label="P1", default=1, minimum=0, maximum=10, decimals=0),
+)
 
 
 def _qt_app() -> QApplication:
@@ -29,15 +33,15 @@ def test_control_panel_set_strategies():
             id="a",
             name="A",
             version="1.0",
-            kind=SMA_CROSSOVER_KIND,
-            params=StrategyParameters.from_specs(SMA_CROSSOVER_SPECS),
+            kind=DUMMY_KIND,
+            params=StrategyParameters.from_specs(DUMMY_SPECS),
         ),
         StrategyDefinition(
             id="b",
             name="B",
             version="2.0",
-            kind=SMA_CROSSOVER_KIND,
-            params=StrategyParameters.from_specs(SMA_CROSSOVER_SPECS),
+            kind=DUMMY_KIND,
+            params=StrategyParameters.from_specs(DUMMY_SPECS),
         ),
     )
     panel.set_strategies(defs)
@@ -58,8 +62,8 @@ def test_control_busy_disables_run():
                 id="a",
                 name="A",
                 version="1.0",
-                kind=SMA_CROSSOVER_KIND,
-                params=StrategyParameters.from_specs(SMA_CROSSOVER_SPECS),
+                kind=DUMMY_KIND,
+                params=StrategyParameters.from_specs(DUMMY_SPECS),
             ),
         )
     )
@@ -80,8 +84,8 @@ def test_strategy_list_panel():
             id="a",
             name="A",
             version="1.0",
-            kind=SMA_CROSSOVER_KIND,
-            params=StrategyParameters.from_specs(SMA_CROSSOVER_SPECS),
+            kind=DUMMY_KIND,
+            params=StrategyParameters.from_specs(DUMMY_SPECS),
             allocation_pct=40,
         ),
     )

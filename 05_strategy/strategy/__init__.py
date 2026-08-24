@@ -3,7 +3,6 @@
 Depends on: core, market.
 """
 
-from strategy.builtins import default_definitions, install_builtins
 from strategy.events.lab_reset import LabReset
 from strategy.events.paper_trade_requested import PaperTradeRequested
 from strategy.events.strategies_listed import StrategiesListed
@@ -33,8 +32,6 @@ __all__ = [
     "StrategyRuntime",
     "StrategyLogic",
     "BarView",
-    "install_builtins",
-    "default_definitions",
     "strategy_manifest",
     "StrategiesListed",
     "StrategySelected",

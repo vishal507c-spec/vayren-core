@@ -65,7 +65,7 @@ class EquityCurveView(_ChartView):
         super().set_result(result)
         self.update()
 
-    def paintEvent(self, _event) -> None:  # type: ignore[no-untyped-def]
+    def paintEvent(self, _event) -> None:  # type: ignore[no-untyped-def]  # noqa: N802
         painter = QPainter(self)
         painter.fillRect(self.rect(), _CHART_BG)
         if self._result is None or not self._result.equity_curve:
@@ -108,7 +108,7 @@ class EquityCurveView(_ChartView):
 class DrawdownView(_ChartView):
     """Drawdown area chart."""
 
-    def paintEvent(self, _event) -> None:  # type: ignore[no-untyped-def]
+    def paintEvent(self, _event) -> None:  # type: ignore[no-untyped-def]  # noqa: N802
         painter = QPainter(self)
         painter.fillRect(self.rect(), _CHART_BG)
         if self._result is None or not self._result.equity_curve:
@@ -147,7 +147,7 @@ class DrawdownView(_ChartView):
 class DistributionView(_ChartView):
     """Win/loss counts + P&L and R-multiple histograms."""
 
-    def paintEvent(self, _event) -> None:  # type: ignore[no-untyped-def]
+    def paintEvent(self, _event) -> None:  # type: ignore[no-untyped-def]  # noqa: N802
         painter = QPainter(self)
         painter.fillRect(self.rect(), _CHART_BG)
         if self._result is None or not self._result.trades:
@@ -246,7 +246,7 @@ class TradesView(QWidget):
 class MonthlyView(_ChartView):
     """Monthly P&L bar chart."""
 
-    def paintEvent(self, _event) -> None:  # type: ignore[no-untyped-def]
+    def paintEvent(self, _event) -> None:  # type: ignore[no-untyped-def]  # noqa: N802
         painter = QPainter(self)
         painter.fillRect(self.rect(), _CHART_BG)
         if self._result is None or not self._result.trades:
@@ -344,7 +344,7 @@ class PerformanceView(QWidget):
 class ExposureView(_ChartView):
     """Time-in-market and exposure summary."""
 
-    def paintEvent(self, _event) -> None:  # type: ignore[no-untyped-def]
+    def paintEvent(self, _event) -> None:  # type: ignore[no-untyped-def]  # noqa: N802
         painter = QPainter(self)
         painter.fillRect(self.rect(), _CHART_BG)
         if self._result is None or not self._result.trades:

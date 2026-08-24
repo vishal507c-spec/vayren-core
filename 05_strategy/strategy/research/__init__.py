@@ -2,23 +2,51 @@
 
 from .advanced_validation import (
     AdvancedValidationResult,
+    CostScenario,
+    CostStressResult,
     CPCVConfig,
+    CPCVPath,
     CPCVResult,
     DSRResult,
     EvidenceGrade,
+    LeakageResult,
     MultipleTestingResult,
+    OOSResult,
     PBOResult,
+    TemporalPeriod,
+    TemporalStabilityResult,
     ValidationPolicy,
+    check_data_leakage,
+    check_temporal_stability,
+    compute_dsr,
+    compute_pbo,
     correct_multiple_testing,
     grade_evidence,
     run_cpcv,
+    validate_costs,
+    validate_discovery,
+    validate_oos,
 )
 from .analysis import ResearchAnalysis, analyze_dataset
 from .dataset import ResearchDataset
 from .discovery import Discovery, create_discovery
 from .engine import ResearchEngine
+from .evidence import Evidence, create_evidence, list_evidence, load_evidence, save_evidence
+from .evolution import (
+    EvolutionProposal,
+    approve_proposal,
+    compare_versions,
+    create_proposal,
+    get_diff,
+    list_proposals,
+    load_proposal,
+    reject_proposal,
+    save_proposal,
+)
 from .experiment import Experiment, Hypothesis
+from .governance import Decision, create_decision, list_decisions, load_decision, save_decision
 from .intelligence import CandidateHypothesis, IntelligenceRun, ResearchIntelligence
+from .lineage import LineageEdge, LineageGraph, LineageNode, load_lineage, save_lineage
 from .robustness import RobustnessResult, run_parameter_sensitivity, run_robustness
 from .validation import ValidationResult, validate_experiment
 
@@ -41,13 +69,51 @@ __all__ = [
     "ResearchEngine",
     "AdvancedValidationResult",
     "CPCVConfig",
+    "CPCVPath",
     "CPCVResult",
+    "CostScenario",
+    "CostStressResult",
     "DSRResult",
     "EvidenceGrade",
+    "LeakageResult",
     "MultipleTestingResult",
+    "OOSResult",
     "PBOResult",
+    "TemporalPeriod",
+    "TemporalStabilityResult",
     "ValidationPolicy",
+    "check_data_leakage",
+    "check_temporal_stability",
+    "compute_dsr",
+    "compute_pbo",
     "correct_multiple_testing",
     "grade_evidence",
     "run_cpcv",
+    "validate_costs",
+    "validate_discovery",
+    "validate_oos",
+    "Evidence",
+    "create_evidence",
+    "list_evidence",
+    "load_evidence",
+    "save_evidence",
+    "LineageNode",
+    "LineageEdge",
+    "LineageGraph",
+    "load_lineage",
+    "save_lineage",
+    "Decision",
+    "create_decision",
+    "list_decisions",
+    "load_decision",
+    "save_decision",
+    "EvolutionProposal",
+    "create_proposal",
+    "load_proposal",
+    "list_proposals",
+    "save_proposal",
+    "approve_proposal",
+    "reject_proposal",
+    "get_diff",
+    "compare_versions",
 ]

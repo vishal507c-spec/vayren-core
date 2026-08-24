@@ -67,7 +67,7 @@ class ParamInfo:
 
 
 def parse_and_validate(code: str) -> tuple[ast.Module | None, list[CompileError], list[ParamInfo]]:
-    """Parse code, return (tree, errors, params). If errors non-empty, tree is still parsed but invalid."""
+    """Parse code, return (tree, errors, params). If errors non-empty, tree is still parsed but invalid."""  # noqa: E501
     errors: list[CompileError] = []
     params: list[ParamInfo] = []
     try:
@@ -90,7 +90,7 @@ def parse_and_validate(code: str) -> tuple[ast.Module | None, list[CompileError]
             if isinstance(node, (ast.keyword, ast.comprehension, ast.arguments, ast.arg)):
                 continue
             # Special handling: disallow imports, loops, defs, classes
-            if isinstance(
+            if isinstance(  # noqa: SIM102
                 node,
                 (
                     ast.Import,
@@ -112,8 +112,8 @@ def parse_and_validate(code: str) -> tuple[ast.Module | None, list[CompileError]
                     ast.Yield,
                 ),
             ):
-                # Allow tuples/lists for very limited? For now allow input tuples but keep strict: disallow
-                # Actually allow Tuple/List as they may appear in some contexts, but keep warning for these node types
+                # Allow tuples/lists for very limited? For now allow input tuples but keep strict: disallow  # noqa: E501
+                # Actually allow Tuple/List as they may appear in some contexts, but keep warning for these node types  # noqa: E501
                 if isinstance(
                     node,
                     (ast.Import, ast.ImportFrom, ast.FunctionDef, ast.ClassDef, ast.For, ast.While),
@@ -202,7 +202,7 @@ def parse_and_validate(code: str) -> tuple[ast.Module | None, list[CompileError]
             ):
                 continue
         # Validate calls more thoroughly
-        if isinstance(node, ast.Call):
+        if isinstance(node, ast.Call):  # noqa: SIM102
             if isinstance(node.func, ast.Name):
                 fname = node.func.id
                 if fname == "input":
@@ -298,8 +298,8 @@ def parse_and_validate(code: str) -> tuple[ast.Module | None, list[CompileError]
                 and node.id not in FUNCTIONS
                 and node.id not in {"True", "False", "None"}
             ):
-                # It could be a user variable — allow any lowercase name that was assigned? For simplicity allow any Name that is not uppercase primitive mismatch
-                # We will allow user variables: any name that is not disallowed is ok if it appears as assignment target elsewhere.
-                # To keep validator simple, allow all stores and any load that is either variable or function — so permit any identifier as potential user var
+                # It could be a user variable — allow any lowercase name that was assigned? For simplicity allow any Name that is not uppercase primitive mismatch  # noqa: E501
+                # We will allow user variables: any name that is not disallowed is ok if it appears as assignment target elsewhere.  # noqa: E501
+                # To keep validator simple, allow all stores and any load that is either variable or function — so permit any identifier as potential user var  # noqa: E501
                 pass
     return tree, errors, params

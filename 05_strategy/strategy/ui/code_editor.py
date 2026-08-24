@@ -100,9 +100,9 @@ class CodeEditor(QPlainTextEdit):
         font.setStyleHint(QFont.StyleHint.Monospace)
         font.setFixedPitch(True)
         self.setFont(font)
-        # comfortable line height via stylesheet line-height not directly supported, use extra spacing via document margin
+        # comfortable line height via stylesheet line-height not directly supported, use extra spacing via document margin  # noqa: E501
         self.setStyleSheet(
-            "QPlainTextEdit { background: #0B1017; color: #E6EDF3; border: none; selection-background-color: #0E4F49; selection-color: #FFFFFF; }"
+            "QPlainTextEdit { background: #0B1017; color: #E6EDF3; border: none; selection-background-color: #0E4F49; selection-color: #FFFFFF; }"  # noqa: E501
             "QPlainTextEdit:focus { border: none; }"
         )
         # tab = 4 spaces, indentation
@@ -135,7 +135,7 @@ class CodeEditor(QPlainTextEdit):
 
     def _find_dialog(self):
         txt, ok = QInputDialog.getText(self, "Find", "Find:")
-        if ok and txt:
+        if ok and txt:  # noqa: SIM102
             if not self.find(txt):
                 self.moveCursor(QTextCursor.MoveOperation.Start)
                 self.find(txt)

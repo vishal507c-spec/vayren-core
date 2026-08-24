@@ -1,16 +1,34 @@
-"""Strategy registry tests."""
+"""Strategy registry tests — generic, no builtin dependency."""
 
 import pytest
 
-from strategy.builtins import SMA_CROSSOVER_KIND, SMA_CROSSOVER_SPECS, install_builtins
 from strategy.models.definition import StrategyDefinition
-from strategy.models.parameters import StrategyParameters
+from strategy.models.parameters import ParameterSpec, StrategyParameters
+from strategy.models.signal import Signal
 from strategy.registry import StrategyRegistry, StrategyRegistryError
+from strategy.runtime import BarView
+
+DUMMY_KIND = "dummy_test_kind"
+DUMMY_SPECS: tuple[ParameterSpec, ...] = (
+    ParameterSpec(key="p1", label="P1", default=1, minimum=0, maximum=10, decimals=0),
+)
+
+
+class _DummyLogic:
+    def warmup(self) -> int:
+        return 0
+
+    def on_bar(self, view: BarView) -> Signal | None:  # noqa: ARG002
+        return None
+
+
+def _dummy_factory(params: StrategyParameters) -> _DummyLogic:  # noqa: ARG001
+    return _DummyLogic()
 
 
 def _registry() -> StrategyRegistry:
     r = StrategyRegistry()
-    install_builtins(r)
+    r.register_kind(DUMMY_KIND, _dummy_factory, DUMMY_SPECS)
     return r
 
 
@@ -19,8 +37,8 @@ def _def(_registry: StrategyRegistry, sid: str = "test-one") -> StrategyDefiniti
         id=sid,
         name="Test",
         version="1.0",
-        kind=SMA_CROSSOVER_KIND,
-        params=StrategyParameters.from_specs(SMA_CROSSOVER_SPECS),
+        kind=DUMMY_KIND,
+        params=StrategyParameters.from_specs(DUMMY_SPECS),
         allocation_pct=40.0,
     )
 
@@ -39,8 +57,8 @@ def test_enabled_filters():
         id="b",
         name="B",
         version="1.0",
-        kind=SMA_CROSSOVER_KIND,
-        params=StrategyParameters.from_specs(SMA_CROSSOVER_SPECS),
+        kind=DUMMY_KIND,
+        params=StrategyParameters.from_specs(DUMMY_SPECS),
         enabled=False,
     )
     r.register_definition(disabled)
@@ -95,4 +113,7 @@ def test_duplicate_id_rejected():
 
 def test_kinds_sorted():
     r = _registry()
-    assert SMA_CROSSOVER_KIND in r.kinds
+    assert DUMMY_KIND in r.kinds
+    # Registry starts empty if not populated
+    empty = StrategyRegistry()
+    assert empty.kinds == ()
