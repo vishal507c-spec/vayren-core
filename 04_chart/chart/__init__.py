@@ -16,6 +16,7 @@ from chart.renderer.label_renderer import LabelRenderer
 from chart.renderer.overlay_renderer import OverlayRenderer
 from chart.renderer.time_axis_renderer import TimeAxisRenderer
 from chart.widgets.candle_chart_widget import CandleChartWidget
+from chart.widgets.indicator_visibility_panel import IndicatorVisibilityPanel
 from chart.widgets.symbol_list_widget import SymbolListWidget
 from chart.widgets.timeframe_toolbar import TimeframeToolbar
 from chart.widgets.tools_toolbar import ChartToolsToolbar
@@ -33,6 +34,7 @@ __all__ = [
     "OverlayRenderer",
     "TimeAxisRenderer",
     "CandleChartWidget",
+    "IndicatorVisibilityPanel",
     "SymbolListWidget",
     "TimeframeToolbar",
     "ChartToolsToolbar",

@@ -30,6 +30,8 @@ class CandleRenderer:
     VOLUME_BEAR = QColor(239, 83, 80, 110)
 
     _FONT = QFont("Segoe UI", 8)
+    _VOLUME_LABEL_FONT = QFont("Segoe UI", 7)
+    _VOLUME_LABEL_FONT.setWeight(QFont.Weight.DemiBold)
     _grid_pen = QPen(_GRID, 1)
     _text_pen = QPen(_TEXT, 1)
     _bull_pen = QPen(BULL, 1)
@@ -37,6 +39,9 @@ class CandleRenderer:
     _volume_brush = QBrush(VOLUME)
     _volume_bull_brush = QBrush(VOLUME_BULL)
     _volume_bear_brush = QBrush(VOLUME_BEAR)
+    _volume_label_brush_bull = QBrush(BULL)
+    _volume_label_brush_bear = QBrush(BEAR)
+    _volume_label_text_pen = QPen(QColor("#ffffff"), 1)
 
     @staticmethod
     def paint(
@@ -168,6 +173,78 @@ class CandleRenderer:
             painter.fillRect(volume, vol_brush)
 
         painter.restore()
+
+    @staticmethod
+    def format_volume(volume: int) -> str:
+        """TradingView-style compact volume formatting.
+
+        950 -> "950", 8020 -> "8.02 K", 1250000 -> "1.25 M", 2500000000 -> "2.50 B"
+        """
+        v = int(volume)
+        if v >= 1_000_000_000:
+            return f"{v / 1_000_000_000:.2f} B"
+        if v >= 1_000_000:
+            return f"{v / 1_000_000:.2f} M"
+        if v >= 1_000:
+            return f"{v / 1_000:.2f} K"
+        return str(v)
+
+    @staticmethod
+    def paint_volume_value(
+        painter: QPainter,
+        volume: int,
+        is_bull: bool,
+        volume_max: int,
+        volume_rect: QRect,
+    ) -> QRect:
+        """Paint latest volume value label at right edge of volume pane.
+
+        Compact rounded-rectangle, right-aligned, vertically centered at
+        latest volume level, green/red per bar direction (TradingView exact).
+        No-ops when volume_max is 0 or rect is empty.
+        """
+        if volume_rect.isEmpty() or volume_max <= 0:
+            return QRect()
+        text = CandleRenderer.format_volume(volume)
+        # volume height for latest bar
+        volume_height = volume_rect.height() * (volume / volume_max) if volume_max > 0 else 0.0
+        volume_height = max(0.0, min(volume_height, float(volume_rect.height())))
+        # y at top of volume bar
+        y_top = volume_rect.bottom() - volume_height
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+        painter.setFont(CandleRenderer._VOLUME_LABEL_FONT)
+        fm = painter.fontMetrics()
+        pad_h = 6
+        pad_v = 3
+        text_w = fm.horizontalAdvance(text)
+        text_h = fm.height()
+        label_w = text_w + 2 * pad_h
+        label_h = text_h + 2 * pad_v
+        # clamp label height to volume_rect height
+        label_h = min(label_h, volume_rect.height())
+        # right edge aligned, 2px inset from right
+        x = volume_rect.right() - label_w - 2
+        # vertically centered at y_top, clamped inside volume_rect
+        y = y_top - label_h / 2.0
+        if y < volume_rect.top():
+            y = float(volume_rect.top())
+        if y + label_h > volume_rect.bottom():
+            y = float(volume_rect.bottom() - label_h)
+        rect = QRectF(x, y, label_w, label_h)
+        brush = (
+            CandleRenderer._volume_label_brush_bull
+            if is_bull
+            else CandleRenderer._volume_label_brush_bear
+        )
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(brush)
+        painter.drawRoundedRect(rect, 3.0, 3.0)
+        painter.setPen(CandleRenderer._volume_label_text_pen)
+        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)
+        painter.restore()
+        return rect.toRect()
 
     @staticmethod
     def _y(price: float, price_low: float, price_high: float, chart_rect: QRect) -> float:

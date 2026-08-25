@@ -1,10 +1,11 @@
 """CandleChartWidget — candlestick viewport: zoom, pan, touch, crosshair + overlays."""
 
+import contextlib
 from logging import getLogger
 from math import hypot
 
 from market.models.bar import Bar
-from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import (
     QAction,
     QBrush,
@@ -29,6 +30,7 @@ from chart.renderer.candle_renderer import CandleRenderer
 from chart.renderer.crosshair_renderer import CrosshairRenderer
 from chart.renderer.overlay_renderer import OverlayRenderer
 from chart.renderer.time_axis_renderer import TimeAxisRenderer
+from chart.widgets.indicator_visibility_panel import IndicatorVisibilityPanel
 
 logger = getLogger(__name__)
 
@@ -56,6 +58,8 @@ class CandleChartWidget(QWidget):
     independent of the crosshair, which only paints its price/time labels.
     Holds no events, no SQL, no data loading.
     """
+
+    session_changed = Signal()
 
     MIN_VISIBLE_BARS = 10
     ZOOM_STEP = 1.25
@@ -97,6 +101,18 @@ class CandleChartWidget(QWidget):
         self._price_drag_active = False
         self._price_drag_anchor_y = 0.0
         self._overlay: ChartOverlay | None = None
+        self._overlays: dict[str, ChartOverlay] = {}
+        # ── indicator visibility (TradingView-style, dynamic) ─────────
+        self._indicator_visible: dict[str, bool] = {}
+        self._visibility_panel = IndicatorVisibilityPanel(self)
+        # start hidden — no active indicator (TradingView exact)
+        self._visibility_panel.hide()
+        self._visibility_panel.visibility_changed.connect(self._on_indicator_visibility_changed)
+        self._visibility_panel.indicator_removed.connect(self._on_indicator_removed)
+        self._visibility_panel.settings_requested.connect(self._on_indicator_settings)
+        self._visibility_panel.source_requested.connect(self._on_indicator_source)
+        self._visibility_panel.more_requested.connect(self._on_indicator_more)
+        self._position_visibility_panel()
         self._reset_action = QAction("↩ Reset chart view", self)
         self._reset_action.setShortcut(QKeySequence(Qt.Modifier.ALT | Qt.Key.Key_R))
         self._reset_action.triggered.connect(self.reset_view)
@@ -122,7 +138,192 @@ class CandleChartWidget(QWidget):
         indices/prices → pixels using the chart's own math.
         """
         self._overlay = overlay
+        # keep per-indicator map in sync — TradeOverlay is treated as "OBR" indicator
+        if overlay is None:
+            self._overlays.pop("OBR", None)
+        else:
+            # store under OBR key (canonical strategy overlay); also keep generic
+            self._overlays["OBR"] = overlay
         self.update()
+
+    def set_named_overlay(self, name: str, overlay: ChartOverlay | None) -> None:
+        """Install or remove a named overlay (per-indicator layer).
+
+        Each name corresponds to one row in the visibility panel. Visibility
+        toggle hides only that name's overlay — per-indicator isolation.
+        Volume ("Vol") is not an overlay (handled via volume strip).
+        """
+        if overlay is None:
+            self._overlays.pop(name, None)
+            if self._overlay is not None and name == "OBR":
+                self._overlay = None
+        else:
+            self._overlays[name] = overlay
+            if name == "OBR":
+                self._overlay = overlay
+        self.update()
+
+    # ── indicator visibility (TradingView-style, dynamic) ────────────
+
+    @property
+    def visibility_panel(self) -> IndicatorVisibilityPanel:
+        """Floating indicator visibility list (top-left)."""
+        return self._visibility_panel
+
+    @property
+    def indicator_visibility(self) -> dict[str, bool]:
+        """Current visibility per indicator (copy)."""
+        return dict(self._indicator_visible)
+
+    def is_indicator_visible(self, name: str) -> bool:
+        return self._indicator_visible.get(name, True)
+
+    @property
+    def volume_visible(self) -> bool:
+        """Whether the volume strip is currently rendered."""
+        return self._indicator_visible.get("Vol", True)
+
+    @property
+    def overlay_visible(self) -> bool:
+        """Whether the strategy overlay (OBR) is currently rendered."""
+        return self._indicator_visible.get("OBR", True)
+
+    def _normalize_indicator_name(self, name: str) -> str:
+        return "Vol" if name.lower() == "volume" else name
+
+    def add_indicator(self, name: str) -> None:
+        """Add indicator to panel (dynamic, TradingView exact)."""
+        key = self._normalize_indicator_name(name)
+        if key in self._indicator_visible and self._visibility_panel.has_indicator(key):
+            return
+        self._indicator_visible[key] = True
+        self._visibility_panel.add_indicator(key)
+        # ensure overlay mapping for known strategy indicators
+        if key == "OBR" and self._overlay is not None and key not in self._overlays:
+            self._overlays[key] = self._overlay
+        self._position_visibility_panel()
+        self._static_cache = None
+        self._static_key = None
+        self._grid_cache = None
+        self._grid_key = None
+        self.update()
+        with contextlib.suppress(Exception):
+            self.session_changed.emit()
+
+    def remove_indicator(self, name: str) -> None:
+        """Remove indicator completely (Delete action)."""
+        key = self._normalize_indicator_name(name)
+        if not self._visibility_panel.has_indicator(key) and key not in self._indicator_visible:
+            return
+        # delegate to panel which will emit indicator_removed
+        self._visibility_panel.remove_indicator(key)
+
+    def clear_indicators(self) -> None:
+        """Remove all indicators (panel hidden)."""
+        self._indicator_visible.clear()
+        self._visibility_panel.clear()
+        self._overlays.clear()
+        if self._overlay is not None:
+            # keep single overlay but not mapped — hidden until re-added
+            pass
+        self._static_cache = None
+        self._static_key = None
+        self._grid_cache = None
+        self._grid_key = None
+        self.update()
+        with contextlib.suppress(Exception):
+            self.session_changed.emit()
+
+    def set_indicator_visible(self, name: str, visible: bool) -> None:
+        """Set visibility for `name` — updates eye panel and chart rendering.
+
+        Only visual rendering is affected; underlying data/calculation untouched.
+        Name stays in list even when hidden (crossed-eye).
+        """
+        key = self._normalize_indicator_name(name)
+        if self._indicator_visible.get(key, True) == visible:
+            return
+        self._indicator_visible[key] = visible
+        panel_row = self._visibility_panel.row(key)
+        if panel_row is not None and panel_row.is_visible != visible:
+            panel_row.set_visible(visible)
+        self._static_cache = None
+        self._static_key = None
+        self._grid_cache = None
+        self._grid_key = None
+        self.update()
+        with contextlib.suppress(Exception):
+            self.session_changed.emit()
+
+    def set_indicators(self, names: tuple[str, ...]) -> None:
+        """Replace indicator list (panel rows) — preserves visibility where possible."""
+        # normalize
+        norm = tuple(self._normalize_indicator_name(n) for n in names)
+        previous = dict(self._indicator_visible)
+        self._indicator_visible = {n: previous.get(n, True) for n in norm}
+        self._visibility_panel.set_indicators(norm)
+        # restore overlay mappings for strategy indicators present
+        for n in norm:
+            if n == "OBR" and self._overlay is not None:
+                self._overlays[n] = self._overlay
+        self._position_visibility_panel()
+        self._static_cache = None
+        self._static_key = None
+        self._grid_cache = None
+        self._grid_key = None
+        self.update()
+        with contextlib.suppress(Exception):
+            self.session_changed.emit()
+
+    def _on_indicator_visibility_changed(self, name: str, visible: bool) -> None:
+        """Panel eye clicked — update rendering only, never data/calculation."""
+        key = self._normalize_indicator_name(name)
+        self._indicator_visible[key] = visible
+        self._static_cache = None
+        self._static_key = None
+        self._grid_cache = None
+        self._grid_key = None
+        self.update()
+        with contextlib.suppress(Exception):
+            self.session_changed.emit()
+
+    def _on_indicator_removed(self, name: str) -> None:
+        """Panel Delete clicked — remove indicator completely."""
+        key = self._normalize_indicator_name(name)
+        if key in ("Vol", "OBR"):
+            self._indicator_visible[key] = False
+        else:
+            self._indicator_visible.pop(key, None)
+        if key in self._overlays:
+            self._overlays.pop(key, None)
+        self._position_visibility_panel()
+        self._static_cache = None
+        self._static_key = None
+        self._grid_cache = None
+        self._grid_key = None
+        self.update()
+        with contextlib.suppress(Exception):
+            self.session_changed.emit()
+
+    def _on_indicator_settings(self, name: str) -> None:
+        logger.info("Indicator settings requested: %s", name)
+
+    def _on_indicator_source(self, name: str) -> None:
+        logger.info("Indicator source requested: %s", name)
+
+    def _on_indicator_more(self, name: str, pos: object) -> None:
+        logger.info("Indicator more requested: %s at %s", name, pos)
+
+    def _position_visibility_panel(self) -> None:
+        """Place panel top-left, just below header strip, compact, not covering price."""
+        x = 8
+        y = self.SYMBOL_HEIGHT + 6
+        self._visibility_panel.move(x, y)
+        self._visibility_panel.raise_()
+        if self._visibility_panel.indicators:
+            self._visibility_panel.show()
+        else:
+            self._visibility_panel.hide()
 
     def _paint_strategy_overlay(
         self,
@@ -134,14 +335,30 @@ class CandleChartWidget(QWidget):
         price_high: float,
         volume_max: int,
     ) -> None:
-        """Delegate painting to the installed overlay, if any.
+        """Delegate painting to the installed overlay(s), respecting per-indicator visibility.
 
         Builds a :class:`ChartViewport` snapshot from the current model /
         window / price range and forwards it. No-ops when no overlay or no
         model is loaded — cheap enough to call on every paint.
+        Hidden indicators skip their overlay only — other indicators unchanged.
         """
-        overlay = self._overlay
-        if overlay is None or self._model is None or not self._model.bars:
+        if self._model is None or not self._model.bars:
+            return
+        # collect overlays whose indicator is visible
+        to_paint: list[ChartOverlay] = []
+        if self._overlays:
+            for name, ov in self._overlays.items():
+                if self._indicator_visible.get(name, True):
+                    to_paint.append(ov)
+            if (
+                self._overlay is not None
+                and self._overlay not in self._overlays.values()
+                and self._indicator_visible.get("OBR", True)
+            ):
+                to_paint.append(self._overlay)
+        elif self._overlay is not None and self._indicator_visible.get("OBR", True):
+            to_paint.append(self._overlay)
+        if not to_paint:
             return
         viewport = ChartViewport(
             bars=self._model.bars,
@@ -154,10 +371,11 @@ class CandleChartWidget(QWidget):
             volume_rect=volume_rect,
             axis_rect=axis_rect,
         )
-        try:
-            overlay.paint_overlay(painter, viewport)
-        except Exception:  # noqa: BLE001
-            logger.exception("Overlay paint failed")
+        for overlay in to_paint:
+            try:
+                overlay.paint_overlay(painter, viewport)
+            except Exception:  # noqa: BLE001
+                logger.exception("Overlay paint failed")
 
     # ── model + viewport ──────────────────────────────────────────────
 
@@ -440,6 +658,8 @@ class CandleChartWidget(QWidget):
     # ── painting ──────────────────────────────────────────────────────
 
     def paintEvent(self, _event: QPaintEvent) -> None:
+        # keep panel top-left floating, never covering price scale
+        self._position_visibility_panel()
         painter = QPainter(self)
         painter.fillRect(self.rect(), CandleRenderer.BACKGROUND)
         if self._model is None:
@@ -456,7 +676,8 @@ class CandleChartWidget(QWidget):
             return
         chart_rect, volume_rect, axis_rect = self._chart_rects()
         price_low, price_high = self._price_range()
-        _, _, volume_max = self._window_stats()
+        _, _, volume_max_raw = self._window_stats()
+        volume_max = volume_max_raw if self._indicator_visible.get("Vol", True) else 0
         painter.drawPixmap(
             0,
             0,
@@ -465,8 +686,9 @@ class CandleChartWidget(QWidget):
             ),
         )
         self._paint_header(painter, chart_rect)
+        self._paint_volume_value_label(painter, volume_rect, volume_max_raw)
         self._paint_strategy_overlay(
-            painter, chart_rect, volume_rect, axis_rect, price_low, price_high, volume_max
+            painter, chart_rect, volume_rect, axis_rect, price_low, price_high, volume_max_raw
         )
         crosshair = self._crosshair_pos
         if crosshair is not None and chart_rect.contains(crosshair):
@@ -488,8 +710,9 @@ class CandleChartWidget(QWidget):
         Everything that does not change on mouse-only repaints is baked into
         one pixmap, so crosshair movement costs a single blit instead of a
         full redraw. Rebuilt whenever the model, window, price range or size
-        changes (all part of the key).
+        changes (all part of the key). Volume visibility is part of key.
         """
+        vol_visible = self._indicator_visible.get("Vol", True)
         key = (
             id(self._model),
             self._first,
@@ -497,6 +720,7 @@ class CandleChartWidget(QWidget):
             price_low,
             price_high,
             volume_max,
+            vol_visible,
             self.width(),
             self.height(),
         )
@@ -600,6 +824,32 @@ class CandleChartWidget(QWidget):
             left_margin=symbol_rect.right(),
         )
 
+    def _paint_volume_value_label(
+        self, painter: QPainter, volume_rect: QRect, volume_max: int
+    ) -> None:
+        """Paint selected-candle volume value at right edge of volume pane (TradingView exact).
+
+        Compact rounded-rect, right-aligned, vertically at selected volume level
+        (crosshair's candle), green/red per that candle's direction, formatted
+        as 950 / 8.02 K / 1.25 M / 2.50 B. Hidden when crosshair outside
+        (TradingView hide/reset) — no fixed latest label.
+        No-ops when no model, no volume, Vol hidden, or no crosshair.
+        """
+        if self._model is None or not self._model.bars:
+            return
+        if not self._indicator_visible.get("Vol", True):
+            return
+        if volume_rect.isEmpty() or volume_max <= 0:
+            return
+        if self._crosshair_pos is None or self._crosshair_value is None:
+            return
+        idx = self._crosshair_value.bar_index
+        if idx < 0 or idx >= len(self._model.bars):
+            return
+        bar = self._model.bars[idx]
+        is_bull = bar.close >= bar.open
+        CandleRenderer.paint_volume_value(painter, bar.volume, is_bull, volume_max, volume_rect)
+
     def _paint_overlays(
         self,
         painter: QPainter,
@@ -668,6 +918,7 @@ class CandleChartWidget(QWidget):
         self._first = new_first
         self._last = new_first + new_count
         self._follow_latest = new_first >= self._max_first()
+        self._refresh_crosshair_after_viewport()
         self.update()
 
     def _pan_delta_px(self, delta_x_px: float) -> None:
@@ -685,6 +936,7 @@ class CandleChartWidget(QWidget):
         self._first = new_first
         self._last = new_first + count
         self._follow_latest = new_first >= self._max_first()
+        self._refresh_crosshair_after_viewport()
         self.update()
 
     # ── input events ──────────────────────────────────────────────────
@@ -772,6 +1024,7 @@ class CandleChartWidget(QWidget):
         self._clear_crosshair()
 
     def resizeEvent(self, _event: QResizeEvent) -> None:
+        self._position_visibility_panel()
         self.update()
 
     def event(self, event: QEvent) -> bool:
@@ -930,6 +1183,11 @@ class CandleChartWidget(QWidget):
             close=bar.close,
         )
 
+    def _refresh_crosshair_after_viewport(self) -> None:
+        """Re-snap crosshair after pan/zoom so volume tracking stays synced (TradingView)."""
+        if self._crosshair_pos is not None:
+            self._snap_crosshair(self._crosshair_pos)
+
     def _price_from_y(self, bar: Bar, y: int, chart_rect: QRect) -> float:
         """Return the price at vertical pixel `y` within the chart rect."""
         if self._model is None:
@@ -945,8 +1203,8 @@ class CandleChartWidget(QWidget):
         return low + fraction * span
 
     def _crosshair_dirty_rect(self, old_pos: QPoint | None, new_pos: QPoint | None) -> QRect:
-        """Smallest region covering the previous and next crosshair + overlays."""
-        chart_rect, _, axis_rect = self._chart_rects()
+        """Smallest region covering previous/next crosshair + overlays + volume label."""
+        chart_rect, volume_rect, axis_rect = self._chart_rects()
         rects: list[QRect] = []
         for pos in (old_pos, new_pos):
             if pos is None:
@@ -963,6 +1221,9 @@ class CandleChartWidget(QWidget):
                 )
             )
             rects.append(axis_rect)
+            rects.append(
+                QRect(volume_rect.right() - 80, volume_rect.top(), 80, volume_rect.height())
+            )
         if not rects:
             return self.rect()
         dirty = rects[0]

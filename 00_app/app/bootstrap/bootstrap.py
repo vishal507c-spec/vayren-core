@@ -169,6 +169,92 @@ class Bootstrap:
         )
         lifecycle = AppLifecycle(self._bus)
 
+        # ── Chart session persistence (TradingView exact restore) ──
+        from chart.session.session_store import ChartSessionStore
+
+        chart_session_store = ChartSessionStore()
+        _initial_chart_session = chart_session_store.load()
+        # pre-seed window with saved symbol/timeframe so on_symbols_listed can restore
+        # (validated later against actual symbol list)
+        try:
+            if _initial_chart_session.symbol:
+                window._current_symbol = _initial_chart_session.symbol  # type: ignore[attr-defined]
+            if _initial_chart_session.timeframe:
+                window._current_timeframe = _initial_chart_session.timeframe  # type: ignore[attr-defined]
+        except Exception:
+            pass
+        # restore active indicators (name, visible, settings)
+        try:
+            for ind in _initial_chart_session.indicators:
+                with contextlib.suppress(Exception):
+                    widget.add_indicator(ind.name)
+                    # restore visibility
+                    if not ind.visible:
+                        widget.set_indicator_visible(ind.name, False)
+                    # restore settings if any (e.g., OBR params) — keep for future
+                    if ind.settings:
+                        # store settings on widget for later use (not affecting calculation)
+                        with contextlib.suppress(Exception):
+                            if not hasattr(widget, "_indicator_settings"):
+                                widget._indicator_settings = {}  # type: ignore[attr-defined]
+                            widget._indicator_settings[ind.name] = dict(ind.settings)  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
+        # ── auto-save helper (symbol/timeframe/indicator add-remove/visibility/settings/layout) ──
+        def _save_chart_session(*_a: Any, **_kw: Any) -> None:
+            try:
+                from chart.session.session_store import ChartSession, IndicatorState
+
+                # collect active indicators — only those with a row (TradingView active)
+                inds: list[IndicatorState] = []
+                try:
+                    for rname in list(widget.visibility_panel.indicators):  # type: ignore[attr-defined]
+                        vis = widget.is_indicator_visible(rname)  # type: ignore[attr-defined]
+                        settings: dict[str, Any] = {}
+                        try:
+                            if hasattr(widget, "_indicator_settings"):
+                                settings = dict(widget._indicator_settings.get(rname, {}))  # type: ignore[attr-defined]
+                        except Exception:
+                            settings = {}
+                        inds.append(IndicatorState(name=rname, visible=vis, settings=settings))
+                except Exception:
+                    inds = []
+                # chart layout stub (future)
+                layout: dict[str, Any] = {}
+                with contextlib.suppress(Exception):
+                    layout["follow_latest"] = bool(
+                        getattr(widget, "_follow_latest", True)
+                    )
+                sess = ChartSession(
+                    symbol=getattr(window, "_current_symbol", None),
+                    timeframe=getattr(window, "_current_timeframe", None),
+                    indicators=inds,
+                    chart_layout=layout,
+                )
+                chart_session_store.save(sess)
+            except Exception:
+                pass
+
+        # connect auto-save to all relevant signals (symbol/timeframe/indicator)
+        with contextlib.suppress(Exception):
+            window.session_changed.connect(_save_chart_session)
+        with contextlib.suppress(Exception):
+            widget.session_changed.connect(_save_chart_session)  # type: ignore[attr-defined]
+        # also direct panel signals as fallback (widget already emits via session_changed)
+        with contextlib.suppress(Exception):
+            widget.visibility_panel.visibility_changed.connect(
+                lambda *_a: _save_chart_session()  # type: ignore[attr-defined]
+            )
+            widget.visibility_panel.indicator_removed.connect(
+                lambda *_a: _save_chart_session()  # type: ignore[attr-defined]
+            )
+        # ensure we save on close/crash via aboutToQuit
+        with contextlib.suppress(Exception):
+            app_inst = QApplication.instance()
+            if isinstance(app_inst, QApplication):
+                app_inst.aboutToQuit.connect(_save_chart_session)
+
         data_settings = DownloadSettings(data_dir=data_dir)
         data_provider = build_provider(data_settings)
         data_credentials = ProviderCredentialsManager(data_settings, data_provider)
@@ -380,6 +466,82 @@ class Bootstrap:
         self._bus.subscribe(TimeframesListed, window.on_timeframes_listed)
         self._bus.subscribe(DataLoaded, engine.on_data_loaded)
         self._bus.subscribe(ChartReady, window.on_chart_ready)
+        # ── TradingView: keep active indicators alive across symbol/timeframe, recalculate ──
+        def _recalc_active_indicators(event: ChartReady) -> None:  # type: ignore[no-untyped-def]
+            try:
+                # only recalc if there are active indicators (panel has rows)
+                active = []
+                try:
+                    active = list(widget.visibility_panel.indicators)  # type: ignore[attr-defined]
+                except Exception:
+                    active = []
+                if not active:
+                    return
+                # for each active strategy indicator, rerun with new symbol/timeframe
+                # keep settings/visibility/style intact, just change data source
+                for ind_name in active:
+                    # check if this indicator is a strategy (in STRATEGIES list)
+                    is_strategy = False
+                    try:
+                        from strategy.language.storage import list_strategies
+
+                        strats = list_strategies(r"D:\VAYREN_STRATEGIES")
+                        if ind_name in strats or ind_name.lower() == "obr":
+                            is_strategy = True
+                        # also check registry
+                        if not is_strategy:
+                            try:
+                                # strategy ids are lower-kebab
+                                sid = ind_name.lower().replace(" ", "-")
+                                if strategy_registry.contains(sid):
+                                    is_strategy = True
+                            except Exception:
+                                pass
+                    except Exception:
+                        is_strategy = ind_name.lower() == "obr"
+                    if not is_strategy:
+                        # pure indicator (VWAP, EMA, etc.) — no backtest, just keep row
+                        # recalculation will happen via its own renderer on next paint
+                        continue
+                    # strategy: rerun backtest with new symbol/timeframe, preserve settings
+                    try:
+                        from strategy.language.storage import load_strategy_record
+
+                        rec = load_strategy_record(ind_name, r"D:\VAYREN_STRATEGIES")
+                        if rec is None and ind_name.lower() == "obr":
+                            # fallback for OBR
+                            rec = load_strategy_record("OBR", r"D:\VAYREN_STRATEGIES")
+                        if rec is None:
+                            continue
+                        strategy_id = rec.id
+                        symbol = event.model.symbol
+                        timeframe = event.model.timeframe
+                        # use current chart's bar range for backtest period
+                        try:
+                            bars = event.model.bars
+                            start_date = bars[0].timestamp[:10] if bars else "2024-01-01"
+                            end_date = bars[-1].timestamp[:10] if bars else "2026-12-31"
+                        except Exception:
+                            start_date = "2024-01-01"
+                            end_date = "2026-12-31"
+                        from backtest.events import RunBacktest
+
+                        self._bus.publish(
+                            RunBacktest(
+                                request_id=uuid.uuid4().hex[:8],
+                                strategy_ids=(strategy_id,),
+                                symbol=symbol,  # type: ignore[arg-type]
+                                timeframe=timeframe,
+                                start_date=start_date,
+                                end_date=end_date,
+                            )
+                        )
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+
+        self._bus.subscribe(ChartReady, _recalc_active_indicators)
         self._bus.subscribe(WindowRendered, lifecycle.on_window_rendered)
         self._bus.subscribe(DownloadRequest, data_worker.on_download_request)
         self._bus.subscribe(CoverageRequest, data_worker.on_coverage_request)

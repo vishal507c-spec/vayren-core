@@ -13,6 +13,7 @@ rail that later phases can wire real tools into.
 
 from collections.abc import Callable
 from math import cos, pi, sin
+from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPainterPath, QPen, QPixmap
@@ -126,11 +127,33 @@ def _draw_cursor(painter: QPainter, color: QColor) -> None:
 
 
 def _draw_download(painter: QPainter, color: QColor) -> None:
-    _stroke(painter, color)
-    painter.drawLine(QPointF(8.0, 3.5), QPointF(8.0, 8.2))
-    painter.drawLine(QPointF(5.6, 6.8), QPointF(8.0, 9.2))
-    painter.drawLine(QPointF(10.4, 6.8), QPointF(8.0, 9.2))
-    painter.drawRoundedRect(QRectF(2.6, 10.6, 10.8, 2.6), 1.0, 1.0)
+    # Historical Data Download — database + download (clean terminal line-art)
+    # SVG 32×32 (stroke 1.8) scaled to 16×16 logical, optically centered
+    pen = QPen(color, 1.7)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    painter.setPen(pen)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.save()
+    # scale 0.55 from 32 to ~17.6 logical to fill 16 with slight margin, then center
+    painter.translate(0.9, 0.7)
+    # database top ellipse (orig 11,6.5 rx7 ry3.2 -> scaled 0.55)
+    painter.drawEllipse(QRectF(1.65, 1.18, 7.7, 3.52))
+    # vertical sides
+    painter.drawLine(QPointF(1.65, 2.94), QPointF(1.65, 7.45))
+    painter.drawLine(QPointF(9.35, 2.94), QPointF(9.35, 7.45))
+    # bottom ellipse
+    painter.drawEllipse(QRectF(1.65, 5.69, 7.7, 3.52))
+    # middle ellipse
+    painter.drawEllipse(QRectF(1.65, 3.48, 7.7, 3.52))
+    # download arrow vertical
+    painter.drawLine(QPointF(11.0, 5.85), QPointF(11.0, 11.55))
+    # arrow head
+    painter.drawLine(QPointF(8.68, 9.55), QPointF(11.0, 11.87))
+    painter.drawLine(QPointF(13.32, 9.55), QPointF(11.0, 11.87))
+    # tray
+    painter.drawLine(QPointF(8.53, 13.75), QPointF(13.47, 13.75))
+    painter.restore()
 
 
 def _draw_crosshair(painter: QPainter, color: QColor) -> None:
@@ -266,13 +289,52 @@ def _pixmap(kind: str, color: QColor) -> QPixmap:
     return pixmap
 
 
+def _svg_download_pixmap(color: QColor) -> QPixmap:
+    # Use provided SVG exactly as supplied, transparent background, vector
+    base = Path(__file__).resolve().parent.parent / "assets" / "indicator_bar"
+    p = base / "historical_download.svg"
+    try:
+        data = p.read_text(encoding="utf-8")
+    except Exception:
+        return _pixmap("download", color)
+    # replace currentColor with actual color hex
+    hex_col = color.name()
+    data = data.replace("currentColor", hex_col)
+    try:
+        from PySide6.QtCore import QByteArray
+        from PySide6.QtSvg import QSvgRenderer
+    except Exception:
+        return _pixmap("download", color)
+    pixmap = QPixmap(32, 32)
+    pixmap.setDevicePixelRatio(2.0)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    renderer = QSvgRenderer(QByteArray(data.encode("utf-8")))
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    # render SVG (32x32) into 16x16 logical (32 device)
+    renderer.render(painter, QRectF(0, 0, 32, 32))
+    painter.end()
+    return pixmap
+
+
 def _icon(kind: str) -> QIcon:
     icon = _ICON_CACHE.get(kind)
     if icon is None:
         icon = QIcon()
-        icon.addPixmap(_pixmap(kind, TEXT), QIcon.Mode.Normal, QIcon.State.Off)
-        icon.addPixmap(_pixmap(kind, ACCENT_TEXT), QIcon.Mode.Normal, QIcon.State.On)
-        icon.addPixmap(_pixmap(kind, PLACEHOLDER), QIcon.Mode.Disabled, QIcon.State.Off)
+        if kind == "download":
+            icon.addPixmap(_svg_download_pixmap(TEXT), QIcon.Mode.Normal, QIcon.State.Off)
+            icon.addPixmap(_svg_download_pixmap(ACCENT_TEXT), QIcon.Mode.Normal, QIcon.State.On)
+            icon.addPixmap(_svg_download_pixmap(PLACEHOLDER), QIcon.Mode.Disabled, QIcon.State.Off)
+            # hover accent also via Active
+            try:
+                from chart.theme import ACCENT
+                icon.addPixmap(_svg_download_pixmap(ACCENT), QIcon.Mode.Active, QIcon.State.Off)
+            except Exception:
+                pass
+        else:
+            icon.addPixmap(_pixmap(kind, TEXT), QIcon.Mode.Normal, QIcon.State.Off)
+            icon.addPixmap(_pixmap(kind, ACCENT_TEXT), QIcon.Mode.Normal, QIcon.State.On)
+            icon.addPixmap(_pixmap(kind, PLACEHOLDER), QIcon.Mode.Disabled, QIcon.State.Off)
         _ICON_CACHE[kind] = icon
     return icon
 

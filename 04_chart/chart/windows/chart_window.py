@@ -10,7 +10,7 @@ from market.events.quotes_loaded import QuotesLoaded
 from market.events.symbols_listed import SymbolsListed
 from market.events.timeframe_changed import TimeframeChanged
 from market.events.timeframes_listed import TimeframesListed
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QApplication,
@@ -55,6 +55,8 @@ class ChartWindow(QMainWindow):
     reset-view action. Subscriptions are wired by bootstrap; this class only
     handles incoming events and publishes the terminal results.
     """
+
+    session_changed = Signal()
 
     def __init__(
         self,
@@ -267,19 +269,29 @@ class ChartWindow(QMainWindow):
     def on_symbols_listed(self, event: SymbolsListed) -> None:
         """Populate the watchlist with the discovered stock symbols.
 
-        If no chart is loaded yet, automatically select the first symbol so
-        the market chart appears immediately without requiring a manual click
-        (TradingView-style: open = chart visible).
+        Restores saved session symbol if available and valid, otherwise
+        TradingView-style: first symbol. Persists are validated against
+        actual symbol list; corrupted/missing falls back to defaults.
         """
         self._watchlist.set_symbols(event.symbols)
         logger.info("Watchlist populated (%d stocks)", len(event.symbols))
         if not event.symbols:
             return
-        if self._current_symbol is None:
-            first = event.symbols[0]
-            # Highlight first row and trigger the same flow as a user click
-            self._watchlist.select_symbol(first)
-            self._on_symbol_selected(first)
+        target: str | None = None
+        if self._current_symbol is not None and self._current_symbol in event.symbols:
+            target = self._current_symbol
+        elif self._current_symbol is None:
+            target = event.symbols[0]
+        else:
+            # saved symbol not found (corrupted) → fallback to first
+            target = event.symbols[0]
+            self._current_symbol = None  # reset to allow fallback logic next time
+            # also clear timeframe if symbol invalid? keep as is, will be validated later
+            logger.info("Saved symbol not found, fallback to %s", target)
+        if target is not None:
+            self._watchlist.select_symbol(target)
+            self._current_symbol = target
+            self._on_symbol_selected(target)
 
     def on_quotes_loaded(self, event: QuotesLoaded) -> None:
         """Attach the latest real quotes to the watchlist rows."""
@@ -370,6 +382,8 @@ class ChartWindow(QMainWindow):
         self.show()
         logger.info("Chart window shown for %s", model.symbol)
         self._bus.publish(WindowRendered())
+        with contextlib.suppress(Exception):
+            self.session_changed.emit()
 
     def _on_symbol_selected(self, symbol: str) -> None:
         logger.info("User selected symbol: %s", symbol)
@@ -382,6 +396,8 @@ class ChartWindow(QMainWindow):
                 TimeframeChanged(symbol=symbol, timeframe=timeframe, limit=self._limit)
             )
         self._bus.publish(ListTimeframes(symbol=symbol))
+        with contextlib.suppress(Exception):
+            self.session_changed.emit()
 
     def _on_timeframe_selected(self, timeframe: str) -> None:
         symbol = self._current_symbol
@@ -391,6 +407,8 @@ class ChartWindow(QMainWindow):
         logger.info("User selected timeframe %s for %s", timeframe, symbol)
         self._current_timeframe = timeframe
         self._bus.publish(TimeframeChanged(symbol=symbol, timeframe=timeframe, limit=self._limit))
+        with contextlib.suppress(Exception):
+            self.session_changed.emit()
 
     @property
     def indicators(self) -> IndicatorsToolbar:
@@ -398,13 +416,20 @@ class ChartWindow(QMainWindow):
         return self._indicators
 
     def _on_indicator_strategy_selected(self, name: str) -> None:
-        """Forward strategy selection — app layer handles VM execution."""
+        """Add strategy indicator to chart visibility list (TradingView dynamic)."""
         logger.info("Indicators strategy selected: %s (forwarded to app layer)", name)
+        with contextlib.suppress(Exception):
+            self._widget.add_indicator(name)
+        with contextlib.suppress(Exception):
+            self.session_changed.emit()
 
     def _on_indicator_selected(self, name: str, category: str) -> None:
-        """Non-strategy indicator selected — placeholder (future overlay)."""
+        """Add indicator to chart visibility list (TradingView dynamic)."""
         logger.info("Indicator selected: %s (%s) — no strategy execution", name, category)
-        _ = name, category
+        with contextlib.suppress(Exception):
+            self._widget.add_indicator(name)
+        with contextlib.suppress(Exception):
+            self.session_changed.emit()
 
     def set_indicator_strategies(self, names: tuple[str, ...]) -> None:
         """Inject strategy names into the INDICATORS menu (called by bootstrap)."""
