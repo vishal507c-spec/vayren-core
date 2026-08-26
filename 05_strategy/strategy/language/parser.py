@@ -262,7 +262,29 @@ def parse_and_validate(code: str) -> tuple[ast.Module | None, list[CompileError]
                 elif fname in FUNCTIONS:
                     spec = FUNCTIONS[fname]
                     expected = spec["args"]
-                    if isinstance(expected, tuple):
+                    # chart primitives allow keyword options, so check minimum only
+                    if fname in ("plot", "line", "label", "marker"):
+                        min_args = expected[0] if isinstance(expected, tuple) else expected
+                        total_args = len(node.args) + len(node.keywords)
+                        if len(node.args) < min_args:
+                            errors.append(
+                                CompileError(
+                                    line=node.lineno,
+                                    col=node.col_offset,
+                                    message=f"{fname}() missing required value",
+                                    hint=f"{fname}(value, title) — e.g. plot(refHigh, \"REF HIGH\")",
+                                )
+                            )
+                        elif fname == "plot" and len(node.args) < 2 and total_args < 2:
+                            errors.append(
+                                CompileError(
+                                    line=node.lineno,
+                                    col=node.col_offset,
+                                    message=f"{fname}() missing required value",
+                                    hint='plot(value, "title")',
+                                )
+                            )
+                    elif isinstance(expected, tuple):
                         if not (expected[0] <= len(node.args) <= expected[1]):
                             errors.append(
                                 CompileError(

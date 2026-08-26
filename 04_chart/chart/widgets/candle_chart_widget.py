@@ -288,14 +288,37 @@ class CandleChartWidget(QWidget):
             self.session_changed.emit()
 
     def _on_indicator_removed(self, name: str) -> None:
-        """Panel Delete clicked — remove indicator completely."""
+        """Panel Delete clicked — remove indicator completely (owner-aware)."""
         key = self._normalize_indicator_name(name)
         if key in ("Vol", "OBR"):
             self._indicator_visible[key] = False
         else:
             self._indicator_visible.pop(key, None)
+        # For PlotOverlay (single instance handling many owners), just remove that owner's series
+        # Don't pop the overlay itself — keep it for other owners
         if key in self._overlays:
-            self._overlays.pop(key, None)
+            ov = self._overlays.get(key)
+            if ov is not None and hasattr(ov, "remove_owner"):
+                with contextlib.suppress(Exception):
+                    ov.remove_owner(key)
+                # keep PlotOverlay in dict — don't pop, it may hold other owners' series
+                # only pop if it's not a PlotOverlay (i.e., TradeOverlay)
+                pass
+            else:
+                self._overlays.pop(key, None)
+        # owner-aware chart cleanup — remove all plot series for this owner from any PlotOverlay
+        try:
+            for ov in list(self._overlays.values()):
+                if hasattr(ov, "remove_owner"):
+                    with contextlib.suppress(Exception):
+                        ov.remove_owner(key)  # type: ignore[attr-defined]
+            if hasattr(self, "_plot_overlay") and getattr(self, "_plot_overlay") is not None:
+                with contextlib.suppress(Exception):
+                    self._plot_overlay.remove_owner(key)  # type: ignore[attr-defined]
+        except Exception:
+            pass
+        # If we removed the overlay entry and it was the only one, keep PlotOverlay for other owners
+        # No need to pop PLOT overlay when removing OBR — keep it
         self._position_visibility_panel()
         self._static_cache = None
         self._static_key = None

@@ -161,8 +161,10 @@ class BacktestRunner:
             from strategy.models.parameters import StrategyParameters
 
             compiled = compile_strategy(rec.code)
-            # Use VM exclusively
-            logic = compiled.create_logic(StrategyParameters(compiled.param_defaults))
+            # Use VM exclusively — owner-aware for chart lifecycle (use display name for visibility)
+            logic = compiled.create_logic(
+                StrategyParameters(compiled.param_defaults), owner_id=rec.name
+            )
             warmup = max(0, logic.warmup())
         except Exception as exc:  # noqa: BLE001
             logger.warning("Strategy compilation failed for %s: %s", rec.name, exc)
@@ -175,13 +177,26 @@ class BacktestRunner:
             slippage_pct=config.slippage_pct, commission_pct=config.commission_pct
         )
 
-        for index in range(warmup, len(window)):
+        for index in range(len(window)):
             bar = window[index]
             if on_progress is not None and index % 500 == 0:
                 try:  # noqa: SIM105
                     on_progress(index, len(window))
                 except Exception:  # noqa: BLE001, SIM105
                     pass
+
+            # Warmup: run VM for chart/indicator history only, skip trading
+            if index < warmup:
+                from strategy.models.parameters import StrategyParameters as SP  # noqa: N817
+
+                view_warm = BarView(
+                    bars=window,
+                    index=index,
+                    params=SP(compiled.param_defaults),
+                    state=StrategyState(),
+                )
+                logic.on_bar(view_warm)
+                continue
 
             if not positions.flat:
                 trade = positions.try_close(
@@ -203,7 +218,6 @@ class BacktestRunner:
                 state = StrategyState.open(
                     side=op.side, entry_price=op.entry_price, entry_index=op.entry_index
                 )
-            # VM expects BarView with params (use compiled defaults)
             from strategy.models.parameters import StrategyParameters as SP  # noqa: N817
 
             view = BarView(
@@ -281,6 +295,56 @@ class BacktestRunner:
             trades, config.initial_capital, window[0].timestamp if window else None
         )
         metrics = compute_metrics(trades, curve, config.initial_capital)
+        # Collect chart series from VM — owner-aware (strategy instance, title)
+        chart_series: tuple[Any, ...] = ()
+        try:
+            from backtest.models.result import ChartSeries
+
+            raw_series: dict[Any, Any] = {}
+            raw_meta: dict[Any, Any] = {}
+            if hasattr(logic, "get_chart_series_with_owner"):
+                raw_series = logic.get_chart_series_with_owner()  # type: ignore[attr-defined]
+                try:
+                    raw_meta = logic.get_chart_series_meta_with_owner()  # type: ignore[attr-defined]
+                except Exception:
+                    raw_meta = {}
+            elif hasattr(logic, "get_chart_series"):
+                raw_series = logic.get_chart_series()  # type: ignore[attr-defined]
+                try:
+                    raw_meta = logic.get_chart_series_meta()  # type: ignore[attr-defined]
+                except Exception:
+                    raw_meta = {}
+            series_list: list[ChartSeries] = []
+            for key, values in raw_series.items():
+                if not isinstance(values, dict):
+                    continue
+                # key may be (owner_id, title) or title
+                if isinstance(key, tuple) and len(key) == 2:
+                    owner_id, title = str(key[0]), str(key[1])
+                else:
+                    owner_id, title = str(getattr(rec, "id", "")), str(key)
+                pts = tuple(
+                    (int(k), float(v))
+                    for k, v in sorted(values.items())
+                    if v is not None
+                )
+                if not pts:
+                    continue
+                meta = raw_meta.get(key, {}) if isinstance(key, tuple) else raw_meta.get(title, {})
+                if not isinstance(meta, dict):
+                    meta = {}
+                series_list.append(
+                    ChartSeries(
+                        title=title,
+                        values=pts,
+                        style=str(meta.get("style", "line")),
+                        extend=str(meta.get("extend", "session")),
+                        strategy=str(owner_id or getattr(rec, "name", "")),
+                    )
+                )
+            chart_series = tuple(series_list)
+        except Exception:
+            chart_series = ()
         # Use rec.id as canonical strategy_id, rec.name as display
         # For label, mimic StrategyDefinition.label: "NAME v1.0"
         label = f"{rec.name} v{rec.version}" if hasattr(rec, "version") else rec.name
@@ -294,6 +358,7 @@ class BacktestRunner:
             bars_used=len(window),
             period_start=window[0].timestamp if window else None,
             period_end=window[-1].timestamp if window else None,
+            chart_series=chart_series,
         )
 
     def _run_one_legacy(

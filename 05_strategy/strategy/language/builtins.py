@@ -6,10 +6,10 @@ KEYWORDS = {"strategy", "input", "if", "and", "or", "not", "True", "False"}
 FUNCTIONS = {
     "strategy": {"args": 1, "desc": "strategy(name)"},
     "input": {"args": (1, 2), "desc": "input(default, label)"},
-    "RSI": {"args": 1, "desc": "RSI(period)"},
-    "ATR": {"args": 1, "desc": "ATR(period)"},
-    "SMA": {"args": 1, "desc": "SMA(period)"},
-    "EMA": {"args": 1, "desc": "EMA(period)"},
+    "RSI": {"args": (1, 2), "desc": "RSI(period) or RSI(close, period)"},
+    "ATR": {"args": (1, 2), "desc": "ATR(period) or ATR(close, period)"},
+    "SMA": {"args": (1, 2), "desc": "SMA(period) or SMA(close, period)"},
+    "EMA": {"args": (1, 2), "desc": "EMA(period) or EMA(close, period)"},
     "range": {"args": 1, "desc": "range(period) channel range"},
     "buy": {"args": 0, "desc": "buy() open long"},
     "sell": {"args": 0, "desc": "sell() open short"},
@@ -21,6 +21,10 @@ FUNCTIONS = {
     "is_new_day": {"args": 0, "desc": "is_new_day() true on first bar of new session"},
     "prev_day_close": {"args": 0, "desc": "prev_day_close() previous session close"},
     "after_time": {"args": 1, "desc": 'after_time("HH:MM") true when bar time >= HH:MM'},
+    "plot": {"args": (2, 6), "desc": 'plot(value, title, style="line", ...)'},
+    "line": {"args": (4, 6), "desc": 'line(x1,y1,x2,y2, ...)'},
+    "label": {"args": (3, 6), "desc": 'label(x,y,text, ...)'},
+    "marker": {"args": (3, 6), "desc": 'marker(x,y,text, ...)'},
 }
 
 VARIABLES = {"close", "open", "high", "low", "volume", "bar", "time"}
@@ -43,4 +47,8 @@ HIGHLIGHT_FUNCTIONS = [
     "is_new_day",
     "prev_day_close",
     "after_time",
+    "plot",
+    "line",
+    "label",
+    "marker",
 ]  # noqa: E501

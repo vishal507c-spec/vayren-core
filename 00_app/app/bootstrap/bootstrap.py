@@ -110,6 +110,17 @@ class Bootstrap:
         backtest_worker = BacktestWorker(backtest_runner)
         trade_overlay = TradeOverlay()
         widget.set_overlay(trade_overlay)
+        # Plot overlay for generic chart series (TradingView plot() primitive) — compact, no OBR-specific
+        try:
+            from chart.renderer.plot_renderer import PlotOverlay
+
+            plot_overlay = PlotOverlay()
+            plot_overlay.set_visibility_checker(widget.is_indicator_visible)  # type: ignore[attr-defined]
+            # Single overlay handles all plot series; per-series visibility checked inside
+            # Store under generic key, visibility per series title/strategy handled internally
+            widget.set_named_overlay("PLOT", plot_overlay)
+        except Exception:
+            plot_overlay = None  # type: ignore[assignment]
 
         # legacy controls (kept for service list, not injected into market)
         lab_control = StrategyControlPanel()
@@ -272,6 +283,10 @@ class Bootstrap:
         self._lab_list = lab_list
         self._lab_workspace = lab_workspace
         self._trade_overlay = trade_overlay
+        try:
+            self._plot_overlay = plot_overlay  # type: ignore[name-defined]
+        except Exception:
+            self._plot_overlay = None  # type: ignore[attr-defined]
         self._performance_panel = performance_panel
         self._market_status = market_status
         self._event_log = event_log
@@ -1387,6 +1402,14 @@ class Bootstrap:
         except Exception:
             pass
         trade_overlay.clear()
+        try:
+            if hasattr(self, "_plot_overlay") and self._plot_overlay is not None:
+                self._plot_overlay.clear()  # type: ignore[attr-defined]
+                # widget will repaint via ChartReady handling; plot will be repopulated via recalc
+                if hasattr(self, "_widget") and self._widget is not None:
+                    self._widget.update()  # type: ignore[attr-defined]
+        except Exception:
+            pass
         self._system_health.set_engine_state("Chart Engine", "Active")
         event_log.add_entry("INFO", f"Chart ready: {event.model.symbol} ({event.model.timeframe})")
 
@@ -1433,6 +1456,13 @@ class Bootstrap:
             first = result.results[0]
             performance_panel.set_result(first)
             trade_overlay.set_result(first)
+            # chart plots — generic, no OBR-specific
+            try:
+                if hasattr(self, "_plot_overlay") and self._plot_overlay is not None:
+                    cs = getattr(first, "chart_series", ())
+                    self._plot_overlay.set_from_chart_series(cs)  # type: ignore[attr-defined]
+            except Exception:
+                pass
             widget.update()
             event_log.add_entry(
                 "SUCCESS",
@@ -1650,6 +1680,11 @@ class Bootstrap:
     ) -> None:  # type: ignore[no-untyped-def]
         performance_panel.clear()
         trade_overlay.clear()
+        try:
+            if hasattr(self, "_plot_overlay") and self._plot_overlay is not None:
+                self._plot_overlay.clear()  # type: ignore[attr-defined]
+        except Exception:
+            pass
         widget.update()
         try:
             if hasattr(self, "_lab_workspace") and self._lab_workspace is not None:

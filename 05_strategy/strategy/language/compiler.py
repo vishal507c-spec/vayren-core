@@ -23,7 +23,9 @@ class CompiledStrategy:
     ir: StrategyIR | None = None
     warmup: int = 20
 
-    def create_logic(self, params: StrategyParameters) -> StrategyLogic:
+    def create_logic(
+        self, params: StrategyParameters, owner_id: str | None = None
+    ) -> StrategyLogic:
         """Create VM logic — IR → Universal VM is the ONLY strategy execution path.
 
         No exec fallback. If IR is missing or VM fails, fail loudly.
@@ -35,7 +37,7 @@ class CompiledStrategy:
         from strategy.vm import vm_from_ir
 
         # Fail loudly — no silent fallback to another implementation
-        return vm_from_ir(self.ir, params)
+        return vm_from_ir(self.ir, params, owner_id=owner_id)
 
 
 def compile_strategy(code: str) -> CompiledStrategy:

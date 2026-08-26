@@ -8,7 +8,7 @@ per-instance state, and produces generic Signals.
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from market.models.bar import Bar
@@ -49,6 +49,13 @@ class VMState:
     current_day: str | None = None
     prev_day_close: float = 0.0
     is_new_day_flag: bool = False
+    # Chart series — owner-aware: (owner_id, title) -> {bar_index: value}
+    # For backward compat, also support title-only, but owner-aware is primary
+    chart_series: dict[tuple[str, str], dict[int, float]] = field(default_factory=dict)
+    chart_series_meta: dict[tuple[str, str], dict[str, Any]] = field(default_factory=dict)
+    # legacy title-only for tests that don't use owner
+    chart_series_legacy: dict[str, dict[int, float]] = field(default_factory=dict)
+    chart_series_legacy_meta: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 class StrategyVM:
@@ -58,8 +65,11 @@ class StrategyVM:
     StrategyRuntime/BacktestRunner without modification.
     """
 
-    def __init__(self, ir: StrategyIR, params: StrategyParameters | dict[str, float] | None = None):
+    def __init__(
+        self, ir: StrategyIR, params: StrategyParameters | dict[str, float] | None = None, owner_id: str | None = None
+    ):
         self._ir = ir
+        self._owner_id = owner_id or ir.strategy_name
         # Normalize params to dict label->float
         if params is None:
             self._params: dict[str, float] = {p.label: float(p.default) for p in ir.parameters}
@@ -288,22 +298,27 @@ class StrategyVM:
                 return float(self._params[key])
             return float(default) if isinstance(default, (int, float)) else 0
         # Indicator helpers — generic, not strategy-specific
+        # Support both EMA(20) and EMA(close, 20) — period is last arg
+        def _period_arg(default: int = 14) -> int:
+            if not args:
+                return default
+            try:
+                # last arg is period if 2 args, else first
+                val = args[-1] if len(args) > 1 else args[0]
+                return int(val)
+            except Exception:
+                return default
+
         if func == "RSI":
-            period = int(args[0]) if args else 14
-            return self._calc_rsi(period)
+            return self._calc_rsi(_period_arg(14))
         if func == "ATR":
-            period = int(args[0]) if args else 14
-            return self._calc_atr(period, bar)
+            return self._calc_atr(_period_arg(14), bar)
         if func == "SMA":
-            period = int(args[0]) if args else 14
-            # second arg series ignored for now (always close)
-            return self._calc_sma(period)
+            return self._calc_sma(_period_arg(14))
         if func == "EMA":
-            period = int(args[0]) if args else 14
-            return self._calc_ema(period)
+            return self._calc_ema(_period_arg(14))
         if func == "range":
-            period = int(args[0]) if args else 14
-            return self._calc_range(period, bar)
+            return self._calc_range(_period_arg(14), bar)
         # Actions — generic, produce pending signals
         if func == "buy":
             self._state.pending_kind = SignalKind.BUY
@@ -345,6 +360,45 @@ class StrategyVM:
                 return hhmm >= target
             except Exception:
                 return False
+        if func == "plot":
+            if not args:
+                return None
+            try:
+                val = args[0]
+                title = str(args[1]) if len(args) > 1 else "plot"
+                if val is None:
+                    return None
+                try:
+                    fval = float(val)
+                except Exception:
+                    return None
+                # owner-aware: (owner_id, title) is the true key
+                key = (self._owner_id, title)
+                # also keep legacy title-only for backward compat tests
+                if title not in self._state.chart_series_legacy:
+                    self._state.chart_series_legacy[title] = {}
+                    self._state.chart_series_legacy_meta[title] = {}
+                self._state.chart_series_legacy[title][view.index] = fval
+                if key not in self._state.chart_series:
+                    self._state.chart_series[key] = {}
+                    self._state.chart_series_meta[key] = {}
+                self._state.chart_series[key][view.index] = fval
+            except Exception:
+                pass
+            return None
+        if func in ("line", "label", "marker"):
+            try:
+                title = str(args[2]) if len(args) > 2 and func in ("label", "marker") else func
+                key = (self._owner_id, title)
+                if title not in self._state.chart_series_legacy:
+                    self._state.chart_series_legacy[title] = {}
+                self._state.chart_series_legacy[title][view.index] = float(args[0]) if args and isinstance(args[0], (int, float)) else 0
+                if key not in self._state.chart_series:
+                    self._state.chart_series[key] = {}
+                self._state.chart_series[key][view.index] = float(args[0]) if args and isinstance(args[0], (int, float)) else 0
+            except Exception:
+                pass
+            return None
         # Unknown function — for determinism return 0, but could raise
         return 0
 
@@ -430,11 +484,27 @@ class StrategyVM:
             return False
         return False
 
+    def get_chart_series(self) -> dict[str, dict[int, float]]:
+        """Return stable chart series: title -> {bar_index: value} (legacy, for tests)."""
+        return {k: dict(v) for k, v in self._state.chart_series_legacy.items()}
+
+    def get_chart_series_with_owner(self) -> dict[tuple[str, str], dict[int, float]]:
+        """Owner-aware: (owner_id, title) -> {bar_index: value}."""
+        return {k: dict(v) for k, v in self._state.chart_series.items()}
+
+    def get_chart_series_meta(self) -> dict[str, dict[str, Any]]:
+        return {k: dict(v) for k, v in self._state.chart_series_legacy_meta.items()}
+
+    def get_chart_series_meta_with_owner(self) -> dict[tuple[str, str], dict[str, Any]]:
+        return {k: dict(v) for k, v in self._state.chart_series_meta.items()}
+
 
 def vm_from_ir(
-    ir: StrategyIR, params: StrategyParameters | dict[str, float] | None = None
+    ir: StrategyIR,
+    params: StrategyParameters | dict[str, float] | None = None,
+    owner_id: str | None = None,
 ) -> StrategyLogic:  # noqa: E501
     """Create a StrategyLogic-compatible VM instance from IR."""
-    vm = StrategyVM(ir, params)
+    vm = StrategyVM(ir, params, owner_id=owner_id)
     # StrategyLogic protocol expects warmup/on_bar
     return vm  # type: ignore[return-value]

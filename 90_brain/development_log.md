@@ -2,6 +2,23 @@
 
 **Nya entry hamesha upar likho.**
 
+## 2026-08-26 — SIDEBAR ICON REPLACEMENT — SVG Icon Swap
+
+### Kya hua tha?
+- User ne do naye SVG icons diye (watchlist.svg, download-engine.svg) existing sidebar icons replace karne ke liye. Dono icons ka rendering pipeline fix karna tha — pehle QPainter-drawn icons the, ab SVG-based.
+
+### Kya kiya?
+- **tools_toolbar.py:** `_svg_download_pixmap` ko generic `_svg_icon_pixmap` mein replace kiya. Naya `_SVG_DATA` dict SVG markup directly embed karta hai (zero file dependency — rendering guarantee). `_icon()` function `_SVG_DATA` check karta hai, match ho to SVG rendering, warna fallback QPainter.
+- **Icons:** Watchlist = rounded rect + 3 horizontal lines. Download = database + down arrow. Dono32×32 viewBox, `stroke-width="1.8"`, `currentColor` for dynamic color.
+- **Files created:** `04_chart/chart/assets/indicator_bar/watchlist.svg`, `download-engine.svg`
+- **Removed:** `pathlib.Path` import (unused after embedding SVG data)
+- **Lint:** `ruff check` + `ruff format` PASS
+
+### Verification
+- `pytest 04_chart/chart/tests/` 185/185 PASS
+- `ruff check` PASS, `ruff format --check` PASS
+- Direct rendering test: both SVGs render correctly in normal, active, disabled states
+
 ## 2026-08-24 — BUILTIN REMOVAL & UNIVERSAL VM MIGRATION — Agent 4 (Runtime Hardening)
 
 ### Kya hua tha?

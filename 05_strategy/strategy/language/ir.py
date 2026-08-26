@@ -53,6 +53,7 @@ class IRName:
 class IRCall:
     func: str
     args: tuple[Any, ...]
+    kwargs: tuple[tuple[str, Any], ...] = ()
     kind: str = "Call"
 
 
@@ -219,7 +220,8 @@ def _expr_to_ir(node: ast.AST) -> Any:
             else "unknown"
         )  # type: ignore[attr-defined]
         args = tuple(_expr_to_ir(a) for a in node.args)
-        return IRCall(func=func, args=args)
+        kwargs = tuple((kw.arg, _expr_to_ir(kw.value)) for kw in node.keywords if kw.arg is not None)
+        return IRCall(func=func, args=args, kwargs=kwargs)
     if isinstance(node, ast.BinOp):
         op = type(node.op).__name__
         return IRBinOp(left=_expr_to_ir(node.left), op=op, right=_expr_to_ir(node.right))

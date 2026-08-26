@@ -9,6 +9,25 @@ from backtest.models.trade import TradeRecord
 
 
 @dataclass(frozen=True)
+class ChartSeries:
+    """One plot series for chart rendering — stable identity per title.
+
+    Attributes:
+        title: Series name (e.g., "REF HIGH").
+        values: Mapping bar_index -> value (only bars where plot was called).
+        style: Optional style hint ("line", "dots", etc.).
+        extend: Optional extend hint ("session", "none", etc.).
+        strategy: Strategy name/id that produced this series (for visibility).
+    """
+
+    title: str
+    values: tuple[tuple[int, float], ...]
+    style: str = "line"
+    extend: str = "session"
+    strategy: str = ""
+
+
+@dataclass(frozen=True)
 class StrategyResult:
     """Outputs of one strategy's isolated run.
 
@@ -22,6 +41,7 @@ class StrategyResult:
         bars_used: Number of bars that survived the date-range slice.
         period_start: First bar timestamp in the slice.
         period_end: Last bar timestamp in the slice.
+        chart_series: Plot series for chart rendering (stable identity per title).
     """
 
     strategy_id: str
@@ -33,6 +53,7 @@ class StrategyResult:
     bars_used: int
     period_start: str | None
     period_end: str | None
+    chart_series: tuple[ChartSeries, ...] = ()
 
 
 @dataclass(frozen=True)
