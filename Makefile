@@ -1,4 +1,4 @@
-.PHONY: setup dev test test-coverage lint format typecheck check validate-structure validate-imports clean
+.PHONY: setup dev test test-coverage lint format typecheck check validate-structure validate-imports exe clean
 
 # ═══════════════════════════════════════════════════════════════
 # VAYREN — MAKEFILE
@@ -15,6 +15,11 @@ setup:
 
 dev:
 	python -m app
+
+# ── Packaging ──────────────────────────────────────────────────
+
+exe:
+	.venv\Scripts\pyinstaller scripts\assets\vayren.spec --noconfirm --distpath build\dist --workpath build\work
 
 # ── Quality ────────────────────────────────────────────────────
 

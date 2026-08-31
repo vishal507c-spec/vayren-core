@@ -1,147 +1,169 @@
-# Architecture — Poora Ghar Ka Naksha
+# Architecture — VAYREN Current System
 
-## 1. Ye kya hai?
+**Owns:** Module map, layers, dependency graph, event flow, runtime. **Not owns:** Language ownership → `ARCHITECTURE_CONSTITUTION.md`; detailed boundaries/events/contracts/state → `module_contracts.md`, `event_catalog.md`, `ai_memory.md`.
+**When to read:** ALWAYS first, before any code change. **Related:** `ARCHITECTURE_CONSTITUTION.md` (languages), `90_brain/` (contracts/state).
 
-Ye document batata hai ki **poora system kaise juda hai** — kaun kahan hai, kaun kis se baat karta hai.
+**Status:** Authoritative. Current system only — not a diary. For language/migration see `ARCHITECTURE_CONSTITUTION.md`.
 
-## 2. Ek Nazar Mein — Modules
+---
+
+## 1. What is VAYREN?
+
+Desktop charting platform: `SQLite per-stock OHLCV → EventBus → candlestick chart + watchlist`. Event-driven, layered, single composition root (`00_app/app/bootstrap/bootstrap.py`). No trading logic in chart, no chart logic in storage.
+
+---
+
+## 2. Current Modules
+
+| Chapter | Package | Owns | Depends on |
+|---|---|---|---|
+| `00_app` | `app` | Entry, wiring, lifecycle (`App`, `Bootstrap`, `AppLifecycle`) | `core`, `data`, `market`, `chart`, `strategy`, `backtest` |
+| `01_core` | `core` | Foundation: `EventBus`, `Event`, logger, `Registry`, contracts, `SystemModel`, AI boundary | — (stdlib only) |
+| `02_data` | `data` | Historical download (write path): engine, worker thread, storage, provider boundary | `core` |
+| `03_market` | `market` | Read path: per-symbol SQLite → `Bar`/`SymbolQuote` | `core` |
+| `04_chart` | `chart` | Chart model, engine, renderers, widgets, windows, theme | `core`, `market` |
+| `05_strategy` | `strategy` | Strategy registry, `.vstrat` language, VM runtime, research, Lab UI | `core`, `market` |
+| `06_backtest` | `backtest` | Replay, execution simulation, positions, journal, metrics | `core`, `market`, `strategy` |
+
+> `90_brain/` is documentation, not a runtime module.
+
+---
+
+## 3. How Modules Are Connected
+
+**Allowed dependency graph** (enforced by `scripts/validate_imports.py`):
 
 ```
-00_app ──► 01_core ──► 02_data ──► 03_market ──► 04_chart
- (Manager) (Post Office) (Data Writer) (Godown)   (Painter)
+01_core ─────────────────────► (none)
+  ↑                          
+02_data ─────────────────────► 01_core
+03_market ───────────────────► 01_core
+05_strategy ─────────────────► 01_core, 03_market
+04_chart ────────────────────► 01_core, 03_market
+06_backtest ─────────────────► 01_core, 03_market, 05_strategy
+00_app ──────────────────────► 01_core, 02_data, 03_market, 04_chart, 05_strategy, 06_backtest
 ```
 
-| Module | Kaam | Depend karta hai |
+| Dependency | Allowed? | Reason |
 |---|---|---|
-| `00_app` | bootstrap, wiring, lifecycle, entry | core, data, market, chart |
-| `01_core` | EventBus, events, logger, registry + Universal Foundation (`contracts`/`registry`/`system`/`ai`) | kuch nahi |
-| `02_data` | historical candle download: engine, worker thread, UI, storage | core |
-| `03_market` | SQLite candles: database→repository→loader | core |
-| `04_chart` | chart model, engine, renderer, widgets, windows | core, market |
+| `market → core` | ✅ | Read layer needs bus/contracts only |
+| `chart → market` (`Bar` only) | ✅ | Chart renders bars, must not touch `market.database` |
+| `chart → data` | ❌ | Write path isolated from presentation |
+| `market → chart` | ❌ | Storage must not know presentation |
+| `core → any` | ❌ | Foundation is domain-agnostic |
+| `app → any` | ✅ | Composition root wires all |
+| `* → app` | ❌ | No backward import |
 
-## 3. Core ke Andar — Layer Map
+**INVARIANT:** Cross-module imports use only `module/__init__.py` public surface. Internal paths (`market.database`, `chart.renderer`) are never imported cross-module. Relative cross-module imports (`..market`) and `from x import *` are forbidden.
 
-```
-contracts/   (Component DNA, Capability contracts — kya cheez hai)
-    ↓
-registry/    (ComponentRegistry + CapabilityRegistry — kaun hai)
-    ↓
-system/      (SystemModel: graphs, change impact, snapshot — system kaisa hai)
-    ↓
-ai/          (Part 3: intent → plan → validator → simulation → sandbox
-              → memories → optimization; sab deterministic, AI optional)
-```
+---
 
-**Part 3 principle — AI proposes, VAYREN validates:**
-- `core/ai/` pure model/observation layer hai — koi LLM call nahi, koi runtime change nahi
-- `AiBoundary` fail-closed: forbidden actions (trade execution, risk bypass, contract override...) hamesha denied
-- `Sandbox.deploy()` = recorded decision only — "deterministic runtime remains authoritative"
-- `OptimizationStudy.adopt()` hamesha error deta hai — self-optimization guarded
-- Providers (`AiProviderRegistry`) optional — bina provider sab kuch kaam karta hai
+## 4. Layers
 
-## 4. Runtime Integration (Part 4) — Naya Architecture, Purana Runtime
+### 4.1 Per-domain pipeline
 
 ```
-Bootstrap (ek hi composition root)
-    ├── services (old Registry — names: symbol_repository, chart_engine, ...)   [unchanged]
-    ├── bus + subscriptions                                                       [unchanged]
-    └── _build_architecture()  ← startup par ek baar
-            ├── market_manifest()  → ComponentRegistry (implementations = live SymbolRepository)
-            ├── chart_manifest()   → ComponentRegistry (implementations = live ChartEngine)
-            └── SystemModel(registry)  → components / system_model properties
+database  (SQL)
+    ↓
+repository (rows → Bar/SymbolQuote)
+    ↓
+loader    (Event → repository → Event)
+    ↓
+engine    (Event → ChartModel)
+    ↓
+renderer  (stateless QPainter: grid, candles, volume, axes)
+    ↓
+widgets   (viewport: zoom/pan/crosshair, watchlist, tools rail)
+    ↓
+windows   (host: splitter, title, WindowRendered)
 ```
 
-- **Ek hi runtime** — EventBus wahi, Bootstrap wahi, hot paths wahi
-- Lookup dono taraf: `bootstrap.services.get("symbol_repository")` (old) + `bootstrap.components.providers("data.query.candles")` (new)
-- Real implementations hi implementations hain — koi adapter, koi wrapper nahi
-- SystemModel construction **startup par ek baar** (0.134 ms = 2% of startup) — har event/candle/tick par kabhi nahi
-- Explicit registration (`market_manifest()` / `chart_manifest()`) — koi plugin scanner, koi reflection nahi
+- One layer = one responsibility. Skipping a layer is forbidden.
+- `database` never emits events; `widgets` never touch bus/SQL.
 
-## 3. Ek Module Ke Andar Bhi Layers Hain
+### 4.2 Core internals
 
 ```
-database   (SQL likhta hai)
+contracts/  (Component/Capability/Manifest — what exists)
     ↓
-repository (rows → Bar model)
+registry/   (ComponentRegistry + CapabilityRegistry — who provides)
     ↓
-loader     (event sunta hai, event bhejta hai)
+system/     (SystemModel, graphs, analyze_change — how it fits)
     ↓
-engine     (data → chart model)
-    ↓
-widget     (sirf dikhata hai)
+ai/         (Intent → Plan → Validator → Simulation → Sandbox — deterministic, optional)
 ```
 
-Har layer ka ek kaam. Layer skip karna — mana.
+- `core/ai` is pure model/observation: no LLM call, no runtime mutation.
+- `AiBoundary` fail-closed; `Sandbox.deploy()` = recorded decision only; `OptimizationStudy.adopt()` always errors.
 
-## 4. Architecture Rules
-
-| Rule | Matlab |
-|---|---|
-| Event-driven | Sab baat EventBus se |
-| Wiring sirf bootstrap mein | Subscriptions sirf `00_app/app/bootstrap/bootstrap.py` |
-| No cross-module calls | Module sirf public API se baat karta hai |
-| UI bus nahi chhunta | Widgets ko model milta hai, bus nahi |
-| SQL sirf market/database mein | Drawing sirf chart/renderer mein |
-
-## 5. Event Flow — Phase 1
+### 4.3 Runtime composition (single root)
 
 ```
-App.main()
+Bootstrap (00_app/app/bootstrap/bootstrap.py)
+  ├── EventBus + services Registry (name lookup, unchanged)
+  ├── subscriptions (ONLY place subscribe is called)
+  └── _build_architecture() — once at startup
+        ├── market_manifest() → ComponentRegistry (live SymbolRepository)
+        ├── chart_manifest()  → ComponentRegistry (live ChartEngine)
+        ├── data_manifest() , strategy_manifest(), backtest_manifest()
+        └── SystemModel(registry) → components / system_model
+```
+
+- Single runtime: same bus, same bootstrap, same hot paths.
+- Capability lookup `components.providers("data.query.candles")` coexists with legacy `services.get("symbol_repository")`.
+- Explicit registration — no scanner, no reflection. `SystemModel` built once at startup (not per-event).
+
+---
+
+## 5. Runtime Flow
+
+```
+App.main() → parse_args + configure_logging + QApplication
     ↓
-Bootstrap.start()  → database connect → AppStarted bhejo
+Bootstrap(data_dir, limit)  // builds bus, repos, loaders, engine, widgets
     ↓
-AppLifecycle.on_app_started  → LoadSymbol bhejo
+Bootstrap.start() → AppStarted (bus)
     ↓
-MarketDataLoader.on_load_symbol → repository → database
+AppLifecycle.on_app_started → ListSymbols
     ↓
-DataLoaded bhejo
+SymbolListLoader → SymbolsListed → QuoteLoader → QuotesLoaded (watchlist)
     ↓
-ChartEngine.on_data_loaded → ChartModel banao
+(user click) LoadSymbol / TimeframeChanged → MarketDataLoader → DataLoaded
     ↓
-ChartReady bhejo
+ChartEngine.on_data_loaded → ChartReady
     ↓
-ChartWindow.on_chart_ready → widget.set_model → show
-    ↓
-WindowRendered bhejo
-    ↓
-AppLifecycle.on_window_rendered (bas, khatam)
+ChartWindow.on_chart_ready → widget.set_model → WindowRendered
     ↓
 Qt event loop
 ```
 
-**Bus synchronous hai** — matlab poora chain ek saath chalta hai, Qt loop shuru hone se pehle hi.
+- **Synchronous bus:** the entire chain completes in one `publish` before Qt loop starts.
+- `limit: int | None = None` = full history (no `LIMIT NULL` bind). `DataLoaded` is the chart's only data source.
 
-## 6. Story
+---
 
-Socho ek office hai:
+## 6. Boundaries & Invariants
 
-- **Manager** (App) subah aata hai, sabko order deta hai
-- **Post office** (EventBus) har message pass karta hai
-- **Godown ka munshi** (Market loader) godown (SQLite) se data nikalta hai
-- **Painter** (Chart engine + widget) wall par chart banata hai
+| Boundary | Rule |
+|---|---|
+| Event-driven only | Modules communicate only via `EventBus`. Direct calls cross-module are forbidden. |
+| Single wiring point | `bus.subscribe` only in `bootstrap.py`. Widgets never subscribe. |
+| One module one responsibility | New behavior → new module. Existing modules are not expanded. |
+| Layers isolated | UI: no SQL; loader: no painting; business logic: never in UI. |
+| Public contract | Consumers depend on `__init__.py` exports + events, never internals. |
+| No fabrication | Bars/quotes derived only from real `ohlcv` rows. Aggregation never invents candles. |
+| Secrets | Credentials/tokens never in events, settings, logs, or UI. |
+| No placeholder | No mock/sample trading logic, no `TODO/FIXME`, no dead code. |
 
-Manager khud godown nahi jata. Wo post office se kahta hai — *"SPY ka data bhejo"*.
+---
 
-## 7. Example — Dependency Chain
+## 7. Enforcement
 
-```
-chart imports core + market        ✅
-market imports core                ✅
-core imports kuch nahi             ✅
-app imports core + market + chart  ✅ (manager ko sabse baat karni hai)
-chart imports app                  ❌ (peeche jaana mana)
-```
+| Check | What it validates |
+|---|---|
+| `scripts/validate_imports.py` (AST) | Dependency graph §3; forbids internal/relative/star imports |
+| `scripts/validate_structure.py` | Required layout: `__init__.py`, `README.md`, `manifest.py`, `models/`, `database/`/`renderer/` etc. per domain (5 core domains) |
+| `make check` | `ruff format --check` + `ruff check` + `pyright` + `pytest` + validators — must pass before merge |
 
-## 8. Enforcement
+> Principles for evolution (not a roadmap): new module → lower-numbered public APIs, bus only, own responsibility, contracts in `module_contracts.md`+`event_catalog.md`. Migration is **invisible feature-driven** per `CONSTITUTION.md` §5, §13, §17: new feature → target arch + directly related legacy slice (smallest useful) → validate; no unrelated migration, no big-bang.
 
-`scripts/validate_imports.py` dependency map check karta hai (AST se).
-
-`scripts/validate_structure.py` layout check karta hai.
-
-Dono `make check` ka hissa hain.
-
-## 9. Future
-
-Naya module aayega toh ye chain aage badhegi — `05_strategy → 06_backtest → 07_risk → 08_execution → 09_portfolio → 10_scanner → 11_indicator → 12_drawing → 13_replay → 14_workspace → 15_plugin` — architecture wahi rahega.
-
-> Naksha yaad rakho: Manager → Post Office → Godown → Painter.

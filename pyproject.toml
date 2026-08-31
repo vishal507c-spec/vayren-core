@@ -46,7 +46,7 @@ vayren = "app:main"
 target-version = "py311"
 line-length = 100
 indent-width = 4
-extend-exclude = ["99_archive", "90_brain"]
+extend-exclude = ["90_brain"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "ARG", "C4", "T10"]
@@ -112,6 +112,8 @@ packages = [
     "02_data/data",
     "03_market/market",
     "04_chart/chart",
+    "05_strategy/strategy",
+    "06_backtest/backtest",
 ]
 
 [build-system]

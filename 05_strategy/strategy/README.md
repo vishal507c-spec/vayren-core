@@ -1,12 +1,13 @@
-# strategy — Strategy Platform
+# Strategy — Strategy Platform (05_strategy)
 
-Registry, definitions, runtime and lab UI for trading strategies.
+Registry, definitions, language/compiler, storage, runtime + lab UI. VM-only execution.
 
-- `registry.py` — kinds (logic factories) + definitions (configured instances)
+- `language/` — `.vstrat` → parser → compiler → IR (`strategy.language.compiler`)
+- `storage.py` — `ensure_builtin_strategies` creates `.vstrat` samples (no `builtins/` folder — removed 2026-08-24, VM path only)
 - `models/` — definition, parameters, signal, state
-- `runtime.py` — bar-by-bar execution of a logic into signals
-- `builtins/` — explicitly registered production strategies
-- `events/` — StrategiesListed, StrategySelected, PaperTradeRequested, LabReset
-- `ui/` — Strategy Lab control panel, strategy list, configure dialog
+- `runtime.py` — IR → VM bar-by-bar signals (no `exec`)
+- `events/` — `StrategiesListed`, `StrategySelected`, `PaperTradeRequested`, `LabReset`
+- `research/` — intelligence, evidence, lineage, evolution, validation
+- `ui/` — Strategy Lab panel
 
-Depends on: core, market. Event-driven only; subscriptions live in bootstrap.
+Depends on: core, market. Event-driven; subscriptions in `bootstrap`.

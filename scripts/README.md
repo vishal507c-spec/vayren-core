@@ -9,7 +9,7 @@
 | Script | Kaam | Kab chalao |
 |---|---|---|
 | `seed_sample_db.py` | `data/vayren.db` banata hai (random-walk OHLCV) | Pehli baar, jab asli DB nahi hai |
-| `validate_structure.py` | 4 modules ka layout check | `make check` mein |
+| `validate_structure.py` | 5 domains ka layout check (`app`/`core`/`data`/`market`/`chart`) | `make check` mein |
 | `validate_imports.py` | Cross-module dependency rules check (AST se) | `make check` mein |
 
 ## 3. Example
@@ -25,8 +25,8 @@ python scripts/validate_imports.py
 ## 4. Ye Kya Nahi Karega
 
 - Ye koi service nahi hai — app inhe kabhi import nahi karta
-- `99_archive` aur `90_brain` validation se bahar hain
-- Sample DB sirf khilona hai — asli data `data/vayren.db` par aayega
+- `90_brain` validation se bahar hai (`99_archive` removed 2026-08-31)
+- Sample DB sirf khilona hai — asli data `D:\ZerodhaTradingData` par aayega
 
 ## 5. Future
 

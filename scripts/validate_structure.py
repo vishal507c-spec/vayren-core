@@ -1,7 +1,7 @@
 """Validate that the repository structure follows the blueprint.
 
 Domains live inside numbered startup-flow chapters (NN_CHAPTER/domain/).
-Archived modules in 99_archive and knowledge in 90_brain are excluded.
+Knowledge in 90_brain is excluded.
 """
 
 from pathlib import Path

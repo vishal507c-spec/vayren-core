@@ -1,5 +1,9 @@
 # AI Memory — Abhi Kya State Hai
 
+**Owns:** Current state, open items, verified facts, oddities. **Not owns:** Rules/architecture/events/contracts → `AGENTS.md`, `ARCHITECTURE_CONSTITUTION.md`, `architecture.md`, `module_contracts.md`, `event_catalog.md`; history → `development_log.md`.
+**When to read:** Every new session start, before deciding what to build next.
+**Related:** `development_log.md` (history), `architecture.md` (map), `module_contracts.md` (APIs).
+
 **Last update:** 2026-08-26 (Sidebar Icon Replacement — SVG icons embedded in tools_toolbar.py, _SVG_DATA dict, watchlist + download-engine, 185/185 tests pass)
 
 ## 1. Ye kya hai?
@@ -19,7 +23,6 @@ Ye document AI ko batata hai ki **abhi platform kahan hai** â€” kya bana, k
 | chart | `04_chart/chart/` | `ChartModel` (+ `timeframe`, `exchange`), `CrosshairValue`, `ChartEngine`, `CandleRenderer` + `TimeAxisRenderer` + `CrosshairRenderer` + `LabelRenderer` + `OverlayRenderer`, `CandleChartWidget` (axis strip + snapping crosshair + overlays), `WatchlistWidget` (+ inner `SymbolListWidget` â€” 2-line quote rows via `_SymbolRowDelegate`), `ChartToolsToolbar` (TradingView-style left rail — SVG-based nav icons: watchlist + download-engine via `_SVG_DATA` dict, `_svg_icon_pixmap` renderer; other tools QPainter fallback), `ChartWindow`, **`manifest.py` (Part 4) â€” `chart_manifest()` production manifest** (presentation, chart.render, consumes data.query.candles, deps core+market), `ChartReady`, `WindowRendered` |
 | data | `02_data/data/` | **Historical download engine (Phase 6)** â€” `settings.py` (DownloadSettings frozen: chunks 200d, max_history 10y, retries 5, 429-stop @3, market 09:15â€“12:40 IST, lock stale 120s, default interval `15m`; NSE_HOLIDAYS 2024â€“26; no credentials here â€” provider package ke paas), `calendar/throttle/lock/models/logging_setup/symbols/reporter` (reporter protocol: Null/Recording), `storage/` (CandleDB â€” ohlcv/non_trading/history_boundaries, WAL, INSERT OR IGNORE, V9/V9.1 migrations; DatabaseScanner + `scan_one()`), `provider/` (contract.py â€” Provider protocol `available/symbols/fetch_candles(symbol,interval,start,end)/new_session/renew`, CANONICAL_INTERVALS `(1m,5m,15m,30m,1h)`, 7 normalized error codes, `ProviderError(msg, code)`, sentinels TOKEN_EXPIRED/RATE_LIMITED; factory.py â€” register_provider/build_provider dispatch on `settings.provider`; `zerodha/` package â€” adapter.py (ZerodhaProvider: KITE_INTERVAL_IDS, symbols, fetch_candles wrapper, lazy FetchEngine reset on new_session/renew), auth.py (token.json + Selenium TOTP login, `available()`, lazy SDK imports), fetch.py (FetchEngine 5 retries), instruments.py (resolver, cached), credentials.py (ZerodhaCredentials from_env + layered load_zerodha_credentials(settings, store) per-field: stored -> env -> none; Phase 6N credentials manager: credentials.py (CredentialField + ProviderConfigError), credentials_store.py (CredentialStore protocol; FileCredentialStore data_dir/credentials/vayren.<provider>.json; WindowsCredentialStore ctypes advapi32 CredWriteW/CredReadW/CredDeleteW, TargetName=vayren:zerodha, JSON blob, CRED_PERSIST_LOCAL_MACHINE; default_store win32->Windows else file, no keyring dep), manager.py (ProviderCredentialsManager(settings, provider, store=None) validate label-only/save/apply/test_connection/clear/reload/has_stored; provider duck-type display_name/credential_fields/build_credentials/reload_credentials; adapter 5 fields api_key+api_secret required, user_id/password/totp_secret optional; auth messages -> panel + env fallback mention) priority in-app -> env -> Not Configured; env instructions sirf Advanced -> Environment Variable Fallback collapsed; ui/credentials_dialog.py (ProviderCredentialsDialog + _SecretEdit masked/eye/re-mask, Test Connection generic success/failure texts, Save & Connect -> manager.save, Clear with confirm), status_view set_credentials_manager + post-dialog reload) â€” engine/UI se Zerodha internals ab GONE), `downloader/` (DownloadQueue PARTIAL-priority, forward_sweep 200d chunks + jitter, `HistoricalDownloadEngine.run_download/run_batch/scan_symbol/reset/set_reporter` — **provider required ctor param (Phase 6L), bootstrap `build_provider` se deta hai; canonical intervals only, `provider.symbols()` universe filter, `new_session()` per job, fetch_chunk = partial(provider.fetch_candles, symbol, interval)**), `events/` (8: DownloadRequest, CoverageRequest, CancelDownload, DownloadStarted, DownloadProgress, DownloadCompleted, DownloadFailed, DownloadCoverage), `worker.py` (DownloadWorker QThread â€” engine sirf yahan, op queue, signalsâ†’bus bridge), `ui/` (download_panel (sections, chips, quick ranges, plan, date defaults 2017->today, display dd MMM yyyy - 6I/6I-bis), status_view (state cards, provider card), log_view (LogPanel), historical_panel (HistoricalDownloadPanel side panel - Phase 6F; single main scroll - 6J), stock_checklist (Phase 6G)), **`manifest.py` â€” `data_manifest()`** (historical_data, capabilities download/coverage/status, deps sirf core) |
 | brain | `90_brain/` | Permanent knowledge â€” code chhune se pehle padho |
-| archive | `99_archive/` | Purane modules, sirf reference â€” kabhi import nahi |
 
 ## 3. Verified Facts (is session mein pakke kiye)
 
@@ -56,12 +59,11 @@ Ye document AI ko batata hai ki **abhi platform kahan hai** â€” kya bana, k
 ## 4. Workflow â€” AI Agent Ke Liye
 
 ```
-1. 90_brain/*.md padho (minimum: project_rules, architecture,
-   event_catalog, module_contracts, naming_conventions, coding_standards, ai_memory)
-2. 99_archive sirf reference ke liye
-3. Module contracts ke hisaab se implement
-4. make check (lint + format + typecheck + test + validators)
-5. 90_brain/development_log.md + ai_memory.md update
+1. 90_brain/*.md padho (minimum: architecture,
+   event_catalog, module_contracts, ai_memory) + ARCHITECTURE_CONSTITUTION.md
+2. Module contracts ke hisaab se implement
+3. make check (lint + format + typecheck + test + validators)
+4. 90_brain/development_log.md + ai_memory.md update
 ```
 
 ## 5. Open Items â€” Baaki Kaam
@@ -88,7 +90,7 @@ Ye document AI ko batata hai ki **abhi platform kahan hai** â€” kya bana, k
 | Engine renewal semantics | Pehli sweep failure â†’ `_auth.renew()` ek baar â†’ retry ek baar; doosri failure â†’ `{"ok": False}` bina `error` key + `_abort=True`; sirf renewal **exception** â†’ `{"error": "auth"}` |
 | CandleDB quirks (test-pinned) | non-date strings verbatim store (upsert count); `ohlcv` NOT NULL (corruption rows sirf legacy DBs mein); `load_symbols` missing CSV â†’ FileNotFoundError (resolve_symbols fallback); CSV cols `trading_symbol,interval`; scanner DOWNLOAD_COMPLETE = poori target window covered (earliest â‰ˆ target_start AND latest â‰ˆ now) |
 | Hatchling + `.gitignore` gotcha | Hatchling `.gitignore` ko wheel exclude spec mein merge karta hai. Bare `data/` pattern = kisi bhi depth ka data dir exclude â†’ `02_data/data` wheel + editable `.pth` se silently gayab (import fail). Fix: `/data/` root-anchored. Editable reinstall ke baad `02_data` `.pth` mein aana chahiye |
-| 527 stocks ka UX | Watchlist ab header row ke saath hai â€” search/filter aur watchlist persistence aage ke phase (roadmap dekho) |
+| 527 stocks ka UX | Watchlist ab header row ke saath hai â€” search/filter aur watchlist persistence aage ke phase (architecture.md Future dekho) |
 
 ## 6. Known Oddities (Koi Problem Nahi)
 
@@ -107,3 +109,9 @@ Naya kaam shuru karo toh pehle `roadmap.md` dekho â€” kaunsa phase, kaunsa 
 
 > Brain state bataata hai: kya bana, kahan hai, kya baaki. Update karte rehna.
 
+
+## Packaging
+- EXE build: `.venv/Scripts/pyinstaller scripts/assets/vayren.spec --noconfirm` -> build/dist/Vayren/Vayren.exe; icon scripts/assets/make_icon.py se regenerate hota hai.
+
+## Constitution
+- `ARCHITECTURE_CONSTITUTION.md` (repo root) ADOPTED hai — naya code hamesha ownership table ke hisaab se language choose karo; legacy Python ko preserve rakho, big-bang migration MANA hai.

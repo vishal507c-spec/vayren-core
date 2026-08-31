@@ -1,7 +1,7 @@
 """Validate import rules across the repository.
 
 Domains live inside numbered startup-flow chapters (NN_CHAPTER/domain/).
-Files under 90_brain (docs) and 99_archive (retired modules) are excluded.
+Files under 90_brain (docs) are excluded.
 """
 
 import argparse
@@ -11,7 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-EXCLUDED_TOP_DIRS = {"90_brain", "99_archive"}
+EXCLUDED_TOP_DIRS = {"90_brain"}
 
 # Map domain package names to their numbered chapter folders
 DOMAIN_CHAPTERS: dict[str, str] = {

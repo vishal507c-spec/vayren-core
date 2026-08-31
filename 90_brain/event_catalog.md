@@ -1,5 +1,9 @@
 ﻿# Event Catalog — Post Office Ki Register
 
+**Owns:** Events + owner + payload. **Not owns:** Language/architecture → `ARCHITECTURE_CONSTITUTION.md`/`architecture.md`; module APIs/boundaries → `module_contracts.md`.
+**When to read:** Before publishing/subscribing/handling any event, or adding a new event.
+**Related:** `module_contracts.md` (which module owns which events), `architecture.md` (flow).
+
 ## 1. Ye kya hai?
 
 Ye **saare events ki list** hai jo platform mein chalte hain. Sabse pakka document — yahan jo likha hai, wahi hota hai.

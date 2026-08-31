@@ -1,0 +1,82 @@
+# -*- mode: python ; coding: utf-8 -*-
+"""PyInstaller spec — Vayren desktop app.
+
+Build:  .venv/Scripts/pyinstaller scripts/assets/vayren.spec --noconfirm
+Output: dist/Vayren/Vayren.exe
+"""
+
+import sys
+from pathlib import Path
+
+ROOT = Path(SPECPATH).resolve().parents[1]
+
+a = Analysis(
+    [str(ROOT / "00_app" / "app" / "__main__.py")],
+    pathex=[
+        str(ROOT / "00_app"),
+        str(ROOT / "01_core"),
+        str(ROOT / "02_data"),
+        str(ROOT / "03_market"),
+        str(ROOT / "04_chart"),
+        str(ROOT / "05_strategy"),
+        str(ROOT / "06_backtest"),
+    ],
+    binaries=[],
+    datas=[],
+    hiddenimports=[
+        "app",
+        "core",
+        "data",
+        "market",
+        "chart",
+        "strategy",
+        "backtest",
+        "PySide6.QtGui",
+        "PySide6.QtWidgets",
+        "PySide6.QtCore",
+    ],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[
+        "pytest",
+        "pyright",
+        "pre_commit",
+        "tkinter",
+        "PySide6.QtWebEngineCore",
+        "PySide6.QtWebEngineWidgets",
+        "PySide6.Qt3D",
+        "PySide6.QtCharts",
+        "PySide6.QtDataVisualization",
+        "PySide6.QtQuick",
+        "PySide6.QtMultimedia",
+        "PySide6.QtPdf",
+    ],
+    noarchive=False,
+    module_collection_mode=None,
+)
+
+pyz = PYZ(a.pure)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name="Vayren",
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=False,
+    console=False,
+    icon=str(ROOT / "scripts" / "assets" / "vayren.ico"),
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    name="Vayren",
+)

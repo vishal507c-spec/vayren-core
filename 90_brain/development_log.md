@@ -1776,3 +1776,53 @@ Qt loop running raha. Ek fix laggi: `__main__.py` ko `sys.argv[1:]` dena padta h
 ```
 
 > Har session ka record. 6 mahine baad koi padhe — sab samajh aaye.
+
+## 2026-08-31 - Standalone EXE build (packaging)
+
+### Kya hua tha?
+User chahta tha app desktop par proper standalone app ke roop mein mile.
+
+### Decision
+PyInstaller (onedir, windowed) + custom spec; icon scripts/assets se generate.
+
+### Kya kiya?
+- pyproject.toml wheel packages mein 05_strategy/strategy, 06_backtest/backtest add kiye
+- scripts/assets/make_icon.py + vayren.ico (pure-python PNG/ICO encoder)
+- scripts/assets/vayren.spec (PyInstaller, excludes pytest/tkinter/webengine)
+- Build: build/dist/Vayren/Vayren.exe; launch test OK (VAYREN window title)
+
+### Consequence
+App ab bina venv ke kisi Windows PC par chalegi (data dir D:\ZerodhaTradingData expect karti hai).
+
+### Verification
+EXE launch: process + MainWindowTitle confirmed.
+
+## 2026-08-31 - Architecture Constitution adopted
+
+### Kya hua tha?
+User ne VAYREN Architecture Constitution diya (Rust/Python/egui ownership + gradual migration).
+
+### Kya kiya?
+- 90_brain/architecture_constitution.md save kiya (28 sections, full text)
+- AGENTS.md brain table mein sabse upar register kiya
+
+### Consequence
+Naya code: Rust (core/perf/data/indicators/risk/execution/backtest), Python (strategy/AI/research), Rust+egui (UI). Legacy Python working rakha jayega — no big-bang rewrite.
+
+## 2026-08-31 - Documentation cleanup + 99_archive removal
+
+### Kya hua tha?
+User ne docs cleanup task diya — obsolete/duplicate markdown aur 99_archive hatana tha.
+
+### Kya kiya?
+- Repo-wide .md scan (110 files) → classify kiya
+- DELETED: 99_archive/ (poora tree, ~115 files incl. 115 READMEs) — retired museum modules, koi active code depend nahi karta
+- DELETED: 90_brain/architecture_constitution.md — root ARCHITECTURE_CONSTITUTION.md ka duplicate (superseded)
+- Reference updates: AGENTS.md (constitution path root par, archive rows hatae), ai_memory.md (module table + workflow + constitution path), module_contracts.md (sec 6 museum hatai), roadmap.md (status note), validate_imports.py (EXCLUDED_TOP_DIRS se 99_archive removed, docstring), validate_structure.py (docstring), pyproject.toml (ruff extend-exclude)
+- Environment note: naya venv me kiteconnect missing tha → 5 test fail; pip install -e ".[dev,data]" se fix → 769 passed
+
+### Consequence
+Repo me ab sirf active docs hain. Validators green (structure + imports). 99_archive ka koi import/config dependency nahi tha.
+
+### Verification
+validate_structure PASSED, validate_imports PASSED, pytest 769 passed. Lint/typecheck pre-existing issues unrelated (plot_renderer/vm etc. — cleanup se pehle se the).

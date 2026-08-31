@@ -1,5 +1,8 @@
 # Vayren — Desktop Charting Platform
 
+**Owns:** High-level overview, getting-started. **Not owns:** Rules/architecture/contracts → `AGENTS.md`, `ARCHITECTURE_CONSTITUTION.md`, `90_brain/`.
+**When to read:** First overview for humans; AI should prefer `AGENTS.md` path.
+
 ## 1. Ye kya hai?
 
 Vayren ek **desktop charting platform** hai.
@@ -69,21 +72,14 @@ Sabko alag-alag bolne ki zaroorat nahi. Sab **Post Office** se baat karte hain.
 04_chart (Painter — chart banata hai)
 ```
 
-Event flow:
+Event flow (ab 19 events — poora catalog `90_brain/event_catalog.md` mein):
 
 ```
-AppStarted
-    ↓
-LoadSymbol
-    ↓
-DataLoaded
-    ↓
-ChartReady
-    ↓
-WindowRendered
+AppStarted → ListSymbols → SymbolsListed → QuotesLoaded → LoadSymbol → DataLoaded → ChartReady → WindowRendered
+(plus TimeframeChanged, DownloadRequest/Progress/Completed … — event-driven chain)
 ```
 
-Bas ye 5 events. Aage-piche kuch nahi.
+Detail: `90_brain/event_catalog.md` authoritative hai.
 
 ## 7. Example
 
@@ -93,10 +89,11 @@ python scripts/seed_sample_db.py   # pehli baar: sample data banane ke liye
 make dev
 ```
 
-Aapka `data/vayren.db` apna asli database bhi de sakte hain:
+Aapka asli data directory bhi de sakte hain:
 
 ```bash
-python -m app --symbol SPY --db data/vayren.db --limit 5000
+python -m app --data-dir D:\ZerodhaTradingData --limit 5000
+# env: VAYREN_DATA_DIR=D:\ZerodhaTradingData  python -m app
 ```
 
 Chart kholne ke baad:
