@@ -13,11 +13,10 @@ from typing import Any
 
 from market.models.bar import Bar
 
-from strategy.language import compile_to_ir
+from strategy.language import compile_strategy
 from strategy.models.state import StrategyState
 from strategy.runtime import BarView
 from strategy.version import create_version
-from strategy.vm import StrategyVM
 
 
 def _hash_source(source: str) -> str:
@@ -280,17 +279,19 @@ def approve_proposal(
         save_proposal(failed, data_dir)
         return failed, None
 
-    # SAFETY CHECK 3: Compiler validation
+    # SAFETY CHECK 3: Compiler validation — Python-native
     try:
-        ir = compile_to_ir(prop.new_source)
+        compiled = compile_strategy(prop.new_source)
     except Exception as e:
         failed = _proposal_failed(prop, f"Compilation failed: {e}")
         save_proposal(failed, data_dir)
         return failed, None
 
-    # SAFETY CHECK 4: VM validation — controlled test execution
+    # SAFETY CHECK 4: Python validation — controlled test execution
     try:
-        vm = StrategyVM(ir, {})
+        from strategy.models.parameters import StrategyParameters
+
+        logic = compiled.create_logic(StrategyParameters({}))
         from datetime import timedelta
 
         base = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
@@ -306,21 +307,21 @@ def approve_proposal(
             )
             for i in range(30)
         )
-        for idx in range(vm.warmup(), len(bars)):
+        for idx in range(logic.warmup(), len(bars)):
             view = BarView(bars=bars, index=idx, params={}, state=StrategyState())
-            vm.on_bar(view)
+            logic.on_bar(view)
     except Exception as e:
-        failed = _proposal_failed(prop, f"VM execution failed: {e}")
+        failed = _proposal_failed(prop, f"Python execution failed: {e}")
         save_proposal(failed, data_dir)
         return failed, None
 
-    # SAFETY CHECK 5: Create new version with deterministic IR hash
+    # SAFETY CHECK 5: Create new version with deterministic hash
     try:
-        ir_hash = hashlib.sha256(ir.to_json().encode("utf-8")).hexdigest()
+        ir_hash = hashlib.sha256(compiled.code.encode("utf-8")).hexdigest()
         new_version = create_version(
             prop.strategy_id,
             prop.new_source,
-            ir_version=ir.ir_version,
+            ir_version=1,
             ir_hash=ir_hash,
             parent_version_id=prop.parent_version_id,
             data_dir=data_dir,

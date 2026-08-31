@@ -4,7 +4,7 @@
 **When to read:** Every new session start, before deciding what to build next.
 **Related:** `development_log.md` (history), `architecture.md` (map), `module_contracts.md` (APIs).
 
-**Last update:** 2026-08-26 (Sidebar Icon Replacement — SVG icons embedded in tools_toolbar.py, _SVG_DATA dict, watchlist + download-engine, 185/185 tests pass)
+**Last update:** 2026-08-31 (Strategy → Python-native: `.vstrat` DSL/IR/VM removed; `strategies/base.PythonStrategy` + `compile_strategy`; storage `.py`; 127 strategy+backtest+app tests pass)
 
 ## 1. Ye kya hai?
 

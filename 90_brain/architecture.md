@@ -22,7 +22,7 @@ Desktop charting platform: `SQLite per-stock OHLCV → EventBus → candlestick 
 | `02_data` | `data` | Historical download (write path): engine, worker thread, storage, provider boundary | `core` |
 | `03_market` | `market` | Read path: per-symbol SQLite → `Bar`/`SymbolQuote` | `core` |
 | `04_chart` | `chart` | Chart model, engine, renderers, widgets, windows, theme | `core`, `market` |
-| `05_strategy` | `strategy` | Strategy registry, `.vstrat` language, VM runtime, research, Lab UI | `core`, `market` |
+| `05_strategy` | `strategy` | Strategy registry, Python-native runtime, research, Lab UI | `core`, `market` |
 | `06_backtest` | `backtest` | Replay, execution simulation, positions, journal, metrics | `core`, `market`, `strategy` |
 
 > `90_brain/` is documentation, not a runtime module.

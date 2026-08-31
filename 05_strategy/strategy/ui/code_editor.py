@@ -22,7 +22,47 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from strategy.language.builtins import HIGHLIGHT_FUNCTIONS, HIGHLIGHT_KEYWORDS
+# Python-native strategy editor highlight terms (DSL removed)
+HIGHLIGHT_KEYWORDS = (
+    "class",
+    "def",
+    "self",
+    "if",
+    "elif",
+    "else",
+    "for",
+    "while",
+    "return",
+    "import",
+    "from",
+    "and",
+    "or",
+    "not",
+    "in",
+    "None",
+    "True",
+    "False",
+    "lambda",
+    "pass",
+    "break",
+    "continue",
+)
+HIGHLIGHT_FUNCTIONS = (
+    "buy",
+    "sell",
+    "close_position",
+    "stop_loss",
+    "take_profit",
+    "time_exit",
+    "PythonStrategy",
+    "calc_rsi",
+    "calc_sma",
+    "calc_ema",
+    "calc_atr",
+    "calc_range",
+    "ParameterSpec",
+    "StrategyParameters",
+)
 
 
 class StrategyHighlighter(QSyntaxHighlighter):

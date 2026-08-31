@@ -1,9 +1,6 @@
-"""Persistence for strategies — inside VAYREN, not VS Code.
+"""Persistence for strategies — Python-native."""
 
-Generic Strategy Library: one file per strategy, stable UUID identity separate
-from display name. File format is JSON (id, name, code, timestamps) with
-backward compatibility for legacy plain-code .vstrat files.
-"""
+
 
 from __future__ import annotations
 
@@ -14,83 +11,68 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 DEFAULT_NAME = "Untitled Strategy"
-DEFAULT_CODE = ""
+DEFAULT_CODE = """from strategy.strategies.base import PythonStrategy
 
-# Legacy OBR source preserved if file already exists; not used as template for new strategies.
+class Strategy(PythonStrategy):
+    def on_bar_logic(self, view):
+        # Example: buy when close > open
+        if view.bar.close > view.bar.open:
+            self.buy()
+"""
+
+# Python-native built-in strategies
 LEGACY_OBR_NAME = "OBR SELL v1.0"
-LEGACY_OBR_CODE = """strategy("OBR SELL v1.0")
+LEGACY_OBR_CODE = """from strategy.strategies.base import PythonStrategy
+from strategy.strategies.indicators import calc_range, calc_rsi
 
-# --- parameters exposed to UI ---
-c1_thresh = input(1.25, "C1 Range")
-c4_thresh = input(0.56, "C4 Range")
-rsi_thr = input(65, "RSI Threshold")
-
-# --- indicators ---
-rsi = RSI(14)
-atr = ATR(14)
-ch_range = range(20)
-
-# --- entry: short rejection near top ---
-sell_condition = close >= (high - ch_range * 0.15 * c1_thresh) and rsi >= rsi_thr and volume >= 1000
-
-if sell_condition:
-    sell()
-    stop_loss(close + c1_thresh * (high - low))
-    take_profit(close - 2 * c1_thresh * (high - low))
-
-# --- exit: cover when mid break ---
-if close < (high + low) / 2 and rsi < 50:
-    close_position()
-
-time_exit("15:15")
+class Strategy(PythonStrategy):
+    @staticmethod
+    def param_specs():
+        from strategy.models.parameters import ParameterSpec
+        return (
+            ParameterSpec(key="c1_thresh", label="C1 Range", default=1.25, minimum=0.1, maximum=5.0, decimals=2),
+            ParameterSpec(key="c4_thresh", label="C4 Range", default=0.56, minimum=0.1, maximum=5.0, decimals=2),
+            ParameterSpec(key="rsi_thr", label="RSI Threshold", default=65, minimum=30, maximum=90, decimals=0),
+        )
+    def on_bar_logic(self, view):
+        bar = view.bar
+        c1 = float(self.params.get("c1_thresh", 1.25))
+        rsi_thr = float(self.params.get("rsi_thr", 65))
+        rsi = calc_rsi(self.closes, 14)
+        ch_range = calc_range(self.highs, self.lows, 20)
+        if bar.close >= (bar.high - ch_range * 0.15 * c1) and rsi >= rsi_thr and bar.volume >= 1000:
+            self.sell()
+            self.stop_loss(bar.close + c1 * (bar.high - bar.low))
+            self.take_profit(bar.close - 2 * c1 * (bar.high - bar.low))
+            return
+        if bar.close < (bar.high + bar.low) / 2 and rsi < 50:
+            self.close_position(view)
+            return
+        self.time_exit("15:15")
 """
 
 
 def _is_test_data_dir(p: Path) -> bool:
-    """Heuristic: true for pytest/tmp temp dirs — keep isolated for tests."""
     s = str(p).lower()
     return "tmp" in s or "temp" in s or "pytest" in s
 
 
 def strategy_dir(data_dir: Path | str | None) -> Path:
-    """Canonical strategy source location.
-
-    Product requirement: D:\\VAYREN_STRATEGIES is the ONLY canonical location
-    for user strategy source files. UI saves must land there, and the library
-    must discover from there after restart.
-
-    Test isolation: when caller passes a temporary data_dir (pytest tmp_path),
-    honour that directory so tests remain hermetic and never pollute the
-    canonical folder.
-    """
     canonical = Path(r"D:\VAYREN_STRATEGIES")
     if data_dir is not None:
         p = Path(data_dir)
-        # Test temp dir → keep isolated (e.g. /tmp/pytest-.../tmp_abc/strategies)
         if _is_test_data_dir(p):
             d = p / "strategies"
             d.mkdir(parents=True, exist_ok=True)
             return d
-        # Canonical or market-data dir → always canonical
-        # (covers production D:\\ZerodhaTradingData and explicit canonical path)
         try:
-            # If already pointing inside canonical, normalise to canonical
-            if (
-                canonical in p.parents
-                or p == canonical
-                or str(p).lower().startswith(str(canonical).lower())
-            ):
+            if canonical in p.parents or p == canonical or str(p).lower().startswith(str(canonical).lower()):
                 canonical.mkdir(parents=True, exist_ok=True)
                 return canonical
         except Exception:
             pass
-        # For any other non-test explicit data_dir that is a real folder,
-        # still prefer canonical per product rule (single source of truth)
-        # but allow fallback to data_dir/strategies if canonical not writable?
-        # Requirement says ONLY canonical, so return canonical.
         canonical.mkdir(parents=True, exist_ok=True)
         return canonical
-    # data_dir is None → canonical (covers cwd fallback and UI default)
     canonical.mkdir(parents=True, exist_ok=True)
     return canonical
 
@@ -99,13 +81,11 @@ def strategy_path(name: str, data_dir: Path | str | None = None) -> Path:
     safe = "".join(c if c.isalnum() or c in " -_." else "_" for c in name).strip()
     if not safe:
         safe = "strategy"
-    return strategy_dir(data_dir) / f"{safe}.vstrat"
+    return strategy_dir(data_dir) / f"{safe}.py"
 
 
 @dataclass(frozen=True)
 class StrategyRecord:
-    """Generic Strategy Library record — stable ID separate from display name."""
-
     id: str
     name: str
     code: str
@@ -123,7 +103,6 @@ def _read_record(path: Path) -> StrategyRecord | None:
         text = path.read_text(encoding="utf-8")
     except Exception:
         return None
-    # Try JSON with id/code
     try:
         data = json.loads(text)
         if isinstance(data, dict) and "id" in data and "code" in data:
@@ -137,14 +116,8 @@ def _read_record(path: Path) -> StrategyRecord | None:
             )
     except Exception:
         pass
-    # Legacy plain-code file: id is stem, name is stem
-    return StrategyRecord(
-        id=path.stem,
-        name=path.stem,
-        code=text,
-        created_at="",
-        updated_at="",
-    )
+    # Fallback: plain Python file
+    return StrategyRecord(id=path.stem, name=path.stem, code=text, created_at="", updated_at="")
 
 
 def _write_record(path: Path, record: StrategyRecord) -> Path:
@@ -161,34 +134,13 @@ def _write_record(path: Path, record: StrategyRecord) -> Path:
 
 
 def save_strategy(code: str, name: str = DEFAULT_NAME, data_dir: Path | str | None = None) -> Path:
-    """Save strategy code under `name`, preserving stable ID if file exists.
-
-    New files get a fresh UUID; existing files keep their ID and update
-    code/name/timestamps. File content is JSON (id, name, code) with
-    backward-compatible plain-text fallback on read.
-    """
     p = strategy_path(name, data_dir)
     now = _now_iso()
     existing = _read_record(p) if p.exists() else None
     if existing is not None:
-        # Preserve stable ID from existing record (JSON or legacy plain)
-        record = StrategyRecord(
-            id=existing.id,
-            name=name,
-            code=code,
-            created_at=existing.created_at or now,
-            updated_at=now,
-            version=existing.version,
-        )
+        record = StrategyRecord(id=existing.id, name=name, code=code, created_at=existing.created_at or now, updated_at=now, version=existing.version)
     else:
-        # New strategy: stable UUID
-        record = StrategyRecord(
-            id=str(uuid.uuid4()),
-            name=name,
-            code=code,
-            created_at=now,
-            updated_at=now,
-        )
+        record = StrategyRecord(id=str(uuid.uuid4()), name=name, code=code, created_at=now, updated_at=now)
     return _write_record(p, record)
 
 
@@ -201,7 +153,6 @@ def load_strategy(name: str = DEFAULT_NAME, data_dir: Path | str | None = None) 
 
 
 def load_strategy_record(name: str, data_dir: Path | str | None = None) -> StrategyRecord | None:
-    """Load the full record (id, name, code) for `name`."""
     p = strategy_path(name, data_dir)
     if not p.exists():
         return None
@@ -211,7 +162,7 @@ def load_strategy_record(name: str, data_dir: Path | str | None = None) -> Strat
 def list_strategies(data_dir: Path | str | None = None) -> list[str]:
     d = strategy_dir(data_dir)
     names: list[str] = []
-    for p in d.glob("*.vstrat"):
+    for p in d.glob("*.py"):
         try:
             names.append(p.stem)
         except Exception:
@@ -220,10 +171,9 @@ def list_strategies(data_dir: Path | str | None = None) -> list[str]:
 
 
 def list_strategies_with_mtime(data_dir: Path | str | None = None) -> list[tuple[str, float]]:
-    """(name, epoch mtime) pairs sorted by name — real file modification times."""
     d = strategy_dir(data_dir)
     items: list[tuple[str, float]] = []
-    for p in d.glob("*.vstrat"):
+    for p in d.glob("*.py"):
         try:
             items.append((p.stem, p.stat().st_mtime))
         except Exception:
@@ -232,7 +182,6 @@ def list_strategies_with_mtime(data_dir: Path | str | None = None) -> list[tuple
 
 
 def delete_strategy(name: str, data_dir: Path | str | None = None) -> bool:
-    """Remove a saved strategy file. Returns False when it does not exist."""
     p = strategy_path(name, data_dir)
     if not p.exists():
         return False
@@ -241,25 +190,15 @@ def delete_strategy(name: str, data_dir: Path | str | None = None) -> bool:
 
 
 def rename_strategy(old_name: str, new_name: str, data_dir: Path | str | None = None) -> Path:
-    """Rename a saved strategy file; preserves stable ID, updates name field."""
     src = strategy_path(old_name, data_dir)
     if not src.exists():
         raise FileNotFoundError(f"strategy not found: {old_name}")
     dst = strategy_path(new_name, data_dir)
     if dst.exists():
         raise FileExistsError(f"strategy already exists: {new_name}")
-    # Preserve ID but update name in content
     record = _read_record(src)
     if record is not None:
-        # Write updated record to new location with same id
-        updated = StrategyRecord(
-            id=record.id,
-            name=new_name,
-            code=record.code,
-            created_at=record.created_at or _now_iso(),
-            updated_at=_now_iso(),
-            version=record.version,
-        )
+        updated = StrategyRecord(id=record.id, name=new_name, code=record.code, created_at=record.created_at or _now_iso(), updated_at=_now_iso(), version=record.version)
         _write_record(dst, updated)
         src.unlink()
         return dst
@@ -267,11 +206,9 @@ def rename_strategy(old_name: str, new_name: str, data_dir: Path | str | None = 
 
 
 def duplicate_strategy(name: str, copy_name: str, data_dir: Path | str | None = None) -> Path:
-    """Copy a saved strategy under a new name; new stable ID, same code."""
     record = load_strategy_record(name, data_dir)
     if record is None:
         raise FileNotFoundError(f"strategy not found: {name}")
-    # New record with fresh ID, same code
     return save_strategy(record.code, copy_name, data_dir)
 
 
@@ -283,163 +220,142 @@ def ensure_default(data_dir: Path | str | None = None) -> str:
 
 
 def list_strategy_records(data_dir: Path | str | None = None) -> list[StrategyRecord]:
-    """All strategy records with stable IDs, sorted by name."""
     d = strategy_dir(data_dir)
     records: list[StrategyRecord] = []
-    for p in d.glob("*.vstrat"):
+    for p in d.glob("*.py"):
         rec = _read_record(p)
         if rec is not None:
             records.append(rec)
     return sorted(records, key=lambda r: r.name.lower())
 
 
-def get_strategy_by_id(
-    strategy_id: str, data_dir: Path | str | None = None
-) -> StrategyRecord | None:
-    """Find a strategy by its stable ID."""
+def get_strategy_by_id(strategy_id: str, data_dir: Path | str | None = None) -> StrategyRecord | None:
     for rec in list_strategy_records(data_dir):
         if rec.id == strategy_id:
             return rec
     return None
 
 
-def update_strategy(
-    strategy_id: str,
-    new_code: str | None = None,
-    new_name: str | None = None,
-    data_dir: Path | str | None = None,
-) -> StrategyRecord | None:
-    """Update code/name for the strategy with `strategy_id`, preserving ID."""
+def update_strategy(strategy_id: str, new_code: str | None = None, new_name: str | None = None, data_dir: Path | str | None = None) -> StrategyRecord | None:
     for rec in list_strategy_records(data_dir):
         if rec.id == strategy_id:
             code = new_code if new_code is not None else rec.code
             name = new_name if new_name is not None else rec.name
-            # If name changed, need to rename file
             if name != rec.name:
-                # Write to new path with same id, then remove old
                 old_path = strategy_path(rec.name, data_dir)
                 new_path = strategy_path(name, data_dir)
                 if new_path.exists() and new_path != old_path:
                     raise FileExistsError(f"strategy already exists: {name}")
-                updated = StrategyRecord(
-                    id=rec.id,
-                    name=name,
-                    code=code,
-                    created_at=rec.created_at,
-                    updated_at=_now_iso(),
-                )
+                updated = StrategyRecord(id=rec.id, name=name, code=code, created_at=rec.created_at, updated_at=_now_iso())
                 _write_record(new_path, updated)
                 if old_path != new_path:
                     old_path.unlink(missing_ok=True)
                 return updated
-            # Same name, just update code
-            updated = StrategyRecord(
-                id=rec.id, name=name, code=code, created_at=rec.created_at, updated_at=_now_iso()
-            )
+            updated = StrategyRecord(id=rec.id, name=name, code=code, created_at=rec.created_at, updated_at=_now_iso())
             _write_record(strategy_path(name, data_dir), updated)
             return updated
     return None
 
 
 def create_strategy(name: str, code: str, data_dir: Path | str | None = None) -> StrategyRecord:
-    """Create a new strategy with stable UUID; raises if name exists."""
     p = strategy_path(name, data_dir)
     if p.exists():
         raise FileExistsError(f"strategy already exists: {name}")
     now = _now_iso()
-    record = StrategyRecord(
-        id=str(uuid.uuid4()), name=name, code=code, created_at=now, updated_at=now
-    )
+    record = StrategyRecord(id=str(uuid.uuid4()), name=name, code=code, created_at=now, updated_at=now)
     _write_record(p, record)
     return record
 
 
 def ensure_builtin_strategies(data_dir: Path | str | None = None) -> None:
-    """Seed helper for tests — production is user-owned (no auto-create).
-
-    In production (canonical D:\\VAYREN_STRATEGIES or None) this is a no-op
-    to preserve user-owned library: VAYREN START never invents OBR/SMA files.
-    For isolated test temp dirs (pytest tmp_path) it still seeds the three
-    library fixtures so historical migration tests remain hermetic.
-    """
-    # Production canonical → no seeding (user-owned)
     if data_dir is None:
         return
     p = Path(data_dir)
-    # Only seed isolated temp dirs (heuristic: tmp/temp/pytest in path)
     s = str(p).lower()
     if not ("tmp" in s or "temp" in s or "pytest" in s):
         return
     if list_strategies(data_dir):
         return
-    # Seed fixtures for tests (same code as before)
     save_strategy(LEGACY_OBR_CODE, LEGACY_OBR_NAME, data_dir)
-    obr_code = """strategy("OBR")
-ref_index = input(3, "Reference Candle Index")
-exit_hour = input(15, "Exit Hour")
-exit_min = input(15, "Exit Minute")
-ref_range = range(20)
-rsi_val = RSI(14)
-is_up_break = close > high - ref_range * 0.10
-is_down_break = close < low + ref_range * 0.10
-if is_up_break and rsi_val > 55:
-    buy()
-    stop_loss(low)
-    take_profit(close + ref_range)
-if is_down_break and rsi_val < 45:
-    sell()
-    stop_loss(high)
-    take_profit(close - ref_range)
-time_exit("15:15")
+    obr_code = """from strategy.strategies.base import PythonStrategy
+from strategy.strategies.indicators import calc_range, calc_rsi
+
+class Strategy(PythonStrategy):
+    @staticmethod
+    def param_specs():
+        from strategy.models.parameters import ParameterSpec
+        return (
+            ParameterSpec(key="ref_index", label="Reference Candle Index", default=3, minimum=1, maximum=10, decimals=0),
+            ParameterSpec(key="exit_hour", label="Exit Hour", default=15, minimum=0, maximum=23, decimals=0),
+            ParameterSpec(key="exit_min", label="Exit Minute", default=15, minimum=0, maximum=59, decimals=0),
+        )
+    def on_bar_logic(self, view):
+        bar = view.bar
+        ref_range = calc_range(self.highs, self.lows, 20)
+        rsi_val = calc_rsi(self.closes, 14)
+        is_up_break = bar.close > bar.high - ref_range * 0.10
+        is_down_break = bar.close < bar.low + ref_range * 0.10
+        if is_up_break and rsi_val > 55:
+            self.buy()
+            self.stop_loss(bar.low)
+            self.take_profit(bar.close + ref_range)
+            return
+        if is_down_break and rsi_val < 45:
+            self.sell()
+            self.stop_loss(bar.high)
+            self.take_profit(bar.close - ref_range)
+            return
+        self.time_exit("15:15")
 """
     save_strategy(obr_code, "OBR", data_dir)
-    sma_code = """strategy("SMA Crossover")
-fast_period = input(10, "Fast period")
-slow_period = input(30, "Slow period")
-fast = SMA(fast_period)
-slow = SMA(slow_period)
-if fast > slow and prev_fast <= prev_slow:
-    buy()
-if fast < slow and prev_fast >= prev_slow:
-    sell()
-prev_fast = fast
-prev_slow = slow
+    sma_code = """from strategy.strategies.base import PythonStrategy
+from strategy.strategies.indicators import calc_sma
+
+class Strategy(PythonStrategy):
+    @staticmethod
+    def param_specs():
+        from strategy.models.parameters import ParameterSpec
+        return (
+            ParameterSpec(key="fast_period", label="Fast period", default=10, minimum=2, maximum=50, decimals=0),
+            ParameterSpec(key="slow_period", label="Slow period", default=30, minimum=5, maximum=100, decimals=0),
+        )
+    def __init__(self, params=None):
+        super().__init__(params)
+        self.prev_fast = None
+        self.prev_slow = None
+    def on_bar_logic(self, view):
+        fast_period = int(self.params.get("fast_period", 10))
+        slow_period = int(self.params.get("slow_period", 30))
+        fast = calc_sma(self.closes, fast_period)
+        slow = calc_sma(self.closes, slow_period)
+        if self.prev_fast is None:
+            self.prev_fast = fast
+            self.prev_slow = slow
+            return
+        if fast > slow and self.prev_fast <= self.prev_slow:
+            self.buy()
+        elif fast < slow and self.prev_fast >= self.prev_slow:
+            self.sell()
+        self.prev_fast = fast
+        self.prev_slow = slow
 """
     save_strategy(sma_code, "SMA Crossover", data_dir)
-    # Create initial versions for each fixture (generic, not strategy-specific)
     try:
-        from strategy.version import create_version  # noqa: I001
-        from strategy.language import compile_to_ir
+        from strategy.version import create_version
         import hashlib
-
         for name in [LEGACY_OBR_NAME, "OBR", "SMA Crossover"]:
             rec = load_strategy_record(name, data_dir)
             if rec is None:
                 continue
-            ir_snapshot: str | None = None
-            ir_hash = ""
-            ir_version = 1
-            params: dict[str, float] = {}
+            params = {}
             try:
-                ir = compile_to_ir(rec.code)
-                ir_snapshot = ir.to_json()
-                ir_hash = hashlib.sha256(ir_snapshot.encode("utf-8")).hexdigest()
-                ir_version = ir.ir_version
-                params = {p.label: float(p.default) for p in ir.parameters}
+                from strategy.language.compiler import compile_strategy
+                compiled = compile_strategy(rec.code)
+                params = compiled.param_defaults
             except Exception:
-                ir_hash = hashlib.sha256(rec.code.encode("utf-8")).hexdigest()
-                ir_snapshot = None
-            try:  # noqa: SIM105
-                create_version(
-                    rec.id,
-                    rec.code,
-                    ir_version=ir_version,
-                    ir_hash=ir_hash,
-                    ir_snapshot=ir_snapshot,
-                    parameters=params,
-                    data_dir=data_dir,
-                    metadata={"name": name, "bootstrap": True},
-                )
+                pass
+            try:
+                create_version(rec.id, rec.code, ir_snapshot=None, ir_hash=hashlib.sha256(rec.code.encode()).hexdigest(), ir_version=1, parameters=params, data_dir=data_dir, metadata={"name": name, "bootstrap": True})
             except Exception:
                 pass
     except Exception:

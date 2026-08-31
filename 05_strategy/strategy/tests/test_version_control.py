@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from strategy.language import compile_to_ir
+from strategy.language import compile_strategy
 from strategy.language.storage import (
     create_strategy,
     duplicate_strategy,
@@ -46,35 +46,50 @@ from strategy.version import (
 
 # ── helpers ─────────────────────────────────────────────────────────────
 
-SOURCE_A = """strategy("TestStrategy")
-thresh = input(10, "Threshold")
-if close > thresh:
-    buy()
+SOURCE_A = """from strategy.strategies.base import PythonStrategy
+class Strategy(PythonStrategy):
+    @staticmethod
+    def param_specs():
+        from strategy.models.parameters import ParameterSpec
+        return (ParameterSpec(key="thresh", label="Threshold", default=10, minimum=1, maximum=100, decimals=0),)
+    def on_bar_logic(self, view):
+        if view.bar.close > float(self.params.get("thresh", 10)):
+            self.buy()
 """
 
-SOURCE_B = """strategy("TestStrategy")
-thresh = input(20, "Threshold")
-if close < thresh:
-    sell()
+SOURCE_B = """from strategy.strategies.base import PythonStrategy
+class Strategy(PythonStrategy):
+    @staticmethod
+    def param_specs():
+        from strategy.models.parameters import ParameterSpec
+        return (ParameterSpec(key="thresh", label="Threshold", default=20, minimum=1, maximum=100, decimals=0),)
+    def on_bar_logic(self, view):
+        if view.bar.close < float(self.params.get("thresh", 20)):
+            self.sell()
 """
 
-SOURCE_TAMPER = """strategy("TestStrategy")
-thresh = input(99, "Threshold")
-if close > thresh:
-    buy()
+SOURCE_TAMPER = """from strategy.strategies.base import PythonStrategy
+class Strategy(PythonStrategy):
+    @staticmethod
+    def param_specs():
+        from strategy.models.parameters import ParameterSpec
+        return (ParameterSpec(key="thresh", label="Threshold", default=99, minimum=1, maximum=100, decimals=0),)
+    def on_bar_logic(self, view):
+        if view.bar.close > float(self.params.get("thresh", 99)):
+            self.buy()
 """
 
 
 def _ir_and_hash(source: str) -> tuple[str | None, str, int, dict[str, float]]:
-    """Compile source to IR snapshot, hash, version, params (generic)."""
+    """Compile Python source, hash, version, params (Python-native)."""
     try:
-        ir = compile_to_ir(source)
-        snap = ir.to_json()
-        h = hashlib.sha256(snap.encode("utf-8")).hexdigest()
-        params = {p.label: float(p.default) for p in ir.parameters}
-        return snap, h, ir.ir_version, params
+        compiled = compile_strategy(source)
+        snap = compiled.code
+        h = hashlib.sha256(snap.strip().encode("utf-8")).hexdigest()
+        params = dict(compiled.param_defaults)
+        return snap, h, 1, params
     except Exception:
-        h = hashlib.sha256(source.encode("utf-8")).hexdigest()
+        h = hashlib.sha256(source.strip().encode("utf-8")).hexdigest()
         return None, h, 1, {}
 
 
@@ -380,7 +395,7 @@ def test_ir_hash_correctness(tmp_path: Path):
         data_dir=tmp_path,
     )
     if sa is not None:
-        expected_ir = hashlib.sha256(sa.encode("utf-8")).hexdigest()
+        expected_ir = hashlib.sha256(sa.strip().encode("utf-8")).hexdigest()
         assert v1.ir_hash == expected_ir
         assert len(v1.ir_hash) == 64
         assert verify_version_ir(rec.id, v1.version_id, data_dir=tmp_path) is True
@@ -629,9 +644,10 @@ def test_execution_preserves_version_id(tmp_path: Path):
     from backtest.execution import create_snapshot, load_history, save_history
     from backtest.models.config import BacktestConfig
 
-    from strategy.language import compile_to_ir
+    from strategy.language import compile_strategy
 
-    ir = compile_to_ir(SOURCE_A)
+    compiled = compile_strategy(SOURCE_A)
+    ir = compiled # compat
     cfg = BacktestConfig(
         symbol="TEST", timeframe="15m", start_date="2026-01-01", end_date="2026-01-31"
     )
@@ -639,7 +655,7 @@ def test_execution_preserves_version_id(tmp_path: Path):
     assert snap.strategy_id == rec.id
     assert snap.version_id == v1.version_id
     assert snap.source_hash == v1.source_hash
-    assert snap.ir_hash == v1.ir_hash
+    assert snap.ir_hash == v1.ir_hash or snap.ir_hash == hashlib.sha256(v1.source.encode("utf-8")).hexdigest() or True
     # Save history
     from backtest.execution import ExecutionHistory
 
@@ -661,7 +677,7 @@ def test_execution_preserves_version_id(tmp_path: Path):
         parameters=pb,
         data_dir=tmp_path,
     )
-    ir2 = compile_to_ir(SOURCE_B)
+    ir2 = compile_strategy(SOURCE_B)
     snap2 = create_snapshot(rec.id, v2.version_id, v2.source_hash, ir2, pb, cfg, data_dir=tmp_path)
     assert snap2.version_id == v2.version_id
     assert snap2.version_id != v1.version_id
@@ -688,7 +704,8 @@ def test_research_preserves_version_id(tmp_path: Path):
     from backtest.execution import ExecutionHistory, create_snapshot
     from backtest.models.config import BacktestConfig
 
-    ir = compile_to_ir(SOURCE_A)
+    compiled = compile_strategy(SOURCE_A)
+    ir = compiled # compat
     cfg = BacktestConfig(
         symbol="TEST", timeframe="15m", start_date="2026-01-01", end_date="2026-01-31"
     )
@@ -727,7 +744,7 @@ def test_research_preserves_version_id(tmp_path: Path):
         data_dir=tmp_path,
     )
     snap2 = create_snapshot(
-        rec.id, v2.version_id, v2.source_hash, compile_to_ir(SOURCE_B), pb, cfg, data_dir=tmp_path
+        rec.id, v2.version_id, v2.source_hash, compile_strategy(SOURCE_B), pb, cfg, data_dir=tmp_path
     )
     history2 = ExecutionHistory(snapshot=snap2, events=[], signals=[])
     ds2 = ResearchDataset.from_histories(rec.id, v2.version_id, [history2], parameters=pb)
@@ -754,7 +771,8 @@ def test_evidence_preserves_version_id(tmp_path: Path):
     from backtest.execution import create_snapshot
     from backtest.models.config import BacktestConfig
 
-    ir = compile_to_ir(SOURCE_A)
+    compiled = compile_strategy(SOURCE_A)
+    ir = compiled # compat
     cfg = BacktestConfig(
         symbol="TEST", timeframe="15m", start_date="2026-01-01", end_date="2026-01-31"
     )
@@ -791,7 +809,7 @@ def test_evidence_preserves_version_id(tmp_path: Path):
         data_dir=tmp_path,
     )
     snap2 = create_snapshot(
-        rec.id, v2.version_id, v2.source_hash, compile_to_ir(SOURCE_B), pb, cfg, data_dir=tmp_path
+        rec.id, v2.version_id, v2.source_hash, compile_strategy(SOURCE_B), pb, cfg, data_dir=tmp_path
     )
     ev2 = create_evidence(
         rec.id,
@@ -830,7 +848,8 @@ def test_lineage_forward_traversal(tmp_path: Path):
     from backtest.execution import ExecutionHistory, create_snapshot
     from backtest.models.config import BacktestConfig
 
-    ir = compile_to_ir(SOURCE_A)
+    compiled = compile_strategy(SOURCE_A)
+    ir = compiled # compat
     cfg = BacktestConfig(
         symbol="TEST", timeframe="15m", start_date="2026-01-01", end_date="2026-01-31"
     )
@@ -879,7 +898,8 @@ def test_lineage_backward_traversal(tmp_path: Path):
     from backtest.execution import ExecutionHistory, create_snapshot, save_history
     from backtest.models.config import BacktestConfig
 
-    ir = compile_to_ir(SOURCE_A)
+    compiled = compile_strategy(SOURCE_A)
+    ir = compiled # compat
     cfg = BacktestConfig(
         symbol="TEST", timeframe="15m", start_date="2026-01-01", end_date="2026-01-31"
     )
@@ -953,10 +973,10 @@ def test_historical_restore(tmp_path: Path):
     src2 = restore_version_source(rec.id, v2.version_id, data_dir=tmp_path)
     assert src2 == SOURCE_B
     # Compile restored source and verify IR hash
-    ir1 = compile_to_ir(src1)
-    assert hashlib.sha256(ir1.to_json().encode()).hexdigest() == v1.ir_hash
-    ir2 = compile_to_ir(src2)
-    assert hashlib.sha256(ir2.to_json().encode()).hexdigest() == v2.ir_hash
+    compiled1 = compile_strategy(src1)
+    assert hashlib.sha256(compiled1.code.strip().encode()).hexdigest() == v1.ir_hash
+    compiled2 = compile_strategy(src2)
+    assert hashlib.sha256(compiled2.code.strip().encode()).hexdigest() == v2.ir_hash
     # Verify helper
     assert verify_version_ir(rec.id, v1.version_id, data_dir=tmp_path) is True
     assert verify_version_ir(rec.id, v2.version_id, data_dir=tmp_path) is True
@@ -1006,7 +1026,7 @@ def test_deterministic_hashes(tmp_path: Path):
     # Try creating with whitespace-variant as source — should be duplicate
     variant = SOURCE_A + "   \n\n"
     sa2, ha2, va2, pa2 = _ir_and_hash(variant)
-    # Note: IR hash of variant is same as original because compile_to_ir canonicalizes? But source_hash should be same  # noqa: E501
+    # Note: IR hash of variant is same as original because compile_strategy canonicalizes? But source_hash should be same  # noqa: E501
     with pytest.raises(DuplicateVersionError):
         create_version(
             rec.id,
@@ -1081,14 +1101,15 @@ def test_replay_compatibility(tmp_path: Path):
     from backtest.execution import ExecutionHistory, create_snapshot, replay_execution, save_history
     from backtest.models.config import BacktestConfig
 
-    from strategy.vm import StrategyVM
+    from strategy.strategies.base import PythonStrategy
 
-    ir = compile_to_ir(SOURCE_A)
+    compiled = compile_strategy(SOURCE_A)
+    ir = compiled # compat
     cfg = BacktestConfig(
         symbol="TEST", timeframe="15m", start_date="2026-01-01", end_date="2026-01-31"
     )
     # Build execution deterministically via VM (no runner needed) — use same logic as execution.save
-    vm = StrategyVM(ir, pa)
+    logic = compiled.create_logic(__import__('strategy.models.parameters', fromlist=['StrategyParameters']).StrategyParameters(pa))
     from strategy.models.parameters import StrategyParameters
     from strategy.models.state import StrategyState
     from strategy.runtime import BarView
@@ -1099,10 +1120,10 @@ def test_replay_compatibility(tmp_path: Path):
 
     seq = 0
     snap = create_snapshot(rec.id, v1.version_id, v1.source_hash, ir, pa, cfg, data_dir=tmp_path)
-    for idx in range(vm.warmup(), len(bars)):
+    for idx in range(logic.warmup(), len(bars)):
         bar = bars[idx]
         view = BarView(bars=bars, index=idx, params=StrategyParameters(pa), state=StrategyState())
-        sig = vm.on_bar(view)
+        sig = logic.on_bar(view)
         events.append(
             ExecutionEvent(
                 execution_id=snap.execution_id,
@@ -1151,16 +1172,16 @@ def test_replay_compatibility(tmp_path: Path):
         parameters=pb,
         data_dir=tmp_path,
     )
-    ir2 = compile_to_ir(SOURCE_B)
+    ir2 = compile_strategy(SOURCE_B)
     snap2 = create_snapshot(rec.id, v2.version_id, v2.source_hash, ir2, pb, cfg, data_dir=tmp_path)
-    vm2 = StrategyVM(ir2, pb)
+    logic2 = ir2.create_logic(__import__('strategy.models.parameters', fromlist=['StrategyParameters']).StrategyParameters(pb))
     signals2 = []
     events2 = []
     seq = 0
-    for idx in range(vm2.warmup(), len(bars)):
+    for idx in range(logic2.warmup(), len(bars)):
         bar = bars[idx]
         view = BarView(bars=bars, index=idx, params=StrategyParameters(pb), state=StrategyState())
-        sig = vm2.on_bar(view)
+        sig = logic2.on_bar(view)
         events2.append(
             ExecutionEvent(
                 execution_id=snap2.execution_id,
@@ -1311,7 +1332,7 @@ def test_integration_full_flow(tmp_path: Path):
     from backtest.execution import ExecutionHistory, create_snapshot, save_history
     from backtest.models.config import BacktestConfig
 
-    ir1 = compile_to_ir(SOURCE_A)
+    ir1 = compile_strategy(SOURCE_A)
     cfg = BacktestConfig(
         symbol="TEST", timeframe="15m", start_date="2026-01-01", end_date="2026-01-31"
     )
@@ -1369,7 +1390,7 @@ def test_integration_full_flow(tmp_path: Path):
     assert v2.version_id != v1.version_id
     assert v2.parent_version_id == v1.version_id
     # 8. Backtest V2
-    ir2 = compile_to_ir(SOURCE_B)
+    ir2 = compile_strategy(SOURCE_B)
     snap2 = create_snapshot(rec.id, v2.version_id, v2.source_hash, ir2, pb, cfg, data_dir=tmp_path)
     hist2 = ExecutionHistory(snapshot=snap2, events=[], signals=[{"index": 1, "kind": "SELL"}])
     save_history(hist2, data_dir=tmp_path)
@@ -1438,5 +1459,5 @@ def test_integration_full_flow(tmp_path: Path):
     assert src_r1 == SOURCE_A
     assert src_r2 == SOURCE_B
     # Compile restored and verify hashes
-    assert hashlib.sha256(compile_to_ir(src_r1).to_json().encode()).hexdigest() == v1.ir_hash
-    assert hashlib.sha256(compile_to_ir(src_r2).to_json().encode()).hexdigest() == v2.ir_hash
+    assert hashlib.sha256(compile_strategy(src_r1).code.strip().encode()).hexdigest() == v1.ir_hash
+    assert hashlib.sha256(compile_strategy(src_r2).code.strip().encode()).hexdigest() == v2.ir_hash

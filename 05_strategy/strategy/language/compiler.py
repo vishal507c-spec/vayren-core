@@ -1,63 +1,72 @@
-"""Compiler — validated AST -> StrategyIR -> Universal VM (only execution path)."""
+"""Compiler — Python-native Strategy compilation (no DSL, no IR, no VM)."""
 
-import ast
 from dataclasses import dataclass
 
-from strategy.language.ir import StrategyIR, build_ir
-from strategy.language.parser import CompileError, parse_and_validate
 from strategy.models.parameters import StrategyParameters
 from strategy.runtime import StrategyLogic
 
 
 class StrategyLanguageError(Exception):
-    def __init__(self, errors: list[CompileError]):
+    def __init__(self, errors: list):
         self.errors = errors
-        super().__init__("\n".join(e.pretty() for e in errors))
+        super().__init__("\n".join(str(e) for e in errors))
 
 
 @dataclass
 class CompiledStrategy:
-    tree: ast.Module
-    param_defaults: dict[str, float]  # label -> default
     code: str
-    ir: StrategyIR | None = None
-    warmup: int = 20
+    strategy_class: type
+    param_specs: tuple
+    param_defaults: dict[str, float]
 
-    def create_logic(
-        self, params: StrategyParameters, owner_id: str | None = None
-    ) -> StrategyLogic:
-        """Create VM logic — IR → Universal VM is the ONLY strategy execution path.
-
-        No exec fallback. If IR is missing or VM fails, fail loudly.
-        """
-        if self.ir is None:
-            raise StrategyLanguageError(
-                [CompileError(line=1, col=0, message="IR not available — compilation failed")]
-            )
-        from strategy.vm import vm_from_ir
-
-        # Fail loudly — no silent fallback to another implementation
-        return vm_from_ir(self.ir, params, owner_id=owner_id)
+    def create_logic(self, params: StrategyParameters, owner_id: str | None = None) -> StrategyLogic:
+        try:
+            return self.strategy_class(params)
+        except Exception as e:
+            raise StrategyLanguageError([f"Failed to create strategy logic: {e}"]) from e
 
 
 def compile_strategy(code: str) -> CompiledStrategy:
-    tree, errors, param_infos = parse_and_validate(code)
-    if errors:
-        raise StrategyLanguageError(errors)
-    if tree is None:
-        raise StrategyLanguageError([e for e in errors])  # noqa: C416
-    defaults: dict[str, float] = {}
-    for p in param_infos:
-        defaults[p.label] = float(p.default)
-    ir = build_ir(code, tree, param_infos)
-    return CompiledStrategy(tree=tree, param_defaults=defaults, code=code, ir=ir)
+    # Expect Python code defining a class Strategy(PythonStrategy) or similar
+    namespace: dict = {"__builtins__": __builtins__}
+    try:
+        exec(code, namespace)
+    except SyntaxError as e:
+        raise StrategyLanguageError([f"Syntax error at line {e.lineno}: {e.msg}"]) from e
+    except Exception as e:
+        raise StrategyLanguageError([f"Compilation failed: {e}"]) from e
 
+    # Find StrategyLogic subclass
+    strategy_class = None
+    for name, obj in namespace.items():
+        if isinstance(obj, type):
+            # Check if it has on_bar_logic or on_bar
+            if hasattr(obj, "on_bar_logic") or hasattr(obj, "on_bar"):
+                # Avoid base class itself
+                if name != "PythonStrategy":
+                    strategy_class = obj
+                    break
+    if strategy_class is None:
+        # Fallback: look for class named Strategy
+        if "Strategy" in namespace and isinstance(namespace["Strategy"], type):
+            strategy_class = namespace["Strategy"]
+    if strategy_class is None:
+        raise StrategyLanguageError(["No Strategy class found — define class Strategy(PythonStrategy) with on_bar_logic"])
 
-def compile_to_ir(code: str) -> StrategyIR:
-    """Compile source to generic IR — no execution, deterministic."""
-    tree, errors, param_infos = parse_and_validate(code)
-    if errors:
-        raise StrategyLanguageError(errors)
-    if tree is None:
-        raise StrategyLanguageError([CompileError(line=1, col=0, message="Empty source")])
-    return build_ir(code, tree, param_infos)
+    # Extract param specs if available
+    param_specs = ()
+    try:
+        if hasattr(strategy_class, "param_specs") and callable(getattr(strategy_class, "param_specs")):
+            param_specs = tuple(strategy_class.param_specs())
+    except Exception:
+        param_specs = ()
+
+    param_defaults = {}
+    for spec in param_specs:
+        try:
+            param_defaults[spec.label] = float(spec.default)
+            param_defaults[spec.key] = float(spec.default)
+        except Exception:
+            pass
+
+    return CompiledStrategy(code=code, strategy_class=strategy_class, param_specs=param_specs, param_defaults=param_defaults)

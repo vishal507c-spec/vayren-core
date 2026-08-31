@@ -1,6 +1,6 @@
 """PlotRenderer — TradingView-style plot series painting.
 
-Renders generic plot series produced by StrategyVM's plot() primitive.
+Renders generic plot series produced by Python strategies's plot() primitive.
 Each series is a dict of bar_index -> value, stable identity per title.
 Handles session gaps (no line across missing bars), zoom/pan, and viewport.
 Pure painting: no state, no calculation.

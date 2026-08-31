@@ -36,17 +36,35 @@ def _seed_repo(tmp: Path, symbol: str, closes: list[float]) -> SymbolRepository:
     return SymbolRepository(tmp)
 
 
-SMA_CODE = """strategy("SMA Crossover")
-fast_period = input(10, "Fast period")
-slow_period = input(30, "Slow period")
-fast = SMA(fast_period)
-slow = SMA(slow_period)
-if fast > slow and prev_fast <= prev_slow:
-    buy()
-if fast < slow and prev_fast >= prev_slow:
-    sell()
-prev_fast = fast
-prev_slow = slow
+SMA_CODE = """from strategy.strategies.base import PythonStrategy
+from strategy.strategies.indicators import calc_sma
+class Strategy(PythonStrategy):
+    @staticmethod
+    def param_specs():
+        from strategy.models.parameters import ParameterSpec
+        return (
+            ParameterSpec(key="fast_period", label="Fast period", default=10, minimum=2, maximum=50, decimals=0),
+            ParameterSpec(key="slow_period", label="Slow period", default=30, minimum=5, maximum=100, decimals=0),
+        )
+    def __init__(self, params=None):
+        super().__init__(params)
+        self.prev_fast = None
+        self.prev_slow = None
+    def on_bar_logic(self, view):
+        fast_period = int(self.params.get("fast_period", 10))
+        slow_period = int(self.params.get("slow_period", 30))
+        fast = calc_sma(self.closes, fast_period)
+        slow = calc_sma(self.closes, slow_period)
+        if self.prev_fast is None:
+            self.prev_fast = fast
+            self.prev_slow = slow
+            return
+        if fast > slow and self.prev_fast <= self.prev_slow:
+            self.buy()
+        elif fast < slow and self.prev_fast >= self.prev_slow:
+            self.sell()
+        self.prev_fast = fast
+        self.prev_slow = slow
 """
 
 
@@ -108,9 +126,10 @@ def test_runner_vm_is_only_path():
     assert "sma_crossover" not in runner_text.lower()
     # Should use VM path
     assert "vm_from_ir" in runner_text or "compile_strategy" in runner_text
-    # Compiler should have no exec fallback
+    # Compiler must be Python-native (no IR / VM / DSL)
     comp_text = pathlib.Path("05_strategy/strategy/language/compiler.py").read_text(
         encoding="utf-8"
     )
-    assert "exec(" not in comp_text
+    assert "StrategyIR" not in comp_text
+    assert "vm_from_ir" not in comp_text
     assert "_CompiledLogic" not in comp_text

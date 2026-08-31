@@ -102,7 +102,7 @@ class Bootstrap:
         # ``ensure_builtin_strategies`` is now a deprecated no-op kept only
         # for backward compat; no seeding on VAYREN START.
 
-        # BacktestRunner is VM-only: .vstrat -> IR -> VM -> Signal
+        # BacktestRunner is Python-only: .py Strategy -> PythonStrategy -> Signal
         # canonical strategy source D:\VAYREN_STRATEGIES  # noqa: E501
         backtest_runner = BacktestRunner(
             repository, registry=strategy_registry, data_dir=r"D:\VAYREN_STRATEGIES"
@@ -1052,7 +1052,7 @@ class Bootstrap:
                     try:
                         import hashlib
 
-                        from strategy.language import compile_to_ir
+                        from strategy.language import compile_strategy
                         from strategy.language.storage import load_strategy_record
                         from strategy.version import (
                             DuplicateVersionError,
@@ -1070,17 +1070,16 @@ class Bootstrap:
                                 parent_id = versions[-1].version_id
                         except Exception:
                             pass
-                        # Build IR snapshot + hash + params if possible
+                        # Build Python snapshot + hash + params
                         ir_snapshot: str | None = None
                         ir_hash = ""
                         ir_version = 1
                         params: dict[str, float] = {}
                         try:
-                            ir = compile_to_ir(code)
-                            ir_snapshot = ir.to_json()
-                            ir_hash = hashlib.sha256(ir_snapshot.encode("utf-8")).hexdigest()
-                            ir_version = ir.ir_version
-                            params = {p.label: float(p.default) for p in ir.parameters}
+                            compiled = compile_strategy(code)
+                            ir_snapshot = compiled.code
+                            ir_hash = hashlib.sha256(compiled.code.encode("utf-8")).hexdigest()
+                            params = dict(compiled.param_defaults)
                         except Exception:
                             ir_hash = hashlib.sha256(code.encode("utf-8")).hexdigest()
                         try:
@@ -1478,7 +1477,6 @@ class Bootstrap:
                     create_snapshot,
                     save_history,
                 )
-                from strategy.language import compile_to_ir
                 from strategy.language.storage import (
                     get_strategy_by_id,
                     load_strategy,
@@ -1537,31 +1535,12 @@ class Bootstrap:
                                 )
                                 ir_version = 1
                                 version_id = "v0"
-                        # Compile to get IR for data requirements (deterministic)
-                        ir = None
-                        try:
-                            if source:
-                                ir = compile_to_ir(source)
-                                # Use version's IR hash if we have a version to keep lineage stable; else compute  # noqa: E501
-                                if version is None and ir:
-                                    hashlib.sha256(ir.to_json().encode("utf-8")).hexdigest()
-                                    ir_version = ir.ir_version
-                        except Exception:
-                            pass
-                        # Fallback IR stub if compile failed but version had hash
-                        ir_obj = (
-                            ir
-                            if ir is not None
-                            else type(
-                                "IR", (), {"ir_version": ir_version, "to_json": lambda: "{}"}
-                            )()
-                        )  # type: ignore[assignment]
-                        # Build snapshot — exact version reference preserved forever
+                        # Build snapshot — exact version reference preserved forever (Python-native)
                         snap = create_snapshot(
                             strategy_id,
                             version_id,
                             source_hash,
-                            ir_obj,  # type: ignore[arg-type]
+                            None,
                             dict(definition.params) if hasattr(definition, "params") else {},
                             res.config,  # type: ignore[attr-defined]
                             data_dir,

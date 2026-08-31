@@ -1,12 +1,10 @@
-"""BacktestRunner — orchestrates replay → VM strategy → execution → journal → metrics.
+"""BacktestRunner — orchestrates replay → Python strategy → execution → journal → metrics.
 
-Canonical path: .vstrat → Parser → Compiler → IR → Universal VM → Signal.
+Canonical path: Python Strategy (strategy.strategies.base.PythonStrategy) → Signal.
 
-No Python builtin factory, no exec fallback. VM is the ONLY strategy execution path.
+No DSL, no IR, no VM. Python is the ONLY strategy execution path.
 Registry is kept only for backward compat (legacy definitions) but not used for
-.vstrat strategies. If registry is provided and strategy is found there, it is
-used only to preserve old tests; otherwise VM path is taken. New code should
-use VM path (data_dir + StrategyRecord).
+Python strategies. New code should use Python path (data_dir + StrategyRecord).
 """
 
 from __future__ import annotations
@@ -37,7 +35,7 @@ class BacktestRunner:
     UI thread and bridges results via Qt signals. Market data is reused
     through the given :class:`SymbolRepository`.
 
-    Execution is VM-only: .vstrat source → IR → StrategyVM. No exec().
+    Execution is Python-only: Python Strategy source → PythonStrategy. No DSL, no IR, no VM.
     """
 
     def __init__(
@@ -48,7 +46,7 @@ class BacktestRunner:
     ) -> None:
         self._repository = repository
         self._registry = registry
-        # data_dir for .vstrat lookup; if not given, try to derive from repository
+        # data_dir for Python strategy lookup; if not given, try to derive from repository
         if data_dir is None:
             try:
                 d = getattr(repository, "_directory", None)
@@ -117,7 +115,7 @@ class BacktestRunner:
     def _run_one_by_id(
         self, strategy_id: str, config: BacktestConfig, on_progress: Any | None
     ) -> StrategyResult | None:
-        # Try VM path first: load .vstrat by id or name
+        # Try Python path first: load Python strategy by id or name
         try:
             from strategy.language.storage import get_strategy_by_id, load_strategy_record
 
@@ -155,13 +153,13 @@ class BacktestRunner:
         if not window:
             return None
 
-        # Compile .vstrat → IR → VM (only path, fail loudly)
+        # Compile Python Strategy (only path, fail loudly)
         try:
             from strategy.language import compile_strategy
             from strategy.models.parameters import StrategyParameters
 
             compiled = compile_strategy(rec.code)
-            # Use VM exclusively — owner-aware for chart lifecycle (use display name for visibility)
+            # Python-native — owner-aware for chart lifecycle
             logic = compiled.create_logic(
                 StrategyParameters(compiled.param_defaults), owner_id=rec.name
             )

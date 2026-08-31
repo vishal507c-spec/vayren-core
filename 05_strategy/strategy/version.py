@@ -508,29 +508,15 @@ def restore_version_source(
 def verify_version_ir(
     strategy_id: str, version_id: str, data_dir: Path | str | None = None
 ) -> bool:
-    """Verify stored IR hash matches recompiled source's IR. Returns True or raises on mismatch."""
+    """Verify stored source — Python-native (IR removed). Returns True or raises on mismatch."""
     v = load_version(strategy_id, version_id, data_dir)
     if v is None:
         raise FileNotFoundError(f"version not found: {strategy_id}/{version_id}")
-    if v.ir_snapshot is not None:
-        computed = _hash_ir_json(v.ir_snapshot)
-        if computed != v.ir_hash:
-            raise ValueError(
-                f"IR tamper: stored ir_hash {v.ir_hash} != computed {computed} for {strategy_id}/{version_id}"  # noqa: E501
-            )
-        return True
-    # No snapshot stored — compile source and compare
-    try:
-        from strategy.language import compile_to_ir
-
-        ir = compile_to_ir(v.source)
-        recomputed = hashlib.sha256(ir.to_json().encode("utf-8")).hexdigest()
-        if recomputed != v.ir_hash:
-            raise ValueError(
-                f"IR mismatch: stored {v.ir_hash} != recompiled {recomputed} for {strategy_id}/{version_id}"  # noqa: E501
-            )
-        return True
-    except ValueError:
-        raise
-    except Exception as exc:
-        raise ValueError(f"cannot verify IR for {strategy_id}/{version_id}: {exc}") from exc
+    recomputed = _hash_text(v.source)
+    if recomputed != v.source_hash:
+        raise ValueError(f"source tamper: {v.source_hash} != {recomputed} for {strategy_id}/{version_id}")
+    # Also verify ir_hash matches source hash (Python-native)
+    expected_ir = _hash_text(v.source)
+    if v.ir_hash != expected_ir:
+        raise ValueError(f"ir_hash tamper: {v.ir_hash} != {expected_ir} for {strategy_id}/{version_id}")
+    return True

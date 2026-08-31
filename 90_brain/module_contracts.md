@@ -240,31 +240,31 @@ WAL, `V9/V9.1` migrations.
 
 ### 5.6 Module: `05_strategy` — Strategy Platform
 
-**Responsibility:** Strategy registry, language (`.vstrat` → IR), storage, VM runtime, research, Lab UI. VM-only, no `exec`.
+**Responsibility:** Strategy registry, Python-native runtime (`PythonStrategy` → `StrategyLogic`), storage, research, Lab UI.
 
 **Public API** (`strategy/__init__.py`):
 `StrategyRegistry`, `StrategyRegistryError`, `StrategyDefinition`, `StrategyParameters`, `ParameterSpec`, `ParameterError`, `Signal`, `SignalKind`, `StrategyState`, `StrategyRuntime`, `StrategyLogic`, `BarView`, `strategy_manifest`, events `StrategiesListed`, `StrategySelected`, `PaperTradeRequested`, `LabReset`
 
 **Consumes:** `core`, `market`.
 
-**Produces:** `Signal` streams, strategy records (`.vstrat` + IR snapshot).
+**Produces:** `Signal` streams, strategy records (`.py` Python code, no IR).
 
 **Forbidden:** `data` internals, `chart` internals, `app` internals.
 
 **Invariants:**
-- `.vstrat` → parser → compiler → IR → VM is the ONLY execution path. No `builtins/` folder (removed 2026-08-24).
+- Python `class Strategy(PythonStrategy)` is the ONLY execution path — no `.vstrat` DSL, no parser/compiler/IR/VM, no `exec` of DSL.
 - `StrategyParameters` frozen; `StrategyRegistry` is the registry of definitions.
-- Backtest must obtain strategies via `strategy` public API, not via file parsing.
+- Backtest must obtain strategies via `strategy` public API (`compile_strategy` → Python class), not via file parsing.
 
-**AI modification:** Keep VM path; do not reintroduce Python factory `exec`. Add strategy via new `.vstrat` record + IR.
+**AI modification:** Keep Python-native path; do not reintroduce `.vstrat` DSL. Add strategy via new `.py` record (Python class).
 
-**Validation:** `05_strategy/strategy/tests` (+ VM migration tests).
+**Validation:** `05_strategy/strategy/tests` (Python strategy tests).
 
 ---
 
 ### 5.7 Module: `06_backtest` — Research Engine
 
-**Responsibility:** Historical replay, execution simulation, positions, journal, metrics. VM-only orchestration.
+**Responsibility:** Historical replay, execution simulation, positions, journal, metrics. Python-only orchestration.
 
 **Public API** (`backtest/__init__.py`):
 `BacktestRunner`, `BacktestWorker`, `BacktestConfig`, `BacktestResult`, `StrategyResult`, `TradeRecord`, `EquityPoint`, `PerformanceMetrics`, `RunBacktest`, `BacktestStarted`, `BacktestProgress`, `BacktestCompleted`, `BacktestFailed`, `backtest_manifest`, `validate_backtest_form`
@@ -276,11 +276,11 @@ WAL, `V9/V9.1` migrations.
 **Forbidden:** `data` provider SDK, `chart` rendering.
 
 **Invariants:**
-- `BacktestRunner(repository, registry, data_dir)` loads `.vstrat` via `get_strategy_by_id` → `compile_strategy` → `vm_from_ir`; no factory fallback.
+- `BacktestRunner(repository, registry, data_dir)` loads Python strategy via `get_strategy_by_id` → `compile_strategy` → `PythonStrategy`; no `.vstrat`/VM fallback.
 - `validate_backtest_form` is honest validation (no fake results).
 - `BacktestWorker` off-UI-thread (like `DownloadWorker`).
 
-**AI modification:** Preserve VM dispatch; respect `PerformanceMemory` measured-only metrics.
+**AI modification:** Preserve Python dispatch; respect `PerformanceMemory` measured-only metrics.
 
 **Validation:** `06_backtest/backtest/tests` + `scripts/run_tests.py` partitions.
 
