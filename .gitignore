@@ -5,6 +5,7 @@ __pycache__/
 dist/
 build/
 *.so
+.venv/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
