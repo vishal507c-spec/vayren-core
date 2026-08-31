@@ -156,12 +156,24 @@ fix: correct bar timestamp ordering in the repository
 ```
 Public API badla → README update karo, tests saath mein, `make check` pass kiye bina commit nahi.
 
+## GitHub Push — Hard Rule (NON-NEGOTIABLE)
+
+**Bina user ke explicit command ke GitHub par KUCH bhi push/release/tag/PR nahi.**
+
+- **LOCAL ≠ REMOTE, COMMIT ≠ PUSH, VERSION ≠ TAG, TAG ≠ RELEASE** — ek operation dusre se permission nahi deta
+- Explicit permission hi push kara sakti hai: "GitHub par push karo", "main par push karo", "changes push karo", "commit aur push karo", "version release karo" (release workflow explicitly manga ho)
+- Tests pass / task complete / commit bana / version update — **ye koi bhi push permission NAHI hai**
+- Ambiguous commands ("kar do", "update kar do", "save kar do", "complete kar do") → **sirf local rakho**; agar remote intent possible ho to pucho: "GitHub par push karna hai ya sirf local changes rakhne hain?"
+- Local work allowed: edit, tests, builds, validation, git status/diff, local commits (jab task appropriate ho)
+- Push karte waqt: branch check → git status → git diff review → sirf requested changes push → **force-push kabhi nahi** (jab tak user explicitly na maange), branch switch/merge push ke liye nahi
+
 ## Forbidden
 
 - `from x import *`, relative cross-module, dusre module ka internal import
 - Widget ke andar EventBus/SQL, loader ke andar drawing, UI ke andar business logic
 - Placeholder / mock / sample trading logic, TODO/FIXME, dead code
 - Big-bang migration, naya language/framework bina approval
+- **Bina explicit user command ke GitHub push/release/tag/PR** (upar wala Hard Rule)
 
 ## Commands
 

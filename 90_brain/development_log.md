@@ -2,6 +2,13 @@
 
 **Nya entry hamesha upar likho.**
 
+## 2026-08-31 - HARD RULE - GitHub Push Permission
+
+- User ne NON-NEGOTIABLE rule diya: bina explicit command ke GitHub push/release/tag/PR MANA. LOCAL != REMOTE, COMMIT != PUSH, VERSION != TAG, TAG != RELEASE.
+- Context: AI ne indicator-icons commit (6ccebeb) bina permission push kar diya tha - user ne wapas manga; main 80599f7 par force-rollback kiya (user ki explicit demand par), kaam local backup/indicator-icons branch mein safe.
+- AGENTS.md mein GitHub Push Hard Rule section + Forbidden bullet add hua (future sessions ke liye persist).
+
+
 ## 2026-08-31 — RELEASE v1.5.0 — Python-native Strategy + AI-first Docs
 
 **Release:** `v1.5.0` (pyproject `1.5.0`, tag `v1.5.0`). Previous tag `v1.2.0`. Commit `aa1b22e` foundation work + docs `22eaa0d` + strategy `f870012` + `f22867a`.
