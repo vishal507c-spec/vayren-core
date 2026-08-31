@@ -1,0 +1,60 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.so
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyright/
+htmlcov/
+.coverage
+.coverage.*
+
+# Environment
+.env
+.env.local
+.env.*.local
+*.env
+
+# IDE
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data
+*.parquet
+*.h5
+*.feather
+/data/
+market/data/
+
+# Logs
+*.log
+logs/
+
+# Docker
+.docker/
+docker-compose.override.yml
+
+# Knowledge artifacts
+knowledge/experiments/*/runs/
+knowledge/experiments/*/artifacts/
+knowledge/memory/session-logs/
+
+# Coding-time forensics traces
+.forensics/
+
+# Secrets
+credentials.yaml
+secrets.yaml
+*.key
+*.pem

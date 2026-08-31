@@ -1,0 +1,56 @@
+"""Strategy Language — sandbox parser/compiler + generic IR."""
+
+from .compiler import CompiledStrategy, StrategyLanguageError, compile_strategy, compile_to_ir
+from .ir import IR_VERSION, StrategyIR
+from .parser import CompileError, parse_and_validate
+from .storage import (
+    DEFAULT_CODE,
+    DEFAULT_NAME,
+    LEGACY_OBR_CODE,
+    LEGACY_OBR_NAME,
+    StrategyRecord,
+    create_strategy,
+    delete_strategy,
+    duplicate_strategy,
+    ensure_builtin_strategies,
+    ensure_default,
+    get_strategy_by_id,
+    list_strategies,
+    list_strategies_with_mtime,
+    list_strategy_records,
+    load_strategy,
+    load_strategy_record,
+    rename_strategy,
+    save_strategy,
+    update_strategy,
+)
+
+__all__ = [
+    "CompiledStrategy",
+    "StrategyLanguageError",
+    "StrategyIR",
+    "IR_VERSION",
+    "CompileError",
+    "compile_strategy",
+    "compile_to_ir",
+    "parse_and_validate",
+    "DEFAULT_CODE",
+    "DEFAULT_NAME",
+    "LEGACY_OBR_CODE",
+    "LEGACY_OBR_NAME",
+    "StrategyRecord",
+    "ensure_default",
+    "list_strategies",
+    "list_strategies_with_mtime",
+    "list_strategy_records",
+    "load_strategy",
+    "load_strategy_record",
+    "save_strategy",
+    "create_strategy",
+    "update_strategy",
+    "get_strategy_by_id",
+    "delete_strategy",
+    "duplicate_strategy",
+    "rename_strategy",
+    "ensure_builtin_strategies",
+]

@@ -1,0 +1,207 @@
+"""Research storage — generic file-based, one JSON per object."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from .discovery import Discovery
+from .experiment import Experiment
+from .intelligence import IntelligenceRun
+
+
+def _research_dir(data_dir: Path | str | None, sub: str) -> Path:
+    if data_dir and Path(data_dir).is_dir():
+        d = Path(data_dir) / "research" / sub
+    else:
+        d = Path.cwd() / ".vayren" / "research" / sub
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _record_lineage_for_experiment(exp: Experiment, data_dir: Path | str | None) -> None:
+    try:
+        from .lineage import load_lineage, save_lineage
+
+        g = load_lineage(data_dir)
+        g.add_node("STRATEGY", exp.strategy_id)
+        g.add_node("VERSION", exp.version_id)
+        g.add_node("EXPERIMENT", exp.experiment_id)
+        g.add_edge(
+            "STRATEGY",
+            exp.strategy_id,
+            "EXPERIMENT",
+            exp.experiment_id,
+            relationship="experiment_of",
+        )
+        g.add_edge(
+            "VERSION", exp.version_id, "EXPERIMENT", exp.experiment_id, relationship="experiment_of"
+        )
+        for eid in exp.execution_ids:
+            g.add_node("EXECUTION", eid)
+            g.add_edge("EXECUTION", eid, "EXPERIMENT", exp.experiment_id, relationship="input_to")
+        save_lineage(g, data_dir)
+    except Exception:
+        pass
+
+
+def _record_lineage_for_discovery(disc: Discovery, data_dir: Path | str | None) -> None:
+    try:
+        from .lineage import load_lineage, save_lineage
+
+        g = load_lineage(data_dir)
+        g.add_node("STRATEGY", disc.strategy_id)
+        g.add_node("VERSION", disc.version_id)
+        g.add_node("EXPERIMENT", disc.experiment_id)
+        g.add_node("DISCOVERY", disc.discovery_id)
+        g.add_edge(
+            "STRATEGY", disc.strategy_id, "DISCOVERY", disc.discovery_id, relationship="discovered"
+        )
+        g.add_edge(
+            "VERSION", disc.version_id, "DISCOVERY", disc.discovery_id, relationship="discovered"
+        )
+        g.add_edge(
+            "EXPERIMENT",
+            disc.experiment_id,
+            "DISCOVERY",
+            disc.discovery_id,
+            relationship="produced",
+        )
+        save_lineage(g, data_dir)
+    except Exception:
+        pass
+
+
+def _record_lineage_for_intelligence(run: IntelligenceRun, data_dir: Path | str | None) -> None:
+    try:
+        from .lineage import load_lineage, save_lineage
+
+        g = load_lineage(data_dir)
+        g.add_node("STRATEGY", run.strategy_id)
+        g.add_node("VERSION", run.version_id)
+        g.add_node("INTELLIGENCE_RUN", run.run_id)
+        g.add_edge(
+            "STRATEGY", run.strategy_id, "INTELLIGENCE_RUN", run.run_id, relationship="analysis_of"
+        )
+        g.add_edge(
+            "VERSION", run.version_id, "INTELLIGENCE_RUN", run.run_id, relationship="analysis_of"
+        )
+        for eid in run.execution_ids:
+            g.add_node("EXECUTION", eid)
+            g.add_edge("EXECUTION", eid, "INTELLIGENCE_RUN", run.run_id, relationship="input_to")
+        for did in run.discoveries:
+            g.add_node("DISCOVERY", did)
+            g.add_edge("INTELLIGENCE_RUN", run.run_id, "DISCOVERY", did, relationship="produced")
+        save_lineage(g, data_dir)
+    except Exception:
+        pass
+
+
+def save_experiment(exp: Experiment, data_dir: Path | str | None = None) -> Path:
+    p = _research_dir(data_dir, "experiments") / f"{exp.experiment_id}.json"
+    # Immutable check — if exists and identical, return; otherwise collision error
+    if p.exists():
+        try:
+            existing = Experiment.from_dict(json.loads(p.read_text(encoding="utf-8")))
+            if existing.to_dict() == exp.to_dict():
+                return p
+            raise FileExistsError(f"experiment id collision: {exp.experiment_id}")
+        except FileExistsError:
+            raise
+        except Exception:
+            pass
+    p.write_text(exp.to_json(), encoding="utf-8")
+    _record_lineage_for_experiment(exp, data_dir)
+    return p
+
+
+def load_experiment(experiment_id: str, data_dir: Path | str | None = None) -> Experiment | None:
+    p = _research_dir(data_dir, "experiments") / f"{experiment_id}.json"
+    if not p.exists():
+        return None
+    try:
+        return Experiment.from_dict(json.loads(p.read_text(encoding="utf-8")))
+    except Exception:
+        return None
+
+
+def list_experiments(data_dir: Path | str | None = None) -> list[Experiment]:
+    d = _research_dir(data_dir, "experiments")
+    exps: list[Experiment] = []
+    for p in d.glob("*.json"):
+        e = load_experiment(p.stem, data_dir)
+        if e:
+            exps.append(e)
+    exps.sort(key=lambda x: x.created_at)
+    return exps
+
+
+def save_discovery(disc: Discovery, data_dir: Path | str | None = None) -> Path:
+    p = _research_dir(data_dir, "discoveries") / f"{disc.discovery_id}.json"
+    if p.exists():
+        try:
+            existing = Discovery.from_dict(json.loads(p.read_text(encoding="utf-8")))
+            if existing.to_dict() == disc.to_dict():
+                return p
+            raise FileExistsError(f"discovery id collision: {disc.discovery_id}")
+        except FileExistsError:
+            raise
+        except Exception:
+            pass
+    p.write_text(disc.to_json(), encoding="utf-8")
+    _record_lineage_for_discovery(disc, data_dir)
+    return p
+
+
+def load_discovery(discovery_id: str, data_dir: Path | str | None = None) -> Discovery | None:
+    p = _research_dir(data_dir, "discoveries") / f"{discovery_id}.json"
+    if not p.exists():
+        return None
+    try:
+        return Discovery.from_dict(json.loads(p.read_text(encoding="utf-8")))
+    except Exception:
+        return None
+
+
+def save_intelligence_run(run: IntelligenceRun, data_dir: Path | str | None = None) -> Path:
+    p = _research_dir(data_dir, "intelligence_runs") / f"{run.run_id}.json"
+    if p.exists():
+        try:
+            # Quick identical check via raw json comparison
+            existing_text = p.read_text(encoding="utf-8")
+            if json.loads(existing_text).get("run_id") == run.run_id:
+                # Let it dedup if already exists with same id; for immutability just return
+                return p
+        except Exception:
+            pass
+    p.write_text(run.to_json(), encoding="utf-8")
+    _record_lineage_for_intelligence(run, data_dir)
+    return p
+
+
+def load_intelligence_run(
+    run_id: str, data_dir: Path | str | None = None
+) -> IntelligenceRun | None:
+    p = _research_dir(data_dir, "intelligence_runs") / f"{run_id}.json"
+    if not p.exists():
+        return None
+    try:
+        import json as _json
+
+        data = _json.loads(p.read_text(encoding="utf-8"))
+        from .intelligence import IntelligenceRun as _IR  # noqa: N814
+
+        return _IR(
+            run_id=str(data["run_id"]),
+            strategy_id=str(data["strategy_id"]),
+            version_id=str(data["version_id"]),
+            execution_ids=tuple(data.get("execution_ids", [])),
+            configuration=dict(data.get("configuration", {})),
+            hypotheses_tested=int(data.get("hypotheses_tested", 0)),
+            candidates_found=int(data.get("candidates_found", 0)),
+            discoveries=tuple(data.get("discoveries", [])),
+            created_at=str(data.get("created_at", "")),
+            result_summary=dict(data.get("result_summary", {})),
+        )
+    except Exception:
+        return None
