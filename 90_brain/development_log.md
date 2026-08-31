@@ -2,6 +2,14 @@
 
 **Nya entry hamesha upar likho.**
 
+## 2026-08-31 — RELEASE v1.5.0 — Python-native Strategy + AI-first Docs
+
+**Release:** `v1.5.0` (pyproject `1.5.0`, tag `v1.5.0`). Previous tag `v1.2.0`. Commit `aa1b22e` foundation work + docs `22eaa0d` + strategy `f870012` + `f22867a`.
+
+**Kya hua:** Foundation repair (universal VM, builtin removal, timeframe fix, advanced validation) ke baad docs ko AI-first banaya (AGENTS 161L, architecture institutional, module_contracts 25KB, 90_brain 9→5), invisible feature-driven migration (CONSTITUTION §5,§13,§17) add kiya, Strategy → Python-native (`.vstrat`/IR/VM removed, `strategies/base.PythonStrategy` + `compile_strategy` + `.py` storage, `obr.py`/`sma.py`), `99_archive` docs cleanup, `.venv` gitignore.
+
+**Validation:** `validate_structure` PASS, `validate_imports` PASS, 127 tests (00_app + 05_strategy + 06_backtest) PASS, no source off-branch changes.
+
 ## 2026-08-26 — SIDEBAR ICON REPLACEMENT — SVG Icon Swap
 
 ### Kya hua tha?

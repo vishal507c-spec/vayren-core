@@ -1,5 +1,7 @@
 # Vayren — Desktop Charting Platform
 
+**Current release:** `v1.5.0` (pyproject `1.5.0`, tag `v1.5.0`). Previous `v1.2.0`.
+
 **Owns:** High-level overview, getting-started. **Not owns:** Rules/architecture/contracts → `AGENTS.md`, `ARCHITECTURE_CONSTITUTION.md`, `90_brain/`.
 **When to read:** First overview for humans; AI should prefer `AGENTS.md` path.
 
