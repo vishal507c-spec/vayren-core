@@ -22,7 +22,7 @@ Ye repository ka **Brain** `90_brain/` folder mein hai. AI agent ko code chhune 
 
 Code badalne ke baad **dono** update karo: `development_log.md` aur `ai_memory.md`.
 
-**Standards (consolidated):** `project_rules.md` + `coding_standards.md` + `naming_conventions.md` + `roadmap.md` → ye file mein merge ho chuke hain (duplicate hatao, knowledge retain). Detail neeche.
+**Standards (consolidated):** Legacy `project_rules`/`coding_standards`/`naming_conventions`/`roadmap` docs → ye file + `90_brain/architecture.md` mein merge ho chuke hain. Detail neeche.
 
 ## Repository Structure
 

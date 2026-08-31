@@ -105,7 +105,7 @@ Ye document AI ko batata hai ki **abhi platform kahan hai** â€” kya bana, k
 
 ## 7. Future
 
-Naya kaam shuru karo toh pehle `roadmap.md` dekho â€” kaunsa phase, kaunsa chapter.
+Naya kaam shuru karo toh pehle `90_brain/architecture.md (Future)` dekho â€” kaunsa phase, kaunsa chapter.
 
 > Brain state bataata hai: kya bana, kahan hai, kya baaki. Update karte rehna.
 

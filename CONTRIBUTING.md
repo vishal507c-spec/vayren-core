@@ -57,7 +57,7 @@ Har naye kaam ka order pakka hai:
 | Architecture decision | `90_brain/development_log.md` |
 | Code change complete | `90_brain/development_log.md` |
 | Current state update | `90_brain/ai_memory.md` |
-| Naya module aaya | `90_brain/roadmap.md` + `90_brain/module_contracts.md` |
+| Naya module aaya | `90_brain/architecture.md` (Future) + `90_brain/module_contracts.md` |
 
 > Purana `13_knowledge/` ab `99_archive/` mein hai — wahan kuch mat likho.
 
