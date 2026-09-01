@@ -1211,11 +1211,18 @@ class Bootstrap:
 
                     if isinstance(exc, StrategyLanguageError) and exc.errors:
                         e = exc.errors[0]
-                        msg = f"Line {e.line}, Col {e.col}: {e.message}"
-                        if e.hint:
-                            msg += f" ({e.hint})"
-                        lab_workspace.center_detail.show_compile_result(False, msg, e.line, e.col)
-                        event_log.add_entry("ERROR", msg)
+                        if isinstance(e, str):
+                            msg = e
+                            lab_workspace.center_detail.show_compile_result(False, msg)
+                            event_log.add_entry("ERROR", msg)
+                        else:
+                            msg = f"Line {e.line}, Col {e.col}: {e.message}"
+                            if getattr(e, "hint", None):
+                                msg += f" ({e.hint})"
+                            lab_workspace.center_detail.show_compile_result(
+                                False, msg, e.line, e.col
+                            )
+                            event_log.add_entry("ERROR", msg)
                     else:
                         msg = str(exc)
                         lab_workspace.center_detail.show_compile_result(False, msg)
