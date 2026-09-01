@@ -22,7 +22,11 @@ a = Analysis(
         str(ROOT / "06_backtest"),
     ],
     binaries=[],
-    datas=[],
+    # Chart SVG assets (indicator toolbar icons) — panel resolves them as
+    # chart/assets/indicator_bar relative to its own module location.
+    datas=[
+        (str(ROOT / "04_chart" / "chart" / "assets"), "chart/assets"),
+    ],
     hiddenimports=[
         "app",
         "core",

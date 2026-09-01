@@ -9,6 +9,14 @@
 - AGENTS.md mein GitHub Push Hard Rule section + Forbidden bullet add hua (future sessions ke liye persist).
 
 
+## 2026-08-31 — RELEASE v1.5.1 — Packaging Fix (PyInstaller SVG assets)
+
+**Release:** \1.5.1\ (pyproject .5.1\, tag \1.5.1\). Previous \1.5.0\.
+
+**Fix:** scripts/assets/vayren.spec datas=[] → datas=[(04_chart/chart/assets, chart/assets)] — indicator toolbar SVGs now bundled in \uild/dist/Vayren/_internal/chart/assets/indicator_bar/\; EXE toolbar visible (was names-only). Hard-rule docs (AGENTS) included.
+
+**Validation:** alidate_structure PASS, alidate_imports PASS, 195 chart tests PASS.
+
 ## 2026-08-31 — RELEASE v1.5.0 — Python-native Strategy + AI-first Docs
 
 **Release:** `v1.5.0` (pyproject `1.5.0`, tag `v1.5.0`). Previous tag `v1.2.0`. Commit `aa1b22e` foundation work + docs `22eaa0d` + strategy `f870012` + `f22867a`.

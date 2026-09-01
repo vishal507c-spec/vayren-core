@@ -4,7 +4,7 @@
 **When to read:** Every new session start, before deciding what to build next.
 **Related:** `development_log.md` (history), `architecture.md` (map), `module_contracts.md` (APIs).
 
-**Last update:** 2026-08-31 — **v1.5.0 RELEASED** (Foundation repair + Universal VM + Strategy Python-native; docs AI-first + invisible migration; 127 tests + validators PASS; pyproject 1.5.0 → tag v1.5.0)
+**Last update:** 2026-08-31 — **v1.5.1 RELEASED** (Foundation repair + Universal VM + Strategy Python-native; docs AI-first + invisible migration; 127 tests + validators PASS; pyproject 1.5.0 → tag v1.5.0)
 
 **Current release:** `v1.5.0` (pyproject `1.5.0`, tag `v1.5.0` → commit `HEAD`). Previous tag `v1.2.0`. Changes since `v1.2.0`: Strategy → Python-native (`.vstrat`/IR/VM removed, `strategies/base.PythonStrategy`), docs consolidation (90_brain 9→5 + AGENTS institutional + invisible migration CONSTITUTION §5,§13,§17), `90_brain` cleanup, `.venv` gitignore.
 
