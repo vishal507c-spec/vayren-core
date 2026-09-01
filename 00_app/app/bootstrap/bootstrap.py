@@ -1142,17 +1142,23 @@ class Bootstrap:
                         try:
                             from strategy.models.parameters import ParameterSpec
 
-                            specs = tuple(
-                                ParameterSpec(
-                                    key=k,
-                                    label=k,
-                                    default=float(v),
-                                    minimum=0,
-                                    maximum=1e9,
-                                    decimals=2,
+                            # Prefer declared specs (unique keys, real min/max) —
+                            # param_defaults would duplicate label+key rows.
+                            declared = tuple(getattr(compiled, "param_specs", ()) or ())
+                            if declared:
+                                specs = declared
+                            else:
+                                specs = tuple(
+                                    ParameterSpec(
+                                        key=k,
+                                        label=k,
+                                        default=float(v),
+                                        minimum=0,
+                                        maximum=1e9,
+                                        decimals=2,
+                                    )
+                                    for k, v in compiled.param_defaults.items()
                                 )
-                                for k, v in compiled.param_defaults.items()
-                            )
                             strategy_registry.register_kind(target_kind, _factory, specs)
                             # Also create a definition for backtest if missing
                             if not strategy_registry.contains(sid):
@@ -1176,7 +1182,14 @@ class Bootstrap:
                     try:
                         from strategy.models.parameters import StrategyParameters
 
-                        new_params = {k: float(v) for k, v in compiled.param_defaults.items()}
+                        # Unique spec keys only (label keys would fail validation)
+                        spec_keys = [s.key for s in getattr(compiled, "param_specs", ()) or ()]
+                        if spec_keys:
+                            new_params = {
+                                k: float(compiled.param_defaults[k]) for k in spec_keys
+                            }
+                        else:
+                            new_params = {k: float(v) for k, v in compiled.param_defaults.items()}
                         mapped = {}
                         for lk, lv in compiled.param_defaults.items():
                             lk_lower = lk.lower().replace(" ", "_").replace("-", "_")
@@ -1194,7 +1207,16 @@ class Bootstrap:
                             strategy_registry.set_params(sid, StrategyParameters(new_params))
                     except Exception:
                         pass
-                    # Phase 3: show generic IR info
+                    # Phase 3: show compile info (unique param count, warmup)
+                    specs = tuple(getattr(compiled, "param_specs", ()) or ())
+                    unique_keys = {getattr(s, "key", None) for s in specs} - {None}
+                    param_count = len(unique_keys) if unique_keys else len(compiled.param_defaults)
+                    try:
+                        warmup = compiled.create_logic(
+                            StrategyParameters(compiled.param_defaults)
+                        ).warmup()
+                    except Exception:
+                        warmup = None
                     ir = getattr(compiled, "ir", None)
                     if ir is not None:
                         msg = (
@@ -1202,8 +1224,10 @@ class Bootstrap:
                             f"{len(ir.parameters)} params · {len(ir.statements)} stmts · "
                             f"{len(ir.data_requirements)} data req)"
                         )
+                    elif warmup is not None:
+                        msg = f"✓ COMPILED — {param_count} params · warmup {warmup} · Python"
                     else:
-                        msg = f"Strategy compiled successfully ({len(compiled.param_defaults)} params)"  # noqa: E501
+                        msg = f"Strategy compiled successfully ({param_count} params)"  # noqa: E501
                     lab_workspace.center_detail.show_compile_result(True, msg)
                     event_log.add_entry("SUCCESS", msg)
                 except Exception as exc:  # noqa: BLE001

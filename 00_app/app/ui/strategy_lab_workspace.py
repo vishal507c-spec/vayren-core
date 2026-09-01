@@ -392,21 +392,32 @@ class ParamsPane(QWidget):
             from strategy.language import compile_strategy
 
             compiled = compile_strategy(code)
-            for label_text, default in compiled.param_defaults.items():
+            # Prefer declared specs (key + label) — param_defaults duplicates
+            # every param under both label and key, which would double the rows.
+            entries: list[tuple[str, str, float]] = []
+            seen: set[str] = set()
+            for spec in getattr(compiled, "param_specs", ()) or ():
+                if spec.key in seen:
+                    continue
+                seen.add(spec.key)
+                entries.append((spec.key, spec.label, float(spec.default)))
+            if not entries:
+                entries = [(k, k, float(v)) for k, v in compiled.param_defaults.items()]
+            for key, label_text, default in entries:
                 key_label = QLabel(label_text, self._grid_host)
                 key_label.setStyleSheet(f"color: {t.MUTED}; font-size: 10px;")
                 spin = QDoubleSpinBox(self._grid_host)
                 spin.setStyleSheet(t.INPUT_QSS)
                 spin.setMinimumWidth(120)
-                if "C1" in label_text:
+                if "C1" in label_text or "c1" in key:
                     spin.setRange(0.5, 2.0)
                     spin.setDecimals(2)
                     spin.setSingleStep(0.05)
-                elif "C4" in label_text:
+                elif "C4" in label_text or "c4" in key:
                     spin.setRange(0.3, 1.5)
                     spin.setDecimals(2)
                     spin.setSingleStep(0.05)
-                elif "RSI" in label_text:
+                elif "RSI" in label_text or "rsi" in key:
                     spin.setRange(50, 80)
                     spin.setDecimals(0)
                     spin.setSingleStep(1)
@@ -415,9 +426,9 @@ class ParamsPane(QWidget):
                     spin.setDecimals(2)
                 spin.setValue(float(default))
                 spin.valueChanged.connect(
-                    lambda v, k=label_text: self.param_changed.emit(k, float(v))
+                    lambda v, k=key: self.param_changed.emit(k, float(v))
                 )
-                self._spins[label_text] = spin
+                self._spins[key] = spin
                 col = count % 6
                 row = (count // 6) * 2
                 self._grid.addWidget(key_label, row, col)
