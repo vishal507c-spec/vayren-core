@@ -120,3 +120,18 @@ class PythonStrategy(StrategyLogic):
 
     def prev_day_close(self) -> float:
         return float(self._prev_day_close)
+
+    def after_time(self, time_str: str, view: BarView) -> bool:
+        try:
+            return str(view.bar.timestamp)[11:16] >= str(time_str)
+        except Exception:
+            return False
+
+    def plot(self, value: float, title: str) -> None:
+        # No-op for Python-native — chart series kept for compatibility, not required for signals
+        try:
+            if not hasattr(self, "_plot_series"):
+                self._plot_series: dict[str, list] = {}  # type: ignore[attr-defined]
+            self._plot_series.setdefault(title, []).append(float(value))  # type: ignore[attr-defined]
+        except Exception:
+            pass
