@@ -4,7 +4,7 @@
 
 [project]
 name = "vayren-core"
-version = "1.5.2"
+version = "1.6.0"
 description = "Event-driven desktop charting platform"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -59,6 +59,7 @@ line-ending = "auto"
 [tool.ruff.lint.per-file-ignores]
 "04_chart/chart/widgets/*.py" = ["N802"]  # Qt event handlers are camelCase by framework convention
 "02_data/data/ui/*.py" = ["N802"]  # Qt signal handlers are camelCase by framework convention
+"00_app/app/ui/strategy_lab_workspace.py" = ["E501", "SIM105", "N814", "C420"]
 
 # ── Pyright (Type Checker) ────────────────────────────────────
 [tool.pyright]

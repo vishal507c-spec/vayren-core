@@ -1,0 +1,61 @@
+"""Directional result derivation — filter trades by side and recompute metrics.
+
+Pure post-processing over a :class:`StrategyResult`. No trading logic,
+no persistence, no new calculation formulas — reuses :func:`compute_metrics`
+and :func:`compute_equity_curve` so numbers stay identical to the engine.
+"""
+
+from __future__ import annotations
+
+from backtest.engine.metrics import compute_equity_curve, compute_metrics
+from backtest.models.result import StrategyResult
+
+
+def _filter_trades(trades: tuple, side: str):  # type: ignore[no-untyped-def]
+    wanted = side.upper()
+    return tuple(t for t in trades if getattr(t, "side", "") == wanted)
+
+
+def derive_directional_result(base: StrategyResult | None, side: str) -> StrategyResult | None:
+    """Return a view of *base* containing only *side* trades.
+
+    When *base* is None (no backtest yet) the result is None.
+    When the side has zero trades the result still exists — metrics will
+    report ``total_trades == 0`` and callers render ``--``. This matches
+    the engine's own zero-trade metrics and avoids inventing numbers.
+    """
+    if base is None:
+        return None
+    side_u = side.upper()
+    if side_u not in ("LONG", "SHORT"):
+        raise ValueError(f"side must be LONG or SHORT, got {side!r}")
+    filtered = _filter_trades(base.trades, side_u)
+    # Recompute equity curve from filtered trades using same helpers
+    start = base.period_start or (base.equity_curve[0].timestamp if base.equity_curve else None)
+    curve = compute_equity_curve(filtered, base.config.initial_capital, start)
+    metrics = compute_metrics(filtered, curve, base.config.initial_capital)
+    # Preserve period / bars_used / chart_series (plotting is direction-agnostic)
+    return StrategyResult(
+        strategy_id=base.strategy_id,
+        name=base.name,
+        config=base.config,
+        trades=filtered,
+        equity_curve=curve,
+        metrics=metrics,
+        bars_used=base.bars_used,
+        period_start=base.period_start,
+        period_end=base.period_end,
+        chart_series=base.chart_series,
+    )
+
+
+def split_by_side(
+    base: StrategyResult | None,
+) -> tuple[StrategyResult | None, StrategyResult | None]:
+    """Return ``(buy_result, sell_result)`` for *base*.
+
+    BUY == LONG, SELL == SHORT.
+    """
+    if base is None:
+        return None, None
+    return derive_directional_result(base, "LONG"), derive_directional_result(base, "SHORT")

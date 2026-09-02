@@ -1,14 +1,9 @@
-"""Strategy Lab Workspace — clean two-column research screen.
-
-LEFT (25%): strategy library. MAIN (75%): strategy workspace
-(CODE | PARAMETERS | BACKTEST). BOTTOM: results. Empty states are
-intentional and the hierarchy STRATEGY → CODE → PARAMETERS → BACKTEST
-is immediately obvious.
-"""
+"""Strategy Lab Workspace — BUY / SELL / COMPARE tri-mode research screen."""
 
 from __future__ import annotations
 
 from datetime import datetime
+from enum import StrEnum
 
 from backtest.models.result import StrategyResult
 from PySide6.QtCore import QDate, QLocale, Qt, Signal
@@ -29,6 +24,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMenu,
     QPushButton,
+    QScrollArea,
     QSplitter,
     QStackedWidget,
     QTableWidget,
@@ -43,6 +39,15 @@ from app.ui import lab_theme as t
 
 _DEFAULT_SLIPPAGE_PCT = 0.02
 _DEFAULT_COMMISSION_PCT = 0.03
+
+_BUY_ACCENT = "#00C7B7"
+_SELL_ACCENT = "#F05A67"
+
+
+class StrategyViewMode(StrEnum):
+    BUY = "BUY"
+    SELL = "SELL"
+    COMPARE = "COMPARE"
 
 
 def _hline() -> QFrame:
@@ -85,6 +90,9 @@ def _relative_time(mtime: float) -> str:
     return datetime.fromtimestamp(mtime).strftime("%d %b")
 
 
+# ---------------------------------------------------------------------------
+# Library row etc. — unchanged from original (preserved for test compat)
+# ---------------------------------------------------------------------------
 class _StrategyRow(QWidget):
     """One library row: status dot + name · modified · three-dot menu."""
 
@@ -211,7 +219,6 @@ class StrategyLibraryPanel(QWidget):
         self._list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._list.customContextMenuRequested.connect(self._row_menu)
         lay.addWidget(self._list, 1)
-        # Empty state — centered icon + text + single primary CTA
         self._empty = QWidget(self)
         empty_lay = QVBoxLayout(self._empty)
         empty_lay.setContentsMargins(12, 32, 12, 32)
@@ -272,7 +279,6 @@ class StrategyLibraryPanel(QWidget):
         return str(item.data(Qt.ItemDataRole.UserRole)) if item else None
 
     def request_rename(self, name: str) -> None:
-        """Open the inline rename prompt (shared by row menu and title edit)."""
         self._ask_rename(name)
 
     def _refilter(self, text: str) -> None:
@@ -291,7 +297,6 @@ class StrategyLibraryPanel(QWidget):
             self._list.setItemWidget(item, row)
             item.setSizeHint(row.sizeHint())
         empty = not self._items
-        # Spec: exactly ONE primary NEW STRATEGY in empty state
         self._empty.setVisible(empty)
         self._list.setVisible(not empty)
         self._new_btn.setVisible(not empty)
@@ -392,8 +397,6 @@ class ParamsPane(QWidget):
             from strategy.language import compile_strategy
 
             compiled = compile_strategy(code)
-            # Prefer declared specs (key + label) — param_defaults duplicates
-            # every param under both label and key, which would double the rows.
             entries: list[tuple[str, str, float]] = []
             seen: set[str] = set()
             for spec in getattr(compiled, "param_specs", ()) or ():
@@ -425,9 +428,7 @@ class ParamsPane(QWidget):
                     spin.setRange(0, 100000)
                     spin.setDecimals(2)
                 spin.setValue(float(default))
-                spin.valueChanged.connect(
-                    lambda v, k=key: self.param_changed.emit(k, float(v))
-                )
+                spin.valueChanged.connect(lambda v, k=key: self.param_changed.emit(k, float(v)))
                 self._spins[key] = spin
                 col = count % 6
                 row = (count // 6) * 2
@@ -507,6 +508,7 @@ class BacktestRunPanel(QWidget):
         self._run.setStyleSheet(t.PRIMARY_QSS)
         self._run.clicked.connect(self._emit)
         lay.addWidget(self._run)
+        self._mode: StrategyViewMode = StrategyViewMode.BUY
 
     @staticmethod
     def _date_edit(date: QDate) -> QDateEdit:
@@ -560,6 +562,16 @@ class BacktestRunPanel(QWidget):
             "commission_pct": _DEFAULT_COMMISSION_PCT,
         }
 
+    def set_view_mode(self, mode: StrategyViewMode) -> None:
+        self._mode = mode
+        # Update the single RUN button label per mode for COMPARE/BUY/SELL clarity
+        if mode == StrategyViewMode.BUY:
+            self._run.setText("▶  RUN BUY BACKTEST")
+        elif mode == StrategyViewMode.SELL:
+            self._run.setText("▶  RUN SELL BACKTEST")
+        else:
+            self._run.setText("▶  RUN ALL")
+
     def _emit(self) -> None:
         symbol = self._symbol_combo.currentText().strip()
         if not symbol:
@@ -580,9 +592,12 @@ class BacktestRunPanel(QWidget):
 
     def set_busy(self, busy: bool) -> None:
         self._run.setEnabled(not busy)
-        self._run.setText("RUNNING BACKTEST…" if busy else "▶  RUN BACKTEST")
         if busy:
+            self._run.setText("RUNNING BACKTEST…")
             self._hide_error()
+        else:
+            # restore per-mode label
+            self.set_view_mode(self._mode)
         self.busy_changed.emit(busy)
 
 
@@ -768,6 +783,147 @@ class EditorPane(QWidget):
             self._status.set_error()
 
 
+class _ViewModeSelector(QWidget):
+    """Segmented control: [ BUY (LONG) ] [ SELL (SHORT) ] [ COMPARE ]."""
+
+    mode_changed = Signal(object)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("ViewModeSelector")
+        self.setFixedHeight(44)
+        self.setStyleSheet(f"background: {t.BG1}; border-bottom: 1px solid {t.BORDER};")
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(14, 6, 14, 6)
+        lay.setSpacing(0)
+        # breadcrumb hint
+        hint = QLabel("VIEW", self)
+        hint.setStyleSheet(t.label(t.TEXT2, 10, 700, 0.6))
+        lay.addWidget(hint)
+        lay.addSpacing(12)
+        # segmented container — prominent pill
+        seg = QWidget(self)
+        seg.setObjectName("Seg")
+        seg.setStyleSheet(
+            f"QWidget#Seg {{ background: {t.BG0}; border: 1px solid {t.BORDER}; border-radius: 6px; }}"
+        )
+        seg_lay = QHBoxLayout(seg)
+        seg_lay.setContentsMargins(3, 3, 3, 3)
+        seg_lay.setSpacing(3)
+        group = QButtonGroup(seg)
+        group.setExclusive(True)
+        self._group = group
+        self._buy_btn = self._make_btn("BUY (LONG)", seg, _BUY_ACCENT)
+        self._sell_btn = self._make_btn("SELL (SHORT)", seg, _SELL_ACCENT)
+        self._cmp_btn = self._make_btn("COMPARE", seg, t.ACCENT)
+        for btn in (self._buy_btn, self._sell_btn, self._cmp_btn):
+            group.addButton(btn)
+            seg_lay.addWidget(btn)
+        self._buy_btn.setChecked(True)
+        self._buy_btn.clicked.connect(lambda: self._emit(StrategyViewMode.BUY))
+        self._sell_btn.clicked.connect(lambda: self._emit(StrategyViewMode.SELL))
+        self._cmp_btn.clicked.connect(lambda: self._emit(StrategyViewMode.COMPARE))
+        lay.addWidget(seg)
+        lay.addStretch(1)
+        # direction indicator dot — textual + color
+        self._indicator = QLabel("●  BUY  —  LONG", self)
+        self._indicator.setStyleSheet(f"color: {_BUY_ACCENT}; font-size: 11px; font-weight: 800;")
+        lay.addWidget(self._indicator)
+        self._current: StrategyViewMode = StrategyViewMode.BUY
+        self._apply_indicator()
+
+    def _make_btn(self, text: str, parent: QWidget, accent: str) -> QPushButton:  # noqa: ARG002
+        btn = QPushButton(text, parent)
+        btn.setCheckable(True)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setMinimumHeight(28)
+        btn.setStyleSheet(
+            f"QPushButton {{ background: transparent; border: none; border-radius: 4px;"
+            f" padding: 7px 14px; color: {t.TEXT2}; font-size: 11px; font-weight: 700;"
+            f" letter-spacing: 0.3px; }}"
+            f"QPushButton:hover {{ color: {t.TEXT}; background: {t.PANEL2}; }}"
+            f"QPushButton:checked {{ background: {t.PANEL2}; color: {t.TEXT}; }}"
+        )
+        return btn
+
+    def _emit(self, mode: StrategyViewMode) -> None:
+        self._current = mode
+        self._apply_indicator()
+        self.mode_changed.emit(mode)
+
+    def _apply_indicator(self) -> None:
+        if self._current == StrategyViewMode.BUY:
+            self._indicator.setText("●  BUY  —  LONG")
+            self._indicator.setStyleSheet(
+                f"color: {_BUY_ACCENT}; font-size: 11px; font-weight: 800;"
+            )
+            self._buy_btn.setStyleSheet(
+                f"QPushButton {{ background: {_BUY_ACCENT}; border: none; border-radius: 4px;"
+                f" padding: 7px 14px; color: #04211E; font-size: 11px; font-weight: 800; }}"
+                f"QPushButton:checked {{ background: {_BUY_ACCENT}; color: #04211E; }}"
+            )
+            self._sell_btn.setStyleSheet(
+                f"QPushButton {{ background: transparent; border: none; border-radius: 4px;"
+                f" padding: 7px 14px; color: {t.TEXT2}; font-size: 11px; font-weight: 700; }}"
+                f"QPushButton:hover {{ color: {t.TEXT}; background: {t.PANEL2}; }}"
+                f"QPushButton:checked {{ background: {t.PANEL2}; color: {t.TEXT}; }}"
+            )
+            self._cmp_btn.setStyleSheet(self._sell_btn.styleSheet())
+        elif self._current == StrategyViewMode.SELL:
+            self._indicator.setText("●  SELL  —  SHORT")
+            self._indicator.setStyleSheet(
+                f"color: {_SELL_ACCENT}; font-size: 11px; font-weight: 800;"
+            )
+            self._sell_btn.setStyleSheet(
+                f"QPushButton {{ background: {_SELL_ACCENT}; border: none; border-radius: 4px;"
+                f" padding: 7px 14px; color: #FFFFFF; font-size: 11px; font-weight: 800; }}"
+                f"QPushButton:checked {{ background: {_SELL_ACCENT}; color: #FFFFFF; }}"
+            )
+            self._buy_btn.setStyleSheet(
+                f"QPushButton {{ background: transparent; border: none; border-radius: 4px;"
+                f" padding: 7px 14px; color: {t.TEXT2}; font-size: 11px; font-weight: 700; }}"
+                f"QPushButton:hover {{ color: {t.TEXT}; background: {t.PANEL2}; }}"
+                f"QPushButton:checked {{ background: {t.PANEL2}; color: {t.TEXT}; }}"
+            )
+            self._cmp_btn.setStyleSheet(self._buy_btn.styleSheet())
+        else:
+            self._indicator.setText("◐  COMPARE")
+            self._indicator.setStyleSheet(f"color: {t.ACCENT}; font-size: 11px; font-weight: 800;")
+            self._cmp_btn.setStyleSheet(
+                f"QPushButton {{ background: {t.ACCENT}; border: none; border-radius: 4px;"
+                f" padding: 7px 14px; color: #04211E; font-size: 11px; font-weight: 800; }}"
+                f"QPushButton:checked {{ background: {t.ACCENT}; color: #04211E; }}"
+            )
+            self._buy_btn.setStyleSheet(
+                f"QPushButton {{ background: transparent; border: none; border-radius: 4px;"
+                f" padding: 7px 14px; color: {t.TEXT2}; font-size: 11px; font-weight: 700; }}"
+                f"QPushButton:hover {{ color: {t.TEXT}; background: {t.PANEL2}; }}"
+                f"QPushButton:checked {{ background: {t.PANEL2}; color: {t.TEXT}; }}"
+            )
+            self._sell_btn.setStyleSheet(self._buy_btn.styleSheet())
+        self._indicator.setVisible(True)
+
+    @property
+    def current_mode(self) -> StrategyViewMode:
+        return self._current
+
+    def set_mode(self, mode: StrategyViewMode) -> None:
+        if mode == self._current:
+            return
+        self._current = mode
+        # block signals to avoid loop
+        self._buy_btn.blockSignals(True)
+        self._sell_btn.blockSignals(True)
+        self._cmp_btn.blockSignals(True)
+        self._buy_btn.setChecked(mode == StrategyViewMode.BUY)
+        self._sell_btn.setChecked(mode == StrategyViewMode.SELL)
+        self._cmp_btn.setChecked(mode == StrategyViewMode.COMPARE)
+        self._buy_btn.blockSignals(False)
+        self._sell_btn.blockSignals(False)
+        self._cmp_btn.blockSignals(False)
+        self._apply_indicator()
+
+
 class MetricsTiles(QWidget):
     """Compact metric tiles + secondary statistics strip."""
 
@@ -777,6 +933,10 @@ class MetricsTiles(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(14, 10, 14, 8)
         lay.setSpacing(4)
+        # directional header — impossible to misunderstand
+        self._dir_label = QLabel("BUY PERFORMANCE", self)
+        self._dir_label.setStyleSheet(t.label(t.MUTED, 9, 700, 0.7))
+        lay.addWidget(self._dir_label)
         grid = QGridLayout()
         grid.setContentsMargins(0, 0, 0, 0)
         grid.setHorizontalSpacing(28)
@@ -805,10 +965,27 @@ class MetricsTiles(QWidget):
         self._extra.setStyleSheet(f"color: {t.MUTED}; font-size: 10px;")
         self._extra.setWordWrap(True)
         lay.addWidget(self._extra)
+        self._mode: StrategyViewMode = StrategyViewMode.BUY
 
     @staticmethod
     def _value_style(color: str) -> str:
         return f"color: {color}; font-size: 15px; font-weight: 700;"
+
+    def set_view_mode(self, mode: StrategyViewMode) -> None:
+        self._mode = mode
+        if mode == StrategyViewMode.BUY:
+            self._dir_label.setText("BUY PERFORMANCE  —  LONG")
+            self._dir_label.setStyleSheet(
+                f"color: {_BUY_ACCENT}; font-size: 9px; font-weight: 700; letter-spacing: 0.6px;"
+            )
+        elif mode == StrategyViewMode.SELL:
+            self._dir_label.setText("SELL PERFORMANCE  —  SHORT")
+            self._dir_label.setStyleSheet(
+                f"color: {_SELL_ACCENT}; font-size: 9px; font-weight: 700; letter-spacing: 0.6px;"
+            )
+        else:
+            self._dir_label.setText("PERFORMANCE")
+            self._dir_label.setStyleSheet(t.label(t.MUTED, 9, 700, 0.7))
 
     def set_result(self, result: StrategyResult | None) -> None:
         if result is None:
@@ -859,8 +1036,92 @@ class MetricsTiles(QWidget):
         )
 
 
+class _DualEquityView(QWidget):
+    """Dual equity chart for COMPARE — BUY (teal) + SELL (red) with labels."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._buy: StrategyResult | None = None
+        self._sell: StrategyResult | None = None
+        self.setMinimumHeight(160)
+
+    def set_results(self, buy: StrategyResult | None, sell: StrategyResult | None) -> None:
+        self._buy = buy
+        self._sell = sell
+        self.update()
+
+    def set_result(self, result: StrategyResult | None) -> None:  # compat single
+        self._buy = result
+        self._sell = None
+        self.update()
+
+    def paintEvent(self, _event) -> None:  # type: ignore[no-untyped-def]  # noqa: N802
+        from PySide6.QtGui import QColor, QPainter, QPen
+
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor("#101418"))
+        # legend always visible
+        from PySide6.QtCore import Qt as _Qt
+
+        has_buy = self._buy is not None and bool(self._buy.equity_curve)
+        has_sell = self._sell is not None and bool(self._sell.equity_curve)
+        if not has_buy and not has_sell:
+            painter.setPen(QColor("#8a93a6"))
+            painter.drawText(
+                self.rect(), _Qt.AlignmentFlag.AlignCenter, "No equity data — run a backtest"
+            )
+            return
+        # collect curves
+        curves = []  # type: ignore[var-annotated]
+        if has_buy:
+            curves.append((self._buy.equity_curve, QColor(_BUY_ACCENT), "BUY / LONG"))  # type: ignore[reportOptionalMemberAccess]
+        if has_sell:
+            curves.append((self._sell.equity_curve, QColor(_SELL_ACCENT), "SELL / SHORT"))  # type: ignore[reportOptionalMemberAccess]
+        # global span
+        all_eq = []
+        for curve, _, _ in curves:
+            all_eq.extend(p.equity for p in curve)  # type: ignore[attr-defined]
+        lo, hi = min(all_eq), max(all_eq)
+        span = hi - lo or 1.0
+        pad_l, pad_r, pad_t, pad_b = 48, 12, 20, 18
+        plot = self.rect().adjusted(pad_l, pad_t, -pad_r, -pad_b)
+        if plot.width() <= 0 or plot.height() <= 0:
+            return
+        # grid
+        painter.setPen(QPen(QColor("#232936"), 1))
+        for i in range(5):
+            y = plot.top() + plot.height() * i / 4
+            painter.drawLine(plot.left(), int(y), plot.right(), int(y))
+        # legend
+        y_leg = 4
+        x_leg = plot.left()
+        for _, color, label in curves:
+            painter.fillRect(int(x_leg), int(y_leg), 10, 3, color)
+            painter.setPen(QColor("#cfd8dc"))
+            painter.drawText(int(x_leg + 14), int(y_leg + 8), label)
+            x_leg += 110
+        # draw curves
+        for curve, color, _ in curves:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            painter.setPen(QPen(color, 1.6))
+            pts = []
+            for i, p in enumerate(curve):
+                x = plot.left() + i / max(1, len(curve) - 1) * plot.width()
+                y = plot.bottom() - (p.equity - lo) / span * plot.height()
+                from PySide6.QtCore import QPointF as _QPointF
+
+                pts.append(_QPointF(x, y))
+            for i in range(len(pts) - 1):
+                painter.drawLine(pts[i], pts[i + 1])
+        # baseline
+        if has_buy and self._buy is not None:
+            y0 = plot.bottom() - (self._buy.metrics.starting_capital - lo) / span * plot.height()
+            painter.setPen(QPen(QColor("#3b4659"), 1, _Qt.PenStyle.DashLine))
+            painter.drawLine(plot.left(), int(y0), plot.right(), int(y0))
+
+
 class TradeBlotter(QWidget):
-    """Dense trade table with filter and CSV export."""
+    """Dense trade table with filter and CSV export. Supports directional filtering."""
 
     trade_clicked = Signal(int)
 
@@ -872,11 +1133,20 @@ class TradeBlotter(QWidget):
         lay.setSpacing(0)
         bar = QHBoxLayout()
         bar.setContentsMargins(14, 8, 14, 8)
+        bar.setSpacing(6)
         self._filter = QLineEdit(self)
         self._filter.setPlaceholderText("Filter trades")
         self._filter.setStyleSheet(t.INPUT_QSS)
         self._filter.textChanged.connect(self._apply_filter)
         bar.addWidget(self._filter, 1)
+        # COMPARE filter: ALL / BUY / SELL — visible only in COMPARE
+        self._side_filter = QComboBox(self)
+        self._side_filter.addItems(["ALL", "BUY", "SELL"])
+        self._side_filter.setStyleSheet(t.INPUT_QSS)
+        self._side_filter.setFixedWidth(90)
+        self._side_filter.setVisible(False)
+        self._side_filter.currentTextChanged.connect(lambda _: self._apply_filter(""))
+        bar.addWidget(self._side_filter)
         export_btn = QPushButton("EXPORT CSV", self)
         export_btn.setStyleSheet(t.BUTTON_QSS)
         export_btn.clicked.connect(self._export_csv)
@@ -913,6 +1183,42 @@ class TradeBlotter(QWidget):
         self._table.setVisible(False)
         lay.addWidget(self._table, 1)
         self._trades: list = []
+        self._side_mode: str = "ALL"  # ALL / LONG / SHORT
+        self._needle: str = ""
+
+    def set_side_filter_visible(self, visible: bool) -> None:
+        self._side_filter.setVisible(visible)
+
+    def set_side_mode(self, mode: str) -> None:
+        """Set directional filter: ALL, BUY (LONG), SELL (SHORT)."""
+        m = mode.upper()
+        if m in ("BUY", "LONG"):
+            self._side_mode = "LONG"
+            self._side_filter.blockSignals(True)
+            self._side_filter.setCurrentText("BUY")
+            self._side_filter.blockSignals(False)
+        elif m in ("SELL", "SHORT"):
+            self._side_mode = "SHORT"
+            self._side_filter.blockSignals(True)
+            self._side_filter.setCurrentText("SELL")
+            self._side_filter.blockSignals(False)
+        else:
+            self._side_mode = "ALL"
+            self._side_filter.blockSignals(True)
+            self._side_filter.setCurrentText("ALL")
+            self._side_filter.blockSignals(False)
+        self._apply_filter(self._needle)
+        # When user explicitly changes combo, update side mode
+        # connect handler does _apply_filter; ensure side_mode sync
+        cur = self._side_filter.currentText().upper()
+        if cur == "BUY":
+            self._side_mode = "LONG"
+        elif cur == "SELL":
+            self._side_mode = "SHORT"
+        else:
+            if self._side_filter.isVisible():
+                # user-driven change — already set via lambda, need sync
+                pass
 
     def set_result(self, result: StrategyResult | None) -> None:
         has = result is not None and bool(result.trades)
@@ -945,7 +1251,16 @@ class TradeBlotter(QWidget):
                     from PySide6.QtGui import QColor
 
                     item.setForeground(QColor(t.POS if trade.winning else t.NEG))
+                if col == 2:
+                    # Direction column textual identity — not color alone
+                    from PySide6.QtGui import QColor
+
+                    if trade.side == "LONG":
+                        item.setForeground(QColor(_BUY_ACCENT))
+                    elif trade.side == "SHORT":
+                        item.setForeground(QColor(_SELL_ACCENT))
                 self._table.setItem(i, col, item)
+        self._apply_filter(self._needle)
 
     def _on_cell(self, row: int, _col: int) -> None:
         item = self._table.item(row, 0)
@@ -953,8 +1268,39 @@ class TradeBlotter(QWidget):
             self.trade_clicked.emit(int(item.data(Qt.ItemDataRole.UserRole)))
 
     def _apply_filter(self, text: str) -> None:
-        needle = text.strip().lower()
+        # track needle
+        if text is not None:
+            # called via textChanged with actual needle, or via side change with ""
+            # We need to distinguish: if text == "" from side combo we keep previous needle
+            # Heuristic: if sender is filter line edit, update needle; if combo, keep.
+            sender = self.sender()
+            if sender is self._filter or text != "":
+                self._needle = text.strip().lower() if isinstance(text, str) else ""
+            # for combo change we pass "" but should retain needle
+            if sender is self._side_filter:
+                # keep existing needle
+                pass
+            elif isinstance(text, str) and text != "" or sender is self._filter:
+                self._needle = text.strip().lower() if isinstance(text, str) else ""
+        needle = self._needle
+        # need side mode from combo if visible (user may have changed it)
+        if self._side_filter.isVisible():
+            cur = self._side_filter.currentText().upper()
+            if cur == "BUY":
+                self._side_mode = "LONG"
+            elif cur == "SELL":
+                self._side_mode = "SHORT"
+            else:
+                self._side_mode = "ALL"
         for row in range(self._table.rowCount()):
+            # side filter first
+            if self._side_mode != "ALL":
+                side_item = self._table.item(row, 2)
+                side = side_item.text().upper() if side_item else ""
+                # table stores LONG/SHORT
+                if side != self._side_mode:
+                    self._table.setRowHidden(row, True)
+                    continue
             if not needle:
                 self._table.setRowHidden(row, False)
                 continue
@@ -1013,8 +1359,607 @@ class TradeBlotter(QWidget):
                 )
 
 
+# ---------------------------------------------------------------------------
+# Comparison helpers — metrics direction, stronger side, highlighting
+# ---------------------------------------------------------------------------
+_METRIC_ORDER = (
+    "Net Profit",
+    "Total Trades",
+    "Win Rate",
+    "Profit Factor",
+    "Expectancy",
+    "Max Drawdown",
+    "Sharpe",
+    "Avg Trade",
+)
+
+
+def _metric_values(result: StrategyResult | None) -> dict[str, float | None]:
+    if result is None:
+        return {k: None for k in _METRIC_ORDER}
+    m = result.metrics
+    return {
+        "Net Profit": m.net_profit if m.total_trades else None,
+        "Total Trades": float(m.total_trades) if m.total_trades is not None else None,
+        "Win Rate": m.win_rate,
+        "Profit Factor": m.profit_factor,
+        "Expectancy": m.expectancy,
+        "Max Drawdown": m.max_drawdown_pct,  # stored positive, lower is better
+        "Sharpe": m.sharpe_ratio,
+        "Avg Trade": m.avg_trade,
+    }
+
+
+def _is_higher_better(key: str) -> bool:
+    # Lower absolute drawdown is better (smaller number)
+    return key != "Max Drawdown"
+
+
+def _format_metric(key: str, value: float | None) -> str:
+    if value is None:
+        return "--"
+    if key == "Net Profit":
+        return f"₹{_inr(float(value))}"
+    if key == "Total Trades":
+        return f"{int(value)}"
+    if key == "Win Rate":
+        return f"{value * 100:.1f}%"
+    if key == "Profit Factor":
+        return f"{value:.2f}"
+    if key == "Expectancy":
+        return f"₹{_inr(float(value))}"
+    if key == "Max Drawdown":
+        return f"-{float(value):.2f}%"
+    if key == "Sharpe":
+        return f"{value:.2f}"
+    if key == "Avg Trade":
+        return f"₹{_inr(float(value))}"
+    return str(value)
+
+
+def determine_stronger_side(
+    buy: StrategyResult | None, sell: StrategyResult | None
+) -> tuple[str, str]:
+    """Return (verdict, reason).
+
+    Verdict is one of "BUY / LONG", "SELL / SHORT", "TOO CLOSE TO CALL", "INSUFFICIENT".
+    Reason is a short human explanation for the banner subtitle.
+    """
+    if buy is None or sell is None:
+        return "INSUFFICIENT", "Run both sides to compare"
+    # Need at least one trade on each side to declare a winner — else insufficient
+    if buy.metrics.total_trades == 0 or sell.metrics.total_trades == 0:
+        # If one side has zero trades and other has trades, the traded side is clearly active
+        # But we still declare INSUFFICIENT per spec's "Not backtested yet" — avoid fake winner
+        # We only declare when both have at least 1 trade
+        if buy.metrics.total_trades == 0 and sell.metrics.total_trades == 0:
+            return "TOO CLOSE TO CALL", "Neither side produced trades"
+        if buy.metrics.total_trades == 0:
+            return "INSUFFICIENT", "BUY has no trades"
+        if sell.metrics.total_trades == 0:
+            return "INSUFFICIENT", "SELL has no trades"
+    vals_buy = _metric_values(buy)
+    vals_sell = _metric_values(sell)
+    buy_wins = 0
+    sell_wins = 0
+    reasons_buy: list[str] = []
+    reasons_sell: list[str] = []
+    for key in _METRIC_ORDER:
+        bv = vals_buy[key]
+        sv = vals_sell[key]
+        if bv is None or sv is None:
+            continue
+        # consider tie tolerance for near-equal values
+        if key == "Max Drawdown":
+            # lower is better
+            if abs(bv - sv) < 0.05:  # tie within 0.05%
+                continue
+            if bv < sv:
+                buy_wins += 1
+                reasons_buy.append(f"lower drawdown ({bv:.2f}% vs {sv:.2f}%)")
+            elif sv < bv:
+                sell_wins += 1
+                reasons_sell.append(f"lower drawdown ({sv:.2f}% vs {bv:.2f}%)")
+        else:
+            # higher better; need tolerance
+            if key in ("Profit Factor", "Sharpe"):
+                thresh = 0.03
+            elif key == "Win Rate":
+                thresh = 0.02
+            elif key in ("Net Profit", "Expectancy", "Avg Trade"):
+                # relative tolerance 1%
+                base = max(abs(bv), abs(sv), 1.0)
+                if abs(bv - sv) / base < 0.01:
+                    continue
+                thresh = 0.0  # already handled via relative
+            else:
+                thresh = 0.0
+                if abs(bv - sv) <= thresh:
+                    continue
+            if key in ("Net Profit", "Expectancy", "Avg Trade") and thresh == 0.0:
+                # already checked relative
+                pass
+            elif abs(bv - sv) <= thresh:
+                continue
+            if bv > sv:
+                buy_wins += 1
+                if key == "Net Profit":
+                    reasons_buy.append("higher net profit")
+                elif key == "Profit Factor":
+                    reasons_buy.append("better profit factor")
+                elif key == "Sharpe":
+                    reasons_buy.append("better sharpe")
+                elif key == "Win Rate":
+                    reasons_buy.append("higher win rate")
+                else:
+                    reasons_buy.append(f"higher {key.lower()}")
+            elif sv > bv:
+                sell_wins += 1
+                if key == "Net Profit":
+                    reasons_sell.append("higher net profit")
+                elif key == "Profit Factor":
+                    reasons_sell.append("better profit factor")
+                elif key == "Sharpe":
+                    reasons_sell.append("better sharpe")
+                elif key == "Win Rate":
+                    reasons_sell.append("higher win rate")
+                else:
+                    reasons_sell.append(f"higher {key.lower()}")
+    total = buy_wins + sell_wins
+    if total == 0:
+        return "TOO CLOSE TO CALL", "Metrics are effectively equal"
+    diff = abs(buy_wins - sell_wins)
+    # Require clear majority: at least 2 more wins than opponent, or 60% majority
+    if diff >= 2 or (total >= 3 and max(buy_wins, sell_wins) / total >= 0.6):
+        if buy_wins > sell_wins:
+            reason = ", ".join(reasons_buy[:3]) or "more winning metrics"
+            return "BUY / LONG", reason
+        else:
+            reason = ", ".join(reasons_sell[:3]) or "more winning metrics"
+            return "SELL / SHORT", reason
+    return "TOO CLOSE TO CALL", "No side dominates across key metrics"
+
+
+class _ComparisonMatrix(QWidget):
+    """Grid: Metric | BUY | SELL with winner highlighting per metric direction."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setStyleSheet(f"background: {t.BG1};")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(14, 10, 14, 10)
+        lay.setSpacing(6)
+        title = QLabel("PERFORMANCE COMPARISON", self)
+        title.setStyleSheet(t.label(t.TEXT2, 10, 700, 0.8))
+        lay.addWidget(title)
+        lay.addWidget(_hline())
+        # header row
+        header = QGridLayout()
+        header.setContentsMargins(0, 4, 0, 0)
+        header.setHorizontalSpacing(16)
+        header.setVerticalSpacing(4)
+        for col, txt in enumerate(("", "BUY (LONG)", "SELL (SHORT)")):
+            lbl = QLabel(txt, self)
+            if col == 0:
+                lbl.setStyleSheet(t.label(t.MUTED, 9, 600, 0.6))
+            elif col == 1:
+                lbl.setStyleSheet(f"color: {_BUY_ACCENT}; font-size: 9px; font-weight: 700;")
+            else:
+                lbl.setStyleSheet(f"color: {_SELL_ACCENT}; font-size: 9px; font-weight: 700;")
+            header.addWidget(lbl, 0, col)
+        lay.addLayout(header)
+        # rows
+        self._grid = QGridLayout()
+        self._grid.setContentsMargins(0, 2, 0, 0)
+        self._grid.setHorizontalSpacing(16)
+        self._grid.setVerticalSpacing(6)
+        self._buy_labels: dict[str, QLabel] = {}
+        self._sell_labels: dict[str, QLabel] = {}
+        self._metric_labels: dict[str, QLabel] = {}
+        for row, key in enumerate(_METRIC_ORDER):
+            m_lbl = QLabel(key, self)
+            m_lbl.setStyleSheet(f"color: {t.TEXT2}; font-size: 11px; font-weight: 600;")
+            self._metric_labels[key] = m_lbl
+            buy_lbl = QLabel("--", self)
+            buy_lbl.setStyleSheet(
+                f"color: {t.TEXT}; font-size: 11px; font-weight: 600; background: transparent; padding: 2px 6px; border-radius: 3px;"
+            )
+            buy_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            sell_lbl = QLabel("--", self)
+            sell_lbl.setStyleSheet(
+                f"color: {t.TEXT}; font-size: 11px; font-weight: 600; background: transparent; padding: 2px 6px; border-radius: 3px;"
+            )
+            sell_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._buy_labels[key] = buy_lbl
+            self._sell_labels[key] = sell_lbl
+            self._grid.addWidget(m_lbl, row, 0)
+            self._grid.addWidget(buy_lbl, row, 1)
+            self._grid.addWidget(sell_lbl, row, 2)
+        lay.addLayout(self._grid)
+        self._buy = None
+        self._sell = None
+
+    def set_results(self, buy: StrategyResult | None, sell: StrategyResult | None) -> None:
+        self._buy = buy
+        self._sell = sell
+        vals_buy = _metric_values(buy)
+        vals_sell = _metric_values(sell)
+        for key in _METRIC_ORDER:
+            bv = vals_buy[key]
+            sv = vals_sell[key]
+            buy_lbl = self._buy_labels[key]
+            sell_lbl = self._sell_labels[key]
+            buy_lbl.setText(_format_metric(key, bv))
+            sell_lbl.setText(_format_metric(key, sv))
+            # reset styles
+            buy_lbl.setStyleSheet(
+                f"color: {t.TEXT}; font-size: 11px; font-weight: 600; background: transparent; padding: 2px 6px; border-radius: 3px;"
+            )
+            sell_lbl.setStyleSheet(
+                f"color: {t.TEXT}; font-size: 11px; font-weight: 600; background: transparent; padding: 2px 6px; border-radius: 3px;"
+            )
+            if bv is None or sv is None:
+                continue
+            # Determine per-row winner for highlighting (higher better except drawdown)
+            winner = None
+            if key == "Max Drawdown":
+                if abs(bv - sv) < 0.05:
+                    continue
+                winner = "BUY" if bv < sv else "SELL"
+            else:
+                # handle thresholds
+                if key in ("Profit Factor", "Sharpe"):
+                    if abs(bv - sv) <= 0.03:
+                        continue
+                elif key == "Win Rate":
+                    if abs(bv - sv) <= 0.02:
+                        continue
+                elif key in ("Net Profit", "Expectancy", "Avg Trade"):
+                    base = max(abs(bv), abs(sv), 1.0)
+                    if abs(bv - sv) / base < 0.01:
+                        continue
+                if bv > sv:
+                    winner = "BUY"
+                elif sv > bv:
+                    winner = "SELL"
+            if winner == "BUY":
+                buy_lbl.setStyleSheet(
+                    f"color: #04211E; font-size: 11px; font-weight: 700; background: {_BUY_ACCENT}; padding: 2px 6px; border-radius: 3px;"
+                )
+            elif winner == "SELL":
+                sell_lbl.setStyleSheet(
+                    f"color: #FFFFFF; font-size: 11px; font-weight: 700; background: {_SELL_ACCENT}; padding: 2px 6px; border-radius: 3px;"
+                )
+
+
+class _StrongerBanner(QWidget):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setStyleSheet(
+            f"background: {t.PANEL}; border: 1px solid {t.BORDER}; border-radius: 4px;"
+        )
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(14, 10, 14, 10)
+        lay.setSpacing(4)
+        self._kicker = QLabel("STRONGER SIDE", self)
+        self._kicker.setStyleSheet(t.label(t.MUTED, 9, 700, 0.6))
+        self._kicker.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(self._kicker)
+        self._verdict = QLabel("TOO CLOSE TO CALL", self)
+        self._verdict.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._verdict.setStyleSheet(f"color: {t.TEXT}; font-size: 18px; font-weight: 800;")
+        lay.addWidget(self._verdict)
+        self._reason = QLabel("", self)
+        self._reason.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._reason.setWordWrap(True)
+        self._reason.setStyleSheet(f"color: {t.TEXT2}; font-size: 10px;")
+        lay.addWidget(self._reason)
+
+    def set_verdict(self, verdict: str, reason: str) -> None:
+        self._verdict.setText(verdict)
+        self._reason.setText(reason)
+        if verdict == "BUY / LONG":
+            self._verdict.setStyleSheet(f"color: {_BUY_ACCENT}; font-size: 18px; font-weight: 800;")
+            self.setStyleSheet(
+                f"background: {t.PANEL}; border: 1px solid {_BUY_ACCENT}; border-radius: 4px;"
+            )
+        elif verdict == "SELL / SHORT":
+            self._verdict.setStyleSheet(
+                f"color: {_SELL_ACCENT}; font-size: 18px; font-weight: 800;"
+            )
+            self.setStyleSheet(
+                f"background: {t.PANEL}; border: 1px solid {_SELL_ACCENT}; border-radius: 4px;"
+            )
+        elif verdict == "INSUFFICIENT":
+            self._verdict.setStyleSheet(f"color: {t.MUTED}; font-size: 14px; font-weight: 700;")
+            self.setStyleSheet(
+                f"background: {t.BG1}; border: 1px dashed {t.BORDER}; border-radius: 4px;"
+            )
+        else:
+            self._verdict.setStyleSheet(f"color: {t.TEXT}; font-size: 16px; font-weight: 700;")
+            self.setStyleSheet(
+                f"background: {t.PANEL}; border: 1px solid {t.BORDER}; border-radius: 4px;"
+            )
+
+
+class _CompareView(QWidget):
+    """Full comparison workspace for COMPARE mode — scrollable."""
+
+    run_all_requested = Signal()
+    run_buy_requested = Signal()
+    run_sell_requested = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setStyleSheet(f"background: {t.BG0};")
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet(
+            f"QScrollArea {{ background: {t.BG0}; border: none; }} {t.SCROLLBAR_QSS}"
+        )
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        content = QWidget(scroll)
+        content.setStyleSheet(f"background: {t.BG0};")
+        lay = QVBoxLayout(content)
+        lay.setContentsMargins(16, 14, 16, 14)
+        lay.setSpacing(14)
+        # Header
+        hdr = QLabel("STRATEGY COMPARISON", content)
+        hdr.setStyleSheet(t.label(t.TEXT, 11, 800, 0.8))
+        hdr.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(hdr)
+        vs_row = QHBoxLayout()
+        vs_row.setSpacing(12)
+        self._buy_hdr = QLabel("BUY (LONG)", content)
+        self._buy_hdr.setStyleSheet(f"color: {_BUY_ACCENT}; font-size: 11px; font-weight: 700;")
+        self._buy_hdr.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        vs = QLabel("VS", content)
+        vs.setStyleSheet(t.label(t.MUTED, 10, 700, 0.6))
+        vs.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._sell_hdr = QLabel("SELL (SHORT)", content)
+        self._sell_hdr.setStyleSheet(f"color: {_SELL_ACCENT}; font-size: 11px; font-weight: 700;")
+        self._sell_hdr.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        vs_row.addWidget(self._buy_hdr, 1)
+        vs_row.addWidget(vs)
+        vs_row.addWidget(self._sell_hdr, 1)
+        lay.addLayout(vs_row)
+        lay.addWidget(_hline())
+        # Stronger side banner
+        self._banner = _StrongerBanner(content)
+        lay.addWidget(self._banner)
+        # Performance matrix
+        self._matrix = _ComparisonMatrix(content)
+        lay.addWidget(self._matrix)
+        # Equity comparison
+        eq_title = QLabel("EQUITY COMPARISON", content)
+        eq_title.setStyleSheet(t.label(t.TEXT2, 10, 700, 0.8))
+        lay.addWidget(eq_title)
+        self._equity = _DualEquityView(content)
+        self._equity.setMinimumHeight(180)
+        lay.addWidget(self._equity)
+        # Risk strip (max drawdown already in matrix, add simple risk row)
+        risk_title = QLabel("RISK COMPARISON", content)
+        risk_title.setStyleSheet(t.label(t.TEXT2, 10, 700, 0.8))
+        lay.addWidget(risk_title)
+        self._risk_grid = QWidget(content)
+        self._risk_grid.setStyleSheet(
+            f"background: {t.BG1}; border: 1px solid {t.BORDER}; border-radius: 4px;"
+        )
+        rg_lay = QGridLayout(self._risk_grid)
+        rg_lay.setContentsMargins(10, 8, 10, 8)
+        rg_lay.setHorizontalSpacing(16)
+        rg_lay.setVerticalSpacing(4)
+        self._risk_buy_dd = QLabel("--", self._risk_grid)
+        self._risk_sell_dd = QLabel("--", self._risk_grid)
+        for col, txt in enumerate(("METRIC", "BUY", "SELL")):
+            lbl = QLabel(txt, self._risk_grid)
+            lbl.setStyleSheet(t.label(t.MUTED, 9, 600, 0.6))
+            rg_lay.addWidget(lbl, 0, col)
+        rg_lay.addWidget(QLabel("Max Drawdown", self._risk_grid), 1, 0)
+        rg_lay.addWidget(self._risk_buy_dd, 1, 1)
+        rg_lay.addWidget(self._risk_sell_dd, 1, 2)
+        self._risk_buy_sh = QLabel("--", self._risk_grid)
+        self._risk_sell_sh = QLabel("--", self._risk_grid)
+        rg_lay.addWidget(QLabel("Sharpe", self._risk_grid), 2, 0)
+        rg_lay.addWidget(self._risk_buy_sh, 2, 1)
+        rg_lay.addWidget(self._risk_sell_sh, 2, 2)
+        lay.addWidget(self._risk_grid)
+        # Trade comparison strip
+        tr_title = QLabel("TRADE COMPARISON", content)
+        tr_title.setStyleSheet(t.label(t.TEXT2, 10, 700, 0.8))
+        lay.addWidget(tr_title)
+        self._trade_summary = QLabel("", content)
+        self._trade_summary.setStyleSheet(
+            f"color: {t.MUTED}; font-size: 10px; background: {t.BG1}; padding: 6px 10px; border: 1px solid {t.BORDER}; border-radius: 3px;"
+        )
+        self._trade_summary.setWordWrap(True)
+        lay.addWidget(self._trade_summary)
+        self._trade_blotter = TradeBlotter(content)
+        self._trade_blotter.setMinimumHeight(180)
+        self._trade_blotter.set_side_filter_visible(True)
+        self._trade_blotter.set_side_mode("ALL")
+        lay.addWidget(self._trade_blotter)
+        # Empty / missing banners
+        self._empty_banner = QLabel("", content)
+        self._empty_banner.setStyleSheet(
+            f"color: {t.MUTED}; font-size: 11px; background: {t.BG1}; border: 1px dashed {t.BORDER}; padding: 12px; border-radius: 4px;"
+        )
+        self._empty_banner.setWordWrap(True)
+        self._empty_banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._empty_banner.setVisible(False)
+        lay.addWidget(self._empty_banner)
+        self._actions = QWidget(content)
+        act_lay = QHBoxLayout(self._actions)
+        act_lay.setContentsMargins(0, 0, 0, 0)
+        act_lay.setSpacing(8)
+        self._run_buy = QPushButton("RUN BUY BACKTEST", self._actions)
+        self._run_buy.setStyleSheet(
+            f"QPushButton {{ background: {_BUY_ACCENT}; border: none; border-radius: 3px; padding: 6px 14px; color: #04211E; font-size: 10px; font-weight: 700;}} QPushButton:hover {{ background: {t.ACCENT_DIM};}}"
+        )
+        self._run_sell = QPushButton("RUN SELL BACKTEST", self._actions)
+        self._run_sell.setStyleSheet(
+            f"QPushButton {{ background: {_SELL_ACCENT}; border: none; border-radius: 3px; padding: 6px 14px; color: #FFF; font-size: 10px; font-weight: 700;}} QPushButton:hover {{ background: #D64552;}}"
+        )
+        self._run_all = QPushButton("RUN ALL", self._actions)
+        self._run_all.setStyleSheet(t.PRIMARY_QSS)
+        self._run_buy.clicked.connect(self.run_buy_requested.emit)
+        self._run_sell.clicked.connect(self.run_sell_requested.emit)
+        self._run_all.clicked.connect(self.run_all_requested.emit)
+        act_lay.addWidget(self._run_buy)
+        act_lay.addWidget(self._run_sell)
+        act_lay.addWidget(self._run_all)
+        act_lay.addStretch(1)
+        self._actions.setVisible(False)
+        lay.addWidget(self._actions)
+        lay.addStretch(1)
+        content.setLayout(lay)
+        scroll.setWidget(content)
+        outer.addWidget(scroll, 1)
+        self._buy: StrategyResult | None = None
+        self._sell: StrategyResult | None = None
+
+    def set_results(
+        self,
+        buy: StrategyResult | None,
+        sell: StrategyResult | None,
+        full: StrategyResult | None = None,
+    ) -> None:
+        self._buy = buy
+        self._sell = sell
+        self._matrix.set_results(buy, sell)
+        self._equity.set_results(buy, sell)
+        # risk grid
+        if buy is not None:
+            self._risk_buy_dd.setText(f"-{buy.metrics.max_drawdown_pct:.2f}%")
+            self._risk_buy_sh.setText(
+                f"{buy.metrics.sharpe_ratio:.2f}" if buy.metrics.sharpe_ratio is not None else "--"
+            )
+        else:
+            self._risk_buy_dd.setText("--")
+            self._risk_buy_sh.setText("--")
+        if sell is not None:
+            self._risk_sell_dd.setText(f"-{sell.metrics.max_drawdown_pct:.2f}%")
+            self._risk_sell_sh.setText(
+                f"{sell.metrics.sharpe_ratio:.2f}"
+                if sell.metrics.sharpe_ratio is not None
+                else "--"
+            )
+        else:
+            self._risk_sell_dd.setText("--")
+            self._risk_sell_sh.setText("--")
+        # verdict
+        verdict, reason = determine_stronger_side(buy, sell)
+        # Map INSUFFICIENT to user-friendly
+        if verdict == "INSUFFICIENT":
+            if buy is None and sell is None:
+                self._banner.set_verdict(
+                    "NOTHING TO COMPARE YET", "Run BUY and SELL backtests to compare performance."
+                )
+            elif buy is None or (buy is not None and buy.metrics.total_trades == 0):
+                # sell available but buy missing — keep sell verdict? Show insufficient banner but not claim stronger
+                self._banner.set_verdict("INSUFFICIENT — SELL AVAILABLE", reason)
+            elif sell is None or (sell is not None and sell.metrics.total_trades == 0):
+                self._banner.set_verdict("INSUFFICIENT — BUY AVAILABLE", reason)
+            else:
+                self._banner.set_verdict(verdict, reason)
+        else:
+            self._banner.set_verdict(verdict, reason)
+        # trade summary
+        if buy is None and sell is None:
+            self._trade_summary.setText("No trades to compare — run both backtests.")
+        elif buy is None:
+            self._trade_summary.setText(
+                f"SELL: {len(sell.trades) if sell else 0} trades  ·  BUY: Not backtested yet"
+            )
+        elif sell is None:
+            self._trade_summary.setText(
+                f"BUY: {len(buy.trades) if buy else 0} trades  ·  SELL: Not backtested yet"
+            )
+        else:
+            self._trade_summary.setText(
+                f"BUY: {len(buy.trades)} trades  ·  SELL: {len(sell.trades)} trades  ·  TOTAL: {len(buy.trades) + len(sell.trades)}"
+            )
+        # empty / action banner for partial data
+        has_buy = buy is not None
+        has_sell = sell is not None
+        if not has_buy and not has_sell:
+            self._empty_banner.setText(
+                "NOTHING TO COMPARE YET\nRun BUY and SELL backtests to compare performance."
+            )
+            self._empty_banner.setVisible(True)
+            self._actions.setVisible(True)
+            self._run_buy.setVisible(True)
+            self._run_sell.setVisible(True)
+        elif not has_buy or (has_buy and buy.metrics.total_trades == 0 and has_sell):
+            # buy missing or empty
+            if has_sell:
+                self._empty_banner.setText("BUY — Not backtested yet")
+            else:
+                self._empty_banner.setText("BUY — Not backtested yet")
+            self._empty_banner.setVisible(True)
+            self._actions.setVisible(True)
+        elif not has_sell or (has_sell and sell.metrics.total_trades == 0 and has_buy):
+            if has_buy:
+                self._empty_banner.setText("SELL — Not backtested yet")
+            self._empty_banner.setVisible(True)
+            self._actions.setVisible(True)
+        else:
+            self._empty_banner.setVisible(False)
+            # In full compare, hide the per-side run buttons, keep RUN ALL
+            self._actions.setVisible(True)
+            # show all three but RUN ALL is primary
+            self._run_buy.setVisible(True)
+            self._run_sell.setVisible(True)
+            self._run_all.setVisible(True)
+        # Adjust actions: when both missing, emphasize RUN ALL; when one missing, show its run
+        if not has_buy and not has_sell:
+            self._run_all.setText("RUN ALL")
+        elif not has_buy:
+            self._run_buy.setVisible(True)
+        elif not has_sell:
+            self._run_sell.setVisible(True)
+        # Trade blotter — show combined trades for ALL / BUY / SELL filtering
+        try:
+            combined: StrategyResult | None = None
+            if full is not None:
+                combined = full
+            elif buy is not None and sell is not None:
+                # Merge buy + sell trades chronologically by entry_index
+                merged = tuple(
+                    sorted(
+                        (*buy.trades, *sell.trades), key=lambda tr: getattr(tr, "entry_index", 0)
+                    )
+                )
+                # Use buy's config/metrics as placeholder, but blotter only uses trades
+                from backtest.models.result import StrategyResult as _SR
+
+                combined = _SR(
+                    strategy_id=buy.strategy_id,
+                    name=buy.name,
+                    config=buy.config,
+                    trades=merged,
+                    equity_curve=buy.equity_curve,
+                    metrics=buy.metrics,
+                    bars_used=buy.bars_used,
+                    period_start=buy.period_start,
+                    period_end=buy.period_end,
+                    chart_series=buy.chart_series,
+                )
+            elif buy is not None:
+                combined = buy
+            elif sell is not None:
+                combined = sell
+            self._trade_blotter.set_result(combined)
+            self._trade_blotter.set_side_mode("ALL")
+        except Exception:
+            pass
+
+
 class StrategyLabWorkspace(QWidget):
-    """Two-column lab: library (25%) | strategy workspace (75%), results below."""
+    """Two-column lab with BUY / SELL / COMPARE tri-mode results."""
 
     run_backtest = Signal(object)
     trade_focus = Signal(int)
@@ -1029,10 +1974,18 @@ class StrategyLabWorkspace(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setStyleSheet(f"background: {t.BG0};")
+        self._view_mode: StrategyViewMode = StrategyViewMode.BUY
+        self._full_result: StrategyResult | None = None
+        self._buy_result: StrategyResult | None = None
+        self._sell_result: StrategyResult | None = None
+        self._pending_side: StrategyViewMode | None = None
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
         outer.addWidget(self._build_topbar())
+        self._mode_selector = _ViewModeSelector(self)
+        self._mode_selector.mode_changed.connect(self.set_view_mode)
+        outer.addWidget(self._mode_selector)
         self._root = QSplitter(Qt.Orientation.Vertical, self)
         self._root.setStyleSheet(t.SPLITTER_QSS)
         self._root.setHandleWidth(1)
@@ -1050,11 +2003,9 @@ class StrategyLabWorkspace(QWidget):
             lambda: self.left_nav.request_rename(self.current_tab_name())
         )
         self.center_detail.param_changed.connect(self.param_changed.emit)
-        # Backtest panel lives inside EditorPane's BACKTEST tab; expose alias
         self.right_settings = self.center_detail.backtest_panel
-        self.right_settings.run_requested.connect(self.run_backtest.emit)
+        self.right_settings.run_requested.connect(self._on_panel_run)
         self.right_settings.busy_changed.connect(self._set_run_busy)
-        # Center stack: empty state vs editor
         self._center_empty = self._build_center_empty()
         self._center_stack = QStackedWidget(self)
         self._center_stack.addWidget(self._center_empty)
@@ -1069,13 +2020,48 @@ class StrategyLabWorkspace(QWidget):
         assert isinstance(self._collapse_btn, QToolButton)
         results_dock = self._result_stack.parentWidget()
         assert results_dock is not None
+        self._results_dock = results_dock  # keep reference for visibility toggling
         self._root.addWidget(self._main)
         self._root.addWidget(results_dock)
         self._root.setStretchFactor(0, 1)
         self._root.setStretchFactor(1, 0)
+        # Compare view — stacked outside _result_stack so test count==4 preserved
+        self._compare_view = _CompareView(self)
+        self._compare_view.run_all_requested.connect(self._emit_run_all)
+        self._compare_view.run_buy_requested.connect(self._emit_run_buy)
+        self._compare_view.run_sell_requested.connect(self._emit_run_sell)
+        self._compare_view.setVisible(False)
+        # _results_container kept for backward compat (some tests check attribute existence)
+        self._results_container = self._compare_view  # type: ignore[assignment]
         outer.addWidget(self._root, 1)
+        outer.addWidget(self._compare_view, 1)
         self._setup_shortcuts()
         self._main.setSizes([280, 880])
+        self._apply_view_mode()
+
+    def _on_panel_run(self, cfg: object) -> None:
+        # Track which side was requested so set_result can retain the other side's state
+        if self._view_mode == StrategyViewMode.BUY:
+            self._pending_side = StrategyViewMode.BUY
+        elif self._view_mode == StrategyViewMode.SELL:
+            self._pending_side = StrategyViewMode.SELL
+        else:
+            self._pending_side = StrategyViewMode.COMPARE
+        self.run_backtest.emit(cfg)
+
+    def _emit_run_buy(self) -> None:
+        self.set_view_mode(StrategyViewMode.BUY)
+        self._pending_side = StrategyViewMode.BUY
+        self.run_backtest.emit(self.right_settings.current_config())
+
+    def _emit_run_sell(self) -> None:
+        self.set_view_mode(StrategyViewMode.SELL)
+        self._pending_side = StrategyViewMode.SELL
+        self.run_backtest.emit(self.right_settings.current_config())
+
+    def _emit_run_all(self) -> None:
+        self._pending_side = StrategyViewMode.COMPARE
+        self.run_backtest.emit(self.right_settings.current_config())
 
     def _build_center_empty(self) -> QWidget:
         widget = QWidget(self)
@@ -1114,7 +2100,6 @@ class StrategyLabWorkspace(QWidget):
 
     def _set_center_empty(self, empty: bool) -> None:
         self._center_stack.setCurrentIndex(0 if empty else 1)
-        # breadcrumb reflects state — empty shows nothing
         if empty:
             self._crumb_name.setText("")
 
@@ -1150,7 +2135,7 @@ class StrategyLabWorkspace(QWidget):
         compile_btn.clicked.connect(
             lambda: self.compile_requested_relay.emit(self.center_detail.get_code())
         )
-        self._topbar_run = QPushButton("▶  RUN BACKTEST", bar)
+        self._topbar_run = QPushButton("▶  RUN BUY BACKTEST", bar)
         self._topbar_run.setStyleSheet(t.PRIMARY_QSS)
         self._topbar_run.clicked.connect(self._emit_run)
         lay.addWidget(save_btn)
@@ -1185,6 +2170,8 @@ class StrategyLabWorkspace(QWidget):
         perf_lay.setSpacing(0)
         perf_lay.addWidget(self.metrics)
         perf_lay.addWidget(EquityCurveView(perf_page), 1)
+        # keep reference to perf equity for backward compat updates
+        self._perf_equity = perf_lay.itemAt(1).widget()  # type: ignore[assignment]
         stack.addWidget(perf_page)
         self.journal = TradeBlotter(dock)
         self.journal.trade_clicked.connect(self.trade_focus.emit)
@@ -1239,9 +2226,18 @@ class StrategyLabWorkspace(QWidget):
             self.toggle_results(open_it=True)
 
     def results_open(self) -> bool:
+        # In COMPARE mode, results are shown via compare view container
+        if self._view_mode == StrategyViewMode.COMPARE:
+            return self._results_container.isVisible()  # type: ignore[attr-defined]
         return self._result_stack.isVisible()
 
     def toggle_results(self, open_it: bool | None = None) -> None:
+        # Delegate to container visibility when in COMPARE, else stack
+        if self._view_mode == StrategyViewMode.COMPARE:
+            opening = open_it if open_it is not None else not self._results_container.isVisible()
+            self._results_container.setVisible(opening)
+            self._collapse_btn.setText("▾" if opening else "▴")
+            return
         opening = open_it if open_it is not None else not self._result_stack.isVisible()
         if opening:
             height = self._results_height
@@ -1282,9 +2278,28 @@ class StrategyLabWorkspace(QWidget):
 
     def _set_run_busy(self, busy: bool) -> None:
         self._topbar_run.setEnabled(not busy)
-        self._topbar_run.setText("RUNNING BACKTEST…" if busy else "▶  RUN BACKTEST")
+        if busy:
+            self._topbar_run.setText("RUNNING BACKTEST…")
+        else:
+            self._apply_top_run_label()
+        # Note: right_settings already reflects busy via its own set_busy emission;
+        # do NOT call set_busy here or we recurse via busy_changed.
+
+    def _apply_top_run_label(self) -> None:
+        if self._view_mode == StrategyViewMode.BUY:
+            self._topbar_run.setText("▶  RUN BUY BACKTEST")
+        elif self._view_mode == StrategyViewMode.SELL:
+            self._topbar_run.setText("▶  RUN SELL BACKTEST")
+        else:
+            self._topbar_run.setText("▶  RUN ALL")
 
     def _emit_run(self) -> None:
+        if self._view_mode == StrategyViewMode.BUY:
+            self._pending_side = StrategyViewMode.BUY
+        elif self._view_mode == StrategyViewMode.SELL:
+            self._pending_side = StrategyViewMode.SELL
+        else:
+            self._pending_side = StrategyViewMode.COMPARE
         self.run_backtest.emit(self.right_settings.current_config())
 
     def _setup_shortcuts(self) -> None:
@@ -1314,9 +2329,15 @@ class StrategyLabWorkspace(QWidget):
     def open_strategy(self, name: str, code: str) -> None:
         self.center_detail.open_buffer(name, code)
         self.set_strategy_name(name)
+        # Preserve directional state across strategy switches? Per spec, switching
+        # strategy should likely reset directional results. Keep current mode but clear old results
+        # The caller (bootstrap) will repopulate library; we keep view mode.
+        self._full_result = None
+        self._buy_result = None
+        self._sell_result = None
+        self._refresh_directional_views()
 
     def select_next_after_delete(self, deleted: str) -> None:
-        """Open the neighbour of a deleted strategy; fall back to empty state."""
         names = [name for name in self.left_nav.names() if name != deleted]
         target = next((name for name in names if name > deleted), None)
         if target is None and names:
@@ -1326,17 +2347,189 @@ class StrategyLabWorkspace(QWidget):
         else:
             self._set_center_empty(True)
             self._crumb_name.setText("")
+            self._full_result = None
+            self._buy_result = None
+            self._sell_result = None
+            self._refresh_directional_views()
 
     strategy_open_requested = Signal(str)
 
+    # ------------------------------------------------------------------
+    # Directional view mode API — buffered BUY/SELL state
+    # ------------------------------------------------------------------
+    @property
+    def view_mode(self) -> StrategyViewMode:
+        return self._view_mode
+
+    @property
+    def mode_selector(self) -> _ViewModeSelector:
+        return self._mode_selector
+
+    @property
+    def buy_result(self) -> StrategyResult | None:
+        return self._buy_result
+
+    @property
+    def sell_result(self) -> StrategyResult | None:
+        return self._sell_result
+
+    @property
+    def full_result(self) -> StrategyResult | None:
+        return self._full_result
+
+    def set_view_mode(self, mode: StrategyViewMode | str) -> None:
+        if isinstance(mode, str):
+            try:
+                mode = StrategyViewMode(mode)
+            except Exception:
+                return
+        if mode == self._view_mode:
+            return
+        self._view_mode = mode  # type: ignore[assignment]
+        self._mode_selector.set_mode(mode)  # type: ignore[arg-type]
+        self._apply_view_mode()
+
+    def _apply_view_mode(self) -> None:
+        mode = self._view_mode
+        self._mode_selector.set_mode(mode)
+        self.right_settings.set_view_mode(mode)
+        self.metrics.set_view_mode(mode)
+        self._apply_top_run_label()
+        if mode == StrategyViewMode.COMPARE:
+            try:
+                dock = self._results_dock
+                dock.setVisible(False)
+                self._compare_view.setVisible(True)
+                self._collapse_btn.setText("▾")
+            except Exception:
+                pass
+            self._refresh_directional_views()
+        else:
+            try:
+                dock = self._results_dock
+                dock.setVisible(True)
+                self._compare_view.setVisible(False)
+            except Exception:
+                pass
+            self._refresh_directional_views()
+        self.update()
+
     def set_result(self, result: StrategyResult | None) -> None:
-        self.metrics.set_result(result)
-        self._equity_view.set_result(result)
-        self._drawdown_view.set_result(result)
-        self.journal.set_result(result)
-        self._update_equity_summary(result)
+        # Derive per-side results via filtered replay — same engine numbers, different view
+        # Respect pending side so COMPARE can show “Not backtested yet” after a single-side run
+        pending = self._pending_side
+        self._pending_side = None
+        self._full_result = result
+        if result is None:
+            self._buy_result = None
+            self._sell_result = None
+        else:
+            try:
+                from backtest import derive_directional_result
+
+                if pending == StrategyViewMode.BUY:
+                    self._buy_result = derive_directional_result(result, "LONG")
+                elif pending == StrategyViewMode.SELL:
+                    self._sell_result = derive_directional_result(result, "SHORT")
+                else:
+                    # COMPARE / initial / backward-compat direct call → derive both
+                    self._buy_result = derive_directional_result(result, "LONG")
+                    self._sell_result = derive_directional_result(result, "SHORT")
+            except Exception:
+                # Fallback: raw split
+                if pending == StrategyViewMode.SELL:
+                    self._sell_result = result
+                else:
+                    self._buy_result = result
+        self._refresh_directional_views()
+        # For backward compat, also expand results if we have any result
         if result is not None:
             self.show_result(0, expand=True)
+            # Ensure compare view gets latest (pass full for combined blotter)
+            try:
+                self._compare_view.set_results(self._buy_result, self._sell_result, result)
+            except Exception:
+                pass
+
+    def set_results(self, buy: StrategyResult | None, sell: StrategyResult | None) -> None:
+        """Explicitly set per-side results (used for isolated BUY/SELL runs)."""
+        self._buy_result = buy
+        self._sell_result = sell
+        # Keep full as the side that last ran or a synthetic aggregate
+        if buy is not None and sell is None:
+            self._full_result = buy
+        elif sell is not None and buy is None:
+            self._full_result = sell
+        elif buy is not None and sell is not None:
+            # keep existing full if present
+            pass
+        self._refresh_directional_views()
+        try:
+            self._compare_view.set_results(buy, sell, self._full_result)
+        except Exception:
+            pass
+
+    def _refresh_directional_views(self) -> None:
+        mode = self._view_mode
+        # Pick active result for single-mode panels
+        active: StrategyResult | None
+        if mode == StrategyViewMode.BUY:
+            active = self._buy_result
+            # If buy has never been run but full exists, show buy filtered (may be empty trades)
+            # If both None -> empty state placeholder
+            if (
+                active is None
+                and self._buy_result is None
+                and self._sell_result is None
+                and self._full_result is None
+            ):
+                # truly nothing
+                pass
+        elif mode == StrategyViewMode.SELL:
+            active = self._sell_result
+        else:
+            # COMPARE — push to compare view, keep metrics etc hidden
+            try:
+                self._compare_view.set_results(
+                    self._buy_result, self._sell_result, self._full_result
+                )
+            except Exception:
+                pass
+            return
+        # Empty states per spec §26
+        has = active is not None
+        # Metrics / Equity / Trade views always get active (may be zero-trade result)
+        # When active is None, show directional empty placeholder via metrics placeholder "--"
+        self.metrics.set_result(active)
+        self._equity_view.set_result(active)
+        if hasattr(self, "_perf_equity"):
+            try:
+                self._perf_equity.set_result(active)  # type: ignore[attr-defined]
+            except Exception:
+                pass
+        self._drawdown_view.set_result(active)  # type: ignore[attr-defined]
+        self.journal.set_result(active)
+        # Side filter for trade blotter
+        if mode == StrategyViewMode.BUY:
+            self.journal.set_side_mode("BUY")
+            self.journal.set_side_filter_visible(False)
+        elif mode == StrategyViewMode.SELL:
+            self.journal.set_side_mode("SELL")
+            self.journal.set_side_filter_visible(False)
+        # Equity summary — show START/END per side
+        self._update_equity_summary(active)
+        # If active is None (never run), show directional placeholder text in journal placeholder
+        if not has:
+            # customize placeholder text per direction
+            if mode == StrategyViewMode.BUY:
+                self.journal._placeholder.setText(
+                    "BUY BACKTEST NOT RUN\nConfigure your strategy and run the BUY backtest."
+                )
+            else:
+                self.journal._placeholder.setText(
+                    "SELL BACKTEST NOT RUN\nConfigure your strategy and run the SELL backtest."
+                )
+            # metrics already shows "--"
 
     def _update_equity_summary(self, result: StrategyResult | None) -> None:
         points = result.equity_curve if result is not None else ()
@@ -1345,18 +2538,46 @@ class StrategyLabWorkspace(QWidget):
             end = float(points[-1].equity)
             ret = (end - start) / start * 100 if start else 0.0
             color = t.POS if ret >= 0 else t.NEG
+            dir_tag = (
+                "BUY"
+                if self._view_mode == StrategyViewMode.BUY
+                else "SELL"
+                if self._view_mode == StrategyViewMode.SELL
+                else ""
+            )
+            prefix = f"{dir_tag} " if dir_tag else ""
             self._equity_summary.setText(
-                f"START ₹{_inr(start)}   ·   END ₹{_inr(end)}   ·   "
+                f"{prefix}START ₹{_inr(start)}   ·   END ₹{_inr(end)}   ·   "
                 f"<span style='color:{color};'>RETURN {ret:+.2f}%</span>"
             )
+        elif len(points) == 1:
+            start = float(points[0].equity)
+            self._equity_summary.setText(f"START ₹{_inr(start)}   ·   No trades yet")
         else:
-            self._equity_summary.setText("No backtest results yet.")
+            if self._view_mode == StrategyViewMode.BUY:
+                self._equity_summary.setText("No BUY backtest — run BUY backtest to see equity.")
+            elif self._view_mode == StrategyViewMode.SELL:
+                self._equity_summary.setText("No SELL backtest — run SELL backtest to see equity.")
+            else:
+                self._equity_summary.setText("No backtest results yet.")
 
     def clear(self) -> None:
+        self._full_result = None
+        self._buy_result = None
+        self._sell_result = None
         self.metrics.set_result(None)
         self._equity_view.set_result(None)
-        self._drawdown_view.set_result(None)
+        try:
+            self._perf_equity.set_result(None)  # type: ignore[attr-defined]
+        except Exception:
+            pass
+        self._drawdown_view.set_result(None)  # type: ignore[attr-defined]
         self.journal.set_result(None)
+        try:
+            self._compare_view.set_results(None, None)
+        except Exception:
+            pass
+        self._update_equity_summary(None)
 
 
-__all__ = ["StrategyLabWorkspace"]
+__all__ = ["StrategyLabWorkspace", "StrategyLibraryPanel", "BacktestRunPanel", "StrategyViewMode"]

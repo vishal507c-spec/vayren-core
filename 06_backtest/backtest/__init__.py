@@ -3,6 +3,10 @@
 Depends on: core, market, strategy.
 """
 
+from backtest.engine.directional import (
+    derive_directional_result,
+    split_by_side,
+)
 from backtest.events import (
     BacktestCompleted,
     BacktestFailed,
@@ -39,4 +43,6 @@ __all__ = [
     "BacktestFailed",
     "backtest_manifest",
     "validate_backtest_form",
+    "derive_directional_result",
+    "split_by_side",
 ]
