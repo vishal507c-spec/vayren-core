@@ -2,6 +2,21 @@
 
 **Nya entry hamesha upar likho.**
 
+## 2026-09-02 — RELEASE v1.5.2 — OBR Chart Fix (REF Horizontal Extension)
+
+**Release:** `v1.5.2` (pyproject `1.5.2`, tag `v1.5.2`). Previous `v1.5.1`.
+
+**Root causes fixed:**
+*   `00_app/app/bootstrap/bootstrap.py:485` dedent — `widget.indicator_added.connect`, session-restore, `ChartReady _recalc` (561-574) were inside `_recalc` dead code → `ChartReady` subs 3 not 4, `calls=[]`. Dedent to `_wire_events` + `ChartReady 4`.
+*   `00_app/app/bootstrap/bootstrap.py:1462` clear-before-repopulate race — `_recalc` added live before `_on_chart_ready_lab` clear → empty. Added repopulate after clear looping `visibility_panel` → ` _run_strategy_plots`.
+*   `00_app/app/bootstrap/bootstrap.py:1514` stale `BacktestCompleted` — quick `TF 15m→30m` 15m backtest (54008) overwrote 30m live (28091) `106.5 outside [340,371]` → gated `symbol/timeframe` match before `PlotOverlay.set_from_chart_series`.
+*   `04_chart/chart/renderer/plot_renderer.py:155` `PlotOverlay` sparse dot — gap break drew `ellipse` at `refBar` only. Generic `extend="session"` + `avg_gap>2` sparse → horizontal ray `[idx, next_idx-1]` at same price, dense `gap≈1` → connected polyline `29 lines`. `OBR` 2164 pts `1..28080` now `10 segs visible 350.8..366` inside viewport.
+*   `04_chart/chart/widgets/candle_chart_widget.py:63` `indicator_added` signal + `05_strategy/strategy/strategies/base.py:135` `plot` storage + `scripts/assets/vayren.spec` hiddenimports `zoneinfo,tzdata,strategies.*`, compile string-error + param dedup `12→6` + `after_time`.
+
+**Verification:** `ABCAPITAL 30m 28091` `REF HIGH 2164 last (28080,366.3)` visible `10` `350.8..366` `paint_overlay 2 calls` horizontal; `AUBANK 30m 28565` `2201` `10 segs`; `OFF/ON`, `remove/re-add` `2→0→2` no duplicate; `TF 15m↔30m` `2170↔2164`; `769 tests` `structure/imports PASS`; `dist/Vayren/Vayren.exe` `2026-09-02 08:52:22` `EXE running OK`.
+
+**Preserved:** `OBR.process_bar()` `D:\VAYREN_STRATEGIES\OBR.py` unchanged, trading/BUY/SELL logic untouched, generic `PlotOverlay` (no OBR-specific renderer).
+
 ## 2026-08-31 - HARD RULE - GitHub Push Permission
 
 - User ne NON-NEGOTIABLE rule diya: bina explicit command ke GitHub push/release/tag/PR MANA. LOCAL != REMOTE, COMMIT != PUSH, VERSION != TAG, TAG != RELEASE.

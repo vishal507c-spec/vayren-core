@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 from collections import deque
-from typing import Any
-
-from market.models.bar import Bar
 
 from strategy.models.parameters import StrategyParameters
 from strategy.models.signal import Signal, SignalKind
@@ -33,6 +30,10 @@ class PythonStrategy(StrategyLogic):
         self._current_day: str | None = None
         self._prev_day_close: float = 0.0
         self._is_new_day: bool = False
+        # Chart plot series — title -> {bar_index: value}
+        self._plot_series: dict[str, dict[int, float]] = {}
+        self._plot_meta: dict[str, dict[str, str]] = {}
+        self._current_bar_index: int = 0
 
     def warmup(self) -> int:
         return 20
@@ -63,6 +64,7 @@ class PythonStrategy(StrategyLogic):
         self._pending_sl = None
         self._pending_tp = None
         self._pending_time_exit = None
+        self._current_bar_index = view.index
 
         signal = self.on_bar_logic(view)
 
@@ -128,10 +130,31 @@ class PythonStrategy(StrategyLogic):
             return False
 
     def plot(self, value: float, title: str) -> None:
-        # No-op for Python-native — chart series kept for compatibility, not required for signals
+        """Record a chart plot point — title identifies the series.
+
+        Data is stored as {bar_index: value} so the backtest runner can
+        package it into ChartSeries and the chart renderer can draw
+        persistent lines across the relevant bars.
+        """
         try:
-            if not hasattr(self, "_plot_series"):
-                self._plot_series: dict[str, list] = {}  # type: ignore[attr-defined]
-            self._plot_series.setdefault(title, []).append(float(value))  # type: ignore[attr-defined]
+            self._plot_series.setdefault(title, {})[self._current_bar_index] = float(value)
         except Exception:
             pass
+
+    def get_chart_series(self) -> dict[str, dict[int, float]]:
+        """Return chart plot series in legacy title-keyed format."""
+        return {k: dict(v) for k, v in self._plot_series.items()}
+
+    def get_chart_series_with_owner(self) -> dict[tuple[str, str], dict[int, float]]:
+        """Return chart plot series keyed by (owner_id, title)."""
+        owner = getattr(self, "_owner_id", "") or ""
+        return {(owner, k): dict(v) for k, v in self._plot_series.items()}
+
+    def get_chart_series_meta(self) -> dict[str, dict[str, str]]:
+        """Return chart plot series metadata (title-keyed)."""
+        return {k: dict(v) for k, v in self._plot_meta.items()}
+
+    def get_chart_series_meta_with_owner(self) -> dict[tuple[str, str], dict[str, str]]:
+        """Return chart plot series metadata keyed by (owner_id, title)."""
+        owner = getattr(self, "_owner_id", "") or ""
+        return {(owner, k): dict(v) for k, v in self._plot_meta.items()}

@@ -8,7 +8,6 @@ from typing import Any
 
 from chart.engine.chart_engine import ChartEngine
 from chart.events.chart_ready import ChartReady
-from chart.events.window_rendered import WindowRendered
 from chart.manifest import chart_manifest
 from chart.widgets.candle_chart_widget import CandleChartWidget
 from chart.widgets.timeframe_toolbar import TimeframeToolbar
@@ -21,15 +20,7 @@ from core.registry.component_registry import ComponentRegistry
 from core.registry.registry import Registry
 from core.system.system_model import SystemModel
 from data import (
-    CancelDownload,
-    CoverageRequest,
-    DownloadCompleted,
-    DownloadCoverage,
-    DownloadFailed,
-    DownloadProgress,
-    DownloadRequest,
     DownloadSettings,
-    DownloadStarted,
     DownloadWorker,
     HistoricalDownloadEngine,
     data_manifest,
@@ -110,7 +101,7 @@ class Bootstrap:
         backtest_worker = BacktestWorker(backtest_runner)
         trade_overlay = TradeOverlay()
         widget.set_overlay(trade_overlay)
-        # Plot overlay for generic chart series (TradingView plot() primitive) — compact, no OBR-specific
+        # Plot overlay — generic TradingView plot() primitive
         try:
             from chart.renderer.plot_renderer import PlotOverlay
 
@@ -234,9 +225,7 @@ class Bootstrap:
                 # chart layout stub (future)
                 layout: dict[str, Any] = {}
                 with contextlib.suppress(Exception):
-                    layout["follow_latest"] = bool(
-                        getattr(widget, "_follow_latest", True)
-                    )
+                    layout["follow_latest"] = bool(getattr(widget, "_follow_latest", True))
                 sess = ChartSession(
                     symbol=getattr(window, "_current_symbol", None),
                     timeframe=getattr(window, "_current_timeframe", None),
@@ -481,6 +470,7 @@ class Bootstrap:
         self._bus.subscribe(TimeframesListed, window.on_timeframes_listed)
         self._bus.subscribe(DataLoaded, engine.on_data_loaded)
         self._bus.subscribe(ChartReady, window.on_chart_ready)
+
         # ── TradingView: keep active indicators alive across symbol/timeframe, recalculate ──
         def _recalc_active_indicators(event: ChartReady) -> None:  # type: ignore[no-untyped-def]
             try:
@@ -518,7 +508,9 @@ class Bootstrap:
                         # pure indicator (VWAP, EMA, etc.) — no backtest, just keep row
                         # recalculation will happen via its own renderer on next paint
                         continue
-                    # strategy: rerun backtest with new symbol/timeframe, preserve settings
+                    # strategy: rerun plots on the new chart bars (live REF HIGH/LOW)
+                    self._run_strategy_plots(ind_name, event.model.bars)
+                    # also rerun backtest with new symbol/timeframe, preserve settings
                     try:
                         from strategy.language.storage import load_strategy_record
 
@@ -556,16 +548,18 @@ class Bootstrap:
             except Exception:
                 pass
 
+        # Connect indicator_added signal to live plot runner (chart bars via widget._model)
+        widget.indicator_added.connect(
+            lambda name: self._run_strategy_plots(name, widget._model.bars if widget._model else ())
+        )
+        # Session-restore fix: indicators added BEFORE this connection
+        # (via bootstrap init session restore) never fired indicator_added.
+        # Run plots for any already-active visible indicators now.
+        if widget._model is not None and widget._model.bars:
+            for ind_name, vis in widget._indicator_visible.items():
+                if vis:
+                    self._run_strategy_plots(ind_name, widget._model.bars)
         self._bus.subscribe(ChartReady, _recalc_active_indicators)
-        self._bus.subscribe(WindowRendered, lifecycle.on_window_rendered)
-        self._bus.subscribe(DownloadRequest, data_worker.on_download_request)
-        self._bus.subscribe(CoverageRequest, data_worker.on_coverage_request)
-        self._bus.subscribe(CancelDownload, data_worker.on_cancel_download)
-        self._bus.subscribe(DownloadStarted, data_window.on_download_started)
-        self._bus.subscribe(DownloadProgress, data_window.on_download_progress)
-        self._bus.subscribe(DownloadCompleted, data_window.on_download_completed)
-        self._bus.subscribe(DownloadFailed, data_window.on_download_failed)
-        self._bus.subscribe(DownloadCoverage, data_window.on_download_coverage)
         data_worker.started.connect(self._bus.publish)
         data_worker.progress.connect(self._bus.publish)
         data_worker.completed.connect(self._bus.publish)
@@ -887,6 +881,11 @@ class Bootstrap:
                 if errors:
                     for err in errors:
                         event_log.add_entry("WARN", f"Validation failed: {err}")
+                    # Surface in Strategy Lab UI — event_log is hidden by
+                    # default, the user would otherwise see nothing.
+                    lab_workspace.center_detail.show_compile_result(
+                        False, "BACKTEST VALIDATION FAILED — " + "; ".join(errors)
+                    )
                     return
                 request_id = uuid.uuid4().hex[:8]
                 self._bus.publish(
@@ -1160,20 +1159,44 @@ class Bootstrap:
                                     for k, v in compiled.param_defaults.items()
                                 )
                             strategy_registry.register_kind(target_kind, _factory, specs)
-                            # Also create a definition for backtest if missing
-                            if not strategy_registry.contains(sid):
-                                from strategy.models.definition import StrategyDefinition
-                                from strategy.models.parameters import StrategyParameters
+                            # ALWAYS register/update the definition — even if
+                            # a previous compile registered one. Without this,
+                            # a re-compiled strategy (new UUID or changed
+                            # params) would keep the stale definition and
+                            # RUN BACKTEST validation would reject it.
+                            from strategy.models.definition import StrategyDefinition
+                            from strategy.models.parameters import StrategyParameters
 
-                                definition = StrategyDefinition(
-                                    id=sid,
-                                    name=lab_workspace.current_tab_name().strip() or sid,  # type: ignore[attr-defined]
-                                    version="1.0",
-                                    kind=target_kind,
-                                    params=StrategyParameters(compiled.param_defaults),
-                                )
-                                with contextlib.suppress(Exception):
+                            # Spec keys ONLY — raw param_defaults contains both
+                            # label and key entries, which fails validated()
+                            # (unknown parameters) and silently skips registration.
+                            definition_params = StrategyParameters(
+                                {
+                                    spec.key: compiled.param_defaults[spec.key]
+                                    for spec in specs
+                                    if spec.key in compiled.param_defaults
+                                }
+                            )
+                            definition = StrategyDefinition(
+                                id=sid,
+                                name=lab_workspace.current_tab_name().strip() or sid,  # type: ignore[attr-defined]
+                                version="1.0",
+                                kind=target_kind,
+                                params=definition_params,
+                            )
+                            # Registration failure must surface, not vanish —
+                            # an unregistered definition makes RUN BACKTEST
+                            # fail validation forever with no visible reason.
+                            try:
+                                if strategy_registry.contains(sid):
+                                    strategy_registry.set_params(sid, definition_params)
+                                else:
                                     strategy_registry.register_definition(definition)
+                            except Exception as reg_exc:
+                                event_log.add_entry(
+                                    "ERROR",
+                                    f"Strategy registration failed: {reg_exc}",
+                                )
                         except Exception:
                             strategy_registry._kinds[target_kind] = _factory  # type: ignore[attr-defined]
                     # also refresh params UI from compiled defaults
@@ -1185,9 +1208,7 @@ class Bootstrap:
                         # Unique spec keys only (label keys would fail validation)
                         spec_keys = [s.key for s in getattr(compiled, "param_specs", ()) or ()]
                         if spec_keys:
-                            new_params = {
-                                k: float(compiled.param_defaults[k]) for k in spec_keys
-                            }
+                            new_params = {k: float(compiled.param_defaults[k]) for k in spec_keys}
                         else:
                             new_params = {k: float(v) for k, v in compiled.param_defaults.items()}
                         mapped = {}
@@ -1435,9 +1456,29 @@ class Bootstrap:
         try:
             if hasattr(self, "_plot_overlay") and self._plot_overlay is not None:
                 self._plot_overlay.clear()  # type: ignore[attr-defined]
-                # widget will repaint via ChartReady handling; plot will be repopulated via recalc
-                if hasattr(self, "_widget") and self._widget is not None:
-                    self._widget.update()  # type: ignore[attr-defined]
+        except Exception:
+            pass
+        # Re-populate live strategy plots AFTER clear (TradingView: keep active indicators alive)
+        # _recalc_active_indicators also runs but order is before this clear, so repopulate here.
+        try:
+            if (
+                hasattr(self, "_widget")
+                and self._widget is not None
+                and hasattr(self, "_plot_overlay")
+                and self._plot_overlay is not None
+            ):
+                try:
+                    active_names = list(self._widget.visibility_panel.indicators)  # type: ignore[attr-defined]
+                except Exception:
+                    active_names = []
+                for ind_name in active_names:
+                    try:
+                        self._run_strategy_plots(ind_name, event.model.bars)
+                    except Exception:
+                        continue
+                if active_names:
+                    with contextlib.suppress(Exception):
+                        self._widget.update()  # type: ignore[attr-defined]
         except Exception:
             pass
         self._system_health.set_engine_state("Chart Engine", "Active")
@@ -1487,8 +1528,25 @@ class Bootstrap:
             performance_panel.set_result(first)
             trade_overlay.set_result(first)
             # chart plots — generic, no OBR-specific
+            # Avoid stale overwrite: if backtest symbol/timeframe mismatches current chart,
+            # skip plot overlay (live plots via _run_strategy_plots/_on_chart_ready_lab are correct)
             try:
                 if hasattr(self, "_plot_overlay") and self._plot_overlay is not None:
+                    # gate on current chart model to prevent stale backtest (e.g., quick TF switch)
+                    try:
+                        cur = getattr(self, "_widget", None)
+                        cur_model = getattr(cur, "_model", None) if cur is not None else None
+                        if cur_model is not None and (
+                            getattr(first.config, "symbol", None)
+                            != getattr(cur_model, "symbol", None)
+                            or getattr(first.config, "timeframe", None)
+                            != getattr(cur_model, "timeframe", None)
+                        ):
+                            raise ValueError("stale backtest")
+                    except ValueError:
+                        raise
+                    except Exception:
+                        pass
                     cs = getattr(first, "chart_series", ())
                     self._plot_overlay.set_from_chart_series(cs)  # type: ignore[attr-defined]
             except Exception:
@@ -1564,7 +1622,7 @@ class Bootstrap:
                                     if source
                                     else ""
                                 )
-                                ir_version = 1
+                                ir_version = 1  # noqa: F841
                                 version_id = "v0"
                         # Build snapshot — exact version reference preserved forever (Python-native)
                         snap = create_snapshot(
@@ -1664,7 +1722,7 @@ class Bootstrap:
                             if hasattr(self, "_lab_workspace") and self._lab_workspace is not None:
                                 # Store last execution for replay button
                                 self._last_execution_id = snap.execution_id  # type: ignore[attr-defined]
-                                self._last_execution_ir = ir  # type: ignore[attr-defined]
+                                self._last_execution_ir = None  # type: ignore[attr-defined]  # noqa: F821
                         except Exception:
                             pass
                     except Exception as e:  # noqa: BLE001
@@ -1684,6 +1742,65 @@ class Bootstrap:
             pass
         event_log.add_entry("ERROR", f"Backtest failed: {event.reason}")
         system_health.set_engine_state("Backtest Engine", "Idle")
+
+    def _run_strategy_plots(self, strategy_name: str, bars: tuple) -> None:
+        """Compile the strategy and run it on the given bars to populate plot series
+        on the chart overlay. This is called when an indicator is added or when
+        chart data changes (symbol/timeframe), ensuring live plots are always fresh."""
+        from logging import getLogger
+
+        _log = getLogger(__name__)
+        _log.info("_run_strategy_plots: %s (%d bars)", strategy_name, len(bars))
+        try:
+            from backtest.models.result import ChartSeries
+            from strategy.language import compile_strategy
+            from strategy.language.storage import load_strategy_record
+            from strategy.models.parameters import StrategyParameters
+            from strategy.runtime import StrategyRuntime
+
+            rec = load_strategy_record(strategy_name, r"D:\VAYREN_STRATEGIES")
+            if rec is None:
+                _log.warning("_run_strategy_plots: no record for %s", strategy_name)
+                return
+            compiled = compile_strategy(rec.code)
+            logic = compiled.create_logic(StrategyParameters(compiled.param_defaults))
+            logic._owner_id = strategy_name
+
+            runtime = StrategyRuntime(logic, StrategyParameters(compiled.param_defaults))
+            runtime.run(bars)
+
+            raw = logic.get_chart_series_with_owner()
+            _log.info(
+                "_run_strategy_plots: %s -> %d series, raw keys: %s",
+                strategy_name,
+                len(raw),
+                list(raw.keys())[:4],
+            )
+            if not raw:
+                return
+
+            chart_series_list = []
+            for (owner, title), vals in raw.items():
+                pts = tuple((int(k), float(v)) for k, v in sorted(vals.items()) if v is not None)
+                if not pts:
+                    continue
+                chart_series_list.append(
+                    ChartSeries(
+                        title=title,
+                        values=pts,
+                        style="line",
+                        extend="session",
+                        strategy=str(owner),
+                    )
+                )
+
+            if chart_series_list and hasattr(self, "_plot_overlay") and self._plot_overlay:
+                self._plot_overlay.add_from_chart_series(tuple(chart_series_list))
+                _log.info(
+                    "_run_strategy_plots: added %d chart series to overlay", len(chart_series_list)
+                )
+        except Exception:
+            _log.exception("_run_strategy_plots(%s) failed", strategy_name)
 
     def _on_lab_reset(
         self, performance_panel: Any, trade_overlay: Any, event_log: Any, widget: Any

@@ -8,6 +8,8 @@ Pure painting: no state, no calculation.
 
 from __future__ import annotations
 
+from typing import Any
+
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QPen
 
@@ -55,13 +57,17 @@ class PlotOverlay:
         self._is_visible = is_visible  # callable(owner_or_title) -> bool
 
     def set_series(
-        self, series: dict[tuple[str, str], dict[int, float]], meta: dict[tuple[str, str], dict[str, str]] | None = None
+        self,
+        series: dict[tuple[str, str], dict[int, float]],
+        meta: dict[tuple[str, str], dict[str, str]] | None = None,
     ) -> None:
         """Replace all series. `series` is (owner_id, title) -> {bar_index: value}."""
         self._series = {k: dict(v) for k, v in series.items()}
         self._meta = {k: dict(v) for k, v in (meta or {}).items()}
 
-    def set_series_legacy(self, series: dict[str, dict[int, float]], meta: dict[str, dict[str, str]] | None = None) -> None:
+    def set_series_legacy(
+        self, series: dict[str, dict[int, float]], meta: dict[str, dict[str, str]] | None = None
+    ) -> None:
         """Legacy title-only for tests."""
         # map title -> (title, title) owner==title
         conv = {(k, k): dict(v) for k, v in series.items()}
@@ -69,7 +75,7 @@ class PlotOverlay:
         self.set_series(conv, conv_meta)
 
     def set_visibility_checker(self, checker: Any) -> None:
-        """Set callable(title)->bool for per-series visibility (e.g., widget.is_indicator_visible)."""
+        """Set callable for per-series visibility."""
         self._is_visible = checker
 
     def set_from_chart_series(self, chart_series: tuple) -> None:
@@ -89,7 +95,9 @@ class PlotOverlay:
                             continue
                     elif isinstance(item, dict):
                         try:
-                            mp[int(item.get("bar_index", item.get("index", 0)))] = float(item.get("value", 0))
+                            mp[int(item.get("bar_index", item.get("index", 0)))] = float(
+                                item.get("value", 0)
+                            )
                         except Exception:
                             continue
                 strat = str(getattr(cs, "strategy", "")).strip() or title
@@ -185,10 +193,66 @@ class PlotOverlay:
             pen.setCapStyle(Qt.PenCapStyle.RoundCap)
             pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
             painter.setPen(pen)
-            # Collect points in visible range, break on gaps
-            # need to handle session gaps: only connect consecutive bar_indices where both have values and are consecutive
-            # For OBR, values exist for each bar in session after ref, so consecutive
-            # For gap (e.g., bar 14 -> 17 missing 15,16), break
+            # Generic extend handling: sparse level series (e.g., OBR REF HIGH/LOW)
+            # have extend="session" and large gaps (~13 for 30m). They must be
+            # drawn as horizontal rays from each plotted index to just before the
+            # next plotted index (or to end of data), not as isolated dots.
+            # Dense series (gap 1) remain connected diagonally.
+            meta = self._meta.get(key, {}) if isinstance(self._meta.get(key, {}), dict) else {}
+            extend = str(meta.get("extend", "none")).lower() if isinstance(meta, dict) else "none"
+            sorted_all = sorted(series.items())
+            # Heuristic: sparse if average gap > 2 and extend requests session/right
+            is_extended = False
+            if extend in ("session", "right", "extend", "horizontal"):
+                if len(sorted_all) >= 2:
+                    gaps = [
+                        sorted_all[i + 1][0] - sorted_all[i][0] for i in range(len(sorted_all) - 1)
+                    ]
+                    avg_gap = sum(gaps) / len(gaps) if gaps else 1
+                    if avg_gap > 2:
+                        is_extended = True
+                elif len(sorted_all) == 1:
+                    # single point with extend -> treat as ray
+                    is_extended = True
+            if is_extended:
+                # Build horizontal segments: each plotted value extends to next_idx-1
+                segments: list[list[tuple[float, float]]] = []
+                total_bars = len(viewport.bars)
+                for i, (bar_idx, price) in enumerate(sorted_all):
+                    next_idx = sorted_all[i + 1][0] if i + 1 < len(sorted_all) else total_bars
+                    seg_start = bar_idx
+                    seg_end = next_idx - 1
+                    # clip to visible window
+                    if seg_end < first or seg_start >= last:
+                        continue
+                    seg_start = max(seg_start, first)
+                    seg_end = min(seg_end, last - 1)
+                    if seg_start > seg_end:
+                        continue
+                    # price outside viewport still draw (clipped) — keep y
+                    y = _price_y(price, low, high, rect)
+                    # if segment length 0 (single bar), draw as dot/small line for visibility
+                    if seg_start == seg_end:
+                        x = _bar_x(seg_start, first, last, rect)
+                        # draw 1-bar wide horizontal tick
+                        x2 = (
+                            _bar_x(seg_start + 1, first, last, rect)
+                            if seg_start + 1 < last
+                            else x + 4
+                        )
+                        # if only single bar visible, draw short line
+                        if abs(x2 - x) < 1:
+                            painter.drawEllipse(QRectF(x - 1.5, y - 1.5, 3, 3))
+                        else:
+                            painter.drawLine(int(x), int(y), int(x2), int(y))
+                    else:
+                        x1 = _bar_x(seg_start, first, last, rect)
+                        x2 = _bar_x(seg_end, first, last, rect)
+                        # draw horizontal line across segment
+                        # use full width from center of first to center of last
+                        painter.drawLine(int(x1), int(y), int(x2), int(y))
+                continue
+            # Fallback: original gap-breaking connected logic for dense series
             sorted_items = sorted((k, v) for k, v in series.items() if k in visible)
             if not sorted_items:
                 continue

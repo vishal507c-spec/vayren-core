@@ -60,6 +60,7 @@ class CandleChartWidget(QWidget):
     """
 
     session_changed = Signal()
+    indicator_added = Signal(str)
 
     MIN_VISIBLE_BARS = 10
     ZOOM_STEP = 1.25
@@ -207,6 +208,7 @@ class CandleChartWidget(QWidget):
         self._grid_cache = None
         self._grid_key = None
         self.update()
+        self.indicator_added.emit(key)
         with contextlib.suppress(Exception):
             self.session_changed.emit()
 
@@ -312,7 +314,7 @@ class CandleChartWidget(QWidget):
                 if hasattr(ov, "remove_owner"):
                     with contextlib.suppress(Exception):
                         ov.remove_owner(key)  # type: ignore[attr-defined]
-            if hasattr(self, "_plot_overlay") and getattr(self, "_plot_overlay") is not None:
+            if hasattr(self, "_plot_overlay") and self._plot_overlay is not None:
                 with contextlib.suppress(Exception):
                     self._plot_overlay.remove_owner(key)  # type: ignore[attr-defined]
         except Exception:
