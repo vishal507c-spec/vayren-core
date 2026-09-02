@@ -1983,9 +1983,6 @@ class StrategyLabWorkspace(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
         outer.addWidget(self._build_topbar())
-        self._mode_selector = _ViewModeSelector(self)
-        self._mode_selector.mode_changed.connect(self.set_view_mode)
-        outer.addWidget(self._mode_selector)
         self._root = QSplitter(Qt.Orientation.Vertical, self)
         self._root.setStyleSheet(t.SPLITTER_QSS)
         self._root.setHandleWidth(1)
@@ -1996,6 +1993,11 @@ class StrategyLabWorkspace(QWidget):
         self._main.setChildrenCollapsible(False)
         self.left_nav = StrategyLibraryPanel(self)
         self.center_detail = EditorPane(self)
+        # Prominent BUY/SELL/COMPARE selector — inside BACKTEST workspace, directly below CODE|PARAMETERS|BACKTEST
+        self._mode_selector = _ViewModeSelector(self.center_detail)
+        self._mode_selector.mode_changed.connect(self.set_view_mode)
+        # EditorPane layout: header(0), tab_bar(1), _stack(2), _status_msg(3) → insert selector at 2
+        self.center_detail.layout().insertWidget(2, self._mode_selector)
         self.center_detail.save_requested.connect(self.save_requested_relay)
         self.center_detail.compile_requested.connect(self.compile_requested_relay)
         self.center_detail.tab_changed.connect(self._crumb_name.setText)
