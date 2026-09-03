@@ -155,6 +155,10 @@ class Bootstrap:
         event_log = EventLogPanel()
         system_health = SystemHealthPanel(data_dir=data_dir)
 
+        from app.ui.trade_context_panel import TradeContextPanel
+
+        trade_context_panel = TradeContextPanel()
+
         window = ChartWindow(
             widget,
             watchlist,
@@ -168,6 +172,7 @@ class Bootstrap:
             lab_workspace=lab_workspace,
             event_log=event_log,
             system_health=system_health,
+            trade_context=trade_context_panel,
         )
         lifecycle = AppLifecycle(self._bus)
 
@@ -263,6 +268,13 @@ class Bootstrap:
         data_engine.set_reporter(data_worker)
         data_window.set_credentials_manager(data_credentials)
 
+        # ── Trade → Chart instant context (§1-34) ───────────────
+        from app.services.trade_chart_controller import TradeChartController
+
+        trade_chart_controller = TradeChartController(
+            self._bus, widget, window, repository, trade_overlay, trade_context_panel, lab_workspace
+        )
+
         # dynamic attrs for validation bookkeeping
         self._last_train_result: object | None = None
         self._last_test_cfg: object | None = None
@@ -282,6 +294,8 @@ class Bootstrap:
         self._system_health = system_health
         self._nav_bar = nav_bar
         self._widget = widget
+        self._trade_context_panel = trade_context_panel
+        self._trade_chart_controller = trade_chart_controller
 
         self._register_services(
             repository,
@@ -432,6 +446,11 @@ class Bootstrap:
         self._services.register("market_status_panel", market_status)
         self._services.register("event_log_panel", event_log)
         self._services.register("system_health_panel", system_health)
+        # trade-context services (Strategy Lab → Chart)
+        if hasattr(self, "_trade_context_panel"):
+            self._services.register("trade_context_panel", self._trade_context_panel)  # type: ignore[attr-defined]
+        if hasattr(self, "_trade_chart_controller"):
+            self._services.register("trade_chart_controller", self._trade_chart_controller)  # type: ignore[attr-defined]
 
     def _wire_events(
         self,
@@ -474,6 +493,14 @@ class Bootstrap:
         # ── TradingView: keep active indicators alive across symbol/timeframe, recalculate ──
         def _recalc_active_indicators(event: ChartReady) -> None:  # type: ignore[no-untyped-def]
             try:
+                # Do not trigger automatic recalc while a trade context is active
+                # (would overwrite Strategy Lab trades and clear chart context)
+                try:
+                    tcc = getattr(self, "_trade_chart_controller", None)
+                    if tcc is not None and getattr(tcc, "_selected_index", None) is not None:
+                        return
+                except Exception:
+                    pass
                 # only recalc if there are active indicators (panel has rows)
                 active = []
                 try:
@@ -583,6 +610,13 @@ class Bootstrap:
             window,
             widget,
         )
+        # ── trade-chart controller bind LAST so its ChartReady runs after window clears stale overlay  # noqa: E501
+        try:
+            ctrl = getattr(self, "_trade_chart_controller", None)
+            if ctrl is not None and hasattr(ctrl, "bind"):
+                ctrl.bind()  # type: ignore[attr-defined]
+        except Exception:
+            pass
         app = QApplication.instance()
         if isinstance(app, QApplication):
             app.aboutToQuit.connect(data_worker.shutdown)
@@ -907,12 +941,97 @@ class Bootstrap:
 
             lab_workspace.run_backtest.connect(_on_workspace_run)
 
-            # trade focus → highlight + chart focus
-            def _on_trade_focus(idx: int) -> None:
-                trade_overlay.set_highlight(idx)
-                # try to focus chart on trade bar
+            # ── instant trade → chart (spec §5) ─────────────────
+            # Bridge lab trade clicks → chart controller; chart reuse, cached, race-safe.
+            # Keep legacy highlight for backward compat but primary path is controller.
+            controller = getattr(self, "_trade_chart_controller", None)
+            trade_panel = getattr(self, "_trade_context_panel", None)
+
+            def _on_trade_focus_new(idx: int) -> None:
+                # Update blotter selection state (professional subtle highlight)
+                # Try to keep compare blotter in sync as well
                 try:
-                    # find trade from last result
+                    if hasattr(lab_workspace, "journal") and hasattr(
+                        lab_workspace.journal, "set_selected_index"
+                    ):
+                        lab_workspace.journal.set_selected_index(idx)  # type: ignore[attr-defined]
+                    # also sync compare blotter if visible
+                    with contextlib.suppress(Exception):
+                        cmp_b = getattr(lab_workspace, "_compare_view", None)
+                        if cmp_b is not None:
+                            cmp_blotter = getattr(cmp_b, "_trade_blotter", None)
+                            if cmp_blotter is not None and hasattr(
+                                cmp_blotter, "set_selected_index"
+                            ):
+                                cmp_blotter.set_selected_index(idx)  # type: ignore[attr-defined]
+                except Exception:
+                    pass
+                if controller is not None:
+                    try:
+                        # Resolve actual TradeRecord from visible blotter to handle filtered views
+                        # (BUY/SELL filtered indices differ from controller's full list).
+                        actual_trade = None
+                        # Try journal first
+                        with contextlib.suppress(Exception):
+                            # Determine which blotter is currently visible/has the trade
+                            candidates: list[Any] = []
+                            _journal = getattr(lab_workspace, "journal", None)
+                            _j_trades = getattr(_journal, "_trades", None)
+                            if _j_trades and 0 <= idx < len(_j_trades):
+                                candidates.append(_j_trades[idx])
+                            # Compare blotter (holds combined trades in COMPARE)
+                            _cmp_b = getattr(lab_workspace, "_compare_view", None)
+                            _cmp_blotter = (
+                                getattr(_cmp_b, "_trade_blotter", None)
+                                if _cmp_b is not None
+                                else None
+                            )
+                            _c_trades = getattr(_cmp_blotter, "_trades", None)
+                            if _c_trades and 0 <= idx < len(_c_trades):
+                                candidates.append(_c_trades[idx])
+                            # Prefer trade that matches current view mode
+                            if candidates:
+                                # Filtered trade; map to full via entry_time
+                                filtered = candidates[0]
+                                # Try to find in controller's full list
+                                found = None
+                                for t in getattr(controller, "_current_trades", ()):
+                                    if getattr(t, "entry_time", None) == getattr(
+                                        filtered, "entry_time", None
+                                    ) and getattr(t, "symbol", None) == getattr(
+                                        filtered, "symbol", None
+                                    ):
+                                        found = t
+                                        break
+                                actual_trade = found if found is not None else filtered
+                            else:
+                                actual_trade = None
+                        if actual_trade is not None and hasattr(
+                            controller, "select_trade_by_record"
+                        ):
+                            ok = controller.select_trade_by_record(actual_trade)  # type: ignore[attr-defined]
+                            if ok:
+                                with contextlib.suppress(Exception):
+                                    window.show_market()
+                                    widget.update()
+                                return
+                        # Fallback to index-based (full list)
+                        ok = controller.select_trade(idx)
+                        if ok:
+                            # bring chart into view instantly (persistent workspace)
+                            with contextlib.suppress(Exception):
+                                # slight delay ensures ChartReady/UI ready; instant for cached
+                                window.show_market()
+                                widget.update()
+                        else:
+                            trade_overlay.set_highlight(idx)
+                            widget.update()
+                        return
+                    except Exception:
+                        pass
+                # fallback legacy
+                trade_overlay.set_highlight(idx)
+                try:
                     last = getattr(self, "_last_train_result", None)
                     if last is not None and hasattr(last, "trades") and 0 <= idx < len(last.trades):
                         _ = last.trades[idx].entry_index
@@ -920,8 +1039,138 @@ class Bootstrap:
                 except Exception:
                     pass
 
-            lab_workspace.trade_focus.connect(_on_trade_focus)
-            lab_workspace.journal.trade_clicked.connect(_on_trade_focus)
+            # wire single-click handler — avoid double emission (journal forwards to trade_focus)
+            lab_workspace.trade_focus.connect(_on_trade_focus_new)
+            # also handle performance panel trade selection
+            with contextlib.suppress(Exception):
+                performance_panel.trade_selected.connect(_on_trade_focus_new)  # type: ignore[attr-defined]
+            # COMPARE mode has its own blotter not forwarded to trade_focus
+            with contextlib.suppress(Exception):
+                # compare trade blotter (visible in COMPARE)
+                cmp_blotter = getattr(lab_workspace, "_compare_view", None)
+                if cmp_blotter is not None:
+                    cmp_blotter = getattr(cmp_blotter, "_trade_blotter", None)
+                    if cmp_blotter is not None and hasattr(cmp_blotter, "trade_clicked"):
+                        cmp_blotter.trade_clicked.connect(_on_trade_focus_new)  # type: ignore[attr-defined]
+            # Also handle direct journal clicks that bypass trade_focus (defensive)
+            # journal already forwards to trade_focus, but keep as fallback if forwarding disabled
+            with contextlib.suppress(Exception):
+                # Only connect if not already double (check receivers)
+                # Use trade_focus as primary; journal direct is redundant
+                pass
+
+            # TradeContextPanel: prev/next + open in market (§29, §17)
+            if trade_panel is not None and controller is not None:
+                try:
+                    trade_panel.prev_trade.connect(lambda: controller.select_prev())  # type: ignore[attr-defined]
+                    trade_panel.next_trade.connect(lambda: controller.select_next())  # type: ignore[attr-defined]
+                    trade_panel.open_in_market.connect(lambda: controller.open_in_market())  # type: ignore[attr-defined]
+
+                    # keep blotter selection in sync when navigating from chart panel
+                    # Map full index back to filtered view's row for correct highlight
+                    def _sync_blotter_next() -> None:
+                        with contextlib.suppress(Exception):
+                            cur = getattr(controller, "_selected_index", None)
+                            if cur is None:
+                                return
+                            # Find full trade
+                            full_trades = getattr(controller, "_current_trades", ())
+                            if not full_trades or cur < 0 or cur >= len(full_trades):
+                                return
+                            full_trade = full_trades[cur]
+                            # Map to visible blotter's filtered index
+                            # Try journal
+                            try:
+                                journal = getattr(lab_workspace, "journal", None)
+                                if journal is not None and getattr(journal, "_trades", None):
+                                    for fi, ft in enumerate(journal._trades):  # type: ignore[attr-defined]
+                                        if getattr(ft, "entry_time", None) == getattr(
+                                            full_trade, "entry_time", None
+                                        ) and getattr(ft, "symbol", None) == getattr(
+                                            full_trade, "symbol", None
+                                        ):
+                                            journal.set_selected_index(fi)  # type: ignore[attr-defined]
+                                            break
+                            except Exception:
+                                pass
+                            # Also sync compare blotter if visible
+                            try:
+                                cmp_b = getattr(lab_workspace, "_compare_view", None)
+                                if cmp_b is not None:
+                                    cmp_blotter = getattr(cmp_b, "_trade_blotter", None)
+                                    if cmp_blotter is not None and getattr(
+                                        cmp_blotter, "_trades", None
+                                    ):
+                                        for fi, ft in enumerate(cmp_blotter._trades):  # type: ignore[attr-defined]
+                                            if getattr(ft, "entry_time", None) == getattr(
+                                                full_trade, "entry_time", None
+                                            ):
+                                                cmp_blotter.set_selected_index(fi)  # type: ignore[attr-defined]
+                                                break
+                            except Exception:
+                                pass
+
+                    trade_panel.prev_trade.connect(_sync_blotter_next)  # type: ignore[attr-defined]
+                    trade_panel.next_trade.connect(_sync_blotter_next)  # type: ignore[attr-defined]
+                except Exception:
+                    pass
+
+            # Keyboard global for chart context: ←/→ navigates trades when focused (§28)
+            # Installed on window so it works whether market or lab is active
+            try:
+                from PySide6.QtCore import Qt as _Qt
+                from PySide6.QtGui import QAction as _QAct
+                from PySide6.QtGui import QKeySequence as _QKS  # noqa: N814
+
+                def _chart_prev_trade() -> None:
+                    if (
+                        controller is not None
+                        and getattr(controller, "_selected_index", None) is not None
+                    ):
+                        controller.select_prev()
+
+                def _chart_next_trade() -> None:
+                    if (
+                        controller is not None
+                        and getattr(controller, "_selected_index", None) is not None
+                    ):
+                        controller.select_next()
+
+                # Use Shortcut context WidgetWithChildrenShortcut on window for previous/next
+                prev_action = _QAct(window)
+                prev_action.setShortcut(_QKS(_Qt.Key.Key_Left))
+                prev_action.setShortcutContext(_Qt.ShortcutContext.WidgetWithChildrenShortcut)
+                prev_action.triggered.connect(_chart_prev_trade)  # type: ignore[arg-type]
+                window.addAction(prev_action)
+
+                next_action = _QAct(window)
+                next_action.setShortcut(_QKS(_Qt.Key.Key_Right))
+                next_action.setShortcutContext(_Qt.ShortcutContext.WidgetWithChildrenShortcut)
+                next_action.triggered.connect(_chart_next_trade)  # type: ignore[arg-type]
+                window.addAction(next_action)
+
+                esc_action = _QAct(window)
+                esc_action.setShortcut(_QKS(_Qt.Key.Key_Escape))
+                esc_action.setShortcutContext(_Qt.ShortcutContext.WidgetWithChildrenShortcut)
+
+                def _on_esc() -> None:
+                    with contextlib.suppress(Exception):
+                        if trade_panel is not None and trade_panel.isVisible():
+                            # clear focused trade overlay, keep chart
+                            if hasattr(controller, "clear"):
+                                controller.clear()  # type: ignore[attr-defined]
+                            trade_panel.clear()  # type: ignore[attr-defined]
+                            widget.update()
+                            # return focus to lab blotter
+                            with contextlib.suppress(Exception):
+                                window.show_lab()
+                                if hasattr(lab_workspace, "journal"):
+                                    lab_workspace.journal.setFocus()  # type: ignore[attr-defined]
+
+                esc_action.triggered.connect(_on_esc)  # type: ignore[arg-type]
+                window.addAction(esc_action)
+            except Exception:
+                pass
 
             # ── code editor SAVE / COMPILE ──
             # Canonical per product requirement: UI ↔ D:\VAYREN_STRATEGIES
@@ -1234,7 +1483,7 @@ class Bootstrap:
                     param_count = len(unique_keys) if unique_keys else len(compiled.param_defaults)
                     try:
                         warmup = compiled.create_logic(
-                            StrategyParameters(compiled.param_defaults)
+                            StrategyParameters(compiled.param_defaults)  # type: ignore[reportPossiblyUnboundVariable]
                         ).warmup()
                     except Exception:
                         warmup = None
@@ -1527,6 +1776,22 @@ class Bootstrap:
             first = result.results[0]
             performance_panel.set_result(first)
             trade_overlay.set_result(first)
+            # notify trade→chart controller (instant context, caching, race-safe)
+            # Controller's set_result preserves the selected trade if it still exists
+            # in the new result (e.g., automatic recalc after ChartReady), otherwise clears.
+            try:
+                ctrl = getattr(self, "_trade_chart_controller", None)
+                if ctrl is not None and hasattr(ctrl, "set_result"):
+                    ctrl.set_result(first, getattr(first, "config", None))  # type: ignore[attr-defined]
+                else:
+                    # No controller — clear stale context
+                    if hasattr(trade_overlay, "clear_focused"):
+                        trade_overlay.clear_focused()  # type: ignore[attr-defined]
+                    panel = getattr(self, "_trade_context_panel", None)
+                    if panel is not None and hasattr(panel, "clear"):
+                        panel.clear()  # type: ignore[attr-defined]
+            except Exception:
+                pass
             # chart plots — generic, no OBR-specific
             # Avoid stale overwrite: if backtest symbol/timeframe mismatches current chart,
             # skip plot overlay (live plots via _run_strategy_plots/_on_chart_ready_lab are correct)
@@ -1585,7 +1850,7 @@ class Bootstrap:
                         version = None
                         # Try to map definition.name -> library UUID
                         try:
-                            rec = load_strategy_record(definition.name, data_dir)
+                            rec = load_strategy_record(definition.name, data_dir)  # type: ignore[attr-defined]
                             if rec is not None:
                                 canonical_id = rec.id
                                 source = rec.code
@@ -1764,12 +2029,12 @@ class Bootstrap:
                 return
             compiled = compile_strategy(rec.code)
             logic = compiled.create_logic(StrategyParameters(compiled.param_defaults))
-            logic._owner_id = strategy_name
+            logic._owner_id = strategy_name  # type: ignore[attr-defined]
 
             runtime = StrategyRuntime(logic, StrategyParameters(compiled.param_defaults))
             runtime.run(bars)
 
-            raw = logic.get_chart_series_with_owner()
+            raw = logic.get_chart_series_with_owner()  # type: ignore[attr-defined]
             _log.info(
                 "_run_strategy_plots: %s -> %d series, raw keys: %s",
                 strategy_name,
@@ -1810,6 +2075,18 @@ class Bootstrap:
         try:
             if hasattr(self, "_plot_overlay") and self._plot_overlay is not None:
                 self._plot_overlay.clear()  # type: ignore[attr-defined]
+        except Exception:
+            pass
+        try:
+            ctrl = getattr(self, "_trade_chart_controller", None)
+            if ctrl is not None and hasattr(ctrl, "clear"):
+                ctrl.clear()  # type: ignore[attr-defined]
+            panel = getattr(self, "_trade_context_panel", None)
+            if panel is not None and hasattr(panel, "clear"):
+                panel.clear()  # type: ignore[attr-defined]
+            # also clear focused overlay if any
+            if hasattr(trade_overlay, "clear_focused"):
+                trade_overlay.clear_focused()  # type: ignore[attr-defined]
         except Exception:
             pass
         widget.update()

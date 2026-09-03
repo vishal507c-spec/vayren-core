@@ -72,6 +72,7 @@ class ChartWindow(QMainWindow):
         lab_workspace: QWidget | None = None,
         event_log: QWidget | None = None,
         system_health: QWidget | None = None,
+        trade_context: QWidget | None = None,
     ) -> None:
         super().__init__()
         self._widget = widget
@@ -92,6 +93,7 @@ class ChartWindow(QMainWindow):
         self._lab_active = False
         self._bottom_visible = False
 
+        self._trade_context = trade_context
         # ── Chart top bar: ONE horizontal line (TradingView-style) ──
         # 15m 30m 45m 1h 2h 4h ▾ INDICATORS
         self._indicators = IndicatorsToolbar(self)
@@ -116,8 +118,12 @@ class ChartWindow(QMainWindow):
         top_lay.addWidget(self._indicators, 0)
         top_lay.addStretch(1)
         layout.addWidget(top_row)
+        if trade_context is not None:
+            layout.addWidget(trade_context)
         layout.addWidget(widget)
         layout.setStretchFactor(top_row, 0)
+        if trade_context is not None:
+            layout.setStretchFactor(trade_context, 0)  # type: ignore[arg-type]
         layout.setStretchFactor(widget, 1)
         splitter.addWidget(container)
         splitter.setStretchFactor(0, 0)

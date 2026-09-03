@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from datetime import datetime
 from enum import StrEnum
 
@@ -1121,9 +1122,17 @@ class _DualEquityView(QWidget):
 
 
 class TradeBlotter(QWidget):
-    """Dense trade table with filter and CSV export. Supports directional filtering."""
+    """Dense trade table with filter and CSV export. Supports directional filtering.
+
+    Enhancements for instant trade→chart (spec §5, §28, §29):
+    - Single-click row → trade_clicked (no confirmation)
+    - Keyboard: ↑/↓ to step, Enter to re-focus, Esc to clear filter focus
+    - Hover tooltip preview (tiny trade summary, no chart init)
+    - Professional selected-row highlight (thin accent, not heavy fill)
+    """
 
     trade_clicked = Signal(int)
+    trade_hovered = Signal(int)  # optional preview hook
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -1178,13 +1187,27 @@ class TradeBlotter(QWidget):
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._table.setAlternatingRowColors(True)
         self._table.setSortingEnabled(False)
-        self._table.setStyleSheet(t.TABLE_QSS)
+        self._table.setStyleSheet(
+            t.TABLE_QSS
+            + f" QTableWidget::item:selected {{ background: {t.PANEL2}; border-left: 2px solid {t.ACCENT}; }}"
+        )
         self._table.cellClicked.connect(self._on_cell)
+        self._table.cellEntered.connect(self._on_hover)
+        self._table.setMouseTracking(True)
         self._table.setVisible(False)
+        # keyboard navigation is context-aware (§28) — only active when blotter has focus or when chart panel not interfering
+        self._table.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         lay.addWidget(self._table, 1)
         self._trades: list = []
         self._side_mode: str = "ALL"  # ALL / LONG / SHORT
         self._needle: str = ""
+        self._selected_index: int | None = None
+        # enable Arrow/Page navigation handling (table + viewport both route keys here)
+        self._table.installEventFilter(self)
+        try:
+            self._table.viewport().installEventFilter(self)
+        except Exception:
+            pass
 
     def set_side_filter_visible(self, visible: bool) -> None:
         self._side_filter.setVisible(visible)
@@ -1226,6 +1249,8 @@ class TradeBlotter(QWidget):
         self._table.setVisible(has)
         self._table.setRowCount(0)
         self._trades = list(result.trades) if result else []
+        self._selected_index = None
+        self._table.clearSelection()
         if not has:
             return
         assert result is not None
@@ -1262,10 +1287,120 @@ class TradeBlotter(QWidget):
                 self._table.setItem(i, col, item)
         self._apply_filter(self._needle)
 
+    # ── instant trade selection helpers ───────────────────────
+
+    @property
+    def selected_index(self) -> int | None:
+        return self._selected_index
+
+    def set_selected_index(self, index: int | None) -> None:
+        """Highlight the given trade row (0-based) with subtle selected state."""
+        self._selected_index = index
+        if index is None:
+            self._table.clearSelection()
+            return
+        # find row that holds that UserRole index (table may be filtered)
+        for row in range(self._table.rowCount()):
+            item = self._table.item(row, 0)
+            if item is not None and int(item.data(Qt.ItemDataRole.UserRole)) == index:
+                self._table.selectRow(row)
+                self._table.scrollToItem(item)
+                # tooltip style selected remains via QSS accent border
+                return
+
     def _on_cell(self, row: int, _col: int) -> None:
         item = self._table.item(row, 0)
         if item is not None:
-            self.trade_clicked.emit(int(item.data(Qt.ItemDataRole.UserRole)))
+            idx = int(item.data(Qt.ItemDataRole.UserRole))
+            self._selected_index = idx
+            # subtle professional selected state via selectRow
+            self._table.selectRow(row)
+            self.trade_clicked.emit(idx)
+
+    def _on_hover(self, row: int, _col: int) -> None:
+        """Hover preview (§30): tiny tooltip with trade summary, no chart init."""
+        try:
+            item = self._table.item(row, 0)
+            if item is None:
+                return
+            idx = int(item.data(Qt.ItemDataRole.UserRole))
+            if 0 <= idx < len(self._trades):
+                tr = self._trades[idx]
+                tip = (
+                    f"TRADE #{idx + 1}  {tr.symbol} · {tr.side}\n"
+                    f"{tr.entry_time[:16]} → {tr.exit_time[:16]}\n"
+                    f"₹{tr.entry_price:.2f} → ₹{tr.exit_price:.2f}  P&L ₹{tr.pnl:+,.2f}"
+                )
+                self._table.setToolTip(tip)
+                # do not emit hover as chart overlay; panel preview optional cheap
+                # we still emit trade_hovered for future extensions but not used for chart
+                with contextlib.suppress(Exception):
+                    self.trade_hovered.emit(idx)
+        except Exception:
+            pass
+
+    def _step_selection(self, step: int) -> bool:
+        """Move selection by `step` rows (skipping hidden), emit trade_clicked."""
+        if self._selected_index is None:
+            if not self._trades:
+                return False
+            self.set_selected_index(0)
+            self.trade_clicked.emit(0)
+            return True
+        nxt = self._next_visible(self._selected_index + step, step)
+        if nxt is None:
+            return False
+        self._selected_index = nxt
+        self.set_selected_index(nxt)
+        self.trade_clicked.emit(nxt)
+        return True
+
+    def eventFilter(self, obj, event) -> bool:  # type: ignore[no-untyped-def]  # noqa: N802
+        import contextlib
+
+        is_table = obj is self._table or obj is self._table.viewport()
+        if is_table and event.type() == event.Type.KeyPress:
+            key = event.key()
+            # Arrow navigation — rapid trade switching (§23, §28)
+            if key == 16777235:  # Qt.Key_Up
+                return self._step_selection(-1)
+            if key == 16777237:  # Qt.Key_Down
+                return self._step_selection(1)
+            if key == 16777220:  # Enter
+                if self._selected_index is not None:
+                    self.trade_clicked.emit(self._selected_index)
+                    return True
+            elif key == 16777216:  # Escape
+                # return focus to list filter / clear
+                with contextlib.suppress(Exception):
+                    self._filter.clearFocus()
+                    self._table.clearFocus()
+                    self._table.clearSelection()
+                return False
+        return super().eventFilter(obj, event)
+
+    def _next_visible(self, start: int, step: int) -> int | None:
+        """Walk in direction step until a non-hidden row is found."""
+        idx = start
+        while 0 <= idx < len(self._trades):
+            # find table row for this trade index
+            for row in range(self._table.rowCount()):
+                it = self._table.item(row, 0)
+                if it is not None and int(it.data(Qt.ItemDataRole.UserRole)) == idx:
+                    if not self._table.isRowHidden(row):
+                        return idx
+                    break
+            idx += step
+        return None
+
+    def keyPressEvent(self, event) -> None:  # type: ignore[no-untyped-def]  # noqa: N802
+        # container-level arrows when focus is on blotter itself
+        if event.key() in (16777235, 16777237, 16777220, 16777216) and self.eventFilter(
+            self._table, event
+        ):
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def _apply_filter(self, text: str) -> None:
         # track needle
@@ -1997,7 +2132,7 @@ class StrategyLabWorkspace(QWidget):
         self._mode_selector = _ViewModeSelector(self.center_detail)
         self._mode_selector.mode_changed.connect(self.set_view_mode)
         # EditorPane layout: header(0), tab_bar(1), _stack(2), _status_msg(3) → insert selector at 2
-        self.center_detail.layout().insertWidget(2, self._mode_selector)
+        self.center_detail.layout().insertWidget(2, self._mode_selector)  # type: ignore[attr-defined]
         self.center_detail.save_requested.connect(self.save_requested_relay)
         self.center_detail.compile_requested.connect(self.compile_requested_relay)
         self.center_detail.tab_changed.connect(self._crumb_name.setText)

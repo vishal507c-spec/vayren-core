@@ -73,6 +73,11 @@ class CandleChartWidget(QWidget):
     PRICE_ZOOM_STEP = 1.25
     PRICE_EDGE_MARGIN = 0.05
 
+    # Trade-context intelligent viewport tuning (70-85% context, 15-30% trade)
+    TRADE_VIEWPORT_MIN = 60
+    TRADE_VIEWPORT_MAX = 400
+    TRADE_FOCUS_FRACTION = 0.28  # entry sits ~28% from left edge
+
     _STRIP_BRUSH = QBrush(OverlayRenderer.STRIP_BG)
     _STRIP_BORDER_PEN = QPen(OverlayRenderer.STRIP_BORDER, 1)
 
@@ -300,9 +305,9 @@ class CandleChartWidget(QWidget):
         # Don't pop the overlay itself — keep it for other owners
         if key in self._overlays:
             ov = self._overlays.get(key)
-            if ov is not None and hasattr(ov, "remove_owner"):
+            if ov is not None and hasattr(ov, "remove_owner"):  # type: ignore[attr-defined]
                 with contextlib.suppress(Exception):
-                    ov.remove_owner(key)
+                    ov.remove_owner(key)  # type: ignore[attr-defined]
                 # keep PlotOverlay in dict — don't pop, it may hold other owners' series
                 # only pop if it's not a PlotOverlay (i.e., TradeOverlay)
                 pass
@@ -313,8 +318,8 @@ class CandleChartWidget(QWidget):
             for ov in list(self._overlays.values()):
                 if hasattr(ov, "remove_owner"):
                     with contextlib.suppress(Exception):
-                        ov.remove_owner(key)  # type: ignore[attr-defined]
-            if hasattr(self, "_plot_overlay") and self._plot_overlay is not None:
+                        ov.remove_owner(key)  # type: ignore[attr-defined]  # type: ignore[attr-defined]
+            if hasattr(self, "_plot_overlay") and self._plot_overlay is not None:  # type: ignore[attr-defined]
                 with contextlib.suppress(Exception):
                     self._plot_overlay.remove_owner(key)  # type: ignore[attr-defined]
         except Exception:
@@ -476,6 +481,132 @@ class CandleChartWidget(QWidget):
         if total <= 0:
             return self.INITIAL_BARS
         return max(self.MIN_VISIBLE_BARS, min(self.INITIAL_BARS, total))
+
+    # ── trade-context viewport ────────────────────────────────────
+
+    def find_bar_index(self, timestamp: str) -> int | None:
+        """Return index of the bar whose timestamp matches ``timestamp`` exactly.
+
+        Uses binary search on the sorted bar timestamps. Returns None when the
+        model is not loaded or the timestamp is not present.
+        """
+        if self._model is None or not self._model.bars:
+            return None
+        bars = self._model.bars
+        lo, hi = 0, len(bars) - 1
+        # Fast path: exact string compare uses lexical order = chronological for ISO8601
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            mid_ts = bars[mid].timestamp
+            if mid_ts == timestamp:
+                return mid
+            if mid_ts < timestamp:
+                lo = mid + 1
+            else:
+                hi = mid - 1
+        # Also try prefix match (TradeRecord may store full ISO, bar stores same)
+        # Fall back to linear scan nearby? For now exact only.
+        # Try matching by prefix (first 16 chars: YYYY-MM-DD HH:MM) tolerance
+        target_prefix = timestamp[:16]
+        for idx, bar in enumerate(bars):
+            if bar.timestamp[:16] == target_prefix:
+                return idx
+        return None
+
+    def _trade_viewport(self, entry_idx: int, exit_idx: int, total: int) -> tuple[int, int]:
+        """Intelligent viewport around a trade (spec §9).
+
+        Trade occupies ~15-30% of the visible window, remainder is surrounding
+        market context. Very short trades get expanded context; very long trades
+        get proportionally larger windows. The entry sits near ``TRADE_FOCUS_FRACTION``
+        from the left edge so both entry and exit remain visible with useful context
+        before entry and after exit.
+        """
+        if total <= 0:
+            return 0, self.INITIAL_BARS
+        trade_span = max(1, exit_idx - entry_idx)
+        if trade_span <= 5:
+            count = 80
+        elif trade_span <= 15:
+            count = 100
+        elif trade_span <= 30:
+            count = trade_span * 3 + 30
+        elif trade_span <= 80:
+            count = trade_span * 2 + 50
+        else:
+            count = trade_span * 3 // 2 + 60
+        count = max(self.TRADE_VIEWPORT_MIN, min(count, self.TRADE_VIEWPORT_MAX, total))
+        # entry at ~28% from left
+        first = entry_idx - int(count * self.TRADE_FOCUS_FRACTION)
+        # ensure exit fits with right margin
+        if exit_idx >= first + count:
+            first = exit_idx - count + int(count * 0.15) + 1
+        # clamp to valid range
+        first = max(0, min(first, total - count))
+        return first, count
+
+    def focus_on_trade(
+        self,
+        entry_index: int,
+        exit_index: int,
+        entry_price: float | None = None,  # noqa: ARG002 — reserved for future price-range fitting
+        exit_price: float | None = None,  # noqa: ARG002
+    ) -> bool:
+        """Position the viewport so the trade from ``entry_index`` to ``exit_index`` is visible.
+
+        Computes an intelligent surrounding context, updates ``_first/_last``, clears
+        price manual scale, invalidates caches and repaints. Returns True when the
+        viewport changed. No-ops when no model is loaded or indices are out of range.
+        Chart is reused — no model reload, no destruction.
+        """
+        if self._model is None or not self._model.bars:
+            return False
+        total = len(self._model.bars)
+        if entry_index < 0 or exit_index < 0 or entry_index >= total or exit_index >= total:
+            return False
+        if exit_index < entry_index:
+            entry_index, exit_index = exit_index, entry_index
+        first, count = self._trade_viewport(entry_index, exit_index, total)
+        new_last = first + count
+        if first == self._first and new_last == self._last:
+            # still ensure follow_latest off and price fit
+            self._follow_latest = False
+            return False
+        self._first = first
+        self._last = new_last
+        self._follow_latest = False
+        # auto-fit price so entry/exit prices are inside viewport
+        self._price_manual = None
+        self._clear_crosshair()
+        self._grid_cache = None
+        self._grid_key = None
+        self._static_cache = None
+        self._static_key = None
+        self._stats_cache = None
+        self._stats_key = None
+        logger.info(
+            "Trade viewport: entry %d exit %d span %d -> first %d count %d",
+            entry_index,
+            exit_index,
+            exit_index - entry_index,
+            first,
+            count,
+        )
+        self.update()
+        return True
+
+    def focus_on_timestamps(self, entry_time: str, exit_time: str) -> bool:
+        """Locate bars by timestamp and focus viewport on that trade.
+
+        Returns False when either timestamp cannot be resolved.
+        Timezone handling is exact string match per the project's ISO8601 convention.
+        """
+        e_idx = self.find_bar_index(entry_time)
+        x_idx = self.find_bar_index(exit_time)
+        if e_idx is None or x_idx is None:
+            logger.warning("Trade timestamps not found in bars: %r .. %r", entry_time, exit_time)
+            return False
+        return self.focus_on_trade(e_idx, x_idx)
 
     def _log_data_range(self, model: ChartModel) -> None:
         first, last = self._visible_range()
