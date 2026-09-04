@@ -46,9 +46,12 @@ def test_right_panel_open_by_default(workspace: StrategyLabWorkspace) -> None:
     assert workspace.center_detail._stack.count() == 3
 
 
-def test_results_start_collapsed(workspace: StrategyLabWorkspace) -> None:
+def test_results_visible_with_ready_state(workspace: StrategyLabWorkspace) -> None:
+    # Redesign: results stay visible with a compact ready state — no blank dock.
     workspace.show()
-    assert not workspace.results_open()
+    assert workspace.results_open()
+    assert "READY" in workspace.metrics._status.text()
+    assert workspace.metrics._vals["NET PROFIT"].text() == "--"
 
 
 def test_results_tabs_are_four(workspace: StrategyLabWorkspace) -> None:
@@ -160,7 +163,7 @@ def test_run_panel_blocks_inverted_dates(qt_app: QApplication) -> None:
     assert qt_app is not None
     panel = BacktestRunPanel()
     panel.set_symbols(("X",))
-    panel._symbol_combo.setCurrentText("X")
+    panel.set_selected_symbols(("X",))
     panel._from.setDate(QDate(2026, 1, 1))
     panel._to.setDate(QDate(2025, 1, 1))
     emitted: list[object] = []
@@ -242,6 +245,160 @@ def test_workspace_public_surface(workspace: StrategyLabWorkspace) -> None:
         "select_next_after_delete",
     ):
         assert hasattr(workspace, name)
+
+
+def test_backtest_config_is_compact_grid(workspace: StrategyLabWorkspace) -> None:
+    # Config lives in one dense card: symbols + timeframe/date/capital side by side.
+    panel = workspace.right_settings
+    host = panel._symbols.parentWidget()
+    assert host is not None
+    grid = host.layout()
+    assert grid is not None
+    assert panel._tf_combo.isVisibleTo(panel)
+    assert panel._from.isVisibleTo(panel) and panel._to.isVisibleTo(panel)
+    assert panel._capital.isVisibleTo(panel)
+    # Advanced settings start disclosed-collapsed (progressive disclosure).
+    assert not panel._advanced_host.isVisibleTo(panel)
+    panel._advanced_toggle.click()
+    assert panel._advanced_host.isVisibleTo(panel)
+    assert "slippage" in panel._advanced_host.text().lower()
+
+
+def test_single_dominant_run_action(workspace: StrategyLabWorkspace) -> None:
+    # ONE primary RUN in the BACKTEST panel, directly after configuration.
+    from PySide6.QtWidgets import QPushButton
+
+    primaries = [
+        b
+        for b in workspace.right_settings.findChildren(QPushButton)
+        if b.styleSheet() == workspace.right_settings._run.styleSheet()
+        and b.isVisibleTo(workspace.right_settings)
+    ]
+    assert len(primaries) == 1
+    assert "RUN" in workspace.right_settings._run.text()
+    assert workspace.right_settings._run.minimumHeight() >= 32
+
+
+def test_mode_selector_only_on_backtest_tab(workspace: StrategyLabWorkspace) -> None:
+    workspace.show()
+    workspace.open_strategy("OBR Sell", 'strategy("OBR Sell")\n')
+    workspace.center_detail._switch(0)
+    assert not workspace._mode_selector.isVisibleTo(workspace)
+    workspace.center_detail.show_backtest()
+    assert workspace._mode_selector.isVisibleTo(workspace)
+
+
+def test_result_header_states(workspace: StrategyLabWorkspace) -> None:
+    workspace.show()
+    assert "READY" in workspace.metrics._status.text()
+    workspace._set_run_busy(True)
+    assert "RUNNING" in workspace.metrics._status.text()
+    workspace._set_run_busy(False)
+    assert "READY" in workspace.metrics._status.text()
+    workspace.set_run_state("failed")
+    assert "FAILED" in workspace.metrics._status.text()
+    workspace.clear()
+    assert "READY" in workspace.metrics._status.text()
+
+
+def test_results_above_fold_at_workstation_size(workspace: StrategyLabWorkspace) -> None:
+    workspace.resize(1600, 900)
+    workspace.show()
+    workspace.right_settings.set_symbols(("AAA", "BBB", "CCC"))
+    workspace.right_settings.set_selected_symbols(("AAA", "BBB", "CCC"))
+    QApplication.processEvents()
+    assert workspace.metrics.isVisibleTo(workspace)
+    ranking_table = workspace.right_settings.ranking._table
+    assert ranking_table.isVisibleTo(workspace)
+    # Result header + ranking are visible without scrolling (above the fold).
+    height = workspace.height()
+    top = workspace.metrics.mapTo(workspace, workspace.metrics.rect().topLeft()).y()
+    assert 0 <= top < height
+    rank_top = ranking_table.mapTo(workspace, ranking_table.rect().topLeft()).y()
+    assert 0 <= rank_top < height
+    rank_bottom = ranking_table.mapTo(workspace, ranking_table.rect().bottomLeft()).y()
+    assert rank_bottom <= height
+
+
+def test_compare_ranking_first_class(workspace: StrategyLabWorkspace) -> None:
+    workspace.show()
+    workspace.set_view_mode("COMPARE")
+    QApplication.processEvents()
+    compare = workspace._compare_view
+    assert compare._ranking.isVisibleTo(compare)
+    assert "COMPARE" in compare._compare_header.text()
+    # One dominant RUN ALL; per-side runs stay as quiet secondaries.
+    assert "RUN ALL" in compare._run_all.text()
+    assert compare._run_all.minimumHeight() >= 32
+    assert not hasattr(compare, "_risk_grid")
+
+
+def test_compare_ranking_syncs_universe_and_results(workspace: StrategyLabWorkspace) -> None:
+    from backtest.engine.metrics import compute_equity_curve, compute_metrics
+    from backtest.models.config import BacktestConfig
+    from backtest.models.result import StrategyResult
+    from backtest.models.trade import TradeRecord
+
+    def trade(symbol: str, day: int, pnl: float) -> TradeRecord:
+        return TradeRecord(
+            symbol=symbol,
+            side="LONG",
+            entry_index=day,
+            exit_index=day + 1,
+            entry_time=f"2026-01-{day:02d} 09:15:00",
+            exit_time=f"2026-01-{day:02d} 15:15:00",
+            entry_price=100.0,
+            exit_price=100.0 + pnl,
+            quantity=10.0,
+            pnl=pnl,
+            pnl_pct=pnl,
+            commission=1.0,
+            bars_held=1,
+            exit_reason="SIGNAL",
+        )
+
+    workspace.show()
+    workspace.right_settings.set_symbols(("AAA", "BBB"))
+    workspace.right_settings.set_selected_symbols(("AAA", "BBB"))
+    trades = (trade("AAA", 2, 60.0), trade("BBB", 3, 10.0))
+    config = BacktestConfig(
+        symbol="MULTI",
+        timeframe="15m",
+        start_date="2026-01-01",
+        end_date="2026-01-10",
+        initial_capital=100000.0,
+    )
+    curve = compute_equity_curve(trades, 100000.0, "2026-01-01 09:15:00")
+    base = StrategyResult(
+        strategy_id="s",
+        name="S",
+        config=config,
+        trades=trades,
+        equity_curve=curve,
+        metrics=compute_metrics(trades, curve, 100000.0),
+        bars_used=100,
+        period_start="2026-01-01",
+        period_end="2026-01-10",
+    )
+    workspace.set_last_run_symbols(("AAA", "BBB"))
+    workspace.set_ranking_errors({})
+    workspace.set_result(base)
+    workspace.set_view_mode("COMPARE")
+    QApplication.processEvents()
+    compare_ranking = workspace._compare_view._ranking
+    assert compare_ranking.universe == ("AAA", "BBB")
+    assert compare_ranking.ordered_symbols()[0] == "AAA"
+    assert compare_ranking._table.isVisibleTo(workspace._compare_view)
+
+
+def test_compare_stock_count_flows_to_header(workspace: StrategyLabWorkspace) -> None:
+    workspace.show()
+    workspace.right_settings.set_symbols(("AAA", "BBB", "CCC"))
+    workspace.right_settings.set_selected_symbols(("AAA", "BBB", "CCC"))
+    workspace.set_view_mode("COMPARE")
+    QApplication.processEvents()
+    assert "3" in workspace._compare_view._compare_header.text()
+    assert "3" in workspace._compare_view._run_all.text()
 
 
 def test_storage_file_ops(tmp_path: Path) -> None:

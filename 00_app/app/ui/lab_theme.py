@@ -113,6 +113,17 @@ SCROLLBAR_QSS = (  # noqa: UP031
     "QScrollBar:add-page:horizontal, QScrollBar:sub-page:horizontal { background: transparent; }"
 ) % {"border": BORDER, "muted": MUTED}
 
+CARD_QSS = (  # noqa: UP031
+    "background: %(panel)s; border: 1px solid %(border)s; border-radius: 4px;"
+) % {"panel": PANEL, "border": BORDER}
+
+QUIET_BUTTON_QSS = (  # noqa: UP031
+    "QPushButton { background: transparent; border: 1px solid %(border)s; border-radius: 3px;"
+    " padding: 3px 10px; color: %(text2)s; font-size: 10px; font-weight: 600;}"
+    "QPushButton:hover { background: %(panel2)s; color: %(text)s; border-color: %(muted)s;}"
+    "QPushButton:disabled { color: %(muted)s; border-color: %(border)s; }"
+) % {"border": BORDER, "text2": TEXT2, "text": TEXT, "panel2": PANEL2, "muted": MUTED}
+
 MENU_QSS = (  # noqa: UP031
     "QMenu { background: %(panel)s; border: 1px solid %(border)s; padding: 4px; }"
     "QMenu::item { padding: 5px 18px 5px 12px; color: %(text2)s; font-size: 11px; border-radius: 2px; }"  # noqa: E501

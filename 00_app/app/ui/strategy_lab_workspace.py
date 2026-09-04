@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
 from strategy.ui.code_editor import CodeEditor
 
 from app.ui import lab_theme as t
+from app.ui.watchlist_multiselect import WatchlistMultiSelect
 
 _DEFAULT_SLIPPAGE_PCT = 0.02
 _DEFAULT_COMMISSION_PCT = 0.03
@@ -176,12 +177,12 @@ class StrategyLibraryPanel(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setMinimumWidth(220)
-        self.setMaximumWidth(420)
+        self.setMinimumWidth(200)
+        self.setMaximumWidth(320)
         self.setStyleSheet(f"background: {t.BG0}; border-right: 1px solid {t.BORDER};")
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(12, 12, 12, 12)
-        lay.setSpacing(10)
+        lay.setContentsMargins(10, 10, 10, 10)
+        lay.setSpacing(8)
         head = QLabel("STRATEGIES", self)
         head.setStyleSheet(t.label(t.TEXT2, 10, 700, 0.8))
         lay.addWidget(head)
@@ -463,34 +464,49 @@ class BacktestRunPanel(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setStyleSheet(f"background: {t.BG1};")
+        # Ranking table is owned here (single instance, single state) but lives
+        # in the results area — the workspace reparents it after construction.
+        from app.ui.stock_ranking import StockRankingWidget
+
+        self._ranking = StockRankingWidget(self)
+        self._ranking.setVisible(False)
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(24, 20, 24, 20)
-        lay.setSpacing(12)
-        lay.addWidget(self._lab("SYMBOL"))
-        self._symbol_combo = QComboBox(self)
-        self._symbol_combo.setEditable(True)
-        self._symbol_combo.setStyleSheet(t.INPUT_QSS)
-        lay.addWidget(self._symbol_combo)
-        lay.addWidget(self._lab("TIMEFRAME"))
-        self._tf_combo = QComboBox(self)
+        lay.setContentsMargins(16, 12, 16, 12)
+        lay.setSpacing(8)
+        # ── configuration card: dense grid, one glance ──
+        card = QWidget(self)
+        card.setStyleSheet(t.CARD_QSS)
+        grid = QGridLayout(card)
+        grid.setContentsMargins(12, 10, 12, 10)
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(6)
+        grid.addWidget(self._lab("BACKTEST CONFIGURATION"), 0, 0, 1, 3)
+        grid.addWidget(self._lab("SYMBOLS"), 1, 0, 1, 3)
+        self._symbols = WatchlistMultiSelect(card)
+        grid.addWidget(self._symbols, 2, 0, 1, 3)
+        grid.addWidget(self._lab("TIMEFRAME"), 3, 0)
+        grid.addWidget(self._lab("DATE RANGE"), 3, 1)
+        grid.addWidget(self._lab("INITIAL CAPITAL"), 3, 2)
+        self._tf_combo = QComboBox(card)
         self._tf_combo.setStyleSheet(t.INPUT_QSS)
         self._tf_combo.currentTextChanged.connect(
             lambda tf: self.timeframe_changed.emit(tf) if tf else None
         )
-        lay.addWidget(self._tf_combo)
-        lay.addWidget(self._lab("DATE RANGE"))
+        grid.addWidget(self._tf_combo, 4, 0)
         range_row = QHBoxLayout()
-        range_row.setSpacing(6)
+        range_row.setSpacing(4)
+        range_row.setContentsMargins(0, 0, 0, 0)
         self._from = self._date_edit(QDate(2023, 1, 1))
         self._to = self._date_edit(QDate.currentDate())
-        arrow = QLabel("→", self)
+        arrow = QLabel("→", card)
         arrow.setStyleSheet(f"color: {t.MUTED};")
         range_row.addWidget(self._from, 1)
         range_row.addWidget(arrow)
         range_row.addWidget(self._to, 1)
-        lay.addLayout(range_row)
-        lay.addWidget(self._lab("INITIAL CAPITAL"))
-        self._capital = QDoubleSpinBox(self)
+        range_host = QWidget(card)
+        range_host.setLayout(range_row)
+        grid.addWidget(range_host, 4, 1)
+        self._capital = QDoubleSpinBox(card)
         self._capital.setRange(10000, 1e9)
         self._capital.setDecimals(0)
         self._capital.setValue(1000000)
@@ -498,18 +514,46 @@ class BacktestRunPanel(QWidget):
         self._capital.setPrefix("₹ ")
         self._capital.setLocale(QLocale(QLocale.Language.English, QLocale.Country.India))
         self._capital.setStyleSheet(t.INPUT_QSS)
-        lay.addWidget(self._capital)
-        lay.addStretch(1)
+        grid.addWidget(self._capital, 4, 2)
+        grid.setColumnStretch(0, 0)
+        grid.setColumnStretch(1, 1)
+        grid.setColumnStretch(2, 1)
+        # Advanced (progressive disclosure): fixed cost readout, no extra controls.
+        self._advanced_toggle = QPushButton("Advanced configuration ▾", card)
+        self._advanced_toggle.setStyleSheet(t.QUIET_BUTTON_QSS)
+        self._advanced_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._advanced_toggle.clicked.connect(self._toggle_advanced)
+        grid.addWidget(self._advanced_toggle, 5, 0, 1, 3, Qt.AlignmentFlag.AlignLeft)
+        self._advanced_host = QLabel(
+            f"Costs — slippage {_DEFAULT_SLIPPAGE_PCT}% · "
+            f"commission {_DEFAULT_COMMISSION_PCT}% (fixed)",
+            card,
+        )
+        self._advanced_host.setStyleSheet(f"color: {t.MUTED}; font-size: 10px;")
+        self._advanced_host.setVisible(False)
+        grid.addWidget(self._advanced_host, 6, 0, 1, 3)
+        lay.addWidget(card)
+        self._symbols.selection_changed.connect(self._on_selection_for_ranking)
+        # ── ONE dominant action, directly after configuration ──
         self._error = QLabel("", self)
         self._error.setStyleSheet(f"color: {t.NEG}; font-size: 10px;")
         self._error.setWordWrap(True)
         self._error.setVisible(False)
         lay.addWidget(self._error)
         self._run = QPushButton("▶  RUN BACKTEST", self)
+        self._run.setMinimumHeight(34)
         self._run.setStyleSheet(t.PRIMARY_QSS)
         self._run.clicked.connect(self._emit)
         lay.addWidget(self._run)
+        lay.addStretch(1)
         self._mode: StrategyViewMode = StrategyViewMode.BUY
+
+    def _toggle_advanced(self) -> None:
+        show = not self._advanced_host.isVisible()
+        self._advanced_host.setVisible(show)
+        self._advanced_toggle.setText(
+            "Advanced configuration ▴" if show else "Advanced configuration ▾"
+        )
 
     @staticmethod
     def _date_edit(date: QDate) -> QDateEdit:
@@ -526,14 +570,48 @@ class BacktestRunPanel(QWidget):
         return label
 
     def set_symbols(self, symbols: tuple[str, ...]) -> None:
-        current = self._symbol_combo.currentText()
-        self._symbol_combo.clear()
-        for symbol in symbols:
-            self._symbol_combo.addItem(symbol)
-        if current:
-            idx = self._symbol_combo.findText(current)
-            if idx >= 0:
-                self._symbol_combo.setCurrentIndex(idx)
+        """Replace the available universe (Market Watchlist feed).
+
+        Selection always survives; symbols missing from the new universe
+        stay selected but render as stale chips until removed.
+        """
+        self._symbols.set_symbols(symbols)
+
+    def selected_symbols(self) -> tuple[str, ...]:
+        """The selected symbols in selection order."""
+        return self._symbols.selected_symbols()
+
+    def set_selected_symbols(self, symbols: tuple[str, ...] | list[str]) -> None:
+        """Replace the selection (used by tests and bulk actions)."""
+        self._symbols.set_selected_symbols(symbols)
+
+    @property
+    def ranking(self):  # type: ignore[no-untyped-def]
+        """The embedded stock-ranking table (selection-only universe)."""
+        return self._ranking
+
+    def _on_selection_for_ranking(self, selected: object) -> None:
+        try:
+            symbols = tuple(selected) if selected is not None else ()  # type: ignore[arg-type]
+        except Exception:
+            symbols = self._symbols.selected_symbols()
+        try:
+            self._ranking.set_universe(symbols)
+        except Exception:
+            pass
+
+    def set_ranking_results(
+        self,
+        base: object | None,
+        errors: dict[str, str] | None = None,
+        last_run: tuple[str, ...] | list[str] | None = None,
+        mode_label: str = "",
+    ) -> None:
+        """Push a mode-consistent result into the ranking table."""
+        try:
+            self._ranking.set_results(base, errors, last_run, mode_label)
+        except Exception:
+            pass
 
     def set_timeframes(self, timeframes: tuple[str, ...]) -> None:
         current = self._tf_combo.currentText()
@@ -553,8 +631,10 @@ class BacktestRunPanel(QWidget):
             self._tf_combo.setCurrentIndex(idx)
 
     def current_config(self) -> dict[str, object]:
+        selected = self._symbols.selected_symbols()
         return {
-            "symbol": self._symbol_combo.currentText().strip(),
+            "symbol": selected[0] if selected else "",
+            "symbols": selected,
             "timeframe": self._tf_combo.currentText().strip(),
             "start_date": self._from.date().toString("yyyy-MM-dd"),
             "end_date": self._to.date().toString("yyyy-MM-dd"),
@@ -574,9 +654,8 @@ class BacktestRunPanel(QWidget):
             self._run.setText("▶  RUN ALL")
 
     def _emit(self) -> None:
-        symbol = self._symbol_combo.currentText().strip()
-        if not symbol:
-            self._show_error("Select a symbol before running the backtest.")
+        if not self._symbols.has_selection():
+            self._show_error("Select at least one symbol before running the backtest.")
             return
         if self._from.date() >= self._to.date():
             self._show_error("End date must be after start date.")
@@ -623,7 +702,7 @@ class EditorPane(QWidget):
         header.setStyleSheet(
             f"QWidget#EditorHeader {{ background: {t.BG0}; border-bottom: 1px solid {t.BORDER}; }}"
         )
-        header.setFixedHeight(34)
+        header.setFixedHeight(32)
         h_lay = QHBoxLayout(header)
         h_lay.setContentsMargins(14, 4, 14, 4)
         h_lay.setSpacing(10)
@@ -653,7 +732,7 @@ class EditorPane(QWidget):
         tab_bar.setStyleSheet(
             f"QWidget#CenterTabs {{ background: {t.BG0}; border-bottom: 1px solid {t.BORDER}; }}"
         )
-        tab_bar.setFixedHeight(30)
+        tab_bar.setFixedHeight(28)
         tb_lay = QHBoxLayout(tab_bar)
         tb_lay.setContentsMargins(14, 0, 14, 0)
         tb_lay.setSpacing(2)
@@ -792,10 +871,10 @@ class _ViewModeSelector(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("ViewModeSelector")
-        self.setFixedHeight(44)
+        self.setFixedHeight(36)
         self.setStyleSheet(f"background: {t.BG1}; border-bottom: 1px solid {t.BORDER};")
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(14, 6, 14, 6)
+        lay.setContentsMargins(12, 4, 12, 4)
         lay.setSpacing(0)
         # breadcrumb hint
         hint = QLabel("VIEW", self)
@@ -926,22 +1005,31 @@ class _ViewModeSelector(QWidget):
 
 
 class MetricsTiles(QWidget):
-    """Compact metric tiles + secondary statistics strip."""
+    """Result header — run status + key metrics, immediately below the run area."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setStyleSheet(f"background: {t.BG1}; border-bottom: 1px solid {t.BORDER};")
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(14, 10, 14, 8)
-        lay.setSpacing(4)
+        lay.setContentsMargins(12, 8, 12, 6)
+        lay.setSpacing(3)
+        # status row: run state pill left, directional context right
+        status_row = QHBoxLayout()
+        status_row.setContentsMargins(0, 0, 0, 0)
+        status_row.setSpacing(8)
+        self._status = QLabel("● READY", self)
+        self._status.setStyleSheet(f"color: {t.MUTED}; font-size: 10px; font-weight: 700;")
+        status_row.addWidget(self._status)
+        status_row.addStretch(1)
         # directional header — impossible to misunderstand
         self._dir_label = QLabel("BUY PERFORMANCE", self)
         self._dir_label.setStyleSheet(t.label(t.MUTED, 9, 700, 0.7))
-        lay.addWidget(self._dir_label)
+        status_row.addWidget(self._dir_label)
+        lay.addLayout(status_row)
         grid = QGridLayout()
         grid.setContentsMargins(0, 0, 0, 0)
-        grid.setHorizontalSpacing(28)
-        grid.setVerticalSpacing(2)
+        grid.setHorizontalSpacing(18)
+        grid.setVerticalSpacing(1)
         self._vals: dict[str, QLabel] = {}
         keys = (
             "NET PROFIT",
@@ -970,7 +1058,19 @@ class MetricsTiles(QWidget):
 
     @staticmethod
     def _value_style(color: str) -> str:
-        return f"color: {color}; font-size: 15px; font-weight: 700;"
+        return f"color: {color}; font-size: 14px; font-weight: 700;"
+
+    def set_status(self, state: str) -> None:
+        """Update the run-state pill: ready | running | complete | failed."""
+        mapping = {
+            "ready": ("● READY", t.MUTED),
+            "running": ("● RUNNING BACKTEST…", t.ACCENT),
+            "complete": ("✓ BACKTEST COMPLETE", t.POS),
+            "failed": ("✕ BACKTEST FAILED", t.NEG),
+        }
+        text, color = mapping.get(state, ("● READY", t.MUTED))
+        self._status.setText(text)
+        self._status.setStyleSheet(f"color: {color}; font-size: 10px; font-weight: 700;")
 
     def set_view_mode(self, mode: StrategyViewMode) -> None:
         self._mode = mode
@@ -1133,6 +1233,7 @@ class TradeBlotter(QWidget):
 
     trade_clicked = Signal(int)
     trade_hovered = Signal(int)  # optional preview hook
+    symbol_filter_changed = Signal(str)  # "ALL" or a symbol
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -1156,6 +1257,15 @@ class TradeBlotter(QWidget):
         self._side_filter.setVisible(False)
         self._side_filter.currentTextChanged.connect(lambda _: self._apply_filter(""))
         bar.addWidget(self._side_filter)
+        # Symbol filter: ALL + one entry per traded symbol — visible on multi-symbol results
+        self._symbol_filter = QComboBox(self)
+        self._symbol_filter.addItem("ALL")
+        self._symbol_filter.setStyleSheet(t.INPUT_QSS)
+        self._symbol_filter.setFixedWidth(110)
+        self._symbol_filter.setVisible(False)
+        self._symbol_filter.setToolTip("Filter trades by symbol")
+        self._symbol_filter.currentTextChanged.connect(self._on_symbol_filter_changed)
+        bar.addWidget(self._symbol_filter)
         export_btn = QPushButton("EXPORT CSV", self)
         export_btn.setStyleSheet(t.BUTTON_QSS)
         export_btn.clicked.connect(self._export_csv)
@@ -1254,6 +1364,7 @@ class TradeBlotter(QWidget):
         if not has:
             return
         assert result is not None
+        self._refresh_symbol_items([t.symbol for t in result.trades])
         self._table.setRowCount(len(result.trades))
         for i, trade in enumerate(result.trades):
             values = [
@@ -1307,6 +1418,44 @@ class TradeBlotter(QWidget):
                 self._table.scrollToItem(item)
                 # tooltip style selected remains via QSS accent border
                 return
+
+    @property
+    def symbol_filter(self) -> str:
+        """Active symbol filter: "ALL" or a symbol."""
+        return self._symbol_filter.currentText()
+
+    def set_symbol_filter(self, symbol: str) -> None:
+        """Set the symbol filter programmatically (no signal emission)."""
+        combo = self._symbol_filter
+        idx = combo.findText(symbol)
+        if idx < 0:
+            idx = 0
+        combo.blockSignals(True)
+        try:
+            combo.setCurrentIndex(idx)
+        finally:
+            combo.blockSignals(False)
+        self._apply_filter(self._needle)
+
+    def _refresh_symbol_items(self, symbols: list[str]) -> None:
+        """Rebuild symbol choices; keep the filter only if still available."""
+        combo = self._symbol_filter
+        current = combo.currentText()
+        unique = sorted(set(symbols))
+        combo.blockSignals(True)
+        try:
+            combo.clear()
+            combo.addItem("ALL")
+            for symbol in unique:
+                combo.addItem(symbol)
+            combo.setCurrentIndex(combo.findText(current) if current in unique else 0)
+        finally:
+            combo.blockSignals(False)
+        combo.setVisible(len(unique) > 1)
+
+    def _on_symbol_filter_changed(self, text: str) -> None:
+        self._apply_filter(self._needle)
+        self.symbol_filter_changed.emit(text or "ALL")
 
     def _on_cell(self, row: int, _col: int) -> None:
         item = self._table.item(row, 0)
@@ -1412,7 +1561,7 @@ class TradeBlotter(QWidget):
             if sender is self._filter or text != "":
                 self._needle = text.strip().lower() if isinstance(text, str) else ""
             # for combo change we pass "" but should retain needle
-            if sender is self._side_filter:
+            if sender is self._side_filter or sender is self._symbol_filter:
                 # keep existing needle
                 pass
             elif isinstance(text, str) and text != "" or sender is self._filter:
@@ -1427,7 +1576,16 @@ class TradeBlotter(QWidget):
                 self._side_mode = "SHORT"
             else:
                 self._side_mode = "ALL"
+        only_symbol = self._symbol_filter.currentText()
+        if not self._symbol_filter.isVisible():
+            only_symbol = "ALL"
         for row in range(self._table.rowCount()):
+            # symbol filter first (multi-symbol research)
+            if only_symbol != "ALL":
+                sym_item = self._table.item(row, 1)
+                if sym_item is None or sym_item.text() != only_symbol:
+                    self._table.setRowHidden(row, True)
+                    continue
             # side filter first
             if self._side_mode != "ALL":
                 side_item = self._table.item(row, 2)
@@ -1839,32 +1997,22 @@ class _CompareView(QWidget):
         content = QWidget(scroll)
         content.setStyleSheet(f"background: {t.BG0};")
         lay = QVBoxLayout(content)
-        lay.setContentsMargins(16, 14, 16, 14)
-        lay.setSpacing(14)
-        # Header
-        hdr = QLabel("STRATEGY COMPARISON", content)
-        hdr.setStyleSheet(t.label(t.TEXT, 11, 800, 0.8))
-        hdr.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lay.addWidget(hdr)
-        vs_row = QHBoxLayout()
-        vs_row.setSpacing(12)
-        self._buy_hdr = QLabel("BUY (LONG)", content)
-        self._buy_hdr.setStyleSheet(f"color: {_BUY_ACCENT}; font-size: 11px; font-weight: 700;")
-        self._buy_hdr.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        vs = QLabel("VS", content)
-        vs.setStyleSheet(t.label(t.MUTED, 10, 700, 0.6))
-        vs.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._sell_hdr = QLabel("SELL (SHORT)", content)
-        self._sell_hdr.setStyleSheet(f"color: {_SELL_ACCENT}; font-size: 11px; font-weight: 700;")
-        self._sell_hdr.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        vs_row.addWidget(self._buy_hdr, 1)
-        vs_row.addWidget(vs)
-        vs_row.addWidget(self._sell_hdr, 1)
-        lay.addLayout(vs_row)
+        lay.setContentsMargins(12, 10, 12, 10)
+        lay.setSpacing(10)
+        # Header: combined context + stock count, then verdict, then ranking.
+        self._compare_header = QLabel("COMPARE — COMBINED", content)
+        self._compare_header.setStyleSheet(t.label(t.TEXT, 11, 800, 0.8))
+        self._compare_header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(self._compare_header)
         lay.addWidget(_hline())
         # Stronger side banner
         self._banner = _StrongerBanner(content)
         lay.addWidget(self._banner)
+        # Stock ranking — first-class result section in COMPARE.
+        from app.ui.stock_ranking import StockRankingWidget
+
+        self._ranking = StockRankingWidget(content)
+        lay.addWidget(self._ranking)
         # Performance matrix
         self._matrix = _ComparisonMatrix(content)
         lay.addWidget(self._matrix)
@@ -1875,33 +2023,6 @@ class _CompareView(QWidget):
         self._equity = _DualEquityView(content)
         self._equity.setMinimumHeight(180)
         lay.addWidget(self._equity)
-        # Risk strip (max drawdown already in matrix, add simple risk row)
-        risk_title = QLabel("RISK COMPARISON", content)
-        risk_title.setStyleSheet(t.label(t.TEXT2, 10, 700, 0.8))
-        lay.addWidget(risk_title)
-        self._risk_grid = QWidget(content)
-        self._risk_grid.setStyleSheet(
-            f"background: {t.BG1}; border: 1px solid {t.BORDER}; border-radius: 4px;"
-        )
-        rg_lay = QGridLayout(self._risk_grid)
-        rg_lay.setContentsMargins(10, 8, 10, 8)
-        rg_lay.setHorizontalSpacing(16)
-        rg_lay.setVerticalSpacing(4)
-        self._risk_buy_dd = QLabel("--", self._risk_grid)
-        self._risk_sell_dd = QLabel("--", self._risk_grid)
-        for col, txt in enumerate(("METRIC", "BUY", "SELL")):
-            lbl = QLabel(txt, self._risk_grid)
-            lbl.setStyleSheet(t.label(t.MUTED, 9, 600, 0.6))
-            rg_lay.addWidget(lbl, 0, col)
-        rg_lay.addWidget(QLabel("Max Drawdown", self._risk_grid), 1, 0)
-        rg_lay.addWidget(self._risk_buy_dd, 1, 1)
-        rg_lay.addWidget(self._risk_sell_dd, 1, 2)
-        self._risk_buy_sh = QLabel("--", self._risk_grid)
-        self._risk_sell_sh = QLabel("--", self._risk_grid)
-        rg_lay.addWidget(QLabel("Sharpe", self._risk_grid), 2, 0)
-        rg_lay.addWidget(self._risk_buy_sh, 2, 1)
-        rg_lay.addWidget(self._risk_sell_sh, 2, 2)
-        lay.addWidget(self._risk_grid)
         # Trade comparison strip
         tr_title = QLabel("TRADE COMPARISON", content)
         tr_title.setStyleSheet(t.label(t.TEXT2, 10, 700, 0.8))
@@ -1930,22 +2051,20 @@ class _CompareView(QWidget):
         act_lay = QHBoxLayout(self._actions)
         act_lay.setContentsMargins(0, 0, 0, 0)
         act_lay.setSpacing(8)
-        self._run_buy = QPushButton("RUN BUY BACKTEST", self._actions)
-        self._run_buy.setStyleSheet(
-            f"QPushButton {{ background: {_BUY_ACCENT}; border: none; border-radius: 3px; padding: 6px 14px; color: #04211E; font-size: 10px; font-weight: 700;}} QPushButton:hover {{ background: {t.ACCENT_DIM};}}"
-        )
-        self._run_sell = QPushButton("RUN SELL BACKTEST", self._actions)
-        self._run_sell.setStyleSheet(
-            f"QPushButton {{ background: {_SELL_ACCENT}; border: none; border-radius: 3px; padding: 6px 14px; color: #FFF; font-size: 10px; font-weight: 700;}} QPushButton:hover {{ background: #D64552;}}"
-        )
-        self._run_all = QPushButton("RUN ALL", self._actions)
+        # ONE dominant action; per-side runs stay as quiet secondaries.
+        self._run_all = QPushButton("▶  RUN ALL", self._actions)
+        self._run_all.setMinimumHeight(32)
         self._run_all.setStyleSheet(t.PRIMARY_QSS)
+        self._run_buy = QPushButton("BUY only", self._actions)
+        self._run_buy.setStyleSheet(t.QUIET_BUTTON_QSS)
+        self._run_sell = QPushButton("SELL only", self._actions)
+        self._run_sell.setStyleSheet(t.QUIET_BUTTON_QSS)
         self._run_buy.clicked.connect(self.run_buy_requested.emit)
         self._run_sell.clicked.connect(self.run_sell_requested.emit)
         self._run_all.clicked.connect(self.run_all_requested.emit)
+        act_lay.addWidget(self._run_all)
         act_lay.addWidget(self._run_buy)
         act_lay.addWidget(self._run_sell)
-        act_lay.addWidget(self._run_all)
         act_lay.addStretch(1)
         self._actions.setVisible(False)
         lay.addWidget(self._actions)
@@ -1966,25 +2085,6 @@ class _CompareView(QWidget):
         self._sell = sell
         self._matrix.set_results(buy, sell)
         self._equity.set_results(buy, sell)
-        # risk grid
-        if buy is not None:
-            self._risk_buy_dd.setText(f"-{buy.metrics.max_drawdown_pct:.2f}%")
-            self._risk_buy_sh.setText(
-                f"{buy.metrics.sharpe_ratio:.2f}" if buy.metrics.sharpe_ratio is not None else "--"
-            )
-        else:
-            self._risk_buy_dd.setText("--")
-            self._risk_buy_sh.setText("--")
-        if sell is not None:
-            self._risk_sell_dd.setText(f"-{sell.metrics.max_drawdown_pct:.2f}%")
-            self._risk_sell_sh.setText(
-                f"{sell.metrics.sharpe_ratio:.2f}"
-                if sell.metrics.sharpe_ratio is not None
-                else "--"
-            )
-        else:
-            self._risk_sell_dd.setText("--")
-            self._risk_sell_sh.setText("--")
         # verdict
         verdict, reason = determine_stronger_side(buy, sell)
         # Map INSUFFICIENT to user-friendly
@@ -2092,6 +2192,39 @@ class _CompareView(QWidget):
         except Exception:
             pass
 
+    def set_ranking(
+        self,
+        base: object | None,
+        errors: dict[str, str] | None = None,
+        last_run: tuple[str, ...] | list[str] | None = None,
+    ) -> None:
+        """Push the combined result into the compare ranking table."""
+        try:
+            self._ranking.set_results(base, errors, last_run, "COMPARE — COMBINED")
+        except Exception:
+            pass
+
+    def sync_ranking(
+        self,
+        universe: tuple[str, ...] | list[str],
+        base: object | None,
+        errors: dict[str, str] | None = None,
+        last_run: tuple[str, ...] | list[str] | None = None,
+    ) -> None:
+        """Sync selection universe + combined result (single entry point)."""
+        try:
+            self._ranking.set_universe(universe)
+        except Exception:
+            pass
+        self.set_ranking(base, errors, last_run)
+
+    def set_stock_count(self, count: int) -> None:
+        """Update the compare header and primary action with the selection size."""
+        noun = "STOCK" if count == 1 else "STOCKS"
+        self._compare_header.setText(f"COMPARE — COMBINED · {count} {noun}")
+        symbols = f"{count} symbol" if count == 1 else f"{count} symbols"
+        self._run_all.setText(f"▶  RUN ALL · {symbols}")
+
 
 class StrategyLabWorkspace(QWidget):
     """Two-column lab with BUY / SELL / COMPARE tri-mode results."""
@@ -2114,6 +2247,12 @@ class StrategyLabWorkspace(QWidget):
         self._buy_result: StrategyResult | None = None
         self._sell_result: StrategyResult | None = None
         self._pending_side: StrategyViewMode | None = None
+        # Bars per symbol for multi-symbol aggregates (symbol -> window bars).
+        self._symbol_windows: dict[str, int] = {}
+        # Stock ranking state — selection-only universe, never the full NSE list.
+        self._ranking_errors: dict[str, str] = {}
+        self._last_run_symbols: tuple[str, ...] | None = None
+        self._run_state: str = "ready"
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
@@ -2133,6 +2272,9 @@ class StrategyLabWorkspace(QWidget):
         self._mode_selector.mode_changed.connect(self.set_view_mode)
         # EditorPane layout: header(0), tab_bar(1), _stack(2), _status_msg(3) → insert selector at 2
         self.center_detail.layout().insertWidget(2, self._mode_selector)  # type: ignore[attr-defined]
+        # Mode switch belongs to BACKTEST only — hidden on CODE/PARAMETERS.
+        self._mode_selector.setVisible(False)
+        self.center_detail._stack.currentChanged.connect(self._sync_mode_selector)
         self.center_detail.save_requested.connect(self.save_requested_relay)
         self.center_detail.compile_requested.connect(self.compile_requested_relay)
         self.center_detail.tab_changed.connect(self._crumb_name.setText)
@@ -2143,6 +2285,10 @@ class StrategyLabWorkspace(QWidget):
         self.right_settings = self.center_detail.backtest_panel
         self.right_settings.run_requested.connect(self._on_panel_run)
         self.right_settings.busy_changed.connect(self._set_run_busy)
+        try:
+            self.right_settings.ranking.symbol_focused.connect(self._on_ranking_focus)
+        except Exception:
+            pass
         self._center_empty = self._build_center_empty()
         self._center_stack = QStackedWidget(self)
         self._center_stack.addWidget(self._center_empty)
@@ -2160,13 +2306,22 @@ class StrategyLabWorkspace(QWidget):
         self._results_dock = results_dock  # keep reference for visibility toggling
         self._root.addWidget(self._main)
         self._root.addWidget(results_dock)
+        # Balanced share so the result header sits above the fold.
         self._root.setStretchFactor(0, 1)
-        self._root.setStretchFactor(1, 0)
+        self._root.setStretchFactor(1, 1)
         # Compare view — stacked outside _result_stack so test count==4 preserved
         self._compare_view = _CompareView(self)
         self._compare_view.run_all_requested.connect(self._emit_run_all)
         self._compare_view.run_buy_requested.connect(self._emit_run_buy)
         self._compare_view.run_sell_requested.connect(self._emit_run_sell)
+        self._compare_view._trade_blotter.trade_clicked.connect(self.trade_focus.emit)
+        self._compare_view._trade_blotter.symbol_filter_changed.connect(
+            self._on_compare_symbol_filter
+        )
+        try:
+            self._compare_view._ranking.symbol_focused.connect(self._on_ranking_focus)
+        except Exception:
+            pass
         self._compare_view.setVisible(False)
         # _results_container kept for backward compat (some tests check attribute existence)
         self._results_container = self._compare_view  # type: ignore[assignment]
@@ -2175,6 +2330,13 @@ class StrategyLabWorkspace(QWidget):
         self._setup_shortcuts()
         self._main.setSizes([280, 880])
         self._apply_view_mode()
+
+    def _sync_mode_selector(self, index: int) -> None:
+        """Show BUY/SELL/COMPARE only where it applies — the BACKTEST tab."""
+        try:
+            self._mode_selector.setVisible(index == 2)
+        except Exception:
+            pass
 
     def _on_panel_run(self, cfg: object) -> None:
         # Track which side was requested so set_result can retain the other side's state
@@ -2243,12 +2405,12 @@ class StrategyLabWorkspace(QWidget):
     def _build_topbar(self) -> QWidget:
         bar = QWidget(self)
         bar.setObjectName("LabTopBar")
-        bar.setFixedHeight(38)
+        bar.setFixedHeight(34)
         bar.setStyleSheet(
             f"QWidget#LabTopBar {{ background: {t.BG0}; border-bottom: 1px solid {t.BORDER}; }}"
         )
         lay = QHBoxLayout(bar)
-        lay.setContentsMargins(14, 5, 10, 5)
+        lay.setContentsMargins(12, 3, 10, 3)
         lay.setSpacing(8)
         brand = QLabel("VAYREN", bar)
         brand.setStyleSheet(
@@ -2306,12 +2468,18 @@ class StrategyLabWorkspace(QWidget):
         perf_lay.setContentsMargins(0, 0, 0, 0)
         perf_lay.setSpacing(0)
         perf_lay.addWidget(self.metrics)
+        # Stock ranking — first-class section between summary and equity.
+        # Single instance owned by the BACKTEST panel; reparented here.
+        self._single_ranking = self.right_settings.ranking
+        perf_lay.addWidget(self._single_ranking)
+        self._single_ranking.setVisible(True)
         perf_lay.addWidget(EquityCurveView(perf_page), 1)
         # keep reference to perf equity for backward compat updates
         self._perf_equity = perf_lay.itemAt(1).widget()  # type: ignore[assignment]
         stack.addWidget(perf_page)
         self.journal = TradeBlotter(dock)
         self.journal.trade_clicked.connect(self.trade_focus.emit)
+        self.journal.symbol_filter_changed.connect(self._on_symbol_filter)
         stack.addWidget(self.journal)
         equity_page = QWidget(dock)
         equity_lay = QVBoxLayout(equity_page)
@@ -2353,9 +2521,11 @@ class StrategyLabWorkspace(QWidget):
         strip_lay.addWidget(collapse)
         lay.addWidget(strip)
         lay.addWidget(stack, 1)
-        stack.setVisible(False)
+        # Results stay visible with a compact ready state — no blank collapsed dock.
+        stack.setVisible(True)
         self._result_stack = stack
         self._collapse_btn = collapse
+        self._collapse_btn.setText("▾")
 
     def show_result(self, index: int, expand: bool) -> None:
         self._result_stack.setCurrentIndex(index)
@@ -2417,8 +2587,12 @@ class StrategyLabWorkspace(QWidget):
         self._topbar_run.setEnabled(not busy)
         if busy:
             self._topbar_run.setText("RUNNING BACKTEST…")
+            self.set_run_state("running")
         else:
             self._apply_top_run_label()
+            # Restored to ready unless a result already marked completion/failure.
+            if self._run_state == "running":
+                self.set_run_state("ready")
         # Note: right_settings already reflects busy via its own set_busy emission;
         # do NOT call set_busy here or we recurse via busy_changed.
 
@@ -2472,7 +2646,9 @@ class StrategyLabWorkspace(QWidget):
         self._full_result = None
         self._buy_result = None
         self._sell_result = None
+        self.set_run_state("ready")
         self._refresh_directional_views()
+        self._push_ranking()
 
     def select_next_after_delete(self, deleted: str) -> None:
         names = [name for name in self.left_nav.names() if name != deleted]
@@ -2487,7 +2663,9 @@ class StrategyLabWorkspace(QWidget):
             self._full_result = None
             self._buy_result = None
             self._sell_result = None
+            self.set_run_state("ready")
             self._refresh_directional_views()
+            self._push_ranking()
 
     strategy_open_requested = Signal(str)
 
@@ -2549,6 +2727,7 @@ class StrategyLabWorkspace(QWidget):
             except Exception:
                 pass
             self._refresh_directional_views()
+        self._push_ranking()
         self.update()
 
     def set_result(self, result: StrategyResult | None) -> None:
@@ -2578,6 +2757,13 @@ class StrategyLabWorkspace(QWidget):
                     self._sell_result = result
                 else:
                     self._buy_result = result
+            try:
+                symbol = getattr(getattr(result, "config", None), "symbol", "")
+                if symbol and symbol != "MULTI":
+                    self._last_run_symbols = (str(symbol),)
+                    self._ranking_errors = {}
+            except Exception:
+                pass
         self._refresh_directional_views()
         # For backward compat, also expand results if we have any result
         if result is not None:
@@ -2587,6 +2773,8 @@ class StrategyLabWorkspace(QWidget):
                 self._compare_view.set_results(self._buy_result, self._sell_result, result)
             except Exception:
                 pass
+            self.set_run_state("complete")
+        self._push_ranking()
 
     def set_results(self, buy: StrategyResult | None, sell: StrategyResult | None) -> None:
         """Explicitly set per-side results (used for isolated BUY/SELL runs)."""
@@ -2605,6 +2793,168 @@ class StrategyLabWorkspace(QWidget):
             self._compare_view.set_results(buy, sell, self._full_result)
         except Exception:
             pass
+        self._push_ranking()
+
+    def set_symbol_windows(self, mapping: dict[str, int] | None) -> None:
+        """Remember per-symbol bar windows for multi-symbol aggregates.
+
+        Used only as the Exposure denominator when a symbol filter is active;
+        single-symbol results already carry their own ``bars_used``.
+        """
+        self._symbol_windows = dict(mapping) if mapping else {}
+
+    def set_ranking_errors(self, errors: dict[str, str] | None) -> None:
+        """Remember per-symbol batch failures for the ranking table.
+
+        Failed symbols render as unavailable ("—") instead of an invented rank.
+        """
+        self._ranking_errors = dict(errors) if errors else {}
+        self._push_ranking()
+
+    def set_last_run_symbols(self, symbols: tuple[str, ...] | list[str] | None) -> None:
+        """Remember which symbols the last completed RUN attempted.
+
+        Selected symbols absent from this list render as pending ("run again")
+        instead of borrowing a stale zero-trade rank from an older run.
+        """
+        self._last_run_symbols = tuple(symbols) if symbols else None
+        self._push_ranking()
+
+    def _ranking_base(self) -> StrategyResult | None:
+        if self._view_mode == StrategyViewMode.BUY:
+            return self._buy_result
+        if self._view_mode == StrategyViewMode.SELL:
+            return self._sell_result
+        return self._full_result
+
+    def _ranking_mode_label(self) -> str:
+        if self._view_mode == StrategyViewMode.BUY:
+            return "BUY — LONG"
+        if self._view_mode == StrategyViewMode.SELL:
+            return "SELL — SHORT"
+        return "COMPARE — COMBINED"
+
+    def _push_ranking(self) -> None:
+        try:
+            universe = self.right_settings.selected_symbols()
+        except Exception:
+            universe = ()
+        try:
+            self.right_settings.set_ranking_results(
+                self._ranking_base(),
+                dict(self._ranking_errors),
+                self._last_run_symbols,
+                self._ranking_mode_label(),
+            )
+        except Exception:
+            pass
+        try:
+            self._compare_view.sync_ranking(
+                universe,
+                self._full_result,
+                dict(self._ranking_errors),
+                self._last_run_symbols,
+            )
+        except Exception:
+            pass
+        try:
+            self._compare_view.set_stock_count(len(universe))
+        except Exception:
+            pass
+
+    def set_run_state(self, state: str) -> None:
+        """Surface the run lifecycle in the result header: ready|running|complete|failed."""
+        self._run_state = state
+        try:
+            self.metrics.set_status(state)
+        except Exception:
+            pass
+
+    def _on_ranking_focus(self, symbol: str) -> None:
+        """Keep the trade blotter filter agreeing with the ranking selection."""
+        if not symbol:
+            return
+        try:
+            if self._view_mode == StrategyViewMode.COMPARE:
+                blotter = getattr(self._compare_view, "_trade_blotter", None)
+                if blotter is not None and hasattr(blotter, "set_symbol_filter"):
+                    blotter.set_symbol_filter(symbol)
+                self._on_compare_symbol_filter(symbol)
+            else:
+                if hasattr(self.journal, "set_symbol_filter"):
+                    self.journal.set_symbol_filter(symbol)
+                self._on_symbol_filter(symbol)
+        except Exception:
+            pass
+
+    def _on_symbol_filter(self, symbol: str) -> None:
+        """Refresh stat views for one symbol; the journal hides other rows itself."""
+        if self._view_mode == StrategyViewMode.COMPARE:
+            return
+        base = self._buy_result if self._view_mode == StrategyViewMode.BUY else self._sell_result
+        if base is None:
+            base = self._full_result
+        if base is None:
+            return
+        view = base if symbol == "ALL" else self._derive_symbol_view(base, symbol)
+        if view is None:
+            return
+        self.metrics.set_result(view)
+        self._equity_view.set_result(view)
+        try:
+            self._perf_equity.set_result(view)  # type: ignore[attr-defined]
+        except Exception:
+            pass
+        self._drawdown_view.set_result(view)  # type: ignore[attr-defined]
+        self._update_equity_summary(view)
+
+    def _on_compare_symbol_filter(self, symbol: str) -> None:
+        """Refresh the compare matrix/equity for one symbol (blotter hides rows itself)."""
+        try:
+            from backtest import derive_symbol_result
+        except Exception:
+            return
+        buy = self._buy_result
+        sell = self._sell_result
+        if symbol != "ALL":
+            if buy is not None:
+                buy = derive_symbol_result(buy, symbol)
+            if sell is not None:
+                sell = derive_symbol_result(sell, symbol)
+        try:
+            self._compare_view.set_results(buy, sell, self._full_result)
+        except Exception:
+            pass
+
+    def _derive_symbol_view(self, base: StrategyResult, symbol: str) -> StrategyResult | None:
+        """Filter `base` to one symbol with honest per-symbol bar windows."""
+        try:
+            from backtest import derive_symbol_result
+        except Exception:
+            return None
+        view = derive_symbol_result(base, symbol)
+        if view is None:
+            return None
+        window = self._symbol_windows.get(symbol)
+        if window is not None:
+            try:
+                from backtest.models.result import StrategyResult as _SR
+
+                return _SR(
+                    strategy_id=view.strategy_id,
+                    name=view.name,
+                    config=view.config,
+                    trades=view.trades,
+                    equity_curve=view.equity_curve,
+                    metrics=view.metrics,
+                    bars_used=window,
+                    period_start=view.period_start,
+                    period_end=view.period_end,
+                    chart_series=view.chart_series,
+                )
+            except Exception:
+                return view
+        return view
 
     def _refresh_directional_views(self) -> None:
         mode = self._view_mode
@@ -2702,6 +3052,9 @@ class StrategyLabWorkspace(QWidget):
         self._full_result = None
         self._buy_result = None
         self._sell_result = None
+        self._symbol_windows = {}
+        self._ranking_errors = {}
+        self._last_run_symbols = None
         self.metrics.set_result(None)
         self._equity_view.set_result(None)
         try:
@@ -2715,6 +3068,8 @@ class StrategyLabWorkspace(QWidget):
         except Exception:
             pass
         self._update_equity_summary(None)
+        self.set_run_state("ready")
+        self._push_ranking()
 
 
 __all__ = ["StrategyLabWorkspace", "StrategyLibraryPanel", "BacktestRunPanel", "StrategyViewMode"]

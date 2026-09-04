@@ -5,6 +5,7 @@ Depends on: core, market, strategy.
 
 from backtest.engine.directional import (
     derive_directional_result,
+    derive_symbol_result,
     split_by_side,
 )
 from backtest.events import (
@@ -44,5 +45,6 @@ __all__ = [
     "backtest_manifest",
     "validate_backtest_form",
     "derive_directional_result",
+    "derive_symbol_result",
     "split_by_side",
 ]

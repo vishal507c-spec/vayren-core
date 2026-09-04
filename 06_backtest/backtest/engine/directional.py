@@ -59,3 +59,30 @@ def split_by_side(
     if base is None:
         return None, None
     return derive_directional_result(base, "LONG"), derive_directional_result(base, "SHORT")
+
+
+def derive_symbol_result(base: StrategyResult | None, symbol: str) -> StrategyResult | None:
+    """Return a view of *base* containing only *symbol* trades.
+
+    Same recompute helpers as the directional split so numbers stay identical
+    to the engine. Used for per-symbol research filtering of multi-symbol
+    backtests; ``TradeRecord.symbol`` is the single source of truth.
+    """
+    if base is None:
+        return None
+    filtered = tuple(t for t in base.trades if getattr(t, "symbol", "") == symbol)
+    start = base.period_start or (base.equity_curve[0].timestamp if base.equity_curve else None)
+    curve = compute_equity_curve(filtered, base.config.initial_capital, start)
+    metrics = compute_metrics(filtered, curve, base.config.initial_capital)
+    return StrategyResult(
+        strategy_id=base.strategy_id,
+        name=base.name,
+        config=base.config,
+        trades=filtered,
+        equity_curve=curve,
+        metrics=metrics,
+        bars_used=base.bars_used,
+        period_start=base.period_start,
+        period_end=base.period_end,
+        chart_series=base.chart_series,
+    )

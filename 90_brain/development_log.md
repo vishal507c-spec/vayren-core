@@ -2,6 +2,54 @@
 
 **Nya entry hamesha upar likho.**
 
+## 2026-09-04 - Strategy Lab Full UI Redesign (neuroscience-driven density)
+
+**Kya hua:** Poora Strategy Lab / Backtest experience restructure — config, RUN, results, ranking ab ek compact flow me (koi feature remove nahi, koi logic change nahi).
+
+**Kya kiya:**
+- BacktestRunPanel: vertical stack → compact config card (QGridLayout: SYMBOLS full-width; TIMEFRAME/DATE RANGE/INITIAL CAPITAL 3-col) + Advanced disclosure (fixed costs readout) + ONE dominant RUN (min 34px) seedha config ke neeche. Ranking table panel se hata (results me first-class).
+- MetricsTiles → result header: status pill (READY/RUNNING/COMPLETE/FAILED) + 8 metrics + wins/losses strip; dock ab hamesha visible (collapsed blank dock hata).
+- PERFORMANCE page: summary → ranking → equity (ranking single instance, panel-owned, reparented — koi duplicate state nahi).
+- _CompareView: header "COMPARE — COMBINED · N STOCKS" → verdict → STOCK RANKING → matrix → equity → blotter; risk-grid duplicate hata (matrix me DD/sharpe already); actions = ONE primary RUN ALL (count ke saath) + quiet BUY-only/SELL-only (signals preserved).
+- _ViewModeSelector 44→36px, sirf BACKTEST tab par visible; topbar 38→34, editor header/tabs slim, sidebar max 320.
+- Run lifecycle: set_run_state() — busy/complete/clear/strategy-switch + bootstrap failed paths (single + batch) → header pill.
+- Splitter balance 1:0 → 1:1 (result header above the fold).
+
+**Preserved:** Saare signals/methods/attrs (bootstrap + tests ke contracts), OBR/trading/backtest/ranking calculations, 4 result tabs, CODE/PARAMETERS/BACKTEST, BUY/SELL/COMPARE, single-symbol flow, blotter/CSV/keyboard, ranking universe-only + sorting.
+
+**Tests:** test_results_start_collapsed → test_results_visible_with_ready_state (naya contract); 8 naye layout tests (grid density, single RUN, selector visibility, header states, above-fold @1600x900, compare ranking/count) → 27 lab tests + 12 ranking PASS. Geometry probe: 1600x900/1920x1080/2560x1440 BUY+COMPARE sab OK (RUN≤408, ranking fully visible). ruff/format/pyright/validators PASS.
+
+## 2026-09-04 - Strategy Lab Stock Ranking (selected Watchlist only)
+
+**Kya hua:** BACKTEST tab me selected stocks dikhte the, ranking nahi — ab selection-only STOCK RANKING section hai.
+
+**Kya kiya:**
+- app/ui/stock_ranking.py (NAYA): StockRankingWidget + build_stock_ranking() — sirf selected Watchlist universe, metrics sirf derive_symbol_result() se (koi naya formula nahi, koi fake rank nahi); sort key net_profit desc (1st = best); unavailable/pending/no-trades rows me rank "—"; compact QTableWidget (22px rows, max 220, internal scroll, sortable headers, green profit/red loss).
+- BacktestRunPanel: INITIAL CAPITAL ke neeche STOCK RANKING section embed; selection_changed → ranking universe auto-update; set_ranking_results() passthrough.
+- StrategyLabWorkspace: _ranking_errors + _last_run_symbols state; set_ranking_errors()/set_last_run_symbols() (batch_finished se); _ranking_base() mode-consistent (BUY=LONG, SELL=SHORT, COMPARE=full); _push_ranking() set_result/set_results/_apply_view_mode/clear par; single-symbol me last_run=(symbol,) auto + errors clear; _on_ranking_focus() row click → journal/compare blotter filter agreement.
+- bootstrap.py: _on_batch_finished me set_last_run_symbols(outcome.symbols) + set_ranking_errors(outcome.errors) (merge se pehle, final set_result ke saath consistent).
+
+**Preserved:** OBR/trading/backtest calculations, multi-symbol coordinator/merge architecture, BUY/SELL/COMPARE, single-symbol flow, 4 result tabs, WatchlistWidget API.
+
+**Tests:** 12 naye (test_stock_ranking.py: 1/2/5+ stocks, unavailable/no-trades/pending, widget refresh/sort/click, workspace BUY/SELL/COMPARE + single + filter agreement) → 71 app tests PASS, validators PASS. Full-suite 00_app partition exit-crash pre-existing hai (clean HEAD par bhi, Qt teardown) — tests sab green.
+
+## 2026-09-04 - Strategy Lab Multi-Symbol Backtest (Watchlist chips selector)
+
+**Kya hua:** Backtest single-symbol tha; ab multi-symbol hai - sirf Market Watchlist se.
+
+**Kya kiya:**
+- watchlist_widget.py: watchlist_changed signal (set_symbols / add / remove / switch par emit)
+- app/ui/watchlist_multiselect.py (NAYA): WatchlistMultiSelect - removable chips, searchable checkable popup, All/None, stale-chip marking, empty-state. Selection order preserved; no market data on select.
+- BacktestRunPanel: symbol combo -> WatchlistMultiSelect; current_config() ab symbols tuple bhi deta hai; _emit() has_selection() check. TradeBlotter: symbol filter combo (ALL + har traded symbol), _apply_filter symbol+side+text chain, symbol_filter_changed signal. StrategyLabWorkspace: set_symbol_windows(), _on_symbol_filter() per-symbol refresh, _on_compare_symbol_filter().
+- backtest/engine/directional.py: derive_symbol_result() - TradeRecord.symbol se filter + equity/metrics recompute.
+- app/services/multi_symbol_backtest.py (NAYA): MultiSymbolBacktestCoordinator - RUN par per-symbol RunBacktest chain (existing worker off-UI-thread), BacktestResult merge: trades sorted (entry_time,symbol), equity/metrics recompute, config.symbol=MULTI, bars sum, chart_series=(); per-symbol errors isolated (dict), is_member() stale-event guard, cancel on LabReset.
+- bootstrap.py: coordinator created/registered; bus subs BEFORE regular handlers (per-symbol events skipped via is_member); _on_workspace_run fan-out (2+ symbols -> coordinator.start); SymbolsListed/watchlist_changed -> right_settings.set_symbols(window.watchlist.symbols) (watchlist-only feed); batch_finished -> set_symbol_windows + per-symbol error surface; LabReset -> coordinator.cancel; _recalc_active_indicators guard batch.active.
+
+**Preserved:** OBR logic, trading calculations, chart renderer, single-symbol flow (coordinator bypass at 1 symbol), BUY/SELL/COMPARE, WatchlistWidget API.
+
+**Tests:** 15 naye (7 coordinator + 8 multiselect + 4 directional) -> 789 total, gate green (ruff/format/pyright/validators on touched scope).
+
+
 ## 2026-09-02 — RELEASE v1.5.2 — OBR Chart Fix (REF Horizontal Extension)
 
 **Release:** `v1.5.2` (pyproject `1.5.2`, tag `v1.5.2`). Previous `v1.5.1`.

@@ -4,7 +4,7 @@
 **When to read:** Every new session start, before deciding what to build next.
 **Related:** `development_log.md` (history), `architecture.md` (map), `module_contracts.md` (APIs).
 
-**Last update:** 2026-09-02 — **v1.5.2 RELEASED** (OBR REF HIGH/LOW horizontal extension + ChartReady/indicator lifecycle + stale overlay fix; generic PlotOverlay extend; BUY/SELL unchanged; 769 tests + validators PASS)
+**Last update:** 2026-09-04 — Strategy Lab Full UI Redesign (compact config grid, result header + run states, ranking first-class incl. COMPARE, 1:1 splitter; layout tests 27+12 PASS, geometries OK)
 
 **Current release:** `v1.5.2` (pyproject `1.5.2`, tag `v1.5.2` → commit `HEAD`). Previous tag `v1.5.1`. Changes since `v1.5.1`: OBR chart fix — REF HIGH/LOW horizontal ray (generic `PlotOverlay` `extend="session"` sparse→horizontal, dense→connected), stale `BacktestCompleted` overlay gate, `ChartReady` dedent + `_on_chart_ready_lab` repopulation + `indicator_added` lifecycle, compile feedback + param dedup, `after_time`/`plot` helpers.
 

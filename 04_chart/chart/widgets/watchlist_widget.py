@@ -34,6 +34,7 @@ class WatchlistWidget(QWidget):
 
     symbol_selected = Signal(str)
     reset_requested = Signal()
+    watchlist_changed = Signal()
 
     ALL_STOCKS = "All Stocks"
 
@@ -159,6 +160,7 @@ class WatchlistWidget(QWidget):
         self._all_symbols = symbols
         self._watchlists[self.ALL_STOCKS] = symbols
         self._refresh_list()
+        self.watchlist_changed.emit()
 
     def set_quotes(self, quotes: tuple[SymbolQuote, ...]) -> None:
         """Attach the latest real quote per symbol to the list rows.
@@ -219,9 +221,12 @@ class WatchlistWidget(QWidget):
     def _set_active(self, name: str) -> None:
         if name not in self._watchlists:
             return
+        if name == self._active:
+            return
         self._active = name
         self._watchlist_button.setText(name)
         self._refresh_list()
+        self.watchlist_changed.emit()
 
     def _refresh_watchlist_menu(self) -> None:
         self._watchlist_menu.clear()

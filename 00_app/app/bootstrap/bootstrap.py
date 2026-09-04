@@ -269,11 +269,13 @@ class Bootstrap:
         data_window.set_credentials_manager(data_credentials)
 
         # ── Trade → Chart instant context (§1-34) ───────────────
+        from app.services.multi_symbol_backtest import MultiSymbolBacktestCoordinator
         from app.services.trade_chart_controller import TradeChartController
 
         trade_chart_controller = TradeChartController(
             self._bus, widget, window, repository, trade_overlay, trade_context_panel, lab_workspace
         )
+        multi_symbol_coordinator = MultiSymbolBacktestCoordinator(self._bus)
 
         # dynamic attrs for validation bookkeeping
         self._last_train_result: object | None = None
@@ -296,6 +298,7 @@ class Bootstrap:
         self._widget = widget
         self._trade_context_panel = trade_context_panel
         self._trade_chart_controller = trade_chart_controller
+        self._multi_symbol_coordinator = multi_symbol_coordinator
 
         self._register_services(
             repository,
@@ -438,6 +441,8 @@ class Bootstrap:
         self._services.register("backtest_runner", backtest_runner)
         self._services.register("backtest_worker", backtest_worker)
         self._services.register("trade_overlay", trade_overlay)
+        if hasattr(self, "_multi_symbol_coordinator"):
+            self._services.register("multi_symbol_coordinator", self._multi_symbol_coordinator)  # type: ignore[attr-defined]
         self._services.register("lab_control_panel", lab_control)
         self._services.register("lab_strategy_list", lab_list)
         self._services.register("lab_workspace", lab_workspace)
@@ -498,6 +503,14 @@ class Bootstrap:
                 try:
                     tcc = getattr(self, "_trade_chart_controller", None)
                     if tcc is not None and getattr(tcc, "_selected_index", None) is not None:
+                        return
+                except Exception:
+                    pass
+                # ...nor while a multi-symbol batch is in flight (the merged
+                # aggregate event drives the final recalc instead)
+                try:
+                    multi = getattr(self, "_multi_symbol_coordinator", None)
+                    if multi is not None and multi.active:  # type: ignore[attr-defined]
                         return
                 except Exception:
                     pass
@@ -594,6 +607,15 @@ class Bootstrap:
         data_worker.coverage.connect(self._bus.publish)
         data_worker.log.connect(data_window.on_log_line)
         data_window.close_requested.connect(lambda: window.toggle_panel("download"))
+        # ── multi-symbol batch: coordinator sees bus events BEFORE the regular
+        # per-result handlers so per-symbol events can be suppressed there ──
+        _multi = getattr(self, "_multi_symbol_coordinator", None)
+        if _multi is not None:
+            from backtest.events import BacktestCompleted as BatchCompletedEvent
+            from backtest.events import BacktestFailed as BatchFailedEvent
+
+            self._bus.subscribe(BatchCompletedEvent, _multi.on_completed)  # type: ignore[attr-defined]
+            self._bus.subscribe(BatchFailedEvent, _multi.on_failed)  # type: ignore[attr-defined]
         # ── Strategy Lab wiring ──
         self._wire_lab(
             strategy_registry,
@@ -804,10 +826,15 @@ class Bootstrap:
         performance_panel.trade_selected.connect(trade_overlay.set_highlight)
         # ── Strategy Lab workspace (single-strategy) ──
         if lab_workspace is not None:
-            # sync symbols/timeframes
-            self._bus.subscribe(
-                SymbolsListed, lambda e: lab_workspace.right_settings.set_symbols(e.symbols)
-            )  # noqa: E501
+            # sync symbols/timeframes — selector universe is the Market
+            # Watchlist only (never the full NSE universe)
+            def _feed_watchlist_symbols(*_a: Any) -> None:
+                with contextlib.suppress(Exception):
+                    lab_workspace.right_settings.set_symbols(window.watchlist.symbols)
+
+            self._bus.subscribe(SymbolsListed, _feed_watchlist_symbols)
+            with contextlib.suppress(Exception):
+                window.watchlist.watchlist_changed.connect(_feed_watchlist_symbols)
             self._bus.subscribe(
                 TimeframesListed,
                 lambda e: lab_workspace.right_settings.set_timeframes(e.timeframes),
@@ -909,7 +936,8 @@ class Bootstrap:
                     slippage_pct=cfg.get("slippage_pct", 0.02),
                     commission_pct=cfg.get("commission_pct", 0.03),
                 )
-                symbol = cfg.get("symbol") or window.current_symbol
+                symbols = tuple(cfg.get("symbols") or ())
+                symbol = symbols[0] if symbols else (cfg.get("symbol") or window.current_symbol)
                 enabled_ids = {d.id for d in strategy_registry.enabled()}
                 errors = validate_backtest_form(form, symbol, enabled_ids)
                 if errors:
@@ -921,6 +949,28 @@ class Bootstrap:
                         False, "BACKTEST VALIDATION FAILED — " + "; ".join(errors)
                     )
                     return
+                # Multi-symbol: chain one RunBacktest per symbol through the
+                # existing worker; results merge into one aggregate at the end.
+                if len(symbols) > 1:
+                    multi = getattr(self, "_multi_symbol_coordinator", None)
+                    if multi is not None:
+                        from app.services.multi_symbol_backtest import BatchRequest
+
+                        multi.start(  # type: ignore[attr-defined]
+                            symbols,
+                            BatchRequest(
+                                strategy_id=sid,
+                                timeframe=form.timeframe,
+                                start_date=form.start_date,
+                                end_date=form.end_date,
+                                initial_capital=form.initial_capital,
+                                slippage_pct=form.slippage_pct,
+                                commission_pct=form.commission_pct,
+                            ),
+                        )
+                        self._last_test_cfg = cfg
+                        self._last_train_result = None
+                        return
                 request_id = uuid.uuid4().hex[:8]
                 self._bus.publish(
                     RunBacktest(
@@ -940,6 +990,35 @@ class Bootstrap:
                 self._last_train_result = None
 
             lab_workspace.run_backtest.connect(_on_workspace_run)
+
+            # ── multi-symbol batch: surface per-symbol errors + bar windows ──
+            _multi_lab = getattr(self, "_multi_symbol_coordinator", None)
+            if _multi_lab is not None:
+
+                def _on_batch_finished(outcome: Any) -> None:
+                    with contextlib.suppress(Exception):
+                        lab_workspace.set_symbol_windows(outcome.bars_by_symbol)
+                    with contextlib.suppress(Exception):
+                        lab_workspace.set_last_run_symbols(outcome.symbols)
+                    with contextlib.suppress(Exception):
+                        lab_workspace.set_ranking_errors(dict(outcome.errors))
+                    if outcome.errors:
+                        detail = "; ".join(f"{s}: {e}" for s, e in outcome.errors.items())
+                        event_log.add_entry("WARN", f"Some symbols failed — {detail}")
+                        lab_workspace.center_detail.show_compile_result(
+                            True,
+                            f"✓ {len(outcome.results)}/{len(outcome.symbols)} symbols — "
+                            f"failed: {', '.join(outcome.errors)}",
+                        )
+
+                def _on_batch_failed(reason: str) -> None:
+                    event_log.add_entry("ERROR", f"Multi-symbol backtest failed: {reason}")
+                    lab_workspace.center_detail.show_compile_result(False, reason)
+                    with contextlib.suppress(Exception):
+                        lab_workspace.set_run_state("failed")
+
+                _multi_lab.batch_finished.connect(_on_batch_finished)  # type: ignore[attr-defined]
+                _multi_lab.batch_failed.connect(_on_batch_failed)  # type: ignore[attr-defined]
 
             # ── instant trade → chart (spec §5) ─────────────────
             # Bridge lab trade clicks → chart controller; chart reuse, cached, race-safe.
@@ -1761,6 +1840,11 @@ class Bootstrap:
     ) -> None:  # type: ignore[no-untyped-def]  # noqa: E501
         from backtest.models.result import BacktestResult
 
+        # Per-symbol batch events are merged by the coordinator; only the
+        # final aggregate event (different id) should touch the UI here.
+        _multi = getattr(self, "_multi_symbol_coordinator", None)
+        if _multi is not None and _multi.is_member(event.request_id):  # type: ignore[attr-defined]
+            return
         result: BacktestResult = event.result  # type: ignore[assignment]
         lab_control.set_busy(False)
         # also update dedicated workspace if present
@@ -1999,6 +2083,9 @@ class Bootstrap:
     def _on_backtest_failed(
         self, event: Any, lab_control: Any, event_log: Any, system_health: Any
     ) -> None:  # type: ignore[no-untyped-def]
+        _multi = getattr(self, "_multi_symbol_coordinator", None)
+        if _multi is not None and _multi.is_member(event.request_id):  # type: ignore[attr-defined]
+            return
         lab_control.set_busy(False)
         try:
             if hasattr(self, "_lab_workspace") and self._lab_workspace is not None:
@@ -2007,6 +2094,11 @@ class Bootstrap:
             pass
         event_log.add_entry("ERROR", f"Backtest failed: {event.reason}")
         system_health.set_engine_state("Backtest Engine", "Idle")
+        try:
+            if hasattr(self, "_lab_workspace") and self._lab_workspace is not None:
+                self._lab_workspace.set_run_state("failed")
+        except Exception:
+            pass
 
     def _run_strategy_plots(self, strategy_name: str, bars: tuple) -> None:
         """Compile the strategy and run it on the given bars to populate plot series
@@ -2081,6 +2173,9 @@ class Bootstrap:
             ctrl = getattr(self, "_trade_chart_controller", None)
             if ctrl is not None and hasattr(ctrl, "clear"):
                 ctrl.clear()  # type: ignore[attr-defined]
+            multi = getattr(self, "_multi_symbol_coordinator", None)
+            if multi is not None:
+                multi.cancel()  # type: ignore[attr-defined]
             panel = getattr(self, "_trade_context_panel", None)
             if panel is not None and hasattr(panel, "clear"):
                 panel.clear()  # type: ignore[attr-defined]
