@@ -4,7 +4,7 @@
 
 [project]
 name = "vayren-core"
-version = "1.7.0"
+version = "1.8.0"
 description = "Event-driven desktop charting platform"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -46,7 +46,9 @@ vayren = "app:main"
 target-version = "py311"
 line-length = 100
 indent-width = 4
-extend-exclude = ["90_brain"]
+# 90_brain = docs; 99_archive = legacy reference snapshot (not shipped,
+# not tested, not validated — every other tool already ignores it).
+extend-exclude = ["90_brain", "99_archive"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "ARG", "C4", "T10"]
@@ -60,6 +62,14 @@ line-ending = "auto"
 "04_chart/chart/widgets/*.py" = ["N802"]  # Qt event handlers are camelCase by framework convention
 "02_data/data/ui/*.py" = ["N802"]  # Qt signal handlers are camelCase by framework convention
 "00_app/app/ui/strategy_lab_workspace.py" = ["E501", "SIM105", "N814", "C420"]
+# E501: long lines here are embedded Python-strategy source payloads inside
+# triple-quoted strings (exec'd verbatim; rewrapping would change strategy
+# source bytes/hashes). Same tradeoff as strategy_lab_workspace above.
+"05_strategy/strategy/language/storage.py" = ["E501"]
+"05_strategy/strategy/tests/test_runtime.py" = ["E501"]
+"05_strategy/strategy/tests/test_version_control.py" = ["E501"]
+"05_strategy/strategy/tests/test_vm_migration.py" = ["E501"]
+"06_backtest/backtest/tests/test_runner.py" = ["E501"]
 
 # ── Pyright (Type Checker) ────────────────────────────────────
 [tool.pyright]
@@ -70,6 +80,8 @@ include = [
     "02_data/data",
     "03_market/market",
     "04_chart/chart",
+    "05_strategy/strategy",
+    "06_backtest/backtest",
     "scripts",
 ]
 extraPaths = [
@@ -85,7 +97,11 @@ testpaths = [
     "02_data/data/tests",
     "03_market/market/tests",
     "04_chart/chart/tests",
+    "05_strategy/strategy/tests",
+    "05_strategy/strategy/research/tests",
+    "06_backtest/backtest/tests",
     "scripts/forensics/tests",
+    "scripts/tests",
 ]
 addopts = "-v --tb=short"
 
@@ -97,6 +113,8 @@ source = [
     "02_data/data",
     "03_market/market",
     "04_chart/chart",
+    "05_strategy/strategy",
+    "06_backtest/backtest",
 ]
 
 [tool.coverage.report]

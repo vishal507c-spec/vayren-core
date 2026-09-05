@@ -1,6 +1,6 @@
 """Backtest time-range filtering and window slicing."""
 
-from market.models.bar import Bar
+from market import Bar
 
 
 def slice_bars(

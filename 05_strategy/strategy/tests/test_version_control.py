@@ -575,8 +575,9 @@ def test_strategy_rename_preserves_id(tmp_path: Path):
     assert versions_after[0].version_id == v1.version_id
     assert versions_after[0].source == SOURCE_A
     # Old name no longer exists but id lookup still works
-    assert get_strategy_by_id(old_id, data_dir=tmp_path) is not None
-    assert get_strategy_by_id(old_id, data_dir=tmp_path).name == "Renamed"
+    renamed = get_strategy_by_id(old_id, data_dir=tmp_path)
+    assert renamed is not None
+    assert renamed.name == "Renamed"
 
 
 # ── 13. duplicate strategy gets new ID ─────────────────────────────────
@@ -647,7 +648,7 @@ def test_execution_preserves_version_id(tmp_path: Path):
     from strategy.language import compile_strategy
 
     compiled = compile_strategy(SOURCE_A)
-    ir = compiled # compat
+    ir = compiled  # compat
     cfg = BacktestConfig(
         symbol="TEST", timeframe="15m", start_date="2026-01-01", end_date="2026-01-31"
     )
@@ -655,7 +656,11 @@ def test_execution_preserves_version_id(tmp_path: Path):
     assert snap.strategy_id == rec.id
     assert snap.version_id == v1.version_id
     assert snap.source_hash == v1.source_hash
-    assert snap.ir_hash == v1.ir_hash or snap.ir_hash == hashlib.sha256(v1.source.encode("utf-8")).hexdigest() or True
+    assert (
+        snap.ir_hash == v1.ir_hash
+        or snap.ir_hash == hashlib.sha256(v1.source.encode("utf-8")).hexdigest()
+        or True
+    )
     # Save history
     from backtest.execution import ExecutionHistory
 
@@ -683,6 +688,7 @@ def test_execution_preserves_version_id(tmp_path: Path):
     assert snap2.version_id != v1.version_id
     # Reload first execution — still V1
     loaded1 = load_history(snap.execution_id, data_dir=tmp_path)
+    assert loaded1 is not None
     assert loaded1.snapshot.version_id == v1.version_id
 
 
@@ -705,7 +711,7 @@ def test_research_preserves_version_id(tmp_path: Path):
     from backtest.models.config import BacktestConfig
 
     compiled = compile_strategy(SOURCE_A)
-    ir = compiled # compat
+    ir = compiled  # compat
     cfg = BacktestConfig(
         symbol="TEST", timeframe="15m", start_date="2026-01-01", end_date="2026-01-31"
     )
@@ -730,6 +736,7 @@ def test_research_preserves_version_id(tmp_path: Path):
     from strategy.research.storage import load_experiment
 
     loaded_exp = load_experiment(exp.experiment_id, data_dir=tmp_path)
+    assert loaded_exp is not None
     assert loaded_exp.strategy_id == rec.id
     assert loaded_exp.version_id == v1.version_id
     # Second version must not alter first research
@@ -744,7 +751,13 @@ def test_research_preserves_version_id(tmp_path: Path):
         data_dir=tmp_path,
     )
     snap2 = create_snapshot(
-        rec.id, v2.version_id, v2.source_hash, compile_strategy(SOURCE_B), pb, cfg, data_dir=tmp_path
+        rec.id,
+        v2.version_id,
+        v2.source_hash,
+        compile_strategy(SOURCE_B),
+        pb,
+        cfg,
+        data_dir=tmp_path,
     )
     history2 = ExecutionHistory(snapshot=snap2, events=[], signals=[])
     ds2 = ResearchDataset.from_histories(rec.id, v2.version_id, [history2], parameters=pb)
@@ -772,7 +785,7 @@ def test_evidence_preserves_version_id(tmp_path: Path):
     from backtest.models.config import BacktestConfig
 
     compiled = compile_strategy(SOURCE_A)
-    ir = compiled # compat
+    ir = compiled  # compat
     cfg = BacktestConfig(
         symbol="TEST", timeframe="15m", start_date="2026-01-01", end_date="2026-01-31"
     )
@@ -809,7 +822,13 @@ def test_evidence_preserves_version_id(tmp_path: Path):
         data_dir=tmp_path,
     )
     snap2 = create_snapshot(
-        rec.id, v2.version_id, v2.source_hash, compile_strategy(SOURCE_B), pb, cfg, data_dir=tmp_path
+        rec.id,
+        v2.version_id,
+        v2.source_hash,
+        compile_strategy(SOURCE_B),
+        pb,
+        cfg,
+        data_dir=tmp_path,
     )
     ev2 = create_evidence(
         rec.id,
@@ -849,7 +868,7 @@ def test_lineage_forward_traversal(tmp_path: Path):
     from backtest.models.config import BacktestConfig
 
     compiled = compile_strategy(SOURCE_A)
-    ir = compiled # compat
+    ir = compiled  # compat
     cfg = BacktestConfig(
         symbol="TEST", timeframe="15m", start_date="2026-01-01", end_date="2026-01-31"
     )
@@ -899,7 +918,7 @@ def test_lineage_backward_traversal(tmp_path: Path):
     from backtest.models.config import BacktestConfig
 
     compiled = compile_strategy(SOURCE_A)
-    ir = compiled # compat
+    ir = compiled  # compat
     cfg = BacktestConfig(
         symbol="TEST", timeframe="15m", start_date="2026-01-01", end_date="2026-01-31"
     )
@@ -1101,15 +1120,17 @@ def test_replay_compatibility(tmp_path: Path):
     from backtest.execution import ExecutionHistory, create_snapshot, replay_execution, save_history
     from backtest.models.config import BacktestConfig
 
-    from strategy.strategies.base import PythonStrategy
-
     compiled = compile_strategy(SOURCE_A)
-    ir = compiled # compat
+    ir = compiled  # compat
     cfg = BacktestConfig(
         symbol="TEST", timeframe="15m", start_date="2026-01-01", end_date="2026-01-31"
     )
     # Build execution deterministically via VM (no runner needed) — use same logic as execution.save
-    logic = compiled.create_logic(__import__('strategy.models.parameters', fromlist=['StrategyParameters']).StrategyParameters(pa))
+    logic = compiled.create_logic(
+        __import__(
+            "strategy.models.parameters", fromlist=["StrategyParameters"]
+        ).StrategyParameters(pa)
+    )
     from strategy.models.parameters import StrategyParameters
     from strategy.models.state import StrategyState
     from strategy.runtime import BarView
@@ -1174,7 +1195,11 @@ def test_replay_compatibility(tmp_path: Path):
     )
     ir2 = compile_strategy(SOURCE_B)
     snap2 = create_snapshot(rec.id, v2.version_id, v2.source_hash, ir2, pb, cfg, data_dir=tmp_path)
-    logic2 = ir2.create_logic(__import__('strategy.models.parameters', fromlist=['StrategyParameters']).StrategyParameters(pb))
+    logic2 = ir2.create_logic(
+        __import__(
+            "strategy.models.parameters", fromlist=["StrategyParameters"]
+        ).StrategyParameters(pb)
+    )
     signals2 = []
     events2 = []
     seq = 0
@@ -1268,6 +1293,7 @@ def test_evidence_immutability(tmp_path: Path):
     from strategy.research.evidence import load_evidence
 
     loaded = load_evidence(ev.evidence_id, data_dir=tmp_path)
+    assert loaded is not None
     assert loaded.value == 0.6
 
 
@@ -1423,6 +1449,8 @@ def test_integration_full_flow(tmp_path: Path):
 
     h1 = load_history(snap1.execution_id, data_dir=tmp_path)
     h2 = load_history(snap2.execution_id, data_dir=tmp_path)
+    assert h1 is not None
+    assert h2 is not None
     assert h1.snapshot.version_id == v1.version_id
     assert h2.snapshot.version_id == v2.version_id
     # V1 research points to V1, V2 to V2

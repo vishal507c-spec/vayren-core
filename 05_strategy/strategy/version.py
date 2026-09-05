@@ -514,9 +514,13 @@ def verify_version_ir(
         raise FileNotFoundError(f"version not found: {strategy_id}/{version_id}")
     recomputed = _hash_text(v.source)
     if recomputed != v.source_hash:
-        raise ValueError(f"source tamper: {v.source_hash} != {recomputed} for {strategy_id}/{version_id}")
+        raise ValueError(
+            f"source tamper: {v.source_hash} != {recomputed} for {strategy_id}/{version_id}"
+        )
     # Also verify ir_hash matches source hash (Python-native)
     expected_ir = _hash_text(v.source)
     if v.ir_hash != expected_ir:
-        raise ValueError(f"ir_hash tamper: {v.ir_hash} != {expected_ir} for {strategy_id}/{version_id}")
+        raise ValueError(
+            f"ir_hash tamper: {v.ir_hash} != {expected_ir} for {strategy_id}/{version_id}"
+        )
     return True

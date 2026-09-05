@@ -1,6 +1,9 @@
 """TradeRecord + related types — one closed position."""
 
-from dataclasses import dataclass
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -45,3 +48,27 @@ class TradeRecord:
     def winning(self) -> bool:
         """True when the trade profited after commissions."""
         return self.pnl > 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> TradeRecord:
+        raw_r_multiple = data.get("r_multiple")
+        return TradeRecord(
+            symbol=str(data["symbol"]),
+            side=str(data["side"]),
+            entry_index=int(data["entry_index"]),
+            exit_index=int(data["exit_index"]),
+            entry_time=str(data["entry_time"]),
+            exit_time=str(data["exit_time"]),
+            entry_price=float(data["entry_price"]),
+            exit_price=float(data["exit_price"]),
+            quantity=float(data["quantity"]),
+            pnl=float(data["pnl"]),
+            pnl_pct=float(data["pnl_pct"]),
+            commission=float(data["commission"]),
+            bars_held=int(data["bars_held"]),
+            exit_reason=str(data["exit_reason"]),
+            r_multiple=None if raw_r_multiple is None else float(raw_r_multiple),
+        )

@@ -1,14 +1,15 @@
 """Strategy component manifest — the real strategy platform, described factually."""
 
-from core.contracts.capability import (
+from core import (
     BehavioralRules,
     CapabilityContract,
     CapabilityDecl,
     CapabilityId,
+    ComponentContract,
+    ComponentId,
+    ComponentManifest,
+    ComponentVersion,
 )
-from core.contracts.component import ComponentId, ComponentVersion
-from core.contracts.contract import ComponentContract
-from core.contracts.manifest import ComponentManifest
 
 
 def strategy_manifest() -> ComponentManifest:

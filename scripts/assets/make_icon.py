@@ -81,9 +81,7 @@ def encode_ico(pngs: dict[int, bytes]) -> bytes:
     entries = b""
     offset = 6 + 16 * count
     for size, data in pngs.items():
-        entries += struct.pack(
-            "<BBBBHHII", size % 256, size % 256, 0, 0, 1, 32, len(data), offset
-        )
+        entries += struct.pack("<BBBBHHII", size % 256, size % 256, 0, 0, 1, 32, len(data), offset)
         offset += len(data)
     return header + entries + b"".join(pngs.values())
 

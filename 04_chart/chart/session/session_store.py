@@ -39,9 +39,7 @@ def _default_session_path() -> Path:
     # Prefer AppDataLocation (platform standard, survives crash, reliable)
     # Use VAYREN subfolder to be app-specific even without QCoreApplication org set
     try:
-        base = QStandardPaths.writableLocation(
-            QStandardPaths.StandardLocation.AppDataLocation
-        )
+        base = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation)
         if base:
             # base may already be app-specific if org/app set, or generic Roaming
             # Ensure VAYREN subfolder for reliability
@@ -86,11 +84,7 @@ class ChartSessionStore:
                 return ChartSession()
             symbol = data.get("symbol")
             timeframe = data.get("timeframe")
-            symbol = (
-                None
-                if not isinstance(symbol, str) or not symbol.strip()
-                else symbol.strip()
-            )
+            symbol = None if not isinstance(symbol, str) or not symbol.strip() else symbol.strip()
             timeframe = (
                 None
                 if not isinstance(timeframe, str) or not timeframe.strip()

@@ -17,7 +17,9 @@ def calc_rsi(closes: deque[float], period: int = 14) -> float:
     return 100 - (100 / (1 + rs))
 
 
-def calc_atr(highs: deque[float], lows: deque[float], closes: deque[float], period: int = 14) -> float:
+def calc_atr(
+    highs: deque[float], lows: deque[float], _closes: deque[float], period: int = 14
+) -> float:
     if len(highs) < period:
         return (highs[-1] - lows[-1]) if highs and lows else 0.0
     trs = [highs[i] - lows[i] for i in range(-period, 0)]

@@ -4,6 +4,8 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from typing import Any
+
 from chart.models.chart_viewport import ChartViewport
 from market.models.bar import Bar
 from PySide6.QtWidgets import QApplication
@@ -150,3 +152,33 @@ def test_validate_form():
         commission_pct=0.03,
     )
     assert any("Start date" in e for e in validate_backtest_form(bad, "TEST", {"s"}))
+
+
+def _form(**overrides: Any) -> BacktestForm:
+    values: dict[str, Any] = {
+        "strategy_id": "s",
+        "timeframe": "15m",
+        "start_date": "2026-01-01",
+        "end_date": "2026-01-10",
+        "initial_capital": 1_000_000,
+        "slippage_pct": 0.02,
+        "commission_pct": 0.03,
+    }
+    values.update(overrides)
+    return BacktestForm(**values)
+
+
+def test_max_position_size_validation():
+    assert validate_backtest_form(_form(), "TEST", {"s"}) == []
+    assert validate_backtest_form(_form(max_position_size=500_000), "TEST", {"s"}) == []
+    assert validate_backtest_form(_form(max_position_size=1_000_000), "TEST", {"s"}) == []
+    assert any(
+        "positive" in e for e in validate_backtest_form(_form(max_position_size=0), "TEST", {"s"})
+    )
+    assert any(
+        "positive" in e for e in validate_backtest_form(_form(max_position_size=-5), "TEST", {"s"})
+    )
+    assert any(
+        "exceed" in e
+        for e in validate_backtest_form(_form(max_position_size=2_000_000), "TEST", {"s"})
+    )

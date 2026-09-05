@@ -28,8 +28,10 @@ PARTS = (
     "03_market/market/tests",
     *sorted(glob.glob("04_chart/chart/tests/test_*.py")),
     "05_strategy/strategy/tests",
+    "05_strategy/strategy/research/tests",
     "06_backtest/backtest/tests",
     "scripts/forensics/tests",
+    "scripts/tests",
 )
 
 

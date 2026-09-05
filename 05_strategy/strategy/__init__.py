@@ -9,6 +9,7 @@ from strategy.events.strategies_listed import StrategiesListed
 from strategy.events.strategy_selected import StrategySelected
 from strategy.manifest import strategy_manifest
 from strategy.models.definition import StrategyDefinition
+from strategy.models.form import BacktestForm
 from strategy.models.parameters import (
     ParameterError,
     ParameterSpec,
@@ -17,12 +18,14 @@ from strategy.models.parameters import (
 from strategy.models.signal import Signal, SignalKind
 from strategy.models.state import StrategyState
 from strategy.registry import StrategyRegistry, StrategyRegistryError
+from strategy.research.dataset import ResearchDataset
 from strategy.runtime import BarView, StrategyLogic, StrategyRuntime
 
 __all__ = [
     "StrategyRegistry",
     "StrategyRegistryError",
     "StrategyDefinition",
+    "BacktestForm",
     "StrategyParameters",
     "ParameterSpec",
     "ParameterError",
@@ -32,6 +35,7 @@ __all__ = [
     "StrategyRuntime",
     "StrategyLogic",
     "BarView",
+    "ResearchDataset",
     "strategy_manifest",
     "StrategiesListed",
     "StrategySelected",

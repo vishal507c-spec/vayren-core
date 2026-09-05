@@ -2,6 +2,118 @@
 
 **Nya entry hamesha upar likho.**
 
+## 2026-09-05 - AEOS Phase 5 (action timing: bracketing FALSIFIED, validation medians strengthened, per-test ~25ms)
+
+**Kya hua:** Per-action external bracketing banao → test karo → falsify karo. 2 calibration brackets (76s aur 40s, sub-second actions ke around) prove karte hain: inter-call agent latency floor ~tens-of-seconds hai, isliye interactive READ/EDIT/SEARCH ko externally time karna impossible hai. Negative result honestly report, koi fake precision nahi.
+**Method:** Temp `act.py` (repo me nahi) + `benchmark.py record-action` + scoreboard "Action timing" section (upper-bound bias documented). Bracket overhead calls ke bahar rakha; phir bhi gap me agent inference dominate karta hai.
+**Jo measurable hai:** validation replays (7 tasks, sab first-try pass — medians updated: SMALL 19.8→~17, UI 17.6→~19, STRATEGY 15.1→~16, BACKTEST 21.6→~23, REFACTOR 43.5→~35, ARCH 44.7→~35, MICRO 3.9→~5; aggregate median ~2.34×) + per-test durations (107 tests / 2.69s, slowest 0.22s, avg ~25ms → suite overhead dominate karta hai, test count nahi).
+**Dominant consumer:** clocked quantities me pytest process (~60-82s); interactive actions ka time floor ke neeche unobservable hai — counts (edits 55, retrieval 45) hi ekmatra signal hain.
+**Repetition:** is turn me 1 failed edit (benchmark.py header clobber — turant repair + verify), 0 validation failures, 0 retries.
+**Utilization:** 91 UNCHANGED. **Optimization:** koi nahi (koi candidate §18 bar pass nahi karta).
+
+## 2026-09-05 - AEOS Phase 4 (agent-work breakdown: 175 ops counted, UNKNOWN median 90.5%, no blind optimization)
+
+**Kya hua:** 8 corpus tasks ka transcript-forensics: har tool call count kiya (R/S/E/V/D/P), durations sirf clocked validation ke. Koi phase duration estimate nahi — sab NOT MEASURED + UNKNOWN.
+**Breakdown (ops, 175 total):** reads 17 · searches 28 · edits 55 · validation-runs 30 · debug-runs 13 · plan/meta 32. UNKNOWN wall share: 85.7–98.3%, median 90.5% (BACKTEST 97.1% me interruption idle included).
+**Repetition (counted):** abort-retry validation runs 7 (har task me 1, pre-fix era) · failed-edit retries 3 (oldString mismatch — re-read discipline gap) · post-validation fix edits 5 · probe/synthetic proofs 2.
+**Dominant bottleneck:** OTHER (unpartitioned agent work) — measured durations me validation sirf ~1.5–14%; op counts me edits (31%) + context retrieval (26%) sabse bade. UNDERSTAND/SEARCH/PLAN/IMPLEMENT ko duration me alag karna abhi impossible hai (per-action clock nahi) — isliye koi phase-optimizer §18 bar pass nahi karta.
+**Capability underuse:** koi material nahi mila — planner 8/8, precedents reuse, failure-pattern triage sahi tha (defer-to-investigation). Gap sirf forensics mark discipline hai (process, zero code).
+**Utilization:** 91 UNCHANGED (nayi capability ka evidence nahi; instrumentation process hai).
+**Harness:** `record`/`phases` + scoreboard "Agent-work breakdown" section (append-only backfill, baseline untouched).
+
+## 2026-09-05 - AEOS Phase 3 (BEFORE→AFTER: validation speedup 2.37× median, end-to-end honestly NOT MEASURED)
+
+**Kya hua:** Same-task validation replays (identical recorded commands, n=1-4 by cost) — median validation speedup **2.37×**, mean 2.60×, **540s saved** across 10 replayed tasks. End-to-end task repeats deliberately NOT faked (re-doing known solutions = contaminated theater).
+
+**Per-task BEFORE→AFTER (validation_s):** BUGFIX 26.1→14.1 (1.85×) · MICRO 6.5→3.9 (1.69×) · STRATEGY 54.5→15.1 (3.61×) · BACKTEST 53.5→21.6 (2.48×) · SMALL 85.5→19.8 (4.33×) · UI 73.2→17.6 (4.15×) · REFACTOR 44.2→43.5 (1.01×) · ARCH 67.0→44.7 (1.50×) · MIGRATE 3.4→1.5 (2.27×) · QT-FIX 456.5→148.6 (3.07×, full+partitions). Sab replay first-try pass (Qt fix dividend).
+** Biggest improvement:** SMALL 4.33×. **Regression:** none (min 1.01× REFACTOR — uska BEFORE already clean tha, retry-cost hi nahi tha).
+**Bottleneck (measured):** validation wall ka sirf ~1.5–14% (median ~5.5%) hai — dominant cost agent work (unpartitioned) hai. Agla target wahi hai, par uske liye pehle phase-discipline (forensics marks) chahiye — is turn me implement karne layak koi code optimization §18 bar pass nahi karta (xdist = new dep + Qt risk → reject; parallel validation 0.9× already rejected).
+**Human:** 0 interventions (BEFORE ratio ke liye baseline nahi — NOT MEASURED, absolute 0 report).
+**Utilization:** 89 → 91 (Understanding + Validation to 10 on bisection-proof + replay evidence; Context/Tools capped).
+
+## 2026-09-05 - AEOS-X Phase 2 (corpus executed, Qt root-cause fixed, velocity loop live)
+
+**Kya hua:** 10 me se 9 corpus tasks execute + record kiye (1 obsolete nikla — evidence ke saath), Qt teardown abort ka ROOT CAUSE establish + fix, impact-first validation automate, replay + scoreboard live. Koi fake speedup nahi.
+
+**Corpus execution (wall-clock measured via harness begin/record):**
+- MICRO (validator file:line:stmt detail, synthetic probe proof) — wall 384s, validation 6.5s
+- SMALL (`vayren --describe`, snapshot-render pin) — wall 1282s, validation 85.5s
+- UI (watchlist filter, setRowHidden, membership untouched) — wall 960s, validation 73.2s
+- BUGFIX (setTextAlignment deprecation, warning gone) — wall 229s, validation 26.1s
+- STRATEGY (sma min_volume, parity proven) — wall 382s, validation 54.5s
+- BACKTEST (BacktestConfig.max_position_size + form validation) — wall 1844s (interruption idle included), validation 53.5s
+- REFACTOR (14 files public-surface imports) — wall 1028s, validation 44.2s
+- ARCH (BacktestForm+ResearchDataset exported; loader/lineage exceptions contracts me documented) — wall 538s, validation 67s
+- MIGRATE — OBSOLETE: KITE_INTERVAL_IDS pehle se adapter me hai, settings canonical-only (21 tests se verified, spec marked OBSOLETE, fake migration nahi kiya)
+- Har task: impact-plan validation, 0 test failures, 12/12 success. Pehle-round aborts sab Qt flake the (neeche fix).
+
+**Qt teardown — ROOT CAUSE ESTABLISHED + FIXED (Temp probes, repo untouched by probes):**
+- A (no teardown) → abort; B (workers+windows) → clean; B1 (workers only) → clean; B2 (windows only) → abort; C1 gc-scan me BacktestWorker RUNNING mila.
+- Bisection: chart-alone clean, non-Qt remainder clean, 00_app me sirf test_smoke + test_runtime_integration abort karte hain (Bootstrap workers join kabhi hote nahi the).
+- Fix (test-only, 29 lines): `00_app/app/tests/conftest.py` me autouse fixture — har test ke baad live QThreads ka idempotent `shutdown()`. Full suite 925 passed RC=0 (pehli baar), `run_tests.py` 25/25 (pehle 23/24).
+
+**Automation (highest-ROI first, measured):**
+- `benchmark.py impact` — changed files → level 0-4 plan (reverse-dep map, public-surface rules, scripts/config handling). Is mission me har task ne use kiya: impact median 53.5s vs full-suite baseline 81.8s = 1.5× operational speedup per cycle (correctness 12/12, failures sirf 2 intentional red-proofs).
+- `benchmark.py replay` — recorded validation re-run (BENCH-MICRO-01 replay pass 7.6s). RESET deliberately nahi (destructive).
+- `begin/record` wall-clock; pyright-include regression test; AGENTS.md fast-path bullet (pichhle turn).
+- Parallel validation probe: serial 18.8s vs parallel 20.4s (0.9×) — REJECTED with evidence (skew-dominated pairs me overhead > gain).
+
+**Score:** AI utilization 85 → 89 (evidence-backed; Context/Tools capped — no byte API, PS quoting stumbles; 95 NOT claimed).
+**Validation:** ruff 0, format clean, pyright 0 full-scope, validators pass, pytest 925 RC=0, run_tests 25/25.
+
+## 2026-09-05 - AEOS Velocity Baseline + Pyright Closure (23→0, benchmark harness live)
+
+**Kya hua:** "Validated" se "measurably faster + continuously benchmarkable" tak — pehla real baseline, pyright scope closure, measurement harness, velocity scoreboard. Koi 10× claim nahi — sirf measured numbers.
+
+**Pyright closure (22 errors → 0, chart/strategy/backtest):**
+- Genuine bug (1): `TradeRecord` me `to_dict`/`from_dict` missing the — `ExecutionHistory` save/load har non-trivial history par `AttributeError` deta tha. Methods add kiye (established `asdict`+coercion pattern) + 4 roundtrip tests (`test_execution.py`: dict roundtrip, JSON roundtrip, save/load+dedup, empty-trades).
+- Incorrect call (1): `evolution.py` `BarView(params={})` → `StrategyParameters({})` (Mapping API identical, `.get` reads).
+- Missing narrowing (1): `compiler.py` `tuple(specs)` par `isinstance(specs, Iterable)` guard (same outcome, no exception churn).
+- Optional narrowing (2+4): `sma.py` prev locals + single None-check (set-together invariant preserved); `optimizer.py` `runner._registry` assert-local (2 sites).
+- Signature widening (4): `validate_oos(list)` → `Sequence` (body read-only — slices/tuples ab valid, runtime identical).
+- Test typing (1+6): `test_runtime` int→float literals; `test_version_control` 6× assert-narrowing locals.
+- Koi suppression nahi (no new `type: ignore`/`noqa` for typing), koi behavior change nahi. Phir `pyright.include` me 3 dirs add — gate ab typecheck enforce karta hai (dobara rot nahi hoga).
+
+**Benchmark system (4 files, koi naya dir nahi):**
+- `scripts/benchmark_corpus.md` — protocol (cold/warm, n≥3, median/p95/min/max, NOT MEASURED rule) + 10 real specs (backlog-grounded: `--describe` CLI, watchlist filter, setTextAlignment warning, SMA param, BacktestConfig field, public-surface imports, Kite interval migration...).
+- `scripts/benchmark.py` (stdlib) — `gate` (timed validation steps, cold-labeled), `record` (task sample + auto git stat), `scoreboard` (regenerates `scripts/benchmark_scoreboard.md` from `scripts/benchmark_runs.jsonl` — numbers kabhi hand-edit nahi).
+- BENCH-TEST-01 executed: gate-coverage regression test (`scripts/tests/test_gate_coverage.py`) — red state demonstrate kiya (2 failing runs), phir testpaths+PARTS wire karke green. Ye test pichhle mission ka blind spot dobara hone nahi dega.
+- AGENTS.md me 1-line fast-path bullet (impact-first ~5s, phir full gate ~105s — measured).
+
+**Measured gate baseline (n=3, harness):** ruff 0.07s / format 0.07s / pyright ~23s / pytest ~82s median / validators ~0.1s+~1.5s. Full suite 914 passed.
+**Known flake (measured, pre-existing):** full-suite process 9 me se 7 RC-captured runs me tests-pass ke BAAD abort karta hai (Qt teardown, rc=-1073740791; clean HEAD par prove). Harness isko `flake-teardown` tri-state me report karta hai — pass ki tarah mask nahi, failure ki tarah misreport nahi. CI (`run_tests.py`) isi wajah se 23/24 dikhata hai. Root-cause fix (Qt lifecycle) dedicated task hai — is mission me nahi (risk > scope).
+**Samples:** AEOS-PYRIGHT-01 (refactor, 10f +265/-50, 911 tests, 0 failures, 2 repairs, wall NOT MEASURED) + BENCH-TEST-01 (test, 3f +95/-0, wall NOT MEASURED). Baaki 8 corpus tasks: specs ready, baselines NOT MEASURED (future runs harness se record honge).
+**Validation:** ruff 0, format clean, pyright 0 (full scope), structure 7 domains, imports 0, pytest 914 passed (impact-first 102 + full).
+
+## 2026-09-05 - Validation Gate Restoration (strategy/backtest wired in, layering fixed)
+
+**Kya hua:** `make check` ka gate 05_strategy/06_backtest ko silently skip karta tha — 92 tests kabhi run nahi hote the, validators unhe enforce nahi karte the, ruff me 285 errors the (gate RED). Ab gate poora green: **907 tests PASS** (809 + 92 restored + 6 naye), ruff/format/pyright/validators PASS.
+
+**Root causes (measured):**
+- `pyproject.testpaths` me `05_strategy/.../tests`, `.../research/tests`, `06_backtest/.../tests` missing → default `pytest`/`make test`/CI 92 tests skip karte the. `scripts/run_tests.py` me bhi `research/tests` partition missing tha (28 tests).
+- `validate_structure.py` (5 domains) + `validate_imports.py` (5 domains) strategy/backtest ko silently ignore karte the.
+- `pyright.include` me `04_chart/05_strategy/06_backtest` missing (23 errors wahan — deliberately deferred, neeche dekho).
+- CI (`.github/workflows/ci.yml`) sirf `ruff check` + `pytest` chalata tha — format/typecheck/validators/partitioned run missing.
+
+**Enforcement ne 4 real violations pakde (sab fix kiye, behavior preserved):**
+- `strategy/research/dataset.py` → `backtest.execution` (sirf annotation) → `TYPE_CHECKING` move.
+- `backtest/ui/overlay.py` → `chart.models.chart_viewport` (sirf annotation; runtime duck-typed, chart ka `ChartOverlay` Protocol already structural match) → `TYPE_CHECKING` move.
+- `strategy/research/robustness.py` → `backtest.runner`/`backtest.models.config` (REAL runtime coupling, lazy imports cycle-risk chhupa rahe the) → `_run_variant_backtest` ko `backtest/runner.py` me `run_variant_backtest()` banakar move kiya (verbatim logic) + `run_parameter_sensitivity(..., variant_executor=None)` injection. Zero in-repo callers execution path use karte the → sab current paths byte-identical.
+- Move ke dauran 2 latent bugs mile: `execution.py:314` me `StrategyParameters` import missing (F821 — NameError path) + moved fallback me non-existent `TestStrategy` symbol ka import (guaranteed ImportError) → dono fix.
+- `validate_imports.py` ab `if TYPE_CHECKING:` blocks exempt karta hai (runtime graph enforce hota hai; static-only coupling violation nahi) + strategy/backtest chapters/deps (`strategy→core,market`; `backtest→core,market,strategy`).
+
+**Lint repair (76 errors in 05_strategy/06_backtest + 209 in 99_archive):**
+- `99_archive` ko ruff `extend-exclude` me dala (legacy snapshot — ship/test/validate nahi hota; baaki saare tools pehle se ignore karte hain).
+- Baaki: auto-fix + format, phir manual (SIM102 combine, SIM105 suppress, ARG noqa/underscore, E501 rewrap). Embedded strategy-source strings (exec payloads, hash-sensitive) wali E501 lines ke liye precedented per-file-ignores.
+- Pre-existing format drift bhi fix: `04_chart/chart/session/session_store.py`, `scripts/assets/make_icon.py` (format-only).
+
+**Validation (evidence):** `ruff check` 0, `ruff format --check` clean, `pyright` 0 errors, `pytest` **907 passed/54.7s**, validators PASS (structure 7 domains, imports 0 errors), `run_tests.py` 23/24 (00_app partition: 79 passed + pre-existing Qt teardown abort rc=3221226505 — clean HEAD par stash karke prove kiya, pre-existing hai).
+- Naye tests (6): `strategy/tests/test_robustness.py` (3: structured path, kwargs compat, executor injection) + `backtest/tests/test_variant_backtest.py` (3: config/trades wiring, TestStrategy fallback, empty result).
+
+**Deferred (measured, NOT fixed):** pyright include me chart/strategy/backtest add nahi kiya — wahan 23 errors hain (Optional-narrowing, TradeRecord to_dict/from_dict, test type mismatches). Type-suppression ya risky refactor ke bajaye honestly deferred; koi gate toda nahi.
+
+**Files:** pyproject.toml, Makefile (coverage), ci.yml (poora gate mirror), run_tests.py (+research partition), validators, scripts/README, robustness.py, runner.py (+`run_variant_backtest` export), dataset.py, overlay.py, execution.py (F821), lint fixes; contracts (`module_contracts.md` §4/§5.6/§5.7/§13) + `architecture.md` §7 updated.
+
 ## 2026-09-04 - Strategy Lab Full UI Redesign (neuroscience-driven density)
 
 **Kya hua:** Poora Strategy Lab / Backtest experience restructure — config, RUN, results, ranking ab ek compact flow me (koi feature remove nahi, koi logic change nahi).

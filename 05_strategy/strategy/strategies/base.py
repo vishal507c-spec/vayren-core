@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import deque
+from contextlib import suppress
 
 from strategy.models.parameters import StrategyParameters
 from strategy.models.signal import Signal, SignalKind
@@ -136,10 +137,8 @@ class PythonStrategy(StrategyLogic):
         package it into ChartSeries and the chart renderer can draw
         persistent lines across the relevant bars.
         """
-        try:
+        with suppress(Exception):
             self._plot_series.setdefault(title, {})[self._current_bar_index] = float(value)
-        except Exception:
-            pass
 
     def get_chart_series(self) -> dict[str, dict[int, float]]:
         """Return chart plot series in legacy title-keyed format."""

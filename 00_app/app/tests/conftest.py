@@ -114,6 +114,35 @@ def qt_app() -> QApplication:
     return app
 
 
+@pytest.fixture(autouse=True)
+def _shutdown_qt_workers():
+    """Join live QThread workers after every app test.
+
+    Root cause of the pre-existing post-pass teardown abort: Bootstrap starts
+    worker threads (BacktestWorker runs its loop immediately) that outlive the
+    test; at interpreter exit the live QThread aborts the process. Both
+    workers expose an idempotent ``shutdown()``; call it on every still
+    running QThread so the process exits cleanly. Proven by Temp probes:
+    no-teardown → abort, workers-shutdown-only → clean, windows-only → abort.
+    """
+    yield
+    import gc
+
+    from PySide6.QtCore import QThread
+
+    for obj in gc.get_objects():
+        if isinstance(obj, QThread) and obj.isRunning():
+            shutdown = getattr(obj, "shutdown", None)
+            try:
+                if callable(shutdown):
+                    shutdown()
+                else:
+                    obj.quit()
+                    obj.wait(3000)
+            except Exception:
+                pass
+
+
 def _load_real_font() -> None:
     """Load a real Windows TTF so offscreen metrics match production fonts.
 

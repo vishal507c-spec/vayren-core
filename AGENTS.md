@@ -122,6 +122,8 @@ TODO/FIXME / dead code / mock logic / sample trading logic  ❌
 □ Coding-time forensics: `python scripts/forensics/__main__.py mark --phase PHASE --action ...` evidence do,
   `run --phase PHASE -- <cmd>` lambi commands wrap karo; task ka session apne aap open/close hota hai
 □ make check chalao (lint + format + typecheck + test + validators)
+  ↳ Fast path (measured): iterate par pehle impact-scope tests (`pytest <touched-module>/tests`, ~5s),
+    phir full gate (~105s: pytest ~82s + pyright ~23s). Benchmarks: `python scripts/benchmark.py gate|record|scoreboard`.
 □ Task end par LAST command: `python scripts/forensics/__main__.py report --name "..."` (report auto-append bhi hota hai next task par)
 □ 90_brain/development_log.md aur 90_brain/ai_memory.md update karo
 ```

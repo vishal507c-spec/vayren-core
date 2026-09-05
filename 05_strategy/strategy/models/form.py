@@ -18,6 +18,7 @@ class BacktestForm:
         initial_capital: Starting capital in currency units.
         slippage_pct: Slippage applied per fill, in percent.
         commission_pct: Commission applied per fill, in percent.
+        max_position_size: Optional cap per position (None = uncapped).
     """
 
     strategy_id: str
@@ -27,6 +28,7 @@ class BacktestForm:
     initial_capital: float
     slippage_pct: float
     commission_pct: float
+    max_position_size: float | None = None
 
 
 @dataclass(frozen=True)

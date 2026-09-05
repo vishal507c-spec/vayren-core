@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMenu,
     QToolButton,
     QVBoxLayout,
@@ -58,6 +59,12 @@ class WatchlistWidget(QWidget):
         layout.addWidget(self._header_separator)
         layout.addWidget(self._sort_row)
         layout.addWidget(self._sort_separator)
+
+        self._filter_edit = QLineEdit(self)
+        self._filter_edit.setPlaceholderText("Filter symbols…")
+        self._filter_edit.setClearButtonEnabled(True)
+        self._filter_edit.textChanged.connect(self._apply_filter)
+        layout.addWidget(self._filter_edit)
 
         self._list = SymbolListWidget(self)
         layout.addWidget(self._list, 1)
@@ -244,3 +251,20 @@ class WatchlistWidget(QWidget):
         ordered = sorted(members, reverse=not self._sort_ascending)
         self._list.set_symbols(tuple(ordered))
         self._list.set_quotes(self._quotes)
+        self._apply_filter(self._filter_edit.text())
+
+    @property
+    def filter_text(self) -> str:
+        """Current filter text (empty = no filtering)."""
+        return self._filter_edit.text()
+
+    def set_filter(self, text: str) -> None:
+        """Set the filter text (filters display only, never membership)."""
+        self._filter_edit.setText(text)
+
+    def _apply_filter(self, text: str) -> None:
+        """Hide rows not matching the filter; membership/selection untouched."""
+        needle = text.strip().lower()
+        for i in range(self._list.count()):
+            item = self._list.item(i)
+            self._list.setRowHidden(i, bool(needle) and needle not in item.text().lower())

@@ -10,7 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
-from market.models.bar import Bar
+from market import Bar
 
 from strategy.models.parameters import StrategyParameters
 from strategy.models.signal import Signal

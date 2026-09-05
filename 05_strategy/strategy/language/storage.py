@@ -1,11 +1,10 @@
 """Persistence for strategies — Python-native."""
 
-
-
 from __future__ import annotations
 
 import json
 import uuid
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -30,9 +29,18 @@ class Strategy(PythonStrategy):
     def param_specs():
         from strategy.models.parameters import ParameterSpec
         return (
-            ParameterSpec(key="c1_thresh", label="C1 Range", default=1.25, minimum=0.1, maximum=5.0, decimals=2),
-            ParameterSpec(key="c4_thresh", label="C4 Range", default=0.56, minimum=0.1, maximum=5.0, decimals=2),
-            ParameterSpec(key="rsi_thr", label="RSI Threshold", default=65, minimum=30, maximum=90, decimals=0),
+            ParameterSpec(
+                key="c1_thresh", label="C1 Range", default=1.25, minimum=0.1, maximum=5.0,
+                decimals=2,
+            ),
+            ParameterSpec(
+                key="c4_thresh", label="C4 Range", default=0.56, minimum=0.1, maximum=5.0,
+                decimals=2,
+            ),
+            ParameterSpec(
+                key="rsi_thr", label="RSI Threshold", default=65, minimum=30, maximum=90,
+                decimals=0,
+            ),
         )
     def on_bar_logic(self, view):
         bar = view.bar
@@ -66,7 +74,11 @@ def strategy_dir(data_dir: Path | str | None) -> Path:
             d.mkdir(parents=True, exist_ok=True)
             return d
         try:
-            if canonical in p.parents or p == canonical or str(p).lower().startswith(str(canonical).lower()):
+            if (
+                canonical in p.parents
+                or p == canonical
+                or str(p).lower().startswith(str(canonical).lower())
+            ):
                 canonical.mkdir(parents=True, exist_ok=True)
                 return canonical
         except Exception:
@@ -138,9 +150,18 @@ def save_strategy(code: str, name: str = DEFAULT_NAME, data_dir: Path | str | No
     now = _now_iso()
     existing = _read_record(p) if p.exists() else None
     if existing is not None:
-        record = StrategyRecord(id=existing.id, name=name, code=code, created_at=existing.created_at or now, updated_at=now, version=existing.version)
+        record = StrategyRecord(
+            id=existing.id,
+            name=name,
+            code=code,
+            created_at=existing.created_at or now,
+            updated_at=now,
+            version=existing.version,
+        )
     else:
-        record = StrategyRecord(id=str(uuid.uuid4()), name=name, code=code, created_at=now, updated_at=now)
+        record = StrategyRecord(
+            id=str(uuid.uuid4()), name=name, code=code, created_at=now, updated_at=now
+        )
     return _write_record(p, record)
 
 
@@ -198,7 +219,14 @@ def rename_strategy(old_name: str, new_name: str, data_dir: Path | str | None = 
         raise FileExistsError(f"strategy already exists: {new_name}")
     record = _read_record(src)
     if record is not None:
-        updated = StrategyRecord(id=record.id, name=new_name, code=record.code, created_at=record.created_at or _now_iso(), updated_at=_now_iso(), version=record.version)
+        updated = StrategyRecord(
+            id=record.id,
+            name=new_name,
+            code=record.code,
+            created_at=record.created_at or _now_iso(),
+            updated_at=_now_iso(),
+            version=record.version,
+        )
         _write_record(dst, updated)
         src.unlink()
         return dst
@@ -229,14 +257,21 @@ def list_strategy_records(data_dir: Path | str | None = None) -> list[StrategyRe
     return sorted(records, key=lambda r: r.name.lower())
 
 
-def get_strategy_by_id(strategy_id: str, data_dir: Path | str | None = None) -> StrategyRecord | None:
+def get_strategy_by_id(
+    strategy_id: str, data_dir: Path | str | None = None
+) -> StrategyRecord | None:
     for rec in list_strategy_records(data_dir):
         if rec.id == strategy_id:
             return rec
     return None
 
 
-def update_strategy(strategy_id: str, new_code: str | None = None, new_name: str | None = None, data_dir: Path | str | None = None) -> StrategyRecord | None:
+def update_strategy(
+    strategy_id: str,
+    new_code: str | None = None,
+    new_name: str | None = None,
+    data_dir: Path | str | None = None,
+) -> StrategyRecord | None:
     for rec in list_strategy_records(data_dir):
         if rec.id == strategy_id:
             code = new_code if new_code is not None else rec.code
@@ -246,12 +281,20 @@ def update_strategy(strategy_id: str, new_code: str | None = None, new_name: str
                 new_path = strategy_path(name, data_dir)
                 if new_path.exists() and new_path != old_path:
                     raise FileExistsError(f"strategy already exists: {name}")
-                updated = StrategyRecord(id=rec.id, name=name, code=code, created_at=rec.created_at, updated_at=_now_iso())
+                updated = StrategyRecord(
+                    id=rec.id,
+                    name=name,
+                    code=code,
+                    created_at=rec.created_at,
+                    updated_at=_now_iso(),
+                )
                 _write_record(new_path, updated)
                 if old_path != new_path:
                     old_path.unlink(missing_ok=True)
                 return updated
-            updated = StrategyRecord(id=rec.id, name=name, code=code, created_at=rec.created_at, updated_at=_now_iso())
+            updated = StrategyRecord(
+                id=rec.id, name=name, code=code, created_at=rec.created_at, updated_at=_now_iso()
+            )
             _write_record(strategy_path(name, data_dir), updated)
             return updated
     return None
@@ -262,7 +305,9 @@ def create_strategy(name: str, code: str, data_dir: Path | str | None = None) ->
     if p.exists():
         raise FileExistsError(f"strategy already exists: {name}")
     now = _now_iso()
-    record = StrategyRecord(id=str(uuid.uuid4()), name=name, code=code, created_at=now, updated_at=now)
+    record = StrategyRecord(
+        id=str(uuid.uuid4()), name=name, code=code, created_at=now, updated_at=now
+    )
     _write_record(p, record)
     return record
 
@@ -341,22 +386,30 @@ class Strategy(PythonStrategy):
 """
     save_strategy(sma_code, "SMA Crossover", data_dir)
     try:
-        from strategy.version import create_version
         import hashlib
+
+        from strategy.version import create_version
+
         for name in [LEGACY_OBR_NAME, "OBR", "SMA Crossover"]:
             rec = load_strategy_record(name, data_dir)
             if rec is None:
                 continue
             params = {}
-            try:
+            with suppress(Exception):
                 from strategy.language.compiler import compile_strategy
+
                 compiled = compile_strategy(rec.code)
                 params = compiled.param_defaults
-            except Exception:
-                pass
-            try:
-                create_version(rec.id, rec.code, ir_snapshot=None, ir_hash=hashlib.sha256(rec.code.encode()).hexdigest(), ir_version=1, parameters=params, data_dir=data_dir, metadata={"name": name, "bootstrap": True})
-            except Exception:
-                pass
+            with suppress(Exception):
+                create_version(
+                    rec.id,
+                    rec.code,
+                    ir_snapshot=None,
+                    ir_hash=hashlib.sha256(rec.code.encode()).hexdigest(),
+                    ir_version=1,
+                    parameters=params,
+                    data_dir=data_dir,
+                    metadata={"name": name, "bootstrap": True},
+                )
     except Exception:
         pass

@@ -15,6 +15,8 @@ class BacktestConfig:
         initial_capital: Starting account equity.
         slippage_pct: Slippage per fill, in percent (0-5).
         commission_pct: Commission per fill, in percent (0-5).
+        max_position_size: Optional cap per position in currency units
+            (None = uncapped, preserves previous behavior).
     """
 
     symbol: str
@@ -24,3 +26,4 @@ class BacktestConfig:
     initial_capital: float = 1_000_000.0
     slippage_pct: float = 0.02
     commission_pct: float = 0.03
+    max_position_size: float | None = None

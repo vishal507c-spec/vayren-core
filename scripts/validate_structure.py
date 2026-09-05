@@ -104,6 +104,33 @@ DOMAIN_STRUCTURE: dict[str, list[str]] = {
         "events/__init__.py",
         "tests/__init__.py",
     ],
+    "strategy": [
+        "__init__.py",
+        "README.md",
+        "manifest.py",
+        "registry.py",
+        "runtime.py",
+        "version.py",
+        "models/__init__.py",
+        "events/__init__.py",
+        "research/__init__.py",
+        "strategies/__init__.py",
+        "ui/__init__.py",
+        "tests/__init__.py",
+    ],
+    "backtest": [
+        "__init__.py",
+        "README.md",
+        "manifest.py",
+        "runner.py",
+        "worker.py",
+        "execution.py",
+        "models/__init__.py",
+        "events/__init__.py",
+        "engine/__init__.py",
+        "ui/__init__.py",
+        "tests/__init__.py",
+    ],
 }
 
 # Map domain names to their numbered chapter folders
@@ -113,6 +140,8 @@ DOMAIN_CHAPTERS: dict[str, str] = {
     "market": "03_market",
     "chart": "04_chart",
     "data": "02_data",
+    "strategy": "05_strategy",
+    "backtest": "06_backtest",
 }
 
 

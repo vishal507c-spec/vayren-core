@@ -11,5 +11,10 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
+      # Mirror `make check`: lint + format + typecheck + tests + validators.
       - run: ruff check .
-      - run: pytest
+      - run: ruff format --check .
+      - run: pyright
+      - run: python scripts/run_tests.py
+      - run: python scripts/validate_structure.py
+      - run: python scripts/validate_imports.py

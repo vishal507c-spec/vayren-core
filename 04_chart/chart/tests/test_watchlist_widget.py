@@ -279,3 +279,43 @@ def test_tool_button_emits_reset_requested() -> None:
     widget.reset_requested.connect(lambda: captured.append(True))
     widget._tool_button.click()
     assert len(captured) == 1
+
+
+# -- filter ---------------------------------------------------------------
+
+
+def test_filter_hides_non_matching_rows_only() -> None:
+    widget = _widget()
+    widget.set_filter("tcs")
+    visible = [
+        widget._list.item(i).text()
+        for i in range(widget._list.count())
+        if not widget._list.isRowHidden(i)
+    ]
+    assert visible == ["TCS"]
+
+
+def test_filter_clear_restores_all_rows_and_selection() -> None:
+    widget = _widget()
+    widget.select_symbol("SPY")
+    widget.set_filter("zzz")
+    assert widget.current_symbol == "SPY"
+    widget.set_filter("")
+    assert widget.symbols == tuple(sorted(_SYMBOLS))
+    assert widget.current_symbol == "SPY"
+
+
+def test_filter_survives_refresh_and_never_mutates_membership() -> None:
+    widget = _widget()
+    before = widget.symbols
+    widget.set_filter("o")
+    widget.sort_by_name(False)
+    assert widget.symbols == before[::-1]
+    assert widget.filter_text == "o"
+    hidden = [
+        widget._list.item(i).text()
+        for i in range(widget._list.count())
+        if widget._list.isRowHidden(i)
+    ]
+    assert "NETWEB" in hidden
+    assert "VOLTAMP" not in hidden

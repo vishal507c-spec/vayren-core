@@ -5,8 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from itertools import product
 
-from strategy.models.definition import StrategyDefinition
-from strategy.models.parameters import StrategyParameters
+from strategy import StrategyDefinition, StrategyParameters
 
 from backtest.models.config import BacktestConfig
 from backtest.models.result import StrategyResult
@@ -98,13 +97,15 @@ def optimize(
         try:
             new_def = base_definition.with_params(StrategyParameters(merged))
             # temporary registry clone for this candidate
-            from strategy.registry import StrategyRegistry
+            from strategy import StrategyRegistry
 
             tmp_reg = StrategyRegistry()
+            backtest_registry = runner._registry
+            assert backtest_registry is not None
             tmp_reg.register_kind(
                 base_definition.kind,
-                runner._registry.factory(base_definition.kind),
-                runner._registry.param_specs(base_definition.kind),
+                backtest_registry.factory(base_definition.kind),
+                backtest_registry.param_specs(base_definition.kind),
             )  # type: ignore[attr-defined]
             tmp_reg.register_definition(new_def)
             tmp_runner = BacktestRunner(runner._repository, tmp_reg)  # type: ignore[attr-defined]
@@ -161,15 +162,16 @@ def validate(
     """Run candidate on train and test separately, detect overfit."""
     merged = dict(base_definition.params)
     merged.update(candidate_params)
-    from strategy.models.parameters import StrategyParameters
-    from strategy.registry import StrategyRegistry
+    from strategy import StrategyParameters, StrategyRegistry
 
     new_def = base_definition.with_params(StrategyParameters(merged))
     tmp_reg = StrategyRegistry()
+    backtest_registry = runner._registry
+    assert backtest_registry is not None
     tmp_reg.register_kind(
         base_definition.kind,
-        runner._registry.factory(base_definition.kind),
-        runner._registry.param_specs(base_definition.kind),
+        backtest_registry.factory(base_definition.kind),
+        backtest_registry.param_specs(base_definition.kind),
     )  # type: ignore[attr-defined]
     tmp_reg.register_definition(new_def)
     tmp_runner = BacktestRunner(runner._repository, tmp_reg)  # type: ignore[attr-defined]

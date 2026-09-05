@@ -24,12 +24,13 @@ from backtest.models import (
     StrategyResult,
     TradeRecord,
 )
-from backtest.runner import BacktestRunner
+from backtest.runner import BacktestRunner, run_variant_backtest
 from backtest.validation import validate_backtest_form
 from backtest.worker import BacktestWorker
 
 __all__ = [
     "BacktestRunner",
+    "run_variant_backtest",
     "BacktestWorker",
     "BacktestConfig",
     "BacktestResult",

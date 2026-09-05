@@ -13,6 +13,7 @@ import json
 import math
 import statistics
 import uuid
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field  # noqa: F401
 from datetime import datetime, timezone  # noqa: F401
 from typing import Any
@@ -337,8 +338,8 @@ def _profit_factor(pnls: list[float]) -> float | None:
 
 
 def validate_oos(
-    in_sample_trades: list[Any],
-    out_sample_trades: list[Any],
+    in_sample_trades: Sequence[Any],
+    out_sample_trades: Sequence[Any],
     min_oos_trades: int = 30,
 ) -> OOSResult:
     """Real OOS validation — compares IS vs OOS on independent metrics.

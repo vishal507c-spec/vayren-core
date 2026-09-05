@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from market.models.bar import Bar
+from market import Bar
 
 from backtest.models.config import BacktestConfig
 from backtest.models.trade import TradeRecord
@@ -146,7 +146,7 @@ def create_snapshot(
     strategy_id: str,
     version_id: str,
     source_hash: str,
-    ir: Any,  # Python-native: optional legacy IR, now unused
+    ir: Any,  # Python-native: optional legacy IR, now unused  # noqa: ARG001
     parameters: dict[str, float],
     config: BacktestConfig,
     data_dir: Path | str | None = None,  # noqa: ARG001
@@ -276,7 +276,7 @@ class ReplayResult:
 def replay_execution(
     history: ExecutionHistory,
     bars: tuple[Bar, ...],
-    ir: Any,  # Python-native: legacy param, not used
+    ir: Any,  # Python-native: legacy param, not used  # noqa: ARG001
 ) -> ReplayResult:
     """Deterministic replay: Python-native — verified by stored signals."""
     snap = history.snapshot
@@ -300,8 +300,7 @@ def replay_execution(
     seq = 0
 
     # Simulate bar processing to generate signals and events
-    from strategy.models.state import StrategyState
-    from strategy.runtime import BarView
+    from strategy import BarView, StrategyParameters, StrategyState
 
     # We need to reconstruct BarView sequence as original did: slice_bars already done, but we have bars  # noqa: E501
     # For replay, we use the same bars that were used originally (passed in)

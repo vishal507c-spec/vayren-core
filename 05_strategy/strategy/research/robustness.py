@@ -32,14 +32,21 @@ def run_parameter_sensitivity(
     *,
     repository=None,
     registry=None,
+    variant_executor=None,
 ) -> list[RobustnessResult]:
     """Generic parameter sensitivity — does not modify original strategy.
 
     Each variant creates a NEW execution context with its own execution_id
-    and modified parameters. If ``repository`` and ``registry`` are provided,
+    and modified parameters. If ``variant_executor`` is provided (a callable
+    ``(repository, registry, dataset, execution_id, variant_params)`` living
+    in the backtest layer, e.g. ``backtest.runner.run_variant_backtest``),
     a new backtest is executed for each variant and real TradeRecords are
-    used for metrics.  Otherwise the variant dataset is structured for later
+    used for metrics. Otherwise the variant dataset is structured for later
     execution (trades=() marks that a backtest must be run separately).
+
+    The executor lives in backtest so that strategy never imports backtest
+    (allowed graph: strategy → core, market only). ``repository``/``registry``
+    are forwarded to the executor unchanged.
     """
     results: list[RobustnessResult] = []
     baseline_analysis = analyze_dataset(dataset)
@@ -56,9 +63,9 @@ def run_parameter_sensitivity(
         variant_params = dict(dataset.parameters)
         variant_params[param_name] = val
 
-        if repository is not None and registry is not None:
+        if variant_executor is not None:
             # Execute a new backtest with the variant parameters.
-            variant_dataset = _run_variant_backtest(
+            variant_dataset = variant_executor(
                 repository, registry, dataset, variant_execution_id, variant_params
             )
         else:
@@ -146,70 +153,6 @@ def run_parameter_sensitivity(
             )
         )
     return results
-
-
-def _run_variant_backtest(
-    repository,
-    registry,
-    dataset: ResearchDataset,
-    execution_id: str,
-    variant_params: dict[str, float],
-) -> ResearchDataset:
-    """Run a single variant backtest and return a ResearchDataset with trades.
-
-    Uses the existing BacktestRunner pipeline with the given parameter variant.
-    """
-    from backtest.runner import BacktestRunner
-
-    # Build backtest config from the dataset's data identity
-    ident = dataset.data_identity
-    from backtest.models.config import BacktestConfig
-
-    config = BacktestConfig(
-        symbol=str(ident.get("symbol", "UNKNOWN")),
-        timeframe=str(ident.get("timeframe", "1D")),
-        start_date=str(ident.get("start_date", "2000-01-01")),
-        end_date=str(ident.get("end_date", "2025-12-31")),
-        slippage_pct=float(ident.get("slippage_pct", 0)),
-        commission_pct=float(ident.get("commission_pct", 0)),
-        initial_capital=float(getattr(dataset, "_initial_capital", 10000.0)),
-    )
-
-    # Get the strategy definition
-    try:
-        from strategy.registry import StrategyRegistry  # noqa: F401
-
-        definition = registry.get(str(dataset.strategy_id))
-    except Exception:
-        from strategy.tests.test_runtime import TestStrategy  # noqa: F401
-
-        definition = registry.get("TestStrategy")
-
-    runner = BacktestRunner(repository, registry)
-    result = runner.run(config, (str(definition.id),), on_progress=None)
-
-    # Collect trades from the result
-    all_trades: list = []
-    for sr in result.results:
-        all_trades.extend(list(sr.trades))
-
-    return ResearchDataset(
-        strategy_id=str(dataset.strategy_id),
-        version_id=str(dataset.version_id),
-        execution_ids=(execution_id,) + dataset.execution_ids,
-        trades=tuple(all_trades) if all_trades else (),
-        signals=dataset.signals,
-        parameters=variant_params,
-        data_identity=dataset.data_identity,
-        metadata={
-            "variant": dataset.metadata.get("variant", None),
-            "param": dataset.metadata.get("param", None),
-            "execution_id": execution_id,
-            "backtest_executed": True,
-            "strategy_id": str(dataset.strategy_id),
-            "version_id": str(dataset.version_id),
-        },
-    )
 
 
 def run_robustness(

@@ -237,7 +237,7 @@ class TradesView(QWidget):
             ]
             for col, value in enumerate(values):
                 item = QTableWidgetItem(value)
-                item.setTextAlignment(int(Qt.AlignmentFlag.AlignCenter))
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 if col == 7:
                     item.setForeground(QBrush(_BULL if trade.winning else _BEAR))
                 self._table.setItem(row, col, item)

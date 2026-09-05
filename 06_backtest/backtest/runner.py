@@ -13,9 +13,7 @@ from logging import getLogger
 from pathlib import Path
 from typing import Any
 
-from strategy.models.signal import SignalKind
-from strategy.models.state import StrategyState
-from strategy.runtime import BarView
+from strategy import BarView, SignalKind, StrategyState
 
 from backtest.engine.journal import TradeJournal
 from backtest.engine.metrics import compute_equity_curve, compute_metrics
@@ -155,8 +153,8 @@ class BacktestRunner:
 
         # Compile Python Strategy (only path, fail loudly)
         try:
+            from strategy import StrategyParameters
             from strategy.language import compile_strategy
-            from strategy.models.parameters import StrategyParameters
 
             compiled = compile_strategy(rec.code)
             # Python-native — owner-aware for chart lifecycle
@@ -185,7 +183,7 @@ class BacktestRunner:
 
             # Warmup: run VM for chart/indicator history only, skip trading
             if index < warmup:
-                from strategy.models.parameters import StrategyParameters as SP  # noqa: N817
+                from strategy import StrategyParameters as SP  # noqa: N817
 
                 view_warm = BarView(
                     bars=window,
@@ -321,11 +319,7 @@ class BacktestRunner:
                     owner_id, title = str(key[0]), str(key[1])
                 else:
                     owner_id, title = str(getattr(rec, "id", "")), str(key)
-                pts = tuple(
-                    (int(k), float(v))
-                    for k, v in sorted(values.items())
-                    if v is not None
-                )
+                pts = tuple((int(k), float(v)) for k, v in sorted(values.items()) if v is not None)
                 if not pts:
                     continue
                 meta = raw_meta.get(key, {}) if isinstance(key, tuple) else raw_meta.get(title, {})
@@ -503,3 +497,70 @@ class BacktestRunner:
             period_start=window[0].timestamp if window else None,
             period_end=window[-1].timestamp if window else None,
         )
+
+
+def run_variant_backtest(
+    repository,
+    registry,
+    dataset,
+    execution_id: str,
+    variant_params: dict[str, float],
+):
+    """Run a single parameter-variant backtest, return a ResearchDataset.
+
+    Moved here from ``strategy.research.robustness`` so that strategy never
+    imports backtest (allowed graph: backtest → strategy only). Research
+    passes this function as ``variant_executor`` to
+    ``run_parameter_sensitivity``. Logic is verbatim the moved helper.
+    """
+    from strategy import ResearchDataset
+
+    # Build backtest config from the dataset's data identity
+    ident = dataset.data_identity
+    config = BacktestConfig(
+        symbol=str(ident.get("symbol", "UNKNOWN")),
+        timeframe=str(ident.get("timeframe", "1D")),
+        start_date=str(ident.get("start_date", "2000-01-01")),
+        end_date=str(ident.get("end_date", "2025-12-31")),
+        slippage_pct=float(ident.get("slippage_pct", 0)),
+        commission_pct=float(ident.get("commission_pct", 0)),
+        initial_capital=float(getattr(dataset, "_initial_capital", 10000.0)),
+    )
+
+    # Get the strategy definition
+    try:
+        from strategy import StrategyRegistry  # noqa: F401
+
+        definition = registry.get(str(dataset.strategy_id))
+    except Exception:
+        # Fallback to the shared test-strategy key. (Note: there is no
+        # importable TestStrategy symbol — the registry itself must provide
+        # this key; a previous revision imported a non-existent name here,
+        # which masked the real error with an ImportError.)
+        definition = registry.get("TestStrategy")
+
+    runner = BacktestRunner(repository, registry)
+    result = runner.run(config, (str(definition.id),), on_progress=None)
+
+    # Collect trades from the result
+    all_trades: list = []
+    for sr in result.results:
+        all_trades.extend(list(sr.trades))
+
+    return ResearchDataset(
+        strategy_id=str(dataset.strategy_id),
+        version_id=str(dataset.version_id),
+        execution_ids=(execution_id,) + dataset.execution_ids,
+        trades=tuple(all_trades) if all_trades else (),
+        signals=dataset.signals,
+        parameters=variant_params,
+        data_identity=dataset.data_identity,
+        metadata={
+            "variant": dataset.metadata.get("variant", None),
+            "param": dataset.metadata.get("param", None),
+            "execution_id": execution_id,
+            "backtest_executed": True,
+            "strategy_id": str(dataset.strategy_id),
+            "version_id": str(dataset.version_id),
+        },
+    )

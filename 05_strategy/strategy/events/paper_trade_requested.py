@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from core.events.event import Event
+from core import Event
 
 
 @dataclass(frozen=True)

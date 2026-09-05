@@ -1,6 +1,6 @@
 """Request validation for the strategy-lab form."""
 
-from strategy.models.form import BacktestForm
+from strategy import BacktestForm
 
 
 def validate_backtest_form(
@@ -20,4 +20,9 @@ def validate_backtest_form(
         errors.append("Start date is after end date.")
     if form.initial_capital <= 0:
         errors.append("Initial capital must be positive.")
+    if form.max_position_size is not None:
+        if form.max_position_size <= 0:
+            errors.append("Max position size must be positive.")
+        elif form.max_position_size > form.initial_capital:
+            errors.append("Max position size cannot exceed initial capital.")
     return errors

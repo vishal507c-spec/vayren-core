@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
-from chart.models.chart_viewport import ChartViewport
+from typing import TYPE_CHECKING
+
 from PySide6.QtCore import QPointF as _QPointF
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen, QPolygonF
 
 from backtest.models.result import StrategyResult
 from backtest.models.trade import TradeRecord
+
+if TYPE_CHECKING:
+    # Annotation only (`from __future__ import annotations` is active).
+    # At runtime the viewport is duck-typed (chart_rect/first/last/
+    # price_low/price_high) against chart's ChartOverlay protocol, so there
+    # is no runtime backtest → chart dependency.
+    from chart.models.chart_viewport import ChartViewport
 
 _BULL = QColor("#26a69a")
 _BEAR = QColor("#ef5350")

@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from market.models.bar import Bar
+from market import Bar
 
 from strategy.language import compile_strategy
 from strategy.models.state import StrategyState
@@ -308,7 +308,9 @@ def approve_proposal(
             for i in range(30)
         )
         for idx in range(logic.warmup(), len(bars)):
-            view = BarView(bars=bars, index=idx, params={}, state=StrategyState())
+            view = BarView(
+                bars=bars, index=idx, params=StrategyParameters({}), state=StrategyState()
+            )
             logic.on_bar(view)
     except Exception as e:
         failed = _proposal_failed(prop, f"Python execution failed: {e}")

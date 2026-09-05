@@ -161,8 +161,8 @@ Qt event loop
 
 | Check | What it validates |
 |---|---|
-| `scripts/validate_imports.py` (AST) | Dependency graph §3; forbids internal/relative/star imports |
-| `scripts/validate_structure.py` | Required layout: `__init__.py`, `README.md`, `manifest.py`, `models/`, `database/`/`renderer/` etc. per domain (5 core domains) |
+| `scripts/validate_imports.py` (AST) | Dependency graph §3; forbids internal/relative/star imports; runtime imports only (`if TYPE_CHECKING:` exempt) |
+| `scripts/validate_structure.py` | Required layout: `__init__.py`, `README.md`, `manifest.py`, `models/`, `database/`/`renderer/` etc. per domain (7 domains: app/core/data/market/chart/strategy/backtest) |
 | `make check` | `ruff format --check` + `ruff check` + `pyright` + `pytest` + validators — must pass before merge |
 
 > Principles for evolution (not a roadmap): new module → lower-numbered public APIs, bus only, own responsibility, contracts in `module_contracts.md`+`event_catalog.md`. Migration is **invisible feature-driven** per `CONSTITUTION.md` §5, §13, §17: new feature → target arch + directly related legacy slice (smallest useful) → validate; no unrelated migration, no big-bang.

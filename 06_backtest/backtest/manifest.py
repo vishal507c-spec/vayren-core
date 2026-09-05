@@ -1,9 +1,13 @@
 """Backtest component manifest."""
 
-from core.contracts.capability import CapabilityDecl, CapabilityId
-from core.contracts.component import ComponentId, ComponentVersion
-from core.contracts.contract import ComponentContract
-from core.contracts.manifest import ComponentManifest
+from core import (
+    CapabilityDecl,
+    CapabilityId,
+    ComponentContract,
+    ComponentId,
+    ComponentManifest,
+    ComponentVersion,
+)
 
 
 def backtest_manifest() -> ComponentManifest:

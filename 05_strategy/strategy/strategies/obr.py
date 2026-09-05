@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from market.models.bar import Bar
+from market import Bar
 
 from strategy.models.parameters import ParameterSpec, StrategyParameters
 from strategy.runtime import BarView, StrategyLogic
@@ -16,9 +16,25 @@ class ObrSellV10(PythonStrategy):
     @staticmethod
     def param_specs() -> tuple[ParameterSpec, ...]:
         return (
-            ParameterSpec(key="c1_thresh", label="C1 Range", default=1.25, minimum=0.1, maximum=5.0, decimals=2),
-            ParameterSpec(key="c4_thresh", label="C4 Range", default=0.56, minimum=0.1, maximum=5.0, decimals=2),
-            ParameterSpec(key="rsi_thr", label="RSI Threshold", default=65, minimum=30, maximum=90, decimals=0),
+            ParameterSpec(
+                key="c1_thresh",
+                label="C1 Range",
+                default=1.25,
+                minimum=0.1,
+                maximum=5.0,
+                decimals=2,
+            ),
+            ParameterSpec(
+                key="c4_thresh",
+                label="C4 Range",
+                default=0.56,
+                minimum=0.1,
+                maximum=5.0,
+                decimals=2,
+            ),
+            ParameterSpec(
+                key="rsi_thr", label="RSI Threshold", default=65, minimum=30, maximum=90, decimals=0
+            ),
         )
 
     def on_bar_logic(self, view: BarView) -> None:
@@ -27,7 +43,11 @@ class ObrSellV10(PythonStrategy):
         rsi_thr = float(self.params.get("rsi_thr", 65))
         rsi = calc_rsi(self.closes, 14)
         ch_range = calc_range(self.highs, self.lows, 20)
-        sell_condition = bar.close >= (bar.high - ch_range * 0.15 * c1_thresh) and rsi >= rsi_thr and bar.volume >= 1000
+        sell_condition = (
+            bar.close >= (bar.high - ch_range * 0.15 * c1_thresh)
+            and rsi >= rsi_thr
+            and bar.volume >= 1000
+        )
         if sell_condition:
             self.sell()
             self.stop_loss(bar.close + c1_thresh * (bar.high - bar.low))
@@ -49,9 +69,20 @@ class Obr(PythonStrategy):
     @staticmethod
     def param_specs() -> tuple[ParameterSpec, ...]:
         return (
-            ParameterSpec(key="ref_index", label="Reference Candle Index", default=3, minimum=1, maximum=10, decimals=0),
-            ParameterSpec(key="exit_hour", label="Exit Hour", default=15, minimum=0, maximum=23, decimals=0),
-            ParameterSpec(key="exit_min", label="Exit Minute", default=15, minimum=0, maximum=59, decimals=0),
+            ParameterSpec(
+                key="ref_index",
+                label="Reference Candle Index",
+                default=3,
+                minimum=1,
+                maximum=10,
+                decimals=0,
+            ),
+            ParameterSpec(
+                key="exit_hour", label="Exit Hour", default=15, minimum=0, maximum=23, decimals=0
+            ),
+            ParameterSpec(
+                key="exit_min", label="Exit Minute", default=15, minimum=0, maximum=59, decimals=0
+            ),
         )
 
     def on_bar_logic(self, view: BarView) -> None:

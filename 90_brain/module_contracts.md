@@ -75,6 +75,8 @@ AI agents must read the relevant module contract before modifying that module.
 
 **INVARIANT:** `chart` never imports `data`; `market` never imports `chart`.
 
+**STATIC-ONLY IMPORTS:** `if TYPE_CHECKING:` imports are annotations-only and create no runtime coupling — `scripts/validate_imports.py` ignores them (runtime graph is what is enforced). Use them when a lower layer only needs an upper layer's type for annotations (e.g. strategy annotating with a backtest type, backtest annotating with a chart viewport). Runtime attribute access in those cases must be duck-typed. Never use TYPE_CHECKING to hide a real runtime dependency.
+
 ---
 
 ## 5. Module Contracts
@@ -243,7 +245,9 @@ WAL, `V9/V9.1` migrations.
 **Responsibility:** Strategy registry, Python-native runtime (`PythonStrategy` → `StrategyLogic`), storage, research, Lab UI.
 
 **Public API** (`strategy/__init__.py`):
-`StrategyRegistry`, `StrategyRegistryError`, `StrategyDefinition`, `StrategyParameters`, `ParameterSpec`, `ParameterError`, `Signal`, `SignalKind`, `StrategyState`, `StrategyRuntime`, `StrategyLogic`, `BarView`, `strategy_manifest`, events `StrategiesListed`, `StrategySelected`, `PaperTradeRequested`, `LabReset`
+`StrategyRegistry`, `StrategyRegistryError`, `StrategyDefinition`, `StrategyParameters`, `ParameterSpec`, `ParameterError`, `Signal`, `SignalKind`, `StrategyState`, `StrategyRuntime`, `StrategyLogic`, `BarView`, `BacktestForm`, `ResearchDataset`, `strategy_manifest`, events `StrategiesListed`, `StrategySelected`, `PaperTradeRequested`, `LabReset`
+
+**Research rule:** `strategy.research` never imports `backtest` at runtime. Variant re-execution is injected: `run_parameter_sensitivity(..., variant_executor=None)` accepts a backtest-layer callable (e.g. `backtest.runner.run_variant_backtest`); without one it returns structured variants (`trades=()`, `backtest_required` metadata).
 
 **Consumes:** `core`, `market`.
 
@@ -267,7 +271,7 @@ WAL, `V9/V9.1` migrations.
 **Responsibility:** Historical replay, execution simulation, positions, journal, metrics. Python-only orchestration.
 
 **Public API** (`backtest/__init__.py`):
-`BacktestRunner`, `BacktestWorker`, `BacktestConfig`, `BacktestResult`, `StrategyResult`, `TradeRecord`, `EquityPoint`, `PerformanceMetrics`, `RunBacktest`, `BacktestStarted`, `BacktestProgress`, `BacktestCompleted`, `BacktestFailed`, `backtest_manifest`, `validate_backtest_form`
+`BacktestRunner`, `run_variant_backtest`, `BacktestWorker`, `BacktestConfig`, `BacktestResult`, `StrategyResult`, `TradeRecord`, `EquityPoint`, `PerformanceMetrics`, `RunBacktest`, `BacktestStarted`, `BacktestProgress`, `BacktestCompleted`, `BacktestFailed`, `backtest_manifest`, `validate_backtest_form`
 
 **Consumes:** `core`, `market`, `strategy`.
 
@@ -279,6 +283,12 @@ WAL, `V9/V9.1` migrations.
 - `BacktestRunner(repository, registry, data_dir)` loads Python strategy via `get_strategy_by_id` → `compile_strategy` → `PythonStrategy`; no `.vstrat`/VM fallback.
 - `validate_backtest_form` is honest validation (no fake results).
 - `BacktestWorker` off-UI-thread (like `DownloadWorker`).
+- Cross-module imports use the provider's public surface (`strategy`, `market`, `core`)
+  wherever the name is exported. Accepted exceptions (documented, not accidental):
+  `strategy.language.*` (strategy exposes no public loader API; function-level imports
+  in `runner.py`) and `strategy.research.lineage` (optional, lazy, try/except-guarded
+  in `execution.py` by design). The domain-level arrow backtest → strategy is still
+  enforced by `validate_imports.py`.
 
 **AI modification:** Preserve Python dispatch; respect `PerformanceMemory` measured-only metrics.
 
@@ -414,8 +424,8 @@ Do not duplicate `AGENTS.md` — this file owns boundaries, `AGENTS.md` owns wor
 
 | Check | Command |
 |---|---|
-| Structure (required files per domain) | `python scripts/validate_structure.py` — checks `__init__.py`, `README.md`, `manifest.py`, `models/`, `events/`, etc. (5 domains) |
-| Import boundaries (allowed graph) | `python scripts/validate_imports.py` / `--json` — AST check forward-only imports |
+| Structure (required files per domain) | `python scripts/validate_structure.py` — checks `__init__.py`, `README.md`, `manifest.py`, `models/`, `events/`, etc. (7 domains: app/core/data/market/chart/strategy/backtest) |
+| Import boundaries (allowed graph) | `python scripts/validate_imports.py` / `--json` — AST check forward-only runtime imports (`if TYPE_CHECKING:` blocks exempt, see §4) |
 | Tests (contract behavior) | `pytest` / `make check` (lint+format+typecheck+test+validators) |
 | Manifests | `market_manifest()`, `chart_manifest()`, `data_manifest()`, `strategy_manifest()`, `backtest_manifest()` raise `ManifestError` on violation |
 | Events | `90_brain/event_catalog.md` + type-exact dispatch tests |

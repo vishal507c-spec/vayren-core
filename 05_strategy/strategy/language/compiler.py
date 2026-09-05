@@ -1,5 +1,6 @@
 """Compiler — Python-native Strategy compilation (no DSL, no IR, no VM)."""
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from strategy.models.parameters import StrategyParameters
@@ -19,7 +20,11 @@ class CompiledStrategy:
     param_specs: tuple
     param_defaults: dict[str, float]
 
-    def create_logic(self, params: StrategyParameters, owner_id: str | None = None) -> StrategyLogic:
+    def create_logic(
+        self,
+        params: StrategyParameters,
+        owner_id: str | None = None,  # noqa: ARG002
+    ) -> StrategyLogic:
         try:
             return self.strategy_class(params)
         except Exception as e:
@@ -36,28 +41,35 @@ def compile_strategy(code: str) -> CompiledStrategy:
     except Exception as e:
         raise StrategyLanguageError([f"Compilation failed: {e}"]) from e
 
-    # Find StrategyLogic subclass
+    # Find StrategyLogic subclass (skip the base class itself)
     strategy_class = None
     for name, obj in namespace.items():
-        if isinstance(obj, type):
-            # Check if it has on_bar_logic or on_bar
-            if hasattr(obj, "on_bar_logic") or hasattr(obj, "on_bar"):
-                # Avoid base class itself
-                if name != "PythonStrategy":
-                    strategy_class = obj
-                    break
-    if strategy_class is None:
+        if (
+            isinstance(obj, type)
+            and (hasattr(obj, "on_bar_logic") or hasattr(obj, "on_bar"))
+            and name != "PythonStrategy"
+        ):
+            strategy_class = obj
+            break
+    if (
+        strategy_class is None
+        and "Strategy" in namespace
+        and isinstance(namespace["Strategy"], type)
+    ):
         # Fallback: look for class named Strategy
-        if "Strategy" in namespace and isinstance(namespace["Strategy"], type):
-            strategy_class = namespace["Strategy"]
+        strategy_class = namespace["Strategy"]
     if strategy_class is None:
-        raise StrategyLanguageError(["No Strategy class found — define class Strategy(PythonStrategy) with on_bar_logic"])
+        raise StrategyLanguageError(
+            ["No Strategy class found — define class Strategy(PythonStrategy) with on_bar_logic"]
+        )
 
     # Extract param specs if available
-    param_specs = ()
+    param_specs: tuple = ()
     try:
-        if hasattr(strategy_class, "param_specs") and callable(getattr(strategy_class, "param_specs")):
-            param_specs = tuple(strategy_class.param_specs())
+        if hasattr(strategy_class, "param_specs") and callable(strategy_class.param_specs):
+            specs = strategy_class.param_specs()
+            if isinstance(specs, Iterable):
+                param_specs = tuple(specs)
     except Exception:
         param_specs = ()
 
@@ -69,4 +81,9 @@ def compile_strategy(code: str) -> CompiledStrategy:
         except Exception:
             pass
 
-    return CompiledStrategy(code=code, strategy_class=strategy_class, param_specs=param_specs, param_defaults=param_defaults)
+    return CompiledStrategy(
+        code=code,
+        strategy_class=strategy_class,
+        param_specs=param_specs,
+        param_defaults=param_defaults,
+    )

@@ -9,7 +9,15 @@ from strategy.runtime import StrategyRuntime
 
 def _bars(closes: list[float]) -> tuple[Bar, ...]:
     return tuple(
-        Bar(symbol="TEST", open=c, high=c + 1, low=c - 1, close=c, volume=1000, timestamp=f"2026-01-{i + 1:02d} 09:15:00")
+        Bar(
+            symbol="TEST",
+            open=c,
+            high=c + 1,
+            low=c - 1,
+            close=c,
+            volume=1000,
+            timestamp=f"2026-01-{i + 1:02d} 09:15:00",
+        )
         for i, c in enumerate(closes)
     )
 
@@ -52,7 +60,23 @@ def test_sma_emits_buy_on_up_cross():
     compiled = compile_strategy(SMA_PYTHON_CODE)
     assert compiled.strategy_class is not None
     strat = compiled.create_logic(StrategyParameters({"fast_period": 2, "slow_period": 3}))
-    closes = [10, 11, 10, 11, 10, 11, 20, 20, 20, 20, 5, 5, 5, 20, 20] * 2
+    closes = [
+        10.0,
+        11.0,
+        10.0,
+        11.0,
+        10.0,
+        11.0,
+        20.0,
+        20.0,
+        20.0,
+        20.0,
+        5.0,
+        5.0,
+        5.0,
+        20.0,
+        20.0,
+    ] * 2
     closes = closes[:30]
     bars = _bars(closes)
     runtime = StrategyRuntime(strat, StrategyParameters({"fast_period": 2, "slow_period": 3}))

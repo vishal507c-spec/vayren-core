@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from backtest.execution import ExecutionHistory
+if TYPE_CHECKING:
+    # Annotation only (never evaluated at runtime — `from __future__ import
+    # annotations` is active). Runtime access below is duck-typed, so there
+    # is no runtime strategy → backtest dependency.
+    from backtest.execution import ExecutionHistory
 
 
 @dataclass(frozen=True)

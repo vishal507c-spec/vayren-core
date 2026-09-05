@@ -16,12 +16,13 @@ from pathlib import Path
 
 
 def test_obr_python_signal(tmp_path: Path):
-    from strategy.language.storage import create_strategy, load_strategy_record
+
+    from market.models.bar import Bar
+
     from strategy.language import compile_strategy
+    from strategy.language.storage import create_strategy
     from strategy.models.parameters import StrategyParameters
     from strategy.runtime import StrategyRuntime
-    from market.models.bar import Bar
-    import datetime
 
     # Create OBR via Python code
     obr_code = """
@@ -43,7 +44,15 @@ class Strategy(PythonStrategy):
     compiled = compile_strategy(rec.code)
     strat = compiled.create_logic(StrategyParameters({}))
     bars = tuple(
-        Bar(symbol="TEST", open=100, high=101, low=99, close=100 + (i % 5), volume=1000, timestamp=f"2026-01-01 09:{15+i:02d}:00")
+        Bar(
+            symbol="TEST",
+            open=100,
+            high=101,
+            low=99,
+            close=100 + (i % 5),
+            volume=1000,
+            timestamp=f"2026-01-01 09:{15 + i:02d}:00",
+        )
         for i in range(60)
     )
     signals = StrategyRuntime(strat, StrategyParameters({})).run(bars)
@@ -51,11 +60,12 @@ class Strategy(PythonStrategy):
 
 
 def test_sma_python_signal(tmp_path: Path):
-    from strategy.language.storage import create_strategy
+    from market.models.bar import Bar
+
     from strategy.language import compile_strategy
+    from strategy.language.storage import create_strategy
     from strategy.models.parameters import StrategyParameters
     from strategy.runtime import StrategyRuntime
-    from market.models.bar import Bar
 
     sma_code = """
 from strategy.strategies.base import PythonStrategy
@@ -80,12 +90,23 @@ class Strategy(PythonStrategy):
     rec = create_strategy("SMA", sma_code, data_dir=tmp_path)
     compiled = compile_strategy(rec.code)
     strat = compiled.create_logic(StrategyParameters({}))
-    bars = tuple(Bar(symbol="TEST", open=100, high=101, low=99, close=100 + (i % 3), volume=1000, timestamp=f"2026-01-01 09:{15+i:02d}:00") for i in range(60))
+    bars = tuple(
+        Bar(
+            symbol="TEST",
+            open=100,
+            high=101,
+            low=99,
+            close=100 + (i % 3),
+            volume=1000,
+            timestamp=f"2026-01-01 09:{15 + i:02d}:00",
+        )
+        for i in range(60)
+    )
     signals = StrategyRuntime(strat, StrategyParameters({})).run(bars)
     assert isinstance(signals, tuple)
 
 
-def test_no_vstrat_files(tmp_path: Path):
+def test_no_vstrat_files():
     import pathlib
 
     # Ensure no .vstrat file handling in codebase
@@ -104,7 +125,7 @@ def test_no_vstrat_files(tmp_path: Path):
 
 
 def test_same_base_class():
-    from strategy.strategies.obr import ObrSellV10, Obr
+    from strategy.strategies.obr import ObrSellV10
     from strategy.strategies.sma import SmaCrossover
 
     assert ObrSellV10.__bases__[0].__name__ == "PythonStrategy"
@@ -112,11 +133,14 @@ def test_same_base_class():
 
 
 def test_backtest_python(tmp_path: Path):
-    from strategy.language.storage import create_strategy
+    import datetime
+    import sqlite3
+
+    from backtest.models.config import BacktestConfig
     from backtest.runner import BacktestRunner
     from market.repository.symbol_repository import SymbolRepository
-    from backtest.models.config import BacktestConfig
-    import sqlite3, datetime
+
+    from strategy.language.storage import create_strategy
 
     code = """
 from strategy.strategies.base import PythonStrategy
@@ -129,21 +153,27 @@ class Strategy(PythonStrategy):
     # Create repo with data
     db_path = tmp_path / "data"
     db_path.mkdir()
-    import pathlib
     # Use symbol repository
     repo = SymbolRepository(db_path)
     # Create a test DB
     db = db_path / "TEST.db"
     conn = sqlite3.connect(db)
-    conn.execute("CREATE TABLE ohlcv (candle_time TEXT PRIMARY KEY, open REAL, high REAL, low REAL, close REAL, volume INTEGER)")
+    conn.execute(
+        "CREATE TABLE ohlcv (candle_time TEXT PRIMARY KEY, open REAL, high REAL, low REAL, close REAL, volume INTEGER)"
+    )
     base = datetime.date(2026, 1, 1)
     for i in range(30):
         c = 100 + i % 5
-        conn.execute("INSERT INTO ohlcv VALUES (?,?,?,?,?,?)", (f"{base} 09:15:00", c-1, c+1, c-1, c, 1000))
+        conn.execute(
+            "INSERT INTO ohlcv VALUES (?,?,?,?,?,?)",
+            (f"{base} 09:15:00", c - 1, c + 1, c - 1, c, 1000),
+        )
         base += datetime.timedelta(days=1)
     conn.commit()
     conn.close()
     runner = BacktestRunner(repo, data_dir=tmp_path)
-    cfg = BacktestConfig(symbol="TEST", timeframe="15m", start_date="2026-01-01", end_date="2026-02-01")
+    cfg = BacktestConfig(
+        symbol="TEST", timeframe="15m", start_date="2026-01-01", end_date="2026-02-01"
+    )
     result = runner.run(cfg, (rec.id,))
     assert result is not None
