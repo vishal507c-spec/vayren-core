@@ -8,7 +8,6 @@ _SECTIONS = ("MARKET", "STRATEGY LAB", "RESEARCH", "PORTFOLIO", "LIVE", "SYSTEM"
 _SECTION_TIP = {
     "RESEARCH": "Not available yet",
     "PORTFOLIO": "Not available yet",
-    "LIVE": "Not available yet",
 }
 
 _BAR_STYLE = """
@@ -53,6 +52,7 @@ class TopNavBar(QWidget):
 
     market_clicked = Signal()
     strategy_lab_clicked = Signal()
+    live_clicked = Signal()
     system_clicked = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -88,6 +88,8 @@ class TopNavBar(QWidget):
                 button.clicked.connect(self.market_clicked)
             elif section == "STRATEGY LAB":
                 button.clicked.connect(self.strategy_lab_clicked)
+            elif section == "LIVE":
+                button.clicked.connect(self.live_clicked)
             elif section == "SYSTEM":
                 button.clicked.connect(self.system_clicked)
             else:

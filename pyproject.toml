@@ -82,6 +82,8 @@ include = [
     "04_chart/chart",
     "05_strategy/strategy",
     "06_backtest/backtest",
+    "07_risk/risk",
+    "08_execution/execution",
     "scripts",
 ]
 extraPaths = [
@@ -102,6 +104,8 @@ testpaths = [
     "05_strategy/strategy/tests",
     "05_strategy/strategy/research/tests",
     "06_backtest/backtest/tests",
+    "07_risk/risk/tests",
+    "08_execution/execution/tests",
     "scripts/forensics/tests",
     "scripts/tests",
 ]
@@ -117,6 +121,8 @@ source = [
     "04_chart/chart",
     "05_strategy/strategy",
     "06_backtest/backtest",
+    "07_risk/risk",
+    "08_execution/execution",
 ]
 
 [tool.coverage.report]
@@ -135,6 +141,8 @@ packages = [
     "04_chart/chart",
     "05_strategy/strategy",
     "06_backtest/backtest",
+    "07_risk/risk",
+    "08_execution/execution",
 ]
 
 [build-system]

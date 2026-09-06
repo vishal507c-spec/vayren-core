@@ -27,7 +27,7 @@ test:
 	pytest
 
 test-coverage:
-	pytest --cov=app --cov=core --cov=market --cov=chart --cov=data --cov=strategy --cov=backtest --cov-report=term --cov-report=html
+	pytest --cov=app --cov=core --cov=market --cov=chart --cov=data --cov=strategy --cov=backtest --cov=risk --cov=execution --cov-report=term --cov-report=html
 
 lint:
 	ruff check .

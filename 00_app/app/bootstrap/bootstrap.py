@@ -118,6 +118,140 @@ class Bootstrap:
         lab_list = StrategyListPanel()
         # dedicated single-strategy lab workspace (isolated from market)
         lab_workspace = StrategyLabWorkspace()
+        # LIVE execution workspace: pure view over provider state, no bus/SQL/broker.
+        from app.ui.live_workspace import LiveWorkspace
+
+        def _live_state_provider() -> dict:
+            """Read-only snapshot for the LIVE tab. Never trades, never raises."""
+            from execution.broker.credentials import (
+                BrokerCredentials,
+                EnvCredentialStore,
+                default_account_id,
+            )
+            from execution.broker.gates import evaluate_live_gates
+
+            state: dict = {
+                "mode": "PAPER",
+                "broker": {
+                    "name": "NOT CONFIGURED",
+                    "environment": "",
+                    "connected": None,
+                    "reason": "no live venue adapter is registered",
+                    "capabilities": [],
+                    "latency_ms": None,
+                    "last_heartbeat": None,
+                },
+                "strategy": None,
+                "position": None,
+                "orders": [],
+                "fills": [],
+                "pnl": {},
+                "risk": {"status": "READY", "limits": [], "decisions": []},
+                "reconciliation": {
+                    "status": "NOT CONFIGURED",
+                    "positions": "N/A",
+                    "orders": "N/A",
+                    "last_check": None,
+                    "mismatches": 0,
+                    "blocks_live": True,
+                },
+                "kill": {"halted": False, "level": "global"},
+                "gates": [],
+                "can_arm": False,
+                "arm_blockers": [],
+                "can_halt": False,
+                "lifecycle": "STOPPED",
+                "events": [],
+            }
+            try:
+                names: list[str] = []
+                with contextlib.suppress(Exception):
+                    from strategy.language.storage import list_strategies
+
+                    names = sorted(list_strategies(r"D:\VAYREN_STRATEGIES"))
+                if names:
+                    state["strategy"] = {
+                        "id": names[0],
+                        "version": "",
+                        "status": "NOT RUNNING",
+                        "mode": "PAPER",
+                        "params": {},
+                        "instrument": "",
+                        "timeframe": "",
+                        "live_supported": None,
+                        "warmup": None,
+                        "state": "STOPPED",
+                    }
+                try:
+                    symbols = repository.list_symbols()
+                except Exception:
+                    symbols = ()
+                state["market_symbol"] = ""
+                state["market_timeframe"] = ""
+                state["market_bars"] = None
+                creds = BrokerCredentials(
+                    account_id=default_account_id(),
+                    environment="live",
+                    key_refs=("API_KEY", "API_SECRET"),
+                )
+                report = evaluate_live_gates(
+                    adapter=None,
+                    credentials=creds,
+                    credential_store=EnvCredentialStore(),
+                    expected_account_id=default_account_id(),
+                    expected_environment="live",
+                    risk_policy=None,
+                    kill_halted=False,
+                )
+                gates = []
+                for gate in report.gates:
+                    gates.append(
+                        {
+                            "name": gate.name,
+                            "status": "READY" if gate.passed else "NOT READY",
+                            "reason": gate.detail,
+                        }
+                    )
+                gates.append(
+                    {
+                        "name": "STRATEGY",
+                        "status": "READY" if names else "NOT READY",
+                        "reason": "" if names else "strategy library is empty",
+                    }
+                )
+                gates.append(
+                    {
+                        "name": "MARKET DATA",
+                        "status": "READY" if symbols else "NOT READY",
+                        "reason": "" if symbols else "no symbols in store",
+                    }
+                )
+                gates.append({"name": "CLOCK", "status": "READY", "reason": "local clock only"})
+                gates.append(
+                    {
+                        "name": "ENVIRONMENT",
+                        "status": "NOT READY",
+                        "reason": "requested=live configured=none",
+                    }
+                )
+                gates.append(
+                    {
+                        "name": "ARMING",
+                        "status": "NOT READY",
+                        "reason": "DISARMED — no live session exists to arm",
+                    }
+                )
+                state["gates"] = gates
+                state["arm_blockers"] = [
+                    f"{g['name']}: {g['reason']}"
+                    for g in gates
+                    if g["status"] != "READY" and g["reason"]
+                ] or ["LIVE broker is not configured"]
+            except Exception:
+                pass
+            return state
+
+        live_workspace = LiveWorkspace(state_provider=_live_state_provider)
         from backtest.ui.performance_panel import PerformancePanel
 
         performance_panel = PerformancePanel()
@@ -170,6 +304,7 @@ class Bootstrap:
             nav=nav_bar,
             left_extra=market_status,
             lab_workspace=lab_workspace,
+            live_workspace=live_workspace,
             event_log=event_log,
             system_health=system_health,
             trade_context=trade_context_panel,
@@ -676,6 +811,8 @@ class Bootstrap:
         nav_bar.market_clicked.connect(window.show_market)
         if hasattr(nav_bar, "strategy_lab_clicked"):
             nav_bar.strategy_lab_clicked.connect(window.show_lab)
+        if hasattr(nav_bar, "live_clicked"):
+            nav_bar.live_clicked.connect(window.show_live)
         nav_bar.system_clicked.connect(window.toggle_bottom)
 
         # ── control ↔ bus ──

@@ -14,6 +14,13 @@ ROOT = Path(__file__).resolve().parent.parent
 
 EXCLUDED_TOP_DIRS = {"90_brain"}
 
+# Broker/vendor SDKs may only be imported inside the isolated provider
+# packages that own them (relative to repo root). Anywhere else —
+# strategy, risk, execution, chart, app included — is a layering violation:
+# Strategy → SDK and Risk → SDK are FORBIDDEN.
+SDK_ALLOWLIST_PREFIXES = ("02_data/data/provider/",)
+SDK_DENYLIST = {"kiteconnect"}
+
 # Map domain package names to their numbered chapter folders
 DOMAIN_CHAPTERS: dict[str, str] = {
     "app": "00_app",
@@ -23,17 +30,21 @@ DOMAIN_CHAPTERS: dict[str, str] = {
     "data": "02_data",
     "strategy": "05_strategy",
     "backtest": "06_backtest",
+    "risk": "07_risk",
+    "execution": "08_execution",
 }
 
 # Domains that should only import from lib/ and immediate upstream
 DOMAIN_DEPS: dict[str, set[str]] = {
-    "app": {"core", "market", "chart", "data", "strategy", "backtest"},
+    "app": {"core", "market", "chart", "data", "strategy", "backtest", "risk", "execution"},
     "core": set(),
     "market": {"core"},
     "chart": {"core", "market"},
     "data": {"core"},
     "strategy": {"core", "market"},
     "backtest": {"core", "market", "strategy"},
+    "risk": {"core"},
+    "execution": {"core", "market", "strategy", "risk"},
 }
 
 
@@ -88,17 +99,36 @@ def main() -> int:
     errors: list[str] = []
     for pyfile in ROOT.rglob("*.py"):
         domain = check_file_domain(pyfile)
-        if domain is None:
+        try:
+            rel = pyfile.relative_to(ROOT).as_posix()
+        except ValueError:
             continue
-        if "test" in pyfile.name:
-            continue
-        if pyfile.parent.name == "tests":
-            continue
+        is_test = "test" in pyfile.name or pyfile.parent.name == "tests"
         try:
             source = pyfile.read_text(encoding="utf-8")
             tree = ast.parse(source)
         except SyntaxError:
-            errors.append(f"Syntax error: {pyfile}")
+            if domain is not None and not is_test:
+                errors.append(f"Syntax error: {pyfile}")
+            continue
+        if not is_test and not rel.startswith(SDK_ALLOWLIST_PREFIXES):
+            for node in ast.walk(tree):
+                if not isinstance(node, (ast.Import, ast.ImportFrom)):
+                    continue
+                names: list[str] = []
+                if isinstance(node, ast.Import):
+                    names = [a.name.split(".")[0] for a in node.names]
+                elif node.module:
+                    names = [node.module.split(".")[0]]
+                for top in names:
+                    if top in SDK_DENYLIST:
+                        errors.append(
+                            f"{pyfile}:{node.lineno}: broker SDK import {top!r} outside "
+                            f"isolated provider packages"
+                        )
+        if domain is None:
+            continue
+        if is_test:
             continue
         lines = source.splitlines()
         allowed_imports = DOMAIN_DEPS.get(domain, set())

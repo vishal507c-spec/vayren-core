@@ -26,6 +26,8 @@ CHAPTERS = (
     "04_chart",
     "05_strategy",
     "06_backtest",
+    "07_risk",
+    "08_execution",
 )
 
 
@@ -128,6 +130,8 @@ def test_pyright_include_covers_all_domains() -> None:
         "04_chart/chart",
         "05_strategy/strategy",
         "06_backtest/backtest",
+        "07_risk/risk",
+        "08_execution/execution",
         "scripts",
     ]
     missing = [e for e in expected if e not in include]

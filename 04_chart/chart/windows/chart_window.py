@@ -70,6 +70,7 @@ class ChartWindow(QMainWindow):
         nav: QWidget | None = None,
         left_extra: QWidget | None = None,
         lab_workspace: QWidget | None = None,
+        live_workspace: QWidget | None = None,
         event_log: QWidget | None = None,
         system_health: QWidget | None = None,
         trade_context: QWidget | None = None,
@@ -85,6 +86,7 @@ class ChartWindow(QMainWindow):
         self._nav = nav
         self._left_extra = left_extra
         self._lab_workspace = lab_workspace
+        self._live_workspace = live_workspace
         self._event_log = event_log
         self._system_health = system_health
         self._current_symbol: str | None = None
@@ -166,11 +168,13 @@ class ChartWindow(QMainWindow):
                 bottom.setMaximumHeight(220)
             self._bottom = bottom
 
-            # stacked middle: market splitter vs lab workspace
+            # stacked middle: market splitter vs lab workspace vs live workspace
             if lab_workspace is not None:
                 self._stack = QStackedWidget(self)
                 self._stack.addWidget(splitter)
                 self._stack.addWidget(lab_workspace)
+                if live_workspace is not None:
+                    self._stack.addWidget(live_workspace)
                 self._stack.setCurrentIndex(0)
             else:
                 self._stack = None  # type: ignore[assignment]
@@ -363,6 +367,20 @@ class ChartWindow(QMainWindow):
         if self._nav is not None and hasattr(self._nav, "set_active"):
             with contextlib.suppress(Exception):
                 self._nav.set_active("STRATEGY LAB")  # type: ignore[attr-defined]
+
+    def show_live(self) -> None:
+        """Switch to the LIVE execution workspace (index 2 when present)."""
+        self._lab_active = False
+        stack = getattr(self, "_stack", None)
+        live = getattr(self, "_live_workspace", None)
+        if stack is not None and live is not None:
+            for index in range(stack.count()):
+                if stack.widget(index) is live:
+                    stack.setCurrentIndex(index)
+                    break
+        if self._nav is not None and hasattr(self._nav, "set_active"):
+            with contextlib.suppress(Exception):
+                self._nav.set_active("LIVE")  # type: ignore[attr-defined]
 
     def toggle_bottom(self) -> None:
         """Toggle the bottom system/event panels."""

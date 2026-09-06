@@ -187,12 +187,14 @@ def _git_numstat() -> tuple[int | None, int | None, int | None]:
 # Domain reverse-dependency map: a change in key requires re-running the
 # tests of every listed domain (own + consumers), cheapest safe superset.
 REVERSE_DEPS: dict[str, tuple[str, ...]] = {
-    "core": ("core", "data", "market", "chart", "strategy", "backtest", "app"),
+    "core": ("core", "data", "market", "chart", "strategy", "backtest", "risk", "execution", "app"),
     "data": ("data", "app"),
-    "market": ("market", "chart", "strategy", "backtest", "app"),
+    "market": ("market", "chart", "strategy", "backtest", "execution", "app"),
     "chart": ("chart", "app"),
-    "strategy": ("strategy", "backtest", "app"),
+    "strategy": ("strategy", "backtest", "execution", "app"),
     "backtest": ("backtest", "app"),
+    "risk": ("risk", "execution", "app"),
+    "execution": ("execution", "app"),
     "app": ("app",),
 }
 
@@ -203,6 +205,8 @@ DOMAIN_TESTS: dict[str, str] = {
     "chart": "04_chart/chart/tests",
     "strategy": "05_strategy/strategy/tests 05_strategy/strategy/research/tests",
     "backtest": "06_backtest/backtest/tests",
+    "risk": "07_risk/risk/tests",
+    "execution": "08_execution/execution/tests",
     "app": "00_app/app/tests",
 }
 
@@ -305,7 +309,17 @@ def impact_plan(files: list[str]) -> dict:
     for d in domains:
         needed.update(REVERSE_DEPS[d])
     pytest_paths: list[str] = []
-    for d in ("core", "data", "market", "chart", "strategy", "backtest", "app"):
+    for d in (
+        "core",
+        "data",
+        "market",
+        "chart",
+        "strategy",
+        "backtest",
+        "risk",
+        "execution",
+        "app",
+    ):
         if d in needed:
             pytest_paths.extend(DOMAIN_TESTS[d].split())
     if any(f.startswith("scripts/") for f in flat):
