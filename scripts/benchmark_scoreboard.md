@@ -8,12 +8,12 @@
 
 | step | n | median | p95 | min | max | cold | status | tests | measured_at |
 |---|---|---|---|---|---|---|---|---|---|
-| ruff-check | 3 | 0.07s | 0.07s | 0.06s | 0.07s | 0.07s | pass | — | 2026-09-04T23:33:15+00:00 |
-| ruff-format-check | 3 | 0.07s | 0.08s | 0.07s | 0.08s | 0.07s | pass | — | 2026-09-04T23:33:16+00:00 |
-| pyright | 3 | 23.26s | 26.05s | 22.94s | 26.05s | 26.05s | pass | — | 2026-09-04T23:34:28+00:00 |
-| pytest | 3 | 81.83s | 81.94s | 81.32s | 81.94s | 81.94s | flake-teardown (914 passed, rc!=0) | 914 passed | 2026-09-04T23:38:33+00:00 |
-| validate-structure | 3 | 0.14s | 0.15s | 0.10s | 0.15s | 0.15s | pass | — | 2026-09-04T23:38:33+00:00 |
-| validate-imports | 3 | 1.52s | 2.11s | 1.22s | 2.11s | 1.52s | pass | — | 2026-09-04T23:38:38+00:00 |
+| ruff-check | 1 | 0.07s | 0.07s | 0.07s | 0.07s | 0.07s | pass | — | 2026-09-06T06:38:15+00:00 |
+| ruff-format-check | 1 | 0.06s | 0.06s | 0.06s | 0.06s | 0.06s | pass | — | 2026-09-06T06:38:15+00:00 |
+| pyright | 1 | 35.52s | 35.52s | 35.52s | 35.52s | 35.52s | pass | — | 2026-09-06T06:38:50+00:00 |
+| pytest | 1 | 105.90s | 105.90s | 105.90s | 105.90s | 105.90s | pass | 1116 passed | 2026-09-06T06:40:36+00:00 |
+| validate-structure | 1 | 0.10s | 0.10s | 0.10s | 0.10s | 0.10s | pass | — | 2026-09-06T06:40:36+00:00 |
+| validate-imports | 1 | 2.52s | 2.52s | 2.52s | 2.52s | 2.52s | pass | — | 2026-09-06T06:40:39+00:00 |
 
 ## Task samples
 
@@ -61,7 +61,7 @@ recorded task samples that used impact-first validation. Operational
 speedup (validation time eliminated per cycle) is separate from
 end-to-end task speedup (needs wall-clock BEFORE/AFTER per task).
 
-- Impact-first validation: baseline full-suite 81.8s vs impact median 53.5s over 9 samples = 1.5x operational speedup per validation cycle.
+- Impact-first validation: baseline full-suite 105.9s vs impact median 53.5s over 9 samples = 2.0x operational speedup per validation cycle.
 - Full-gate task validations: 1 samples,
   median 456.5s.
 - Correctness: 12/12 task samples pass; total failures=2, repairs=10.
@@ -112,6 +112,47 @@ bias (upper bounds still rule out tiny phases as dominant).
 | OTHER | 1 | 40.0s | 39.98s | 39.98s | 39.98s | 39.98s |
 | READ | 1 | 76.3s | 76.28s | 76.28s | 76.28s | 76.28s |
 | ALL | 2 | 116.3s | 58.13s | 58.13s | 76.28s | 76.28s |
+
+## Speed dashboard (BEFORE -> CURRENT -> DELTA, equivalent tasks only)
+
+Pairs share a fingerprint (same class + request + files). Unpaired
+tasks are listed without speedup: SPEEDUP = NOT MEASURED.
+
+| task | class | baseline_s | current_s | speedup | validation_speedup | first_pass | repairs | validation_s | total_s | confidence |
+|---|---|---|---|---|---|---|---|---|---|---|
+| SPEED-EXP-CTX-WARM | MICRO | 0.5 | 0.5 | 1.00x | 1.15x | True | 0 | 0.14s | 0.48s | HIGH (same fingerprint) |
+| SPEED-EXP-TIGHT-WARM | MICRO | 3.2 | 3.0 | 1.08x | 1.09x | True | 0 | 2.80s | 2.97s | HIGH (same fingerprint) |
+| SPEED-EXP-IMPACT-WARM | MICRO | 377.6 | 57.1 | 6.61x | 0.26x | True | 0 | 13.93s | 57.12s | LOW (same fingerprint BUT DIVERGENT: validation 0.26x vs total 6.61x — window hygiene suspect, do not claim) |
+| SPEED-EXP-GATE | MICRO | NOT MEASURED | 263.28s | NOT MEASURED | NOT MEASURED | True | 0 | 144.18s | 263.28s | — (no comparable pair) |
+| PHASE-18-SPEED | ARCHITECTURE | NOT MEASURED | 4530.84s | NOT MEASURED | NOT MEASURED | False | 3 | 144.18s | 4530.84s | — (no comparable pair) |
+
+## Speed metrics (kept separate from AI utilization, never mixed)
+
+- AI_UTILIZATION_SCORE: NOT MEASURED here (see development log; utilization is not a speed multiplier).
+- TASK_WALL_TIME median: 30.18s over 8 speed-task(s).
+- VALIDATION_TIME median: 3.35s.
+- FIRST_PASS_RATE: 0.875 (8 known).
+- REPAIR_TAX median: 0.0.
+- REUSE_SPEEDUP: 1.085 (3 cold/warm pair(s)).
+- HUMAN_INTERVENTIONS: 0.
+
+## Bottlenecks (measured phases ranked, rest UNMEASURED)
+
+- validation: 3.35s [measured]
+- context_preparation: NOT MEASURED [UNMEASURED]
+- editing: NOT MEASURED [UNMEASURED]
+- other: NOT MEASURED [UNMEASURED]
+- planning: NOT MEASURED [UNMEASURED]
+- repair: NOT MEASURED [UNMEASURED]
+- repository_discovery: NOT MEASURED [UNMEASURED]
+
+## Next-optimization recommendations (evidence-gated)
+
+- [HIGH] parallel_validation: keep validation serial unless a new measurement passes review
+  evidence: static: parallel validation measured 0.9x (slower) on 2026-09-05
+- [HIGH] insufficient_evidence: change nothing; record more benchmarked tasks first
+  evidence: no measured snapshot metric crossed a recommendation threshold
+
 
 ## Rules
 

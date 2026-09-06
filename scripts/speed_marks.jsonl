@@ -1,0 +1,20 @@
+{"task": "PHASE-18-SPEED", "ts": "2026-09-06T12:00:37.342+05:30", "kind": "milestone", "name": "TASK_START", "file": null, "note": "evidence: forensics agent-log turn start (turn-msg_0756967200025DtQ2gW7A68JvL)", "duration_ms": null}
+{"task": "PHASE-18-SPEED", "ts": "2026-09-06T12:03:06.190+05:30", "kind": "phase", "name": "VALIDATION", "file": null, "note": "speed CLI smoke + experiments", "duration_ms": null}
+{"task": "PHASE-18-SPEED", "ts": "2026-09-06T11:31:10.590+05:30", "kind": "milestone", "name": "TASK_START", "file": null, "note": "evidence: forensics agent-log turn start (turn-msg_0754e56f2001OmM142Ll6ovHBi); supersedes turn-start estimate, earliest wins", "duration_ms": null}
+{"task": "SPEED-EXP-GATE", "ts": "2026-09-06T12:07:36.944+05:30", "kind": "milestone", "name": "TASK_START", "file": null, "note": "BEFORE: full validation gate n=1 on current tree", "duration_ms": null}
+{"task": "SPEED-EXP-GATE", "ts": "2026-09-06T12:12:00.221+05:30", "kind": "milestone", "name": "TASK_END", "file": null, "note": "gate sample complete", "duration_ms": null}
+{"task": "SPEED-EXP-IMPACT-COLD", "ts": "2026-09-06T12:18:11.652+05:30", "kind": "milestone", "name": "TASK_START", "file": null, "note": "CURRENT cold: scripts-scope impact subset, first run", "duration_ms": null}
+{"task": "SPEED-EXP-IMPACT-COLD", "ts": "2026-09-06T12:24:29.210+05:30", "kind": "milestone", "name": "TASK_END", "file": null, "note": "cold subset done: 3.66s validation", "duration_ms": null}
+{"task": "SPEED-EXP-IMPACT-WARM", "ts": "2026-09-06T12:24:29.335+05:30", "kind": "milestone", "name": "TASK_START", "file": null, "note": "CURRENT warm: identical scripts-scope subset, second run", "duration_ms": null}
+{"task": "SPEED-EXP-IMPACT-WARM", "ts": "2026-09-06T12:25:26.460+05:30", "kind": "milestone", "name": "TASK_END", "file": null, "note": "warm subset done: 13.93s validation (validate_imports 10.86s outlier, machine noise)", "duration_ms": null}
+{"task": "SPEED-EXP-TIGHT-COLD", "ts": "2026-09-06T12:25:50.403+05:30", "kind": "milestone", "name": "TASK_START", "file": null, "note": "tight protocol run 1", "duration_ms": null}
+{"task": "SPEED-EXP-TIGHT-COLD", "ts": "2026-09-06T12:25:53.629+05:30", "kind": "milestone", "name": "TASK_END", "file": null, "note": "tight run 1 done", "duration_ms": null}
+{"task": "SPEED-EXP-TIGHT-WARM", "ts": "2026-09-06T12:25:53.737+05:30", "kind": "milestone", "name": "TASK_START", "file": null, "note": "tight protocol run 2", "duration_ms": null}
+{"task": "SPEED-EXP-TIGHT-WARM", "ts": "2026-09-06T12:25:56.710+05:30", "kind": "milestone", "name": "TASK_END", "file": null, "note": "tight run 2 done", "duration_ms": null}
+{"task": "SPEED-EXP-CTX-COLD", "ts": "2026-09-06T12:27:19.511+05:30", "kind": "milestone", "name": "TASK_START", "file": null, "note": "context compiler run 1", "duration_ms": null}
+{"task": "SPEED-EXP-CTX-COLD", "ts": "2026-09-06T12:27:19.991+05:30", "kind": "milestone", "name": "TASK_END", "file": null, "note": "ctx run 1 done", "duration_ms": null}
+{"task": "SPEED-EXP-CTX-WARM", "ts": "2026-09-06T12:27:20.107+05:30", "kind": "milestone", "name": "TASK_START", "file": null, "note": "context compiler run 2", "duration_ms": null}
+{"task": "SPEED-EXP-CTX-WARM", "ts": "2026-09-06T12:27:20.589+05:30", "kind": "milestone", "name": "TASK_END", "file": null, "note": "ctx run 2 done", "duration_ms": null}
+{"task": "PHASE-18-SPEED", "ts": "2026-09-06T12:28:09.050+05:30", "kind": "milestone", "name": "FIRST_VALIDATION", "file": null, "note": "starting final full-gate validation (make check equivalent)", "duration_ms": null}
+{"task": "PHASE-18-SPEED", "ts": "2026-09-06T12:46:41.328+05:30", "kind": "milestone", "name": "FINAL_GREEN", "file": null, "note": "final gate green: 1117 pytest + 27/27 partitions + ruff/pyright/validators 0", "duration_ms": null}
+{"task": "PHASE-18-SPEED", "ts": "2026-09-06T12:46:41.433+05:30", "kind": "milestone", "name": "TASK_END", "file": null, "note": "implementation + experiments + validation complete, brain updates pending", "duration_ms": null}

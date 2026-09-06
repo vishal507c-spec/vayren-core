@@ -17,13 +17,15 @@ Desktop charting platform: `SQLite per-stock OHLCV → EventBus → candlestick 
 
 | Chapter | Package | Owns | Depends on |
 |---|---|---|---|
-| `00_app` | `app` | Entry, wiring, lifecycle (`App`, `Bootstrap`, `AppLifecycle`) | `core`, `data`, `market`, `chart`, `strategy`, `backtest` |
+| `00_app` | `app` | Entry, wiring, lifecycle (`App`, `Bootstrap`, `AppLifecycle`) | `core`, `data`, `market`, `chart`, `strategy`, `backtest`, `risk`, `execution` |
 | `01_core` | `core` | Foundation: `EventBus`, `Event`, logger, `Registry`, contracts, `SystemModel`, AI boundary | — (stdlib only) |
 | `02_data` | `data` | Historical download (write path): engine, worker thread, storage, provider boundary | `core` |
 | `03_market` | `market` | Read path: per-symbol SQLite → `Bar`/`SymbolQuote` | `core` |
 | `04_chart` | `chart` | Chart model, engine, renderers, widgets, windows, theme | `core`, `market` |
 | `05_strategy` | `strategy` | Strategy registry, Python-native runtime, research, Lab UI | `core`, `market` |
 | `06_backtest` | `backtest` | Replay, execution simulation, positions, journal, metrics | `core`, `market`, `strategy` |
+| `07_risk` | `risk` | Fail-closed pre-order gates, kill switches, session/clock rules | `core` |
+| `08_execution` | `execution` | Live/paper strategy sessions: market-data intake, runtime, planner, engine, broker boundary, portfolio, journal/replay, regime, adaptive | `core`, `market`, `strategy`, `risk` |
 
 > `90_brain/` is documentation, not a runtime module.
 
@@ -41,7 +43,9 @@ Desktop charting platform: `SQLite per-stock OHLCV → EventBus → candlestick 
 05_strategy ─────────────────► 01_core, 03_market
 04_chart ────────────────────► 01_core, 03_market
 06_backtest ─────────────────► 01_core, 03_market, 05_strategy
-00_app ──────────────────────► 01_core, 02_data, 03_market, 04_chart, 05_strategy, 06_backtest
+07_risk ─────────────────────► 01_core
+08_execution ─────────────────► 01_core, 03_market, 05_strategy, 07_risk
+00_app ──────────────────────► 01_core, 02_data, 03_market, 04_chart, 05_strategy, 06_backtest, 07_risk, 08_execution
 ```
 
 | Dependency | Allowed? | Reason |
@@ -53,6 +57,10 @@ Desktop charting platform: `SQLite per-stock OHLCV → EventBus → candlestick 
 | `core → any` | ❌ | Foundation is domain-agnostic |
 | `app → any` | ✅ | Composition root wires all |
 | `* → app` | ❌ | No backward import |
+| `strategy → execution/risk` | ❌ | Strategies never reach live machinery; execution consumes strategy |
+| `backtest → execution/risk` | ❌ | Research replay never touches live/paper paths |
+| `execution → backtest/chart/data` | ❌ | Live layer is independent of research, UI and download paths |
+| `risk → non-core` | ❌ | Gates judge snapshots; they read nothing and call nothing |
 
 **INVARIANT:** Cross-module imports use only `module/__init__.py` public surface. Internal paths (`market.database`, `chart.renderer`) are never imported cross-module. Relative cross-module imports (`..market`) and `from x import *` are forbidden.
 
@@ -148,12 +156,13 @@ Qt event loop
 |---|---|
 | Event-driven only | Modules communicate only via `EventBus`. Direct calls cross-module are forbidden. |
 | Single wiring point | `bus.subscribe` only in `bootstrap.py`. Widgets never subscribe. |
-| One module one responsibility | New behavior → new module. Existing modules are not expanded. |
-| Layers isolated | UI: no SQL; loader: no painting; business logic: never in UI. |
+| One module one responsibility | New behavior → new module. Existing modules are not expanded. (`07_risk`+`08_execution` cover the roadmap's risk/execution slots.) |
+| Layers isolated | UI: no SQL; loader: no painting; business logic: never in UI. Strategy never calls broker; risk never reads market. |
 | Public contract | Consumers depend on `__init__.py` exports + events, never internals. |
-| No fabrication | Bars/quotes derived only from real `ohlcv` rows. Aggregation never invents candles. |
+| No fabrication | Bars/quotes derived only from real `ohlcv` rows. Aggregation never invents candles. Paper fills derive from real event prices. |
 | Secrets | Credentials/tokens never in events, settings, logs, or UI. |
 | No placeholder | No mock/sample trading logic, no `TODO/FIXME`, no dead code. |
+| Live safety | PAPER default; LIVE needs 5 explicit gates; kill switch persisted; UNKNOWN reconciled, never resubmitted. |
 
 ---
 

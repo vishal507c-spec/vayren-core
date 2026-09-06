@@ -133,3 +133,14 @@ class TimeframeChanged(Event):
 `05_strategy` aayega → `StrategyCalculated` jaisa event catalog mein add hoga. Wahi pattern.
 
 > 11 events, 11 messages, 1 post office. Catalog padho — sab clear.
+
+## 10. Live Execution Events (`08_execution`)
+
+| # | Event | Kaun bhejta hai | Kaun sunta hai | Andar kya hota hai |
+|---|---|---|---|---|
+| 22 | `MarketEvent` + Quote/Trade/Candle/OrderBook/Heartbeat | provider/normalizer | `LiveSession` | symbol, timestamp (UTC ISO), seq + kind payload |
+| 23 | `SignalGenerated` | `LiveSession` | journal/bus | request_id, strategy_id, signal_id, event_seq |
+| 24 | `RiskApproved` / `RiskDenied` | `LiveSession` | journal/bus | request_id, intent_id (+ reasons) |
+| 25 | `OrderPlanned` / `OrderSubmitted` / `OrderAcknowledged` | `LiveSession` | journal/bus | request_id, client_order_id |
+| 26 | `OrderFill` / `OrderRejected` / `PositionUpdated` | `LiveSession` | journal/bus | fills, quantities |
+| 27 | `KillSwitchEngaged` | `LiveSession` | journal/bus | level, reason |

@@ -4,7 +4,7 @@
 
 [project]
 name = "vayren-core"
-version = "1.8.0"
+version = "1.9.0"
 description = "Event-driven desktop charting platform"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -87,6 +87,8 @@ include = [
 extraPaths = [
     "02_data",
     "scripts/forensics",
+    "scripts/speed",
+    "scripts",
 ]
 
 # ── Pytest (Test Runner) ──────────────────────────────────────

@@ -2,6 +2,53 @@
 
 **Nya entry hamesha upar likho.**
 
+## 2026-09-06 - Phase 18: AI engineering speed optimization engine (measurement only, zero product changes)
+
+**Kya hua:** `scripts/speed/` package (markers, journal, context compiler, edits, bottleneck, dashboard — stdlib only) + `benchmark.py` scoreboard me speed dashboard + 31 naye tests. Koi strategy/backtest/execution/risk/UI behavior change nahi — sirf measurement infrastructure.
+**Measurement:** Phase markers (DISCOVERY..DONE) + loop milestones (TASK_START..TASK_END, UNMEASURED kabhi invent nahi); append-only journal (`speed_marks/journal.jsonl`, baselines never overwritten); fingerprint-paired BEFORE/CURRENT/DELTA; DIVERGENT-window guard (validation vs total opposite direction → LOW confidence, "do not claim"); metrics separate (utilization kabhi speed multiplier nahi).
+**Experiments (is turn me, same tree):** full gate BEFORE 144.18s (pyright 35.5s, pytest 105.9s/1116); impact subset tight pair cold 3.04s vs warm 2.80s = 1.09x (single-sample, noise ke andar); loose pair ne 10.86s validate_imports outlier pakda (machine noise > cache effect); context compiler ~150ms spawn-dominated (cold/warm indistinguishable). Phase-18 khud: wall 4530.8s (~75min), 3 fix rounds, 0 human interventions.
+**Proof:** 1117 tests RC=0, 27/27 partitions, ruff/format/pyright/validators clean. Scoreboard regenerated (speed sections embedded).
+**Baaki:** equivalent-task repeats future phases me journal me record honge — tabhi real reuse speedup niklega; abhi REUSE_SPEEDUP sirf micro-pairs par hai (1.09x, noise).
+**Release prep:** local commit `v1.9.0` (NOT pushed — `gh` token invalid hai; push + GitHub Release user ke `gh auth login` ke baad). Commit me sirf Phase-18 files + shared measurement/config ke documented hunks; prior product code local hi hai.
+
+## 2026-09-05 - Phase 17: LIVE workspace UI (real execution-control tab, zero fake data)
+
+**Kya hua:** Top nav LIVE button ab real workspace kholta hai: status bar (mode/broker/connection/strategy/risk/reconciliation/kill), mode selector, LIVE READINESS gates with reasons, ARM LIVE (backend-gated), HALT + kill banner, strategy/position/risk panels, live chart (shared CandleChartWidget + real bars), orders/fills tables, PnL strip, reconciliation, broker panel, filterable event stream. Sab `set_state()` se — bus/SQL/broker kabhi nahi chhuta.
+**Proof:** 22 UI tests (E2E renders a REAL PaperService run: fills/positions/journal visible), real CLI ne 2 genuine bugs pakde (cp1252 ✓, lifecycle double-VALIDATING). Gate green: 1086 tests RC=0, 27/27.
+**Baaki:** live venue par real broker wiring (state provider tabdeel hoga, widget nahi).
+
+## 2026-09-05 - Phase 15: sandbox broker + live-readiness infrastructure (REAL_BROKER_UNSPECIFIED, no invented broker)
+
+**Kya hua:** Stop-condition check first: repo me koi execution broker specified nahi hai (Zerodha/KiteConnect SIRF historical-data provider hai `02_data` me; execution ke liye koi venue/config/credentials nahi). Isliye koi real adapter invent nahi kiya — provider-neutral readiness infrastructure banayi.
+**Kya kiya:** SandboxBroker (identity, credential-gated, scripted full/partial/reject/delay fills, disconnect sim) + credentials (store-only values, redacted repr, env store) + 5 named live gates existing primitives par + account confirm (sandbox kabhi LIVE nahi) + explicit arming machine (DISARMED default, LIVE submit gate) + ReadOnlyBroker + retry classification/rate limiter/clock-drift + session stream-generalized (paper parity intact) + --check-live extended (arming/clock/env/reconcile lines) + adapter contract tests + 13 failure sims + redaction tests + sandbox bootstrap benchmark + SDK-boundary validator check (kiteconnect sirf provider me).
+**Proof:** sandbox E2E green, paper/sandbox/replay parity green, 1064 tests RC=0, 27/27 partitions, ruff/format/pyright/validators clean.
+**Benchmarks (local processing only, not exchange latency):** dispatch ~1.34M ev/s, strategy eval ~0.002ms, risk ~0.014ms, plan+settle ~0.005ms, paper session ~28k ev/s, reconcile ~0.01ms, paper bootstrap ~24.6ms, sandbox bootstrap ~2.3ms (startup 0.16 / events 2.12 / reconcile 0.02 / shutdown 0.01).
+**Baaki (real broker):** registered live venue adapter + real credentials + live account confirmation. Tab tak LIVE fail-closed.
+
+## 2026-09-05 - Phase 14: sandbox broker layer (PAPER → SANDBOX → LIVE-READINESS, LIVE stays fail-closed)
+
+**Kya hua:** Deterministic SandboxBroker (account identity, credential requirement, scripted full/partial/reject/delay fills, disconnect simulation) + provider-neutral credentials (values only in store, redacted repr, never logged/journaled) + 5 named live gates mapped on existing safety primitives + account confirmation (sandbox never confirms as LIVE) + `--check-live` diagnostic (orders impossible) + session generalized to adapter-native stream flow (paper behavior preserved, parity green).
+**Proof:** sandbox E2E (signal→fill→portfolio→journal→reconcile), 13 failure simulations all fail closed, paper↔sandbox parity (same signals + fill prices), replay determinism, reconcile mismatch blocks_live. Benchmarks: sandbox bootstrap ~2.2ms total. Gate green.
+**Baaki (real broker):** registered live venue adapter + real credentials + account confirmation against the live venue. Tab tak LIVE = NOT_CONFIGURED (correct behavior).
+
+## 2026-09-05 - Phase 13: --paper wired into 00_app (real E2E, no QApplication, no threads)
+
+**Kya hua:** `python -m app --paper` ab real entrypoint se headless paper session chalata hai: SQLite store → repository → strategy compiler → LiveSession → PaperBroker → fills → portfolio → journal → checkpoint → CLEAN shutdown (RC=0). Koi QApplication/window/threads nahi — Qt teardown class by construction.
+**Files:** `00_app/app/services/paper_service.py` (PaperService: prepare/run/shutdown/state/summarize; checkpoint+journal under `<data_dir>/paper/<symbol>/`), `__init__.py` (--paper/--paper-symbol/--paper-strategy/--paper-timeframe/--strategy-dir flags; --live fail-closed RC=2), `00_app/app/tests/test_paper.py` (9 tests A-L).
+**Real CLI proof:** 40 events → 12 signals → 11 orders → 11 fills → PnL +2822.57 → Shutdown CLEAN. CLI ne 2 genuine bugs pakde: cp1252 ✓-crash (ASCII markers) + checkpoint-recover double-VALIDATING transition (lifecycle fix: RECOVERING end, start accepts CREATED/RECOVERING, contexts reset on recover).
+**Benchmark PAPER_BOOTSTRAP_E2E:** startup ~3ms, execution ~39ms, shutdown ~0ms, recovery run ~42ms.
+**Baaki (sandbox/live):** live venue adapter, broker credentials flow for execution, execution UI, `vayren --live` sirf fail-closed hai.
+
+## 2026-09-05 - Live execution layer (07_risk + 08_execution, paper real, live NOT_CONFIGURED)
+
+**Kya hua:** Production-grade live strategy execution foundation: 07_risk (fail-closed gates, kill switch) + 08_execution (market-data intake, strategy runtime, planner, engine, paper broker, portfolio, journal/replay, regime, adaptive, lifecycle). 72 new tests. Koi real order possible nahi (PAPER default, LIVE 5 gates, koi live adapter nahi).
+
+**Architecture:** strategy logic reuse (PythonStrategy.on_bar, no rewrite) - backtest-paper signal parity measured (warmup-boundary transient documented), fill-price math identical. Risk har order se pehle, final quantity re-validated. UNKNOWN sirf reconcile se nikalta hai. Startup RECOVER-RECONCILE-VALIDATE-WARMUP-READY enforced.
+**Safety:** default PAPER; LIVE_TRADING_ENABLED/BROKER_LIVE_ENABLED/ACCOUNT_CONFIRMED/RISK_LIMITS_VALID/KILL_SWITCH_OFF sab chahiye warna PAPER downgrade (recorded, never silent). Kill switch persisted. Adaptive sirf advisory (size shrink/limit/halt) - risk limits ko touch karne ka koi path nahi.
+**Baselines (scripts/bench_execution.py):** dispatch ~932k ev/s, strategy eval ~0.003ms, risk ~0.017ms, plan+settle ~0.005ms, paper 60-candle ~3ms, reconcile ~0.012ms.
+**Constitution note:** naya code Python me hai (koi Rust workspace/binding infra repo me nahi; smallest-slice + existing event-driven architecture reuse). Deterministic cores (risk checks, state machine, replay) isolated modules me hain - future migration-ready.
+**Baaki:** bootstrap wiring, live venue adapter (NotConfiguredError uthata hai), execution UI, --describe jaisa `vayren --live` CLI.
+
 ## 2026-09-05 - AEOS Phase 5 (action timing: bracketing FALSIFIED, validation medians strengthened, per-test ~25ms)
 
 **Kya hua:** Per-action external bracketing banao → test karo → falsify karo. 2 calibration brackets (76s aur 40s, sub-second actions ke around) prove karte hain: inter-call agent latency floor ~tens-of-seconds hai, isliye interactive READ/EDIT/SEARCH ko externally time karna impossible hai. Negative result honestly report, koi fake precision nahi.

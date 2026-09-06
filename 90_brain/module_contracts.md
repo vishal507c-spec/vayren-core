@@ -50,26 +50,30 @@ AI agents must read the relevant module contract before modifying that module.
 ### Allowed graph (from `scripts/validate_imports.py`)
 
 ```
-00_app ──► 01_core, 02_data, 03_market, 04_chart, 05_strategy, 06_backtest
+00_app ──► 01_core, 02_data, 03_market, 04_chart, 05_strategy, 06_backtest, 07_risk, 08_execution
 01_core ──► (none — stdlib only)
 02_data ──► 01_core
 03_market ──► 01_core
 04_chart ──► 01_core, 03_market
 05_strategy ──► 01_core, 03_market
 06_backtest ──► 01_core, 03_market, 05_strategy
+07_risk ──► 01_core
+08_execution ──► 01_core, 03_market, 05_strategy, 07_risk
 ```
 
 ### Table
 
 | Module | May Import | Forbidden |
 |---|---|---|
-| `00_app` | `core`, `data`, `market`, `chart`, `strategy`, `backtest` | — |
-| `01_core` | stdlib only | `data`, `market`, `chart`, `app`, `strategy`, `backtest` |
-| `02_data` | `core` | `market`, `chart`, `app`, `strategy`, `backtest` |
-| `03_market` | `core` | `02_data`, `04_chart`, `app`, `strategy`, `backtest` |
-| `04_chart` | `core`, `market` (`Bar` only) | `02_data`, `app`, `strategy`, `backtest`, `market.database` |
-| `05_strategy` | `core`, `market` | `02_data`, `04_chart`, `app` internals |
-| `06_backtest` | `core`, `market`, `strategy` | `02_data`, `04_chart`, `app` internals |
+| `00_app` | `core`, `data`, `market`, `chart`, `strategy`, `backtest`, `risk`, `execution` | — |
+| `01_core` | stdlib only | `data`, `market`, `chart`, `app`, `strategy`, `backtest`, `risk`, `execution` |
+| `02_data` | `core` | `market`, `chart`, `app`, `strategy`, `backtest`, `risk`, `execution` |
+| `03_market` | `core` | `02_data`, `04_chart`, `app`, `strategy`, `backtest`, `risk`, `execution` |
+| `04_chart` | `core`, `market` (`Bar` only) | `02_data`, `app`, `strategy`, `backtest`, `risk`, `execution`, `market.database` |
+| `05_strategy` | `core`, `market` | `02_data`, `04_chart`, `app` internals, `risk`, `execution` |
+| `06_backtest` | `core`, `market`, `strategy` | `02_data`, `04_chart`, `app` internals, `risk`, `execution` |
+| `07_risk` | `core` | everything except `core` (events carry data in, decisions out) |
+| `08_execution` | `core`, `market` (`Bar` only), `strategy` (public surface), `risk` | `02_data`, `04_chart`, `app` internals, `backtest`, `market.database` |
 
 **INVARIANT:** `from market.database import ...` or `from ..market import ...` or `from x import *` is a contract violation.
 
@@ -92,9 +96,9 @@ AI agents must read the relevant module contract before modifying that module.
 | `DEFAULT_DATA_DIR` (`D:\ZerodhaTradingData`) | Default `<data_dir>` if neither `--data-dir` nor `VAYREN_DATA_DIR` set |
 | `DEFAULT_LIMIT = None` | Default candles limit |
 
-**Consumes:** `core` (EventBus, logging, registries, SystemModel), `data` (data_manifest, DownloadWorker, settings, credentials), `market` (SymbolRepository, loaders, manifests), `chart` (ChartEngine, widgets, windows, manifests), `strategy` (StrategyRegistry, Lab UI), `backtest` (BacktestRunner/Worker).
+**Consumes:** `core` (EventBus, logging, registries, SystemModel), `data` (data_manifest, DownloadWorker, settings, credentials), `market` (SymbolRepository, loaders, manifests), `chart` (ChartEngine, widgets, windows, manifests), `strategy` (StrategyRegistry, Lab UI), `backtest` (BacktestRunner/Worker), `execution` (PaperService for `--paper`; headless, no QApplication).
 
-**Produces:** `Bootstrap` with properties `bus: EventBus`, `services: Registry` (name lookup, unchanged), `components: ComponentRegistry` (capability lookup), `system_model: SystemModel`. Emits `AppStarted` on `start()`.
+**Produces:** `Bootstrap` with properties `bus: EventBus`, `services: Registry` (name lookup, unchanged), `components: ComponentRegistry` (capability lookup), `system_model: SystemModel`. Emits `AppStarted` on `start()`. Hosts `LiveWorkspace` (LIVE tab): pure view over an injected state dict + arm/halt callbacks, never bus/SQL/broker.
 
 **Dependencies:** See §4.
 
@@ -296,6 +300,63 @@ WAL, `V9/V9.1` migrations.
 
 ---
 
+### 5.8 Module: `07_risk` — Safety Gates
+
+**Responsibility:** Fail-closed pre-order policy evaluation, latched kill switches, session/clock rules. No order planning, no broker knowledge, no market reads.
+
+**Public API** (`risk/__init__.py`):
+`RiskPolicy`, `RiskRequest`, `RiskCheck`, `RiskDecision`, `RiskEngine`, `KillSwitch`, `KillSwitchState`, `SessionRules`, `within_session`, `clock_sane`, `risk_manifest`
+
+**Consumes:** `core` (contracts for the manifest only).
+
+**Produces:** `RiskDecision` (approved + per-check audit trail, or denied with reasons).
+
+**Forbidden:** Everything except `core`. In particular: no `market` reads, no `strategy` imports, no broker access — the engine judges data snapshots handed to it.
+
+**Invariants:**
+- `RiskEngine.evaluate` never raises: any internal error denies with reason `risk engine error — fail closed`.
+- Denied decisions always carry non-empty reasons; approved decisions record every check.
+- Approved intent IDs are remembered; a repeated intent ID is denied (duplicate protection).
+- Kill-switch state persists to JSON; an engaged switch survives restarts and is only released by explicit `disengage`.
+- `clock_sane` requires caller-supplied epoch on the event-time basis (deterministic, no hidden tz).
+
+**AI modification:** Add a gate by adding a named check (never by weakening an existing one). Keep evaluation side-effect-free apart from the seen-intent set and kill-switch file.
+
+**Validation:** `07_risk/risk/tests` + `scripts/run_tests.py` partitions.
+
+---
+
+### 5.9 Module: `08_execution` — Live/Paper Execution
+
+**Responsibility:** Run registered strategies against normalized market events through risk → plan → engine → broker → portfolio, with journal/replay/regime/adaptive observation. Strategy logic is reused from `05_strategy`, never reimplemented.
+
+**Public API** (`execution/__init__.py`, additions Phase 15):
+`SandboxBroker`, `ReadOnlyBroker`, `BrokerCredentials`, `CredentialStore`, `EnvCredentialStore`, `validate_credentials`, `evaluate_live_gates`, `LiveGatesReport`, `confirm_account`, `risk_configuration_valid`, `RateLimiter`, `RetryKind`, `classify_retry`, `clock_drift_ok`, `LiveArm`, `arm_transition`.
+`execution_manifest`, events (`MarketEvent`, `QuoteEvent`, `TradeEvent`, `CandleEvent`, `OrderBookEvent`, `HeartbeatEvent`, `SignalGenerated`, `RiskApproved`, `RiskDenied`, `OrderPlanned`, `OrderSubmitted`, `OrderAcknowledged`, `OrderFill`, `OrderRejected`, `PositionUpdated`, `KillSwitchEngaged`), models (`StrategySignal`, `ExecutionIntent`, `make_intent_id`, `OrderState`, `OrderPlan`, `BrokerOrder`, `Fill`, `Position`, `AccountSnapshot`, `StrategyRuntimeContract`), `MarketDataProvider`, `ReplayProvider`, `StreamNormalizer`, `inspect_strategy`, `LiveSession`, `OrderPlanner`, `ExecutionEngine`, `BrokerAdapter`, `PaperBroker`, `resolve_broker`, `ExecutionMode`, `ModeGates`, `PositionLedger`, `reconcile_positions/orders`, `StatisticalRegimeDetector`, `LiveEventRecorder`, `replay_and_compare`, `ExecutionJournal`, `LatencyTracker`
+
+**Consumes:** `core`, `market` (`Bar` only), `strategy` (public surface: logic, signals, params, definitions), `risk` (engine, kill switch, policy).
+
+**Produces:** Fills, positions, journal facts, replay tapes, reconciliation reports.
+
+**Forbidden:** `02_data`, `04_chart`, `app` internals, `backtest`, `market.database`. In particular: strategy code never touches the broker (no path exists), risk never sees adaptive output as authority, adaptive code never touches risk limits or kill switches.
+
+**Invariants:**
+- Default mode is PAPER; LIVE without all five gates degrades to PAPER with recorded reasons. LIVE_BROKER_INTEGRATION = NOT_CONFIGURED (no live adapter ships).
+- REAL_BROKER_UNSPECIFIED (Phase 15 verdict): the only broker in the repo (Zerodha/KiteConnect) is a historical-data provider in `02_data`; no execution venue is configured anywhere. No Zerodha order code exists or may be inferred from data credentials.
+- LIVE submissions additionally require explicit arming (`DISARMED` default; consent never inferred). Read-only verification is available via `ReadOnlyBroker` (mutations raise before reaching any venue).
+- No order without a risk approval; the FINAL planned quantity is re-validated after adaptive shrink.
+- `UNKNOWN` order states exit only via explicit `reconcile()`; never blind-resubmit.
+- Intent IDs are deterministic (`strategy:version:event_seq:intent_seq`); duplicates are denied at both risk and engine.
+- Startup order RECOVER → RECONCILE → VALIDATE → WARMUP → READY is enforced; orders are impossible before RUNNING.
+- Warmup feeds history with signals discarded; restart recovery re-warms from persisted bar windows (no logic pickling).
+- Backtest ↔ paper parity: identical logic + identical bars → identical signal stream (modulo the documented one-bar warmup-boundary transient); identical fill-price math. Sizing models differ by design and are not compared.
+
+**AI modification:** New venue → new `BrokerAdapter` implementation + `register_adapter` (never touch strategy/risk). New order type → planner + engine transition coverage + tests. Keep the runtime synchronous and deterministic.
+
+**Validation:** `08_execution/execution/tests` + `scripts/run_tests.py` partitions.
+
+---
+
 ## 6. Cross-Module Interfaces
 
 | Interface | Owner | Consumer | Data |
@@ -305,6 +366,9 @@ WAL, `V9/V9.1` migrations.
 | `app → market` | `app` (lifecycle/window) emits `LoadSymbol`, `TimeframeChanged`, `ListSymbols` | loaders consume | symbol/limit |
 | `data → app` | `data` emits `DownloadCompleted(new_rows, db_total)` | side panel consumes | counts |
 | `strategy → backtest` | `strategy` provides `StrategyRuntime` | `BacktestRunner` consumes | `Signal` |
+| `strategy → execution` | `strategy` provides `PythonStrategy`/`Signal`/`BarView` | `LiveSession` consumes | same `Signal`, no rewrite |
+| `risk → execution` | `risk` provides `RiskDecision` | `LiveSession` consumes | approved/denied + reasons |
+| `execution → broker` | `execution` drives `BrokerAdapter` | `PaperBroker` (or registered venue) | `OrderPlan` → `Fill` |
 
 > **Rule:** Consumers depend on the provider's **manifest capability** (`data.query.candles`, `chart.render`, `historical_data.download`) and on the **event** payload, not on internal files.
 
@@ -337,6 +401,11 @@ Authoritative list: `90_brain/event_catalog.md` (19 events). Summary:
 | 19 | `DownloadCoverage` | `data` | `request_id, symbol, interval, info: SymbolInfo` |
 | 20 | `RunBacktest` etc. | `backtest` | `BacktestConfig` |
 | 21 | `StrategiesListed` etc. | `strategy` | lab events |
+| 22 | `MarketEvent` + `Quote/Trade/Candle/OrderBook/HeartbeatEvent` | `execution` | normalized live data (`symbol, timestamp, seq`) |
+| 23 | `SignalGenerated` / `RiskApproved` / `RiskDenied` | `execution` | `request_id, signal/intent ids` |
+| 24 | `OrderPlanned` / `OrderSubmitted` / `OrderAcknowledged` | `execution` | `request_id, client_order_id` |
+| 25 | `OrderFill` / `OrderRejected` / `PositionUpdated` | `execution` | fills, quantities |
+| 26 | `KillSwitchEngaged` | `execution` | `level, reason` |
 
 Contracts: frozen dataclass `Event` subclasses, exact-type bus dispatch, no widget/connection/callable in payload, `limit None` semantics preserved.
 
@@ -358,6 +427,10 @@ Legacy `candles(symbol, timestamp, ...)` only in `SqliteCandleDatabase` tests.
 
 **Timeframe ladder:** `TIMEFRAME_LADDER = ("1m","3m","5m","15m","30m","45m","1h","2h","4h","1D","1W")`; helpers `timeframe_seconds`, `available_timeframes(base)` (multiples only).
 
+**Execution intents/orders:** `ExecutionIntent` (strategy wish + traceable ids, never an order), `OrderPlan` (deterministic planner output), `BrokerOrder` (§12 state machine), `Fill` (fill economics) — all frozen.
+**Risk:** `RiskPolicy` (hard limits), `RiskRequest` (snapshot), `RiskDecision` (approved + named checks or denied with reasons) — frozen.
+**Live data:** `CandleEvent`/`QuoteEvent`/`TradeEvent`/`OrderBookEvent`/`HeartbeatEvent` (`symbol, timestamp UTC ISO, seq`) — frozen.
+
 ---
 
 ## 9. Boundary & Security Rules
@@ -368,8 +441,16 @@ Legacy `candles(symbol, timestamp, ...)` only in `SqliteCandleDatabase` tests.
 | `market.database` | `market` | `market.repository` only | `chart`, `data`, `app` | `Bar` | raw rows, SQL handles |
 | `data/provider` | `data` | `HistoricalDownloadEngine` via `Provider` protocol | `market`, `chart` | canonical `1m..1h` intervals | Kite interval IDs, tokens |
 | `chart/renderer` | `chart` | `CandleChartWidget` | loaders | `Bar`/`ChartModel` | bus, SQL |
-| `strategy` | `strategy` | `backtest` via public registry | `chart` | `Signal` | `exec` strings |
+| `strategy` | `strategy` | `backtest` via public registry; `execution` via public surface | `chart` | `Signal` | `exec` strings |
+| `risk` | `risk` | `execution` via `RiskEngine.evaluate` | everyone else (no reads, no broker) | `RiskRequest` | market state, broker handles |
+| `execution/broker` | `execution` | `ExecutionEngine` via `BrokerAdapter` protocol | `strategy`, `risk`, `chart`, `backtest`, UI | `OrderPlan` | broker SDKs, credential values |
+| `execution/sandbox` | `execution` tests/sessions | explicit `SandboxBroker(...)` construction or `register_adapter` | production code paths, live mode | scripted fills | real-venue behavior |
+| `execution/credentials` | `execution` | `validate_credentials` pre-submit; values in store only | logs, journal, repr, events | key refs + identity | secret values |
+| `execution/arming` | `execution` session | explicit `arm(reason)` call only | credentials, gates, kill switch | DISARMED default | inferred consent |
+| `execution/readonly` | tests/diagnostics | read-only verification of any adapter | order submission paths | reads | mutations |
+| `broker SDKs` | `02_data/data/provider/*` only | isolated venue packages | strategy, risk, execution, chart, app, backtest | nothing | `kiteconnect` etc. outside providers |
 | Credentials | `data/provider` | `AuthEngine` at auth time | events, logs, UI, `SystemModel` | store→env fallback | secrets in plain text |
+| Live orders | `risk`+`execution` | PAPER default; LIVE needs 5 explicit gates | default configs, unconfigured venues | `RiskDecision` | real orders without gates |
 
 **Security invariants:** `ProviderCredentialsManager` validates label-only errors; `WindowsCredentialStore` uses `vayren:zerodha` target; `ZerodhaCredentials.from_env()` redacts `repr`.
 
@@ -383,6 +464,10 @@ Legacy `candles(symbol, timestamp, ...)` only in `SqliteCandleDatabase` tests.
 | Quote load | One-time `get_quotes(527)` at `SymbolsListed` (~0.5s), then `QuoteLoader` no-op cache | Never per-paint DB query |
 | Chart paint | Static pixmap cache `(model, window, price, size)`; crosshair = blit only (~0.9 ms/frame) | `paint_grid` only on cache rebuild |
 | SystemModel | Built once at `Bootstrap._build_architecture()` (~0.13 ms) | Not per-event |
+| Live event dispatch | Sync in-process pipeline, no threads; measured ~0.2 ms/200-candle batch (~932k ev/s) | `scripts/bench_execution.py` baseline |
+| Risk evaluation | Single request ~0.017 ms median | Same baseline script |
+| Paper session | 60 candles end-to-end ~3 ms median (~20k ev/s) | Same baseline script |
+| Sandbox bootstrap | Startup ~0.3 ms, event processing ~3.4 ms, reconcile ~0.03 ms, shutdown ~0.01 ms | `sandbox_bootstrap_e2e` baseline |
 
 No performance guarantee invented beyond measured facts in `ai_memory.md`.
 

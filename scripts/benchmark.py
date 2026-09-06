@@ -522,6 +522,33 @@ def _cell(value: object, suffix: str = "") -> str:
     return f"{value}{suffix}"
 
 
+def _speed_section() -> list[str]:
+    """Phase-18 speed dashboard, rendered by the speed package in isolation.
+
+    Subprocess isolation keeps this harness decoupled from the speed
+    modules (no shared imports, no behavior change to existing sections).
+    """
+    try:
+        proc = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "scripts" / "speed" / "__main__.py"),
+                "dashboard",
+                "--format",
+                "md",
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except Exception as exc:
+        return ["", "## Speed dashboard", "", f"NOT MEASURED (dashboard error: {exc}).", ""]
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return ["", "## Speed dashboard", "", "NOT MEASURED (no speed records yet).", ""]
+    return [""] + proc.stdout.strip().splitlines() + [""]
+
+
 def cmd_scoreboard() -> int:
     gates: dict[str, dict] = {}
     tasks: list[dict] = []
@@ -758,6 +785,7 @@ def cmd_scoreboard() -> int:
         )
     else:
         out.append("| (none) | 0 | — | — | — | — | — |")
+    out += _speed_section()
     out += [
         "",
         "## Rules",

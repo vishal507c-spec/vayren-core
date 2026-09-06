@@ -12,6 +12,8 @@
 | `run_tests.py` | Suite-partitioned pytest driver — har partition apne fresh interpreter mein (Qt/GC crashes se bachne ke liye); `research/tests` samet saare 7 domains | `make test` ke bajaye stable full run ke liye; CI bhi yahi chalata hai |
 | `validate_structure.py` | 7 domains ka layout check (`app`/`core`/`data`/`market`/`chart`/`strategy`/`backtest`) | `make check` mein |
 | `validate_imports.py` | Cross-module dependency rules check (AST se; `if TYPE_CHECKING:` imports runtime coupling nahi maane jate) | `make check` mein |
+| `benchmark.py` | AEOS velocity harness (`gate`/`begin`/`record`/`impact`/`replay`/`scoreboard`) + corpus/scoreboard/runs-log | Validation cost measure karne, impact plan, scoreboard regen ke liye |
+| `speed/__main__.py` | Phase-18 speed instrumentation (`mark`/`record`/`compile-context`/`recommend`/`dashboard`) — engineering-loop timing, task journal, context compiler | Har benchmarked task par (negligible overhead: ek JSONL line) |
 
 ## 3. Example
 
