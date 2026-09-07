@@ -21,6 +21,9 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from broker.adapters.zerodha import BROKER_ID, HISTORICAL_CAPABILITIES
+from broker.capabilities import CapabilitySet
+
 from data.provider.contract import (
     ERR_AUTHENTICATION_FAILED,
     ERR_INVALID_REQUEST,
@@ -50,6 +53,11 @@ KITE_INTERVAL_IDS: dict[str, str] = {
 
 class ZerodhaProvider:
     """Engine-facing adapter over the existing Zerodha implementation."""
+
+    # UBL identity + capability advertisement (M5, additive only — no
+    # behavior change). Single-sourced from the adapter package; this makes
+    # the provider structurally satisfy the UBL HistoricalFace contract.
+    name = BROKER_ID
 
     # In-app credential configuration (provider layer — the engine and the
     # UI flow never know about these; the manager renders exactly these).
@@ -94,6 +102,10 @@ class ZerodhaProvider:
         self._fetcher = None
 
     # ── Provider contract ────────────────────────────────────────────────────
+
+    def capabilities(self) -> CapabilitySet:
+        """Advertised UBL matrix: historical-data only (M5, additive)."""
+        return HISTORICAL_CAPABILITIES
 
     def available(self) -> tuple[bool, str]:
         return self._auth.available()

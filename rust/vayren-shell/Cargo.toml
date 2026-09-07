@@ -1,0 +1,17 @@
+[package]
+name = "vayren-shell"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "VAYREN native UI (Rust + egui): broker/UBL status panel — the established native-UI target"
+
+[lib]
+name = "vayren_shell"
+crate-type = ["rlib"]
+
+[[bin]]
+name = "vayren-shell"
+path = "src/main.rs"
+
+[dependencies]
+eframe = "0.28"

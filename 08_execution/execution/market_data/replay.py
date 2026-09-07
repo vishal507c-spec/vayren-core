@@ -45,6 +45,7 @@ class ReplayProvider(MarketDataProvider):
         self._chunk_size = max(1, int(chunk_size))
         self._cursor = 0
         self._open = False
+        self._subscribed: tuple[str, ...] = ()
 
     @property
     def name(self) -> str:
@@ -65,8 +66,23 @@ class ReplayProvider(MarketDataProvider):
         caps.append("heartbeat")
         return tuple(caps)
 
+    def connect(self) -> None:
+        """Prepare the tape transport without subscribing (FINAL §F)."""
+        self._open = True
+
     def open(self, symbols: tuple[str, ...], timeframe: str) -> None:  # noqa: ARG002
         self._open = True
+        self._subscribed = tuple(symbols)
+
+    def subscribe(self, symbols: tuple[str, ...]) -> None:
+        """Add symbols to the replay subscription set (idempotent, M8 §9)."""
+        self._subscribed = tuple(dict.fromkeys((*self._subscribed, *symbols)))
+        self._open = True
+
+    def unsubscribe(self, symbols: tuple[str, ...]) -> None:
+        """Remove symbols from the replay subscription set (idempotent)."""
+        dropped = set(symbols)
+        self._subscribed = tuple(s for s in self._subscribed if s not in dropped)
 
     def poll(self) -> tuple[MarketEvent, ...]:
         if not self._open:
@@ -84,6 +100,14 @@ class ReplayProvider(MarketDataProvider):
 
     def close(self) -> None:
         self._open = False
+
+    def disconnect(self) -> None:
+        """Drop transport, keeping subscription memory for reconnect."""
+        self._open = False
+
+    def reconnect(self) -> None:
+        """Re-establish transport, resuming the subscription set and tape."""
+        self._open = True
 
     @property
     def exhausted(self) -> bool:

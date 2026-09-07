@@ -323,9 +323,20 @@ def format_paper_report(report: PaperRunReport) -> str:
     )
 
 
-def run_paper(args: Any) -> int:
-    """CLI entry for --paper. Returns the process exit code."""
+def run_paper(args: Any, selection_service: Any = None) -> int:
+    """CLI entry for --paper. Returns the process exit code.
+
+    ``selection_service`` (M4) is the authoritative BrokerSelectionService;
+    when absent (legacy/test callers) one is established locally so the
+    paper run still reads the single selection source.
+    """
     from risk import RiskPolicy
+
+    if selection_service is None:
+        from app.__init__ import establish_selection
+
+        selection_service = establish_selection(args)
+    selection = selection_service.current()
 
     try:
         service = PaperService(
@@ -347,15 +358,22 @@ def run_paper(args: Any) -> int:
         print(f"PAPER FAILED: {exc}")
         return 1
     print(format_paper_report(report))
+    print(
+        f"Broker selection: {selection.name} ({selection.environment.value}) — {selection.reason}"
+    )
     return 0
 
 
-def run_check_live(args: Any) -> int:
+def run_check_live(args: Any, selection_service: Any = None) -> int:
     """CLI entry for --check-live. Diagnostic only: never places an order.
 
     Evaluates strategy/data readiness plus the five live gates against the
     real resolution paths. Always returns 0 when the evaluation itself ran
     (readiness is data, printed as LIVE READY / LIVE NOT READY).
+
+    M4: the probe adapter name comes from the authoritative selection when
+    the selected broker serves the trading domain; otherwise the legacy
+    "live" probe is kept (compatibility shim — it still fails closed).
     """
     from execution.broker.credentials import (
         BrokerCredentials,
@@ -366,6 +384,12 @@ def run_check_live(args: Any) -> int:
     from execution.broker.gates import evaluate_live_gates, format_gates_report
     from execution.modes import ExecutionMode, gates_from_env
     from risk import RiskPolicy
+
+    if selection_service is None:
+        from app.__init__ import establish_selection
+
+        selection_service = establish_selection(args)
+    selection = selection_service.current()
 
     try:
         service = PaperService(
@@ -391,9 +415,16 @@ def run_check_live(args: Any) -> int:
     contracts = [ctx.contract for ctx in session._contexts.values()]
     strategy_ok = all(c.complete for c in contracts) and bool(contracts)
     data_ok = bool(service._bars)
+    # M4: probe the SELECTED broker's trading face when it has one; the
+    # selection itself never bypasses the gates (a paper/sandbox account
+    # still cannot confirm as LIVE — confirm_account enforces environment).
+    from broker.capabilities import Domain
+
+    selected_allows_trading, trading_reason = selection_service.surface_allowed(Domain.TRADING)
+    probe_name = selection.name if selected_allows_trading else "live"
     try:
         broker, effective, downgrade_notes = resolve_broker(
-            ExecutionMode.LIVE, gates_from_env(), adapter_name="live"
+            ExecutionMode.LIVE, gates_from_env(), adapter_name=probe_name
         )
         # A downgrade to PAPER is not a live-capable adapter: the gate
         # must fail rather than bless paper plumbing as LIVE ready.
@@ -419,6 +450,11 @@ def run_check_live(args: Any) -> int:
         kill_halted=session._risk.kill_switch.is_halted(),
     )
     lines = [format_gates_report(report)]
+    lines.append(
+        f"SELECTED BROKER: {selection.name} ({selection.environment.value}) — {selection.reason}"
+    )
+    if not selected_allows_trading:
+        lines.append(f"LIVE PROBE: {trading_reason}")
     lines.append(
         f"[{'ok' if strategy_ok else 'FAIL'}] STRATEGY_REQUIREMENTS"
         + ("" if strategy_ok else " — contract incomplete")

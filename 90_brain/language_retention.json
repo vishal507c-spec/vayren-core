@@ -1,0 +1,26 @@
+{
+  "_note": "Proven-retention manifest for the final language migration pass. Every Rust-owned-but-Python file must resolve to a class or file entry here (or MIGRATED status); the ownership validator enforces this. Reasons cite measurements and constitutional clauses, never convenience.",
+  "classes": {
+    "CORE": "Event bus / registries / manifests are stdlib-only foundation glue with measured microsecond overhead (dispatch ~0.3us, snapshot ~0.024ms). Porting the bus would rewire every module at once (big-bang, constitution §11). Retained; numeric authorities migrate per-feature.",
+    "MARKET_DATA": "Repository/SQL/database layers are SQLite IO orchestration, not numeric compute; the aggregation kernel migrated. A full storage port is product-scale with zero measured need. Retained.",
+    "DATA_PROCESSING": "Download engine is IO/threading orchestration (worker threads, locks, auth flows) around the provider boundary; numeric detectors migrated. Retained as orchestration glue.",
+    "RISK": "RiskEngine is fail-closed orchestration over string-keyed audit reasons, kill-switch persistence and session rules; measured ~0.017ms/request with no bottleneck. A port would split safety-critical reason strings across FFI with high regression risk and no measured benefit. Retained; numeric policy kernels are validator-approved future slices.",
+    "EXECUTION": "Session/planner/broker-venue orchestration is event-driven glue with persistence (checkpoints, journals) and Qt-thread coupling. The lifecycle table authority migrated. A full port is product-scale. Retained.",
+    "BACKTEST": "Runner/optimizer/worker are research orchestration over Python strategies (which must stay Python); metrics kernels migrated. Retained.",
+    "PRESENTATION_MODEL": "ChartModel/viewport math is Qt-paint-coupled presentation state; extracting it without the Qt shell is a UI rewrite in disguise. Retained pending the egui shell; no new presentation math in Python.",
+    "NATIVE_UI": "The Qt application shell (watchlist, chart widget, LIVE workspace, labs) is a working product-scale UI. A full egui rewrite in one pass would destroy working behavior (mission §3/§12, constitution §4/§11 gradual). Retained; the Rust+egui target is established in rust/vayren-shell with the broker panel as the first native surface; NEW surfaces must be Rust+egui.",
+    "APP_UI": "Composition root + Qt shell: same proof as NATIVE_UI. Retained; bootstrap wiring stays Python (composition is not numeric core).",
+    "BOUNDARY_LOADER": "Event loader bridges are bus-coupling glue by design. Retained.",
+    "AI_ADJACENT": "Adaptive/regime/ML interfaces are advisory AI-adjacent logic; AI-adjacent stays Python per constitution §2. Retained.",
+    "DATA_UI": "Download console is Qt UI: same proof as NATIVE_UI. Retained.",
+    "RESEARCH_UI": "Research panels are Python-owned research UI. Retained."
+  },
+  "files": {
+    "08_execution/execution/runtime/lifecycle.py": "LifecycleState machine retained as session orchestration vocabulary (string reasons, Qt-adjacent lifecycle); the order-state authority (the safety-critical table) migrated. Full port is a future execution-slice candidate, not this pass."
+  },
+  "migrated": {
+    "08_execution/execution/models/order.py": "TRANSITIONS/TERMINAL_STATES authority -> Rust order_state; enum/models stay as boundary vocabulary",
+    "06_backtest/backtest/engine/metrics.py": "drawdown/equity/sharpe math -> Rust metrics kernels",
+    "03_market/market/timeframe/aggregate.py": "bucketing/accumulation + mode -> Rust aggregate/stats kernels"
+  }
+}

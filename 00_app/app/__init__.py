@@ -1,5 +1,7 @@
 """App — desktop charting application entry point."""
 
+from __future__ import annotations
+
 import argparse
 import os
 import sys
@@ -65,7 +67,41 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Evaluate live readiness gates without placing any order",
     )
+    parser.add_argument(
+        "--broker",
+        default=None,
+        help=(
+            "Select the authoritative broker for this invocation (resolved "
+            "through the unified broker registry; invalid names fail closed)"
+        ),
+    )
     return parser.parse_args(argv)
+
+
+def establish_selection(args: argparse.Namespace):
+    """Resolve the authoritative BrokerSelection for this invocation.
+
+    Precedence (design §8): explicit ``--broker`` → persisted store →
+    compatibility default. An explicit ``--broker`` that is unknown or
+    fails registry validation is a hard CLI error (exit 2) — never a
+    silent fallback. Returns the service so callers read one selection.
+    """
+    # Seed both registries' built-ins before any name resolution.
+    import data.provider.factory  # noqa: F401  (seeds zerodha history plugin)
+    import execution.broker.factory  # noqa: F401  (seeds paper/sandbox plugins)
+
+    from app.services.broker_selection_service import (  # noqa: F401
+        BrokerSelectionService,
+        app_selection_store,
+    )
+
+    service = BrokerSelectionService(app_selection_store(args.data_dir))
+    requested = getattr(args, "broker", None)
+    if requested:
+        service.select(requested)  # fail-closed on unknown names
+    else:
+        service.current()  # establish compatibility default / store state
+    return service
 
 
 class App:
@@ -77,6 +113,13 @@ class App:
         args = parse_args(argv)
         configure_logging(args.log_level)
 
+        try:
+            selection_service = establish_selection(args)
+        except Exception as exc:
+            print(f"BROKER SELECTION FAILED: {exc}")
+            return 2
+        selection_service.current()  # establish (and validate) eagerly
+
         if args.live:
             print("LIVE TRADING NOT CONFIGURED: no live broker adapter is registered.")
             print("Refusing to trade.")
@@ -85,7 +128,7 @@ class App:
         if args.check_live:
             from app.services.paper_service import run_check_live
 
-            return run_check_live(args)
+            return run_check_live(args, selection_service=selection_service)
 
         if args.describe:
             from app.describe import describe_architecture
@@ -97,13 +140,17 @@ class App:
             from app.services.paper_service import run_paper
 
             try:
-                return run_paper(args)
+                return run_paper(args, selection_service=selection_service)
             except KeyboardInterrupt:
                 print("PAPER INTERRUPTED: shutdown clean")
                 return 130
 
         qt_app = QApplication(argv if argv is not None else sys.argv)
-        bootstrap = Bootstrap(data_dir=Path(args.data_dir), limit=args.limit)
+        bootstrap = Bootstrap(
+            data_dir=Path(args.data_dir),
+            limit=args.limit,
+            selection_service=selection_service,
+        )
         try:
             bootstrap.start()
         except Exception:

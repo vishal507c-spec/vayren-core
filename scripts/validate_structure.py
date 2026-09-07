@@ -166,6 +166,7 @@ DOMAIN_STRUCTURE: dict[str, list[str]] = {
         "broker/sandbox.py",
         "broker/credentials.py",
         "broker/gates.py",
+        "broker/activation.py",
         "portfolio/__init__.py",
         "portfolio/ledger.py",
         "portfolio/reconcile.py",
@@ -177,6 +178,24 @@ DOMAIN_STRUCTURE: dict[str, list[str]] = {
         "adaptive/memory.py",
         "adaptive/confidence.py",
         "ml_interfaces.py",
+        "tests/__init__.py",
+    ],
+    "broker": [
+        "__init__.py",
+        "README.md",
+        "vocab.py",
+        "capabilities.py",
+        "faces.py",
+        "funds.py",
+        "credentials.py",
+        "health.py",
+        "identity.py",
+        "registry.py",
+        "selection.py",
+        "selection_store.py",
+        "adapters/__init__.py",
+        "adapters/zerodha/__init__.py",
+        "adapters/skeleton/__init__.py",
         "tests/__init__.py",
     ],
 }
@@ -192,6 +211,7 @@ DOMAIN_CHAPTERS: dict[str, str] = {
     "backtest": "06_backtest",
     "risk": "07_risk",
     "execution": "08_execution",
+    "broker": "09_broker",
 }
 
 

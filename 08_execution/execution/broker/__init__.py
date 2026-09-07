@@ -1,5 +1,11 @@
 """Broker transport — protocol, venues, credentials, gates, mode-gated factory."""
 
+from execution.broker.activation import (
+    ActivationReport,
+    ActivationStep,
+    evaluate_activation,
+    record_activation,
+)
 from execution.broker.adapter import (
     BrokerAdapter,
     BrokerCapabilities,
@@ -14,7 +20,7 @@ from execution.broker.credentials import (
     default_account_id,
     validate_credentials,
 )
-from execution.broker.factory import register_adapter, resolve_broker
+from execution.broker.factory import resolve_broker
 from execution.broker.gates import (
     ACCOUNT_CONFIRMED,
     BROKER_ADAPTER_READY,
@@ -27,25 +33,41 @@ from execution.broker.gates import (
     confirm_account,
     evaluate_live_gates,
     format_gates_report,
+    funds_snapshot_from_face,
+    funds_valid_for_live,
+    risk_capital_from_funds,
     risk_configuration_valid,
 )
 from execution.broker.paper import PaperBroker
 from execution.broker.readonly import ReadOnlyBroker
 from execution.broker.resilience import (
+    BackoffPolicy,
     RateLimiter,
+    ReconnectPolicy,
     ResilienceState,
     RetryKind,
+    TimeoutPolicy,
     classify_retry,
     clock_drift_ok,
 )
 from execution.broker.sandbox import SandboxBroker
 
 __all__ = [
+    "ActivationReport",
+    "ActivationStep",
+    "BackoffPolicy",
     "BrokerAdapter",
     "BrokerCapabilities",
     "BrokerError",
     "NotConfiguredError",
+    "ReconnectPolicy",
+    "TimeoutPolicy",
     "adapter_supports",
+    "evaluate_activation",
+    "record_activation",
+    "funds_snapshot_from_face",
+    "funds_valid_for_live",
+    "risk_capital_from_funds",
     "PaperBroker",
     "SandboxBroker",
     "ReadOnlyBroker",
@@ -71,6 +93,5 @@ __all__ = [
     "evaluate_live_gates",
     "format_gates_report",
     "risk_configuration_valid",
-    "register_adapter",
     "resolve_broker",
 ]

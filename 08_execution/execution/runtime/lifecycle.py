@@ -17,6 +17,7 @@ class LifecycleState(Enum):
     STOPPED = "STOPPED"
     ERROR = "ERROR"
     RECOVERING = "RECOVERING"
+    RECONCILING = "RECONCILING"
 
 
 TRANSITIONS: dict[LifecycleState, frozenset[LifecycleState]] = {
@@ -38,6 +39,16 @@ TRANSITIONS: dict[LifecycleState, frozenset[LifecycleState]] = {
     LifecycleState.STOPPED: frozenset({LifecycleState.RECOVERING}),
     LifecycleState.ERROR: frozenset({LifecycleState.RECOVERING, LifecycleState.STOPPED}),
     LifecycleState.RECOVERING: frozenset(
+        {
+            LifecycleState.VALIDATING,
+            LifecycleState.RECONCILING,
+            LifecycleState.ERROR,
+            LifecycleState.STOPPED,
+        }
+    ),
+    # FINAL §L: recovered sessions reconcile broker truth before validation.
+    # RECOVERING → VALIDATING stays legal (backward compatible fast path).
+    LifecycleState.RECONCILING: frozenset(
         {LifecycleState.VALIDATING, LifecycleState.ERROR, LifecycleState.STOPPED}
     ),
 }

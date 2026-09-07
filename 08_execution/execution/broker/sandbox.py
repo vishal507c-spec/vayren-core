@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from contextlib import suppress
 
+from broker.funds import FundsSnapshot
+
 from execution.broker.adapter import BrokerCapabilities, BrokerError
 from execution.broker.credentials import BrokerCredentials, CredentialStore, validate_credentials
 from execution.models.order import Fill, OrderPlan
@@ -57,6 +59,8 @@ class SandboxBroker:
 
     @property
     def capabilities(self) -> tuple[str, ...]:
+        # "account.funds" is byte-identical to UBL Caps.ACCOUNT_FUNDS (M6:
+        # no second vocabulary). Sandbox genuinely implements funds().
         return (
             BrokerCapabilities.MARKET_ORDERS,
             BrokerCapabilities.LIMIT_ORDERS,
@@ -65,6 +69,7 @@ class SandboxBroker:
             BrokerCapabilities.POSITIONS,
             BrokerCapabilities.OPEN_ORDERS,
             BrokerCapabilities.STREAMING,
+            "account.funds",
         )
 
     def connect(self) -> None:
@@ -103,6 +108,21 @@ class SandboxBroker:
             "equity": self._capital,
             "currency": "INR",
         }
+
+    def funds(self) -> dict[str, float]:
+        """Cash-only funds view (M6): available/equity track live capital.
+
+        No margin engine exists, so ``used`` is legitimately ``0.0``.
+        Account identity is carried on the snapshot; fill/reconcile
+        behavior is untouched — this only reads current state.
+        """
+        return FundsSnapshot(
+            available=self._capital,
+            used=0.0,
+            equity=self._capital,
+            currency="INR",
+            account_id=self._account_id,
+        ).to_dict()
 
     def positions(self) -> list[dict[str, object]]:
         aggregated: dict[str, float] = {}

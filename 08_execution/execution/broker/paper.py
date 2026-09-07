@@ -10,6 +10,8 @@ credentials, no SDKs — safe by construction.
 
 from __future__ import annotations
 
+from broker.funds import FundsSnapshot
+
 from execution.broker.adapter import BrokerCapabilities, BrokerError
 from execution.models.order import Fill, OrderPlan
 
@@ -41,12 +43,16 @@ class PaperBroker:
 
     @property
     def capabilities(self) -> tuple[str, ...]:
+        # "account.funds" is byte-identical to UBL Caps.ACCOUNT_FUNDS (M6:
+        # no second vocabulary, no new BrokerCapabilities constant). Paper
+        # genuinely implements funds(), so advertising it is honest.
         return (
             BrokerCapabilities.MARKET_ORDERS,
             BrokerCapabilities.LIMIT_ORDERS,
             BrokerCapabilities.CANCEL,
             BrokerCapabilities.POSITIONS,
             BrokerCapabilities.OPEN_ORDERS,
+            "account.funds",
         )
 
     def connect(self) -> None:
@@ -76,6 +82,16 @@ class PaperBroker:
 
     def account(self) -> dict[str, object]:
         return {"equity": self._capital, "currency": "INR", "mode": "PAPER"}
+
+    def funds(self) -> dict[str, float]:
+        """Cash-only funds view (M6): available/equity track live ``_capital``.
+
+        No margin engine exists, so ``used`` is legitimately ``0.0``.
+        Fill economics are untouched — this only reads current state.
+        """
+        return FundsSnapshot(
+            available=self._capital, used=0.0, equity=self._capital, currency="INR"
+        ).to_dict()
 
     def positions(self) -> list[dict[str, object]]:
         aggregated: dict[str, float] = {}

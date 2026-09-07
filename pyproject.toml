@@ -4,7 +4,7 @@
 
 [project]
 name = "vayren-core"
-version = "1.9.0"
+version = "1.10.0"
 description = "Event-driven desktop charting platform"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -84,6 +84,7 @@ include = [
     "06_backtest/backtest",
     "07_risk/risk",
     "08_execution/execution",
+    "09_broker/broker",
     "scripts",
 ]
 extraPaths = [
@@ -106,6 +107,7 @@ testpaths = [
     "06_backtest/backtest/tests",
     "07_risk/risk/tests",
     "08_execution/execution/tests",
+    "09_broker/broker/tests",
     "scripts/forensics/tests",
     "scripts/tests",
 ]
@@ -123,6 +125,7 @@ source = [
     "06_backtest/backtest",
     "07_risk/risk",
     "08_execution/execution",
+    "09_broker/broker",
 ]
 
 [tool.coverage.report]
@@ -143,6 +146,7 @@ packages = [
     "06_backtest/backtest",
     "07_risk/risk",
     "08_execution/execution",
+    "09_broker/broker",
 ]
 
 [build-system]

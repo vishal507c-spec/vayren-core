@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from broker.funds import FundsSnapshot, require_funds
 from risk import RiskPolicy
 
 from execution.broker.adapter import BrokerAdapter
@@ -175,3 +176,66 @@ def format_gates_report(report: LiveGatesReport) -> str:
         detail = f" — {gate.detail}" if gate.detail else ""
         lines.append(f"[{mark}] {gate.name}{detail}")
     return "\n".join(lines)
+
+
+def funds_snapshot_from_face(face: object) -> FundsSnapshot:
+    """Capability-gated funds read: raises ``UnsupportedCapabilityError``
+    when the venue does not advertise ``account.funds`` (never fake zeros).
+
+    Accepts both UBL faces (``capabilities()`` method) and execution
+    venues (``capabilities`` tuple property) — the id checked is the same
+    byte-identical ``account.funds`` string in both vocabularies.
+    """
+    from broker.vocab import UnsupportedCapabilityError
+
+    capabilities = getattr(face, "capabilities", None)
+    advertised: tuple[str, ...]
+    if callable(capabilities):
+        return FundsSnapshot.from_dict(require_funds(face).funds())  # type: ignore[attr-defined]
+    try:
+        advertised = tuple(capabilities or ())
+    except TypeError as exc:
+        raise UnsupportedCapabilityError(
+            f"broker {getattr(face, 'name', '?')!r} has no readable capabilities "
+            f"(funds unavailable): {exc}"
+        ) from exc
+    if "account.funds" not in advertised:
+        raise UnsupportedCapabilityError(
+            f"broker {getattr(face, 'name', '?')!r} does not provide account.funds capability"
+        )
+    funds = getattr(face, "funds", None)
+    if not callable(funds):
+        raise UnsupportedCapabilityError(
+            f"broker {getattr(face, 'name', '?')!r} advertises account.funds but exposes no funds()"
+        )
+    payload = funds()
+    if not isinstance(payload, dict):
+        raise UnsupportedCapabilityError(
+            f"broker {getattr(face, 'name', '?')!r} returned non-dict funds payload"
+        )
+    return FundsSnapshot.from_dict(payload)
+
+
+def risk_capital_from_funds(snapshot: FundsSnapshot) -> tuple[float, float]:
+    """FINAL §H mapping: ``(available → available_capital, equity → equity)``.
+
+    Pure projection for ``RiskRequest`` construction. Missing funds must
+    never authorize trading — callers gate on ``funds_valid_for_live``.
+    """
+    return float(snapshot.available), float(snapshot.equity)
+
+
+def funds_valid_for_live(snapshot: FundsSnapshot) -> tuple[bool, tuple[str, ...]]:
+    """Funds preconditions for LIVE (FINAL §H/§S).
+
+    Fail-closed: non-positive availability/equity or an empty currency
+    denies. Zero available capital can never authorize a live order.
+    """
+    reasons: list[str] = []
+    if snapshot.available <= 0:
+        reasons.append(f"available capital not positive: {snapshot.available}")
+    if snapshot.equity <= 0:
+        reasons.append(f"equity not positive: {snapshot.equity}")
+    if not snapshot.currency or not snapshot.currency.strip():
+        reasons.append("funds currency missing")
+    return (not reasons, tuple(reasons))

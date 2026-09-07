@@ -3,15 +3,20 @@
 All 8 displayed metrics plus helpers for equity + drawdown series. Every
 value is deterministic and derived only from real trade data; when a metric
 is undefined its field is None and callers show ``"--"``.
+
+The numeric kernels (drawdown, equity accumulation, Sharpe) are owned by
+Rust (`rust/vayren-core`, `metrics` module); this module marshals domain
+models and assembles `PerformanceMetrics`.
 """
 
 from __future__ import annotations
 
-import math
-
 from backtest.models.equity import EquityPoint
 from backtest.models.metrics import PerformanceMetrics
 from backtest.models.trade import TradeRecord
+from backtest.native_metrics import equity_curve_points
+from backtest.native_metrics import max_drawdown as _native_drawdown
+from backtest.native_metrics import sharpe as _native_sharpe
 
 
 def compute_metrics(
@@ -83,40 +88,20 @@ def compute_equity_curve(
     if not trades:
         t = start_time or "—"
         return (EquityPoint(timestamp=t, equity=initial_capital, drawdown_pct=0.0),)
-    points: list[EquityPoint] = []
-    equity = initial_capital
-    peak = initial_capital
-    if start_time:
-        points.append(EquityPoint(timestamp=start_time, equity=initial_capital, drawdown_pct=0.0))
-    else:
-        points.append(
-            EquityPoint(timestamp=trades[0].entry_time, equity=initial_capital, drawdown_pct=0.0)
-        )
-    for trade in trades:
-        equity += trade.pnl
-        if equity > peak:
-            peak = equity
-        dd_pct = (peak - equity) / peak * 100.0 if peak else 0.0
-        points.append(EquityPoint(timestamp=trade.exit_time, equity=equity, drawdown_pct=dd_pct))
+    first_stamp = start_time or trades[0].entry_time
+    points = [EquityPoint(timestamp=first_stamp, equity=initial_capital, drawdown_pct=0.0)]
+    # Accumulation math is Rust-owned; timestamps stay a Python domain concern.
+    pairs = equity_curve_points(initial_capital, [trade.pnl for trade in trades])
+    for trade, (equity, drawdown) in zip(trades, pairs, strict=True):
+        points.append(EquityPoint(timestamp=trade.exit_time, equity=equity, drawdown_pct=drawdown))
     return tuple(points)
 
 
 def _max_drawdown(curve: tuple[EquityPoint, ...]) -> tuple[float, float]:
+    """Peak-to-trough drawdown, computed by the Rust kernel."""
     if not curve:
         return 0.0, 0.0
-    peak = curve[0].equity
-    max_pct = 0.0
-    max_abs = 0.0
-    for point in curve:
-        if point.equity > peak:
-            peak = point.equity
-        dd_abs = peak - point.equity
-        dd_pct = (dd_abs / peak * 100.0) if peak else 0.0
-        if dd_pct > max_pct:
-            max_pct = dd_pct
-        if dd_abs > max_abs:
-            max_abs = dd_abs
-    return max_pct, max_abs
+    return _native_drawdown([point.equity for point in curve])
 
 
 def _sharpe(
@@ -133,23 +118,8 @@ def _sharpe(
     """
     if len(trades) < 2:
         return None
-    equity = initial_capital
-    returns: list[float] = []
-    for trade in trades:
-        before = equity
-        equity += trade.pnl
-        if before <= 0.0:
-            continue
-        returns.append(equity / before - 1.0)
-    if len(returns) < 2:
-        return None
-    mean = sum(returns) / len(returns)
-    variance = sum((r - mean) ** 2 for r in returns) / (len(returns) - 1)
-    if variance <= 0.0:
-        return None
-    std = math.sqrt(variance)
-    mean_bars = sum(t.bars_held for t in trades) / len(trades) if trades else 1
-    bars_per_day = 25.0
-    trades_per_year = (252.0 * bars_per_day) / max(1.0, mean_bars)
-    annual_factor = math.sqrt(trades_per_year)
-    return (mean / std) * annual_factor if std else None
+    return _native_sharpe(
+        [trade.pnl for trade in trades],
+        [trade.bars_held for trade in trades],
+        initial_capital,
+    )

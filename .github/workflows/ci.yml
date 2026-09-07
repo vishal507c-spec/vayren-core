@@ -11,10 +11,14 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
-      # Mirror `make check`: lint + format + typecheck + tests + validators.
+      - uses: dtolnay/rust-toolchain@stable
+      # Mirror `make check`: rust + lint + format + typecheck + tests + validators.
+      - run: python scripts/build_rust.py --test
+      - run: cd rust && cargo fmt --all -- --check
       - run: ruff check .
       - run: ruff format --check .
       - run: pyright
       - run: python scripts/run_tests.py
       - run: python scripts/validate_structure.py
       - run: python scripts/validate_imports.py
+      - run: python scripts/validate_language_ownership.py

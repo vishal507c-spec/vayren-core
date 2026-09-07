@@ -2,11 +2,19 @@
 
 Owns the §12 state machine: legal transitions only, UNKNOWN exits
 exclusively through explicit reconciliation. Never resubmits blindly.
+
+Idempotency survives restart (FINAL §K): :meth:`snapshot` exports every
+tracked order (intent/client ids, state, fills); :meth:`restore` rebuilds
+the maps so duplicates stay denied and UNKNOWN orders still require
+explicit reconciliation before any new submission.
 """
 
 from __future__ import annotations
 
-from execution.models.order import TERMINAL_STATES, TRANSITIONS, BrokerOrder, Fill, OrderState
+from typing import Any
+
+from execution.models.order import TERMINAL_STATES, BrokerOrder, Fill, OrderState
+from execution.native_order_state import transition_allowed
 
 
 class IllegalTransitionError(ValueError):
@@ -47,18 +55,21 @@ class ExecutionEngine:
         return self._orders.get(client_id) if client_id else None
 
     def transition(self, client_order_id: str, target: OrderState, reason: str = "") -> BrokerOrder:
-        """Advance one order along a legal edge (UNKNOWN exits need reconcile)."""
+        """Advance one order along a legal edge (UNKNOWN exits need reconcile).
+
+        Legality is judged by the Rust-owned lifecycle table
+        (`execution.native_order_state`); the UNKNOWN-entry edges live in
+        that table, so no Python-side bypass remains.
+        """
         order = self._orders.get(client_order_id)
         if order is None:
             raise IllegalTransitionError(f"unknown order: {client_order_id}")
         if order.state == OrderState.UNKNOWN:
             raise IllegalTransitionError("UNKNOWN exits only via reconcile()")
-        if target == OrderState.UNKNOWN:
-            advanced = order.with_state(target, self._now(), reason=reason or "state unknown")
-            self._orders[client_order_id] = advanced
-            return advanced
-        if target not in TRANSITIONS[order.state]:
+        if not transition_allowed(order.state, target):
             raise IllegalTransitionError(f"illegal {order.state.value} -> {target.value}")
+        if target == OrderState.UNKNOWN:
+            reason = reason or "state unknown"
         advanced = order.with_state(target, self._now(), reason=reason)
         self._orders[client_order_id] = advanced
         return advanced
@@ -142,3 +153,79 @@ class ExecutionEngine:
 
     def open_orders(self) -> tuple[BrokerOrder, ...]:
         return tuple(o for o in self._orders.values() if o.state not in TERMINAL_STATES)
+
+    def snapshot(self) -> dict[str, Any]:
+        """Export idempotency state for checkpoint persistence (FINAL §K).
+
+        Every tracked order: intent/client ids, lifecycle state, fill
+        economics, broker id, history. Plain JSON-safe data only.
+        """
+        return {
+            "orders": [
+                {
+                    "client_order_id": order.client_order_id,
+                    "intent_id": order.intent_id,
+                    "symbol": order.symbol,
+                    "side": order.side,
+                    "quantity": order.quantity,
+                    "order_type": order.order_type,
+                    "limit_price": order.limit_price,
+                    "state": order.state.value,
+                    "filled_qty": order.filled_qty,
+                    "avg_fill_price": order.avg_fill_price,
+                    "broker_order_id": order.broker_order_id,
+                    "reason": order.reason,
+                    "history": [list(pair) for pair in order.history],
+                }
+                for order in self._orders.values()
+            ]
+        }
+
+    def restore(self, data: dict[str, Any]) -> None:
+        """Rebuild idempotency maps from a :meth:`snapshot` (FINAL §K).
+
+        Invalid payloads fail closed (``IllegalTransitionError``) — a
+        corrupt checkpoint never silently authorizes new submissions.
+        Restored UNKNOWN orders still exit only via :meth:`reconcile`.
+        """
+        raw = data.get("orders", [])
+        if not isinstance(raw, list):
+            raise IllegalTransitionError("engine snapshot 'orders' must be a list")
+        rebuilt: dict[str, BrokerOrder] = {}
+        by_intent: dict[str, str] = {}
+        for item in raw:
+            try:
+                state = OrderState(str(item["state"]))
+                order = BrokerOrder(
+                    client_order_id=str(item["client_order_id"]),
+                    intent_id=str(item["intent_id"]),
+                    symbol=str(item["symbol"]),
+                    side=str(item["side"]),
+                    quantity=float(item["quantity"]),
+                    order_type=str(item.get("order_type", "MARKET")),
+                    limit_price=(
+                        None if item.get("limit_price") is None else float(item["limit_price"])
+                    ),
+                    state=state,
+                    filled_qty=float(item.get("filled_qty", 0.0)),
+                    avg_fill_price=(
+                        None
+                        if item.get("avg_fill_price") is None
+                        else float(item["avg_fill_price"])
+                    ),
+                    broker_order_id=item.get("broker_order_id"),
+                    reason=str(item.get("reason", "")),
+                    history=tuple((str(s), str(t)) for s, t in item.get("history", [])),
+                )
+            except (KeyError, TypeError, ValueError) as exc:
+                raise IllegalTransitionError(f"invalid engine snapshot order: {exc}") from exc
+            if order.client_order_id in rebuilt:
+                raise IllegalTransitionError(
+                    f"duplicate client order id in snapshot: {order.client_order_id}"
+                )
+            if order.intent_id in by_intent:
+                raise IllegalTransitionError(f"duplicate intent in snapshot: {order.intent_id}")
+            rebuilt[order.client_order_id] = order
+            by_intent[order.intent_id] = order.client_order_id
+        self._orders = rebuilt
+        self._by_intent = by_intent

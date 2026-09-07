@@ -27,7 +27,7 @@ their meaning is provider-owned.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 TOKEN_EXPIRED = object()  # session/token invalid → renew and retry
 RATE_LIMITED = object()  # consecutive rate-limit hits → emergency stop
@@ -53,11 +53,17 @@ class ProviderError(RuntimeError):
         self.code = code
 
 
+@runtime_checkable
 class Provider(Protocol):
     """The minimal surface the download engine needs from a provider.
 
     Implementations translate broker SDKs, credentials, intervals, tokens,
     exceptions and rate limits into this canonical vocabulary.
+
+    ``runtime_checkable`` (Phase 20 M3): the UBL delegation shim verifies a
+    resolved historical face satisfies this protocol before returning it —
+    fail-closed against mis-registered plugins. Method-presence checking
+    only (data attributes are not probed).
     """
 
     def available(self) -> tuple[bool, str]:

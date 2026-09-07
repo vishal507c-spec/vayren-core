@@ -10,6 +10,20 @@ from pathlib import Path
 
 ROOT = Path(SPECPATH).resolve().parents[1]
 
+# Rust native kernels (constitution §8): the execution/backtest/market
+# bridges load `<root>/rust/target/release/vayren_core.*` at import. Bundle
+# the built library into the same relative location so frozen paths resolve.
+# Fail LOUDLY when absent — a silent EXE without the kernels is forbidden.
+_native_candidates = [
+    ROOT / "rust" / "target" / "release" / name
+    for name in ("vayren_core.dll", "libvayren_core.so", "libvayren_core.dylib")
+]
+_native_lib = next((p for p in _native_candidates if p.is_file()), None)
+if _native_lib is None:
+    raise SystemExit(
+        "PyInstaller: Rust native library missing — run `python scripts/build_rust.py` first."
+    )
+
 a = Analysis(
     [str(ROOT / "00_app" / "app" / "__main__.py")],
     pathex=[
@@ -21,7 +35,7 @@ a = Analysis(
         str(ROOT / "05_strategy"),
         str(ROOT / "06_backtest"),
     ],
-    binaries=[],
+    binaries=[(str(_native_lib), "rust/target/release")],
     # Chart SVG assets (indicator toolbar icons) — panel resolves them as
     # chart/assets/indicator_bar relative to its own module location.
     datas=[

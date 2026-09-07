@@ -1,4 +1,4 @@
-.PHONY: setup dev test test-coverage lint format typecheck check validate-structure validate-imports exe clean
+.PHONY: setup dev test test-coverage lint format typecheck check validate-structure validate-imports validate-language rust exe clean
 
 # ═══════════════════════════════════════════════════════════════
 # VAYREN — MAKEFILE
@@ -10,6 +10,7 @@
 setup:
 	pip install -e ".[dev]"
 	pre-commit install
+	python scripts/build_rust.py
 
 # ── Development ────────────────────────────────────────────────
 
@@ -48,9 +49,18 @@ validate-structure:
 validate-imports:
 	python scripts/validate_imports.py
 
+validate-language:
+	python scripts/validate_language_ownership.py
+
+# ── Rust (constitution §8: Rust owns core/perf kernels) ─────────
+
+rust:
+	python scripts/build_rust.py --test
+	cd rust && cargo fmt --all -- --check
+
 # ── Full Check ─────────────────────────────────────────────────
 
-check: lint typecheck test validate-structure validate-imports
+check: rust lint typecheck test validate-structure validate-imports validate-language
 
 # ── Clean ──────────────────────────────────────────────────────
 

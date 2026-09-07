@@ -18,8 +18,25 @@ EXCLUDED_TOP_DIRS = {"90_brain"}
 # packages that own them (relative to repo root). Anywhere else —
 # strategy, risk, execution, chart, app included — is a layering violation:
 # Strategy → SDK and Risk → SDK are FORBIDDEN.
-SDK_ALLOWLIST_PREFIXES = ("02_data/data/provider/",)
+# M7: ``09_broker/broker/adapters/`` is the future SDK boundary (M5 adapter
+# move target). SDK code has NOT moved there yet — the entry documents the
+# intended boundary so a stray SDK import under 09_broker adapters stays
+# legal by design while any SDK import anywhere else still fails.
+SDK_ALLOWLIST_PREFIXES = ("02_data/data/provider/", "09_broker/broker/adapters/")
 SDK_DENYLIST = {"kiteconnect"}
+
+# M8 network boundary: production broker HTTP/WebSocket client code may exist
+# ONLY inside adapter packages (future) and the retained historical transport
+# (``02_data/data/provider/``, kept intentionally per M5/M8 — the Zerodha
+# transport is not moved). Core, market, chart, strategy, backtest, risk,
+# execution and app composition must never import broker network clients
+# directly — they go Core → UBL → Adapter → Network.
+NETWORK_ALLOWLIST_PREFIXES = ("02_data/data/provider/", "09_broker/broker/adapters/")
+NETWORK_DENYLIST = {"kiteconnect", "httpx", "requests", "websockets", "websocket"}
+
+# Legacy snapshot excluded from shipment/validation (same precedent as the
+# ruff extend-exclude): historical vendor drafts, never imported by product.
+NETWORK_EXCLUDED_PREFIXES = ("99_archive/",)
 
 # Map domain package names to their numbered chapter folders
 DOMAIN_CHAPTERS: dict[str, str] = {
@@ -32,19 +49,34 @@ DOMAIN_CHAPTERS: dict[str, str] = {
     "backtest": "06_backtest",
     "risk": "07_risk",
     "execution": "08_execution",
+    "broker": "09_broker",
 }
 
-# Domains that should only import from lib/ and immediate upstream
+# Domains that should only import from lib/ and immediate upstream.
+# ``broker`` (UBL) consumes nothing but itself — it is a coordination
+# boundary beside the product chapters; ``data``/``execution`` shims and
+# the ``app`` composition root may import it (design §4, §9-M3).
 DOMAIN_DEPS: dict[str, set[str]] = {
-    "app": {"core", "market", "chart", "data", "strategy", "backtest", "risk", "execution"},
+    "app": {
+        "core",
+        "market",
+        "chart",
+        "data",
+        "strategy",
+        "backtest",
+        "risk",
+        "execution",
+        "broker",
+    },
     "core": set(),
     "market": {"core"},
     "chart": {"core", "market"},
-    "data": {"core"},
+    "data": {"core", "broker"},
     "strategy": {"core", "market"},
     "backtest": {"core", "market", "strategy"},
     "risk": {"core"},
-    "execution": {"core", "market", "strategy", "risk"},
+    "execution": {"core", "market", "strategy", "risk", "broker"},
+    "broker": set(),
 }
 
 
@@ -125,6 +157,25 @@ def main() -> int:
                         errors.append(
                             f"{pyfile}:{node.lineno}: broker SDK import {top!r} outside "
                             f"isolated provider packages"
+                        )
+        if (
+            not is_test
+            and not rel.startswith(NETWORK_ALLOWLIST_PREFIXES)
+            and not rel.startswith(NETWORK_EXCLUDED_PREFIXES)
+        ):
+            for node in ast.walk(tree):
+                if not isinstance(node, (ast.Import, ast.ImportFrom)):
+                    continue
+                names = []
+                if isinstance(node, ast.Import):
+                    names = [a.name.split(".")[0] for a in node.names]
+                elif node.module:
+                    names = [node.module.split(".")[0]]
+                for top in names:
+                    if top in NETWORK_DENYLIST:
+                        errors.append(
+                            f"{pyfile}:{node.lineno}: broker network import {top!r} outside "
+                            f"adapter/transport boundary (Core → UBL → Adapter → Network)"
                         )
         if domain is None:
             continue

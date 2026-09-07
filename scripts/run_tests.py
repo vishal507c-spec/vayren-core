@@ -32,6 +32,7 @@ PARTS = (
     "06_backtest/backtest/tests",
     "07_risk/risk/tests",
     "08_execution/execution/tests",
+    "09_broker/broker/tests",
     "scripts/forensics/tests",
     "scripts/tests",
 )
@@ -42,6 +43,21 @@ def main() -> int:
     env.setdefault("QT_QPA_PLATFORM", "offscreen")
     # pymalloc + shiboken interplay is the AV source; plain malloc is stable.
     env.setdefault("PYTHONMALLOC", "malloc")
+
+    # The Rust kernels back execution/backtest/market tests: ensure the
+    # cdylib exists before any partition imports the bridge (fail-closed).
+    build = subprocess.run(
+        [sys.executable, "scripts/build_rust.py"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    if build.returncode != 0:
+        print(build.stdout[-2000:] if build.stdout else "")
+        print(build.stderr[-2000:] if build.stderr else "")
+        print("[        FAIL] rust build  (native kernels required by the gate)")
+        return 1
+    print("[        PASS] rust build", flush=True)
 
     failed: list[str] = []
     total_start = time.perf_counter()

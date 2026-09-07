@@ -16,6 +16,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from broker.adapters.zerodha import BROKER_ID as DEFAULT_PROVIDER_BROKER_ID
+
 # Canonical interval ids (broker-agnostic) and their human-readable labels.
 # The selected provider adapter maps these to broker-specific interval ids.
 INTERVAL_LABEL: dict[str, str] = {
@@ -110,7 +112,14 @@ class DownloadSettings:
     symbols_csv: str | Path | None = None  # default: <data_dir>/symbols.csv
     token_file: str | Path | None = None  # default: <data_dir>/token.json
     logs_dir: str | Path | None = None  # default: <data_dir>/logs
-    provider: str = "zerodha"
+    # Derived compatibility field (M7) — NOT an independent selection source.
+    # INVARIANT: ``provider`` must always equal the authoritative
+    # ``BrokerSelection.name``. The ONLY product write path is the
+    # composition root (``Bootstrap`` copies ``selection.name`` here);
+    # readers (factory, credentials manager, engine status) treat it as a
+    # display/plumbing value. Default venue id single-sourced from the UBL
+    # adapter package (one stable broker identity).
+    provider: str = DEFAULT_PROVIDER_BROKER_ID
     exchange: str = "NSE"
 
     chunk_days: int = 200

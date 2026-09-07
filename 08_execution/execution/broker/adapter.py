@@ -7,7 +7,7 @@ tokens and wire formats stay inside concrete adapters.
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 from execution.models.order import OrderPlan
 
@@ -24,8 +24,15 @@ class BrokerCapabilities:
     STREAMING = "stream.events"
 
 
+@runtime_checkable
 class BrokerAdapter(Protocol):
-    """The full surface a venue must provide for live execution."""
+    """The full surface a venue must provide for live execution.
+
+    ``runtime_checkable`` (Phase 20 M3): the UBL delegation shim verifies a
+    resolved trading face satisfies this protocol before connecting —
+    fail-closed against mis-registered venues. Method-presence checking
+    only (data attributes like ``name`` are not probed).
+    """
 
     @property
     def name(self) -> str: ...

@@ -125,33 +125,36 @@ tasks are listed without speedup: SPEEDUP = NOT MEASURED.
 | SPEED-EXP-IMPACT-WARM | MICRO | 377.6 | 57.1 | 6.61x | 0.26x | True | 0 | 13.93s | 57.12s | LOW (same fingerprint BUT DIVERGENT: validation 0.26x vs total 6.61x — window hygiene suspect, do not claim) |
 | SPEED-EXP-GATE | MICRO | NOT MEASURED | 263.28s | NOT MEASURED | NOT MEASURED | True | 0 | 144.18s | 263.28s | — (no comparable pair) |
 | PHASE-18-SPEED | ARCHITECTURE | NOT MEASURED | 4530.84s | NOT MEASURED | NOT MEASURED | False | 3 | 144.18s | 4530.84s | — (no comparable pair) |
+| PHASE-19-BROKER-AUDIT | ARCHITECTURE | NOT MEASURED | 1877.81s | NOT MEASURED | NOT MEASURED | True | 0 | NOT MEASURED | 1877.81s | — (no comparable pair) |
+| PHASE-20-UBL-M1M3 | ARCHITECTURE | NOT MEASURED | 5368.68s | NOT MEASURED | NOT MEASURED | False | 6 | 105.30s | 5368.68s | — (no comparable pair) |
+| PHASE-21-UBL-M4 | ARCHITECTURE | NOT MEASURED | 5962.73s | NOT MEASURED | NOT MEASURED | False | 3 | 70.20s | 5962.73s | — (no comparable pair) |
 
 ## Speed metrics (kept separate from AI utilization, never mixed)
 
 - AI_UTILIZATION_SCORE: NOT MEASURED here (see development log; utilization is not a speed multiplier).
-- TASK_WALL_TIME median: 30.18s over 8 speed-task(s).
-- VALIDATION_TIME median: 3.35s.
-- FIRST_PASS_RATE: 0.875 (8 known).
+- TASK_WALL_TIME median: 263.28s over 11 speed-task(s).
+- VALIDATION_TIME median: 8.79s.
+- FIRST_PASS_RATE: 0.727 (11 known).
 - REPAIR_TAX median: 0.0.
 - REUSE_SPEEDUP: 1.085 (3 cold/warm pair(s)).
 - HUMAN_INTERVENTIONS: 0.
 
 ## Bottlenecks (measured phases ranked, rest UNMEASURED)
 
-- validation: 3.35s [measured]
+- editing: 550.34s [measured]
+- repository_discovery: 227.45s [measured]
+- planning: 14.29s [measured]
+- validation: 8.79s [measured]
+- other: 0.11s [measured]
+- repair: 0.09s [measured]
 - context_preparation: NOT MEASURED [UNMEASURED]
-- editing: NOT MEASURED [UNMEASURED]
-- other: NOT MEASURED [UNMEASURED]
-- planning: NOT MEASURED [UNMEASURED]
-- repair: NOT MEASURED [UNMEASURED]
-- repository_discovery: NOT MEASURED [UNMEASURED]
 
 ## Next-optimization recommendations (evidence-gated)
 
+- [MEDIUM] implementation_dominates: improve context/planning/reuse (context compiler + proven plans)
+  evidence: implementation share 2.09 > 0.50
 - [HIGH] parallel_validation: keep validation serial unless a new measurement passes review
   evidence: static: parallel validation measured 0.9x (slower) on 2026-09-05
-- [HIGH] insufficient_evidence: change nothing; record more benchmarked tasks first
-  evidence: no measured snapshot metric crossed a recommendation threshold
 
 
 ## Rules

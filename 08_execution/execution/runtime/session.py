@@ -252,10 +252,11 @@ class LiveSession:
         warmup_bars: dict[str, tuple[Bar, ...]] | None = None,
     ) -> ReadinessReport:
         """Bring the session to READY. Returns NOT_LIVE_READY with reasons on any failure."""
+        recovering = self._lifecycle.state == LifecycleState.RECOVERING
         if self._lifecycle.state == LifecycleState.CREATED:
             self._lifecycle.transition(LifecycleState.VALIDATING, reason="start requested")
-        elif self._lifecycle.state == LifecycleState.RECOVERING:
-            self._lifecycle.transition(LifecycleState.VALIDATING, reason="recovered, validating")
+        elif recovering:
+            self._lifecycle.transition(LifecycleState.RECONCILING, reason="recovered, reconciling")
         else:
             raise LifecycleError(
                 f"start requires CREATED or RECOVERING, found {self._lifecycle.state.value}"
@@ -267,6 +268,14 @@ class LiveSession:
         self._mode = mode
         for note in notes:
             self._journal.record("MODE_DOWNGRADE", reason=note)
+        if recovering:
+            # FINAL §K/§L: rebuilt idempotency state reconciles against broker
+            # truth BEFORE validation — unresolved mismatch blocks (never
+            # blind-resubmit). A fresh broker after a crash reports nothing:
+            # restored open orders then fail closed until the operator
+            # clears the checkpoint for a clean restart.
+            self.reconcile_now()
+            self._lifecycle.transition(LifecycleState.VALIDATING, reason="reconciled, validating")
         for context in self._contexts.values():
             lifecycle = context.lifecycle
             if lifecycle.state == LifecycleState.CREATED:
@@ -557,6 +566,8 @@ class LiveSession:
             intent_id=intent.intent_id,
             client_order_id=client_order_id,
             order_type=plan.order_type,
+            broker=self._broker.name if self._broker else "",
+            environment=self._mode.value.lower(),
         )
         self._emit(OrderPlanned(self._request_id, intent.intent_id, client_order_id))
         tracked = self._engine.create(order)
@@ -575,7 +586,11 @@ class LiveSession:
             tracked.client_order_id, OrderState.SUBMITTED, reason="sent to broker"
         )
         self._journal.record(
-            "ORDER_SUBMITTED", client_order_id=client_order_id, broker_order_id=broker_id
+            "ORDER_SUBMITTED",
+            client_order_id=client_order_id,
+            broker_order_id=broker_id,
+            broker=self._broker.name,
+            environment=self._mode.value.lower(),
         )
         self._emit(OrderSubmitted(self._request_id, client_order_id))
         self._orders_today += 1
@@ -604,9 +619,13 @@ class LiveSession:
         self._journal.record(
             "FILL",
             client_order_id=fill.client_order_id,
+            broker_order_id=fill.broker_order_id,
+            intent_id=tracked.intent_id,
             fill_qty=fill.fill_qty,
             fill_price=fill.fill_price,
             partial=fill.partial,
+            broker=self._broker.name if self._broker else "",
+            environment=self._mode.value.lower(),
         )
         self._journal.record("POSITION_UPDATED", symbol=fill.symbol, quantity=qty)
         self._emit(
@@ -655,6 +674,8 @@ class LiveSession:
                     "ORDER_ACK",
                     client_order_id=client_order_id,
                     broker_order_id=str(event.get("broker_order_id", "")),
+                    broker=self._broker.name if self._broker else "",
+                    environment=self._mode.value.lower(),
                 )
                 self._emit(
                     OrderAcknowledged(
@@ -698,7 +719,11 @@ class LiveSession:
     # ── recovery / teardown ─────────────────────────────────────
 
     def checkpoint(self) -> dict[str, Any]:
-        """Persistable session state (bars windows, seqs, journal length)."""
+        """Persistable session state (bars windows, seqs, journal length).
+
+        Includes the engine idempotency snapshot (FINAL §K) so a restart
+        rebuilds known order/intent state and reconciles before submitting.
+        """
         return {
             "mode": self._mode.value,
             "windows": {
@@ -719,6 +744,7 @@ class LiveSession:
             },
             "orders_today": self._orders_today,
             "last_order_epoch": self._last_order_epoch,
+            "engine": self._engine.snapshot(),
         }
 
     def recover(self, checkpoint: dict[str, Any]) -> None:
@@ -750,6 +776,19 @@ class LiveSession:
             LiveStrategyDriver(ctx).restore_window(bars)
         self._orders_today = int(checkpoint.get("orders_today", 0))
         self._last_order_epoch = checkpoint.get("last_order_epoch")
+        # Idempotency state rebuilds BEFORE any new submission (FINAL §K):
+        # restored orders (incl. UNKNOWN) must reconcile before trading.
+        engine_data = checkpoint.get("engine", {})
+        if engine_data:
+            self._engine.restore(engine_data)
+            restored = self._engine.snapshot()["orders"]
+            unknowns = sum(1 for o in restored if o["state"] == OrderState.UNKNOWN.value)
+            self._journal.record(
+                "IDEMPOTENCY_RESTORED",
+                orders=len(restored),
+                unknown_orders=unknowns,
+                reconcile_required=bool(restored),
+            )
         # Ends at RECOVERING; start() moves RECOVERING -> VALIDATING explicitly.
 
     def arm(self, reason: str = "") -> LiveArm:
@@ -891,9 +930,11 @@ class LiveSession:
             tuple(o.client_order_id for o in self._engine.open_orders()), tuple(broker_open)
         )
         self._reconciliation = ReconciliationState(positions=positions, orders=orders)
+        verdict = self._reconciliation.verdict()
         self._journal.record(
             "RECONCILED",
             matched=not self._reconciliation.blocks_live,
             mismatches=len(positions.mismatches) + len(orders.mismatches),
+            status=verdict.status.value,
         )
         return self._reconciliation

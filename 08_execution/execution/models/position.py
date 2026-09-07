@@ -26,9 +26,16 @@ class Position:
 
 @dataclass(frozen=True)
 class AccountSnapshot:
-    """Capital view handed to risk and reconciliation."""
+    """Capital view handed to risk and reconciliation.
+
+    ``account_id``/``environment`` complete the typed account identity
+    (FINAL §H); both default empty so ledger-constructed snapshots keep
+    working unchanged. Identity only — never secret values.
+    """
 
     equity: float
     available_capital: float
     day_pnl: float = 0.0
     currency: str = "INR"
+    account_id: str = ""
+    environment: str = ""

@@ -1,73 +1,27 @@
-"""Order, plan and fill models — the execution state machine vocabulary."""
+"""Order, plan and fill models — the execution state machine vocabulary.
+
+`OrderState` is the lifecycle vocabulary. The TRANSITION TABLE and terminal
+set are owned by Rust (`rust/vayren-core`, `order_state` module) and
+re-exported here from `execution.native_order_state` (a read-only projection
+of the Rust authority — no independent Python table). Public import paths are
+unchanged.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
 
+from execution.models.order_state import OrderState
+from execution.native_order_state import TERMINAL_STATES, TRANSITIONS
 
-class OrderState(Enum):
-    """Broker-independent order lifecycle (§12 mission spec)."""
-
-    CREATED = "CREATED"
-    VALIDATED = "VALIDATED"
-    SUBMITTED = "SUBMITTED"
-    ACKNOWLEDGED = "ACKNOWLEDGED"
-    PARTIALLY_FILLED = "PARTIALLY_FILLED"
-    FILLED = "FILLED"
-    REJECTED = "REJECTED"
-    CANCEL_PENDING = "CANCEL_PENDING"
-    CANCELLED = "CANCELLED"
-    EXPIRED = "EXPIRED"
-    UNKNOWN = "UNKNOWN"
-
-
-TERMINAL_STATES = frozenset(
-    {
-        OrderState.FILLED,
-        OrderState.REJECTED,
-        OrderState.CANCELLED,
-        OrderState.EXPIRED,
-    }
-)
-
-# Allowed transitions (UNKNOWN may resolve to any state only via reconcile).
-TRANSITIONS: dict[OrderState, frozenset[OrderState]] = {
-    OrderState.CREATED: frozenset({OrderState.VALIDATED, OrderState.REJECTED}),
-    OrderState.VALIDATED: frozenset(
-        {OrderState.SUBMITTED, OrderState.REJECTED, OrderState.EXPIRED}
-    ),
-    OrderState.SUBMITTED: frozenset(
-        {OrderState.ACKNOWLEDGED, OrderState.REJECTED, OrderState.EXPIRED, OrderState.UNKNOWN}
-    ),
-    OrderState.ACKNOWLEDGED: frozenset(
-        {
-            OrderState.PARTIALLY_FILLED,
-            OrderState.FILLED,
-            OrderState.REJECTED,
-            OrderState.CANCEL_PENDING,
-            OrderState.EXPIRED,
-            OrderState.UNKNOWN,
-        }
-    ),
-    OrderState.PARTIALLY_FILLED: frozenset(
-        {
-            OrderState.PARTIALLY_FILLED,
-            OrderState.FILLED,
-            OrderState.CANCEL_PENDING,
-            OrderState.EXPIRED,
-            OrderState.UNKNOWN,
-        }
-    ),
-    OrderState.CANCEL_PENDING: frozenset(
-        {OrderState.CANCELLED, OrderState.FILLED, OrderState.UNKNOWN}
-    ),
-    OrderState.UNKNOWN: frozenset(),  # reconcile-only exits, handled explicitly
-    OrderState.FILLED: frozenset(),
-    OrderState.REJECTED: frozenset(),
-    OrderState.CANCELLED: frozenset(),
-    OrderState.EXPIRED: frozenset(),
-}
+__all__ = [
+    "OrderState",
+    "TERMINAL_STATES",
+    "TRANSITIONS",
+    "OrderPlan",
+    "BrokerOrder",
+    "Fill",
+]
 
 
 @dataclass(frozen=True)

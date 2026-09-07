@@ -25,7 +25,6 @@ from data import (
     HistoricalDownloadEngine,
     data_manifest,
 )
-from data.provider.factory import build_provider
 from data.provider.manager import ProviderCredentialsManager
 from data.ui.historical_panel import HistoricalDownloadPanel
 from market.events.data_loaded import DataLoaded
@@ -49,6 +48,40 @@ from app.lifecycle.lifecycle import AppLifecycle
 logger = getLogger(__name__)
 
 
+def _history_domain() -> Any:
+    """The UBL historical-data domain (lazy import keeps bootstrap light)."""
+    from broker.capabilities import Domain
+
+    return Domain.HISTORICAL_DATA
+
+
+def _trading_domain() -> Any:
+    """The UBL trading domain."""
+    from broker.capabilities import Domain
+
+    return Domain.TRADING
+
+
+def _on_broker_selected(name: str, selection_service: Any, data_window: Any) -> None:
+    """Handle one UI selection change (fail-closed, previous state kept)."""
+    from broker.selection import SelectionError
+
+    try:
+        outcome = selection_service.select(name)
+    except SelectionError as exc:
+        logger.warning("broker selection rejected (%s): %s", name, exc)
+        data_window.show_broker_error(str(exc))
+        return
+    data_window.set_broker_selection(outcome.selection, outcome.capabilities)
+    data_window.show_broker_error("")
+
+
+class _HistoryDomain:
+    """Namespace alias so bootstrap reads like the design table."""
+
+    HISTORICAL_DATA = _history_domain()
+
+
 class Bootstrap:
     """Constructs the bus, services and registry; wires every subscription.
 
@@ -56,9 +89,29 @@ class Bootstrap:
     EventBus.subscribe may be called. Modules never subscribe themselves.
     """
 
-    def __init__(self, data_dir: str | Path, limit: int | None = None) -> None:
+    def __init__(
+        self,
+        data_dir: str | Path,
+        limit: int | None = None,
+        selection_service: Any | None = None,
+    ) -> None:
         self._bus = EventBus()
         self._services: Registry[Any] = Registry()
+
+        # ── authoritative broker selection (Phase 21 M4) ──
+        # Every broker-facing surface reads THE selection through this
+        # service; no component keeps its own broker state.
+        from app.services.broker_selection_service import BrokerSelectionService
+
+        if selection_service is None:
+            import data.provider.factory  # noqa: F401  (seeds zerodha)
+            import execution.broker.factory  # noqa: F401  (seeds paper/sandbox)
+
+            from app.services.broker_selection_service import app_selection_store
+
+            selection_service = BrokerSelectionService(app_selection_store(data_dir))
+        self._selection_service: BrokerSelectionService = selection_service
+        selection = selection_service.current()
 
         repository = SymbolRepository(data_dir)
         loader = MarketDataLoader(repository, self._bus)
@@ -164,6 +217,29 @@ class Bootstrap:
                 "events": [],
             }
             try:
+                # ── M4: broker identity from THE authoritative selection ──
+                # The pill may only name a broker that actually serves the
+                # trading domain; anything else stays NOT CONFIGURED (no
+                # fake readiness). Gates stay backend-authoritative.
+                trading_allowed, trading_reason = selection_service.surface_allowed(
+                    _trading_domain()
+                )
+                sel = selection_service.current_or_none()
+                if trading_allowed and sel is not None:
+                    state["broker"]["name"] = sel.name
+                    state["broker"]["environment"] = sel.environment.value
+                    state["broker"]["reason"] = f"selected: {sel.reason}"
+                else:
+                    state["broker"]["reason"] = trading_reason or "no live venue adapter"
+                state["broker"]["selection"] = (
+                    {
+                        "name": sel.name,
+                        "environment": sel.environment.value,
+                        "origin": sel.reason,
+                    }
+                    if sel is not None
+                    else None
+                )
                 names: list[str] = []
                 with contextlib.suppress(Exception):
                     from strategy.language.storage import list_strategies
@@ -395,13 +471,47 @@ class Bootstrap:
             if isinstance(app_inst, QApplication):
                 app_inst.aboutToQuit.connect(_save_chart_session)
 
-        data_settings = DownloadSettings(data_dir=data_dir)
-        data_provider = build_provider(data_settings)
+        # ── historical data: provider DERIVED from the selection (M4) ──
+        # `settings.provider` is no longer an independent source of truth:
+        # the authoritative selection decides which plugin's historical
+        # face is used; without the capability the download path fails
+        # closed with an explicit, honest reason (no silent fallback).
+        history_allowed, history_reason = selection_service.surface_allowed(
+            _HistoryDomain.HISTORICAL_DATA
+        )
+        data_settings = DownloadSettings(data_dir=data_dir, provider=selection.name)
+        if history_allowed:
+            # M7 direct UBL resolution: the composition root resolves the
+            # selected broker's historical face through the single
+            # BrokerRegistry. The legacy build_provider shim is retained
+            # only as a compatibility delegate and is no longer used here.
+            from broker.registry import default_registry
+            from data.provider.contract import Provider
+
+            record = default_registry().get(selection.name)
+            face = record.plugin.face(_HistoryDomain.HISTORICAL_DATA, data_settings)
+            if not isinstance(face, Provider):
+                raise ValueError(
+                    f"provider {selection.name!r} historical face does not satisfy "
+                    "the Provider contract"
+                )
+            data_provider = face
+        else:
+            from data.provider.factory import unavailable_provider
+
+            data_provider = unavailable_provider(history_reason)
+            logger.warning("historical data unavailable: %s", history_reason)
         data_credentials = ProviderCredentialsManager(data_settings, data_provider)
         data_engine = HistoricalDownloadEngine(data_settings, provider=data_provider)
         data_worker = DownloadWorker(data_engine)
         data_engine.set_reporter(data_worker)
         data_window.set_credentials_manager(data_credentials)
+        # Broker selection UI: registry-backed choices in, selection signal out.
+        data_window.set_broker_choices(selection_service.broker_choices())
+        data_window.set_broker_selection(selection)
+        data_window.broker_selected.connect(
+            lambda name: _on_broker_selected(name, selection_service, data_window)
+        )
 
         # ── Trade → Chart instant context (§1-34) ───────────────
         from app.services.multi_symbol_backtest import MultiSymbolBacktestCoordinator

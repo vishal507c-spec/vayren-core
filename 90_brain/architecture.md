@@ -17,15 +17,17 @@ Desktop charting platform: `SQLite per-stock OHLCV → EventBus → candlestick 
 
 | Chapter | Package | Owns | Depends on |
 |---|---|---|---|
-| `00_app` | `app` | Entry, wiring, lifecycle (`App`, `Bootstrap`, `AppLifecycle`) | `core`, `data`, `market`, `chart`, `strategy`, `backtest`, `risk`, `execution` |
+| `00_app` | `app` | Entry, wiring, lifecycle (`App`, `Bootstrap`, `AppLifecycle`) | `core`, `data`, `market`, `chart`, `strategy`, `backtest`, `risk`, `execution`, `broker` |
 | `01_core` | `core` | Foundation: `EventBus`, `Event`, logger, `Registry`, contracts, `SystemModel`, AI boundary | — (stdlib only) |
-| `02_data` | `data` | Historical download (write path): engine, worker thread, storage, provider boundary | `core` |
+| `02_data` | `data` | Historical download (write path): engine, worker thread, storage, provider boundary | `core`, `broker` (UBL registry/faces only) |
 | `03_market` | `market` | Read path: per-symbol SQLite → `Bar`/`SymbolQuote` | `core` |
 | `04_chart` | `chart` | Chart model, engine, renderers, widgets, windows, theme | `core`, `market` |
 | `05_strategy` | `strategy` | Strategy registry, Python-native runtime, research, Lab UI | `core`, `market` |
 | `06_backtest` | `backtest` | Replay, execution simulation, positions, journal, metrics | `core`, `market`, `strategy` |
 | `07_risk` | `risk` | Fail-closed pre-order gates, kill switches, session/clock rules | `core` |
-| `08_execution` | `execution` | Live/paper strategy sessions: market-data intake, runtime, planner, engine, broker boundary, portfolio, journal/replay, regime, adaptive | `core`, `market`, `strategy`, `risk` |
+| `08_execution` | `execution` | Live/paper strategy sessions: market-data intake, runtime, planner, engine, broker boundary, portfolio, journal/replay, regime, adaptive | `core`, `market`, `strategy`, `risk`, `broker` (UBL registry/faces only) |
+| `09_broker` | `broker` | Unified Broker Layer: vocab, tri-state capabilities, faces, single registry, selection, funds, credentials, health | — (stdlib only) |
+| `rust` | `vayren-core` / `vayren-shell` | Rust-owned authorities: order lifecycle table, backtest numeric kernels, timeframe aggregation (cdylib via `core.native` ctypes boundary); native-UI target (egui broker panel) | — (std only; egui for shell) |
 
 > `90_brain/` is documentation, not a runtime module.
 
@@ -38,14 +40,15 @@ Desktop charting platform: `SQLite per-stock OHLCV → EventBus → candlestick 
 ```
 01_core ─────────────────────► (none)
   ↑                          
-02_data ─────────────────────► 01_core
+02_data ─────────────────────► 01_core, 09_broker
 03_market ───────────────────► 01_core
 05_strategy ─────────────────► 01_core, 03_market
 04_chart ────────────────────► 01_core, 03_market
 06_backtest ─────────────────► 01_core, 03_market, 05_strategy
 07_risk ─────────────────────► 01_core
-08_execution ─────────────────► 01_core, 03_market, 05_strategy, 07_risk
-00_app ──────────────────────► 01_core, 02_data, 03_market, 04_chart, 05_strategy, 06_backtest, 07_risk, 08_execution
+08_execution ─────────────────► 01_core, 03_market, 05_strategy, 07_risk, 09_broker
+09_broker ───────────────────► (none)
+00_app ──────────────────────► 01_core, 02_data, 03_market, 04_chart, 05_strategy, 06_backtest, 07_risk, 08_execution, 09_broker
 ```
 
 | Dependency | Allowed? | Reason |
@@ -172,7 +175,9 @@ Qt event loop
 |---|---|
 | `scripts/validate_imports.py` (AST) | Dependency graph §3; forbids internal/relative/star imports; runtime imports only (`if TYPE_CHECKING:` exempt) |
 | `scripts/validate_structure.py` | Required layout: `__init__.py`, `README.md`, `manifest.py`, `models/`, `database/`/`renderer/` etc. per domain (7 domains: app/core/data/market/chart/strategy/backtest) |
-| `make check` | `ruff format --check` + `ruff check` + `pyright` + `pytest` + validators — must pass before merge |
+| `scripts/validate_language_ownership.py` (AST) | Constitutional language ownership: no new Python in Rust-owned domains, no new Qt UI surfaces, no reintroduced authorities, frozen baseline, Rust crate hygiene |
+| `scripts/build_rust.py` | Builds the `vayren-core` cdylib + handshake; required before any Python test run (`make check`/`run_tests.py`/CI build it first) |
+| `make check` | `rust` + `ruff format --check` + `ruff check` + `pyright` + `pytest` + validators — must pass before merge |
 
 > Principles for evolution (not a roadmap): new module → lower-numbered public APIs, bus only, own responsibility, contracts in `module_contracts.md`+`event_catalog.md`. Migration is **invisible feature-driven** per `CONSTITUTION.md` §5, §13, §17: new feature → target arch + directly related legacy slice (smallest useful) → validate; no unrelated migration, no big-bang.
 

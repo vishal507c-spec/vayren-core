@@ -195,6 +195,7 @@ REVERSE_DEPS: dict[str, tuple[str, ...]] = {
     "backtest": ("backtest", "app"),
     "risk": ("risk", "execution", "app"),
     "execution": ("execution", "app"),
+    "broker": ("broker", "app"),
     "app": ("app",),
 }
 
@@ -207,6 +208,7 @@ DOMAIN_TESTS: dict[str, str] = {
     "backtest": "06_backtest/backtest/tests",
     "risk": "07_risk/risk/tests",
     "execution": "08_execution/execution/tests",
+    "broker": "09_broker/broker/tests",
     "app": "00_app/app/tests",
 }
 
@@ -318,6 +320,7 @@ def impact_plan(files: list[str]) -> dict:
         "backtest",
         "risk",
         "execution",
+        "broker",
         "app",
     ):
         if d in needed:

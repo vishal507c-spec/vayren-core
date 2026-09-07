@@ -1,0 +1,12 @@
+[package]
+name = "vayren-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "VAYREN Rust-owned numeric/lifecycle kernels (order state machine, backtest metrics, timeframe aggregation)"
+
+[lib]
+name = "vayren_core"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]

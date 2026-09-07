@@ -1,15 +1,33 @@
-"""Reconciliation — local ledger vs broker truth, with blocking rule."""
+"""Reconciliation — local ledger vs broker truth, with blocking rule.
+
+FINAL §L: positions, orders AND funds reconcile into one
+:class:`ReconciliationVerdict` with status SAFE / WARNING / BLOCKED.
+SAFE journals info; WARNING and BLOCKED both block LIVE. Startup must
+reconcile (RECOVER → RECONCILE → …) before LIVE; every verdict is
+journaled. Ledger and strategy execution state rebuild from fills, so
+positions/fills coverage flows through the same reports.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import StrEnum
+from typing import Any
 
 from execution.models.position import Position
 
 
+class ReconcileStatus(StrEnum):
+    """Verdict status. WARNING and BLOCKED both block LIVE."""
+
+    SAFE = "SAFE"
+    WARNING = "WARNING"
+    BLOCKED = "BLOCKED"
+
+
 @dataclass(frozen=True)
 class ReconciliationMismatch:
-    kind: str  # position | order
+    kind: str  # position | order | funds
     symbol_or_id: str
     local: str
     broker: str
@@ -32,6 +50,14 @@ def _qty_of(position: dict) -> float:
         return float(position.get("quantity", 0.0))
     except Exception:
         return 0.0
+
+
+def _money_of(payload: dict, key: str) -> float | None:
+    try:
+        value = payload.get(key)
+        return None if value is None else float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def reconcile_positions(
@@ -78,6 +104,119 @@ def reconcile_orders(
     )
 
 
+def reconcile_funds(
+    local_equity: float,
+    broker_funds: dict[str, Any],
+    tolerance: float = 1e-9,
+    checked_at: str = "",
+) -> ReconciliationReport:
+    """Compare ledger equity against the broker funds snapshot (FINAL §L).
+
+    Missing/unparseable broker equity is a mismatch (UNKNOWN ≠ zero —
+    never treated as matching). Pure function.
+    """
+    broker_equity = _money_of(broker_funds, "equity")
+    if broker_equity is None:
+        return ReconciliationReport(
+            matched=False,
+            mismatches=(
+                ReconciliationMismatch(
+                    kind="funds",
+                    symbol_or_id="equity",
+                    local=f"{local_equity}",
+                    broker="unknown",
+                ),
+            ),
+            checked_at=checked_at,
+        )
+    if abs(float(local_equity) - broker_equity) > tolerance:
+        return ReconciliationReport(
+            matched=False,
+            mismatches=(
+                ReconciliationMismatch(
+                    kind="funds",
+                    symbol_or_id="equity",
+                    local=f"{local_equity}",
+                    broker=f"{broker_equity}",
+                ),
+            ),
+            checked_at=checked_at,
+        )
+    return ReconciliationReport(matched=True, checked_at=checked_at)
+
+
+@dataclass(frozen=True)
+class ReconciliationVerdict:
+    """One combined verdict across positions/orders/funds (FINAL §L)."""
+
+    status: ReconcileStatus
+    reports: tuple[ReconciliationReport, ...] = ()
+    checked_at: str = ""
+    reasons: tuple[str, ...] = ()
+
+    @property
+    def blocks_live(self) -> bool:
+        """SAFE never blocks; WARNING and BLOCKED always block LIVE."""
+        return self.status is not ReconcileStatus.SAFE
+
+    def journal_payload(self) -> dict[str, Any]:
+        """JSON-safe payload for the RECONCILED journal entry."""
+        return {
+            "status": self.status.value,
+            "checked_at": self.checked_at,
+            "reasons": list(self.reasons),
+            "mismatches": [
+                {
+                    "kind": mismatch.kind,
+                    "id": mismatch.symbol_or_id,
+                    "local": mismatch.local,
+                    "broker": mismatch.broker,
+                }
+                for report in self.reports
+                for mismatch in report.mismatches
+            ],
+        }
+
+
+def verdict_of(
+    reports: tuple[ReconciliationReport, ...],
+    *,
+    evaluated: bool = True,
+    checked_at: str = "",
+) -> ReconciliationVerdict:
+    """Combine reports: unevaluated → WARNING; any mismatch → BLOCKED;
+    all matched → SAFE. Pure function, never raises."""
+    if not evaluated:
+        return ReconciliationVerdict(
+            status=ReconcileStatus.WARNING,
+            reports=reports,
+            checked_at=checked_at,
+            reasons=("reconciliation not evaluated",),
+        )
+    reasons: list[str] = []
+    for report in reports:
+        for mismatch in report.mismatches:
+            reasons.append(
+                f"{mismatch.kind} {mismatch.symbol_or_id}: "
+                f"local={mismatch.local} broker={mismatch.broker}"
+            )
+    if reasons:
+        return ReconciliationVerdict(
+            status=ReconcileStatus.BLOCKED,
+            reports=reports,
+            checked_at=checked_at,
+            reasons=tuple(reasons),
+        )
+    return ReconciliationVerdict(
+        status=ReconcileStatus.SAFE, reports=reports, checked_at=checked_at
+    )
+
+
+def record_verdict(journal: Any, verdict: ReconciliationVerdict) -> None:
+    """Journal one RECONCILED entry (FINAL §L: every verdict is journaled)."""
+    journal.record("RECONCILED", **verdict.journal_payload())
+
+
 @dataclass
 class ReconciliationState:
     """Latest reports; the session consults blocks_live before trading."""
@@ -86,7 +225,12 @@ class ReconciliationState:
         default_factory=lambda: ReconciliationReport(matched=True)
     )
     orders: ReconciliationReport = field(default_factory=lambda: ReconciliationReport(matched=True))
+    funds: ReconciliationReport = field(default_factory=lambda: ReconciliationReport(matched=True))
 
     @property
     def blocks_live(self) -> bool:
-        return self.positions.blocks_live or self.orders.blocks_live
+        return self.positions.blocks_live or self.orders.blocks_live or self.funds.blocks_live
+
+    def verdict(self, *, evaluated: bool = True) -> ReconciliationVerdict:
+        """Combined SAFE/WARNING/BLOCKED verdict (FINAL §L)."""
+        return verdict_of((self.positions, self.orders, self.funds), evaluated=evaluated)

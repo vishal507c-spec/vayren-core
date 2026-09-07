@@ -7,13 +7,15 @@ the deterministic sandbox venue, and arming is explicit per test.
 import time
 
 import pytest
+from broker.capabilities import CapabilitySet, Domain
+from broker.faces import FactoryPlugin
+from broker.registry import BrokerRecord, default_registry
 from risk import RiskPolicy
 from strategy import StrategyParameters
 from strategy.strategies.sma import SmaCrossover
 
 from execution.broker.adapter import BrokerError
 from execution.broker.credentials import BrokerCredentials
-from execution.broker.factory import register_adapter
 from execution.broker.readonly import ReadOnlyBroker
 from execution.broker.sandbox import SandboxBroker
 from execution.engine import IllegalTransitionError
@@ -46,7 +48,25 @@ def _live_session() -> tuple[LiveSession, ReplayProvider]:
         provider,
         RiskPolicy(),
     )
-    register_adapter("safety-sandbox", lambda: SandboxBroker(account_id="safety"))
+    # M7: venue registered directly in the single UBL registry
+    # (the ``register_adapter`` shim is retired).
+    registry = default_registry()
+    if "safety-sandbox" in registry:
+        registry.unregister("safety-sandbox")
+    registry.register(
+        BrokerRecord(
+            name="safety-sandbox",
+            display_name="safety-sandbox",
+            plugin=FactoryPlugin(
+                name="safety-sandbox",
+                display_name="safety-sandbox",
+                factories={Domain.TRADING: lambda: SandboxBroker(account_id="safety")},
+                capabilities=None,
+            ),
+            capabilities=CapabilitySet(),
+            faces=(Domain.TRADING,),
+        )
+    )
     session.register_strategy("sma", "1.0", _live_logic, StrategyParameters({}))
     return session, provider
 

@@ -281,7 +281,9 @@ def bench_sandbox_bootstrap() -> dict[str, float]:
     processing/order submission/fill processing/reconciliation/shutdown."""
     import time as _time
 
-    from execution.broker.factory import register_adapter
+    from broker.capabilities import CapabilitySet, Domain
+    from broker.faces import FactoryPlugin
+    from broker.registry import BrokerRecord, default_registry
     from execution.broker.sandbox import SandboxBroker
     from execution.modes import ExecutionMode
     from execution.runtime.session import LiveSession, SessionConfig
@@ -296,7 +298,25 @@ def bench_sandbox_bootstrap() -> dict[str, float]:
     }
     for _ in range(3):
         start = time.perf_counter()
-        register_adapter("bench-sandbox", lambda: SandboxBroker(account_id="bench"))
+        # M7: venue registered directly in the single UBL registry
+        # (the ``register_adapter`` shim is retired).
+        _registry = default_registry()
+        if "bench-sandbox" in _registry:
+            _registry.unregister("bench-sandbox")
+        _registry.register(
+            BrokerRecord(
+                name="bench-sandbox",
+                display_name="bench-sandbox",
+                plugin=FactoryPlugin(
+                    name="bench-sandbox",
+                    display_name="bench-sandbox",
+                    factories={Domain.TRADING: lambda: SandboxBroker(account_id="bench")},
+                    capabilities=None,
+                ),
+                capabilities=CapabilitySet(),
+                faces=(Domain.TRADING,),
+            )
+        )
         provider = ReplayProvider(candles, chunk_size=1000)
         session = LiveSession(
             SessionConfig(mode=ExecutionMode.SANDBOX, adapter_name="bench-sandbox"),

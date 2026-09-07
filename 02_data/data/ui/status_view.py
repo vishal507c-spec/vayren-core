@@ -14,6 +14,7 @@ from datetime import datetime
 
 from PySide6.QtCore import QSize, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
+    QComboBox,
     QFormLayout,
     QHBoxLayout,
     QLabel,
@@ -63,6 +64,26 @@ QPushButton {
 QPushButton:hover {
     border-color: palette(highlight);
     color: palette(highlight);
+}
+"""
+
+_COMBO_STYLE = """
+QComboBox {
+    color: palette(text);
+    background: palette(base);
+    border: 1px solid palette(midlight);
+    border-radius: 3px;
+    padding: 1px 6px;
+    font-size: 11px;
+}
+QComboBox:hover {
+    border-color: palette(highlight);
+}
+QComboBox QAbstractItemView {
+    background: palette(base);
+    border: 1px solid palette(midlight);
+    selection-background-color: palette(highlight);
+    selection-color: palette(highlighted-text);
 }
 """
 
@@ -117,10 +138,18 @@ def _format_bytes(size: int) -> str:
 
 
 class StatusView(QWidget):
-    """Read-only monitoring cluster; requests for re-checks go via signals."""
+    """Read-only monitoring cluster; requests for re-checks go via signals.
+
+    Broker selection (M4): the selector is a pure view over injected
+    registry facts (``set_broker_choices``) and the authoritative
+    selection (``set_broker_selection``). A user choice is emitted as
+    ``broker_selected`` — validation and persistence happen in the
+    bootstrap composition root, never inside this widget.
+    """
 
     coverage_requested = Signal(str, str)  # symbol, interval
     retry_requested = Signal(str, str, str, str)  # symbol, interval, from, to
+    broker_selected = Signal(str)  # requested broker name (validated upstream)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -131,6 +160,7 @@ class StatusView(QWidget):
         self._total_rows = 0
         self._mode = "idle"
         self._credentials_manager: ProviderCredentialsManager | None = None
+        self._broker_choices: dict[str, dict[str, object]] = {}
 
         self.setStyleSheet(_PROGRESS_STYLE)
 
@@ -300,6 +330,27 @@ class StatusView(QWidget):
         column.setContentsMargins(0, 0, 0, 0)
         column.setSpacing(4)
         column.addWidget(SectionLabel("Provider Status", card))
+        # ── Broker selection (M4): registry-backed choices, validated upstream ──
+        selector_row = QHBoxLayout()
+        selector_row.setSpacing(6)
+        selector_caption = _WrapLabel("Broker", card)
+        selector_caption.setStyleSheet(_ROW_LABEL_STYLE)
+        self._broker_combo = QComboBox(card)
+        self._broker_combo.setStyleSheet(_COMBO_STYLE)
+        self._broker_combo.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._broker_combo.activated.connect(self._on_broker_activated)
+        selector_row.addWidget(selector_caption)
+        selector_row.addWidget(self._broker_combo, 1)
+        column.addLayout(selector_row)
+        self._broker_caps = _WrapLabel("", card)
+        self._broker_caps.setStyleSheet(_NOTE_STYLE)
+        self._broker_caps.setWordWrap(True)
+        column.addWidget(self._broker_caps)
+        self._broker_error = _WrapLabel("", card)
+        self._broker_error.setStyleSheet("color: palette(bright-text); font-size: 10px;")
+        self._broker_error.setWordWrap(True)
+        self._broker_error.hide()
+        column.addWidget(self._broker_error)
         row = QHBoxLayout()
         row.setSpacing(8)
         provider_name = _WrapLabel("Zerodha", card)
@@ -362,6 +413,68 @@ class StatusView(QWidget):
         self._provider_detail.setPlainText(reason)
         self._configure_button.setVisible(not ready)
         self._advanced_button.setVisible(bool(reason))
+
+    # ── broker selection (M4) ────────────────────────────────────────────────
+
+    def set_broker_choices(self, choices: tuple[dict[str, object], ...]) -> None:
+        """Populate the selector from registry facts (name-sorted upstream).
+
+        Each choice carries ``name``/``display_name``/``domains``; the
+        combo shows the display name and stores the registry name.
+        """
+        self._broker_choices = {str(c.get("name", "")): c for c in choices}
+        self._broker_combo.blockSignals(True)
+        self._broker_combo.clear()
+        for choice in choices:
+            self._broker_combo.addItem(
+                str(choice.get("display_name", choice.get("name"))),
+                str(choice.get("name", "")),
+            )
+        self._broker_combo.blockSignals(False)
+
+    def set_broker_selection(
+        self, selection: object, capabilities: tuple[str, ...] | None = None
+    ) -> None:
+        """Show the authoritative selection (never a locally-held state)."""
+        name = str(getattr(selection, "name", ""))
+        reason = str(getattr(selection, "reason", ""))
+        index = self._broker_combo.findData(name)
+        if index < 0:
+            for row, key in enumerate(self._broker_choices):
+                if key == name:
+                    index = row
+                    break
+        if index >= 0:
+            self._broker_combo.blockSignals(True)
+            self._broker_combo.setCurrentIndex(index)
+            self._broker_combo.blockSignals(False)
+        choice = self._broker_choices.get(name, {})
+        domains = choice.get("domains") if isinstance(choice, dict) else None
+        parts: list[str] = []
+        if isinstance(domains, dict):
+            for label, key in (
+                ("Historical", "historical_data"),
+                ("Market", "market_data"),
+                ("Trading", "trading"),
+            ):
+                parts.append(f"{label} {'✓' if domains.get(key) else '✗'}")
+        if capabilities:
+            parts.append(f"{len(capabilities)} capabilities")
+        if reason:
+            parts.append(reason)
+        self._broker_caps.setText("  ·  ".join(parts))
+        self.show_broker_error("")
+
+    def show_broker_error(self, message: str) -> None:
+        """Surface a rejected selection (previous valid choice stays shown)."""
+        self._broker_error.setText(message)
+        self._broker_error.setVisible(bool(message))
+
+    def _on_broker_activated(self, index: int) -> None:
+        """Emit the requested broker name; validation happens in bootstrap."""
+        names = list(self._broker_choices)
+        if 0 <= index < len(names):
+            self.broker_selected.emit(names[index])
 
     def on_started(self, event: DownloadStarted) -> None:
         self._last_start = event

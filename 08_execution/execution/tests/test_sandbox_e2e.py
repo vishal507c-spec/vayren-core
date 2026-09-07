@@ -8,12 +8,15 @@ core path; the venue itself is the deterministic simulated sandbox.
 import time
 
 import pytest
+from broker.capabilities import CapabilitySet, Domain
+from broker.faces import FactoryPlugin
+from broker.registry import BrokerRecord, default_registry
 from risk import RiskPolicy
 from strategy import StrategyParameters
 from strategy.strategies.sma import SmaCrossover
 
 from execution.broker.adapter import NotConfiguredError
-from execution.broker.factory import register_adapter, resolve_broker
+from execution.broker.factory import resolve_broker
 from execution.broker.paper import PaperBroker
 from execution.broker.sandbox import SandboxBroker
 from execution.engine import IllegalTransitionError
@@ -29,13 +32,35 @@ def _logic():
     return SmaCrossover(StrategyParameters({"fast_period": 2, "slow_period": 3}))
 
 
+def _register_venue(name: str, factory: object) -> None:
+    """M7: register a trading venue directly in the single UBL registry
+    (the ``register_adapter`` shim is retired)."""
+    registry = default_registry()
+    if name in registry:
+        registry.unregister(name)
+    registry.register(
+        BrokerRecord(
+            name=name,
+            display_name=name,
+            plugin=FactoryPlugin(
+                name=name,
+                display_name=name,
+                factories={Domain.TRADING: factory},
+                capabilities=None,
+            ),
+            capabilities=CapabilitySet(),
+            faces=(Domain.TRADING,),
+        )
+    )
+
+
 def _sandbox_session(candles, broker=None, **config_overrides):
     provider = ReplayProvider(candles, chunk_size=1000)
     values = {"mode": ExecutionMode.SANDBOX, "adapter_name": "e2e-sandbox"}
     values.update(config_overrides)
     config = SessionConfig(**values)
     venue = broker if broker is not None else SandboxBroker(account_id="e2e-acct")
-    register_adapter("e2e-sandbox", lambda: venue)
+    _register_venue("e2e-sandbox", lambda: venue)
     session = LiveSession(config, provider, RiskPolicy())
     session.register_strategy("sma", "1.0", _logic, StrategyParameters({}))
     return session, provider, venue
@@ -98,7 +123,7 @@ def test_strategy_parity_paper_sandbox() -> None:
         provider,
         RiskPolicy(),
     )
-    register_adapter("parity-sandbox", lambda: SandboxBroker(account_id="parity"))
+    _register_venue("parity-sandbox", lambda: SandboxBroker(account_id="parity"))
     sandbox_session.register_strategy("sma", "1.0", _logic, StrategyParameters({}))
     assert sandbox_session.start(("TEST",), "15m", _warmup()).ready
     now = time.time()
@@ -131,7 +156,7 @@ def test_replay_parity_sandbox_session() -> None:
             provider,
             RiskPolicy(),
         )
-        register_adapter("replay-sandbox", lambda: SandboxBroker(account_id="replay"))
+        _register_venue("replay-sandbox", lambda: SandboxBroker(account_id="replay"))
         session.register_strategy("sma", "1.0", _logic, StrategyParameters({}))
         assert session.start(("TEST",), "15m", _warmup()).ready
         now = time.time()

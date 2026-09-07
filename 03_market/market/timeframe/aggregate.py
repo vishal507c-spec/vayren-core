@@ -5,18 +5,19 @@ intraday buckets (detected from the data), calendar-aligned for daily
 (00:00) and weekly (Monday 00:00) buckets. Only real rows are merged —
 never fabricated values.
 
-Speed note: timestamps are parsed with ``datetime.fromisoformat`` (no
-locale work — ``strptime`` re-reads the locale per call and is ~100x
-slower on this hot path), and buckets accumulate OHLCV in a single pass
-with running max/min/sum instead of per-bucket generator scans.
+The bucket-grouping and single-pass OHLCV accumulation loop is owned by
+Rust (`rust/vayren-core`, `aggregate` module); Python keeps timestamp
+parsing and bar formatting (domain/IO). The detectors keep their parsing
+and route the frequency vote (mode) through the Rust `stats` kernel.
 """
 
 import sqlite3
-from collections import Counter
 from collections.abc import Sequence
 from datetime import date, datetime, timedelta
 
 from market.models.bar import Bar
+from market.native_aggregate import aggregate as _native_aggregate
+from market.native_aggregate import mode as _native_mode
 
 _DAY_SECONDS = 86400
 _TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
@@ -35,13 +36,13 @@ def detect_bar_duration(timestamps: Sequence[str]) -> int | None:
     """Dominant bar duration in seconds from actual rows, or None if < 2 rows."""
     if len(timestamps) < 2:
         return None
-    counts: Counter[int] = Counter()
     previous = _parse_timestamp(timestamps[0])
+    deltas: list[int] = []
     for raw in timestamps[1:]:
         current = _parse_timestamp(raw)
-        counts[round((current - previous).total_seconds())] += 1
+        deltas.append(round((current - previous).total_seconds()))
         previous = current
-    return counts.most_common(1)[0][0]
+    return _native_mode(deltas)
 
 
 def detect_session_start(rows: Sequence[sqlite3.Row]) -> int:
@@ -56,26 +57,8 @@ def detect_session_start(rows: Sequence[sqlite3.Row]) -> int:
         current = first_of_day.get(dt.date())
         if current is None or dt < current:
             first_of_day[dt.date()] = dt
-    counts: Counter[int] = Counter(
-        dt.hour * 3600 + dt.minute * 60 + dt.second for dt in first_of_day.values()
-    )
-    if not counts:
-        return 0
-    return counts.most_common(1)[0][0]
-
-
-def _bucket_key(dt: datetime, timeframe_seconds: int, session_start: int) -> tuple[date, int]:
-    if timeframe_seconds < _DAY_SECONDS:
-        sec_of_day = dt.hour * 3600 + dt.minute * 60 + dt.second
-        if sec_of_day >= session_start:
-            index = (sec_of_day - session_start) // timeframe_seconds
-        else:
-            index = sec_of_day // timeframe_seconds
-        return dt.date(), index
-    if timeframe_seconds == _DAY_SECONDS:
-        return dt.date(), 0
-    monday = dt.date() - timedelta(days=dt.weekday())
-    return monday, 0
+    starts = [dt.hour * 3600 + dt.minute * 60 + dt.second for dt in first_of_day.values()]
+    return _native_mode(starts) or 0
 
 
 def _bar_timestamp(
@@ -101,35 +84,40 @@ def aggregate_bars(
     """
     if not rows:
         return []
-    buckets: dict[tuple[date, int], list[float]] = {}
-    symbols: dict[tuple[date, int], str] = {}
+    days: list[int] = []
+    secs: list[int] = []
+    opens: list[float] = []
+    highs: list[float] = []
+    lows: list[float] = []
+    closes: list[float] = []
+    volumes: list[float] = []
+    symbols: list[str] = []
     for row in rows:
         dt = _parse_timestamp(row["timestamp"])
-        key = _bucket_key(dt, timeframe_seconds, session_start)
-        acc = buckets.get(key)
-        if acc is None:
-            buckets[key] = [row["open"], row["high"], row["low"], row["close"], row["volume"]]
-            symbols[key] = row["symbol"]
-        else:
-            if row["high"] > acc[1]:
-                acc[1] = row["high"]
-            if row["low"] < acc[2]:
-                acc[2] = row["low"]
-            acc[3] = row["close"]
-            acc[4] += row["volume"]
-
+        days.append(dt.date().toordinal())
+        secs.append(dt.hour * 3600 + dt.minute * 60 + dt.second)
+        opens.append(row["open"])
+        highs.append(row["high"])
+        lows.append(row["low"])
+        closes.append(row["close"])
+        volumes.append(row["volume"])
+        symbols.append(row["symbol"])
+    buckets = _native_aggregate(
+        days, secs, opens, highs, lows, closes, volumes, timeframe_seconds, session_start
+    )
     bars: list[Bar] = []
-    for key, acc in buckets.items():
-        bucket_start, index = key
+    for day, index, o, h, low, close, volume in buckets:
         bars.append(
             Bar(
-                symbol=symbols[key],
-                open=acc[0],
-                high=acc[1],
-                low=acc[2],
-                close=acc[3],
-                volume=int(acc[4]),
-                timestamp=_bar_timestamp(bucket_start, timeframe_seconds, index, session_start),
+                symbol=symbols[0],
+                open=o,
+                high=h,
+                low=low,
+                close=close,
+                volume=int(volume),
+                timestamp=_bar_timestamp(
+                    date.fromordinal(day), timeframe_seconds, index, session_start
+                ),
                 bar_size=label,
             )
         )

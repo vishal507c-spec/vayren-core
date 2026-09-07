@@ -50,30 +50,32 @@ AI agents must read the relevant module contract before modifying that module.
 ### Allowed graph (from `scripts/validate_imports.py`)
 
 ```
-00_app ──► 01_core, 02_data, 03_market, 04_chart, 05_strategy, 06_backtest, 07_risk, 08_execution
+00_app ──► 01_core, 02_data, 03_market, 04_chart, 05_strategy, 06_backtest, 07_risk, 08_execution, 09_broker
 01_core ──► (none — stdlib only)
-02_data ──► 01_core
+02_data ──► 01_core, 09_broker (UBL registry/faces only)
 03_market ──► 01_core
 04_chart ──► 01_core, 03_market
 05_strategy ──► 01_core, 03_market
 06_backtest ──► 01_core, 03_market, 05_strategy
 07_risk ──► 01_core
-08_execution ──► 01_core, 03_market, 05_strategy, 07_risk
+08_execution ──► 01_core, 03_market, 05_strategy, 07_risk, 09_broker (UBL registry/faces only)
+09_broker ──► (none — stdlib only, self-contained coordination boundary)
 ```
 
 ### Table
 
 | Module | May Import | Forbidden |
 |---|---|---|
-| `00_app` | `core`, `data`, `market`, `chart`, `strategy`, `backtest`, `risk`, `execution` | — |
-| `01_core` | stdlib only | `data`, `market`, `chart`, `app`, `strategy`, `backtest`, `risk`, `execution` |
-| `02_data` | `core` | `market`, `chart`, `app`, `strategy`, `backtest`, `risk`, `execution` |
-| `03_market` | `core` | `02_data`, `04_chart`, `app`, `strategy`, `backtest`, `risk`, `execution` |
-| `04_chart` | `core`, `market` (`Bar` only) | `02_data`, `app`, `strategy`, `backtest`, `risk`, `execution`, `market.database` |
-| `05_strategy` | `core`, `market` | `02_data`, `04_chart`, `app` internals, `risk`, `execution` |
-| `06_backtest` | `core`, `market`, `strategy` | `02_data`, `04_chart`, `app` internals, `risk`, `execution` |
+| `00_app` | `core`, `data`, `market`, `chart`, `strategy`, `backtest`, `risk`, `execution`, `broker` | — |
+| `01_core` | stdlib only | `data`, `market`, `chart`, `app`, `strategy`, `backtest`, `risk`, `execution`, `broker` |
+| `02_data` | `core`, `broker` (UBL registry/faces only) | `market`, `chart`, `app`, `strategy`, `backtest`, `risk`, `execution` |
+| `03_market` | `core` | `02_data`, `04_chart`, `app`, `strategy`, `backtest`, `risk`, `execution`, `broker` |
+| `04_chart` | `core`, `market` (`Bar` only) | `02_data`, `app`, `strategy`, `backtest`, `risk`, `execution`, `broker`, `market.database` |
+| `05_strategy` | `core`, `market` | `02_data`, `04_chart`, `app` internals, `risk`, `execution`, `broker` |
+| `06_backtest` | `core`, `market`, `strategy` | `02_data`, `04_chart`, `app` internals, `risk`, `execution`, `broker` |
 | `07_risk` | `core` | everything except `core` (events carry data in, decisions out) |
-| `08_execution` | `core`, `market` (`Bar` only), `strategy` (public surface), `risk` | `02_data`, `04_chart`, `app` internals, `backtest`, `market.database` |
+| `08_execution` | `core`, `market` (`Bar` only), `strategy` (public surface), `risk`, `broker` (UBL registry/faces only) | `02_data`, `04_chart`, `app` internals, `backtest`, `market.database` |
+| `09_broker` | stdlib only (self-contained coordination boundary) | `data`, `market`, `chart`, `app`, `strategy`, `backtest`, `risk`, `execution` |
 
 **INVARIANT:** `from market.database import ...` or `from ..market import ...` or `from x import *` is a contract violation.
 
@@ -175,7 +177,7 @@ CREATE TABLE history_boundaries(symbol TEXT PRIMARY KEY, earliest TEXT, latest T
 ```
 WAL, `V9/V9.1` migrations.
 
-**Provider boundary** (`data/provider/contract.py`): `Provider` protocol `available()`, `symbols()`, `fetch_candles(symbol, interval, start, end)`, `new_session()`, `renew()`; sentinels `TOKEN_EXPIRED`/`RATE_LIMITED`; `ProviderError(message, code)` 7 codes (`AUTHENTICATION_FAILED` …). `ZerodhaProvider` in `data/provider/zerodha/adapter.py` is the ONLY place knowing Kite interval IDs. `factory.build_provider(settings)` dispatches `settings.provider` (`"zerodha"`). `store → env → Not Configured` credential priority via `ProviderCredentialsManager`.
+**Provider boundary** (`data/provider/contract.py`): `Provider` protocol `available()`, `symbols()`, `fetch_candles(symbol, interval, start, end)`, `new_session()`, `renew()`; sentinels `TOKEN_EXPIRED`/`RATE_LIMITED`; `ProviderError(message, code)` 7 codes (`AUTHENTICATION_FAILED` …). `ZerodhaProvider` in `data/provider/zerodha/adapter.py` is the ONLY place knowing Kite interval IDs. M7: the `register_provider` shim is retired — venues register directly in the single UBL `BrokerRegistry`; `build_provider(settings)` is retained only as a compatibility delegate while the composition root resolves the selected broker's historical face straight from the registry. `DownloadSettings.provider` is derived state (INVARIANT: always equals `BrokerSelection.name`; the ONLY product write path is `Bootstrap`). `store → env → Not Configured` credential priority via `ProviderCredentialsManager`.
 
 **Implementation note:** `HistoricalDownloadEngine(provider, ...)` requires provider (None→TypeError). `forward_sweep(fetch_chunk)` uses 200-day chunks + jitter. `DownloadWorker(QThread)` bridges bus requests ↔ engine signals; bootstrap bridges signals → `bus.publish`.
 
@@ -209,7 +211,7 @@ WAL, `V9/V9.1` migrations.
 
 **Data contract:** See §8.
 
-**Performance note:** `aggregate_bars` optimized to single-pass accumulators; `get_quotes` is `fetch_candles(symbol,1)` per symbol (~1 ms/symbol, ~0.5 s for 527 symbols, one-time at `SymbolsListed`, cached via `QuoteLoader._last_symbols` no-op on identical universe).
+**Performance note:** `aggregate_bars` bucketing/accumulation is Rust-owned (`rust/vayren-core`, `aggregate` + `stats` kernels; measured ~1.5× end-to-end on 60k rows, kernel 8×); Python keeps timestamp parsing/formatting. `get_quotes` is `fetch_candles(symbol,1)` per symbol (~1 ms/symbol, ~0.5 s for 527 symbols, one-time at `SymbolsListed`, cached via `QuoteLoader._last_symbols` no-op on identical universe).
 
 **AI modification:** Add provider/timeframe → extend repository/loader, not UI. Preserve `_last_symbols` guard and no-re-query.
 
@@ -272,7 +274,7 @@ WAL, `V9/V9.1` migrations.
 
 ### 5.7 Module: `06_backtest` — Research Engine
 
-**Responsibility:** Historical replay, execution simulation, positions, journal, metrics. Python-only orchestration.
+**Responsibility:** Historical replay, execution simulation, positions, journal, metrics. Python orchestration over Rust numeric kernels.
 
 **Public API** (`backtest/__init__.py`):
 `BacktestRunner`, `run_variant_backtest`, `BacktestWorker`, `BacktestConfig`, `BacktestResult`, `StrategyResult`, `TradeRecord`, `EquityPoint`, `PerformanceMetrics`, `RunBacktest`, `BacktestStarted`, `BacktestProgress`, `BacktestCompleted`, `BacktestFailed`, `backtest_manifest`, `validate_backtest_form`
@@ -285,6 +287,7 @@ WAL, `V9/V9.1` migrations.
 
 **Invariants:**
 - `BacktestRunner(repository, registry, data_dir)` loads Python strategy via `get_strategy_by_id` → `compile_strategy` → `PythonStrategy`; no `.vstrat`/VM fallback.
+- Metrics math is Rust-owned (`rust/vayren-core`, `metrics` kernels: drawdown/equity/Sharpe; measured 4–5× on 20–100k inputs); `engine/metrics.py` keeps model assembly + `None`-semantics only.
 - `validate_backtest_form` is honest validation (no fake results).
 - `BacktestWorker` off-UI-thread (like `DownloadWorker`).
 - Cross-module imports use the provider's public surface (`strategy`, `market`, `core`)
@@ -331,8 +334,8 @@ WAL, `V9/V9.1` migrations.
 **Responsibility:** Run registered strategies against normalized market events through risk → plan → engine → broker → portfolio, with journal/replay/regime/adaptive observation. Strategy logic is reused from `05_strategy`, never reimplemented.
 
 **Public API** (`execution/__init__.py`, additions Phase 15):
-`SandboxBroker`, `ReadOnlyBroker`, `BrokerCredentials`, `CredentialStore`, `EnvCredentialStore`, `validate_credentials`, `evaluate_live_gates`, `LiveGatesReport`, `confirm_account`, `risk_configuration_valid`, `RateLimiter`, `RetryKind`, `classify_retry`, `clock_drift_ok`, `LiveArm`, `arm_transition`.
-`execution_manifest`, events (`MarketEvent`, `QuoteEvent`, `TradeEvent`, `CandleEvent`, `OrderBookEvent`, `HeartbeatEvent`, `SignalGenerated`, `RiskApproved`, `RiskDenied`, `OrderPlanned`, `OrderSubmitted`, `OrderAcknowledged`, `OrderFill`, `OrderRejected`, `PositionUpdated`, `KillSwitchEngaged`), models (`StrategySignal`, `ExecutionIntent`, `make_intent_id`, `OrderState`, `OrderPlan`, `BrokerOrder`, `Fill`, `Position`, `AccountSnapshot`, `StrategyRuntimeContract`), `MarketDataProvider`, `ReplayProvider`, `StreamNormalizer`, `inspect_strategy`, `LiveSession`, `OrderPlanner`, `ExecutionEngine`, `BrokerAdapter`, `PaperBroker`, `resolve_broker`, `ExecutionMode`, `ModeGates`, `PositionLedger`, `reconcile_positions/orders`, `StatisticalRegimeDetector`, `LiveEventRecorder`, `replay_and_compare`, `ExecutionJournal`, `LatencyTracker`
+`SandboxBroker`, `ReadOnlyBroker`, `BrokerCredentials`, `CredentialStore`, `EnvCredentialStore`, `validate_credentials`, `evaluate_live_gates`, `LiveGatesReport`, `confirm_account`, `risk_configuration_valid`, `RateLimiter`, `RetryKind`, `classify_retry`, `clock_drift_ok`, `LiveArm`, `arm_transition`, `TimeoutPolicy`, `BackoffPolicy`, `ReconnectPolicy`, `ActivationReport`, `ActivationStep`, `evaluate_activation`, `record_activation`, `funds_snapshot_from_face`, `funds_valid_for_live`, `risk_capital_from_funds`.
+`execution_manifest`, events (`MarketEvent`, `QuoteEvent`, `TradeEvent`, `CandleEvent`, `OrderBookEvent`, `HeartbeatEvent`, `SignalGenerated`, `RiskApproved`, `RiskDenied`, `OrderPlanned`, `OrderSubmitted`, `OrderAcknowledged`, `OrderFill`, `OrderRejected`, `PositionUpdated`, `KillSwitchEngaged`, `ACTIVATION_EVALUATED`, `RECONCILED`, `IDEMPOTENCY_RESTORED`), models (`StrategySignal`, `ExecutionIntent`, `make_intent_id`, `OrderState`, `OrderPlan`, `BrokerOrder`, `Fill`, `Position`, `AccountSnapshot`, `StrategyRuntimeContract`), `MarketDataProvider`, `ReplayProvider`, `StreamNormalizer`, `inspect_strategy`, `LiveSession`, `OrderPlanner`, `ExecutionEngine`, `BrokerAdapter`, `PaperBroker`, `resolve_broker`, `ExecutionMode`, `ModeGates`, `PositionLedger`, `ReconcileStatus`, `ReconciliationVerdict`, `verdict_of`, `record_verdict`, `reconcile_positions/orders/funds`, `StatisticalRegimeDetector`, `LiveEventRecorder`, `replay_and_compare`, `ExecutionJournal`, `LatencyTracker`
 
 **Consumes:** `core`, `market` (`Bar` only), `strategy` (public surface: logic, signals, params, definitions), `risk` (engine, kill switch, policy).
 
@@ -345,15 +348,48 @@ WAL, `V9/V9.1` migrations.
 - REAL_BROKER_UNSPECIFIED (Phase 15 verdict): the only broker in the repo (Zerodha/KiteConnect) is a historical-data provider in `02_data`; no execution venue is configured anywhere. No Zerodha order code exists or may be inferred from data credentials.
 - LIVE submissions additionally require explicit arming (`DISARMED` default; consent never inferred). Read-only verification is available via `ReadOnlyBroker` (mutations raise before reaching any venue).
 - No order without a risk approval; the FINAL planned quantity is re-validated after adaptive shrink.
-- `UNKNOWN` order states exit only via explicit `reconcile()`; never blind-resubmit.
+- `UNKNOWN` order states exit only via explicit `reconcile()`; never blind-resubmit. Engine idempotency snapshots (`snapshot`/`restore`) persist through checkpoint/recover; restored UNKNOWN orders reconcile before any new submission; unresolved restart mismatch blocks start (fail-closed; operator clears checkpoint for a clean paper restart).
+- Lifecycle includes `RECONCILING`: recovered sessions run `reconcile_now()` (positions+orders+verdict journaling) before VALIDATING. Funds reconcile via explicit `reconcile_funds` (ledger-vs-venue cash semantics differ by design — paper deducts notional on fill; the activation ceremony carries the funds verdict).
+- Activation ceremony (`evaluate_activation`, 12 ordered steps, pure verifier): broker → LIVE env → credentials → account → market data → funds → risk → reconcile → gates → kill switch → explicit ARM → START (never auto-ok). Every evaluation journals `ACTIVATION_EVALUATED` without secrets.
 - Intent IDs are deterministic (`strategy:version:event_seq:intent_seq`); duplicates are denied at both risk and engine.
 - Startup order RECOVER → RECONCILE → VALIDATE → WARMUP → READY is enforced; orders are impossible before RUNNING.
 - Warmup feeds history with signals discarded; restart recovery re-warms from persisted bar windows (no logic pickling).
 - Backtest ↔ paper parity: identical logic + identical bars → identical signal stream (modulo the documented one-bar warmup-boundary transient); identical fill-price math. Sizing models differ by design and are not compared.
+- Language ownership (FINAL migration): the order lifecycle TABLE and terminal set are Rust-owned (`rust/vayren-core`, `order_state`; ABI v1). `execution.models.order` re-exports `TRANSITIONS`/`TERMINAL_STATES` as a read-only projection (no Python table); `execution.native_order_state.transition_allowed` is the single legality check used by `ExecutionEngine`. Public import paths unchanged; reintroducing a Python table fails `validate_language_ownership.py`.
 
-**AI modification:** New venue → new `BrokerAdapter` implementation + `register_adapter` (never touch strategy/risk). New order type → planner + engine transition coverage + tests. Keep the runtime synchronous and deterministic.
+**AI modification:** New venue → new `BrokerAdapter` implementation + direct `BrokerRegistry.register(...)` in `09_broker` (M7: the `register_adapter` shim is retired; never touch strategy/risk). New order type → planner + engine transition coverage + tests. Keep the runtime synchronous and deterministic.
 
 **Validation:** `08_execution/execution/tests` + `scripts/run_tests.py` partitions.
+
+---
+
+### 5.10 Module: `09_broker` — Unified Broker Layer (M8 production adapter framework)
+
+**Responsibility:** Broker-independent coordination boundary between VAYREN and any venue: one error vocabulary, one capability vocabulary (bool + tri-state), three protocol faces, the ONLY broker registry, the single selection contract, UBL-owned funds/health/credential models. No transport, no SDK, no network, no secrets here — adapters live in `broker/adapters/<broker>/`.
+
+**Public API** (`broker/__init__.py`):
+`ErrorCode`, `BrokerError`, `BrokerNotRegisteredError`, `UnsupportedCapabilityError`, `CredentialsNotReadyError`, `error_code_from_legacy`, `Domain`, `Environment`, `Caps`, `CapabilitySet`, `CapabilityStatus`, `capability_status`, `HistoricalFace`, `MarketDataFace`, `TradingFace`, `BrokerPlugin`, `PluginLike`, `StaticPlugin`, `FactoryPlugin`, `BrokerRecord`, `BrokerRegistry`, `DuplicateBrokerError`, `default_registry`, `BrokerSelection`, `SelectionError`, `SelectionStore`, `MemorySelectionStore`, `surface_resolution`, `surface_status`, `FileSelectionStore`, `SelectionLoadError`, `FundsSnapshot`, `FUNDS_UNKNOWN`, `FUNDS_UNSUPPORTED`, `is_unknown`, `is_unsupported`, `require_funds`, `CredentialScope`, `CredentialRef`, `CredentialMetadata`, `CredentialResolver`, `validate_refs`, `validate_metadata`, `HealthState`, `BrokerHealth`, `health_from_legacy`, `BrokerIdentity`, `identity_of`
+
+**Consumes:** Stdlib only (INVARIANT: `broker` imports nothing — enforced by `validate_imports.py`).
+
+**Produces:** Registry records, selection facts, capability verdicts, funds/health/credential views for `00_app` composition, `02_data` history and `08_execution` trading.
+
+**Forbidden:** Every other chapter (`core`, `market`, `chart`, `data`, `strategy`, `backtest`, `risk`, `execution`, `app`); broker SDKs; network clients; secret values.
+
+**Invariants:**
+- One registry (`BrokerRegistry`), one selection (`BrokerSelection`), one capability vocabulary (`Caps`), one error vocabulary (`ErrorCode`) — AST-enforced, no second systems.
+- Tri-state declaration: SUPPORTED (advertised) / NOT_SUPPORTED (known id, absent) / NOT_CONFIGURED (unknown id or undeclared context). Bool `supports`/`surface_allowed` preserved for compatibility.
+- Unsupported capability → `UnsupportedCapabilityError` before any transport call; unknown broker → `BrokerNotRegisteredError`; corrupt selection → `SelectionLoadError`. No silent fallback; PAPER downgrade semantics unchanged.
+- Credentials are key-references only (`CredentialRef` has no value field); values never in selection persistence, logs, events, journals or UI. PAPER/SANDBOX/LIVE references isolated by environment.
+- Health is connection-only (`HealthState`: DISCONNECTED/CONNECTING/CONNECTED/DEGRADED/AUTH_REQUIRED/AUTH_FAILED/RATE_LIMITED/UNKNOWN); health never implies LIVE readiness (five gates authoritative).
+- `UNKNOWN` funds ≠ `0.0`; unsupported funds ≠ `0.0` (`FUNDS_UNKNOWN`/`FUNDS_UNSUPPORTED` sentinels + `require_funds` gate).
+- Order lifecycle is broker-independent (`execution.models.order`): CREATED/VALIDATED/SUBMITTED/ACKNOWLEDGED/PARTIALLY_FILLED/FILLED/REJECTED/CANCEL_PENDING/CANCELLED/MODIFY_PENDING/MODIFIED/EXPIRED/UNKNOWN; UNKNOWN exits only via `reconcile()`; unknown submissions reconcile first, never blind-retry (`RetryKind.MUST_RECONCILE_FIRST`).
+- Network boundary: Core → UBL → Adapter → Network. Network clients only in `09_broker/broker/adapters/` or retained `02_data/data/provider/` (validator-enforced `NETWORK_DENYLIST`).
+- Zerodha is history-only (trading/funds NOT_SUPPORTED); no `if broker == ...` outside adapters; LIVE_BROKER_INTEGRATION = NOT_CONFIGURED.
+
+**AI modification:** New venue → new `broker/adapters/<venue>/` package (identity + capability matrix + record builder, constructor-injected transport) + `BrokerRegistry.register(...)` at the composition root; run the generic harness `broker/tests/test_adapter_contract.py` against it. Never add SDK/network imports outside the adapter package; never invent capabilities.
+
+**Validation:** `09_broker/broker/tests` + `scripts/run_tests.py` partitions + `validate_imports.py` (SDK/network) + `validate_structure.py` (broker domain).
 
 ---
 
@@ -444,7 +480,7 @@ Legacy `candles(symbol, timestamp, ...)` only in `SqliteCandleDatabase` tests.
 | `strategy` | `strategy` | `backtest` via public registry; `execution` via public surface | `chart` | `Signal` | `exec` strings |
 | `risk` | `risk` | `execution` via `RiskEngine.evaluate` | everyone else (no reads, no broker) | `RiskRequest` | market state, broker handles |
 | `execution/broker` | `execution` | `ExecutionEngine` via `BrokerAdapter` protocol | `strategy`, `risk`, `chart`, `backtest`, UI | `OrderPlan` | broker SDKs, credential values |
-| `execution/sandbox` | `execution` tests/sessions | explicit `SandboxBroker(...)` construction or `register_adapter` | production code paths, live mode | scripted fills | real-venue behavior |
+| `execution/sandbox` | `execution` tests/sessions | explicit `SandboxBroker(...)` construction or direct `BrokerRegistry.register` | production code paths, live mode | scripted fills | real-venue behavior |
 | `execution/credentials` | `execution` | `validate_credentials` pre-submit; values in store only | logs, journal, repr, events | key refs + identity | secret values |
 | `execution/arming` | `execution` session | explicit `arm(reason)` call only | credentials, gates, kill switch | DISARMED default | inferred consent |
 | `execution/readonly` | tests/diagnostics | read-only verification of any adapter | order submission paths | reads | mutations |

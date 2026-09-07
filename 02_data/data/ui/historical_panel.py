@@ -82,6 +82,7 @@ class HistoricalDownloadPanel(QWidget):
     """
 
     close_requested = Signal()
+    broker_selected = Signal(str)  # forwarded from StatusView (validated upstream)
 
     def __init__(self, bus: EventBus) -> None:
         super().__init__()
@@ -116,6 +117,7 @@ class HistoricalDownloadPanel(QWidget):
         self._panel.cancel_requested.connect(self._on_cancel_requested)
         self._status.coverage_requested.connect(self._on_coverage_requested)
         self._status.retry_requested.connect(self._on_download_requested)
+        self._status.broker_selected.connect(self.broker_selected)
 
     def _header(self) -> QWidget:
         header = QWidget(self)
@@ -167,6 +169,18 @@ class HistoricalDownloadPanel(QWidget):
     def set_credentials_manager(self, manager: Any) -> None:
         """Inject the provider configuration service (bootstrap wiring)."""
         self._status.set_credentials_manager(manager)
+
+    def set_broker_choices(self, choices: tuple[dict[str, object], ...]) -> None:
+        """Registry-backed broker list for the selector (M4)."""
+        self._status.set_broker_choices(choices)
+
+    def set_broker_selection(self, selection: Any, capabilities: Any = None) -> None:
+        """Show the authoritative selection (M4)."""
+        self._status.set_broker_selection(selection, capabilities)
+
+    def show_broker_error(self, message: str) -> None:
+        """Surface a rejected selection (M4)."""
+        self._status.show_broker_error(message)
 
     def set_symbols(self, symbols: tuple[str, ...]) -> None:
         self._panel.set_symbols(symbols)

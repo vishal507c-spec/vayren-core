@@ -12,6 +12,7 @@ from collections import deque
 from dataclasses import dataclass, field
 
 from execution.events import HeartbeatEvent, MarketEvent
+from execution.market_data.provider import MarketDataError
 
 
 @dataclass
@@ -47,7 +48,15 @@ class StreamNormalizer:
         self._stale: set[str] = set()
 
     def observe(self, event: MarketEvent, now_epoch: float) -> tuple[MarketEvent, ...]:
-        """Accept one raw event; return newly deliverable events in order."""
+        """Accept one raw event; return newly deliverable events in order.
+
+        Malformed (non-MarketEvent) arrivals fail closed with
+        ``MarketDataError`` — raw SDK objects must never reach the stream.
+        """
+        if not isinstance(event, MarketEvent):
+            raise MarketDataError(
+                f"malformed market event: {type(event).__name__} is not a MarketEvent"
+            )
         if isinstance(event, HeartbeatEvent):
             self.stats.heartbeats += 1
             self._last_heartbeat_epoch[event.symbol] = now_epoch

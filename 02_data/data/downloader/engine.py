@@ -67,7 +67,8 @@ class HistoricalDownloadEngine:
         if provider is None:
             raise TypeError(
                 "HistoricalDownloadEngine requires a provider — "
-                "use data.provider.factory.build_provider"
+                "resolve the selected broker's historical face through "
+                "the unified broker registry (broker.registry)"
             )
         self._settings = settings
         self._report = reporter if reporter is not None else NullReporter()
@@ -110,7 +111,13 @@ class HistoricalDownloadEngine:
         return self._provider.available()
 
     def status(self) -> dict[str, Any]:
-        """Architecture-facing status (no credentials, no secrets)."""
+        """Architecture-facing status (no credentials, no secrets).
+
+        ``provider`` is a derived display value: it mirrors the
+        authoritative ``BrokerSelection.name`` (copied into
+        ``DownloadSettings.provider`` by the composition root) and is
+        never an independent selection source.
+        """
         available, reason = self.provider_available()
         return {
             "provider": self._settings.provider,

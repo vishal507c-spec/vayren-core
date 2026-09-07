@@ -28,7 +28,7 @@ from data.provider.contract import (
     ERR_INVALID_SYMBOL,
     ERR_NETWORK_ERROR,
 )
-from data.provider.factory import build_provider, register_provider
+from data.provider.factory import build_provider
 from data.provider.zerodha import AuthEngine, ZerodhaProvider
 from data.reporter import RecordingReporter
 from data.settings import DownloadSettings
@@ -121,15 +121,36 @@ def test_build_provider_unknown_name_raises(tmp_path) -> None:
         build_provider(settings)
 
 
-def test_register_provider_enables_future_providers(tmp_path) -> None:
-    register_provider("mock", FakeProvider)
+def test_registry_registration_enables_future_providers(tmp_path) -> None:
+    """Future providers register directly in the single UBL registry (M7:
+    the ``register_provider`` shim is retired); ``build_provider`` resolves
+    them unchanged."""
+    from broker.capabilities import Caps, Domain, capability_set
+    from broker.faces import FactoryPlugin
+    from broker.registry import BrokerRecord, default_registry
+
+    caps = capability_set({Domain.HISTORICAL_DATA: (Caps.HIST_CANDLES, Caps.HIST_SYMBOLS)})
+    registry = default_registry()
+    registry.register(
+        BrokerRecord(
+            name="mock",
+            display_name="mock",
+            plugin=FactoryPlugin(
+                name="mock",
+                display_name="mock",
+                factories={Domain.HISTORICAL_DATA: FakeProvider},
+                capabilities=caps,
+            ),
+            capabilities=caps,
+            faces=(Domain.HISTORICAL_DATA,),
+        )
+    )
     try:
         provider = build_provider(make_settings(tmp_path, provider="mock"))
         assert isinstance(provider, FakeProvider)
     finally:
-        from data.provider import factory
-
-        factory._PROVIDER_TYPES.pop("mock", None)
+        if "mock" in registry:
+            registry.unregister("mock")
 
 
 # ── ZerodhaProvider adapter ─────────────────────────────────────────────────

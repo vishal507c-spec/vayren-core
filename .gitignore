@@ -5,6 +5,7 @@ __pycache__/
 dist/
 build/
 *.so
+*.dll
 .venv/
 .pytest_cache/
 .ruff_cache/
@@ -59,3 +60,8 @@ credentials.yaml
 secrets.yaml
 *.key
 *.pem
+
+# Rust (constitution §8: Rust workspace builds locally, never committed)
+rust/target/
+rust/shell_build.log
+rust/shell_build.err
