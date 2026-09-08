@@ -100,7 +100,7 @@ AI agents must read the relevant module contract before modifying that module.
 
 **Consumes:** `core` (EventBus, logging, registries, SystemModel), `data` (data_manifest, DownloadWorker, settings, credentials), `market` (SymbolRepository, loaders, manifests), `chart` (ChartEngine, widgets, windows, manifests), `strategy` (StrategyRegistry, Lab UI), `backtest` (BacktestRunner/Worker), `execution` (PaperService for `--paper`; headless, no QApplication).
 
-**Produces:** `Bootstrap` with properties `bus: EventBus`, `services: Registry` (name lookup, unchanged), `components: ComponentRegistry` (capability lookup), `system_model: SystemModel`. Emits `AppStarted` on `start()`. Hosts `LiveWorkspace` (LIVE tab): pure view over an injected state dict + arm/halt callbacks, never bus/SQL/broker.
+**Produces:** `Bootstrap` with properties `bus: EventBus`, `services: Registry` (name lookup, unchanged), `components: ComponentRegistry` (capability lookup), `system_model: SystemModel`. Emits `AppStarted` on `start()`. Hosts `LiveWorkspace` (LIVE tab): pure view over an injected state dict + arm/halt callbacks, never bus/SQL/broker. Hosts `ResearchWorkspace` (RESEARCH tab): pure view over `ResearchService` (datasets from backtest histories, experiments, real analysis); research computation stays in `strategy.research` (Python). Hosts `PortfolioWorkspace` (PORTFOLIO tab): pure view over the shared workspace-state dict (no duplicated state). Shared `app.ui.ui_kit` widgets (Section/Badge/KVBlock/GateRow/tables) keep all screens consistent.
 
 **Dependencies:** See §4.
 

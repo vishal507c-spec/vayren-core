@@ -18,6 +18,11 @@
   "files": {
     "08_execution/execution/runtime/lifecycle.py": "LifecycleState machine retained as session orchestration vocabulary (string reasons, Qt-adjacent lifecycle); the order-state authority (the safety-critical table) migrated. Full port is a future execution-slice candidate, not this pass."
   },
+  "qt_workspace_allowlist": {
+    "00_app/app/ui/research_workspace.py": "Product-mandated Research workspace built in the retained Qt shell (egui shell is a standalone binary, not embeddable in the Qt app without destroying working behavior). Pure view over the Python research engine; registered here so the egui-direction rule keeps its teeth everywhere else.",
+    "00_app/app/ui/portfolio_workspace.py": "Product-mandated Portfolio workspace built in the retained Qt shell (same proof as research). Pure view over session/paper state; no new state, no new logic.",
+    "00_app/app/services/research_service.py": "Composition service behind the Research workspace (research stays Python per constitution §2). Service glue, not numeric core."
+  },
   "migrated": {
     "08_execution/execution/models/order.py": "TRANSITIONS/TERMINAL_STATES authority -> Rust order_state; enum/models stay as boundary vocabulary",
     "06_backtest/backtest/engine/metrics.py": "drawdown/equity/sharpe math -> Rust metrics kernels",

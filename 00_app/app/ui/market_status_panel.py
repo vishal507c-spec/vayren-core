@@ -1,4 +1,5 @@
-"""MarketStatusPanel — regime placeholder + real data-status display."""
+"""MarketStatusPanel — regime state (honest unknown until an engine reports)
++ real data-status display."""
 
 from PySide6.QtWidgets import QFrame, QGridLayout, QLabel, QVBoxLayout, QWidget
 
@@ -19,7 +20,8 @@ def _separator(parent: QWidget) -> QFrame:
 
 
 class MarketStatusPanel(QWidget):
-    """Two sections: MARKET REGIME (honest unavailable) and DATA STATUS (real)."""
+    """Two sections: MARKET REGIME (unknown until an engine reports) and
+    DATA STATUS (real). Unknown is styled muted, never zero-filled."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)

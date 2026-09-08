@@ -6,6 +6,12 @@ engines or sessions. All data arrives via ``set_state(state)`` or the
 injected callbacks. Missing data renders as N/A / NOT CONFIGURED / empty
 tables — never fabricated.
 
+Layout is scroll-safe: the right rail lives in a scroll area so readiness,
+strategy, position and risk panels never clip at short window heights.
+Readiness gates render as structured Gate/Status/Reason rows (reasons are
+visible text, not tooltips-only). Tables share the terminal conventions
+from `app.ui.ui_kit` and skip rebuilds when content is unchanged.
+
 State dict schema (every key optional; absent means unknown):
   mode: "PAPER" | "SANDBOX" | "LIVE"
   broker: {name, environment, connected, reason, capabilities, latency_ms,
@@ -38,114 +44,58 @@ from typing import Any
 
 from chart.widgets.candle_chart_widget import CandleChartWidget
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
+    QScrollArea,
     QSplitter,
     QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
 from app.ui import lab_theme as t
+from app.ui.ui_kit import (
+    Badge,
+    EmptyState,
+    GateRow,
+    KVBlock,
+    Section,
+    configure_table,
+    fill_table,
+)
+from app.ui.ui_kit import money as _money
+from app.ui.ui_kit import text as _text
 
 _REFRESH_MS = 1000
 _NA = "N/A"
 
+_STRATEGY_KEYS = (
+    "id",
+    "version",
+    "status",
+    "mode",
+    "instrument",
+    "timeframe",
+    "live_supported",
+    "warmup",
+    "state",
+)
 
-def _text(value: Any, default: str = _NA) -> str:
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return "YES" if value else "NO"
-    if isinstance(value, float):
-        return f"{value:,.2f}"
-    return str(value)
-
-
-def _money(value: Any) -> str:
-    if value is None:
-        return _NA
-    try:
-        return f"{float(value):+.2f}"
-    except (TypeError, ValueError):
-        return _NA
-
-
-class _Pill(QLabel):
-    """Small status pill: text + tone (ok/warn/bad/muted)."""
-
-    _COLORS = {
-        "ok": t.POS,
-        "warn": t.WARN,
-        "bad": t.NEG,
-        "muted": t.MUTED,
-        "accent": t.ACCENT,
-    }
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__("", parent)
-        self.setObjectName("LivePill")
-        self.set_tone("muted")
-
-    def set_tone(self, tone: str) -> None:
-        color = self._COLORS.get(tone, t.MUTED)
-        self.setStyleSheet(
-            f"QLabel#LivePill {{ color: {color}; font-size: 11px; font-weight: 700; }}"
-        )
-
-    def set_status(self, text: str, tone: str) -> None:
-        self.setText(text)
-        self.set_tone(tone)
-
-
-class _Section(QWidget):
-    """Titled panel container following lab_theme conventions."""
-
-    def __init__(self, title: str, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 6, 8, 6)
-        layout.setSpacing(4)
-        header = QLabel(title, self)
-        header.setStyleSheet(
-            f"color: {t.MUTED}; font-size: 10px; font-weight: 700; letter-spacing: 1px;"
-        )
-        layout.addWidget(header)
-        self.body = QWidget(self)
-        body_layout = QVBoxLayout(self.body)
-        body_layout.setContentsMargins(0, 0, 0, 0)
-        body_layout.setSpacing(3)
-        layout.addWidget(self.body)
-        self.setStyleSheet(
-            f"background: {t.PANEL}; border: 1px solid {t.BORDER}; border-radius: 4px;"
-        )
-
-    def add(self, widget: QWidget) -> None:
-        layout = self.body.layout()
-        assert layout is not None
-        layout.addWidget(widget)
-
-
-def _kv_row(label: str) -> tuple[QWidget, QLabel]:
-    row = QWidget()
-    lay = QHBoxLayout(row)
-    lay.setContentsMargins(0, 0, 0, 0)
-    lay.setSpacing(6)
-    name = QLabel(label)
-    name.setStyleSheet(f"color: {t.TEXT2}; font-size: 11px;")
-    value = QLabel(_NA)
-    value.setStyleSheet(f"color: {t.TEXT}; font-size: 11px;")
-    value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-    lay.addWidget(name)
-    lay.addStretch(1)
-    lay.addWidget(value)
-    return row, value
+_POSITION_KEYS = (
+    "instrument",
+    "side",
+    "quantity",
+    "avg_price",
+    "current_price",
+    "unrealized",
+    "realized",
+    "exposure",
+    "risk_utilization",
+)
 
 
 class LiveWorkspace(QWidget):
@@ -165,6 +115,9 @@ class LiveWorkspace(QWidget):
         self._on_arm: Callable[[], tuple[bool, str]] | None = None
         self._on_halt: Callable[[], tuple[bool, str]] | None = None
         self._state: dict[str, Any] = {}
+        self._gate_rows: list[tuple[str, Badge, QLabel]] = []
+        self._gate_widgets: dict[str, GateRow] = {}
+        self._event_known: set[str] = {"ALL EVENTS"}
         self._build()
         self._timer = QTimer(self)
         self._timer.setInterval(_REFRESH_MS)
@@ -198,11 +151,13 @@ class LiveWorkspace(QWidget):
         tables = QSplitter(Qt.Orientation.Horizontal)
         tables.addWidget(self._build_orders_panel())
         tables.addWidget(self._build_fills_panel())
+        tables.setStretchFactor(0, 1)
+        tables.setStretchFactor(1, 1)
         left_lay.addWidget(tables, 2)
         middle.addWidget(left)
 
-        rail = QWidget(middle)
-        rail_lay = QVBoxLayout(rail)
+        rail_content = QWidget(middle)
+        rail_lay = QVBoxLayout(rail_content)
         rail_lay.setContentsMargins(0, 0, 0, 0)
         rail_lay.setSpacing(6)
         rail_lay.addWidget(self._build_readiness_panel())
@@ -210,8 +165,17 @@ class LiveWorkspace(QWidget):
         rail_lay.addWidget(self._build_position_panel())
         rail_lay.addWidget(self._build_risk_panel())
         rail_lay.addStretch(1)
-        middle.addWidget(rail)
-        middle.setSizes([880, 360])
+        self._rail_scroll = QScrollArea(middle)
+        self._rail_scroll.setWidgetResizable(True)
+        self._rail_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self._rail_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._rail_scroll.setWidget(rail_content)
+        self._rail_scroll.setMinimumWidth(300)
+        middle.addWidget(self._rail_scroll)
+        # Proportional split (chart area gets ~3/4); no hardcoded pixels so
+        # the layout survives 1280px through 2560px widths.
+        middle.setStretchFactor(0, 3)
+        middle.setStretchFactor(1, 1)
         root.addWidget(middle, 1)
 
         root.addWidget(self._build_bottom_strip())
@@ -227,19 +191,19 @@ class LiveWorkspace(QWidget):
         lay = QHBoxLayout(bar)
         lay.setContentsMargins(10, 6, 10, 6)
         lay.setSpacing(14)
-        self._mode_pill = _Pill(bar)
+        self._mode_pill = Badge(bar)
         lay.addWidget(self._mode_pill)
-        self._broker_pill = _Pill(bar)
+        self._broker_pill = Badge(bar)
         lay.addWidget(self._broker_pill)
-        self._conn_pill = _Pill(bar)
+        self._conn_pill = Badge(bar)
         lay.addWidget(self._conn_pill)
-        self._strategy_pill = _Pill(bar)
+        self._strategy_pill = Badge(bar)
         lay.addWidget(self._strategy_pill)
-        self._risk_pill = _Pill(bar)
+        self._risk_pill = Badge(bar)
         lay.addWidget(self._risk_pill)
-        self._recon_pill = _Pill(bar)
+        self._recon_pill = Badge(bar)
         lay.addWidget(self._recon_pill)
-        self._kill_pill = _Pill(bar)
+        self._kill_pill = Badge(bar)
         lay.addWidget(self._kill_pill)
         lay.addStretch(1)
         mode_label = QLabel("Mode:", bar)
@@ -258,11 +222,10 @@ class LiveWorkspace(QWidget):
         return bar
 
     def _build_chart_panel(self) -> QWidget:
-        section = _Section("CHART")
+        section = Section("CHART")
         self._chart = CandleChartWidget(section)
-        self._chart_empty = QLabel("NO DATA — no market bars available", section)
-        self._chart_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._chart_empty.setStyleSheet(f"color: {t.MUTED}; font-size: 12px;")
+        self._chart_empty = EmptyState("NO DATA", parent=section)
+        self._chart_empty.setVisible(False)
         section.add(self._chart)
         section.add(self._chart_empty)
         self._price_label = QLabel("", section)
@@ -271,12 +234,11 @@ class LiveWorkspace(QWidget):
         return section
 
     def _build_readiness_panel(self) -> QWidget:
-        section = _Section("LIVE READINESS")
-        self._gate_rows: list[tuple[str, QLabel, QLabel]] = []
+        section = Section("LIVE READINESS")
         self._gate_box = QWidget(section)
         self._gate_lay = QVBoxLayout(self._gate_box)
         self._gate_lay.setContentsMargins(0, 0, 0, 0)
-        self._gate_lay.setSpacing(2)
+        self._gate_lay.setSpacing(4)
         section.add(self._gate_box)
         self._arm_button = QPushButton("ARM LIVE", section)
         self._arm_button.setStyleSheet(t.BUTTON_QSS)
@@ -290,22 +252,10 @@ class LiveWorkspace(QWidget):
         return section
 
     def _build_strategy_panel(self) -> QWidget:
-        section = _Section("ACTIVE STRATEGY")
-        self._strategy_rows: dict[str, QLabel] = {}
-        for key in (
-            "id",
-            "version",
-            "status",
-            "mode",
-            "instrument",
-            "timeframe",
-            "live_supported",
-            "warmup",
-            "state",
-        ):
-            row, value = _kv_row(key.replace("_", " ").upper())
-            section.add(row)
-            self._strategy_rows[key] = value
+        section = Section("ACTIVE STRATEGY")
+        self._strategy_block = KVBlock(_STRATEGY_KEYS, section)
+        section.add(self._strategy_block)
+        self._strategy_rows = {key: self._strategy_block.value(key) for key in _STRATEGY_KEYS}
         self._strategy_params = QLabel("", section)
         self._strategy_params.setWordWrap(True)
         self._strategy_params.setStyleSheet(f"color: {t.TEXT2}; font-size: 11px;")
@@ -313,27 +263,15 @@ class LiveWorkspace(QWidget):
         return section
 
     def _build_position_panel(self) -> QWidget:
-        section = _Section("POSITION")
-        self._position_rows: dict[str, QLabel] = {}
-        for key in (
-            "instrument",
-            "side",
-            "quantity",
-            "avg_price",
-            "current_price",
-            "unrealized",
-            "realized",
-            "exposure",
-            "risk_utilization",
-        ):
-            row, value = _kv_row(key.replace("_", " ").upper())
-            section.add(row)
-            self._position_rows[key] = value
+        section = Section("POSITION")
+        self._position_block = KVBlock(_POSITION_KEYS, section)
+        section.add(self._position_block)
+        self._position_rows = {key: self._position_block.value(key) for key in _POSITION_KEYS}
         return section
 
     def _build_risk_panel(self) -> QWidget:
-        section = _Section("RISK")
-        self._risk_status = _Pill(section)
+        section = Section("RISK")
+        self._risk_status = Badge(section)
         section.add(self._risk_status)
         self._risk_limits = QLabel("", section)
         self._risk_limits.setWordWrap(True)
@@ -344,18 +282,11 @@ class LiveWorkspace(QWidget):
     def _make_table(self, headers: list[str]) -> QTableWidget:
         table = QTableWidget(0, len(headers))
         table.setHorizontalHeaderLabels(headers)
-        table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        table.verticalHeader().setVisible(False)
-        table.setStyleSheet(
-            f"QTableWidget {{ background: {t.BG1}; color: {t.TEXT}; font-size: 11px;"
-            f" gridline-color: {t.BORDER}; border: none; }}"
-            f"QHeaderView::section {{ background: {t.PANEL2}; color: {t.TEXT2};"
-            f" font-size: 10px; border: none; padding: 3px; }}"
-        )
+        configure_table(table)
         return table
 
     def _build_orders_panel(self) -> QWidget:
-        section = _Section("OPEN ORDERS")
+        section = Section("OPEN ORDERS")
         self._orders_table = self._make_table(
             [
                 "Order ID",
@@ -374,7 +305,7 @@ class LiveWorkspace(QWidget):
         return section
 
     def _build_fills_panel(self) -> QWidget:
-        section = _Section("RECENT FILLS")
+        section = Section("RECENT FILLS")
         self._fills_table = self._make_table(
             ["Time", "Symbol", "Side", "Qty", "Price", "Order ID", "Strategy", "Slippage"]
         )
@@ -386,18 +317,18 @@ class LiveWorkspace(QWidget):
         lay = QHBoxLayout(strip)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(6)
-        self._pnl_section = _Section("P&L")
+        self._pnl_section = Section("P&L")
         self._pnl_label = QLabel("", self._pnl_section)
         self._pnl_label.setStyleSheet(f"color: {t.TEXT}; font-size: 11px;")
         self._pnl_section.add(self._pnl_label)
         lay.addWidget(self._pnl_section)
-        self._broker_section = _Section("BROKER")
+        self._broker_section = Section("BROKER")
         self._broker_label = QLabel("", self._broker_section)
         self._broker_label.setWordWrap(True)
         self._broker_label.setStyleSheet(f"color: {t.TEXT2}; font-size: 11px;")
         self._broker_section.add(self._broker_label)
         lay.addWidget(self._broker_section)
-        self._recon_section = _Section("RECONCILIATION")
+        self._recon_section = Section("RECONCILIATION")
         self._recon_label = QLabel("", self._recon_section)
         self._recon_label.setWordWrap(True)
         self._recon_label.setStyleSheet(f"color: {t.TEXT2}; font-size: 11px;")
@@ -406,7 +337,7 @@ class LiveWorkspace(QWidget):
         return strip
 
     def _build_event_stream(self) -> QWidget:
-        section = _Section("LIVE EVENTS")
+        section = Section("LIVE EVENTS")
         controls = QWidget(section)
         c_lay = QHBoxLayout(controls)
         c_lay.setContentsMargins(0, 0, 0, 0)
@@ -562,6 +493,18 @@ class LiveWorkspace(QWidget):
                 self._chart_empty.setVisible(True)
                 self._chart_empty.setText("CHART ERROR — model rejected")
                 return
+        else:
+            detail = "  ·  ".join(
+                part
+                for part in (
+                    f"Symbol: {symbol or '—'}",
+                    f"Timeframe: {timeframe or '—'}",
+                    "Source: market store (SQLite)",
+                    "Next: select a symbol with downloaded history",
+                )
+                if part
+            )
+            self._chart_empty.set_detail(detail)
         price = None
         position = state.get("position") or {}
         if isinstance(position, dict):
@@ -572,37 +515,29 @@ class LiveWorkspace(QWidget):
         self._price_label.setText(header)
 
     def _render_gates(self, state: dict[str, Any]) -> None:
-        while self._gate_lay.count():
-            item = self._gate_lay.takeAt(0)
-            widget = item.widget() if item is not None else None
-            if widget is not None:
-                widget.deleteLater()
-        self._gate_rows = []
         gates = state.get("gates") or []
         if not isinstance(gates, list):
             gates = []
+        seen: set[str] = set()
+        self._gate_rows = []
         for gate in gates:
             if not isinstance(gate, dict):
                 continue
             name = str(gate.get("name", "?"))
             status = str(gate.get("status", _NA))
             reason = str(gate.get("reason", ""))
-            row = QWidget(self._gate_box)
-            lay = QHBoxLayout(row)
-            lay.setContentsMargins(0, 0, 0, 0)
-            lay.setSpacing(6)
-            pill = _Pill(row)
-            pill.set_status(
-                status,
-                {"READY": "ok", "NOT READY": "warn", "BLOCKED": "bad"}.get(status, "muted"),
-            )
-            lay.addWidget(pill)
-            label = QLabel(name, row)
-            label.setStyleSheet(f"color: {t.TEXT}; font-size: 11px;")
-            label.setToolTip(reason or name)
-            lay.addWidget(label, 1)
-            self._gate_lay.addWidget(row)
-            self._gate_rows.append((name, pill, label))
+            seen.add(name)
+            row = self._gate_widgets.get(name)
+            if row is None:
+                row = GateRow(name, self._gate_box)
+                self._gate_widgets[name] = row
+                self._gate_lay.addWidget(row)
+            row.render_gate(status, reason)
+            self._gate_rows.append((name, row.pill, row.name_label))
+        for stale in [name for name in self._gate_widgets if name not in seen]:
+            widget = self._gate_widgets.pop(stale)
+            self._gate_lay.removeWidget(widget)
+            widget.deleteLater()
         can_arm = bool(state.get("can_arm", False))
         self._arm_button.setEnabled(can_arm)
         blockers = state.get("arm_blockers") or []
@@ -618,8 +553,7 @@ class LiveWorkspace(QWidget):
     def _render_strategy(self, state: dict[str, Any]) -> None:
         strategy = state.get("strategy")
         if not isinstance(strategy, dict):
-            for value in self._strategy_rows.values():
-                value.setText("N/A")
+            self._strategy_block.set_all_na()
             self._strategy_params.setText("")
             return
         mapping = {
@@ -638,7 +572,7 @@ class LiveWorkspace(QWidget):
                 text = "YES" if value is True else ("NO" if value is False else _NA)
             else:
                 text = _text(value)
-            self._strategy_rows[key].setText(text)
+            self._strategy_block.set(key, text)
         params = strategy.get("params")
         if isinstance(params, dict) and params:
             self._strategy_params.setText(
@@ -650,11 +584,15 @@ class LiveWorkspace(QWidget):
     def _render_position(self, state: dict[str, Any]) -> None:
         position = state.get("position")
         if not isinstance(position, dict) or position.get("flat", False):
-            for key, value in self._position_rows.items():
-                value.setText("FLAT" if key == "side" else ("—" if key == "instrument" else "0"))
+            for key in _POSITION_KEYS:
+                if key == "side":
+                    self._position_block.set(key, "FLAT")
+                elif key == "instrument":
+                    self._position_block.set(key, "—")
+                else:
+                    self._position_block.set(key, "0")
             if not isinstance(position, dict):
-                for value in self._position_rows.values():
-                    value.setText(_NA)
+                self._position_block.set_all_na()
             return
         mapping = {
             "instrument": position.get("symbol", position.get("instrument")),
@@ -669,9 +607,9 @@ class LiveWorkspace(QWidget):
         }
         for key, value in mapping.items():
             if key in ("unrealized", "realized"):
-                self._position_rows[key].setText(_money(value))
+                self._position_block.set(key, _money(value))
             else:
-                self._position_rows[key].setText(_text(value))
+                self._position_block.set(key, _text(value))
 
     def _render_risk(self, state: dict[str, Any]) -> None:
         risk = state.get("risk")
@@ -703,18 +641,6 @@ class LiveWorkspace(QWidget):
                     lines.append(f"[{mark}] {entry[0]}{reason}")
         self._risk_limits.setText("\n".join(lines))
 
-    def _fill_table(self, table: QTableWidget, rows: list[list[str]]) -> None:
-        table.setRowCount(len(rows))
-        for i, row in enumerate(rows):
-            for j, cell in enumerate(row):
-                if j >= table.columnCount():
-                    break
-                item = QTableWidgetItem(str(cell))
-                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                if "UNKNOWN" in str(cell):
-                    item.setForeground(QBrush(QColor(t.NEG)))
-                table.setItem(i, j, item)
-
     def _render_orders(self, state: dict[str, Any]) -> None:
         orders = state.get("orders") or []
         rows: list[list[str]] = []
@@ -736,7 +662,7 @@ class LiveWorkspace(QWidget):
                         _text(order.get("broker"), ""),
                     ]
                 )
-        self._fill_table(self._orders_table, rows)
+        fill_table(self._orders_table, rows)
 
     def _render_fills(self, state: dict[str, Any]) -> None:
         fills = state.get("fills") or []
@@ -757,7 +683,7 @@ class LiveWorkspace(QWidget):
                         _text(fill.get("slippage"), ""),
                     ]
                 )
-        self._fill_table(self._fills_table, rows)
+        fill_table(self._fills_table, rows)
 
     def _render_bottom(self, state: dict[str, Any]) -> None:
         pnl = state.get("pnl") or {}
@@ -826,11 +752,13 @@ class LiveWorkspace(QWidget):
                         _text(event.get("status"), ""),
                     ]
                 )
-        current = self._event_type_filter.currentText()
-        self._event_type_filter.blockSignals(True)
-        self._event_type_filter.clear()
-        self._event_type_filter.addItems(sorted(known))
-        if current in known:
-            self._event_type_filter.setCurrentText(current)
-        self._event_type_filter.blockSignals(False)
-        self._fill_table(self._events_table, rows)
+        if known != self._event_known:
+            self._event_known = known
+            current = self._event_type_filter.currentText()
+            self._event_type_filter.blockSignals(True)
+            self._event_type_filter.clear()
+            self._event_type_filter.addItems(sorted(known))
+            if current in known:
+                self._event_type_filter.setCurrentText(current)
+            self._event_type_filter.blockSignals(False)
+        fill_table(self._events_table, rows)

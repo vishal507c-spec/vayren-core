@@ -157,6 +157,14 @@ def main() -> int:
     if not baseline:
         errors.append("missing baseline: run with --freeze-baseline once, then commit it")
 
+    retention: dict = {}
+    if retention_path.is_file():
+        try:
+            retention = json.loads(retention_path.read_text(encoding="utf-8"))
+        except ValueError as exc:
+            errors.append(f"unreadable retention manifest: {exc}")
+            retention = {}
+
     for path in current:
         if path in baseline:
             continue
@@ -168,10 +176,12 @@ def main() -> int:
                 "implement in rust/ or add proven retention to language_retention.json"
             )
         elif any(path.startswith(prefix) for prefix in QT_SURFACE_DIRS):
-            errors.append(
-                f"new Qt UI surface: {path} — new native UI belongs in "
-                "rust/vayren-shell (Rust+egui)"
-            )
+            allowed = retention.get("qt_workspace_allowlist", {})
+            if path not in allowed:
+                errors.append(
+                    f"new Qt UI surface: {path} — new native UI belongs in "
+                    "rust/vayren-shell (Rust+egui)"
+                )
         else:
             warnings.append(f"new file outside frozen baseline: {path} ({responsibility})")
 
@@ -180,13 +190,10 @@ def main() -> int:
             if _defines(ROOT / rel, name, kind):
                 errors.append(f"migrated authority reintroduced in Python: {name} in {rel}")
 
-    retention: dict = {}
-    if retention_path.is_file():
-        retention = json.loads(retention_path.read_text(encoding="utf-8"))
-        for section in ("classes", "files", "migrated"):
-            for key in retention.get(section, {}):
-                if section != "classes" and not (ROOT / key).is_file():
-                    errors.append(f"retention manifest references missing file: {key}")
+    for section in ("classes", "files", "migrated", "qt_workspace_allowlist"):
+        for key in retention.get(section, {}):
+            if section != "classes" and not (ROOT / key).is_file():
+                errors.append(f"retention manifest references missing file: {key}")
 
     cargo = ROOT / "rust" / "Cargo.toml"
     core_manifest = ROOT / "rust" / "vayren-core" / "Cargo.toml"

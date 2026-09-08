@@ -1,14 +1,10 @@
 """ChartToolsToolbar — TradingView-style vertical chart tools rail.
 
-A narrow fixed-width column of tool buttons pinned to the left edge of the
-chart canvas. Buttons are organised into visual groups (view, measurement,
-shapes, annotation, utility, settings) separated by hairline dividers, with
-the settings group docked to the bottom.
-
-Pure presentation: every button is a UI placeholder — toggling a button only
-changes its checked state. Nothing here touches the chart model, candles,
-coordinates, the bus or any chart logic; the widget exists solely as a visual
-rail that later phases can wire real tools into.
+A narrow fixed-width column pinned to the left edge of the chart canvas.
+It holds exactly two wired navigation buttons (watchlist panel, historical
+download panel); each emits its clicked signal and toggles only its own
+checked state. Nothing here touches the chart model, candles, coordinates,
+the bus or any chart logic.
 """
 
 from collections.abc import Callable
@@ -389,10 +385,9 @@ class ChartToolsToolbar(QWidget):
     their drawer functions) are retained below for later phases — nothing
     is rendered from them.
 
-    Pure presentation: every button is a UI placeholder — toggling a button
-    only changes its checked state. Nothing here touches the chart model,
-    candles, coordinates, the bus or any chart logic; the widget exists
-    solely as a visual rail that later phases can wire real tools into.
+    Pure presentation: each button emits its clicked signal and toggles
+    only its own checked state. Nothing here touches the chart model,
+    candles, coordinates, the bus or any chart logic.
     """
 
     watchlist_clicked = Signal()

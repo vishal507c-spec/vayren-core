@@ -328,6 +328,24 @@ class Bootstrap:
             return state
 
         live_workspace = LiveWorkspace(state_provider=_live_state_provider)
+        from backtest.execution import list_histories
+        from strategy.language.storage import list_strategies
+
+        from app.services.research_service import ResearchService
+        from app.ui.portfolio_workspace import PortfolioWorkspace
+        from app.ui.research_workspace import ResearchWorkspace
+
+        research_service = ResearchService(
+            data_dir=data_dir,
+            strategy_dir=r"D:\VAYREN_STRATEGIES",
+            list_strategies_fn=list_strategies,
+            list_histories_fn=list_histories,
+        )
+        research_workspace = ResearchWorkspace()
+        research_workspace.set_service(research_service)
+        # Portfolio shares the authoritative workspace-state pipeline (no
+        # duplicated state): same provider shape the LIVE tab consumes.
+        portfolio_workspace = PortfolioWorkspace(state_provider=_live_state_provider)
         from backtest.ui.performance_panel import PerformancePanel
 
         performance_panel = PerformancePanel()
@@ -381,6 +399,8 @@ class Bootstrap:
             left_extra=market_status,
             lab_workspace=lab_workspace,
             live_workspace=live_workspace,
+            research_workspace=research_workspace,
+            portfolio_workspace=portfolio_workspace,
             event_log=event_log,
             system_health=system_health,
             trade_context=trade_context_panel,
@@ -921,6 +941,10 @@ class Bootstrap:
         nav_bar.market_clicked.connect(window.show_market)
         if hasattr(nav_bar, "strategy_lab_clicked"):
             nav_bar.strategy_lab_clicked.connect(window.show_lab)
+        if hasattr(nav_bar, "research_clicked"):
+            nav_bar.research_clicked.connect(window.show_research)
+        if hasattr(nav_bar, "portfolio_clicked"):
+            nav_bar.portfolio_clicked.connect(window.show_portfolio)
         if hasattr(nav_bar, "live_clicked"):
             nav_bar.live_clicked.connect(window.show_live)
         nav_bar.system_clicked.connect(window.toggle_bottom)

@@ -34,7 +34,7 @@
  },
  {
   "file": "00_app/app/bootstrap/bootstrap.py",
-  "loc": 2474,
+  "loc": 2498,
   "chapter": "app",
   "test": false,
   "responsibility": "APP_UI",
@@ -112,6 +112,17 @@
  {
   "file": "00_app/app/services/paper_service.py",
   "loc": 482,
+  "chapter": "app",
+  "test": false,
+  "responsibility": "APP_SERVICE",
+  "target": "python-retained",
+  "basis": "composition services",
+  "qt": false,
+  "status": "PYTHON_OWNED"
+ },
+ {
+  "file": "00_app/app/services/research_service.py",
+  "loc": 212,
   "chapter": "app",
   "test": false,
   "responsibility": "APP_SERVICE",
@@ -264,8 +275,52 @@
   "status": "TEST"
  },
  {
+  "file": "00_app/app/tests/test_navigation.py",
+  "loc": 48,
+  "chapter": "app",
+  "test": true,
+  "responsibility": "TEST",
+  "target": "python-test",
+  "basis": "test file",
+  "qt": false,
+  "status": "TEST"
+ },
+ {
   "file": "00_app/app/tests/test_paper.py",
   "loc": 193,
+  "chapter": "app",
+  "test": true,
+  "responsibility": "TEST",
+  "target": "python-test",
+  "basis": "test file",
+  "qt": true,
+  "status": "TEST"
+ },
+ {
+  "file": "00_app/app/tests/test_portfolio_workspace.py",
+  "loc": 97,
+  "chapter": "app",
+  "test": true,
+  "responsibility": "TEST",
+  "target": "python-test",
+  "basis": "test file",
+  "qt": true,
+  "status": "TEST"
+ },
+ {
+  "file": "00_app/app/tests/test_research_workspace.py",
+  "loc": 113,
+  "chapter": "app",
+  "test": true,
+  "responsibility": "TEST",
+  "target": "python-test",
+  "basis": "test file",
+  "qt": false,
+  "status": "TEST"
+ },
+ {
+  "file": "00_app/app/tests/test_responsive_geometry.py",
+  "loc": 234,
   "chapter": "app",
   "test": true,
   "responsibility": "TEST",
@@ -319,6 +374,17 @@
   "status": "TEST"
  },
  {
+  "file": "00_app/app/tests/test_ui_kit.py",
+  "loc": 100,
+  "chapter": "app",
+  "test": true,
+  "responsibility": "TEST",
+  "target": "python-test",
+  "basis": "test file",
+  "qt": true,
+  "status": "TEST"
+ },
+ {
   "file": "00_app/app/tests/test_watchlist_multiselect.py",
   "loc": 95,
   "chapter": "app",
@@ -331,7 +397,7 @@
  },
  {
   "file": "00_app/app/ui/__init__.py",
-  "loc": 15,
+  "loc": 25,
   "chapter": "app",
   "test": false,
   "responsibility": "APP_UI",
@@ -364,7 +430,7 @@
  },
  {
   "file": "00_app/app/ui/live_workspace.py",
-  "loc": 836,
+  "loc": 764,
   "chapter": "app",
   "test": false,
   "responsibility": "APP_UI",
@@ -375,7 +441,29 @@
  },
  {
   "file": "00_app/app/ui/market_status_panel.py",
-  "loc": 103,
+  "loc": 105,
+  "chapter": "app",
+  "test": false,
+  "responsibility": "APP_UI",
+  "target": "python-retained-qt",
+  "basis": "composition root + Qt shell",
+  "qt": true,
+  "status": "INTENTIONALLY_RETAINED"
+ },
+ {
+  "file": "00_app/app/ui/portfolio_workspace.py",
+  "loc": 328,
+  "chapter": "app",
+  "test": false,
+  "responsibility": "APP_UI",
+  "target": "python-retained-qt",
+  "basis": "composition root + Qt shell",
+  "qt": true,
+  "status": "INTENTIONALLY_RETAINED"
+ },
+ {
+  "file": "00_app/app/ui/research_workspace.py",
+  "loc": 403,
   "chapter": "app",
   "test": false,
   "responsibility": "APP_UI",
@@ -419,7 +507,7 @@
  },
  {
   "file": "00_app/app/ui/top_nav_bar.py",
-  "loc": 113,
+  "loc": 111,
   "chapter": "app",
   "test": false,
   "responsibility": "APP_UI",
@@ -431,6 +519,17 @@
  {
   "file": "00_app/app/ui/trade_context_panel.py",
   "loc": 293,
+  "chapter": "app",
+  "test": false,
+  "responsibility": "APP_UI",
+  "target": "python-retained-qt",
+  "basis": "composition root + Qt shell",
+  "qt": true,
+  "status": "INTENTIONALLY_RETAINED"
+ },
+ {
+  "file": "00_app/app/ui/ui_kit.py",
+  "loc": 296,
   "chapter": "app",
   "test": false,
   "responsibility": "APP_UI",
@@ -2971,7 +3070,7 @@
  },
  {
   "file": "04_chart/chart/widgets/tools_toolbar.py",
-  "loc": 467,
+  "loc": 462,
   "chapter": "chart",
   "test": false,
   "responsibility": "NATIVE_UI",
@@ -3004,7 +3103,7 @@
  },
  {
   "file": "04_chart/chart/windows/chart_window.py",
-  "loc": 461,
+  "loc": 491,
   "chapter": "chart",
   "test": false,
   "responsibility": "NATIVE_UI",
@@ -3939,7 +4038,7 @@
  },
  {
   "file": "06_backtest/backtest/ui/analytics_views.py",
-  "loc": 374,
+  "loc": 359,
   "chapter": "backtest",
   "test": false,
   "responsibility": "RESEARCH_UI",
@@ -5225,6 +5324,17 @@
   "status": "PYTHON_OWNED"
  },
  {
+  "file": "scripts/release.py",
+  "loc": 191,
+  "chapter": "scripts",
+  "test": false,
+  "responsibility": "TOOLING",
+  "target": "python-tooling",
+  "basis": "dev tooling",
+  "qt": false,
+  "status": "PYTHON_OWNED"
+ },
+ {
   "file": "scripts/run_tests.py",
   "loc": 90,
   "chapter": "scripts",
@@ -5380,7 +5490,7 @@
  },
  {
   "file": "scripts/validate_language_ownership.py",
-  "loc": 222,
+  "loc": 229,
   "chapter": "scripts",
   "test": false,
   "responsibility": "TOOLING",

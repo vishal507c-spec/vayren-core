@@ -1,4 +1,4 @@
-.PHONY: setup dev test test-coverage lint format typecheck check validate-structure validate-imports validate-language rust exe clean
+.PHONY: setup dev test test-coverage lint format typecheck check validate-structure validate-imports validate-language rust release exe clean
 
 # ═══════════════════════════════════════════════════════════════
 # VAYREN — MAKEFILE
@@ -61,6 +61,11 @@ rust:
 # ── Full Check ─────────────────────────────────────────────────
 
 check: rust lint typecheck test validate-structure validate-imports validate-language
+
+# ── Release (mechanics only; run `make check` first, CI validates on push) ─
+
+release:
+	python scripts/release.py --version $(VERSION)
 
 # ── Clean ──────────────────────────────────────────────────────
 

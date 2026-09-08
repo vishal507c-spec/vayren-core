@@ -71,6 +71,8 @@ class ChartWindow(QMainWindow):
         left_extra: QWidget | None = None,
         lab_workspace: QWidget | None = None,
         live_workspace: QWidget | None = None,
+        research_workspace: QWidget | None = None,
+        portfolio_workspace: QWidget | None = None,
         event_log: QWidget | None = None,
         system_health: QWidget | None = None,
         trade_context: QWidget | None = None,
@@ -87,6 +89,8 @@ class ChartWindow(QMainWindow):
         self._left_extra = left_extra
         self._lab_workspace = lab_workspace
         self._live_workspace = live_workspace
+        self._research_workspace = research_workspace
+        self._portfolio_workspace = portfolio_workspace
         self._event_log = event_log
         self._system_health = system_health
         self._current_symbol: str | None = None
@@ -168,13 +172,17 @@ class ChartWindow(QMainWindow):
                 bottom.setMaximumHeight(220)
             self._bottom = bottom
 
-            # stacked middle: market splitter vs lab workspace vs live workspace
+            # stacked middle: market splitter vs lab/live/research/portfolio
             if lab_workspace is not None:
                 self._stack = QStackedWidget(self)
                 self._stack.addWidget(splitter)
                 self._stack.addWidget(lab_workspace)
                 if live_workspace is not None:
                     self._stack.addWidget(live_workspace)
+                if research_workspace is not None:
+                    self._stack.addWidget(research_workspace)
+                if portfolio_workspace is not None:
+                    self._stack.addWidget(portfolio_workspace)
                 self._stack.setCurrentIndex(0)
             else:
                 self._stack = None  # type: ignore[assignment]
@@ -381,6 +389,28 @@ class ChartWindow(QMainWindow):
         if self._nav is not None and hasattr(self._nav, "set_active"):
             with contextlib.suppress(Exception):
                 self._nav.set_active("LIVE")  # type: ignore[attr-defined]
+
+    def _show_workspace(self, attr: str, section: str) -> None:
+        """Switch to an injected workspace widget by attribute name."""
+        self._lab_active = False
+        stack = getattr(self, "_stack", None)
+        target = getattr(self, attr, None)
+        if stack is not None and target is not None:
+            for index in range(stack.count()):
+                if stack.widget(index) is target:
+                    stack.setCurrentIndex(index)
+                    break
+        if self._nav is not None and hasattr(self._nav, "set_active"):
+            with contextlib.suppress(Exception):
+                self._nav.set_active(section)  # type: ignore[attr-defined]
+
+    def show_research(self) -> None:
+        """Switch to the Research workspace (when injected)."""
+        self._show_workspace("_research_workspace", "RESEARCH")
+
+    def show_portfolio(self) -> None:
+        """Switch to the Portfolio workspace (when injected)."""
+        self._show_workspace("_portfolio_workspace", "PORTFOLIO")
 
     def toggle_bottom(self) -> None:
         """Toggle the bottom system/event panels."""

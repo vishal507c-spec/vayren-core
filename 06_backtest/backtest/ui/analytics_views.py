@@ -29,21 +29,6 @@ _EQUITY = QColor("#42a5f5")
 _DD = QColor("#ef5350")
 
 
-class _PlaceholderView(QWidget):
-    """Single centered label for empty / not-yet-implemented views."""
-
-    def __init__(self, text: str, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
-        label = QLabel(text, self)
-        label.setStyleSheet(_MUTED)
-        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        label.setWordWrap(True)
-        layout.addWidget(label)
-        layout.addStretch(1)
-
-
 class _ChartView(QWidget):
     """Base: override :meth:`paintEvent` to draw on :attr:`result`."""
 

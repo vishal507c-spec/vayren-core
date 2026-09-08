@@ -5,11 +5,6 @@ from PySide6.QtWidgets import QButtonGroup, QHBoxLayout, QLabel, QPushButton, QW
 
 _SECTIONS = ("MARKET", "STRATEGY LAB", "RESEARCH", "PORTFOLIO", "LIVE", "SYSTEM")
 
-_SECTION_TIP = {
-    "RESEARCH": "Not available yet",
-    "PORTFOLIO": "Not available yet",
-}
-
 _BAR_STYLE = """
 TopNavBar {
     background: palette(window);
@@ -52,6 +47,8 @@ class TopNavBar(QWidget):
 
     market_clicked = Signal()
     strategy_lab_clicked = Signal()
+    research_clicked = Signal()
+    portfolio_clicked = Signal()
     live_clicked = Signal()
     system_clicked = Signal()
 
@@ -80,14 +77,15 @@ class TopNavBar(QWidget):
             button.setCursor(  # type: ignore[no-untyped-call]
                 __import__("PySide6.QtCore", fromlist=["Qt"]).Qt.CursorShape.PointingHandCursor
             )
-            if section in _SECTION_TIP:
-                button.setEnabled(False)
-                button.setToolTip(_SECTION_TIP[section])
-            elif section == "MARKET":
+            if section == "MARKET":
                 button.setChecked(True)
                 button.clicked.connect(self.market_clicked)
             elif section == "STRATEGY LAB":
                 button.clicked.connect(self.strategy_lab_clicked)
+            elif section == "RESEARCH":
+                button.clicked.connect(self.research_clicked)
+            elif section == "PORTFOLIO":
+                button.clicked.connect(self.portfolio_clicked)
             elif section == "LIVE":
                 button.clicked.connect(self.live_clicked)
             elif section == "SYSTEM":
