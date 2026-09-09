@@ -15,6 +15,16 @@ from strategy.models.parameters import (
     ParameterSpec,
     StrategyParameters,
 )
+from strategy.models.plot_event import (
+    MarkerType,
+    PlotEvent,
+    PlotLifecycle,
+    PlotType,
+    PlotValidationError,
+    RenderLayer,
+    default_layer,
+    make_event_id,
+)
 from strategy.models.signal import Signal, SignalKind
 from strategy.models.state import StrategyState
 from strategy.registry import StrategyRegistry, StrategyRegistryError
@@ -32,6 +42,14 @@ __all__ = [
     "Signal",
     "SignalKind",
     "StrategyState",
+    "PlotEvent",
+    "PlotType",
+    "MarkerType",
+    "PlotLifecycle",
+    "RenderLayer",
+    "PlotValidationError",
+    "default_layer",
+    "make_event_id",
     "StrategyRuntime",
     "StrategyLogic",
     "BarView",

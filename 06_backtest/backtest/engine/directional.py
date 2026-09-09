@@ -34,7 +34,7 @@ def derive_directional_result(base: StrategyResult | None, side: str) -> Strateg
     start = base.period_start or (base.equity_curve[0].timestamp if base.equity_curve else None)
     curve = compute_equity_curve(filtered, base.config.initial_capital, start)
     metrics = compute_metrics(filtered, curve, base.config.initial_capital)
-    # Preserve period / bars_used / chart_series (plotting is direction-agnostic)
+    # Preserve period / bars_used / chart_series / chart_plots (plotting is direction-agnostic)
     return StrategyResult(
         strategy_id=base.strategy_id,
         name=base.name,
@@ -46,6 +46,8 @@ def derive_directional_result(base: StrategyResult | None, side: str) -> Strateg
         period_start=base.period_start,
         period_end=base.period_end,
         chart_series=base.chart_series,
+        chart_plots=base.chart_plots,
+        muted_bars=base.muted_bars,
     )
 
 
@@ -85,4 +87,6 @@ def derive_symbol_result(base: StrategyResult | None, symbol: str) -> StrategyRe
         period_start=base.period_start,
         period_end=base.period_end,
         chart_series=base.chart_series,
+        chart_plots=base.chart_plots,
+        muted_bars=base.muted_bars,
     )

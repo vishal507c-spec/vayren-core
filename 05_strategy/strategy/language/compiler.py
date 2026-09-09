@@ -23,12 +23,24 @@ class CompiledStrategy:
     def create_logic(
         self,
         params: StrategyParameters,
-        owner_id: str | None = None,  # noqa: ARG002
+        owner_id: str | None = None,
     ) -> StrategyLogic:
         try:
-            return self.strategy_class(params)
+            logic = self.strategy_class(params)
         except Exception as e:
             raise StrategyLanguageError([f"Failed to create strategy logic: {e}"]) from e
+        # Owner identity feeds PlotEvent.source_strategy (strategy-owned
+        # visual ownership); failures never break strategy construction.
+        if owner_id:
+            try:
+                setter = getattr(logic, "set_owner_id", None)
+                if callable(setter):
+                    setter(str(owner_id))
+                else:
+                    logic._owner_id = str(owner_id)  # type: ignore[attr-defined]
+            except Exception:
+                pass
+        return logic
 
 
 def compile_strategy(code: str) -> CompiledStrategy:

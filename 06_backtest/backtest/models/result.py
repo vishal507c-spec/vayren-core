@@ -1,6 +1,7 @@
 """BacktestResult / StrategyResult — one backtest execution's outputs."""
 
 from dataclasses import dataclass
+from typing import Any
 
 from backtest.models.config import BacktestConfig
 from backtest.models.equity import EquityPoint
@@ -15,7 +16,10 @@ class ChartSeries:
     Attributes:
         title: Series name (e.g., "REF HIGH").
         values: Mapping bar_index -> value (only bars where plot was called).
-        style: Optional style hint ("line", "dots", etc.).
+        style: Optional style hint ("line", "dots", etc.). Marker series use
+            "marker_up" / "marker_down" / "marker_square", optionally with
+            "|<label format>" (tokens {t}, {v:.2f}, {v:+.2f}, {v:,.2f});
+            see PlotOverlay for the rendering contract.
         extend: Optional extend hint ("session", "none", etc.).
         strategy: Strategy name/id that produced this series (for visibility).
     """
@@ -42,6 +46,13 @@ class StrategyResult:
         period_start: First bar timestamp in the slice.
         period_end: Last bar timestamp in the slice.
         chart_series: Plot series for chart rendering (stable identity per title).
+        chart_plots: Universal strategy-owned plot events (PlotEvent objects
+            or to_dict() dicts) for the generic plot pipeline — same contract
+            in live, backtest and replay. Stored as ``Any`` so this module
+            never imports strategy internals at runtime.
+        muted_bars: Strategy-declared visually silent bars (generic ints):
+            execution signal pills stay off these bars even though no
+            PlotEvent exists there. Trading data is untouched.
     """
 
     strategy_id: str
@@ -54,6 +65,8 @@ class StrategyResult:
     period_start: str | None
     period_end: str | None
     chart_series: tuple[ChartSeries, ...] = ()
+    chart_plots: tuple[Any, ...] = ()
+    muted_bars: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)

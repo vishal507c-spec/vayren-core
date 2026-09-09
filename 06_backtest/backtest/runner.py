@@ -337,6 +337,30 @@ class BacktestRunner:
             chart_series = tuple(series_list)
         except Exception:
             chart_series = ()
+        # Universal strategy-owned plot events — same contract live/backtest/
+        # replay. Duck-typed (no strategy import): PlotEvent objects or dicts.
+        chart_plots: tuple[Any, ...] = ()
+        try:
+            getter = getattr(logic, "get_plot_events", None)
+            if callable(getter):
+                plots = getter()
+                if isinstance(plots, (tuple, list)):
+                    chart_plots = tuple(plots)
+        except Exception:
+            chart_plots = ()
+        muted_bars: tuple[int, ...] = ()
+        try:
+            mute_getter = getattr(logic, "get_muted_signal_bars", None)
+            if callable(mute_getter):
+                muted = mute_getter()
+                if isinstance(muted, (tuple, list)):
+                    muted_bars = tuple(
+                        int(bar)
+                        for bar in muted
+                        if isinstance(bar, int) and not isinstance(bar, bool) and bar >= 0
+                    )
+        except Exception:
+            muted_bars = ()
         # Use rec.id as canonical strategy_id, rec.name as display
         # For label, mimic StrategyDefinition.label: "NAME v1.0"
         label = f"{rec.name} v{rec.version}" if hasattr(rec, "version") else rec.name
@@ -351,6 +375,8 @@ class BacktestRunner:
             period_start=window[0].timestamp if window else None,
             period_end=window[-1].timestamp if window else None,
             chart_series=chart_series,
+            chart_plots=chart_plots,
+            muted_bars=muted_bars,
         )
 
     def _run_one_legacy(

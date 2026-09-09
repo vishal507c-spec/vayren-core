@@ -2169,6 +2169,13 @@ class Bootstrap:
                         pass
                     cs = getattr(first, "chart_series", ())
                     self._plot_overlay.set_from_chart_series(cs)  # type: ignore[attr-defined]
+                    # Universal plots share one contract live/backtest/replay.
+                    try:
+                        plots = getattr(first, "chart_plots", ())
+                        if plots:
+                            self._plot_overlay.ingest_plot_events(plots)  # type: ignore[attr-defined]
+                    except Exception:
+                        pass
             except Exception:
                 pass
             widget.update()
@@ -2427,6 +2434,14 @@ class Bootstrap:
                 _log.info(
                     "_run_strategy_plots: added %d chart series to overlay", len(chart_series_list)
                 )
+            # Universal strategy-owned plots (same contract as backtest path).
+            try:
+                getter = getattr(logic, "get_plot_events", None)
+                plots = getter() if callable(getter) else ()
+                if plots and hasattr(self, "_plot_overlay") and self._plot_overlay:
+                    self._plot_overlay.ingest_plot_events(tuple(plots))  # type: ignore[attr-defined]
+            except Exception:
+                pass
         except Exception:
             _log.exception("_run_strategy_plots(%s) failed", strategy_name)
 

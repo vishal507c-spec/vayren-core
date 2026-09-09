@@ -226,6 +226,9 @@ WAL, `V9/V9.1` migrations.
 **Public API** (`chart/__init__.py`):
 `ChartModel`, `CrosshairValue`, `infer_timeframe`, `ChartEngine`, `CandleRenderer`, `CrosshairRenderer`, `LabelRenderer`, `OverlayRenderer`, `TimeAxisRenderer`, `CandleChartWidget`, `IndicatorVisibilityPanel`, `SymbolListWidget`, `TimeframeToolbar`, `ChartToolsToolbar`, `WatchlistWidget`, `ChartWindow`, `chart_manifest`, events `ChartReady`, `WindowRendered`
 
+**Universal plot pipeline** (`chart/renderer/plot_renderer.py`, internal path — same pattern as the existing `PlotOverlay` import in `bootstrap.py`):
+`PlotStore` (Qt-free: `ingest`/`ingest_batch` atomic frames, `update`/`remove`/`remove_strategy`, `query_visible(first, last, ...)` indexed viewport query, `consume_dirty`, `stats` measured telemetry), `PlotOverlay.ingest_plot_events/update_plot/remove_plot/total_plot_count/visible_plot_count/plot_stats/consume_plot_dirty`. The renderer consumes generic `PlotEvent` shapes (10 plot types, 9 marker types, text None default, exact logical coordinates) via duck-typing — no runtime `chart → strategy` import. New marker styles (`marker_circle/marker_circle_x/marker_diamond/marker_triangle_up/marker_triangle_down/marker_dot`) + glyph-only `"kind|none"`; legacy styles/paths byte-identical.
+
 **Consumes:** `core`, `market` (`Bar` only).
 
 **Produces:** `ChartReady`/`WindowRendered`; capability `chart.render` (consumes `data.query.candles`).
@@ -252,6 +255,7 @@ WAL, `V9/V9.1` migrations.
 
 **Public API** (`strategy/__init__.py`):
 `StrategyRegistry`, `StrategyRegistryError`, `StrategyDefinition`, `StrategyParameters`, `ParameterSpec`, `ParameterError`, `Signal`, `SignalKind`, `StrategyState`, `StrategyRuntime`, `StrategyLogic`, `BarView`, `BacktestForm`, `ResearchDataset`, `strategy_manifest`, events `StrategiesListed`, `StrategySelected`, `PaperTradeRequested`, `LabReset`
+plus the universal plot contract (`strategy/models/plot_event.py`): `PlotEvent`, `PlotType` (LINE/RAY/SEGMENT/MARKER/SHAPE/LABEL/ZONE/HORIZONTAL_LEVEL/VERTICAL_MARK/AREA), `MarkerType` (UP_ARROW/DOWN_ARROW/CIRCLE/CIRCLE_X/SQUARE/DIAMOND/TRIANGLE_UP/TRIANGLE_DOWN/TRIANGLE_BLUE/DOT), `PlotLifecycle`, `RenderLayer`, `PlotValidationError`, `default_layer`, `make_event_id`. Renderer pill style is solid marker-color fill + white text (reference style); directional triangles are tip-anchored; UP pills prefer below-anchor, DOWN above (screen-space only, logical coordinates untouched). Strategy-facing emitters on `PythonStrategy` (`plot_marker/plot_line/plot_ray/plot_segment/plot_zone/plot_label/plot_level`, `update_plot/remove_plot`, `get_plot_events`, `set_owner_id`) are visual-only and never touch trading state; `compiler.create_logic(..., owner_id)` feeds `source_strategy`.
 
 **Research rule:** `strategy.research` never imports `backtest` at runtime. Variant re-execution is injected: `run_parameter_sensitivity(..., variant_executor=None)` accepts a backtest-layer callable (e.g. `backtest.runner.run_variant_backtest`); without one it returns structured variants (`trades=()`, `backtest_required` metadata).
 
@@ -278,6 +282,8 @@ WAL, `V9/V9.1` migrations.
 
 **Public API** (`backtest/__init__.py`):
 `BacktestRunner`, `run_variant_backtest`, `BacktestWorker`, `BacktestConfig`, `BacktestResult`, `StrategyResult`, `TradeRecord`, `EquityPoint`, `PerformanceMetrics`, `RunBacktest`, `BacktestStarted`, `BacktestProgress`, `BacktestCompleted`, `BacktestFailed`, `backtest_manifest`, `validate_backtest_form`
+`StrategyResult.chart_plots: tuple[Any, ...]` (defaulted): universal strategy-owned plot events (same contract live/backtest/replay), forwarded from `logic.get_plot_events()`; directional/symbol derivations preserve it alongside `chart_series`.
+`StrategyResult.muted_bars: tuple[int, ...]` (defaulted, generic ints): strategy-declared visually silent bars from `logic.get_muted_signal_bars()` (`PythonStrategy.mute_signal_bar`), consumed by `TradeOverlay` coverage alongside marker bars; directional derivations preserve it. Trading data is never affected.
 
 **Consumes:** `core`, `market`, `strategy`.
 
