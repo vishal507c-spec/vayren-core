@@ -111,3 +111,108 @@ def test_workspace_save_requires_hypothesis(qt_app, tmp_path) -> None:
     workspace._on_save_clicked()
     assert len(created) == 1
     assert saving.experiments()[0]["experiment_id"] == created[0]
+
+
+def test_institutional_metrics_honest_na(service: ResearchService) -> None:
+    service.refresh_datasets()
+    view = service.run_analysis("sma")
+    assert view.status == "COMPLETE"
+    # Real engine values present …
+    assert view.metrics["trades"] == 5
+    assert view.metrics["sortino"] != "N/A"
+    assert view.metrics["payoff_ratio"] != "N/A"
+    # … structural gaps stay N/A, never zero-filled.
+    assert view.metrics["cagr"] == "N/A"
+    assert view.metrics["volatility"] == "N/A"
+    assert view.metrics["exposure"] == "N/A"
+    assert view.metrics["turnover"] == "N/A"
+
+
+def test_analysis_status_no_trades_is_honest() -> None:
+    empty = ResearchService(
+        data_dir=None,
+        strategy_dir=None,
+        list_strategies_fn=lambda _d: ["flat"],
+        list_histories_fn=lambda _d: [_history("flat", "exec-1", [])],
+    )
+    empty.refresh_datasets()
+    view = empty.run_analysis("flat")
+    assert view.status in ("NO DATA", "NO TRADES")
+    assert view.metrics["win_rate"] == "N/A"
+
+
+def test_data_quality_never_fabricates(service: ResearchService) -> None:
+    service.refresh_datasets()
+    quality = service.data_quality("sma")
+    assert quality["symbols"] == "TEST"
+    assert quality["missing_bars"] == "NOT CHECKED"
+    assert quality["duplicate_bars"] == "NOT CHECKED"
+    assert quality["bars"] == "N/A"
+    ghost = service.data_quality("ghost")
+    assert ghost["data_status"] == "NO DATA"
+
+
+def test_reproducibility_traces_origin(service: ResearchService) -> None:
+    service.refresh_datasets()
+    repro = service.reproducibility("sma", "EXP-000124")
+    assert repro["experiment_id"] == "EXP-000124"
+    assert repro["dataset"] == "sma"
+    assert repro["timeframe"] == "15m"
+
+
+def test_robustness_and_validation_use_real_engine(service: ResearchService) -> None:
+    service.refresh_datasets()
+    robustness = service.run_robustness("sma")
+    assert isinstance(robustness, list)
+    verdict = service.run_validation("sma")
+    assert verdict["status"] in ("PASS", "WARNING", "FAIL", "NOT RUN", "FAILED")
+    assert "summary" in verdict
+    ghost_verdict = service.run_validation("ghost")
+    assert ghost_verdict["status"] == "NOT RUN"
+
+
+def test_comparison_is_data_driven(tmp_path) -> None:
+    svc = ResearchService(
+        data_dir=tmp_path,
+        strategy_dir=None,
+        list_strategies_fn=lambda _d: [],
+        list_histories_fn=lambda _d: [],
+    )
+    assert svc.comparison() == []
+    svc.create_experiment("sma", "v1", ["exec-1"], "edge persists", {})
+    rows = svc.comparison()
+    assert len(rows) == 1
+    assert rows[0]["status"] == "NO RESULT"
+
+
+def test_workspace_institutional_layout(qt_app, service: ResearchService) -> None:
+    assert qt_app is not None
+    workspace = ResearchWorkspace()
+    workspace.set_service(service)
+    workspace._on_run_clicked()
+    # 8-column signal inspector, sortable + filterable.
+    assert workspace._signals_table.columnCount() == 8
+    assert workspace._trades_table.columnCount() == 8
+    assert workspace._status_badge.text() == "COMPLETE"
+    # Unsupported metrics render N/A, never fake numbers.
+    assert workspace._metrics_block.value("cagr").text() == "N/A"
+    assert workspace._metrics_block.value("exposure").text() == "N/A"
+    # Trade inspector exposes real entry/exit economics.
+    assert workspace._trades_table.rowCount() == 5
+    # Data quality + reproducibility are honest.
+    assert workspace._quality_block.value("missing_bars").text() == "NOT CHECKED"
+    assert workspace._repro_block.value("dataset").text() == "sma"
+    # Log records only real session actions.
+    assert "Analysis complete" in workspace._log_view.toPlainText()
+    assert "EXP-" not in workspace._log_view.toPlainText()
+
+
+def test_workspace_empty_state_is_ready(qt_app) -> None:
+    assert qt_app is not None
+    workspace = ResearchWorkspace()
+    workspace.set_service(None)
+    workspace.refresh()
+    assert workspace._status_badge.text() == "READY"
+    assert workspace._signals_table.columnCount() == 8
+    assert workspace._comparison_table.rowCount() == 0
+    assert "No research service" in workspace._identity_label.text()

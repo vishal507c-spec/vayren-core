@@ -401,6 +401,24 @@ def test_compare_stock_count_flows_to_header(workspace: StrategyLabWorkspace) ->
     assert "3" in workspace._compare_view._run_all.text()
 
 
+def test_batch_progress_shows_counts(workspace: StrategyLabWorkspace) -> None:
+    workspace.show()
+    workspace.set_run_state("running")
+    assert "RUNNING" in workspace.metrics._status.text()
+    workspace.set_batch_progress(123, 527)
+    assert "123 / 527" in workspace.metrics._status.text()
+    assert "23%" in workspace.metrics._status.text()
+    assert "123 / 527" in workspace._topbar_run.text()
+    # throttled to percent changes: same percent keeps prior text
+    before = workspace.metrics._status.text()
+    workspace.set_batch_progress(124, 527)  # still 23%
+    assert workspace.metrics._status.text() == before
+    workspace.set_batch_progress(247, 527)  # 46%
+    assert "247 / 527" in workspace.metrics._status.text()
+    workspace.set_run_state("complete")
+    assert "COMPLETE" in workspace.metrics._status.text()
+
+
 def test_storage_file_ops(tmp_path: Path) -> None:
     from strategy.language.storage import (
         delete_strategy,

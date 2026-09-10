@@ -20,15 +20,12 @@ Ye document batata hai ki **is repository mein kaam kaise karna hai** — chahe 
 1. READ  90_brain/ai_memory.md
    → "Kya chal raha tha? Aage kya?"
 
-2. READ  90_brain/development_log.md
-   → "Is area ke baare mein kya decide hua?"
+2. CODE  karo (AGENTS.md ke rules follow karo)
 
-3. CODE  karo (AGENTS.md ke rules follow karo)
-
-4. RUN   make check
+3. RUN   make check
    → "Sab kuch sahi hai?"
 
-5. UPDATE  90_brain/development_log.md + ai_memory.md
+4. UPDATE  90_brain/ai_memory.md
    → "Kya kiya? Aage kya?"
 ```
 
@@ -54,8 +51,8 @@ Har naye kaam ka order pakka hai:
 
 | Kya hua | Kahaan likho |
 |---|---|
-| Architecture decision | `90_brain/development_log.md` |
-| Code change complete | `90_brain/development_log.md` |
+| Architecture decision | `90_brain/ai_memory.md` |
+| Code change complete | `90_brain/ai_memory.md` |
 | Current state update | `90_brain/ai_memory.md` |
 | Naya module aaya | `90_brain/architecture.md` (Future) + `90_brain/module_contracts.md` |
 

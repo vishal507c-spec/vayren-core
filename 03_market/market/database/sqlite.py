@@ -35,25 +35,43 @@ class SqliteCandleDatabase:
             raise RuntimeError(f"Candle database has no '{_CANDLES_TABLE}' table: {self._path}")
         self._connection = connection
 
-    def fetch_candles(self, symbol: str, limit: int | None) -> list[sqlite3.Row]:
+    def fetch_candles(
+        self,
+        symbol: str,
+        limit: int | None,
+        start: str | None = None,
+        end: str | None = None,
+    ) -> list[sqlite3.Row]:
         """Return candles for `symbol`, ascending by timestamp.
 
         ``limit`` of ``None`` requests the entire available history.
+        ``start``/``end`` are optional inclusive timestamp bounds
+        (``None`` = open-ended). Bounds compose with ``limit``: the limit
+        applies to the bounded set.
         """
         connection = self._require_connection()
+        bounds = ""
+        params: list[object] = [symbol]
+        if start is not None:
+            bounds += " AND timestamp >= ?"
+            params.append(start)
+        if end is not None:
+            bounds += " AND timestamp <= ?"
+            params.append(end)
         if limit is None:
             cursor = connection.execute(
                 "SELECT symbol, timestamp, open, high, low, close, volume "
-                "FROM candles WHERE symbol = ? ORDER BY timestamp ASC",
-                (symbol,),
+                f"FROM candles WHERE symbol = ?{bounds} ORDER BY timestamp ASC",
+                params,
             )
         else:
+            params.append(limit)
             cursor = connection.execute(
                 "SELECT symbol, timestamp, open, high, low, close, volume "
                 "FROM ("
-                "  SELECT * FROM candles WHERE symbol = ? ORDER BY timestamp DESC LIMIT ?"
+                f"  SELECT * FROM candles WHERE symbol = ?{bounds} ORDER BY timestamp DESC LIMIT ?"
                 ") ORDER BY timestamp ASC",
-                (symbol, limit),
+                params,
             )
         return list(cursor.fetchall())
 

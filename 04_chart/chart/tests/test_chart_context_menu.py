@@ -55,7 +55,7 @@ def _app() -> QApplication:
 def _widget(count: int = 200) -> CandleChartWidget:
     _app()
     widget = CandleChartWidget()
-    widget.resize(500, 320)
+    widget.resize(1600, 320)
     widget.set_model(_model(count))
     return widget
 
@@ -146,14 +146,14 @@ def test_right_click_leaves_drag_state_untouched(monkeypatch) -> None:
 
 
 def test_action_trigger_resets_viewport() -> None:
-    widget = _widget(count=500)
+    widget = _widget(count=2000)
     _trailing(widget, CandleChartWidget.INITIAL_BARS)
     widget._zoom_at_px(125.0, 0.5)
     widget._zoom_price_at(60.0, 0.5)
     assert widget._price_manual is not None
     assert widget._last - widget._first < CandleChartWidget.INITIAL_BARS
     widget._reset_action.trigger()
-    assert widget._first == widget._anchor_first(500, CandleChartWidget.INITIAL_BARS)
+    assert widget._first == widget._anchor_first(2000, CandleChartWidget.INITIAL_BARS)
     assert widget._last - widget._first == CandleChartWidget.INITIAL_BARS
     assert widget._first > 0
     assert widget._follow_latest

@@ -6,6 +6,7 @@ Depends on: core, market, strategy.
 from backtest.engine.directional import (
     derive_directional_result,
     derive_symbol_result,
+    derive_symbol_results,
     split_by_side,
 )
 from backtest.events import (
@@ -24,14 +25,28 @@ from backtest.models import (
     StrategyResult,
     TradeRecord,
 )
-from backtest.runner import BacktestRunner, run_variant_backtest
+from backtest.runner import (
+    BacktestRunner,
+    BatchSpec,
+    SymbolBatchResult,
+    default_batch_workers,
+    execute_bars,
+    run_symbol_batch,
+    run_variant_backtest,
+)
 from backtest.validation import validate_backtest_form
-from backtest.worker import BacktestWorker
+from backtest.worker import BacktestWorker, BatchEnqueued
 
 __all__ = [
     "BacktestRunner",
     "run_variant_backtest",
+    "BatchSpec",
+    "SymbolBatchResult",
+    "default_batch_workers",
+    "execute_bars",
+    "run_symbol_batch",
     "BacktestWorker",
+    "BatchEnqueued",
     "BacktestConfig",
     "BacktestResult",
     "StrategyResult",
@@ -47,5 +62,6 @@ __all__ = [
     "validate_backtest_form",
     "derive_directional_result",
     "derive_symbol_result",
+    "derive_symbol_results",
     "split_by_side",
 ]

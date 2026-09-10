@@ -4,7 +4,7 @@
 
 [project]
 name = "vayren-core"
-version = "1.12.0"
+version = "1.13.0"
 description = "Event-driven desktop charting platform"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -70,6 +70,7 @@ line-ending = "auto"
 "05_strategy/strategy/tests/test_version_control.py" = ["E501"]
 "05_strategy/strategy/tests/test_vm_migration.py" = ["E501"]
 "06_backtest/backtest/tests/test_runner.py" = ["E501"]
+"06_backtest/backtest/tests/test_batch_worker.py" = ["E501"]
 
 # ── Pyright (Type Checker) ────────────────────────────────────
 [tool.pyright]

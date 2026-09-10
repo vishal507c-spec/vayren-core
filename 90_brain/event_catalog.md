@@ -88,7 +88,7 @@ WindowRendered       ← "window khul gayi, sab dikh raha hai"
 | Naya event = naya module | Event sirf naya phase aane par add hote hain |
 | No UI/DB inside events | Event mein kabhi window, connection, repository nahi hota |
 | `limit: int \| None = None` | Phase 5C se `LoadSymbol`/`TimeframeChanged` ka `limit` default `None` hai — `None` = asli SQLite ki **poori available history** (2016→2026), explicit `--limit N` sirf tab cap karta hai. DB layer `LIMIT ?` NULL never bind karta (SQLite `datatype mismatch` deta hai) — `limit is None` pe ascending full scan |
-| Catalog update zaroori | Event badla → catalog + development_log update |
+| Catalog update zaroori | Event badla → catalog update |
 
 ## 6. Story
 

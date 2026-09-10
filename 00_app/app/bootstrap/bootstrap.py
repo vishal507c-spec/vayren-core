@@ -540,7 +540,7 @@ class Bootstrap:
         trade_chart_controller = TradeChartController(
             self._bus, widget, window, repository, trade_overlay, trade_context_panel, lab_workspace
         )
-        multi_symbol_coordinator = MultiSymbolBacktestCoordinator(self._bus)
+        multi_symbol_coordinator = MultiSymbolBacktestCoordinator(self._bus, backtest_worker)
 
         # dynamic attrs for validation bookkeeping
         self._last_train_result: object | None = None
@@ -872,15 +872,14 @@ class Bootstrap:
         data_worker.coverage.connect(self._bus.publish)
         data_worker.log.connect(data_window.on_log_line)
         data_window.close_requested.connect(lambda: window.toggle_panel("download"))
-        # ── multi-symbol batch: coordinator sees bus events BEFORE the regular
-        # per-result handlers so per-symbol events can be suppressed there ──
+        # ── multi-symbol batch: the worker runs one bounded batch job and
+        # reports back directly (stock-level progress + per-symbol outcomes);
+        # only the final merged result travels the bus to the regular UI ──
         _multi = getattr(self, "_multi_symbol_coordinator", None)
         if _multi is not None:
-            from backtest.events import BacktestCompleted as BatchCompletedEvent
-            from backtest.events import BacktestFailed as BatchFailedEvent
-
-            self._bus.subscribe(BatchCompletedEvent, _multi.on_completed)  # type: ignore[attr-defined]
-            self._bus.subscribe(BatchFailedEvent, _multi.on_failed)  # type: ignore[attr-defined]
+            backtest_worker.batch_progress.connect(_multi.on_batch_progress)  # type: ignore[attr-defined]
+            backtest_worker.batch_done.connect(_multi.on_batch_done)  # type: ignore[attr-defined]
+            backtest_worker.batch_failed.connect(_multi.on_batch_failed)  # type: ignore[attr-defined]
         # ── Strategy Lab wiring ──
         self._wire_lab(
             strategy_registry,
@@ -1290,6 +1289,16 @@ class Bootstrap:
 
                 _multi_lab.batch_finished.connect(_on_batch_finished)  # type: ignore[attr-defined]
                 _multi_lab.batch_failed.connect(_on_batch_failed)  # type: ignore[attr-defined]
+
+                def _on_batch_progress(payload: object) -> None:
+                    try:
+                        done, total = payload  # type: ignore[misc]
+                    except Exception:  # noqa: BLE001
+                        return
+                    with contextlib.suppress(Exception):
+                        lab_workspace.set_batch_progress(int(done), int(total))
+
+                _multi_lab.batch_progress.connect(_on_batch_progress)  # type: ignore[attr-defined]
 
             # ── instant trade → chart (spec §5) ─────────────────
             # Bridge lab trade clicks → chart controller; chart reuse, cached, race-safe.
@@ -2111,11 +2120,6 @@ class Bootstrap:
     ) -> None:  # type: ignore[no-untyped-def]  # noqa: E501
         from backtest.models.result import BacktestResult
 
-        # Per-symbol batch events are merged by the coordinator; only the
-        # final aggregate event (different id) should touch the UI here.
-        _multi = getattr(self, "_multi_symbol_coordinator", None)
-        if _multi is not None and _multi.is_member(event.request_id):  # type: ignore[attr-defined]
-            return
         result: BacktestResult = event.result  # type: ignore[assignment]
         lab_control.set_busy(False)
         # also update dedicated workspace if present
@@ -2361,9 +2365,6 @@ class Bootstrap:
     def _on_backtest_failed(
         self, event: Any, lab_control: Any, event_log: Any, system_health: Any
     ) -> None:  # type: ignore[no-untyped-def]
-        _multi = getattr(self, "_multi_symbol_coordinator", None)
-        if _multi is not None and _multi.is_member(event.request_id):  # type: ignore[attr-defined]
-            return
         lab_control.set_busy(False)
         try:
             if hasattr(self, "_lab_workspace") and self._lab_workspace is not None:
@@ -2490,7 +2491,11 @@ class Bootstrap:
         self._system_health.set_engine_state("Data Engine", "Ready" if ready else "Unavailable")
         if not ready and reason:
             self._event_log.add_entry("WARN", f"Data provider: {reason}")
-        self._services.get("chart_window").show()
+        # Startup policy: ALWAYS open maximized (native work-area maximize —
+        # title bar + min/max/close preserved, DPI/taskbar aware, no hardcoded
+        # dimensions). This runs BEFORE AppStarted so the layout calculates
+        # against the final maximized space. No geometry is ever restored.
+        self._services.get("chart_window").showMaximized()
         self._event_log.add_entry("INFO", "VAYREN started — Strategy Lab ready")
         self._bus.publish(AppStarted())
 

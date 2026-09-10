@@ -34,7 +34,7 @@
  },
  {
   "file": "00_app/app/bootstrap/bootstrap.py",
-  "loc": 2513,
+  "loc": 2518,
   "chapter": "app",
   "test": false,
   "responsibility": "APP_UI",
@@ -100,7 +100,7 @@
  },
  {
   "file": "00_app/app/services/multi_symbol_backtest.py",
-  "loc": 251,
+  "loc": 266,
   "chapter": "app",
   "test": true,
   "responsibility": "TEST",
@@ -232,7 +232,7 @@
  },
  {
   "file": "00_app/app/tests/test_lab_workspace.py",
-  "loc": 421,
+  "loc": 439,
   "chapter": "app",
   "test": true,
   "responsibility": "TEST",
@@ -265,7 +265,7 @@
  },
  {
   "file": "00_app/app/tests/test_multi_symbol_backtest.py",
-  "loc": 209,
+  "loc": 255,
   "chapter": "app",
   "test": true,
   "responsibility": "TEST",
@@ -342,7 +342,7 @@
  },
  {
   "file": "00_app/app/tests/test_smoke.py",
-  "loc": 79,
+  "loc": 95,
   "chapter": "app",
   "test": true,
   "responsibility": "TEST",
@@ -463,7 +463,7 @@
  },
  {
   "file": "00_app/app/ui/research_workspace.py",
-  "loc": 1091,
+  "loc": 1110,
   "chapter": "app",
   "test": false,
   "responsibility": "APP_UI",
@@ -474,7 +474,7 @@
  },
  {
   "file": "00_app/app/ui/stock_ranking.py",
-  "loc": 535,
+  "loc": 538,
   "chapter": "app",
   "test": false,
   "responsibility": "APP_UI",
@@ -485,7 +485,7 @@
  },
  {
   "file": "00_app/app/ui/strategy_lab_workspace.py",
-  "loc": 3075,
+  "loc": 3118,
   "chapter": "app",
   "test": false,
   "responsibility": "APP_UI",
@@ -2124,7 +2124,7 @@
  },
  {
   "file": "03_market/market/database/ohlcv.py",
-  "loc": 85,
+  "loc": 103,
   "chapter": "market",
   "test": false,
   "responsibility": "MARKET_DATA",
@@ -2135,7 +2135,7 @@
  },
  {
   "file": "03_market/market/database/sqlite.py",
-  "loc": 68,
+  "loc": 86,
   "chapter": "market",
   "test": false,
   "responsibility": "MARKET_DATA",
@@ -2366,7 +2366,7 @@
  },
  {
   "file": "03_market/market/repository/candle_repository.py",
-  "loc": 79,
+  "loc": 98,
   "chapter": "market",
   "test": false,
   "responsibility": "MARKET_DATA",
@@ -2377,7 +2377,7 @@
  },
  {
   "file": "03_market/market/repository/symbol_repository.py",
-  "loc": 92,
+  "loc": 103,
   "chapter": "market",
   "test": false,
   "responsibility": "MARKET_DATA",
@@ -2751,7 +2751,7 @@
  },
  {
   "file": "04_chart/chart/renderer/plot_renderer.py",
-  "loc": 1410,
+  "loc": 1446,
   "chapter": "chart",
   "test": false,
   "responsibility": "NATIVE_UI",
@@ -2850,7 +2850,7 @@
  },
  {
   "file": "04_chart/chart/tests/test_chart_viewport.py",
-  "loc": 670,
+  "loc": 887,
   "chapter": "chart",
   "test": true,
   "responsibility": "TEST",
@@ -3015,7 +3015,7 @@
  },
  {
   "file": "04_chart/chart/widgets/candle_chart_widget.py",
-  "loc": 1395,
+  "loc": 1486,
   "chapter": "chart",
   "test": false,
   "responsibility": "NATIVE_UI",
@@ -3103,7 +3103,7 @@
  },
  {
   "file": "04_chart/chart/windows/chart_window.py",
-  "loc": 491,
+  "loc": 494,
   "chapter": "chart",
   "test": false,
   "responsibility": "NATIVE_UI",
@@ -3268,7 +3268,7 @@
  },
  {
   "file": "05_strategy/strategy/models/plot_event.py",
-  "loc": 320,
+  "loc": 321,
   "chapter": "strategy",
   "test": false,
   "responsibility": "STRATEGY",
@@ -3521,7 +3521,7 @@
  },
  {
   "file": "05_strategy/strategy/strategies/base.py",
-  "loc": 617,
+  "loc": 572,
   "chapter": "strategy",
   "test": false,
   "responsibility": "STRATEGY",
@@ -3576,7 +3576,7 @@
  },
  {
   "file": "05_strategy/strategy/tests/test_obr_pine_parity.py",
-  "loc": 1563,
+  "loc": 1842,
   "chapter": "strategy",
   "test": true,
   "responsibility": "TEST",
@@ -3642,7 +3642,7 @@
  },
  {
   "file": "05_strategy/strategy/tests/test_universal_plots.py",
-  "loc": 777,
+  "loc": 956,
   "chapter": "strategy",
   "test": true,
   "responsibility": "TEST",
@@ -3741,7 +3741,7 @@
  },
  {
   "file": "06_backtest/backtest/__init__.py",
-  "loc": 51,
+  "loc": 67,
   "chapter": "backtest",
   "test": false,
   "responsibility": "BACKTEST",
@@ -3763,7 +3763,7 @@
  },
  {
   "file": "06_backtest/backtest/engine/directional.py",
-  "loc": 90,
+  "loc": 120,
   "chapter": "backtest",
   "test": false,
   "responsibility": "BACKTEST",
@@ -3917,7 +3917,7 @@
  },
  {
   "file": "06_backtest/backtest/models/result.py",
-  "loc": 84,
+  "loc": 88,
   "chapter": "backtest",
   "test": false,
   "responsibility": "BACKTEST",
@@ -3961,7 +3961,7 @@
  },
  {
   "file": "06_backtest/backtest/runner.py",
-  "loc": 578,
+  "loc": 934,
   "chapter": "backtest",
   "test": false,
   "responsibility": "BACKTEST",
@@ -3982,8 +3982,30 @@
   "status": "TEST"
  },
  {
+  "file": "06_backtest/backtest/tests/test_batch_parity.py",
+  "loc": 252,
+  "chapter": "backtest",
+  "test": true,
+  "responsibility": "TEST",
+  "target": "python-test",
+  "basis": "test file",
+  "qt": false,
+  "status": "TEST"
+ },
+ {
+  "file": "06_backtest/backtest/tests/test_batch_worker.py",
+  "loc": 178,
+  "chapter": "backtest",
+  "test": true,
+  "responsibility": "TEST",
+  "target": "python-test",
+  "basis": "test file",
+  "qt": true,
+  "status": "TEST"
+ },
+ {
   "file": "06_backtest/backtest/tests/test_directional.py",
-  "loc": 86,
+  "loc": 110,
   "chapter": "backtest",
   "test": true,
   "responsibility": "TEST",
@@ -4038,7 +4060,7 @@
  },
  {
   "file": "06_backtest/backtest/tests/test_ui.py",
-  "loc": 184,
+  "loc": 486,
   "chapter": "backtest",
   "test": true,
   "responsibility": "TEST",
@@ -4082,7 +4104,7 @@
  },
  {
   "file": "06_backtest/backtest/ui/overlay.py",
-  "loc": 267,
+  "loc": 346,
   "chapter": "backtest",
   "test": false,
   "responsibility": "RESEARCH_UI",
@@ -4115,7 +4137,7 @@
  },
  {
   "file": "06_backtest/backtest/worker.py",
-  "loc": 117,
+  "loc": 228,
   "chapter": "backtest",
   "test": false,
   "responsibility": "RESEARCH_UI",

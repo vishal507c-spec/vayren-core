@@ -1,13 +1,14 @@
-"""Multi-symbol batch coordinator: chaining, merge honesty, error isolation."""
+"""Multi-symbol batch coordinator: single batch job, merge honesty, error isolation."""
 
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from backtest.events import BacktestCompleted, BacktestFailed
+from backtest.events import BacktestCompleted, BacktestFailed, BacktestStarted
 from backtest.models.config import BacktestConfig
-from backtest.models.result import BacktestResult, StrategyResult
+from backtest.models.result import StrategyResult
 from backtest.models.trade import TradeRecord
+from backtest.runner import SymbolBatchResult
 from PySide6.QtWidgets import QApplication
 
 from app.services.multi_symbol_backtest import (
@@ -24,6 +25,18 @@ class _Bus:
 
     def publish(self, event) -> None:  # noqa: ANN001
         self.published.append(event)
+
+
+class _Worker:
+    def __init__(self) -> None:
+        self.enqueued: list = []
+        self.cancels = 0
+
+    def enqueue_batch(self, job) -> None:  # noqa: ANN001
+        self.enqueued.append(job)
+
+    def cancel_batch(self) -> None:
+        self.cancels += 1
 
 
 def _request() -> BatchRequest:
@@ -79,45 +92,42 @@ def _result(symbol: str, day: int, pnl: float) -> StrategyResult:
     )
 
 
-def _complete(
-    coord: MultiSymbolBacktestCoordinator, request_id: str, result: StrategyResult
-) -> None:
-    # The fake bus records only; drive the coordinator handler directly,
-    # exactly as the real bus subscription would.
-    coord.on_completed(
-        BacktestCompleted(request_id=request_id, result=BacktestResult(results=(result,)))
-    )
-
-
-def test_start_publishes_first_symbol_request(qt_app: QApplication) -> None:
-    _ = qt_app
+def _coord() -> tuple[MultiSymbolBacktestCoordinator, _Bus, _Worker]:
     bus = _Bus()
-    coord = MultiSymbolBacktestCoordinator(bus)
+    worker = _Worker()
+    return MultiSymbolBacktestCoordinator(bus, worker), bus, worker
+
+
+def test_start_enqueues_single_batch_job(qt_app: QApplication) -> None:
+    _ = qt_app
+    coord, bus, worker = _coord()
     rid = coord.start(("AAA", "BBB"), _request())
     assert coord.active
-    assert len(bus.published) == 1
-    event = bus.published[0]
-    assert event.symbol == "AAA"
-    assert event.request_id == rid
-    assert coord.owns(rid)
-    assert coord.is_member(rid)
+    assert worker.enqueued and len(worker.enqueued) == 1
+    job = worker.enqueued[0]
+    assert job.request_id == rid
+    assert job.symbols == ("AAA", "BBB")
+    assert job.strategy_id == "s"
+    # one BacktestStarted engages the existing busy UI
+    started = [e for e in bus.published if isinstance(e, BacktestStarted)]
+    assert len(started) == 1 and started[0].request_id == rid
 
 
-def test_batch_chains_and_merges(qt_app: QApplication) -> None:
+def test_batch_done_merges(qt_app: QApplication) -> None:
     _ = qt_app
-    bus = _Bus()
-    coord = MultiSymbolBacktestCoordinator(bus)
+    coord, bus, _ = _coord()
     outcomes: list = []
     coord.batch_finished.connect(outcomes.append)
-    coord.start(("AAA", "BBB"), _request())
-    first_id = coord._current_id
-    assert first_id is not None
-    _complete(coord, first_id, _result("AAA", 3, 50.0))
-    # advanced to second symbol
-    assert coord.active
-    second_id = coord._current_id
-    assert second_id is not None and second_id != first_id
-    _complete(coord, second_id, _result("BBB", 5, -20.0))
+    rid = coord.start(("AAA", "BBB"), _request())
+    coord.on_batch_done(
+        (
+            rid,
+            (
+                SymbolBatchResult("AAA", _result("AAA", 3, 50.0), None),
+                SymbolBatchResult("BBB", _result("BBB", 5, -20.0), None),
+            ),
+        )
+    )
     assert not coord.active
     assert len(outcomes) == 1
     outcome = outcomes[0]
@@ -134,26 +144,35 @@ def test_batch_chains_and_merges(qt_app: QApplication) -> None:
     # final aggregate event published for the normal UI path
     final = bus.published[-1]
     assert isinstance(final, BacktestCompleted)
-    assert not coord.is_member(final.request_id)
+
+
+def test_batch_progress_forwarded(qt_app: QApplication) -> None:
+    _ = qt_app
+    coord, _, _ = _coord()
+    seen: list = []
+    coord.batch_progress.connect(seen.append)
+    rid = coord.start(("AAA", "BBB"), _request())
+    coord.on_batch_progress((rid, 1, 2))
+    coord.on_batch_progress(("stale", 2, 2))
+    assert seen == [(1, 2)]
 
 
 def test_failed_symbol_isolated_not_corrupting(qt_app: QApplication) -> None:
     _ = qt_app
-    bus = _Bus()
-    coord = MultiSymbolBacktestCoordinator(bus)
+    coord, _, _ = _coord()
     outcomes: list = []
     coord.batch_finished.connect(outcomes.append)
-    coord.start(("AAA", "BBB", "CCC"), _request())
-    rid_a = coord._current_id
-    assert rid_a is not None
-    _complete(coord, rid_a, _result("AAA", 3, 50.0))
-    bus.published.clear()
-    rid_b = coord._current_id
-    assert rid_b is not None
-    coord.on_failed(BacktestFailed(request_id=rid_b, reason="no bars"))
-    rid_c = coord._current_id
-    assert rid_c is not None
-    _complete(coord, rid_c, _result("CCC", 7, 10.0))
+    rid = coord.start(("AAA", "BBB", "CCC"), _request())
+    coord.on_batch_done(
+        (
+            rid,
+            (
+                SymbolBatchResult("AAA", _result("AAA", 3, 50.0), None),
+                SymbolBatchResult("BBB", None, "no bars"),
+                SymbolBatchResult("CCC", _result("CCC", 7, 10.0), None),
+            ),
+        )
+    )
     assert len(outcomes) == 1
     outcome = outcomes[0]
     assert set(outcome.errors) == {"BBB"}
@@ -164,34 +183,57 @@ def test_failed_symbol_isolated_not_corrupting(qt_app: QApplication) -> None:
 
 def test_all_failed_emits_batch_failed(qt_app: QApplication) -> None:
     _ = qt_app
-    bus = _Bus()
-    coord = MultiSymbolBacktestCoordinator(bus)
+    coord, bus, _ = _coord()
     reasons: list = []
     coord.batch_failed.connect(reasons.append)
-    coord.start(("AAA", "BBB"), _request())
-    rid1 = coord._current_id
-    assert rid1 is not None
-    coord.on_failed(BacktestFailed(request_id=rid1, reason="e1"))
-    rid2 = coord._current_id
-    assert rid2 is not None
-    coord.on_failed(BacktestFailed(request_id=rid2, reason="e2"))
+    rid = coord.start(("AAA", "BBB"), _request())
+    coord.on_batch_done(
+        (
+            rid,
+            (
+                SymbolBatchResult("AAA", None, "e1"),
+                SymbolBatchResult("BBB", None, "e2"),
+            ),
+        )
+    )
     assert reasons and "AAA: e1" in reasons[0]
     assert not coord.active
+    assert isinstance(bus.published[-1], BacktestFailed)
 
 
-def test_cancel_drops_inflight(qt_app: QApplication) -> None:
+def test_worker_failure_surfaces_batch_failed(qt_app: QApplication) -> None:
     _ = qt_app
-    bus = _Bus()
-    coord = MultiSymbolBacktestCoordinator(bus)
+    coord, bus, _ = _coord()
+    reasons: list = []
+    coord.batch_failed.connect(reasons.append)
+    rid = coord.start(("AAA",), _request())
+    coord.on_batch_failed((rid, "boom"))
+    assert reasons == ["boom"]
+    assert not coord.active
+    assert isinstance(bus.published[-1], BacktestFailed)
+
+
+def test_cancel_drops_stale_done(qt_app: QApplication) -> None:
+    _ = qt_app
+    coord, _, worker = _coord()
+    outcomes: list = []
+    coord.batch_finished.connect(outcomes.append)
     rid = coord.start(("AAA", "BBB"), _request())
     coord.cancel()
     assert not coord.active
-    # stale completion is ignored by the coordinator but still member-flagged
-    # so the regular UI handler skips it too
-    coord.on_completed(
-        BacktestCompleted(request_id=rid, result=BacktestResult(results=(_result("AAA", 3, 1.0),)))
-    )
-    assert coord.is_member(rid)
+    assert worker.cancels >= 1
+    # stale completion is ignored
+    coord.on_batch_done((rid, (SymbolBatchResult("AAA", _result("AAA", 3, 1.0), None),)))
+    assert outcomes == []
+
+
+def test_start_without_worker_raises(qt_app: QApplication) -> None:
+    _ = qt_app
+    import pytest
+
+    coord = MultiSymbolBacktestCoordinator(_Bus())
+    with pytest.raises(RuntimeError):
+        coord.start(("AAA",), _request())
 
 
 def test_merge_single_result_passthrough_shape() -> None:
@@ -201,9 +243,13 @@ def test_merge_single_result_passthrough_shape() -> None:
     assert bars == {"AAA": 100}
 
 
-def test_non_batch_events_pass_through(qt_app: QApplication) -> None:
+def test_stale_done_after_restart_ignored(qt_app: QApplication) -> None:
     _ = qt_app
-    bus = _Bus()
-    coord = MultiSymbolBacktestCoordinator(bus)
-    coord.on_completed(BacktestCompleted(request_id="other", result=BacktestResult(results=())))
-    assert bus.published == []  # coordinator ignored it entirely
+    coord, _, _ = _coord()
+    outcomes: list = []
+    coord.batch_finished.connect(outcomes.append)
+    rid1 = coord.start(("AAA",), _request())
+    rid2 = coord.start(("BBB",), _request())
+    assert rid1 != rid2
+    coord.on_batch_done((rid1, (SymbolBatchResult("AAA", _result("AAA", 3, 1.0), None),)))
+    assert outcomes == []

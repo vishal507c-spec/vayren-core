@@ -1,6 +1,10 @@
 """Directional + symbol result derivation tests."""
 
-from backtest.engine.directional import derive_directional_result, derive_symbol_result
+from backtest.engine.directional import (
+    derive_directional_result,
+    derive_symbol_result,
+    derive_symbol_results,
+)
 from backtest.engine.metrics import compute_equity_curve, compute_metrics
 from backtest.models.config import BacktestConfig
 from backtest.models.result import StrategyResult
@@ -84,3 +88,23 @@ def test_derive_directional_still_splits_by_side() -> None:
     view = derive_directional_result(base, "LONG")
     assert view is not None
     assert [t.side for t in view.trades] == ["LONG"]
+
+
+def test_derive_symbol_results_matches_singular() -> None:
+    base = _result()
+    views = derive_symbol_results(base, ("AAA", "BBB", "ZZZ"))
+    assert set(views) == {"AAA", "BBB", "ZZZ"}
+    for symbol in ("AAA", "BBB", "ZZZ"):
+        single = derive_symbol_result(base, symbol)
+        grouped = views[symbol]
+        assert single is not None
+        assert grouped.trades == single.trades
+        assert tuple(grouped.equity_curve) == tuple(single.equity_curve)
+        assert grouped.metrics == single.metrics
+        assert grouped.bars_used == single.bars_used
+        assert grouped.period_start == single.period_start
+        assert grouped.period_end == single.period_end
+
+
+def test_derive_symbol_results_none_base() -> None:
+    assert derive_symbol_results(None, ("AAA",)) == {}

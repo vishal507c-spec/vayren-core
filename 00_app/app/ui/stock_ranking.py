@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from backtest.engine.directional import derive_symbol_result
+from backtest.engine.directional import derive_symbol_results
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -142,6 +142,9 @@ def build_stock_ranking(
         )
     ranked: list[tuple[str, Any]] = []
     unranked: list[StockRankRow] = []
+    # One grouped pass over the merged trades (identical math to per-symbol
+    # derivation, without rescanning all trades for every symbol).
+    views = derive_symbol_results(base, ordered)
     for symbol in ordered:
         if symbol not in attempted:
             unranked.append(
@@ -175,7 +178,7 @@ def build_stock_ranking(
                 )
             )
             continue
-        view = derive_symbol_result(base, symbol)
+        view = views.get(symbol)
         if view is None:
             unranked.append(
                 StockRankRow(

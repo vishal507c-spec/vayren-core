@@ -14,18 +14,26 @@ class CandleRepository:
 
     The only layer that knows how to map a database row to a Bar — including
     rows merged into higher timeframes. Accepts any SQLite database layer
-    exposing `fetch_candles(symbol, limit)`.
+    exposing `fetch_candles(symbol, limit, start, end)`.
     """
 
     def __init__(self, database: SqliteCandleDatabase | OhlcvCandleDatabase) -> None:
         self._database = database
 
-    def get_candles(self, symbol: str, limit: int | None) -> list[Bar]:
+    def get_candles(
+        self,
+        symbol: str,
+        limit: int | None,
+        start: str | None = None,
+        end: str | None = None,
+    ) -> list[Bar]:
         """Return candles for `symbol`, ascending by timestamp.
 
         ``limit`` of ``None`` requests the entire available history.
+        ``start``/``end`` are optional inclusive ``YYYY-MM-DD HH:MM:SS``
+        bounds (``None`` = open-ended). Bounds compose with ``limit``.
         """
-        rows = self._database.fetch_candles(symbol, limit)
+        rows = self._database.fetch_candles(symbol, limit, start, end)
         return [
             Bar(
                 symbol=row["symbol"],
@@ -54,10 +62,21 @@ class CandleRepository:
             return ()
         return available_timeframes(duration)
 
-    def get_candles_timeframe(self, symbol: str, timeframe: str, limit: int | None) -> list[Bar]:
+    def get_candles_timeframe(
+        self,
+        symbol: str,
+        timeframe: str,
+        limit: int | None,
+        start: str | None = None,
+        end: str | None = None,
+    ) -> list[Bar]:
         """Return candles for `symbol` at `timeframe`, ascending by timestamp.
 
         ``limit`` of ``None`` requests the entire available history.
+        ``start``/``end`` are optional inclusive ``YYYY-MM-DD HH:MM:SS``
+        bounds applied to the aggregation window only — timeframe detection
+        always uses the unbounded latest sample, so bucket alignment never
+        changes. Bounds compose with ``limit``.
 
         Timeframes at or below the detected base duration fall back to the
         plain fetch. Larger timeframes are aggregated from real rows only.
@@ -68,12 +87,12 @@ class CandleRepository:
         sample_rows = self._database.fetch_candles(symbol, _DETECTION_SAMPLE)
         base = detect_bar_duration([row["timestamp"] for row in sample_rows])
         if seconds is None or base is None or seconds <= base:
-            return self.get_candles(symbol, limit)
+            return self.get_candles(symbol, limit, start, end)
         session_start = detect_session_start(sample_rows)
         ratio = seconds // base
         if limit is None:
-            rows = self._database.fetch_candles(symbol, None)
+            rows = self._database.fetch_candles(symbol, None, start, end)
             return aggregate_bars(rows, seconds, timeframe, session_start)
-        rows = self._database.fetch_candles(symbol, (limit + 1) * ratio)
+        rows = self._database.fetch_candles(symbol, (limit + 1) * ratio, start, end)
         bars = aggregate_bars(rows, seconds, timeframe, session_start)
         return bars[-limit:]

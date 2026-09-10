@@ -18,4 +18,4 @@ Link to relevant doc in `90_brain/` (e.g. `architecture.md`, `module_contracts.m
 - [ ] Followed domain conventions (`AGENTS.md`)
 - [ ] Updated relevant READMEs / `90_brain/` if public API changed
 - [ ] `make check` passes
-- [ ] Updated `90_brain/ai_memory.md` + `development_log.md` if needed
+- [ ] Updated `90_brain/ai_memory.md` if needed

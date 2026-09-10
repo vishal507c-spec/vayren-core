@@ -16,11 +16,10 @@ Ye repository ka **Brain** `90_brain/` folder mein hai. AI agent ko code chhune 
 | `event_catalog.md` | Events + owner + payload |
 | `module_contracts.md` | Har module ka public API + SQLite schema |
 | `ai_memory.md` | Abhi kya state hai, kya baaki hai |
-| `development_log.md` | Kis din kya hua |
 
 > `ARCHITECTURE_CONSTITUTION.md` language ownership ka single source hai — Rust→Core/Perf, Python→Strategy/AI, Rust+egui→UI. Naya code wahi se decide karo. Constitution duplicate mat karo, reference karo.
 
-Code badalne ke baad **dono** update karo: `development_log.md` aur `ai_memory.md`.
+Code badalne ke baad `ai_memory.md` update karo.
 
 **Standards (consolidated):** Legacy `project_rules`/`coding_standards`/`naming_conventions`/`roadmap` docs → ye file + `90_brain/architecture.md` mein merge ho chuke hain. Detail neeche.
 
@@ -125,7 +124,7 @@ TODO/FIXME / dead code / mock logic / sample trading logic  ❌
   ↳ Fast path (measured): iterate par pehle impact-scope tests (`pytest <touched-module>/tests`, ~5s),
     phir full gate (~105s: pytest ~82s + pyright ~23s). Benchmarks: `python scripts/benchmark.py gate|record|scoreboard`.
 □ Task end par LAST command: `python scripts/forensics/__main__.py report --name "..."` (report auto-append bhi hota hai next task par)
-□ 90_brain/development_log.md aur 90_brain/ai_memory.md update karo
+□ 90_brain/ai_memory.md update karo
 ```
 
 ## Language & Migration — Constitution Reference (Invisible Feature-Driven)

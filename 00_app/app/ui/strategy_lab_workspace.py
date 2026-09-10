@@ -680,6 +680,13 @@ class BacktestRunPanel(QWidget):
             self.set_view_mode(self._mode)
         self.busy_changed.emit(busy)
 
+    def set_batch_progress(self, done: int, total: int) -> None:
+        """Show stock-level batch progress on the run button (cheap text only)."""
+        if total <= 0:
+            return
+        pct = int(done * 100 / total)
+        self._run.setText(f"RUNNING BACKTEST… {done} / {total} · {pct}%")
+
 
 class EditorPane(QWidget):
     """Center column — strategy header + CODE | PARAMETERS | BACKTEST tabs."""
@@ -1071,6 +1078,14 @@ class MetricsTiles(QWidget):
         text, color = mapping.get(state, ("● READY", t.MUTED))
         self._status.setText(text)
         self._status.setStyleSheet(f"color: {color}; font-size: 10px; font-weight: 700;")
+
+    def set_batch_progress(self, done: int, total: int) -> None:
+        """Show stock-level batch progress in the pill (cheap text only)."""
+        if total <= 0:
+            return
+        pct = int(done * 100 / total)
+        self._status.setText(f"● RUNNING BACKTEST… {done} / {total} · {pct}%")
+        self._status.setStyleSheet(f"color: {t.ACCENT}; font-size: 10px; font-weight: 700;")
 
     def set_view_mode(self, mode: StrategyViewMode) -> None:
         self._mode = mode
@@ -2253,6 +2268,7 @@ class StrategyLabWorkspace(QWidget):
         self._ranking_errors: dict[str, str] = {}
         self._last_run_symbols: tuple[str, ...] | None = None
         self._run_state: str = "ready"
+        self._last_batch_pct = -1
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
@@ -2865,8 +2881,35 @@ class StrategyLabWorkspace(QWidget):
     def set_run_state(self, state: str) -> None:
         """Surface the run lifecycle in the result header: ready|running|complete|failed."""
         self._run_state = state
+        self._last_batch_pct = -1
         try:
             self.metrics.set_status(state)
+        except Exception:
+            pass
+
+    def set_batch_progress(self, done: int, total: int) -> None:
+        """Show stock-level batch progress (throttled to percent changes).
+
+        Updates the run buttons and the status pill with
+        ``RUNNING BACKTEST… 123 / 527 · 23%``. Text-only — no relayout,
+        no per-bar flood.
+        """
+        if total <= 0 or done < 0:
+            return
+        pct = min(100, int(done * 100 / total))
+        if pct == self._last_batch_pct:
+            return
+        self._last_batch_pct = pct
+        try:
+            self.metrics.set_batch_progress(done, total)
+        except Exception:
+            pass
+        try:
+            self.right_settings.set_batch_progress(done, total)
+        except Exception:
+            pass
+        try:
+            self._topbar_run.setText(f"RUNNING BACKTEST… {done} / {total} · {pct}%")
         except Exception:
             pass
 

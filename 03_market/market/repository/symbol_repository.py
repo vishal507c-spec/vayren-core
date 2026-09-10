@@ -79,14 +79,25 @@ class SymbolRepository:
         finally:
             database.close()
 
-    def get_candles_timeframe(self, symbol: str, timeframe: str, limit: int | None) -> list[Bar]:
+    def get_candles_timeframe(
+        self,
+        symbol: str,
+        timeframe: str,
+        limit: int | None,
+        start: str | None = None,
+        end: str | None = None,
+    ) -> list[Bar]:
         """Return candles for the symbol at a timeframe.
 
         ``limit`` of ``None`` requests the entire available history.
+        ``start``/``end`` are optional inclusive ``YYYY-MM-DD HH:MM:SS``
+        bounds on the aggregation window (detection stays unbounded).
         """
         database = OhlcvCandleDatabase(self._directory / f"{symbol}.db")
         database.connect()
         try:
-            return CandleRepository(database).get_candles_timeframe(symbol, timeframe, limit)
+            return CandleRepository(database).get_candles_timeframe(
+                symbol, timeframe, limit, start, end
+            )
         finally:
             database.close()

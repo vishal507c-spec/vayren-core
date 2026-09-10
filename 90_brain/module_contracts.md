@@ -205,6 +205,7 @@ WAL, `V9/V9.1` migrations.
 **Invariants:**
 - `Bar(symbol, open, high, low, close, volume, timestamp: ISO str, bar_size?, vwap?, trades?, source?)` frozen, loop-free.
 - `OhlcvCandleDatabase.fetch_candles(symbol, limit)` — `limit None` ⇒ full ascending scan; never bind `LIMIT NULL`.
+- `fetch_candles(symbol, limit, start?, end?)` — optional inclusive timestamp bounds on the aggregation window only; detection (base duration, session anchor) always uses the unbounded latest sample, so bucket alignment never changes. Bounds compose with `limit`.
 - `CandleRepository.get_candles` is the only rows→Bar mapping.
 - Timeframe detection: base = mode of bar-to-bar deltas; `available_timeframes` pure function (ladder entries that are whole multiples of base). Existence always from DB, never cached.
 - Aggregation: session-anchored intraday (session start = mode of first-bar-per-day, NSE 09:15 aligned), daily=midnight, weekly=Monday midnight; OHLC = first/max/min/last, volume=sum; zero fabricated. Windowed fetch `(limit+1)×ratio` with `bars[-limit:]` drop of oldest partial bucket; `limit None` ⇒ full fetch no drop. Parsed via `datetime.fromisoformat` (not `strptime`).
@@ -281,7 +282,10 @@ plus the universal plot contract (`strategy/models/plot_event.py`): `PlotEvent`,
 **Responsibility:** Historical replay, execution simulation, positions, journal, metrics. Python orchestration over Rust numeric kernels.
 
 **Public API** (`backtest/__init__.py`):
-`BacktestRunner`, `run_variant_backtest`, `BacktestWorker`, `BacktestConfig`, `BacktestResult`, `StrategyResult`, `TradeRecord`, `EquityPoint`, `PerformanceMetrics`, `RunBacktest`, `BacktestStarted`, `BacktestProgress`, `BacktestCompleted`, `BacktestFailed`, `backtest_manifest`, `validate_backtest_form`
+`BacktestRunner`, `run_variant_backtest`, `BacktestWorker`, `BatchEnqueued`, `BacktestConfig`, `BacktestResult`, `StrategyResult`, `TradeRecord`, `EquityPoint`, `PerformanceMetrics`, `RunBacktest`, `BacktestStarted`, `BacktestProgress`, `BacktestCompleted`, `BacktestFailed`, `backtest_manifest`, `validate_backtest_form`
+`BatchSpec` / `SymbolBatchResult` / `run_symbol_batch` / `default_batch_workers` / `execute_bars`: bounded parallel multi-symbol batch (one strategy × N symbols; compile-once per worker, shared `execute_bars` core with the single path, deterministic symbol order, per-symbol error isolation, stock-level progress, `include_plots=False` default for bulk ranking).
+`derive_symbol_results(base, symbols)`: single-pass grouped equivalent of per-symbol `derive_symbol_result` (identical math, used by stock ranking).
+`BacktestWorker` batch queue: `enqueue_batch(BatchEnqueued)` / `cancel_batch()` + `batch_progress` / `batch_done` / `batch_failed` Qt signals (payloads are plain tuples, not bus events — only the final merged `BacktestCompleted` travels the bus).
 `StrategyResult.chart_plots: tuple[Any, ...]` (defaulted): universal strategy-owned plot events (same contract live/backtest/replay), forwarded from `logic.get_plot_events()`; directional/symbol derivations preserve it alongside `chart_series`.
 `StrategyResult.muted_bars: tuple[int, ...]` (defaulted, generic ints): strategy-declared visually silent bars from `logic.get_muted_signal_bars()` (`PythonStrategy.mute_signal_bar`), consumed by `TradeOverlay` coverage alongside marker bars; directional derivations preserve it. Trading data is never affected.
 
@@ -293,6 +297,7 @@ plus the universal plot contract (`strategy/models/plot_event.py`): `PlotEvent`,
 
 **Invariants:**
 - `BacktestRunner(repository, registry, data_dir)` loads Python strategy via `get_strategy_by_id` → `compile_strategy` → `PythonStrategy`; no `.vstrat`/VM fallback.
+- Batch execution reuses the single-run core (`execute_bars`) and the same repository/compile/metrics helpers — same bars in, same results out; only scheduling differs.
 - Metrics math is Rust-owned (`rust/vayren-core`, `metrics` kernels: drawdown/equity/Sharpe; measured 4–5× on 20–100k inputs); `engine/metrics.py` keeps model assembly + `None`-semantics only.
 - `validate_backtest_form` is honest validation (no fake results).
 - `BacktestWorker` off-UI-thread (like `DownloadWorker`).

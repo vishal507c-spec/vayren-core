@@ -58,6 +58,22 @@ def test_switch_symbol_replaces_chart(qt_app: QApplication, tmp_path: Path) -> N
     assert window.watchlist.current_symbol == "BPCL"
 
 
+def test_startup_opens_maximized(qt_app: QApplication, tmp_path: Path) -> None:
+    """Startup policy: every fresh launch opens maximized (native work area).
+
+    Guards against regressions to a small restored startup size — the window
+    must be maximized right after start, before any manual user action.
+    """
+    assert qt_app is not None
+    data_dir = seed_symbol_directory(tmp_path / "data", {"AMBUJACEM": 10})
+    bootstrap = Bootstrap(data_dir=data_dir, limit=10)
+    bootstrap.start()
+    window = bootstrap.services.get("chart_window")
+    qt_app.processEvents()
+    assert window.isVisible()
+    assert window.isMaximized()
+
+
 def test_bootstrap_registers_all_services(qt_app: QApplication, tmp_path: Path) -> None:
     assert qt_app is not None
     data_dir = seed_symbol_directory(tmp_path / "data", {"AMBUJACEM": 10})

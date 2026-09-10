@@ -1,0 +1,940 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VAYREN — Full UI</title>
+<style>
+/* ============ TOKENS (lab_theme.py + chart/theme.py) ============ */
+:root{
+  /* lab_theme */
+  --bg0:#070B10; --bg1:#0B1017; --bg2:#0F151D;
+  --panel:#101720; --panel2:#131B24; --border:#202B36;
+  --accent:#00C7B7; --accent-dim:#00A99D;
+  --text:#E6EDF3; --text2:#8B98A7; --muted:#596675;
+  --pos:#21C58B; --neg:#F05A67; --warn:#DDAA45;
+  --buy:#00C7B7; --sell:#F05A67;
+  /* chart/theme (APP_PALETTE) */
+  --cwin:#101418; --cbase:#101418; --calt:#161c26; --cmidlight:#1f2632;
+  --cmid:#2a3342; --cdark:#3b4659; --ctext:#cfd8dc; --cph:#5d6778;
+  --caccent:#26a69a; --caccenttext:#0b0f13; --ctooltip:#1b212c;
+  --bull:#26a69a; --bear:#ef5350;
+  --font-ui:"Segoe UI", system-ui, sans-serif;
+  --font-code:"JetBrains Mono", Consolas, monospace;
+}
+*{box-sizing:border-box; margin:0; padding:0;}
+html,body{height:100%;}
+body{background:var(--bg0); color:var(--text); font-family:var(--font-ui); font-size:12px; overflow:hidden;}
+::-webkit-scrollbar{width:8px;height:8px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px;}
+::-webkit-scrollbar-thumb:hover{background:var(--muted);}
+.spacer{flex:1;}
+.hidden{display:none !important;}
+
+/* ============ BUTTONS (ui_kit / lab_theme) ============ */
+.btn{background:transparent;border:1px solid var(--border);border-radius:3px;padding:4px 10px;color:var(--text2);font-size:11px;font-weight:600;font-family:var(--font-ui);cursor:pointer;white-space:nowrap;}
+.btn:hover{background:var(--panel2);color:var(--text);border-color:var(--muted);}
+.btn:disabled{color:var(--muted);border-color:var(--border);cursor:default;}
+.btn-primary{background:var(--accent);border:none;border-radius:3px;padding:5px 14px;color:#04211E;font-size:11px;font-weight:700;font-family:var(--font-ui);cursor:pointer;white-space:nowrap;}
+.btn-primary:hover{background:var(--accent-dim);}
+.btn-quiet{background:transparent;border:1px solid var(--border);border-radius:3px;padding:3px 10px;color:var(--text2);font-size:10px;font-weight:600;font-family:var(--font-ui);cursor:pointer;}
+.btn-quiet:hover{background:var(--panel2);color:var(--text);border-color:var(--muted);}
+.tool-btn{background:transparent;border:none;border-radius:3px;padding:3px 6px;color:var(--text2);font-size:11px;cursor:pointer;}
+.tool-btn:hover{background:var(--panel2);color:var(--text);}
+.input{background:var(--bg1);border:1px solid var(--border);border-radius:3px;padding:3px 6px;color:var(--text);font-size:11px;font-family:var(--font-ui);outline:none;width:100%;}
+.input:focus{border-color:var(--accent);}
+select.input{appearance:none;-webkit-appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);background-position:calc(100% - 10px) 9px,calc(100% - 6px) 9px;background-size:4px 4px;background-repeat:no-repeat;padding-right:20px;}
+.hline{height:1px;background:var(--border);}
+.cap{color:var(--muted);font-size:10px;font-weight:700;letter-spacing:1px;}
+
+/* ============ APP SHELL ============ */
+.app{display:flex;flex-direction:column;height:100vh;}
+/* top nav */
+.navbar{height:34px;flex:0 0 34px;background:var(--cwin);border-bottom:1px solid var(--cmid);display:flex;align-items:center;gap:4px;padding:0 10px;}
+.navbar .brand{font-size:13px;font-weight:800;letter-spacing:1px;color:var(--caccent);}
+.navbar .gap{width:16px;}
+.nav-btn{border:none;border-radius:3px;padding:4px 10px;font-size:11px;font-weight:600;letter-spacing:.3px;background:transparent;color:var(--text);font-family:var(--font-ui);cursor:pointer;border-bottom:2px solid transparent;}
+.nav-btn:hover{background:var(--cmidlight);}
+.nav-btn.on{color:#E6EDF3;border-bottom:2px solid #00C7B7;border-radius:0;padding-bottom:2px;}
+.screen{flex:1;display:none;min-height:0;}
+.screen.on{display:flex;}
+
+/* ============ SECTION / BADGE / KV / TABLE (ui_kit) ============ */
+.section{background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:6px 8px;display:flex;flex-direction:column;gap:4px;min-height:0;}
+.section>.s-title{color:var(--muted);font-size:10px;font-weight:700;letter-spacing:1px;}
+.badge{font-size:11px;font-weight:700;}
+.badge.ok{color:var(--pos);} .badge.warn{color:var(--warn);} .badge.bad{color:var(--neg);}
+.badge.muted{color:var(--muted);} .badge.accent{color:var(--accent);}
+.kv{display:flex;flex-direction:column;gap:3px;}
+.kv .row{display:flex;gap:6px;}
+.kv .k{color:var(--text2);font-size:11px;min-width:110px;}
+.kv .v{color:var(--text);font-size:11px;word-break:break-word;}
+.empty{color:var(--muted);font-size:12px;text-align:center;padding:16px 8px;white-space:pre-wrap;}
+table.t{width:100%;border-collapse:collapse;font-size:11px;background:var(--bg1);}
+table.t thead th{background:var(--bg0);color:var(--text2);text-align:left;border-right:1px solid var(--border);border-bottom:1px solid var(--border);padding:4px 8px;font-size:10px;font-weight:600;white-space:nowrap;}
+table.t td{padding:3px 8px;color:var(--text);white-space:nowrap;border-bottom:1px solid var(--border);}
+table.t tbody tr:nth-child(even){background:var(--bg2);}
+table.t tbody tr:hover{background:var(--panel2);}
+table.t tr.sel td{background:var(--panel2);box-shadow:inset 2px 0 0 var(--accent);}
+.tk{color:var(--pos);} .tkr{color:var(--neg);} .unk{color:var(--neg);}
+
+/* ============================================================
+   SCREEN 1 — MARKET (ChartWindow)
+   ============================================================ */
+.market{flex:1;display:flex;min-height:0;background:var(--cwin);color:var(--ctext);}
+/* tools rail */
+.tools-rail{flex:0 0 40px;width:40px;background:var(--calt);border-right:1px solid var(--cmidlight);display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 5px;}
+.tools-rail .tbtn{width:30px;height:30px;border:none;border-radius:4px;background:transparent;color:var(--ctext);display:flex;align-items:center;justify-content:center;cursor:pointer;}
+.tools-rail .tbtn:hover{background:var(--cmidlight);}
+.tools-rail .tbtn.on{background:var(--caccent);color:var(--caccenttext);}
+.tools-rail .tbtn svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;}
+/* watchlist panel */
+.watchlist{flex:0 0 220px;width:220px;background:var(--cwin);border-right:1px solid var(--cmid);display:flex;flex-direction:column;min-height:0;}
+.wl-header{display:flex;align-items:center;gap:2px;padding:4px 6px;border-bottom:1px solid var(--cmidlight);}
+.wl-wl{background:transparent;border:none;color:var(--ctext);font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px;padding:3px 6px;border-radius:3px;}
+.wl-wl:hover{background:var(--cmidlight);}
+.wl-ico{background:transparent;border:none;color:var(--ctext);width:24px;height:24px;border-radius:3px;cursor:pointer;font-size:14px;}
+.wl-ico:hover{background:var(--cmidlight);}
+.wl-sort{display:flex;align-items:center;justify-content:space-between;padding:3px 12px 3px 12px;border-bottom:1px solid var(--cmidlight);}
+.wl-sort .lab{color:var(--cph);font-size:11px;font-weight:600;}
+.wl-sort .sbtn{background:transparent;border:none;color:var(--cph);font-size:11px;cursor:pointer;}
+.wl-filter{padding:4px 6px;border-bottom:1px solid var(--cmidlight);}
+.wl-list{flex:1;overflow-y:auto;}
+.wl-row{display:flex;align-items:baseline;justify-content:space-between;gap:8px;padding:3px 8px;border-bottom:1px solid var(--cmidlight);cursor:pointer;}
+.wl-row:hover{background:var(--calt);}
+.wl-row.on{background:var(--cmidlight);box-shadow:inset 2px 0 0 var(--caccent);}
+.wl-row .sym{font-weight:600;font-size:12px;}
+.wl-row .px{font-weight:600;font-size:12px;}
+.wl-row .chg{width:100%;text-align:right;font-size:11px;}
+.wl-row .chg.up{color:var(--bull);} .wl-row .chg.dn{color:var(--bear);}
+.wl-row .r1{flex:1;display:flex;justify-content:space-between;}
+.wl-row .col{display:flex;flex-direction:column;min-width:0;flex:1;}
+/* download panel */
+.download{flex:0 0 220px;width:220px;background:var(--cwin);border-right:1px solid var(--cmid);display:flex;flex-direction:column;min-height:0;}
+.dl-header{display:flex;align-items:flex-start;gap:4px;padding:5px 12px 5px 12px;border-bottom:1px solid var(--cmidlight);}
+.dl-header .ti{font-size:12px;font-weight:600;color:var(--ctext);}
+.dl-header .su{font-size:10px;color:var(--cph);}
+.dl-close{margin-left:auto;background:transparent;border:none;color:var(--ctext);font-size:14px;font-weight:600;width:22px;height:22px;border-radius:3px;cursor:pointer;}
+.dl-close:hover{background:var(--cmidlight);}
+.dl-body{flex:1;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:10px;}
+.dl-field{display:flex;flex-direction:column;gap:4px;}
+.dl-field label{font-size:10px;color:var(--cph);font-weight:600;letter-spacing:.4px;}
+.dl-input{background:var(--calt);border:1px solid var(--cmid);border-radius:4px;padding:6px 8px;color:var(--ctext);font-size:12px;width:100%;}
+.dl-actions{display:flex;gap:6px;}
+.dl-btn{flex:1;background:var(--caccent);border:none;border-radius:4px;padding:7px;color:var(--caccenttext);font-weight:700;font-size:11px;cursor:pointer;}
+.dl-btn.sec{background:transparent;border:1px solid var(--cmid);color:var(--ctext);}
+.dl-prog{background:var(--calt);border:1px solid var(--cmid);border-radius:4px;padding:8px;}
+.dl-bar{height:6px;background:var(--cmid);border-radius:3px;overflow:hidden;margin:6px 0;}
+.dl-bar>i{display:block;height:100%;background:var(--caccent);width:0;}
+.dl-stat{display:flex;justify-content:space-between;font-size:10px;color:var(--cph);}
+.dl-log{font-family:var(--font-code);font-size:10px;color:var(--cph);background:var(--cbase);border:1px solid var(--cmidlight);border-radius:3px;padding:6px;max-height:120px;overflow:auto;white-space:pre-wrap;}
+/* chart area */
+.chart-area{flex:1;display:flex;flex-direction:column;min-width:0;}
+.market-topbar{height:32px;flex:0 0 32px;background:var(--cwin);border-bottom:1px solid var(--cmid);display:flex;align-items:center;gap:6px;padding:0 6px;}
+.tf-btn{min-width:44px;max-width:56px;height:24px;padding:3px 8px;font-size:11px;font-weight:500;letter-spacing:.2px;border:none;border-radius:4px;background:transparent;color:var(--ctext);cursor:pointer;}
+.tf-btn:hover{background:var(--cmidlight);}
+.tf-btn.on{background:var(--caccent);color:var(--caccenttext);font-weight:600;}
+.tf-more{width:28px;height:24px;font-size:10px;border:none;border-radius:4px;background:transparent;color:var(--ctext);cursor:pointer;}
+.tf-more:hover{background:var(--cmidlight);}
+.tf-more.on{background:var(--caccent);color:var(--caccenttext);}
+.ind-btn{background:transparent;border:1px solid var(--cmid);border-radius:3px;padding:4px 10px;font-size:11px;font-weight:600;letter-spacing:.4px;color:var(--ctext);cursor:pointer;height:24px;}
+.ind-btn:hover{background:var(--cmidlight);border-color:var(--cmidlight);}
+/* trade context strip (hidden unless focused) */
+.trade-strip{flex:0 0 auto;background:var(--bg0);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;padding:2px 10px;min-height:28px;}
+.trade-strip .tid{color:var(--text);font-size:11px;font-weight:800;}
+.trade-strip .tsy{font-size:11px;font-weight:700;}
+.trade-strip .ttm{color:var(--muted);font-size:10px;}
+.trade-strip .tpnl{font-size:11px;font-weight:700;}
+.trade-strip .tr{font-size:10px;font-weight:700;}
+.trade-detail{display:flex;align-items:center;gap:14px;padding:4px 10px;background:var(--bg1);border-bottom:1px solid var(--border);font-size:10px;color:var(--text2);}
+/* canvas */
+.canvas-wrap{flex:1;position:relative;background:var(--cbase);min-height:0;}
+#chartCanvas{position:absolute;inset:0;width:100%;height:100%;}
+.stock-hdr{position:absolute;top:6px;left:10px;font-size:13px;font-weight:700;color:var(--ctext);z-index:2;}
+.stock-hdr small{font-weight:400;color:var(--cph);font-size:11px;margin-left:6px;}
+.ivp{position:absolute;top:28px;left:8px;background:transparent;display:flex;flex-direction:column;gap:2px;z-index:2;}
+.ivp .ir{display:flex;align-items:center;gap:6px;height:22px;font-family:"Inter","Segoe UI",Arial,sans-serif;font-size:13px;color:#E6EAF0;}
+.ivp .ir.off{color:#6b7280;}
+.ivp .ir .e{color:var(--cph);cursor:pointer;font-size:11px;}
+/* indicators popup */
+.ind-pop{position:absolute;top:34px;left:60px;width:360px;height:380px;background:var(--cbase);border:1px solid var(--cmid);border-radius:6px;padding:10px;display:none;flex-direction:column;gap:8px;z-index:5;box-shadow:0 8px 30px rgba(0,0,0,.5);}
+.ind-pop.on{display:flex;}
+.ind-pop .search{background:var(--calt);border:1px solid var(--cmid);border-radius:4px;padding:6px 8px;color:var(--ctext);font-size:12px;width:100%;}
+.ind-cats{display:flex;gap:4px;flex-wrap:wrap;}
+.ind-cat{background:transparent;border:1px solid var(--cmid);border-radius:3px;padding:2px 8px;font-size:10px;font-weight:600;color:var(--ctext);cursor:pointer;height:22px;}
+.ind-cat.on{background:var(--caccent);color:var(--caccenttext);border-color:var(--caccent);}
+.ind-list{flex:1;overflow-y:auto;font-size:12px;}
+.ind-list .hd{color:var(--cph);font-size:10px;font-weight:600;letter-spacing:.6px;padding:6px 4px 2px;}
+.ind-list .it{padding:6px 10px;border-radius:3px;margin:1px 4px;cursor:pointer;}
+.ind-list .it:hover{background:var(--calt);}
+.ind-list .it.on{background:var(--caccent);color:var(--caccenttext);}
+.ind-hint{color:var(--cph);font-size:10px;text-align:center;}
+
+/* ============================================================
+   SCREEN 2 — STRATEGY LAB
+   ============================================================ */
+.lab{flex:1;flex-direction:column;min-height:0;background:var(--bg0);}
+.lab .topbar{height:34px;flex:0 0 34px;background:var(--bg0);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;padding:0 10px 0 12px;}
+.lab .brand{color:var(--accent);font-size:12px;font-weight:800;letter-spacing:1.2px;}
+.lab .crumb-path{color:var(--muted);font-size:11px;}
+.lab .crumb-name{color:var(--text);font-size:12px;font-weight:600;}
+.lab .root{flex:1;display:flex;flex-direction:column;min-height:0;}
+.lab .main{flex:1;display:flex;min-height:0;}
+.library{flex:0 0 280px;background:var(--bg0);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:10px;gap:8px;min-height:0;}
+.btn-new{background:transparent;border:1px solid var(--border);color:var(--text);padding:7px;border-radius:3px;font-size:11px;font-weight:600;font-family:var(--font-ui);cursor:pointer;width:100%;}
+.btn-new:hover{border-color:var(--accent-dim);color:var(--accent);}
+.search-row{display:flex;align-items:center;gap:6px;}
+.search-row .ico{color:var(--muted);font-size:10px;}
+.strat-list{flex:1;overflow-y:auto;display:flex;flex-direction:column;}
+.strat-row{display:flex;align-items:center;gap:6px;padding:4px 6px 4px 2px;border:1px solid transparent;border-radius:3px;margin:1px 0;cursor:pointer;}
+.strat-row:hover{background:var(--bg2);}
+.strat-row.on{background:var(--panel2);border-color:var(--accent-dim);}
+.strat-row .dot{color:var(--muted);font-size:7px;}
+.strat-row .nm{color:var(--text);font-size:12px;font-weight:600;flex:1;}
+.strat-row .st{color:var(--muted);font-size:9px;}
+.center{flex:1;background:var(--bg1);display:flex;flex-direction:column;min-width:0;}
+.editor-header{height:32px;flex:0 0 32px;background:var(--bg0);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;padding:0 14px;}
+.name-cap{color:var(--muted);font-size:8px;font-weight:600;letter-spacing:.8px;}
+.name-val{color:var(--text);font-size:13px;font-weight:600;line-height:1.1;}
+.chip{font-size:10px;font-weight:600;}
+.chip.ready{color:var(--muted);} .chip.modified{color:var(--warn);} .chip.error{color:var(--neg);}
+.tab-bar{height:28px;flex:0 0 28px;background:var(--bg0);border-bottom:1px solid var(--border);display:flex;align-items:stretch;gap:2px;padding:0 14px;}
+.tab{background:transparent;border:none;border-bottom:2px solid transparent;padding:7px 10px 5px;color:var(--text2);font-size:10px;font-weight:600;letter-spacing:.6px;font-family:var(--font-ui);cursor:pointer;}
+.tab:hover{color:var(--text);} .tab.on{color:var(--text);border-bottom-color:var(--accent);}
+.modesel{height:36px;flex:0 0 36px;background:var(--bg1);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;padding:0 12px;}
+.modesel .view{color:var(--text2);font-size:10px;font-weight:700;letter-spacing:.6px;}
+.seg{background:var(--bg0);border:1px solid var(--border);border-radius:6px;padding:3px;display:flex;gap:3px;}
+.seg button{background:transparent;border:none;border-radius:4px;padding:7px 14px;color:var(--text2);font-size:11px;font-weight:700;letter-spacing:.3px;font-family:var(--font-ui);cursor:pointer;}
+.seg button:hover{color:var(--text);background:var(--panel2);}
+.seg button.buy-on{background:var(--buy);color:#04211E;font-weight:800;}
+.seg button.sell-on{background:var(--sell);color:#fff;font-weight:800;}
+.seg button.cmp-on{background:var(--accent);color:#04211E;font-weight:800;}
+.dir-ind{font-size:11px;font-weight:800;}
+.dir-ind.buy{color:var(--buy);} .dir-ind.sell{color:var(--sell);} .dir-ind.cmp{color:var(--accent);}
+.stack{flex:1;min-height:0;position:relative;overflow:hidden;}
+.pane{position:absolute;inset:0;overflow:auto;display:none;}
+.pane.on{display:block;}
+.code-editor{width:100%;height:100%;background:var(--bg1);color:var(--text);border:none;outline:none;resize:none;padding:12px 14px;font-family:var(--font-code);font-size:12px;line-height:1.55;}
+.params-pane{padding:20px 24px;background:var(--bg1);display:flex;flex-direction:column;gap:12px;}
+.param-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:10px 16px;}
+.param-cell .pl{color:var(--muted);font-size:10px;margin-bottom:4px;}
+.backtest-pane{padding:12px 16px;background:var(--bg1);display:flex;flex-direction:column;gap:8px;}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:10px 12px;}
+.cfg-grid{display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:6px 10px;}
+.lab-mini{color:var(--muted);font-size:9px;font-weight:600;letter-spacing:.6px;margin:6px 0 3px;}
+.chips{display:flex;flex-wrap:wrap;gap:4px;border:1px solid var(--border);border-radius:3px;background:var(--bg1);padding:4px;min-height:30px;}
+.chip-sym{background:var(--panel2);border:1px solid var(--accent-dim);border-radius:10px;padding:1px 8px;font-size:11px;color:var(--text);display:flex;align-items:center;gap:4px;}
+.chip-sym b{color:var(--muted);cursor:pointer;font-weight:400;}
+.date-row{display:flex;align-items:center;gap:4px;} .arrow{color:var(--muted);}
+.status-msg{background:var(--bg0);border-top:1px solid var(--border);padding:3px 14px;color:var(--muted);font-size:10px;}
+.results{flex:0 0 300px;background:var(--bg1);border-top:1px solid var(--border);display:flex;flex-direction:column;min-height:0;}
+.result-strip{height:30px;flex:0 0 30px;background:var(--bg0);border-bottom:1px solid var(--border);display:flex;align-items:stretch;gap:2px;padding:0 10px 0 14px;}
+.result-body{flex:1;min-height:0;position:relative;overflow:hidden;}
+.rpane{position:absolute;inset:0;overflow:auto;display:none;}
+.rpane.on{display:flex;flex-direction:column;}
+.metrics{background:var(--bg1);border-bottom:1px solid var(--border);padding:6px 12px;}
+.metric-grid{display:grid;grid-template-columns:repeat(8,auto);gap:1px 18px;justify-content:start;}
+.mtile .mk{color:var(--muted);font-size:9px;font-weight:600;letter-spacing:.5px;}
+.mtile .mv{color:var(--text);font-size:14px;font-weight:700;}
+.mtile .mv.pos{color:var(--pos);} .mtile .mv.neg{color:var(--neg);}
+.chart{flex:1;background:#101418;position:relative;min-height:120px;}
+.chart .empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#8a93a6;font-size:12px;}
+.blot-bar{display:flex;align-items:center;gap:6px;padding:8px 14px;}
+.matrix{width:100%;border-collapse:collapse;font-size:11px;}
+.matrix th,.matrix td{padding:4px 10px;text-align:center;}
+.matrix td:first-child,.matrix th:first-child{text-align:left;color:var(--text2);font-weight:600;}
+.matrix th.buy{color:var(--buy);font-size:9px;font-weight:700;} .matrix th.sell{color:var(--sell);font-size:9px;font-weight:700;}
+.banner{background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:10px 14px;text-align:center;}
+.banner .kick{color:var(--muted);font-size:9px;font-weight:700;letter-spacing:.6px;}
+.banner .verdict{color:var(--text);font-size:18px;font-weight:800;}
+.banner .reason{color:var(--text2);font-size:10px;}
+.cmp-strip{color:var(--muted);font-size:10px;background:var(--bg1);padding:6px 10px;border:1px solid var(--border);border-radius:3px;}
+.cmp-head{color:var(--text);font-size:11px;font-weight:800;letter-spacing:.8px;text-align:center;}
+
+/* ============================================================
+   SCREENS 3/4/5 — RESEARCH / PORTFOLIO / LIVE
+   ============================================================ */
+.ws{flex:1;display:flex;flex-direction:column;gap:6px;padding:8px;background:var(--bg0);min-height:0;overflow:auto;}
+.ws-split{flex:1;display:flex;gap:6px;min-height:0;}
+.ws-col{display:flex;flex-direction:column;gap:6px;min-height:0;}
+.qtabs{display:flex;gap:2px;border-bottom:1px solid var(--border);flex-wrap:wrap;}
+.qtab{background:var(--panel);border:1px solid var(--border);border-bottom:none;color:var(--text2);padding:4px 10px;font-size:11px;cursor:pointer;border-radius:4px 4px 0 0;}
+.qtab.on{color:var(--text);background:var(--panel2);}
+.qbody{flex:1;min-height:0;overflow:auto;border:1px solid var(--border);border-radius:0 0 4px 4px;background:var(--bg1);padding:6px;display:none;}
+.qbody.on{display:block;}
+.cmdbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.pillbar{background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:6px 10px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
+.halt-banner{background:#3A0E14;color:var(--neg);font-size:13px;font-weight:800;border:1px solid var(--neg);border-radius:4px;padding:6px;text-align:center;}
+.live-lower{display:flex;gap:6px;flex-wrap:wrap;}
+.live-lower .section{flex:1;min-width:180px;}
+.logview{font-family:var(--font-code);font-size:11px;color:var(--text2);background:var(--bg1);border:1px solid var(--border);border-radius:3px;padding:4px;white-space:pre-wrap;max-height:84px;overflow:auto;}
+.logview .INFO{color:#8a93a6;} .logview .WARN{color:#d4a017;} .logview .ERROR{color:#ef5350;} .logview .SUCCESS{color:#26a69a;}
+textarea.input{resize:vertical;font-family:var(--font-code);}
+
+/* ============ SCREEN 6 — SYSTEM (bottom dock as full) ============ */
+.system{flex:1;display:flex;flex-direction:column;gap:6px;padding:8px;background:var(--bg0);}
+.system .split{flex:1;display:flex;gap:1px;min-height:0;}
+.system .split>.section{flex:1;}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ============ TOP NAV (TopNavBar) ============ -->
+  <div class="navbar" id="navbar">
+    <span class="brand">VAYREN</span>
+    <span class="gap"></span>
+    <button class="nav-btn on" data-nav="market">MARKET</button>
+    <button class="nav-btn" data-nav="lab">STRATEGY LAB</button>
+    <button class="nav-btn" data-nav="research">RESEARCH</button>
+    <button class="nav-btn" data-nav="portfolio">PORTFOLIO</button>
+    <button class="nav-btn" data-nav="live">LIVE</button>
+    <button class="nav-btn" data-nav="system">SYSTEM</button>
+    <span class="spacer"></span>
+  </div>
+
+  <!-- =========================================================
+       MARKET
+       ========================================================= -->
+  <div class="screen on" data-screen="market">
+    <div class="market">
+      <!-- tools rail -->
+      <div class="tools-rail">
+        <button class="tbtn on" id="railWatch" title="Watchlist (All Stocks)">
+          <svg viewBox="0 0 32 32"><rect x="4" y="5" width="24" height="22" rx="4"/><line x1="10" y1="11" x2="26" y2="11"/><line x1="10" y1="16" x2="26" y2="16"/><line x1="10" y1="21" x2="22" y2="21"/></svg>
+        </button>
+        <button class="tbtn" id="railDl" title="Historical Download">
+          <svg viewBox="0 0 32 32"><ellipse cx="14" cy="6.5" rx="7" ry="3.2"/><path d="M7 6.5v8.2c0 1.8 3.1 3.2 7 3.2s7-1.4 7-3.2V6.5"/><path d="M7 10.7c0 1.8 3.1 3.2 7 3.2s7-1.4 7-3.2"/><path d="M23 12.5v11"/><path d="M18.8 19.5 23 23.7l4.2-4.2"/><path d="M18.5 27h9"/></svg>
+        </button>
+        <span class="spacer"></span>
+      </div>
+
+      <!-- watchlist panel -->
+      <aside class="watchlist" id="watchPanel">
+        <div class="wl-header">
+          <button class="wl-wl">All Stocks ▾</button>
+          <button class="wl-ico" title="New watchlist">+</button>
+          <button class="wl-ico" title="Reset chart view (Alt+R)">↩</button>
+          <button class="wl-ico" title="More watchlist actions">⋯</button>
+        </div>
+        <div class="wl-sort"><span class="lab">SYMBOL</span><button class="sbtn">Sort by ▾</button></div>
+        <div class="wl-filter"><input class="dl-input" id="wlFilter" placeholder="Filter symbols…"></div>
+        <div class="wl-list" id="wlList"></div>
+      </aside>
+
+      <!-- download panel -->
+      <aside class="download hidden" id="dlPanel">
+        <div class="dl-header">
+          <div><div class="ti">Historical Download</div><div class="su">Market Data Acquisition</div></div>
+          <button class="dl-close" id="dlClose">×</button>
+        </div>
+        <div class="dl-body">
+          <div class="dl-field"><label>SYMBOL</label>
+            <select class="dl-input"><option>RELIANCE</option><option>TCS</option><option>INFY</option><option>HDFCBANK</option></select></div>
+          <div class="dl-field"><label>INTERVAL</label>
+            <select class="dl-input"><option>1m</option><option>5m</option><option selected>15m</option><option>1h</option><option>1d</option></select></div>
+          <div class="dl-field"><label>DATE RANGE</label>
+            <div style="display:flex;gap:6px;"><input class="dl-input" type="text" value="2023-01-01"><input class="dl-input" type="text" value="2026-09-09"></div></div>
+          <div class="dl-actions">
+            <button class="dl-btn">DOWNLOAD</button>
+            <button class="dl-btn sec">COVERAGE</button>
+            <button class="dl-btn sec">CANCEL</button>
+          </div>
+          <div class="dl-prog">
+            <div class="dl-stat"><span>Provider</span><span style="color:var(--bull)">● Ready</span></div>
+            <div class="dl-bar"><i></i></div>
+            <div class="dl-stat"><span>Idle</span><span>0 / 0 chunks</span></div>
+          </div>
+          <div class="dl-field"><label>ENGINE LOG</label>
+            <div class="dl-log">→ coverage RELIANCE 15m
+• finished RELIANCE 1d: +2450 new, 2450 total</div></div>
+        </div>
+      </aside>
+
+      <!-- chart column -->
+      <section class="chart-area">
+        <div class="market-topbar">
+          <button class="tf-btn">5m</button>
+          <button class="tf-btn">15m</button>
+          <button class="tf-btn">30m</button>
+          <button class="tf-btn">45m</button>
+          <button class="tf-btn on">1h</button>
+          <button class="tf-btn">2h</button>
+          <button class="tf-btn">4h</button>
+          <button class="tf-more" title="More timeframes">▼</button>
+          <button class="ind-btn" id="indBtn">INDICATORS</button>
+          <span class="spacer"></span>
+        </div>
+
+        <!-- trade context (compact, hidden by default) -->
+        <div class="trade-strip hidden" id="tradeStrip">
+          <span class="tid">TRADE #1</span>
+          <span class="tsy" style="color:var(--buy)">RELIANCE · LONG</span>
+          <span class="ttm">1h · 2024-03-01 09:30</span>
+          <span class="tpnl" style="color:var(--pos)">+₹1,23,400</span>
+          <span class="tr" style="color:var(--pos)">+2.10R</span>
+          <span class="spacer"></span>
+          <button class="btn-quiet" style="height:22px">← PREV</button>
+          <button class="btn-quiet" style="height:22px">NEXT →</button>
+          <button class="btn" style="height:22px">OPEN IN MARKET ↗</button>
+        </div>
+        <div class="trade-detail hidden" id="tradeDetail">
+          <span><span style="color:var(--muted)">ENTRY</span> <span style="color:var(--text);font-weight:600">2024-03-01 · 09:30</span> <span style="color:var(--buy);font-weight:700">₹2,450.00</span></span>
+          <span style="width:1px;height:12px;background:var(--border)"></span>
+          <span><span style="color:var(--muted)">EXIT SELL</span> <span style="color:var(--text);font-weight:600">2024-03-04 · 14:15</span> <span style="color:var(--text);font-weight:700">₹2,580.00</span></span>
+          <span style="width:1px;height:12px;background:var(--border)"></span>
+          <span style="color:var(--muted)">46 bars · target</span>
+        </div>
+
+        <div class="canvas-wrap">
+          <div class="stock-hdr">RELIANCE <small>1h · NSE · <span style="color:var(--pos)">2,580.00 (+1.20%)</span></small></div>
+          <div class="ivp" id="ivp">
+            <div class="ir"><span>Supertrend</span><span class="e">👁 ⚙ {} ⋮</span></div>
+            <div class="ir off"><span>RSI</span><span class="e">🚫 ⚙ {} ⋮</span></div>
+            <div class="ir"><span>Vol</span><span class="e">👁 ⚙ {} ⋮</span></div>
+          </div>
+          <canvas id="chartCanvas"></canvas>
+          <div class="ind-pop" id="indPop">
+            <input class="search" id="indSearch" placeholder="Search indicators & strategies…">
+            <div class="ind-cats" id="indCats">
+              <button class="ind-cat on" data-cat="ALL">ALL</button>
+              <button class="ind-cat" data-cat="TREND">TREND</button>
+              <button class="ind-cat" data-cat="MOMENTUM">MOMENTUM</button>
+              <button class="ind-cat" data-cat="VOLUME">VOLUME</button>
+              <button class="ind-cat" data-cat="VOLATILITY">VOLATILITY</button>
+              <button class="ind-cat" data-cat="STRATEGIES">STRATEGIES</button>
+            </div>
+            <div class="ind-list" id="indList"></div>
+            <div class="ind-hint">Indicators and strategies from a single control</div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- =========================================================
+       STRATEGY LAB
+       ========================================================= -->
+  <div class="screen" data-screen="lab">
+    <div class="lab">
+      <div class="topbar">
+        <span class="brand">VAYREN</span>
+        <span class="crumb-path">/  STRATEGY LAB  /</span>
+        <span class="crumb-name">Supertrend Pullback</span>
+        <span class="spacer"></span>
+        <button class="btn">SAVE</button>
+        <button class="btn">COMPILE</button>
+        <button class="btn-primary" id="labTopRun">▶  RUN BUY BACKTEST</button>
+      </div>
+      <div class="root">
+        <div class="main">
+          <aside class="library">
+            <div class="cap">STRATEGIES</div>
+            <button class="btn-new">+  NEW STRATEGY</button>
+            <div class="search-row"><span class="ico">🔍</span><input class="input" id="labSearch" placeholder="Search strategies..."></div>
+            <div class="strat-list">
+              <div class="strat-row on"><span class="dot">●</span><span class="nm">Supertrend Pullback</span><span class="st">2m ago</span><button class="tool-btn">⋮</button></div>
+              <div class="strat-row"><span class="dot">●</span><span class="nm">EMA Crossover RSI</span><span class="st">5h ago</span><button class="tool-btn">⋮</button></div>
+              <div class="strat-row"><span class="dot">●</span><span class="nm">Mean Reversion v2</span><span class="st">3d ago</span><button class="tool-btn">⋮</button></div>
+            </div>
+          </aside>
+          <section class="center">
+            <div class="editor-header">
+              <div><div class="name-cap">STRATEGY NAME</div><div class="name-val">Supertrend Pullback</div></div>
+              <span class="spacer"></span>
+              <span class="chip ready" id="labChip">● READY</span>
+              <button class="tool-btn" title="Rename strategy">✎</button>
+            </div>
+            <div class="tab-bar">
+              <button class="tab on" data-lc="code">CODE</button>
+              <button class="tab" data-lc="params">PARAMETERS</button>
+              <button class="tab" data-lc="backtest">BACKTEST</button>
+              <span class="spacer"></span>
+            </div>
+            <div class="modesel hidden" id="labMode">
+              <span class="view">VIEW</span>
+              <div class="seg">
+                <button id="mBuy" class="buy-on">BUY (LONG)</button>
+                <button id="mSell">SELL (SHORT)</button>
+                <button id="mCmp">COMPARE</button>
+              </div>
+              <span class="spacer"></span>
+              <span class="dir-ind buy" id="dirInd">●  BUY  —  LONG</span>
+            </div>
+            <div class="stack">
+              <div class="pane on" data-lp="code">
+                <textarea class="code-editor" spellcheck="false"># Supertrend Pullback
+trend    = supertrend(atr_mult = input(3.0, "ATR Mult"), period = input(10, "ATR Period"))
+pullback = input(0.5, "Pullback %")
+stop_pct = input(1.5, "Stop %")
+
+if trend.up and close < trend.line * (1 - pullback/100):
+    buy()
+
+if rsi(14) > input(70, "RSI Exit"):
+    close_all()</textarea>
+              </div>
+              <div class="pane" data-lp="params">
+                <div class="params-pane">
+                  <div class="cap">PARAMETERS</div><div class="hline"></div>
+                  <div class="param-grid">
+                    <div class="param-cell"><div class="pl">ATR Mult</div><input class="input" type="number" step="0.05" value="1.00"></div>
+                    <div class="param-cell"><div class="pl">ATR Period</div><input class="input" type="number" value="10"></div>
+                    <div class="param-cell"><div class="pl">Pullback %</div><input class="input" type="number" step="0.05" value="0.50"></div>
+                    <div class="param-cell"><div class="pl">Stop %</div><input class="input" type="number" step="0.05" value="1.50"></div>
+                    <div class="param-cell"><div class="pl">RSI Exit</div><input class="input" type="number" value="70"></div>
+                  </div>
+                </div>
+              </div>
+              <div class="pane" data-lp="backtest">
+                <div class="backtest-pane">
+                  <div class="card">
+                    <div class="cap" style="color:var(--text2);">BACKTEST CONFIGURATION</div>
+                    <div class="lab-mini">SYMBOLS</div>
+                    <div class="chips"><span class="chip-sym">RELIANCE <b>×</b></span><span class="chip-sym">TCS <b>×</b></span><span class="chip-sym">INFY <b>×</b></span></div>
+                    <div class="cfg-grid">
+                      <div><div class="lab-mini">TIMEFRAME</div><select class="input"><option>1m</option><option>5m</option><option selected>15m</option><option>1h</option><option>1d</option></select></div>
+                      <div><div class="lab-mini">DATE RANGE</div><div class="date-row"><input class="input" value="01 Jan 2023"><span class="arrow">→</span><input class="input" value="09 Sep 2026"></div></div>
+                      <div><div class="lab-mini">INITIAL CAPITAL</div><input class="input" value="₹ 10,00,000"></div>
+                    </div>
+                    <button class="btn-quiet" id="labAdv" style="margin-top:8px">Advanced configuration ▾</button>
+                    <div class="lab-mini" id="labAdvHost" style="display:none;color:var(--muted)">Costs — slippage 0.02% · commission 0.03% (fixed)</div>
+                  </div>
+                  <button class="btn-primary" id="labRun" style="width:100%;min-height:34px;font-size:12px">▶  RUN BUY BACKTEST</button>
+                  <span class="spacer"></span>
+                </div>
+              </div>
+            </div>
+            <div class="status-msg" id="labStatus" style="display:none;"></div>
+          </section>
+        </div>
+
+        <div class="results" id="labResults">
+          <div class="result-strip">
+            <button class="tab on" data-lr="0">PERFORMANCE</button>
+            <button class="tab" data-lr="1">TRADES</button>
+            <button class="tab" data-lr="2">EQUITY</button>
+            <button class="tab" data-lr="3">DRAWDOWN</button>
+            <span class="spacer"></span>
+            <button class="tool-btn" id="labCollapse">▾</button>
+          </div>
+          <div class="result-body" id="labResultBody">
+            <div class="rpane on" data-lrp="0">
+              <div class="metrics">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">
+                  <span class="badge muted" id="labPill">● READY</span><span class="spacer"></span>
+                  <span class="cap" id="labDir" style="color:var(--buy)">BUY PERFORMANCE  —  LONG</span>
+                </div>
+                <div class="metric-grid" id="labMetrics"></div>
+                <div class="cap" style="color:var(--muted);font-size:10px;letter-spacing:0" id="labExtra"></div>
+              </div>
+              <div class="chart"><div class="empty">No equity data — run a backtest</div></div>
+            </div>
+            <div class="rpane" data-lrp="1">
+              <div class="blot-bar"><input class="input" placeholder="Filter trades" style="max-width:240px"><span class="spacer"></span><button class="btn">EXPORT CSV</button></div>
+              <div style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px">Run a backtest to see trades.</div>
+            </div>
+            <div class="rpane" data-lrp="2">
+              <div class="status-msg" style="border-top:none;border-bottom:1px solid var(--border)">No BUY backtest — run BUY backtest to see equity.</div>
+              <div class="chart"><div class="empty">No equity data — run a backtest</div></div>
+            </div>
+            <div class="rpane" data-lrp="3"><div class="chart"><div class="empty">No drawdown data — run a backtest</div></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =========================================================
+       RESEARCH
+       ========================================================= -->
+  <div class="screen" data-screen="research">
+    <div class="ws">
+      <!-- command bar -->
+      <div class="section" style="gap:6px">
+        <div class="s-title">RESEARCH COMMAND</div>
+        <div class="cmdbar">
+          <span style="color:var(--muted);font-size:11px">Dataset:</span>
+          <select class="input" style="width:180px"><option>No datasets</option></select>
+          <span class="spacer"></span>
+          <span style="color:var(--text2);font-size:11px">No dataset</span>
+          <span class="spacer"></span>
+          <span class="badge muted">READY</span>
+          <button class="btn-primary">RUN ANALYSIS</button>
+        </div>
+        <div class="cmdbar">
+          <span style="color:var(--muted);font-size:11px">Experiment:</span>
+          <select class="input" style="width:160px"><option></option></select>
+          <span style="color:var(--muted);font-size:11px">N/A</span>
+        </div>
+      </div>
+      <!-- middle: navigator | center | inspector -->
+      <div class="ws-split" style="flex:1">
+        <div class="ws-col" style="flex:1">
+          <div class="section" style="flex:1">
+            <div class="s-title">NAVIGATOR</div>
+            <div class="cap" style="color:var(--text2)">Datasets (0)</div>
+            <div class="empty">No datasets.</div>
+            <div class="cap" style="color:var(--text2)">Experiments (0)</div>
+            <div class="empty">No experiments.</div>
+            <div style="color:var(--muted);font-size:11px">Select a dataset, then run.</div>
+          </div>
+        </div>
+        <div class="ws-col" style="flex:3">
+          <div class="section"><div class="s-title">HYPOTHESIS</div>
+            <textarea class="input" rows="2" placeholder="State the hypothesis under test…"></textarea>
+            <div style="color:var(--muted);font-size:11px">Hypothesis → experiment → analysis → evidence.</div>
+          </div>
+          <div class="section"><div class="s-title">ANALYSIS RESULTS</div>
+            <div class="kv" id="resMetrics"></div>
+            <div style="color:var(--muted);font-size:11px">RESEARCH READY — No experiment has been executed. Select a dataset, define a hypothesis, then run.</div>
+          </div>
+          <div class="section" style="flex:1">
+            <div class="qtabs" id="resTabs">
+              <button class="qtab on" data-rt="0">SIGNALS</button>
+              <button class="qtab" data-rt="1">TRADES</button>
+              <button class="qtab" data-rt="2">ROBUSTNESS</button>
+              <button class="qtab" data-rt="3">COMPARE</button>
+              <button class="qtab" data-rt="4">DATA</button>
+              <button class="qtab" data-rt="5">VISUALS</button>
+            </div>
+            <div class="qbody on" data-rb="0">
+              <input class="input" placeholder="Filter signals…" style="margin-bottom:6px">
+              <table class="t"><thead><tr><th>TIME</th><th>SYMBOL</th><th>TF</th><th>SIDE</th><th>PRICE</th><th>EVENT</th><th>STRATEGY</th><th>EXP</th></tr></thead><tbody></tbody></table>
+              <div class="empty">NO SIGNALS\nNo signals in dataset.</div>
+              <div style="color:var(--muted);font-size:11px">Select a signal to inspect.</div>
+            </div>
+            <div class="qbody" data-rb="1">
+              <input class="input" placeholder="Filter trades…" style="margin-bottom:6px">
+              <table class="t"><thead><tr><th>#</th><th>ENTRY</th><th>EXIT</th><th>SIDE</th><th>QTY</th><th>P&L</th><th>REASON</th><th>HOLD</th></tr></thead><tbody></tbody></table>
+              <div class="empty">NO TRADES\nNo closed trades in dataset.</div>
+              <div class="section"><div class="s-title">TRADE INSPECTOR</div><div class="kv" id="tradeInsp"></div></div>
+            </div>
+            <div class="qbody" data-rb="2">
+              <table class="t"><thead><tr><th>TEST</th><th>INPUT</th><th>STABILITY</th><th>EVIDENCE</th></tr></thead><tbody></tbody></table>
+              <div class="empty">NOT RUN\nRobustness runs with the analysis engine.</div>
+              <div style="color:var(--muted);font-size:11px">Modes: single run · sweep · grid · range · walk-forward · OOS · sensitivity.</div>
+            </div>
+            <div class="qbody" data-rb="3">
+              <table class="t"><thead><tr><th>EXPERIMENT</th><th>STRATEGY</th><th>STATUS</th><th>DETAIL</th></tr></thead><tbody></tbody></table>
+              <div class="empty">NO EXPERIMENTS\nSave experiments to compare them here.</div>
+            </div>
+            <div class="qbody" data-rb="4">
+              <div class="section"><div class="s-title">DATA QUALITY</div><div class="kv" id="dq"></div>
+                <div style="color:var(--muted);font-size:11px">Values come from the engine; unchecked stays NOT CHECKED.</div></div>
+            </div>
+            <div class="qbody" data-rb="5">
+              <div class="empty">READY\nPrice / equity / drawdown / distribution charts appear here once the engine supplies a dated equity curve. No synthetic charts.</div>
+            </div>
+          </div>
+        </div>
+        <div class="ws-col" style="flex:1">
+          <div class="section" style="flex:1">
+            <div class="s-title">EXPERIMENT INSPECTOR</div>
+            <div class="kv" id="insp"></div>
+            <div class="cap" style="color:var(--text2)">Configuration</div><div class="kv" id="cfg"></div>
+            <div class="cap" style="color:var(--text2)">Data</div><div class="kv" id="dat"></div>
+            <div class="cap" style="color:var(--text2)">Result</div><div style="color:var(--text2);font-size:11px">No result</div>
+            <div class="cap" style="color:var(--text2)">Validation</div><div class="kv" id="val"></div>
+            <div class="cap" style="color:var(--text2)">Reproducibility</div><div class="kv" id="repro"></div>
+            <button class="btn" style="width:100%">SAVE EXPERIMENT</button>
+            <span class="badge muted">READY</span>
+          </div>
+        </div>
+      </div>
+      <div class="section">
+        <div class="s-title">RESEARCH LOG / ENGINE STATUS</div>
+        <div class="cmdbar"><span class="badge muted">READY</span><span style="color:var(--text2);font-size:11px">READY — No experiment executed.</span></div>
+        <div class="logview" style="color:var(--muted)">Engine events appear here.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =========================================================
+       PORTFOLIO
+       ========================================================= -->
+  <div class="screen" data-screen="portfolio">
+    <div class="ws">
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <div class="section" style="flex:2;min-width:260px"><div class="s-title">ACCOUNT / FUNDS</div>
+          <div class="kv" id="pfAcct"></div>
+          <div style="color:var(--muted);font-size:11px">Funds detail unavailable — no account snapshot in state.</div>
+        </div>
+        <div class="section" style="flex:2;min-width:260px"><div class="s-title">PERFORMANCE</div><div class="kv" id="pfPerf"></div></div>
+        <div class="section" style="flex:1;min-width:180px"><div class="s-title">STATUS</div>
+          <span class="badge muted">N/A / N/A</span>
+          <div style="color:var(--text2);font-size:11px">Mode N/A · Halted NO · Lifecycle N/A</div>
+        </div>
+      </div>
+      <div class="ws-split" style="flex:1">
+        <div class="section" style="flex:3"><div class="s-title">POSITIONS &amp; ALLOCATION</div>
+          <table class="t"><thead><tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Exposure</th><th>Alloc %</th></tr></thead><tbody></tbody></table>
+          <div class="empty">NO POSITIONS\nPortfolio is flat.</div>
+        </div>
+        <div class="section" style="flex:2"><div class="s-title">ORDERS &amp; FILLS</div>
+          <table class="t"><thead><tr><th>Order ID</th><th>Symbol</th><th>Side</th><th>Qty</th><th>Status</th></tr></thead><tbody></tbody></table>
+          <div class="hline" style="margin:6px 0"></div>
+          <table class="t"><thead><tr><th>Time</th><th>Symbol</th><th>Qty</th><th>Price</th></tr></thead><tbody></tbody></table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =========================================================
+       LIVE
+       ========================================================= -->
+  <div class="screen" data-screen="live">
+    <div class="ws">
+      <div class="cmdbar" style="flex-direction:column;align-items:stretch;gap:6px;padding:0">
+        <!-- status bar -->
+        <div class="pillbar">
+          <span class="badge accent">PAPER</span>
+          <span class="badge muted">Broker: NOT CONFIGURED</span>
+          <span class="badge muted">Connection: N/A</span>
+          <span class="badge muted">Strategy: —</span>
+          <span class="badge ok">Risk: READY</span>
+          <span class="badge muted">Reconciliation: NOT CONFIGURED</span>
+          <span class="badge ok">● ENABLED</span>
+          <span class="spacer"></span>
+          <span style="color:var(--muted);font-size:11px">Mode:</span>
+          <select class="input" style="width:110px"><option>PAPER</option><option>SANDBOX</option><option>LIVE</option></select>
+          <button class="btn" disabled>HALT EXECUTION</button>
+        </div>
+      </div>
+      <div class="ws-split" style="flex:1">
+        <!-- left: chart + orders/fills -->
+        <div class="ws-col" style="flex:3">
+          <div class="section" style="flex:3"><div class="s-title">CHART</div>
+            <div class="chart" style="min-height:160px"><div class="empty">NO DATA
+Symbol: —  ·  Timeframe: —  ·  Source: market store (SQLite)  ·  Next: select a symbol with downloaded history</div></div>
+            <div style="color:var(--text2);font-size:11px"></div>
+          </div>
+          <div class="ws-split" style="flex:2">
+            <div class="section"><div class="s-title">OPEN ORDERS</div>
+              <table class="t"><thead><tr><th>Order ID</th><th>Strategy</th><th>Symbol</th><th>Side</th><th>Qty</th><th>Type</th><th>Price</th><th>Status</th><th>Time</th><th>Broker</th></tr></thead><tbody></tbody></table>
+            </div>
+            <div class="section"><div class="s-title">RECENT FILLS</div>
+              <table class="t"><thead><tr><th>Time</th><th>Symbol</th><th>Side</th><th>Qty</th><th>Price</th><th>Order ID</th><th>Strategy</th><th>Slippage</th></tr></thead><tbody></tbody></table>
+            </div>
+          </div>
+        </div>
+        <!-- right rail -->
+        <div class="ws-col" style="flex:1;min-width:300px;overflow:auto">
+          <div class="section"><div class="s-title">LIVE READINESS</div>
+            <div id="liveGates"></div>
+            <button class="btn" style="width:100%" disabled>ARM LIVE</button>
+            <div style="color:var(--muted);font-size:11px">Blocked: LIVE broker is not configured</div>
+          </div>
+          <div class="section"><div class="s-title">ACTIVE STRATEGY</div><div class="kv" id="liveStrat"></div></div>
+          <div class="section"><div class="s-title">POSITION</div><div class="kv" id="livePos"></div></div>
+          <div class="section"><div class="s-title">RISK</div><span class="badge ok">READY</span><div style="color:var(--text2);font-size:11px"></div></div>
+        </div>
+      </div>
+      <!-- bottom strip -->
+      <div class="live-lower">
+        <div class="section"><div class="s-title">P&amp;L</div><div style="color:var(--text);font-size:11px">Realized N/A  ·  Unrealized N/A  ·  Total N/A\nExposure N/A  ·  Orders N/A  ·  Fills N/A  ·  W/L N/A/N/A</div></div>
+        <div class="section"><div class="s-title">BROKER</div><div style="color:var(--text2);font-size:11px">N/A  ·  N/A\nLatency N/A  ·  Heartbeat N/A\nCapabilities: N/A</div></div>
+        <div class="section"><div class="s-title">RECONCILIATION</div><div style="color:var(--text2);font-size:11px">N/A  ·  Mismatches N/A  ·  blocks_live N/A</div></div>
+      </div>
+      <!-- event stream -->
+      <div class="section" style="flex:1;min-height:120px"><div class="s-title">LIVE EVENTS</div>
+        <div class="cmdbar"><select class="input" style="width:160px"><option>ALL EVENTS</option></select><input class="input" placeholder="Filter: strategy, symbol, status…"></div>
+        <table class="t"><thead><tr><th>Timestamp</th><th>Strategy</th><th>Symbol</th><th>Event</th><th>Status</th></tr></thead><tbody></tbody></table>
+      </div>
+    </div>
+  </div>
+
+  <!-- =========================================================
+       SYSTEM (bottom dock → full view)
+       ========================================================= -->
+  <div class="screen" data-screen="system">
+    <div class="system">
+      <div class="section"><div class="s-title" style="color:var(--text2)">MARKET STATUS</div>
+        <div style="display:flex;gap:24px;flex-wrap:wrap">
+          <div><div class="cap" style="color:var(--muted)">MARKET REGIME</div><div class="kv" id="sysRegime"></div></div>
+          <div><div class="cap" style="color:var(--muted)">DATA STATUS</div><div class="kv" id="sysData"></div></div>
+        </div>
+      </div>
+      <div class="split">
+        <div class="section"><div class="s-title">EVENT LOG</div>
+          <div class="logview" style="max-height:none;flex:1;font-size:11px"></div>
+        </div>
+        <div class="section"><div class="s-title">SYSTEM HEALTH</div><div class="kv" id="sysHealth"></div></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+/* ================= NAV ================= */
+document.querySelectorAll('.nav-btn').forEach(function(b){
+  b.addEventListener('click',function(){
+    var s=b.dataset.nav;
+    document.querySelectorAll('.nav-btn').forEach(function(x){x.classList.remove('on');});
+    b.classList.add('on');
+    document.querySelectorAll('.screen').forEach(function(x){x.classList.toggle('on',x.dataset.screen===s);});
+  });
+});
+
+/* ================= MARKET: side panel toggle ================= */
+function marketPanel(id){
+  document.getElementById('watchPanel').classList.toggle('hidden', id!=='watchlist');
+  document.getElementById('dlPanel').classList.toggle('hidden', id!=='download');
+  document.getElementById('railWatch').classList.toggle('on', id==='watchlist');
+  document.getElementById('railDl').classList.toggle('on', id==='download');
+}
+var activePanel='watchlist';
+document.getElementById('railWatch').addEventListener('click',function(){activePanel=(activePanel==='watchlist')?null:'watchlist';marketPanel(activePanel);});
+document.getElementById('railDl').addEventListener('click',function(){activePanel=(activePanel==='download')?null:'download';marketPanel(activePanel);});
+document.getElementById('dlClose').addEventListener('click',function(){activePanel='watchlist';marketPanel('watchlist');});
+
+/* timeframe active */
+document.querySelectorAll('.tf-btn').forEach(function(b){b.addEventListener('click',function(){document.querySelectorAll('.tf-btn').forEach(function(x){x.classList.remove('on');});b.classList.add('on');});});
+
+/* indicators popup + catalogue */
+var CAT={TREND:["SMA","EMA","VWAP","Supertrend"],MOMENTUM:["RSI","MACD","Stochastic"],VOLUME:["Volume","OBV"],VOLATILITY:["Bollinger Bands","ATR","ADX"],STRATEGIES:["Supertrend Pullback","EMA Crossover RSI","Mean Reversion v2"]};
+var indCat='ALL';
+function renderInd(filter){
+  var el=document.getElementById('indList'); el.innerHTML='';
+  var cats=(indCat==='ALL')?Object.keys(CAT):[indCat];
+  var any=false;
+  cats.forEach(function(c){
+    var items=CAT[c].filter(function(n){return !filter||n.toLowerCase().indexOf(filter)>=0||c.toLowerCase().indexOf(filter)>=0;});
+    if(!items.length) return;
+    any=true;
+    var h=document.createElement('div'); h.className='hd'; h.textContent='— '+c+' —'; el.appendChild(h);
+    items.forEach(function(n){var d=document.createElement('div');d.className='it';d.textContent=n;d.onclick=function(){document.getElementById('indPop').classList.remove('on');};el.appendChild(d);});
+  });
+  if(!any){var p=document.createElement('div');p.className='it';p.textContent='No matches';el.appendChild(p);}
+}
+document.getElementById('indBtn').addEventListener('click',function(e){e.stopPropagation();document.getElementById('indPop').classList.toggle('on');renderInd('');});
+document.getElementById('indPop').addEventListener('click',function(e){e.stopPropagation();});
+document.body.addEventListener('click',function(){document.getElementById('indPop').classList.remove('on');});
+document.querySelectorAll('.ind-cat').forEach(function(b){b.addEventListener('click',function(e){e.stopPropagation();indCat=b.dataset.cat;document.querySelectorAll('.ind-cat').forEach(function(x){x.classList.remove('on');});b.classList.add('on');renderInd(document.getElementById('indSearch').value.trim().toLowerCase());});});
+document.getElementById('indSearch').addEventListener('input',function(){renderInd(this.value.trim().toLowerCase());});
+
+/* watchlist data */
+var STOCKS=[["RELIANCE",2580.00,1.20],["TCS",3920.50,-0.42],["INFY",1512.30,0.88],["HDFCBANK",1640.10,2.10],["ICICIBANK",1120.75,-0.15],["SBIN",812.40,0.55],["TATAMOTORS",985.25,3.02],["WIPRO",478.60,-1.10],["AXISBANK",1145.90,0.70],["KOTAKBANK",1780.00,-0.33],["LT",3550.20,1.05],["BAJFINANCE",7120.00,0.40]];
+function renderWL(){
+  var q=document.getElementById('wlFilter').value.trim().toUpperCase();
+  var el=document.getElementById('wlList'); el.innerHTML='';
+  STOCKS.forEach(function(s,i){
+    if(q&&s[0].indexOf(q)<0) return;
+    var r=document.createElement('div'); r.className='wl-row'+(i===0?' on':'');
+    var ch=s[2]>=0?'up':'dn'; var sign=s[2]>=0?'+':'';
+    r.innerHTML='<div class="col"><div class="r1"><span class="sym">'+s[0]+'</span><span class="px">'+s[1].toLocaleString('en-IN',{minimumFractionDigits:2})+'</span></div><div class="chg '+ch+'">'+sign+s[2].toFixed(2)+'%</div></div>';
+    r.onclick=function(){document.querySelectorAll('.wl-row').forEach(function(x){x.classList.remove('on');});r.classList.add('on');};
+    el.appendChild(r);
+  });
+}
+document.getElementById('wlFilter').addEventListener('input',renderWL);
+renderWL();
+
+/* ================= CHART CANVAS (candles + axes + grid + crosshair) ================= */
+function drawChart(){
+  var c=document.getElementById('chartCanvas'); if(!c) return;
+  var w=c.clientWidth, h=c.clientHeight; if(w<10||h<10) return;
+  var dpr=window.devicePixelRatio||1; c.width=w*dpr; c.height=h*dpr;
+  var g=c.getContext('2d'); g.setTransform(dpr,0,0,dpr,0,0);
+  g.fillStyle='#101418'; g.fillRect(0,0,w,h);
+  var AXIS_R=56, AXIS_B=22, padL=8;
+  var plotW=w-AXIS_R-padL, plotH=h-AXIS_B;
+  // synthesize a plausible OHLC walk for display only
+  var n=90, price=2400, data=[];
+  for(var i=0;i<n;i++){var o=price;var ch=(Math.sin(i/6)+Math.cos(i/3))*18+(i-45)*2.2;var cl=2400+ch;var hi=Math.max(o,cl)+Math.random()*10;var lo=Math.min(o,cl)-Math.random()*10;data.push([o,hi,lo,cl]);price=cl;}
+  var hiAll=-1e9,loAll=1e9; data.forEach(function(d){hiAll=Math.max(hiAll,d[1]);loAll=Math.min(loAll,d[2]);});
+  var pad=(hiAll-loAll)*0.08; hiAll+=pad; loAll-=pad;
+  function Y(p){return plotH-(p-loAll)/(hiAll-loAll)*plotH;}
+  var step=plotW/n, bw=Math.max(2,step*0.6);
+  // grid
+  g.strokeStyle='#232936'; g.lineWidth=1; g.fillStyle='#5d6778'; g.font='10px Consolas, monospace';
+  for(var k=0;k<=4;k++){var yy=Math.round(k*plotH/4)+0.5;g.beginPath();g.moveTo(padL,yy);g.lineTo(padL+plotW,yy);g.stroke();var val=hiAll-(hiAll-loAll)*k/4;g.fillText(val.toFixed(1),padL+plotW+6,yy+3);}
+  // candles
+  data.forEach(function(d,i){var x=padL+i*step+step/2;var up=d[3]>=d[0];g.strokeStyle=up?'#26a69a':'#ef5350';g.fillStyle=up?'#26a69a':'#ef5350';g.beginPath();g.moveTo(x,Y(d[1]));g.lineTo(x,Y(d[2]));g.stroke();var bt=Math.min(Y(d[0]),Y(d[3]));var bh=Math.abs(Y(d[0])-Y(d[3]))||1;g.fillRect(x-bw/2,bt,bw,bh);});
+  // a couple of overlays
+  g.strokeStyle='#ddaa45';g.lineWidth=1.2;g.beginPath();data.forEach(function(d,i){var x=padL+i*step+step/2;var y=Y(d[3]);i?g.lineTo(x,y):g.moveTo(x,y);});g.stroke();
+  // time axis
+  g.fillStyle='#5d6778';
+  for(var t=0;t<n;t+=15){var x=padL+t*step+step/2;g.fillText('1'+(8+(t%6))+':00',x-14,plotH+14);}
+  // crosshair
+  var cx=padL+plotW*0.62, cy=Y(data[Math.floor(n*0.62)][3]);
+  g.strokeStyle='#3b4659';g.setLineDash([3,3]);g.beginPath();g.moveTo(cx,0);g.lineTo(cx,plotH);g.moveTo(padL,cy);g.lineTo(padL+plotW,cy);g.stroke();g.setLineDash([]);
+  g.fillStyle='#26a69a';g.fillRect(padL+plotW,cy-8,AXIS_R,16);g.fillStyle='#0b0f13';g.fillText(data[Math.floor(n*0.62)][3].toFixed(2),padL+plotW+6,cy+3);
+  // last price tag
+  var lp=data[n-1][3]; g.fillStyle=lp>=data[n-1][0]?'#26a69a':'#ef5350';g.fillRect(padL+plotW,Y(lp)-8,AXIS_R,16);g.fillStyle='#0b0f13';g.fillText(lp.toFixed(2),padL+plotW+6,Y(lp)+3);
+}
+window.addEventListener('resize',drawChart);
+setTimeout(drawChart,50);
+
+/* ================= ui_kit helpers ================= */
+function kv(elId,keys,map,tones){
+  var el=document.getElementById(elId); if(!el) return; el.innerHTML='';
+  keys.forEach(function(k){
+    var row=document.createElement('div');row.className='row';
+    var v=(map&&map[k]!=null)?map[k]:'N/A';
+    var tone=tones&&tones[k];
+    row.innerHTML='<span class="k">'+k.replace(/_/g,' ').toUpperCase()+'</span><span class="v"'+(tone?' style="color:'+tone+'"':'')+'>'+v+'</span>';
+    el.appendChild(row);
+  });
+}
+
+/* ================= RESEARCH ================= */
+var RES_KEYS=["trades","signals","win_rate","avg_win","avg_loss","expectancy","profit_factor","net_profit","max_drawdown","drawdown_abs","drawdown_pct","sharpe","sortino","cagr","volatility","payoff_ratio","exposure","turnover"];
+kv('resMetrics',RES_KEYS,null);
+kv('tradeInsp',["entry_time","entry_price","exit_time","exit_price","direction","exit_reason","pnl","holding","mfe","mae"],null);
+kv('dq',["bars","symbols","date_range","missing_bars","duplicate_bars","timezone","data_status"],null);
+kv('insp',["experiment_id","strategy","version","created","executions","status"],null);
+kv('cfg',["strategy","version","timeframe","parameters"],null);
+kv('dat',["universe","symbol","period","executions"],null);
+kv('val',["status","summary"],{"status":"NOT RUN","summary":"Not run."});
+kv('repro',["experiment_id","strategy_version","dataset","dataset_version","parameters","timeframe","date_range"],null);
+document.querySelectorAll('#resTabs .qtab').forEach(function(b){b.addEventListener('click',function(){
+  document.querySelectorAll('#resTabs .qtab').forEach(function(x){x.classList.remove('on');});b.classList.add('on');
+  document.querySelectorAll('.qbody').forEach(function(x){x.classList.toggle('on',x.dataset.rb===b.dataset.rt);});
+});});
+
+/* ================= PORTFOLIO ================= */
+kv('pfAcct',["account","environment","currency","equity","available","used"],{"account":"N/A","environment":"N/A","currency":"UNAVAILABLE","equity":"UNAVAILABLE","available":"UNAVAILABLE","used":"UNAVAILABLE"});
+kv('pfPerf',["trades","wins","losses","win_rate","realized","unrealized","total"],null);
+
+/* ================= LIVE ================= */
+kv('liveStrat',["id","version","status","mode","instrument","timeframe","live_supported","warmup","state"],null);
+kv('livePos',["instrument","side","quantity","avg_price","current_price","unrealized","realized","exposure","risk_utilization"],null);
+var GATES=[["BROKER","NOT READY","no live venue adapter is registered"],["CREDENTIALS","NOT READY","requested=live configured=none"],["RISK","READY",""],["STRATEGY","NOT READY","strategy library is empty"],["MARKET DATA","READY",""],["CLOCK","READY","local clock only"],["ENVIRONMENT","NOT READY","requested=live configured=none"],["ARMING","NOT READY","DISARMED — no live session exists to arm"]];
+var tone={"READY":"ok","NOT READY":"warn","BLOCKED":"bad"};
+(function(){var el=document.getElementById('liveGates');GATES.forEach(function(g){var d=document.createElement('div');d.style.cssText='display:flex;flex-direction:column;gap:0;';d.innerHTML='<div style="display:flex;gap:6px;align-items:center"><span class="badge '+(tone[g[1]]||'muted')+'">'+g[1]+'</span><span style="color:var(--text);font-size:11px">'+g[0]+'</span></div>'+(g[2]?'<div style="color:var(--muted);font-size:10px;margin-left:2px">'+g[2]+'</div>':'');el.appendChild(d);});})();
+
+/* ================= SYSTEM ================= */
+kv('sysRegime',["Current regime","Trend strength","Volatility","Momentum"],null);
+kv('sysData',["Data provider","Latency","Last update","Bars loaded"],null);
+var SYS=[["CPU","--"],["RAM","--"],["Disk","--"],["Data Engine","Ready"],["Chart Engine","Running"],["Strategy Engine","Ready"],["Backtest Engine","Idle"]];
+kv('sysHealth',SYS.map(function(x){return x[0];}),Object.fromEntries(SYS));
+document.getElementById('sysHealth').innerHTML='';
+SYS.forEach(function(r){var row=document.createElement('div');row.className='row';var col=(r[1]==='Running')?'var(--pos)':(r[1]==='Failed'?'var(--neg)':'var(--text)');row.innerHTML='<span class="k">'+r[0]+'</span><span class="v" style="color:'+col+';font-weight:600">'+r[1]+'</span>';document.getElementById('sysHealth').appendChild(row);});
+
+/* ================= STRATEGY LAB ================= */
+var METRICS=["NET PROFIT","TOTAL TRADES","WIN RATE","PROFIT FACTOR","EXPECTANCY","MAX DRAWDOWN","SHARPE","AVG TRADE"];
+function renderLabMetrics(vals){var g=document.getElementById('labMetrics');g.innerHTML='';METRICS.forEach(function(k){var d=document.createElement('div');d.className='mtile';d.innerHTML='<div class="mk">'+k+'</div><div class="mv">'+(vals&&vals[k]?vals[k]:'--')+'</div>';g.appendChild(d);});}
+renderLabMetrics();
+document.querySelectorAll('[data-lc]').forEach(function(b){b.addEventListener('click',function(){
+  document.querySelectorAll('[data-lc]').forEach(function(x){x.classList.remove('on');});b.classList.add('on');
+  document.querySelectorAll('.lab .pane').forEach(function(p){p.classList.toggle('on',p.dataset.lp===b.dataset.lc);});
+  document.getElementById('labMode').classList.toggle('hidden',b.dataset.lc!=='backtest');
+});});
+document.querySelectorAll('[data-lr]').forEach(function(b){b.addEventListener('click',function(){
+  document.querySelectorAll('[data-lr]').forEach(function(x){x.classList.remove('on');});b.classList.add('on');
+  document.querySelectorAll('.lab .rpane').forEach(function(p){p.classList.toggle('on',p.dataset.lrp===b.dataset.lr);});
+});});
+document.getElementById('labAdv').addEventListener('click',function(){var h=document.getElementById('labAdvHost');var s=h.style.display!=='block';h.style.display=s?'block':'none';this.textContent=s?'Advanced configuration ▴':'Advanced configuration ▾';});
+document.getElementById('labCollapse').addEventListener('click',function(){var b=document.getElementById('labResultBody');var open=b.style.display!=='none';b.style.display=open?'none':'block';this.textContent=open?'▴':'▾';});
+var M={buy:{run:"▶  RUN BUY BACKTEST",dir:"●  BUY  —  LONG",cls:"buy",lab:"BUY PERFORMANCE  —  LONG",col:"var(--buy)"},sell:{run:"▶  RUN SELL BACKTEST",dir:"●  SELL  —  SHORT",cls:"sell",lab:"SELL PERFORMANCE  —  SHORT",col:"var(--sell)"},cmp:{run:"▶  RUN ALL",dir:"◐  COMPARE",cls:"cmp",lab:"PERFORMANCE",col:"var(--muted)"}};
+function setMode(m){var b=document.getElementById('mBuy'),s=document.getElementById('mSell'),c=document.getElementById('mCmp');[b,s,c].forEach(function(x){x.className='';});if(m==='buy')b.className='buy-on';else if(m==='sell')s.className='sell-on';else c.className='cmp-on';
+  var cf=M[m];document.getElementById('dirInd').textContent=cf.dir;document.getElementById('dirInd').className='dir-ind '+cf.cls;document.getElementById('labRun').textContent=cf.run;document.getElementById('labTopRun').textContent=cf.run;var dl=document.getElementById('labDir');dl.textContent=cf.lab;dl.style.color=cf.col;}
+document.getElementById('mBuy').onclick=function(){setMode('buy');};
+document.getElementById('mSell').onclick=function(){setMode('sell');};
+document.getElementById('mCmp').onclick=function(){setMode('cmp');};
+</script>
+</body>
+</html>

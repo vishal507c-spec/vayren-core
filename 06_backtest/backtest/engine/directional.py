@@ -7,6 +7,8 @@ and :func:`compute_equity_curve` so numbers stay identical to the engine.
 
 from __future__ import annotations
 
+from typing import Any
+
 from backtest.engine.metrics import compute_equity_curve, compute_metrics
 from backtest.models.result import StrategyResult
 
@@ -73,6 +75,32 @@ def derive_symbol_result(base: StrategyResult | None, symbol: str) -> StrategyRe
     if base is None:
         return None
     filtered = tuple(t for t in base.trades if getattr(t, "symbol", "") == symbol)
+    return _symbol_view(base, filtered)
+
+
+def derive_symbol_results(
+    base: StrategyResult | None, symbols: tuple[str, ...] | list[str]
+) -> dict[str, StrategyResult]:
+    """Return per-symbol views for *symbols* in a single pass over trades.
+
+    Identical math to calling :func:`derive_symbol_result` per symbol (same
+    helpers, same start timestamp, same field assembly) but groups the
+    merged trades once instead of rescanning them per symbol — ranking
+    527 symbols drops from tens of seconds to well under one.
+    """
+    if base is None:
+        return {}
+    wanted = set(symbols)
+    grouped: dict[str, list] = {}
+    for trade in base.trades:
+        symbol = getattr(trade, "symbol", "")
+        if symbol in wanted:
+            grouped.setdefault(symbol, []).append(trade)
+    return {symbol: _symbol_view(base, tuple(grouped.get(symbol, ()))) for symbol in symbols}
+
+
+def _symbol_view(base: StrategyResult, filtered: tuple[Any, ...]) -> StrategyResult:
+    """Assemble a per-symbol view from already-filtered trades (shared core)."""
     start = base.period_start or (base.equity_curve[0].timestamp if base.equity_curve else None)
     curve = compute_equity_curve(filtered, base.config.initial_capital, start)
     metrics = compute_metrics(filtered, curve, base.config.initial_capital)

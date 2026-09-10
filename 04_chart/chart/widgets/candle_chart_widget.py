@@ -63,9 +63,22 @@ class CandleChartWidget(QWidget):
     indicator_added = Signal(str)
 
     MIN_VISIBLE_BARS = 10
+    # TradingView-style minimum readable candle slot (px): one candle's full
+    # horizontal budget — body + wick + inter-candle gap + marker room.
+    # Tuned to 1px so ~1400 candles fit a normal desktop chart (user request);
+    # the hard MAX_VISIBLE_CANDLES cap remains the backstop against unbounded
+    # compression. Owned centrally here (viewport/geometry layer); the candle
+    # renderer only paints the window it is given and holds no density
+    # constant of its own.
+    MIN_CANDLE_SLOT = 1.0
+    # Hard maximum visible candle limit: one viewport never renders more
+    # than this many candles, no matter how far the user zooms out or how
+    # wide the chart is. Viewport-only visibility cap — the full dataset
+    # stays loaded and pan moves through it normally.
+    MAX_VISIBLE_CANDLES = 1800
     ZOOM_STEP = 1.25
     VOLUME_RATIO = 0.15
-    INITIAL_BARS = 150
+    INITIAL_BARS = 1400
     RIGHT_MARGIN_FRACTION = 0.15
     TIME_AXIS_HEIGHT = 24
     SYMBOL_HEIGHT = 24
@@ -413,7 +426,8 @@ class CandleChartWidget(QWidget):
         """Replace the chart data and reset the viewport.
 
         A fresh lifecycle (first load, new symbol or timeframe change) opens
-        at the latest ``INITIAL_BARS``, never the whole history. For the same
+        at the latest readable window (``INITIAL_BARS`` capped by the
+        viewport density limit), never the whole history. For the same
         symbol/timeframe: follow-latest re-anchors the latest bar at the right
         margin, otherwise the window is shifted so the same bars stay in place.
         """
@@ -427,7 +441,10 @@ class CandleChartWidget(QWidget):
         total = len(model.bars)
         if not same_series or self._follow_latest:
             if same_series:
-                count = max(self.MIN_VISIBLE_BARS, min(previous_count, max(total, 1)))
+                count = max(
+                    self.MIN_VISIBLE_BARS,
+                    min(previous_count, max(total, 1), self.max_visible_bars()),
+                )
             else:
                 count = self._initial_count(total)
             first = self._anchor_first(total, count)
@@ -474,13 +491,15 @@ class CandleChartWidget(QWidget):
         self.update()
 
     def _initial_count(self, total: int) -> int:
-        """Window count for a fresh viewport: the latest ``INITIAL_BARS``.
+        """Window count for a fresh viewport: the latest readable candles.
 
+        ``INITIAL_BARS`` capped by the viewport density limit
+        (``max_visible_bars``), so a fresh chart never opens over-compressed.
         The whole history stays loaded; only the visible window is limited.
         """
         if total <= 0:
             return self.INITIAL_BARS
-        return max(self.MIN_VISIBLE_BARS, min(self.INITIAL_BARS, total))
+        return max(self.MIN_VISIBLE_BARS, min(self.INITIAL_BARS, total, self.max_visible_bars()))
 
     # ── trade-context viewport ────────────────────────────────────
 
@@ -567,6 +586,12 @@ class CandleChartWidget(QWidget):
         if exit_index < entry_index:
             entry_index, exit_index = exit_index, entry_index
         first, count = self._trade_viewport(entry_index, exit_index, total)
+        limit = min(self.max_visible_bars(), total)
+        if count > limit:
+            # Density cap: keep the entry visible at the focus fraction
+            # instead of rendering an over-compressed window.
+            count = max(limit, 1)
+            first = max(0, min(entry_index - int(count * self.TRADE_FOCUS_FRACTION), total - count))
         new_last = first + count
         if first == self._first and new_last == self._last:
             # still ensure follow_latest off and price fit
@@ -627,6 +652,62 @@ class CandleChartWidget(QWidget):
 
     def _window_size(self) -> int:
         return max(0, self._last - self._first)
+
+    def max_visible_bars(self) -> int:
+        """Maximum readable candles for the current viewport width.
+
+        ``chartWidth / MIN_CANDLE_SLOT`` from the live chart geometry —
+        the TradingView-style density cap — additionally bounded by the
+        hard ``MAX_VISIBLE_CANDLES`` limit. Zoom-out, initial view, trade
+        focus and resize all clamp to this; data is never touched, only
+        the visible window. Floored at ``MIN_VISIBLE_BARS`` so a tiny
+        strip still shows something. Before layout (width 0) there is no
+        density information, so fall back to the data-bound default.
+        """
+        chart_rect, _, _ = self._chart_rects()
+        width = chart_rect.width()
+        if width <= 0:
+            if self._model is not None:
+                total = len(self._model.bars)
+                return max(self.MIN_VISIBLE_BARS, min(self.INITIAL_BARS, max(total, 1)))
+            return self.INITIAL_BARS
+        density = max(self.MIN_VISIBLE_BARS, int(width / self.MIN_CANDLE_SLOT))
+        return min(density, self.MAX_VISIBLE_CANDLES)
+
+    def candle_slot_width(self) -> float:
+        """Current px per candle slot (viewport width / visible count)."""
+        chart_rect, _, _ = self._chart_rects()
+        count = self._window_size()
+        if chart_rect.width() <= 0 or count <= 0:
+            return 0.0
+        return chart_rect.width() / count
+
+    def _enforce_density(self) -> bool:
+        """Shrink an over-dense window to ``max_visible_bars``.
+
+        Called on resize (a narrower chart fits fewer readable candles).
+        Follow-latest re-anchors at the right margin; a manually panned
+        view keeps its position, clamped to the valid range. Returns True
+        when the viewport changed. Viewport-only: model/data untouched.
+        """
+        if self._model is None:
+            return False
+        total = len(self._model.bars)
+        count = self._window_size()
+        if total <= 0 or count <= 0:
+            return False
+        limit = min(self.max_visible_bars(), total)
+        if count <= limit:
+            return False
+        if self._follow_latest:
+            first = self._anchor_first(total, limit)
+        else:
+            first = max(0, min(self._first, self._anchor_first(total, limit)))
+        self._first = first
+        self._last = first + limit
+        self._refresh_crosshair_after_viewport()
+        self.update()
+        return True
 
     def _anchor_first(self, total: int, count: int) -> int:
         """First window index that puts the latest bar at the right margin."""
@@ -1054,7 +1135,12 @@ class CandleChartWidget(QWidget):
     # ── zoom / pan ────────────────────────────────────────────────────
 
     def _zoom_at_px(self, anchor_x: float, scale: float) -> None:
-        """Zoom around `anchor_x` (the bar under it stays under the cursor)."""
+        """Zoom around `anchor_x` (the bar under it stays under the cursor).
+
+        Zoom-out stops at the readable density limit
+        (``max_visible_bars``): once the minimum candle slot is reached the
+        window stops growing instead of squeezing candles indefinitely.
+        """
         if self._model is None or not self._model.bars or scale <= 0.0:
             return
         chart_rect, _, _ = self._chart_rects()
@@ -1066,7 +1152,9 @@ class CandleChartWidget(QWidget):
         fraction = max(0.0, min(1.0, fraction))
         anchor_bar = self._first + fraction * count
         anchor_bar = max(float(self._first), min(float(total - 1), anchor_bar))
-        new_count = max(self.MIN_VISIBLE_BARS, min(total, round(count * scale)))
+        new_count = max(
+            self.MIN_VISIBLE_BARS, min(total, round(count * scale), self.max_visible_bars())
+        )
         new_first_raw = round(anchor_bar - fraction * new_count)
         new_first = max(0, min(new_first_raw, self._anchor_first(total, new_count)))
         if new_first == self._first and new_count == count:
@@ -1181,6 +1269,9 @@ class CandleChartWidget(QWidget):
 
     def resizeEvent(self, _event: QResizeEvent) -> None:
         self._position_visibility_panel()
+        # A narrower chart fits fewer readable candles: shrink an
+        # over-dense window to the density limit (viewport-only).
+        self._enforce_density()
         self.update()
 
     def event(self, event: QEvent) -> bool:

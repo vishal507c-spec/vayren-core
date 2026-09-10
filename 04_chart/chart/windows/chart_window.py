@@ -213,6 +213,9 @@ class ChartWindow(QMainWindow):
             self._bottom = None  # type: ignore[assignment]
             self.setCentralWidget(splitter)
         self._apply_panel_state()
+        # Restored/normal geometry only (used if the user later un-maximizes).
+        # Startup size is NOT defined here — Bootstrap.start() shows this window
+        # maximized (native), so no saved or hardcoded size can pin startup small.
         self.resize(1280, 760)
         self.setWindowTitle("VAYREN")
         app = QApplication.instance()
