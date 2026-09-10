@@ -253,3 +253,15 @@ def test_stale_done_after_restart_ignored(qt_app: QApplication) -> None:
     assert rid1 != rid2
     coord.on_batch_done((rid1, (SymbolBatchResult("AAA", _result("AAA", 3, 1.0), None),)))
     assert outcomes == []
+
+
+def test_finalizing_emitted_before_merge(qt_app: QApplication) -> None:
+    _ = qt_app
+    coord, _, _ = _coord()
+    events: list = []
+    coord.batch_finalizing.connect(lambda rid: events.append(("finalizing", rid)))
+    coord.batch_finished.connect(lambda _o: events.append(("finished", None)))
+    rid = coord.start(("AAA",), _request())
+    coord.on_batch_done((rid, (SymbolBatchResult("AAA", _result("AAA", 3, 1.0), None),)))
+    assert events[0] == ("finalizing", rid)
+    assert events[-1][0] == "finished"

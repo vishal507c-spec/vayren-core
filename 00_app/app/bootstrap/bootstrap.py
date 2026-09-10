@@ -41,6 +41,7 @@ from market.loader.symbol_list_loader import SymbolListLoader
 from market.loader.timeframe_list_loader import TimeframeListLoader
 from market.manifest import market_manifest
 from market.repository.symbol_repository import SymbolRepository
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
 from PySide6.QtWidgets import QApplication
 
 from app.lifecycle.lifecycle import AppLifecycle
@@ -80,6 +81,211 @@ class _HistoryDomain:
     """Namespace alias so bootstrap reads like the design table."""
 
     HISTORICAL_DATA = _history_domain()
+
+
+def build_execution_history(
+    result: Any, strategy_registry: Any, data_dir: str
+) -> tuple[str | None, list[tuple[str, str]]]:
+    """Build and save the immutable execution history for one result.
+
+    Verbatim semantics of the former inline Phase-5 block: resolves the
+    canonical strategy/version, materializes per-trade events + signals,
+    writes the JSON history and lineage. Pure data work (no widgets) so it
+    can run off the UI thread. Returns ``(last_execution_id, log_lines)``
+    with one ``(level, text)`` line per result, exactly as logged inline.
+    """
+    import hashlib
+
+    from backtest.execution import (
+        ExecutionEvent,
+        ExecutionHistory,
+        create_snapshot,
+        save_history,
+    )
+    from strategy.language.storage import (
+        get_strategy_by_id,
+        load_strategy,
+        load_strategy_record,
+    )
+    from strategy.version import list_versions
+
+    saved_id: str | None = None
+    saved_version = ""
+    lines: list[tuple[str, str]] = []
+    for res in result.results:
+        # Find strategy definition and resolve canonical UUID via library
+        try:
+            definition = strategy_registry.get(res.strategy_id)
+            # Resolve canonical id: prefer library UUID if name exists
+            canonical_id = definition.id
+            source = None
+            version = None
+            # Try to map definition.name -> library UUID
+            try:
+                rec = load_strategy_record(definition.name, data_dir)  # type: ignore[attr-defined]
+                if rec is not None:
+                    canonical_id = rec.id
+                    source = rec.code
+            except Exception:
+                pass
+            if source is None:
+                source = load_strategy(definition.name, data_dir) or ""
+            # Also try get_strategy_by_id with registry id (might be UUID already)
+            if not source:
+                rec2 = get_strategy_by_id(definition.id, data_dir)
+                if rec2 is not None:
+                    canonical_id = rec2.id
+                    source = rec2.code
+            strategy_id = canonical_id
+            # Find latest version for canonical strategy
+            versions = list_versions(strategy_id, data_dir)
+            if versions:
+                version = versions[-1]
+                source_hash = version.source_hash
+                ir_version = version.ir_version
+                version_id = version.version_id
+            else:
+                # Fallback: if canonical had no version, check slug-based listing (backward compat)  # noqa: E501
+                alt_versions = list_versions(definition.id, data_dir)
+                if alt_versions:
+                    version = alt_versions[-1]
+                    strategy_id = definition.id
+                    source_hash = version.source_hash
+                    ir_version = version.ir_version
+                    version_id = version.version_id
+                else:
+                    source_hash = (
+                        hashlib.sha256((source or "").encode("utf-8")).hexdigest() if source else ""
+                    )
+                    ir_version = 1  # noqa: F841
+                    version_id = "v0"
+            # Build snapshot — exact version reference preserved forever (Python-native)
+            snap = create_snapshot(
+                strategy_id,
+                version_id,
+                source_hash,
+                None,
+                dict(definition.params) if hasattr(definition, "params") else {},
+                res.config,  # type: ignore[attr-defined]
+                data_dir,
+            )
+            # Build generic events from trades
+            events = []
+            seq = 0
+            for t in res.trades:
+                events.append(
+                    ExecutionEvent(
+                        execution_id=snap.execution_id,
+                        sequence=seq,
+                        event_type="TradeClosed",
+                        timestamp=t.exit_time,
+                        data={
+                            "symbol": t.symbol,
+                            "side": t.side,
+                            "pnl": t.pnl,
+                            "entry": t.entry_price,
+                            "exit": t.exit_price,
+                        },
+                    )
+                )
+                seq += 1
+            # Also add BarProcessed-like for replay determinism (using equity curve length)  # noqa: E501
+            for idx, pt in enumerate(res.equity_curve[:5]):
+                events.append(
+                    ExecutionEvent(
+                        execution_id=snap.execution_id,
+                        sequence=seq,
+                        event_type="BarProcessed",
+                        timestamp=pt.timestamp,
+                        data={"index": idx},
+                    )
+                )
+                seq += 1
+            signals = [
+                {
+                    "index": t.entry_index,
+                    "kind": "BUY" if t.side == "LONG" else "SELL",
+                    "price": t.entry_price,
+                    "timestamp": t.entry_time,
+                }
+                for t in res.trades
+            ]
+            history = ExecutionHistory(
+                snapshot=snap, events=events, signals=signals, trades=res.trades
+            )
+            save_history(history, data_dir)
+            # Lineage: VERSION -> EXECUTION (and STRATEGY -> VERSION already via version creation)  # noqa: E501
+            try:
+                from strategy.research.lineage import (
+                    load_lineage,
+                    save_lineage,
+                )
+
+                g = load_lineage(data_dir)
+                snap_id = snap.execution_id
+                g.add_node("STRATEGY", strategy_id)
+                g.add_node("VERSION", version_id)
+                g.add_edge(
+                    "STRATEGY", strategy_id, "VERSION", version_id, relationship="has_version"
+                )
+                g.add_edge(
+                    "VERSION",
+                    version_id,
+                    "EXECUTION",
+                    snap_id,
+                    relationship="executed_as",
+                )
+                g.add_edge(
+                    "STRATEGY",
+                    strategy_id,
+                    "EXECUTION",
+                    snap_id,
+                    relationship="executed",
+                )
+                save_lineage(g, data_dir)
+            except Exception:
+                pass
+            saved_id = snap.execution_id
+            saved_version = version_id
+            lines.append(("INFO", f"Execution {saved_id} saved (v{saved_version[:8]})"))
+        except Exception as e:  # noqa: BLE001
+            lines.append(("WARN", f"History save failed: {e}"))
+    return saved_id, lines
+
+
+class _HistorySaved(QObject):
+    """Completion emitter for the background history save (UI-thread slot)."""
+
+    finished = Signal(object)  # (generation, execution_id | None, log_lines)
+
+
+class _HistorySaveTask(QRunnable):
+    """QRunnable wrapper so the 193k-trade JSON build never blocks the UI."""
+
+    def __init__(
+        self,
+        result: Any,
+        strategy_registry: Any,
+        data_dir: str,
+        generation: int,
+        emitter: _HistorySaved,
+    ) -> None:
+        super().__init__()
+        self._result = result
+        self._strategy_registry = strategy_registry
+        self._data_dir = data_dir
+        self._generation = generation
+        self._emitter = emitter
+
+    def run(self) -> None:
+        try:
+            execution_id, lines = build_execution_history(
+                self._result, self._strategy_registry, self._data_dir
+            )
+        except Exception as exc:  # noqa: BLE001
+            execution_id, lines = None, [("WARN", f"History save failed: {exc}")]
+        self._emitter.finished.emit((self._generation, execution_id, lines))
+        self._result = None  # release the heavy result reference
 
 
 class Bootstrap:
@@ -1266,12 +1472,14 @@ class Bootstrap:
             if _multi_lab is not None:
 
                 def _on_batch_finished(outcome: Any) -> None:
+                    # Single ranking refresh: the terminal BacktestCompleted
+                    # (published right after) rebuilds it once via set_result.
                     with contextlib.suppress(Exception):
                         lab_workspace.set_symbol_windows(outcome.bars_by_symbol)
                     with contextlib.suppress(Exception):
-                        lab_workspace.set_last_run_symbols(outcome.symbols)
+                        lab_workspace.set_last_run_symbols(outcome.symbols, refresh=False)
                     with contextlib.suppress(Exception):
-                        lab_workspace.set_ranking_errors(dict(outcome.errors))
+                        lab_workspace.set_ranking_errors(dict(outcome.errors), refresh=False)
                     if outcome.errors:
                         detail = "; ".join(f"{s}: {e}" for s, e in outcome.errors.items())
                         event_log.add_entry("WARN", f"Some symbols failed — {detail}")
@@ -1289,6 +1497,12 @@ class Bootstrap:
 
                 _multi_lab.batch_finished.connect(_on_batch_finished)  # type: ignore[attr-defined]
                 _multi_lab.batch_failed.connect(_on_batch_failed)  # type: ignore[attr-defined]
+
+                def _on_batch_finalizing(_request_id: object) -> None:
+                    with contextlib.suppress(Exception):
+                        lab_workspace.set_run_state("finalizing")
+
+                _multi_lab.batch_finalizing.connect(_on_batch_finalizing)  # type: ignore[attr-defined]
 
                 def _on_batch_progress(payload: object) -> None:
                     try:
@@ -2187,180 +2401,58 @@ class Bootstrap:
                 "SUCCESS",
                 f"Backtest completed: {first.name} — {len(first.trades)} trades, net ₹{first.metrics.net_profit:+,.0f}",  # noqa: E501  # noqa: E501
             )
-            # Phase 5: create immutable execution history (canonical strategy_id = StrategyRecord.id)  # noqa: E501
-            try:
-                import hashlib
-
-                from backtest.execution import (
-                    ExecutionEvent,
-                    ExecutionHistory,
-                    create_snapshot,
-                    save_history,
-                )
-                from strategy.language.storage import (
-                    get_strategy_by_id,
-                    load_strategy,
-                    load_strategy_record,
-                )
-                from strategy.version import list_versions
-
-                # Canonical strategy source versions live with D:\VAYREN_STRATEGIES  # noqa: E501
-                data_dir = r"D:\VAYREN_STRATEGIES"
-                for res in result.results:
-                    # Find strategy definition and resolve canonical UUID via library
-                    try:
-                        definition = self._strategy_registry.get(res.strategy_id)
-                        # Resolve canonical id: prefer library UUID if name exists
-                        canonical_id = definition.id
-                        source = None
-                        version = None
-                        # Try to map definition.name -> library UUID
-                        try:
-                            rec = load_strategy_record(definition.name, data_dir)  # type: ignore[attr-defined]
-                            if rec is not None:
-                                canonical_id = rec.id
-                                source = rec.code
-                        except Exception:
-                            pass
-                        if source is None:
-                            source = load_strategy(definition.name, data_dir) or ""
-                        # Also try get_strategy_by_id with registry id (might be UUID already)
-                        if not source:
-                            rec2 = get_strategy_by_id(definition.id, data_dir)
-                            if rec2 is not None:
-                                canonical_id = rec2.id
-                                source = rec2.code
-                        strategy_id = canonical_id
-                        # Find latest version for canonical strategy
-                        versions = list_versions(strategy_id, data_dir)
-                        if versions:
-                            version = versions[-1]
-                            source_hash = version.source_hash
-                            ir_version = version.ir_version
-                            version_id = version.version_id
-                        else:
-                            # Fallback: if canonical had no version, check slug-based listing (backward compat)  # noqa: E501
-                            alt_versions = list_versions(definition.id, data_dir)
-                            if alt_versions:
-                                version = alt_versions[-1]
-                                strategy_id = definition.id
-                                source_hash = version.source_hash
-                                ir_version = version.ir_version
-                                version_id = version.version_id
-                            else:
-                                source_hash = (
-                                    hashlib.sha256((source or "").encode("utf-8")).hexdigest()
-                                    if source
-                                    else ""
-                                )
-                                ir_version = 1  # noqa: F841
-                                version_id = "v0"
-                        # Build snapshot — exact version reference preserved forever (Python-native)
-                        snap = create_snapshot(
-                            strategy_id,
-                            version_id,
-                            source_hash,
-                            None,
-                            dict(definition.params) if hasattr(definition, "params") else {},
-                            res.config,  # type: ignore[attr-defined]
-                            data_dir,
-                        )
-                        # Build generic events from trades
-                        events = []
-                        seq = 0
-                        for t in res.trades:
-                            events.append(
-                                ExecutionEvent(
-                                    execution_id=snap.execution_id,
-                                    sequence=seq,
-                                    event_type="TradeClosed",
-                                    timestamp=t.exit_time,
-                                    data={
-                                        "symbol": t.symbol,
-                                        "side": t.side,
-                                        "pnl": t.pnl,
-                                        "entry": t.entry_price,
-                                        "exit": t.exit_price,
-                                    },
-                                )
-                            )
-                            seq += 1
-                        # Also add BarProcessed-like for replay determinism (using equity curve length)  # noqa: E501
-                        for idx, pt in enumerate(res.equity_curve[:5]):
-                            events.append(
-                                ExecutionEvent(
-                                    execution_id=snap.execution_id,
-                                    sequence=seq,
-                                    event_type="BarProcessed",
-                                    timestamp=pt.timestamp,
-                                    data={"index": idx},
-                                )
-                            )
-                            seq += 1
-                        signals = [
-                            {
-                                "index": t.entry_index,
-                                "kind": "BUY" if t.side == "LONG" else "SELL",
-                                "price": t.entry_price,
-                                "timestamp": t.entry_time,
-                            }
-                            for t in res.trades
-                        ]
-                        history = ExecutionHistory(
-                            snapshot=snap, events=events, signals=signals, trades=res.trades
-                        )
-                        save_history(history, data_dir)
-                        # Lineage: VERSION -> EXECUTION (and STRATEGY -> VERSION already via version creation)  # noqa: E501
-                        try:
-                            from strategy.research.lineage import (
-                                load_lineage,
-                                save_lineage,
-                            )
-
-                            g = load_lineage(data_dir)
-                            g.add_node("STRATEGY", strategy_id)
-                            g.add_node("VERSION", version_id)
-                            g.add_edge(
-                                "STRATEGY",
-                                strategy_id,
-                                "VERSION",
-                                version_id,
-                                relationship="has_version",
-                            )
-                            g.add_edge(
-                                "VERSION",
-                                version_id,
-                                "EXECUTION",
-                                snap.execution_id,
-                                relationship="executed_as",
-                            )
-                            # Also link execution to strategy directly for backward traversal convenience  # noqa: E501
-                            g.add_edge(
-                                "STRATEGY",
-                                strategy_id,
-                                "EXECUTION",
-                                snap.execution_id,
-                                relationship="executed",
-                            )
-                            save_lineage(g, data_dir)
-                        except Exception:
-                            pass
-                        event_log.add_entry(
-                            "INFO", f"Execution {snap.execution_id} saved (v{version_id[:8]})"
-                        )
-                        # Expose to lab workspace for replay UI if available
-                        try:
-                            if hasattr(self, "_lab_workspace") and self._lab_workspace is not None:
-                                # Store last execution for replay button
-                                self._last_execution_id = snap.execution_id  # type: ignore[attr-defined]
-                                self._last_execution_ir = None  # type: ignore[attr-defined]  # noqa: F821
-                        except Exception:
-                            pass
-                    except Exception as e:  # noqa: BLE001
-                        event_log.add_entry("WARN", f"History save failed: {e}")
-            except Exception:
-                pass
+            # Phase 5: immutable execution history saves off the UI thread —
+            # the 193k-trade JSON build must never block result display.
+            self._save_execution_history_async(result, event_log)
         system_health.set_engine_state("Backtest Engine", "Idle")
+
+    def _save_execution_history_async(self, result: Any, event_log: Any) -> None:  # type: ignore[no-untyped-def]  # noqa: E501
+        """Persist execution history in the background (UI stays responsive).
+
+        Same file, same log lines, same replay id — only the thread changes.
+        A generation token drops stale completions (reset/rerun mid-save).
+        """
+        self._history_gen = getattr(self, "_history_gen", 0) + 1
+        generation = self._history_gen
+        emitter = _HistorySaved()
+        # Keep emitter + task alive until the slot runs.
+        pending = getattr(self, "_history_pending", None)
+        if not isinstance(pending, list):
+            pending = []
+            self._history_pending = pending  # type: ignore[attr-defined]
+        task = _HistorySaveTask(
+            result,
+            getattr(self, "_strategy_registry", None),
+            r"D:\VAYREN_STRATEGIES",
+            generation,
+            emitter,
+        )
+        pending.append((emitter, task))
+
+        def _done(payload: object) -> None:
+            try:
+                gen, execution_id, lines = payload  # type: ignore[misc]
+            except Exception:  # noqa: BLE001
+                return
+            with contextlib.suppress(ValueError):
+                pending.remove((emitter, task))
+            if gen != getattr(self, "_history_gen", 0):
+                return  # stale (reset/rerun mid-save) — file on disk stays valid
+            for level, text in lines or ():
+                with contextlib.suppress(Exception):
+                    event_log.add_entry(level, text)
+            if execution_id is not None:
+                try:
+                    if hasattr(self, "_lab_workspace") and self._lab_workspace is not None:
+                        # Store last execution for replay button
+                        self._last_execution_id = execution_id  # type: ignore[attr-defined]
+                        self._last_execution_ir = None  # type: ignore[attr-defined]  # noqa: F821
+                except Exception:  # noqa: BLE001
+                    pass
+
+        with contextlib.suppress(Exception):
+            emitter.finished.connect(_done)  # type: ignore[attr-defined]
+        QThreadPool.globalInstance().start(task)
 
     def _on_backtest_failed(
         self, event: Any, lab_control: Any, event_log: Any, system_health: Any

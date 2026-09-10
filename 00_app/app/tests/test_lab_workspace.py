@@ -437,3 +437,120 @@ def test_storage_file_ops(tmp_path: Path) -> None:
         rename_strategy("A", "A", tmp_path)
     assert delete_strategy("A", tmp_path) is True
     assert delete_strategy("A", tmp_path) is False
+
+
+def _many_trades(n: int):
+    from backtest.models.trade import TradeRecord
+
+    return tuple(
+        TradeRecord(
+            symbol=f"S{i % 7:03d}",
+            side="LONG" if i % 2 == 0 else "SHORT",
+            entry_index=i,
+            exit_index=i + 1,
+            entry_time=f"2023-02-{(i % 27) + 1:02d} 10:00:00",
+            exit_time=f"2023-02-{(i % 27) + 1:02d} 10:15:00",
+            entry_price=100.0 + i,
+            exit_price=101.0 + i,
+            quantity=10.0,
+            pnl=float(i),
+            pnl_pct=1.0,
+            commission=1.0,
+            bars_held=1,
+            exit_reason="SIGNAL",
+        )
+        for i in range(n)
+    )
+
+
+def _blotter_result(n: int):
+    from backtest.models.config import BacktestConfig
+    from backtest.models.equity import EquityPoint
+    from backtest.models.metrics import PerformanceMetrics
+    from backtest.models.result import StrategyResult
+
+    trades = _many_trades(n)
+    metrics = PerformanceMetrics(
+        total_trades=n,
+        net_profit=float(n),
+        win_rate=0.5,
+        profit_factor=1.0,
+        max_drawdown_pct=0.0,
+        starting_capital=100000.0,
+        ending_capital=100000.0 + n,
+        gross_profit=float(n),
+        gross_loss=0.0,
+        max_drawdown_abs=0.0,
+        avg_trade=1.0,
+        expectancy=1.0,
+        sharpe_ratio=None,
+        net_profit_pct=0.0,
+    )
+    return StrategyResult(
+        strategy_id="cap",
+        name="Cap v1.0",
+        config=BacktestConfig(
+            symbol="MULTI", timeframe="15m", start_date="2023-01-01", end_date="2023-03-10"
+        ),
+        trades=trades,
+        equity_curve=(EquityPoint(timestamp="2023-01-01 09:15:00", equity=100000.0),),
+        metrics=metrics,
+        bars_used=n,
+        period_start="2023-01-01 09:15:00",
+        period_end="2023-03-10 15:15:00",
+    )
+
+
+def test_blotter_caps_materialized_rows(qt_app):
+    from PySide6.QtWidgets import QApplication
+
+    from app.ui.strategy_lab_workspace import TradeBlotter
+
+    _ = qt_app
+    blotter = TradeBlotter()
+    blotter.show()
+    QApplication.processEvents()
+    blotter.set_result(_blotter_result(5000))
+    assert blotter._table.rowCount() == TradeBlotter._ROW_CAP
+    assert blotter._count_label.isVisible()
+    assert "5,000" in blotter._count_label.text()
+    # clicks still map to global trade indices
+    received: list[int] = []
+    blotter.trade_clicked.connect(received.append)
+    blotter._table.cellClicked.emit(0, 1)
+    assert received == [0]
+    blotter._table.cellClicked.emit(1999, 1)
+    assert received == [0, 1999]
+
+
+def test_blotter_filter_refills_from_all_data(qt_app):
+    from PySide6.QtWidgets import QApplication
+
+    from app.ui.strategy_lab_workspace import TradeBlotter
+
+    _ = qt_app
+    blotter = TradeBlotter()
+    blotter.show()
+    QApplication.processEvents()
+    blotter.set_result(_blotter_result(5000))
+    # 5000 trades over 7 symbols; filtering to one symbol shows all of them
+    blotter.set_symbol_filter("S003")
+    assert blotter._table.rowCount() == 714  # 5000 // 7 rounded per modulo
+    assert not blotter._count_label.isVisible()
+    blotter.set_symbol_filter("ALL")
+    assert blotter._table.rowCount() == TradeBlotter._ROW_CAP
+
+
+def test_blotter_export_covers_all_trades(qt_app, tmp_path):
+    from app.ui.strategy_lab_workspace import TradeBlotter
+
+    _ = qt_app
+    blotter = TradeBlotter()
+    blotter.set_result(_blotter_result(2500))
+    out = tmp_path / "trades.csv"
+    from unittest.mock import patch
+
+    with patch("PySide6.QtWidgets.QFileDialog.getSaveFileName", return_value=(str(out), "")):
+        blotter._export_csv()
+    lines = out.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 2501  # header + every trade, not just materialized rows

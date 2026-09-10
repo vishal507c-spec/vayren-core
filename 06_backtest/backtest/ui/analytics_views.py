@@ -29,6 +29,28 @@ _EQUITY = QColor("#42a5f5")
 _DD = QColor("#ef5350")
 
 
+def decimate_envelope(values: list[float], max_points: int) -> list[float]:
+    """Downsample to ≤ ``max_points`` preserving the visual envelope.
+
+    Each pixel bucket keeps its (min, max) so spikes never vanish — at the
+    rendered resolution the polyline is indistinguishable from the full
+    curve, while a 193k-point equity curve paints in milliseconds instead
+    of seconds. Input data is never modified.
+    """
+    n = len(values)
+    if n <= max_points or max_points < 4:
+        return list(values)
+    out: list[float] = []
+    stride = n / max_points
+    for b in range(max_points):
+        start = int(b * stride)
+        stop = max(start + 1, int((b + 1) * stride))
+        chunk = values[start:stop]
+        out.append(min(chunk))
+        out.append(max(chunk))
+    return out
+
+
 class _ChartView(QWidget):
     """Base: override :meth:`paintEvent` to draw on :attr:`result`."""
 
@@ -64,7 +86,7 @@ class EquityCurveView(_ChartView):
         plot = self.rect().adjusted(pad_l, pad_t, -pad_r, -pad_b)
         if plot.width() <= 0 or plot.height() <= 0:
             return
-        equities = [p.equity for p in curve]
+        equities = decimate_envelope([p.equity for p in curve], max(64, plot.width() * 2))
         lo, hi = min(equities), max(equities)
         span = hi - lo or 1.0
         # grid
@@ -76,9 +98,9 @@ class EquityCurveView(_ChartView):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setPen(QPen(_EQUITY, 1.6))
         pts = []
-        for i, p in enumerate(curve):
-            x = plot.left() + i / max(1, len(curve) - 1) * plot.width()
-            y = plot.bottom() - (p.equity - lo) / span * plot.height()
+        for i, equity in enumerate(equities):
+            x = plot.left() + i / max(1, len(equities) - 1) * plot.width()
+            y = plot.bottom() - (equity - lo) / span * plot.height()
             from PySide6.QtCore import QPointF as _QPointF
 
             pts.append(_QPointF(x, y))
@@ -105,7 +127,8 @@ class DrawdownView(_ChartView):
         curve = self._result.equity_curve
         pad_l, pad_r, pad_t, pad_b = 48, 12, 8, 18
         plot = self.rect().adjusted(pad_l, pad_t, -pad_r, -pad_b)
-        max_dd = max((p.drawdown_pct for p in curve), default=1.0) or 1.0
+        draws = decimate_envelope([p.drawdown_pct for p in curve], max(64, plot.width() * 2))
+        max_dd = max(draws, default=1.0) or 1.0
         painter.setPen(QPen(_GRID, 1))
         for i in range(5):
             y = plot.top() + plot.height() * i / 4
@@ -117,9 +140,9 @@ class DrawdownView(_ChartView):
         from PySide6.QtGui import QPolygonF as _Poly
 
         pts = []
-        for i, p in enumerate(curve):
-            x = plot.left() + i / max(1, len(curve) - 1) * plot.width()
-            y = plot.top() + p.drawdown_pct / max_dd * plot.height()
+        for i, dd in enumerate(draws):
+            x = plot.left() + i / max(1, len(draws) - 1) * plot.width()
+            y = plot.top() + dd / max_dd * plot.height()
             pts.append(_QPointF(x, y))
         poly_pts = pts + [_QPointF(pts[-1].x(), plot.top()), _QPointF(pts[0].x(), plot.top())]
         painter.drawPolygon(_Poly(poly_pts))
@@ -179,9 +202,16 @@ class DistributionView(_ChartView):
 
 
 class TradesView(QWidget):
-    """QTableWidget listing every closed trade."""
+    """QTableWidget listing closed trades (materialization capped).
+
+    All trades stay in the backing result (export/selection map to global
+    indices); only the first ``_ROW_CAP`` rows become widgets so a
+    527-stock batch never builds millions of items.
+    """
 
     trade_selected = Signal(int)
+
+    _ROW_CAP = 2000
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -201,13 +231,17 @@ class TradesView(QWidget):
         layout.addWidget(self._table)
 
     def set_result(self, result: StrategyResult | None) -> None:
-        """Populate the table from `result`."""
+        """Populate the table from `result` (first rows only when huge)."""
         self._result = result
         self._table.setRowCount(0)
         if result is None or not result.trades:
+            self._table.setToolTip("")
             return
-        self._table.setRowCount(len(result.trades))
-        for row, trade in enumerate(result.trades):
+        total = len(result.trades)
+        shown = min(total, self._ROW_CAP)
+        self._table.setRowCount(shown)
+        for row in range(shown):
+            trade = result.trades[row]
             values = [
                 str(row + 1),
                 trade.side,
@@ -226,6 +260,12 @@ class TradesView(QWidget):
                 if col == 7:
                     item.setForeground(QBrush(_BULL if trade.winning else _BEAR))
                 self._table.setItem(row, col, item)
+        if total > shown:
+            self._table.setToolTip(
+                f"Showing first {shown:,} of {total:,} trades — use the Strategy Lab blotter filters to narrow."  # noqa: E501
+            )
+        else:
+            self._table.setToolTip("")
 
 
 class MonthlyView(_ChartView):

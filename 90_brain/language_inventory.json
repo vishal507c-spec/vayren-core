@@ -34,7 +34,7 @@
  },
  {
   "file": "00_app/app/bootstrap/bootstrap.py",
-  "loc": 2518,
+  "loc": 2610,
   "chapter": "app",
   "test": false,
   "responsibility": "APP_UI",
@@ -100,7 +100,7 @@
  },
  {
   "file": "00_app/app/services/multi_symbol_backtest.py",
-  "loc": 266,
+  "loc": 268,
   "chapter": "app",
   "test": true,
   "responsibility": "TEST",
@@ -232,7 +232,7 @@
  },
  {
   "file": "00_app/app/tests/test_lab_workspace.py",
-  "loc": 439,
+  "loc": 558,
   "chapter": "app",
   "test": true,
   "responsibility": "TEST",
@@ -265,7 +265,7 @@
  },
  {
   "file": "00_app/app/tests/test_multi_symbol_backtest.py",
-  "loc": 255,
+  "loc": 267,
   "chapter": "app",
   "test": true,
   "responsibility": "TEST",
@@ -485,7 +485,7 @@
  },
  {
   "file": "00_app/app/ui/strategy_lab_workspace.py",
-  "loc": 3118,
+  "loc": 3161,
   "chapter": "app",
   "test": false,
   "responsibility": "APP_UI",
@@ -3994,7 +3994,7 @@
  },
  {
   "file": "06_backtest/backtest/tests/test_batch_worker.py",
-  "loc": 178,
+  "loc": 259,
   "chapter": "backtest",
   "test": true,
   "responsibility": "TEST",
@@ -4093,7 +4093,7 @@
  },
  {
   "file": "06_backtest/backtest/ui/analytics_views.py",
-  "loc": 359,
+  "loc": 399,
   "chapter": "backtest",
   "test": false,
   "responsibility": "RESEARCH_UI",
@@ -4137,7 +4137,7 @@
  },
  {
   "file": "06_backtest/backtest/worker.py",
-  "loc": 228,
+  "loc": 232,
   "chapter": "backtest",
   "test": false,
   "responsibility": "RESEARCH_UI",

@@ -1068,10 +1068,11 @@ class MetricsTiles(QWidget):
         return f"color: {color}; font-size: 14px; font-weight: 700;"
 
     def set_status(self, state: str) -> None:
-        """Update the run-state pill: ready | running | complete | failed."""
+        """Update the run-state pill: ready | running | finalizing | complete | failed."""
         mapping = {
             "ready": ("● READY", t.MUTED),
             "running": ("● RUNNING BACKTEST…", t.ACCENT),
+            "finalizing": ("◌ FINALIZING…", t.ACCENT),
             "complete": ("✓ BACKTEST COMPLETE", t.POS),
             "failed": ("✕ BACKTEST FAILED", t.NEG),
         }
@@ -1188,6 +1189,8 @@ class _DualEquityView(QWidget):
             )
             return
         # collect curves
+        from backtest.ui.analytics_views import decimate_envelope
+
         curves = []  # type: ignore[var-annotated]
         if has_buy:
             curves.append((self._buy.equity_curve, QColor(_BUY_ACCENT), "BUY / LONG"))  # type: ignore[reportOptionalMemberAccess]
@@ -1203,6 +1206,7 @@ class _DualEquityView(QWidget):
         plot = self.rect().adjusted(pad_l, pad_t, -pad_r, -pad_b)
         if plot.width() <= 0 or plot.height() <= 0:
             return
+        budget = max(64, plot.width() * 2)
         # grid
         painter.setPen(QPen(QColor("#232936"), 1))
         for i in range(5):
@@ -1220,10 +1224,11 @@ class _DualEquityView(QWidget):
         for curve, color, _ in curves:
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
             painter.setPen(QPen(color, 1.6))
+            equities = decimate_envelope([p.equity for p in curve], budget)  # type: ignore[attr-defined]  # noqa: E501
             pts = []
-            for i, p in enumerate(curve):
-                x = plot.left() + i / max(1, len(curve) - 1) * plot.width()
-                y = plot.bottom() - (p.equity - lo) / span * plot.height()
+            for i, equity in enumerate(equities):
+                x = plot.left() + i / max(1, len(equities) - 1) * plot.width()
+                y = plot.bottom() - (equity - lo) / span * plot.height()
                 from PySide6.QtCore import QPointF as _QPointF
 
                 pts.append(_QPointF(x, y))
@@ -1249,6 +1254,12 @@ class TradeBlotter(QWidget):
     trade_clicked = Signal(int)
     trade_hovered = Signal(int)  # optional preview hook
     symbol_filter_changed = Signal(str)  # "ALL" or a symbol
+
+    # Max materialized table rows. Thousands of trades stay fully available
+    # (symbol/side/search filters scan all data, export writes all rows,
+    # clicks map to global trade indices) — only widget creation is capped
+    # so publishing a 527-stock batch never builds millions of items.
+    _ROW_CAP = 2000
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -1290,6 +1301,10 @@ class TradeBlotter(QWidget):
         self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._placeholder.setStyleSheet(f"color: {t.MUTED}; font-size: 11px;")
         lay.addWidget(self._placeholder, 1)
+        self._count_label = QLabel("", self)
+        self._count_label.setStyleSheet(f"color: {t.MUTED}; font-size: 10px;")
+        self._count_label.setVisible(False)
+        lay.addWidget(self._count_label)
         self._table = QTableWidget(self)
         self._table.setColumnCount(11)
         self._table.setHorizontalHeaderLabels(
@@ -1376,42 +1391,99 @@ class TradeBlotter(QWidget):
         self._trades = list(result.trades) if result else []
         self._selected_index = None
         self._table.clearSelection()
+        self._count_label.setVisible(False)
         if not has:
+            self._refresh_symbol_items([])
             return
         assert result is not None
         self._refresh_symbol_items([t.symbol for t in result.trades])
-        self._table.setRowCount(len(result.trades))
-        for i, trade in enumerate(result.trades):
-            values = [
-                str(i + 1),
-                trade.symbol,
-                trade.side,
-                trade.entry_time[:16],
-                f"{trade.entry_price:.2f}",
-                trade.exit_time[:16],
-                f"{trade.exit_price:.2f}",
-                f"{trade.pnl:+,.2f}",
-                f"{trade.r_multiple:.2f}" if trade.r_multiple is not None else "--",
-                str(trade.bars_held),
-                trade.exit_reason,
-            ]
+        self._refill()
+
+    def _format_row(self, index: int, trade: object) -> list[str]:
+        """Display strings for one trade row (single source for fill + search)."""
+        return [
+            str(index + 1),
+            trade.symbol,  # type: ignore[attr-defined]
+            trade.side,  # type: ignore[attr-defined]
+            trade.entry_time[:16],  # type: ignore[attr-defined]
+            f"{trade.entry_price:.2f}",  # type: ignore[attr-defined]
+            trade.exit_time[:16],  # type: ignore[attr-defined]
+            f"{trade.exit_price:.2f}",  # type: ignore[attr-defined]
+            f"{trade.pnl:+,.2f}",  # type: ignore[attr-defined]
+            f"{trade.r_multiple:.2f}" if trade.r_multiple is not None else "--",  # type: ignore[attr-defined]  # noqa: E501
+            str(trade.bars_held),  # type: ignore[attr-defined]
+            trade.exit_reason,  # type: ignore[attr-defined]
+        ]
+
+    def _matching_indices(self) -> list[int]:
+        """Trade indices passing the symbol/side/needle filters (data-side).
+
+        Same semantics as the previous per-row hide loop, but scans data
+        instead of widgets: symbol and side compare first (cheap), the
+        free-text needle formats only surviving rows.
+        """
+        if self._side_filter.isVisible():
+            cur = self._side_filter.currentText().upper()
+            if cur == "BUY":
+                self._side_mode = "LONG"
+            elif cur == "SELL":
+                self._side_mode = "SHORT"
+            else:
+                self._side_mode = "ALL"
+        only_symbol = self._symbol_filter.currentText()
+        if not self._symbol_filter.isVisible():
+            only_symbol = "ALL"
+        needle = self._needle
+        out: list[int] = []
+        for i, trade in enumerate(self._trades):
+            if only_symbol != "ALL" and trade.symbol != only_symbol:  # type: ignore[attr-defined]  # noqa: E501
+                continue
+            if self._side_mode != "ALL" and trade.side != self._side_mode:  # type: ignore[attr-defined]  # noqa: E501
+                continue
+            if needle and needle not in " ".join(self._format_row(i, trade)).lower():
+                continue
+            out.append(i)
+        return out
+
+    def _refill(self) -> None:
+        """Materialize matching rows, capped — one batched table update.
+
+        Thousands of trades stay fully available (filter/export/click map
+        to trade indices), but only the first ``_ROW_CAP`` rows become
+        widgets. An honest caption states the window when truncated.
+        """
+        matched = self._matching_indices()
+        total = len(matched)
+        shown = matched[: self._ROW_CAP]
+        table = self._table
+        table.setRowCount(0)
+        table.setRowCount(len(shown))
+        for row, i in enumerate(shown):
+            trade = self._trades[i]
+            values = self._format_row(i, trade)
             for col, text in enumerate(values):
                 item = QTableWidgetItem(text)
                 item.setData(Qt.ItemDataRole.UserRole, i)
                 if col == 7:
                     from PySide6.QtGui import QColor
 
-                    item.setForeground(QColor(t.POS if trade.winning else t.NEG))
+                    item.setForeground(QColor(t.POS if trade.winning else t.NEG))  # type: ignore[attr-defined]  # noqa: E501
                 if col == 2:
                     # Direction column textual identity — not color alone
                     from PySide6.QtGui import QColor
 
-                    if trade.side == "LONG":
+                    if trade.side == "LONG":  # type: ignore[attr-defined]
                         item.setForeground(QColor(_BUY_ACCENT))
-                    elif trade.side == "SHORT":
+                    elif trade.side == "SHORT":  # type: ignore[attr-defined]
                         item.setForeground(QColor(_SELL_ACCENT))
-                self._table.setItem(i, col, item)
-        self._apply_filter(self._needle)
+                table.setItem(row, col, item)
+        if total > len(shown):
+            self._count_label.setText(
+                f"Showing {len(shown):,} of {total:,} trades — filter by symbol or search to narrow."  # noqa: E501
+            )
+            self._count_label.setVisible(True)
+        else:
+            self._count_label.setVisible(False)
 
     # ── instant trade selection helpers ───────────────────────
 
@@ -1581,44 +1653,7 @@ class TradeBlotter(QWidget):
                 pass
             elif isinstance(text, str) and text != "" or sender is self._filter:
                 self._needle = text.strip().lower() if isinstance(text, str) else ""
-        needle = self._needle
-        # need side mode from combo if visible (user may have changed it)
-        if self._side_filter.isVisible():
-            cur = self._side_filter.currentText().upper()
-            if cur == "BUY":
-                self._side_mode = "LONG"
-            elif cur == "SELL":
-                self._side_mode = "SHORT"
-            else:
-                self._side_mode = "ALL"
-        only_symbol = self._symbol_filter.currentText()
-        if not self._symbol_filter.isVisible():
-            only_symbol = "ALL"
-        for row in range(self._table.rowCount()):
-            # symbol filter first (multi-symbol research)
-            if only_symbol != "ALL":
-                sym_item = self._table.item(row, 1)
-                if sym_item is None or sym_item.text() != only_symbol:
-                    self._table.setRowHidden(row, True)
-                    continue
-            # side filter first
-            if self._side_mode != "ALL":
-                side_item = self._table.item(row, 2)
-                side = side_item.text().upper() if side_item else ""
-                # table stores LONG/SHORT
-                if side != self._side_mode:
-                    self._table.setRowHidden(row, True)
-                    continue
-            if not needle:
-                self._table.setRowHidden(row, False)
-                continue
-            match = False
-            for col in range(self._table.columnCount()):
-                item = self._table.item(row, col)
-                if item is not None and needle in item.text().lower():
-                    match = True
-                    break
-            self._table.setRowHidden(row, not match)
+        self._refill()
 
     def _export_csv(self) -> None:
         if not self._trades:
@@ -2819,22 +2854,30 @@ class StrategyLabWorkspace(QWidget):
         """
         self._symbol_windows = dict(mapping) if mapping else {}
 
-    def set_ranking_errors(self, errors: dict[str, str] | None) -> None:
+    def set_ranking_errors(self, errors: dict[str, str] | None, refresh: bool = True) -> None:
         """Remember per-symbol batch failures for the ranking table.
 
         Failed symbols render as unavailable ("—") instead of an invented rank.
+        Pass ``refresh=False`` while a batch completion is still assembling
+        its final state — the terminal ``set_result`` refreshes once.
         """
         self._ranking_errors = dict(errors) if errors else {}
-        self._push_ranking()
+        if refresh:
+            self._push_ranking()
 
-    def set_last_run_symbols(self, symbols: tuple[str, ...] | list[str] | None) -> None:
+    def set_last_run_symbols(
+        self, symbols: tuple[str, ...] | list[str] | None, refresh: bool = True
+    ) -> None:
         """Remember which symbols the last completed RUN attempted.
 
         Selected symbols absent from this list render as pending ("run again")
         instead of borrowing a stale zero-trade rank from an older run.
+        Pass ``refresh=False`` while a batch completion is still assembling
+        its final state — the terminal ``set_result`` refreshes once.
         """
         self._last_run_symbols = tuple(symbols) if symbols else None
-        self._push_ranking()
+        if refresh:
+            self._push_ranking()
 
     def _ranking_base(self) -> StrategyResult | None:
         if self._view_mode == StrategyViewMode.BUY:

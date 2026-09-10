@@ -112,6 +112,7 @@ class MultiSymbolBacktestCoordinator(QObject):
 
     batch_started = Signal(tuple)  # symbols
     batch_progress = Signal(object)  # (done, total) — stock-level only
+    batch_finalizing = Signal(object)  # request_id — pool done, merge/publish next
     batch_finished = Signal(object)  # BatchOutcome
     batch_failed = Signal(str)  # reason
 
@@ -209,6 +210,7 @@ class MultiSymbolBacktestCoordinator(QObject):
         request = self._request
         symbols = self._symbols
         assert request is not None
+        self.batch_finalizing.emit(request_id)
         self._reset()
         results: dict[str, StrategyResult] = {}
         errors: dict[str, str] = {}
