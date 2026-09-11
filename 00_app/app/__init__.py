@@ -14,17 +14,29 @@ from app.bootstrap.bootstrap import Bootstrap
 
 logger = get_logger(__name__)
 
-# Defaults are per-user and portable — no machine-specific drive letters.
+# Default candle store: pre-v1.11 releases used the workstation Zerodha folder.
+# Env var wins; otherwise prefer that legacy folder when it exists (existing
+# installs keep working with zero flags), else the per-user portable folder.
 # Both are overridable via env var or CLI flag (see ``parse_args``).
-DEFAULT_DATA_DIR = os.environ.get("VAYREN_DATA_DIR") or str(Path.home() / ".vayren" / "data")
+_LEGACY_DATA_DIR = r"D:\ZerodhaTradingData"
+if os.environ.get("VAYREN_DATA_DIR"):
+    DEFAULT_DATA_DIR = os.environ["VAYREN_DATA_DIR"]
+elif Path(_LEGACY_DATA_DIR).is_dir():
+    DEFAULT_DATA_DIR = _LEGACY_DATA_DIR
+else:
+    DEFAULT_DATA_DIR = str(Path.home() / ".vayren" / "data")
 DEFAULT_LIMIT: int | None = None
 
 
 def _default_strategy_dir() -> str:
-    """Strategy library default: env var, else a per-user folder."""
+    """Strategy library default: env var, else the legacy workstation folder
+    (pre-v1.11 releases) when it exists, else a per-user folder."""
     override = os.environ.get("VAYREN_STRATEGIES")
     if override:
         return override
+    legacy = r"D:\VAYREN_STRATEGIES"
+    if Path(legacy).is_dir():
+        return legacy
     return str(Path.home() / ".vayren" / "strategies")
 
 

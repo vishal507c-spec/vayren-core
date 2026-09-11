@@ -80,7 +80,10 @@ def _library_root() -> Path:
 def strategy_dir(data_dir: Path | str | None = None) -> Path:
     """Resolve the strategy library folder.
 
-    ``VAYREN_STRATEGIES`` (env) always wins. Otherwise the library is
+    ``VAYREN_STRATEGIES`` (env) always wins. Otherwise, when ``data_dir``
+    itself already holds ``*.py`` files it IS the library (pre-v1.11
+    workstation layout, e.g. ``D:\\VAYREN_STRATEGIES`` with ``OBR.py`` at
+    the top level) and is used as-is. Else the library is
     ``<data_dir>/strategies`` — colocated with the candle store so a single
     data root is self-contained — except under a test/temp data dir, where
     the same rule applies but is created eagerly. When no ``data_dir`` is
@@ -94,6 +97,10 @@ def strategy_dir(data_dir: Path | str | None = None) -> Path:
 
     if data_dir is not None:
         p = Path(data_dir)
+        # Legacy layout: strategies live directly in the given folder.
+        with suppress(Exception):
+            if any(p.glob("*.py")):
+                return p
         # Colocate the library with the data root; never escape to a global path.
         d = p / "strategies"
         with suppress(Exception):
