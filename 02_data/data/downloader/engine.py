@@ -150,10 +150,11 @@ class HistoricalDownloadEngine:
             message = "Engine already running (lock file held by another process)."
             self._report.on_error(symbol, interval, message)
             return {"locked": True}
-        self._start_heartbeat(lock)
+        heartbeat_stop = self._start_heartbeat(lock)
         try:
             return self._download_one(symbol, interval, from_dt, to_dt)
         finally:
+            heartbeat_stop.set()
             lock.release()
 
     def _download_one(
@@ -254,10 +255,11 @@ class HistoricalDownloadEngine:
             message = "Engine already running (lock file held by another process)."
             self._report.on_status(f"⚠ {message}")
             return {"locked": True}
-        self._start_heartbeat(lock)
+        heartbeat_stop = self._start_heartbeat(lock)
         try:
             return self._run_batch_inner(symbols)
         finally:
+            heartbeat_stop.set()
             lock.release()
 
     def _run_batch_inner(self, symbols: list[dict[str, str]]) -> dict[str, Any]:
@@ -412,14 +414,16 @@ class HistoricalDownloadEngine:
             )
         return max(count, 1)
 
-    def _start_heartbeat(self, lock: EngineLock) -> None:
+    def _start_heartbeat(self, lock: EngineLock) -> threading.Event:
+        stop = threading.Event()
+
         def _beat() -> None:
-            while True:
-                time.sleep(30)
+            while not stop.wait(30):
                 with contextlib.suppress(Exception):
                     lock.heartbeat()
 
         threading.Thread(target=_beat, daemon=True).start()
+        return stop
 
 
 def _jitter_sleep(lo: float, hi: float) -> None:

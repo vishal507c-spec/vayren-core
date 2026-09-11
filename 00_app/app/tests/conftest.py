@@ -116,31 +116,41 @@ def qt_app() -> QApplication:
 
 @pytest.fixture(autouse=True)
 def _shutdown_qt_workers():
-    """Join live QThread workers after every app test.
+    """Shut down every Bootstrap built during a test, then join stray QThreads.
 
-    Root cause of the pre-existing post-pass teardown abort: Bootstrap starts
-    worker threads (BacktestWorker runs its loop immediately) that outlive the
-    test; at interpreter exit the live QThread aborts the process. Both
-    workers expose an idempotent ``shutdown()``; call it on every still
-    running QThread so the process exits cleanly. Proven by Temp probes:
-    no-teardown → abort, workers-shutdown-only → clean, windows-only → abort.
+    Root cause of the pre-existing post-pass teardown abort AND the full-suite
+    hang: Bootstrap starts worker threads (DownloadWorker, BacktestWorker) plus
+    a BrokerManager worker that outlive the test. Repeated Bootstraps in one
+    process accumulated threads without bound — measured at +3 QThread objects
+    and ~1150 QWidgets per Bootstrap — until the process wedged.
+
+    ``Bootstrap.stop()`` shuts down every worker it owns and is idempotent, so
+    the canonical path is: ask each Bootstrap to stop. The ``gc.get_objects()``
+    sweep below is only a safety net for threads NOT owned by a Bootstrap
+    (it cannot be the primary mechanism: with GC disabled the object graph
+    keeps growing, and calling ``wait()`` on threads that a prior sweep
+    already joined is what made the run hang).
     """
     yield
+    import contextlib
     import gc
 
     from PySide6.QtCore import QThread
 
     for obj in gc.get_objects():
+        if obj.__class__.__name__ == "Bootstrap" and hasattr(obj, "stop"):
+            with contextlib.suppress(Exception):
+                obj.stop()
+
+    for obj in gc.get_objects():
         if isinstance(obj, QThread) and obj.isRunning():
-            shutdown = getattr(obj, "shutdown", None)
-            try:
+            shutdown = getattr(obj, "shutdown", None) or getattr(obj, "stop", None)
+            with contextlib.suppress(Exception):
                 if callable(shutdown):
                     shutdown()
                 else:
                     obj.quit()
-                    obj.wait(3000)
-            except Exception:
-                pass
+                obj.wait(3000)
 
 
 def _load_real_font() -> None:

@@ -27,7 +27,7 @@ Desktop charting platform: `SQLite per-stock OHLCV → EventBus → candlestick 
 | `07_risk` | `risk` | Fail-closed pre-order gates, kill switches, session/clock rules | `core` |
 | `08_execution` | `execution` | Live/paper strategy sessions: market-data intake, runtime, planner, engine, broker boundary, portfolio, journal/replay, regime, adaptive | `core`, `market`, `strategy`, `risk`, `broker` (UBL registry/faces only) |
 | `09_broker` | `broker` | Unified Broker Layer: vocab, tri-state capabilities, faces, single registry, selection, funds, credentials, health | — (stdlib only) |
-| `rust` | `vayren-core` / `vayren-shell` | Rust-owned authorities: order lifecycle table, backtest numeric kernels, timeframe aggregation (cdylib via `core.native` ctypes boundary); native-UI target (egui broker panel) | — (std only; egui for shell) |
+| `rust` | `vayren-core` / `vayren-shell` | Rust-owned authorities: order lifecycle table, backtest numeric kernels, timeframe aggregation (cdylib via `core.native` ctypes boundary); native-UI target (Slint application shell) | — (std only; Slint for shell) |
 
 > `90_brain/` is documentation, not a runtime module.
 

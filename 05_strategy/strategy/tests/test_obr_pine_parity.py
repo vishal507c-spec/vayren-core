@@ -43,7 +43,9 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 IST = ZoneInfo("Asia/Kolkata")
-OBR_RECORD_PATH = Path(r"D:\VAYREN_STRATEGIES\OBR.py")
+# Resolve through the shared library resolver (env var → data_dir → per-user)
+# instead of a machine-specific drive letter; missing record → module skip.
+OBR_RECORD_PATH = strategy_dir() / "OBR.py"
 
 
 def _load_obr() -> dict[str, Any]:

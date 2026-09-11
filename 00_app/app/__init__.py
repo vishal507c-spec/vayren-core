@@ -14,8 +14,18 @@ from app.bootstrap.bootstrap import Bootstrap
 
 logger = get_logger(__name__)
 
-DEFAULT_DATA_DIR = r"D:\ZerodhaTradingData"
+# Defaults are per-user and portable — no machine-specific drive letters.
+# Both are overridable via env var or CLI flag (see ``parse_args``).
+DEFAULT_DATA_DIR = os.environ.get("VAYREN_DATA_DIR") or str(Path.home() / ".vayren" / "data")
 DEFAULT_LIMIT: int | None = None
+
+
+def _default_strategy_dir() -> str:
+    """Strategy library default: env var, else a per-user folder."""
+    override = os.environ.get("VAYREN_STRATEGIES")
+    if override:
+        return override
+    return str(Path.home() / ".vayren" / "strategies")
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -54,7 +64,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--strategy-dir",
-        default=os.environ.get("VAYREN_STRATEGIES", r"D:\VAYREN_STRATEGIES"),
+        default=_default_strategy_dir(),
         help="Folder containing strategy .py files",
     )
     parser.add_argument(
@@ -150,6 +160,7 @@ class App:
             data_dir=Path(args.data_dir),
             limit=args.limit,
             selection_service=selection_service,
+            strategy_dir=args.strategy_dir,
         )
         try:
             bootstrap.start()

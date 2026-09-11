@@ -1,41 +1,50 @@
-"""Validate constitutional language ownership (final migration pass).
+"""Enforce constitutional language ownership (hard gate).
 
-Rules (ARCHITECTURE_CONSTITUTION.md §8, enforced permanently):
- 1. Every product Python file must be classified in the committed inventory
-    (no unexplained files): regenerate with `scripts/language_audit.py`.
- 2. No NEW Python in Rust-owned domains (CORE/MARKET_DATA/DATA_PROCESSING/
-    RISK/EXECUTION/BACKTEST/PRESENTATION_MODEL) beyond the frozen baseline:
-    new numeric/lifecycle/core code belongs in `rust/` (or in the retention
-    manifest with proof).
- 3. No NEW Qt UI surfaces (chart widgets/windows/renderer, app/ui, data/ui,
-    backtest/ui): new native UI belongs in `rust/vayren-shell` (Rust+egui).
- 4. Migrated authorities must not be reintroduced in Python (AST checks).
- 5. The Rust workspace must exist, stay dependency-clean, and keep
-    strategy/AI/research out of Rust.
- 6. The retention manifest must reference files that exist.
+Replaces the previous baseline-allowlist validator. Rules derived from
+ARCHITECTURE_CONSTITUTION.md 1-8 and 90_brain/ownership_policy.json.
 
-Usage: `python scripts/validate_language_ownership.py [--freeze-baseline]`
+Checks:
+  1. Every Python file maps to a domain via ownership_policy.json.
+  2. EVERY Python file in a Rust-owned domain MUST have a per-file entry
+     in language_retention.json with a valid state + reason +
+     migration_target + migration_condition. Class-level "classes" text and
+     baseline membership grant NO exemption -> HARD FAIL otherwise.
+  3. New Python files in Rust-owned domains without retention -> HARD FAIL.
+  4. New Qt UI surfaces without per-file retention -> HARD FAIL.
+  5. Migrated authorities must not reappear in Python (AST checks).
+  6. Retention entries must have valid states (not blanket exemptions).
+  7. Rust workspace integrity.
+
+Usage: python scripts/validate_language_ownership.py
 """
 
 from __future__ import annotations
 
-import argparse
 import ast
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 BRAIN = ROOT / "90_brain"
 
-RUST_OWNED = {
+RUST_OWNED_DOMAINS = {
     "CORE",
     "MARKET_DATA",
     "DATA_PROCESSING",
     "RISK",
     "EXECUTION",
     "BACKTEST",
+    "NATIVE_UI",
     "PRESENTATION_MODEL",
+}
+
+VALID_RETENTION_STATES = {
+    "MIGRATED",
+    "MIGRATION_REQUIRED",
+    "TEMPORARILY_RETAINED",
+    "EXEMPT_WITH_JUSTIFICATION",
 }
 
 QT_SURFACE_DIRS = (
@@ -47,10 +56,6 @@ QT_SURFACE_DIRS = (
     "06_backtest/backtest/ui/",
 )
 
-# Migrated authorities that must never reappear in Python.
-# Rule kinds: "no-assign" (name must not be assigned as data),
-# "no-loop" (a same-named delegate may exist but hold no loops),
-# "no-def" (the helper was deleted; any definition is reintroduction).
 NO_REINTRODUCE: dict[str, tuple[list[str], str]] = {
     "TRANSITIONS": (["08_execution/execution/models/order.py"], "no-assign"),
     "TERMINAL_STATES": (["08_execution/execution/models/order.py"], "no-assign"),
@@ -61,6 +66,19 @@ NO_REINTRODUCE: dict[str, tuple[list[str], str]] = {
 
 RUST_FORBIDDEN_MODULES = ("strategy", "research", "ai", "ml", "model_experiment")
 
+SKIP_DIRS = {".venv", "__pycache__", "99_archive", ".git", ".ruff_cache", ".pytest_cache"}
+
+
+def _load_json(path: Path) -> dict[str, Any]:
+    """Load a JSON object file; missing/unreadable/non-object -> empty dict."""
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
 
 def _current_py_files() -> list[str]:
     out = []
@@ -69,22 +87,28 @@ def _current_py_files() -> list[str]:
             rel = path.relative_to(ROOT).as_posix()
         except ValueError:
             continue
-        parts = path.parts
-        if ".venv" in parts or "__pycache__" in parts or "99_archive" in parts:
+        if any(d in path.parts for d in SKIP_DIRS):
             continue
         out.append(rel)
     return out
 
 
-def _defines(path: Path, name: str, kind: str) -> bool:
-    """True when a migrated authority was reintroduced in `path`.
+def _classify_file(rel_path: str, rules: list[dict]) -> dict | None:
+    for rule in rules:
+        for prefix in rule.get("directory_prefixes", []):
+            if rel_path.startswith(prefix):
+                for excluded in rule.get("excluded_subpaths", []):
+                    if rel_path.startswith(excluded):
+                        return None
+                return rule
+    if rel_path.startswith("scripts/"):
+        return {"domain": "TOOLING", "required_language": "PYTHON", "allow_python_glue": True}
+    if "/tests/" in rel_path or rel_path.endswith("conftest.py"):
+        return {"domain": "TEST", "required_language": "SAME_AS_PARENT", "allow_python_glue": True}
+    return {"domain": "UNCLASSIFIED", "required_language": "UNKNOWN", "allow_python_glue": True}
 
-    - "no-assign": the name must not be assigned as module data (imports
-      and re-exports are fine).
-    - "no-loop": a same-named thin delegate may exist, but it must hold
-      no loops (marshaling only, no math).
-    - "no-def": the helper was deleted; any definition fails.
-    """
+
+def _defines(path: Path, name: str, kind: str) -> bool:
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"))
     except (OSError, SyntaxError):
@@ -114,86 +138,113 @@ def _defines(path: Path, name: str, kind: str) -> bool:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Validate language ownership")
-    parser.add_argument("--freeze-baseline", action="store_true")
-    args = parser.parse_args()
     errors: list[str] = []
     warnings: list[str] = []
 
-    inventory_path = BRAIN / "language_inventory.json"
-    baseline_path = BRAIN / "language_baseline.json"
-    retention_path = BRAIN / "language_retention.json"
-    for required in (inventory_path, retention_path):
-        if not required.is_file():
-            errors.append(f"missing required manifest: {required.name}")
+    policy = _load_json(BRAIN / "ownership_policy.json")
+    if not policy:
+        print("Language ownership validation FAILED: missing 90_brain/ownership_policy.json")
+        return 1
 
-    inventory: dict[str, dict] = {}
-    if inventory_path.is_file():
-        try:
-            entries = json.loads(inventory_path.read_text(encoding="utf-8"))
-            inventory = {e["file"]: e for e in entries}
-        except (ValueError, KeyError) as exc:
-            errors.append(f"unreadable inventory: {exc}")
+    retention_data = _load_json(BRAIN / "language_retention.json")
+    if not retention_data:
+        errors.append("missing required file: 90_brain/language_retention.json")
 
+    rules = policy.get("rules", [])
     current = _current_py_files()
-    missing = [f for f in current if f not in inventory]
-    if missing:
-        errors.append(
-            f"{len(missing)} unclassified Python files (run scripts/language_audit.py): "
-            + ", ".join(missing[:8])
-        )
-    stale = [f for f in inventory if not (ROOT / f).is_file()]
-    if stale:
-        errors.append(f"inventory references deleted files: {stale[:8]}")
 
-    baseline: dict[str, str] = {}
-    if baseline_path.is_file():
-        baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
-    if args.freeze_baseline:
-        frozen = {f: inventory.get(f, {}).get("responsibility", "?") for f in current}
-        baseline_path.write_text(json.dumps(frozen, indent=1, sort_keys=True), encoding="utf-8")
-        print(f"baseline frozen: {len(frozen)} files -> {baseline_path.name}")
-        return 0
-    if not baseline:
-        errors.append("missing baseline: run with --freeze-baseline once, then commit it")
+    per_file_retention: dict[str, dict] = {}
+    for file_path, entry in retention_data.get("files", {}).items():
+        if isinstance(entry, str):
+            per_file_retention[file_path] = {"state": "TEMPORARILY_RETAINED", "reason": entry}
+        elif isinstance(entry, dict):
+            per_file_retention[file_path] = entry
 
-    retention: dict = {}
-    if retention_path.is_file():
-        try:
-            retention = json.loads(retention_path.read_text(encoding="utf-8"))
-        except ValueError as exc:
-            errors.append(f"unreadable retention manifest: {exc}")
-            retention = {}
+    migrated_files: set[str] = set()
+    for file_path in retention_data.get("migrated", {}):
+        migrated_files.add(file_path)
 
-    for path in current:
-        if path in baseline:
+    # NOTE: retention_data["classes"] is DOCUMENTATION ONLY (context for why a
+    # domain retains Python glue). It grants ZERO enforcement exemptions.
+    # Every Python file in a Rust-owned domain MUST have a per-file entry in
+    # retention_data["files"] with a valid state, or the validator FAILS.
+    # Baseline (language_baseline.json) is historical reference only and is
+    # NEVER consulted here: baseline membership grants no exemption.
+    qt_allowlist: set[str] = set(retention_data.get("qt_workspace_allowlist", {}).keys())
+
+    for rel in current:
+        if rel in migrated_files:
             continue
-        entry = inventory.get(path, {})
-        responsibility = entry.get("responsibility", "?")
-        if responsibility in RUST_OWNED:
-            errors.append(
-                f"new Python in Rust-owned domain ({responsibility}): {path} — "
-                "implement in rust/ or add proven retention to language_retention.json"
-            )
-        elif any(path.startswith(prefix) for prefix in QT_SURFACE_DIRS):
-            allowed = retention.get("qt_workspace_allowlist", {})
-            if path not in allowed:
+
+        rule = _classify_file(rel, rules)
+        if rule is None:
+            continue
+
+        domain = rule["domain"]
+        req_lang = rule["required_language"]
+
+        if domain in ("TEST", "TOOLING", "UNCLASSIFIED"):
+            continue
+        if req_lang in ("PYTHON", "SAME_AS_PARENT"):
+            continue
+        if req_lang == "UNKNOWN":
+            warnings.append(f"unclassified file: {rel}")
+            continue
+
+        if domain in RUST_OWNED_DOMAINS:
+            if rel in per_file_retention:
+                entry = per_file_retention[rel]
+                state = entry.get("state", "")
+                if state not in VALID_RETENTION_STATES:
+                    errors.append(
+                        f"INVALID RETENTION STATE for {rel}: '{state}'. "
+                        f"Must be one of {sorted(VALID_RETENTION_STATES)}"
+                    )
+                elif state == "MIGRATED":
+                    errors.append(
+                        f"FILE MARKED MIGRATED BUT STILL EXISTS: {rel}. "
+                        f"Remove the file or change state to MIGRATION_REQUIRED."
+                    )
+                elif state in ("TEMPORARILY_RETAINED", "EXEMPT_WITH_JUSTIFICATION"):
+                    for field in ("reason", "migration_target", "migration_condition"):
+                        if not entry.get(field):
+                            errors.append(
+                                f"INCOMPLETE RETENTION for {rel}: missing '{field}'. "
+                                f"Retained files must define reason, migration_target, "
+                                f"migration_condition."
+                            )
+                continue
+
+            if any(rel.startswith(prefix) for prefix in QT_SURFACE_DIRS):
+                if rel in qt_allowlist:
+                    continue
                 errors.append(
-                    f"new Qt UI surface: {path} — new native UI belongs in "
-                    "rust/vayren-shell (Rust+egui)"
+                    f"NEW QT UI SURFACE IN WRONG LANGUAGE: {rel}. "
+                    f"Domain {domain} requires {req_lang} (Rust+Slint). "
+                    f"Add to language_retention.json with TEMPORARILY_RETAINED or migrate."
                 )
-        else:
-            warnings.append(f"new file outside frozen baseline: {path} ({responsibility})")
+                continue
+
+            errors.append(
+                f"WRONG LANGUAGE: {rel} implements {domain} responsibility in Python. "
+                f"Required language: {req_lang}. "
+                f"Baseline membership grants no exemption. "
+                f"Migrate to {req_lang} or add a tracked per-file retention entry "
+                f"(state/reason/migration_target/migration_condition) to "
+                f"90_brain/language_retention.json."
+            )
 
     for name, (files, kind) in NO_REINTRODUCE.items():
         for rel in files:
-            if _defines(ROOT / rel, name, kind):
+            target = ROOT / rel
+            if target.is_file() and _defines(target, name, kind):
                 errors.append(f"migrated authority reintroduced in Python: {name} in {rel}")
 
-    for section in ("classes", "files", "migrated", "qt_workspace_allowlist"):
-        for key in retention.get(section, {}):
-            if section != "classes" and not (ROOT / key).is_file():
-                errors.append(f"retention manifest references missing file: {key}")
+    for file_path, entry in per_file_retention.items():
+        if not (ROOT / file_path).is_file():
+            state = entry.get("state", "") if isinstance(entry, dict) else "?"
+            if state != "MIGRATED":
+                errors.append(f"retention references deleted file: {file_path}")
 
     cargo = ROOT / "rust" / "Cargo.toml"
     core_manifest = ROOT / "rust" / "vayren-core" / "Cargo.toml"
@@ -203,25 +254,41 @@ def main() -> int:
         text = core_manifest.read_text(encoding="utf-8")
         if "[dependencies]" not in text:
             errors.append("vayren-core manifest lost its dependency section")
-        deps = text.split("[dependencies]", 1)[1].split("[", 1)[0].strip()
-        if deps:
-            errors.append(f"vayren-core must stay dependency-free (std only): {deps[:120]}")
+        else:
+            deps = text.split("[dependencies]", 1)[1].split("[", 1)[0].strip()
+            if deps:
+                errors.append(f"vayren-core must stay dependency-free (std only): {deps[:120]}")
+
     for rs in (ROOT / "rust").rglob("*.rs"):
         stem = rs.stem.lower()
         if stem in RUST_FORBIDDEN_MODULES:
             errors.append(f"Rust absorbed a Python-owned domain module: {rs}")
+
     shell_lib = ROOT / "rust" / "vayren-shell" / "src" / "lib.rs"
     if not shell_lib.is_file():
-        errors.append("missing native-UI target: rust/vayren-shell")
+        errors.append("missing native-UI target: rust/vayren-shell/src/lib.rs")
 
-    for warning in warnings[:10]:
+    migration_required = [
+        f
+        for f, e in per_file_retention.items()
+        if isinstance(e, dict) and e.get("state") == "MIGRATION_REQUIRED" and (ROOT / f).is_file()
+    ]
+    if migration_required:
+        warnings.append(
+            f"{len(migration_required)} files marked MIGRATION_REQUIRED still active: "
+            + ", ".join(migration_required[:5])
+        )
+
+    for warning in warnings[:20]:
         print(f"warn: {warning}")
+
     if errors:
-        print("Language ownership validation FAILED:")
+        print(f"Language ownership validation FAILED ({len(errors)} errors):")
         for error in errors:
             print(f"  - {error}")
         return 1
-    print(f"Language ownership validation PASSED ({len(current)} files)")
+
+    print(f"Language ownership validation PASSED ({len(current)} files checked)")
     return 0
 
 

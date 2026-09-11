@@ -153,7 +153,11 @@ def execute_bars(
 
     if not positions.flat and window:
         last = window[-1]
-        last_price = last.close - last.close * (config.slippage_pct / 100.0)
+        op = positions.open_position
+        slip = last.close * (config.slippage_pct / 100.0)
+        last_price = (
+            last.close + slip if op is not None and op.side == "SHORT" else last.close - slip
+        )
         trade = positions.close_end(
             exit_index=len(window) - 1,
             exit_time=last.timestamp,
@@ -285,7 +289,12 @@ class BacktestRunner:
         errors: list[str] = []
 
         for strategy_id in strategy_ids:
-            result = self._run_one_by_id(strategy_id, config, on_progress)
+            try:
+                result = self._run_one_by_id(strategy_id, config, on_progress)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Backtest failed for %s", strategy_id)
+                errors.append(f"{strategy_id}: {exc}")
+                continue
             if result is not None:
                 results.append(result)
             else:
@@ -530,7 +539,11 @@ class BacktestRunner:
 
         if not positions.flat and window:
             last = window[-1]
-            last_price = last.close - last.close * (config.slippage_pct / 100.0)
+            op = positions.open_position
+            slip = last.close * (config.slippage_pct / 100.0)
+            last_price = (
+                last.close + slip if op is not None and op.side == "SHORT" else last.close - slip
+            )
             trade = positions.close_end(
                 exit_index=len(window) - 1,
                 exit_time=last.timestamp,

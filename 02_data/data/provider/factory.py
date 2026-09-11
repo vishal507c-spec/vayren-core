@@ -14,6 +14,7 @@ from __future__ import annotations
 from broker.adapters.zerodha import BROKER_ID as ZERODHA_BROKER_ID
 from broker.adapters.zerodha import zerodha_plugin_record
 from broker.capabilities import Domain
+from broker.management import BrokerSpec
 from broker.registry import default_registry
 
 from data.provider.contract import (
@@ -21,6 +22,7 @@ from data.provider.contract import (
     Provider,
     ProviderError,
 )
+from data.provider.credentials_store import provider_service
 from data.provider.zerodha import ZerodhaProvider
 from data.settings import DownloadSettings
 
@@ -75,6 +77,84 @@ def _seed_zerodha() -> None:
     registry.register(
         zerodha_plugin_record(lambda settings: ZerodhaProvider(settings))  # type: ignore[arg-type,return-value]
     )
+
+
+_seed_zerodha()
+
+
+def zerodha_management_spec() -> BrokerSpec:
+    """The bundled venue's SYSTEM → BROKERS management wiring.
+
+    Lives here (not in app) because every import below is concrete SDK
+    boundary code the architecture tests pin to this chapter: adapter +
+    auth flow + session store + venue registration. ``display_name`` comes
+    from the adapter package's single source of truth — no alias literals.
+    """
+    from broker.adapters.zerodha import DISPLAY_NAME
+
+    from data.provider.zerodha.live_activation import (
+        LIVE_VENUE_ID,
+        register_zerodha_live_instance,
+    )
+    from data.provider.zerodha.live_auth import (
+        DEFAULT_CALLBACK_PORT,
+        SESSION_SERVICE,
+        KiteAuthFlow,
+        ZerodhaSessionStore,
+        redirect_url,
+        wait_for_login_token,
+    )
+    from data.provider.zerodha.live_market_data import ZerodhaMarketDataFace
+    from data.provider.zerodha.live_trading import ZerodhaTradingAdapter
+
+    def _unregister() -> None:
+        registry = default_registry()
+        if LIVE_VENUE_ID in registry:
+            registry.unregister(LIVE_VENUE_ID)
+
+    return BrokerSpec(
+        broker_id="zerodha",
+        display_name=DISPLAY_NAME,
+        config_service=provider_service("zerodha"),
+        session_service=SESSION_SERVICE,
+        required_config=("api_key", "api_secret"),
+        masked_config=("api_key", "api_secret"),
+        build_adapter=lambda api_key, token: ZerodhaTradingAdapter(
+            api_key=api_key, access_token=token
+        ),
+        build_market_data=lambda api_key, token: ZerodhaMarketDataFace(
+            api_key=api_key, access_token=token
+        ),
+        build_flow=KiteAuthFlow,
+        build_session_store=lambda store, service: ZerodhaSessionStore(store, service),
+        venue_register=register_zerodha_live_instance,
+        venue_unregister=_unregister,
+        interactive_login=wait_for_login_token,
+        callback_port=DEFAULT_CALLBACK_PORT,
+        callback_url=redirect_url(DEFAULT_CALLBACK_PORT),
+    )
+
+
+def ensure_live_venues() -> tuple[bool, str]:
+    """Best-effort explicit live-venue activation (idempotent, no network).
+
+    Each venue module decides for itself from operator configuration
+    (environment flags + credentials); unconfigured venues stay
+    unregistered (fail-closed). Called from the LIVE START path only —
+    never at import, so merely importing this factory changes nothing.
+    Returns (any_registered, summary).
+    """
+    results: list[str] = []
+    registered = False
+    try:
+        from data.provider.zerodha.live_activation import register_zerodha_live
+
+        ok, reason = register_zerodha_live()
+        registered = registered or ok
+        results.append(f"zerodha-live: {'registered' if ok else reason}")
+    except ImportError as exc:
+        results.append(f"zerodha-live: unavailable ({exc})")
+    return registered, "; ".join(results)
 
 
 _seed_zerodha()

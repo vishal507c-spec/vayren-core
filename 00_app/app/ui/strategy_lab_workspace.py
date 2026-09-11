@@ -455,11 +455,13 @@ class ParamsPane(QWidget):
 
 
 class BacktestRunPanel(QWidget):
-    """The four run inputs and the primary action — now a tab, not a drawer."""
+    """Compact run controls: symbols + action on row 1, options on row 2."""
 
     run_requested = Signal(object)
     timeframe_changed = Signal(str)
     busy_changed = Signal(bool)
+    stop_requested = Signal()
+    selection_changed = Signal(tuple)  # selected symbols, selection order
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -470,43 +472,67 @@ class BacktestRunPanel(QWidget):
 
         self._ranking = StockRankingWidget(self)
         self._ranking.setVisible(False)
+        self._busy = False
+        self._stop_armed = False
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(16, 12, 16, 12)
-        lay.setSpacing(8)
-        # ── configuration card: dense grid, one glance ──
-        card = QWidget(self)
-        card.setStyleSheet(t.CARD_QSS)
-        grid = QGridLayout(card)
-        grid.setContentsMargins(12, 10, 12, 10)
-        grid.setHorizontalSpacing(10)
-        grid.setVerticalSpacing(6)
-        grid.addWidget(self._lab("BACKTEST CONFIGURATION"), 0, 0, 1, 3)
-        grid.addWidget(self._lab("SYMBOLS"), 1, 0, 1, 3)
-        self._symbols = WatchlistMultiSelect(card)
-        grid.addWidget(self._symbols, 2, 0, 1, 3)
-        grid.addWidget(self._lab("TIMEFRAME"), 3, 0)
-        grid.addWidget(self._lab("DATE RANGE"), 3, 1)
-        grid.addWidget(self._lab("INITIAL CAPITAL"), 3, 2)
-        self._tf_combo = QComboBox(card)
+        lay.setContentsMargins(12, 8, 12, 8)
+        lay.setSpacing(6)
+        # ── row 1: symbol selection + the one dominant action ──
+        top = QHBoxLayout()
+        top.setContentsMargins(0, 0, 0, 0)
+        top.setSpacing(8)
+        sym_box = QVBoxLayout()
+        sym_box.setContentsMargins(0, 0, 0, 0)
+        sym_box.setSpacing(2)
+        sym_box.addWidget(self._lab("SYMBOLS"))
+        self._symbols = WatchlistMultiSelect(self)
+        sym_box.addWidget(self._symbols)
+        top.addLayout(sym_box, 1)
+        self._run = QPushButton("▶  RUN", self)
+        self._run.setMinimumHeight(30)
+        self._run.setMinimumWidth(150)
+        self._run.setStyleSheet(t.PRIMARY_QSS)
+        self._run.clicked.connect(self._emit)
+        top.addWidget(self._run, 0, Qt.AlignmentFlag.AlignBottom)
+        lay.addLayout(top)
+        # ── row 2: options + advanced disclosure ──
+        opts = QHBoxLayout()
+        opts.setContentsMargins(0, 0, 0, 0)
+        opts.setSpacing(8)
+        tf_box = QVBoxLayout()
+        tf_box.setContentsMargins(0, 0, 0, 0)
+        tf_box.setSpacing(2)
+        tf_box.addWidget(self._lab("TIMEFRAME"))
+        self._tf_combo = QComboBox(self)
         self._tf_combo.setStyleSheet(t.INPUT_QSS)
         self._tf_combo.currentTextChanged.connect(
             lambda tf: self.timeframe_changed.emit(tf) if tf else None
         )
-        grid.addWidget(self._tf_combo, 4, 0)
+        tf_box.addWidget(self._tf_combo)
+        opts.addLayout(tf_box)
+        range_box = QVBoxLayout()
+        range_box.setContentsMargins(0, 0, 0, 0)
+        range_box.setSpacing(2)
+        range_box.addWidget(self._lab("DATE RANGE"))
         range_row = QHBoxLayout()
         range_row.setSpacing(4)
         range_row.setContentsMargins(0, 0, 0, 0)
         self._from = self._date_edit(QDate(2023, 1, 1))
         self._to = self._date_edit(QDate.currentDate())
-        arrow = QLabel("→", card)
+        arrow = QLabel("→", self)
         arrow.setStyleSheet(f"color: {t.MUTED};")
         range_row.addWidget(self._from, 1)
         range_row.addWidget(arrow)
         range_row.addWidget(self._to, 1)
-        range_host = QWidget(card)
+        range_host = QWidget(self)
         range_host.setLayout(range_row)
-        grid.addWidget(range_host, 4, 1)
-        self._capital = QDoubleSpinBox(card)
+        range_box.addWidget(range_host)
+        opts.addLayout(range_box, 1)
+        cap_box = QVBoxLayout()
+        cap_box.setContentsMargins(0, 0, 0, 0)
+        cap_box.setSpacing(2)
+        cap_box.addWidget(self._lab("CAPITAL"))
+        self._capital = QDoubleSpinBox(self)
         self._capital.setRange(10000, 1e9)
         self._capital.setDecimals(0)
         self._capital.setValue(1000000)
@@ -514,37 +540,30 @@ class BacktestRunPanel(QWidget):
         self._capital.setPrefix("₹ ")
         self._capital.setLocale(QLocale(QLocale.Language.English, QLocale.Country.India))
         self._capital.setStyleSheet(t.INPUT_QSS)
-        grid.addWidget(self._capital, 4, 2)
-        grid.setColumnStretch(0, 0)
-        grid.setColumnStretch(1, 1)
-        grid.setColumnStretch(2, 1)
+        cap_box.addWidget(self._capital)
+        opts.addLayout(cap_box)
         # Advanced (progressive disclosure): fixed cost readout, no extra controls.
-        self._advanced_toggle = QPushButton("Advanced configuration ▾", card)
+        self._advanced_toggle = QPushButton("Advanced ▾", self)
         self._advanced_toggle.setStyleSheet(t.QUIET_BUTTON_QSS)
         self._advanced_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
         self._advanced_toggle.clicked.connect(self._toggle_advanced)
-        grid.addWidget(self._advanced_toggle, 5, 0, 1, 3, Qt.AlignmentFlag.AlignLeft)
+        opts.addWidget(self._advanced_toggle, 0, Qt.AlignmentFlag.AlignBottom)
+        lay.addLayout(opts)
         self._advanced_host = QLabel(
             f"Costs — slippage {_DEFAULT_SLIPPAGE_PCT}% · "
             f"commission {_DEFAULT_COMMISSION_PCT}% (fixed)",
-            card,
+            self,
         )
         self._advanced_host.setStyleSheet(f"color: {t.MUTED}; font-size: 10px;")
         self._advanced_host.setVisible(False)
-        grid.addWidget(self._advanced_host, 6, 0, 1, 3)
-        lay.addWidget(card)
+        lay.addWidget(self._advanced_host)
         self._symbols.selection_changed.connect(self._on_selection_for_ranking)
-        # ── ONE dominant action, directly after configuration ──
+        # ── inline error, hidden unless validation fails ──
         self._error = QLabel("", self)
         self._error.setStyleSheet(f"color: {t.NEG}; font-size: 10px;")
         self._error.setWordWrap(True)
         self._error.setVisible(False)
         lay.addWidget(self._error)
-        self._run = QPushButton("▶  RUN BACKTEST", self)
-        self._run.setMinimumHeight(34)
-        self._run.setStyleSheet(t.PRIMARY_QSS)
-        self._run.clicked.connect(self._emit)
-        lay.addWidget(self._run)
         lay.addStretch(1)
         self._mode: StrategyViewMode = StrategyViewMode.BUY
 
@@ -599,6 +618,10 @@ class BacktestRunPanel(QWidget):
             self._ranking.set_universe(symbols)
         except Exception:
             pass
+        try:
+            self.selection_changed.emit(tuple(symbols))
+        except Exception:
+            pass
 
     def set_ranking_results(
         self,
@@ -645,15 +668,23 @@ class BacktestRunPanel(QWidget):
 
     def set_view_mode(self, mode: StrategyViewMode) -> None:
         self._mode = mode
-        # Update the single RUN button label per mode for COMPARE/BUY/SELL clarity
+        # Short per-mode labels; never clobber an armed STOP.
+        if self._busy and self._stop_armed:
+            return
         if mode == StrategyViewMode.BUY:
-            self._run.setText("▶  RUN BUY BACKTEST")
+            self._run.setText("▶  RUN BUY")
         elif mode == StrategyViewMode.SELL:
-            self._run.setText("▶  RUN SELL BACKTEST")
+            self._run.setText("▶  RUN SELL")
         else:
             self._run.setText("▶  RUN ALL")
 
     def _emit(self) -> None:
+        # Armed STOP (batch in flight) takes precedence over starting a run.
+        if self._busy and self._stop_armed:
+            self.stop_requested.emit()
+            return
+        if self._busy:
+            return  # single run in flight — no safe stop; ignore extra clicks
         if not self._symbols.has_selection():
             self._show_error("Select at least one symbol before running the backtest.")
             return
@@ -671,21 +702,30 @@ class BacktestRunPanel(QWidget):
         self._error.setVisible(False)
 
     def set_busy(self, busy: bool) -> None:
-        self._run.setEnabled(not busy)
+        self._busy = busy
         if busy:
-            self._run.setText("RUNNING BACKTEST…")
+            # Stay clickable: batch progress arms ■ STOP shortly after.
+            self._run.setEnabled(True)
+            self._run.setText("RUNNING…")
             self._hide_error()
         else:
+            self._stop_armed = False
+            self._run.setEnabled(True)
             # restore per-mode label
             self.set_view_mode(self._mode)
         self.busy_changed.emit(busy)
 
-    def set_batch_progress(self, done: int, total: int) -> None:
-        """Show stock-level batch progress on the run button (cheap text only)."""
-        if total <= 0:
+    def arm_stop(self) -> None:
+        """Morph the run button into ■ STOP (batch confirmed in flight)."""
+        if not self._busy:
             return
-        pct = int(done * 100 / total)
-        self._run.setText(f"RUNNING BACKTEST… {done} / {total} · {pct}%")
+        self._stop_armed = True
+        self._run.setText("■ STOP")
+
+    def disarm_stop(self) -> None:
+        self._stop_armed = False
+        if not self._busy:
+            self.set_view_mode(self._mode)
 
 
 class EditorPane(QWidget):
@@ -1018,8 +1058,20 @@ class MetricsTiles(QWidget):
         super().__init__(parent)
         self.setStyleSheet(f"background: {t.BG1}; border-bottom: 1px solid {t.BORDER};")
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(12, 8, 12, 6)
-        lay.setSpacing(3)
+        lay.setContentsMargins(12, 6, 12, 4)
+        lay.setSpacing(2)
+        # title row: what this surface is + run scope context
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        title_row.setSpacing(8)
+        title = QLabel("BACKTEST PERFORMANCE", self)
+        title.setStyleSheet(f"color: {t.TEXT}; font-size: 11px; font-weight: 800;")
+        title_row.addWidget(title)
+        title_row.addStretch(1)
+        self._context = QLabel("", self)
+        self._context.setStyleSheet(f"color: {t.TEXT2}; font-size: 10px; font-weight: 600;")
+        title_row.addWidget(self._context)
+        lay.addLayout(title_row)
         # status row: run state pill left, directional context right
         status_row = QHBoxLayout()
         status_row.setContentsMargins(0, 0, 0, 0)
@@ -1065,13 +1117,17 @@ class MetricsTiles(QWidget):
 
     @staticmethod
     def _value_style(color: str) -> str:
-        return f"color: {color}; font-size: 14px; font-weight: 700;"
+        return f"color: {color}; font-size: 13px; font-weight: 700;"
 
     def set_status(self, state: str) -> None:
-        """Update the run-state pill: ready | running | finalizing | complete | failed."""
+        """Update the run-state pill: ready | running | aggregating | finalizing | complete | failed."""  # noqa: E501
+        if state == getattr(self, "_state", None):
+            return  # no redundant restyle/repaint for unchanged state
+        self._state = state
         mapping = {
             "ready": ("● READY", t.MUTED),
             "running": ("● RUNNING BACKTEST…", t.ACCENT),
+            "aggregating": ("◌ AGGREGATING…", t.ACCENT),
             "finalizing": ("◌ FINALIZING…", t.ACCENT),
             "complete": ("✓ BACKTEST COMPLETE", t.POS),
             "failed": ("✕ BACKTEST FAILED", t.NEG),
@@ -1080,13 +1136,12 @@ class MetricsTiles(QWidget):
         self._status.setText(text)
         self._status.setStyleSheet(f"color: {color}; font-size: 10px; font-weight: 700;")
 
-    def set_batch_progress(self, done: int, total: int) -> None:
-        """Show stock-level batch progress in the pill (cheap text only)."""
-        if total <= 0:
+    def set_context(self, context: str) -> None:
+        """Run-scope caption, e.g. ``BUY · LONG · 527 STOCKS ANALYZED``."""
+        if context == getattr(self, "_context_text", None):
             return
-        pct = int(done * 100 / total)
-        self._status.setText(f"● RUNNING BACKTEST… {done} / {total} · {pct}%")
-        self._status.setStyleSheet(f"color: {t.ACCENT}; font-size: 10px; font-weight: 700;")
+        self._context_text = context
+        self._context.setText(context)
 
     def set_view_mode(self, mode: StrategyViewMode) -> None:
         self._mode = mode
@@ -2284,6 +2339,7 @@ class StrategyLabWorkspace(QWidget):
     param_changed = Signal(str, float)
     save_requested_relay = Signal(str)
     compile_requested_relay = Signal(str)
+    stop_requested = Signal()
 
     _result_stack: QStackedWidget
     _collapse_btn: QToolButton
@@ -2304,6 +2360,8 @@ class StrategyLabWorkspace(QWidget):
         self._last_run_symbols: tuple[str, ...] | None = None
         self._run_state: str = "ready"
         self._last_batch_pct = -1
+        self._busy_topbar = False
+        self._stop_armed = False
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
@@ -2336,6 +2394,13 @@ class StrategyLabWorkspace(QWidget):
         self.right_settings = self.center_detail.backtest_panel
         self.right_settings.run_requested.connect(self._on_panel_run)
         self.right_settings.busy_changed.connect(self._set_run_busy)
+        self.right_settings.stop_requested.connect(self.stop_requested.emit)
+        try:
+            self.right_settings.selection_changed.connect(
+                lambda _s=None: self._refresh_perf_context()
+            )
+        except Exception:
+            pass
         try:
             self.right_settings.ranking.symbol_focused.connect(self._on_ranking_focus)
         except Exception:
@@ -2357,9 +2422,10 @@ class StrategyLabWorkspace(QWidget):
         self._results_dock = results_dock  # keep reference for visibility toggling
         self._root.addWidget(self._main)
         self._root.addWidget(results_dock)
-        # Balanced share so the result header sits above the fold.
+        # Results-led share: ranking/details need rows after a run, while the
+        # splitter stays user-adjustable at all resolutions.
         self._root.setStretchFactor(0, 1)
-        self._root.setStretchFactor(1, 1)
+        self._root.setStretchFactor(1, 2)
         # Compare view — stacked outside _result_stack so test count==4 preserved
         self._compare_view = _CompareView(self)
         self._compare_view.run_all_requested.connect(self._emit_run_all)
@@ -2475,6 +2541,10 @@ class StrategyLabWorkspace(QWidget):
         self._crumb_name.setStyleSheet(f"color: {t.TEXT}; font-size: 12px; font-weight: 600;")
         lay.addWidget(self._crumb_name)
         lay.addStretch(1)
+        self._topbar_status = QLabel("", bar)
+        self._topbar_status.setStyleSheet(f"color: {t.MUTED}; font-size: 11px; font-weight: 600;")
+        self._topbar_status.setVisible(False)
+        lay.addWidget(self._topbar_status)
         save_btn = QPushButton("SAVE", bar)
         save_btn.setStyleSheet(t.BUTTON_QSS)
         save_btn.clicked.connect(
@@ -2485,9 +2555,9 @@ class StrategyLabWorkspace(QWidget):
         compile_btn.clicked.connect(
             lambda: self.compile_requested_relay.emit(self.center_detail.get_code())
         )
-        self._topbar_run = QPushButton("▶  RUN BUY BACKTEST", bar)
+        self._topbar_run = QPushButton("▶  RUN", bar)
         self._topbar_run.setStyleSheet(t.PRIMARY_QSS)
-        self._topbar_run.clicked.connect(self._emit_run)
+        self._topbar_run.clicked.connect(self._on_topbar_run)
         lay.addWidget(save_btn)
         lay.addWidget(compile_btn)
         lay.addWidget(self._topbar_run)
@@ -2519,14 +2589,13 @@ class StrategyLabWorkspace(QWidget):
         perf_lay.setContentsMargins(0, 0, 0, 0)
         perf_lay.setSpacing(0)
         perf_lay.addWidget(self.metrics)
-        # Stock ranking — first-class section between summary and equity.
+        # Stock ranking — first-class section; owns the perf page viewport.
+        # (The mini equity overview was removed: it duplicated the EQUITY tab.
+        # One click away, LOD-instant — no duplicate information, more rows.)
         # Single instance owned by the BACKTEST panel; reparented here.
         self._single_ranking = self.right_settings.ranking
-        perf_lay.addWidget(self._single_ranking)
+        perf_lay.addWidget(self._single_ranking, 1)
         self._single_ranking.setVisible(True)
-        perf_lay.addWidget(EquityCurveView(perf_page), 1)
-        # keep reference to perf equity for backward compat updates
-        self._perf_equity = perf_lay.itemAt(1).widget()  # type: ignore[assignment]
         stack.addWidget(perf_page)
         self.journal = TradeBlotter(dock)
         self.journal.trade_clicked.connect(self.trade_focus.emit)
@@ -2635,11 +2704,14 @@ class StrategyLabWorkspace(QWidget):
     _anim: object = None
 
     def _set_run_busy(self, busy: bool) -> None:
-        self._topbar_run.setEnabled(not busy)
+        self._busy_topbar = busy
+        self._topbar_run.setEnabled(True)  # stays clickable for ■ STOP while armed
         if busy:
-            self._topbar_run.setText("RUNNING BACKTEST…")
+            self._topbar_run.setText("RUNNING…")
             self.set_run_state("running")
         else:
+            self._stop_armed = False
+            self._topbar_status.setVisible(False)
             self._apply_top_run_label()
             # Restored to ready unless a result already marked completion/failure.
             if self._run_state == "running":
@@ -2647,11 +2719,17 @@ class StrategyLabWorkspace(QWidget):
         # Note: right_settings already reflects busy via its own set_busy emission;
         # do NOT call set_busy here or we recurse via busy_changed.
 
+    def _on_topbar_run(self) -> None:
+        if getattr(self, "_busy_topbar", False) and getattr(self, "_stop_armed", False):
+            self.stop_requested.emit()
+            return
+        self._emit_run()
+
     def _apply_top_run_label(self) -> None:
         if self._view_mode == StrategyViewMode.BUY:
-            self._topbar_run.setText("▶  RUN BUY BACKTEST")
+            self._topbar_run.setText("▶  RUN BUY")
         elif self._view_mode == StrategyViewMode.SELL:
-            self._topbar_run.setText("▶  RUN SELL BACKTEST")
+            self._topbar_run.setText("▶  RUN SELL")
         else:
             self._topbar_run.setText("▶  RUN ALL")
 
@@ -2893,11 +2971,31 @@ class StrategyLabWorkspace(QWidget):
             return "SELL — SHORT"
         return "COMPARE — COMBINED"
 
+    def _refresh_perf_context(self) -> None:
+        """Keep the PERFORMANCE scope caption agreeing with the selection."""
+        try:
+            universe = self.right_settings.selected_symbols()
+        except Exception:
+            universe = ()
+        try:
+            count = len(tuple(universe or ()))
+        except Exception:
+            count = 0
+        try:
+            direction = (self._ranking_mode_label() or "").replace(" — ", " · ")
+            noun = "STOCK" if count == 1 else "STOCKS"
+            scope = f"{count} {noun} ANALYZED" if universe else "NO STOCKS SELECTED"
+            context = f"{direction} · {scope}" if direction else scope
+            self.metrics.set_context(context)
+        except Exception:
+            pass
+
     def _push_ranking(self) -> None:
         try:
             universe = self.right_settings.selected_symbols()
         except Exception:
             universe = ()
+        self._refresh_perf_context()
         try:
             self.right_settings.set_ranking_results(
                 self._ranking_base(),
@@ -2931,11 +3029,10 @@ class StrategyLabWorkspace(QWidget):
             pass
 
     def set_batch_progress(self, done: int, total: int) -> None:
-        """Show stock-level batch progress (throttled to percent changes).
+        """Batch progress: ONE authoritative indicator (topbar status).
 
-        Updates the run buttons and the status pill with
-        ``RUNNING BACKTEST… 123 / 527 · 23%``. Text-only — no relayout,
-        no per-bar flood.
+        Counts appear here only — run buttons morph to ■ STOP and the
+        metrics pill shows state. Throttled to percent changes.
         """
         if total <= 0 or done < 0:
             return
@@ -2944,15 +3041,18 @@ class StrategyLabWorkspace(QWidget):
             return
         self._last_batch_pct = pct
         try:
-            self.metrics.set_batch_progress(done, total)
+            self._topbar_status.setText(f"● {done} / {total} · {pct}%")
+            self._topbar_status.setVisible(True)
+        except Exception:
+            pass
+        # A batch is confirmed in flight — arm ■ STOP on both run buttons.
+        self._stop_armed = True
+        try:
+            self._topbar_run.setText("■ STOP")
         except Exception:
             pass
         try:
-            self.right_settings.set_batch_progress(done, total)
-        except Exception:
-            pass
-        try:
-            self._topbar_run.setText(f"RUNNING BACKTEST… {done} / {total} · {pct}%")
+            self.right_settings.arm_stop()
         except Exception:
             pass
 
@@ -2987,12 +3087,8 @@ class StrategyLabWorkspace(QWidget):
             return
         self.metrics.set_result(view)
         self._equity_view.set_result(view)
-        try:
-            self._perf_equity.set_result(view)  # type: ignore[attr-defined]
-        except Exception:
-            pass
         self._drawdown_view.set_result(view)  # type: ignore[attr-defined]
-        self._update_equity_summary(view)
+        self._update_equity_summary(view, context=f"{symbol} — EQUITY CURVE")
 
     def _on_compare_symbol_filter(self, symbol: str) -> None:
         """Refresh the compare matrix/equity for one symbol (blotter hides rows itself)."""
@@ -3075,11 +3171,6 @@ class StrategyLabWorkspace(QWidget):
         # When active is None, show directional empty placeholder via metrics placeholder "--"
         self.metrics.set_result(active)
         self._equity_view.set_result(active)
-        if hasattr(self, "_perf_equity"):
-            try:
-                self._perf_equity.set_result(active)  # type: ignore[attr-defined]
-            except Exception:
-                pass
         self._drawdown_view.set_result(active)  # type: ignore[attr-defined]
         self.journal.set_result(active)
         # Side filter for trade blotter
@@ -3089,8 +3180,12 @@ class StrategyLabWorkspace(QWidget):
         elif mode == StrategyViewMode.SELL:
             self.journal.set_side_mode("SELL")
             self.journal.set_side_filter_visible(False)
-        # Equity summary — show START/END per side
-        self._update_equity_summary(active)
+        # Equity summary — show START/END per side, with chart context
+        try:
+            universe = self.right_settings.selected_symbols()
+        except Exception:
+            universe = ()
+        self._update_equity_summary(active, context=self._equity_context(universe))
         # If active is None (never run), show directional placeholder text in journal placeholder
         if not has:
             # customize placeholder text per direction
@@ -3104,8 +3199,25 @@ class StrategyLabWorkspace(QWidget):
                 )
             # metrics already shows "--"
 
-    def _update_equity_summary(self, result: StrategyResult | None) -> None:
+    def _equity_context(self, universe: object) -> str:
+        """Explicit chart caption: strategy scope or selected symbol."""
+        try:
+            count = len(tuple(universe or ()))  # type: ignore[arg-type]
+        except Exception:
+            count = 0
+        mode = self._view_mode
+        if mode == StrategyViewMode.BUY:
+            side = "BUY (LONG)"
+        elif mode == StrategyViewMode.SELL:
+            side = "SELL (SHORT)"
+        else:
+            side = "COMBINED"
+        noun = "STOCK" if count == 1 else "STOCKS"
+        return f"STRATEGY EQUITY CURVE · {count} {noun} · {side}"
+
+    def _update_equity_summary(self, result: StrategyResult | None, context: str = "") -> None:
         points = result.equity_curve if result is not None else ()
+        caption = f"{context} — " if context else ""
         if len(points) >= 2:
             start = float(points[0].equity)
             end = float(points[-1].equity)
@@ -3118,14 +3230,14 @@ class StrategyLabWorkspace(QWidget):
                 if self._view_mode == StrategyViewMode.SELL
                 else ""
             )
-            prefix = f"{dir_tag} " if dir_tag else ""
+            scope = f"{dir_tag} " if dir_tag and not context else ""
             self._equity_summary.setText(
-                f"{prefix}START ₹{_inr(start)}   ·   END ₹{_inr(end)}   ·   "
+                f"{caption}{scope}START ₹{_inr(start)}   ·   END ₹{_inr(end)}   ·   "
                 f"<span style='color:{color};'>RETURN {ret:+.2f}%</span>"
             )
         elif len(points) == 1:
             start = float(points[0].equity)
-            self._equity_summary.setText(f"START ₹{_inr(start)}   ·   No trades yet")
+            self._equity_summary.setText(f"{caption}START ₹{_inr(start)}   ·   No trades yet")
         else:
             if self._view_mode == StrategyViewMode.BUY:
                 self._equity_summary.setText("No BUY backtest — run BUY backtest to see equity.")
@@ -3141,12 +3253,16 @@ class StrategyLabWorkspace(QWidget):
         self._symbol_windows = {}
         self._ranking_errors = {}
         self._last_run_symbols = None
-        self.metrics.set_result(None)
-        self._equity_view.set_result(None)
         try:
-            self._perf_equity.set_result(None)  # type: ignore[attr-defined]
+            self.right_settings.disarm_stop()
         except Exception:
             pass
+        try:
+            self.right_settings.set_busy(False)
+        except Exception:
+            pass
+        self.metrics.set_result(None)
+        self._equity_view.set_result(None)
         self._drawdown_view.set_result(None)  # type: ignore[attr-defined]
         self.journal.set_result(None)
         try:

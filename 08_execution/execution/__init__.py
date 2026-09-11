@@ -72,10 +72,12 @@ from execution.events import (
 from execution.journal import ExecutionJournal, JournalEntry, LatencyTracker, StageTimer, utcnow_iso
 from execution.manifest import execution_manifest
 from execution.market_data import (
+    BrokerFeedProvider,
     MarketDataError,
     MarketDataProvider,
     NormalizerConfig,
     ReplayProvider,
+    SqliteTailProvider,
     StreamNormalizer,
     StreamStats,
     bars_to_candles,
@@ -180,6 +182,8 @@ __all__ = [
     "provider_supports",
     "ReplayProvider",
     "bars_to_candles",
+    "BrokerFeedProvider",
+    "SqliteTailProvider",
     "StreamNormalizer",
     "NormalizerConfig",
     "StreamStats",

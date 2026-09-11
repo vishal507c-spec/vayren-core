@@ -1,7 +1,8 @@
 """Build the Rust workspace (constitution §8: Rust owns core/perf).
 
 Builds the `vayren-core` cdylib (release) consumed by the Python boundary
-via ctypes, and verifies the ABI handshake. Also runs `cargo test` with
+via ctypes, builds the `vayren-shell` native UI binary, and verifies the
+ABI handshake. Also runs `cargo test` for the whole workspace with
 `--test`. Fail-closed: any cargo failure exits nonzero with the log tail.
 """
 
@@ -24,6 +25,11 @@ def _lib_name() -> str:
     if system == "darwin":
         return "libvayren_core.dylib"
     return "libvayren_core.so"
+
+
+def _bin_name() -> str:
+    system = platform.system().lower()
+    return "vayren-shell.exe" if system.startswith("win") else "vayren-shell"
 
 
 def _run(argv: list[str]) -> int:
@@ -66,8 +72,17 @@ def main() -> int:
         return 1
     print(f"built {lib} ({lib.stat().st_size} bytes)")
 
+    rc = _run(["cargo", "build", "-p", "vayren-shell", "--manifest-path", "rust/Cargo.toml"])
+    if rc != 0:
+        return rc
+    shell_bin = ROOT / "rust" / "target" / "debug" / _bin_name()
+    if not shell_bin.is_file():
+        print(f"ERROR: expected native UI binary missing after build: {shell_bin}")
+        return 1
+    print(f"built {shell_bin} ({shell_bin.stat().st_size} bytes)")
+
     if args.test:
-        rc = _run(["cargo", "test", "-p", "vayren-core", "--manifest-path", "rust/Cargo.toml"])
+        rc = _run(["cargo", "test", "--workspace", "--manifest-path", "rust/Cargo.toml"])
         if rc != 0:
             return rc
     return 0

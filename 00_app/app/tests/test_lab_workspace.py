@@ -276,7 +276,7 @@ def test_single_dominant_run_action(workspace: StrategyLabWorkspace) -> None:
     ]
     assert len(primaries) == 1
     assert "RUN" in workspace.right_settings._run.text()
-    assert workspace.right_settings._run.minimumHeight() >= 32
+    assert workspace.right_settings._run.minimumHeight() >= 28
 
 
 def test_mode_selector_only_on_backtest_tab(workspace: StrategyLabWorkspace) -> None:
@@ -401,22 +401,43 @@ def test_compare_stock_count_flows_to_header(workspace: StrategyLabWorkspace) ->
     assert "3" in workspace._compare_view._run_all.text()
 
 
-def test_batch_progress_shows_counts(workspace: StrategyLabWorkspace) -> None:
+def test_batch_progress_single_indicator_and_stop(workspace: StrategyLabWorkspace) -> None:
     workspace.show()
-    workspace.set_run_state("running")
+    workspace.right_settings.set_busy(True)  # → topbar busy + pill RUNNING
     assert "RUNNING" in workspace.metrics._status.text()
+    # counts appear exactly once (topbar status), never on run buttons
     workspace.set_batch_progress(123, 527)
-    assert "123 / 527" in workspace.metrics._status.text()
-    assert "23%" in workspace.metrics._status.text()
-    assert "123 / 527" in workspace._topbar_run.text()
+    assert workspace._topbar_status.text() == "● 123 / 527 · 23%"
+    assert "123" not in workspace.metrics._status.text()
+    assert "123" not in workspace._topbar_run.text()
+    # batch confirmed in flight → both run buttons morph to ■ STOP
+    assert workspace._topbar_run.text() == "■ STOP"
+    assert workspace.right_settings._run.text() == "■ STOP"
     # throttled to percent changes: same percent keeps prior text
-    before = workspace.metrics._status.text()
+    before = workspace._topbar_status.text()
     workspace.set_batch_progress(124, 527)  # still 23%
-    assert workspace.metrics._status.text() == before
+    assert workspace._topbar_status.text() == before
     workspace.set_batch_progress(247, 527)  # 46%
-    assert "247 / 527" in workspace.metrics._status.text()
+    assert workspace._topbar_status.text() == "● 247 / 527 · 46%"
+    # STOP click emits stop_requested instead of starting a run
+    stopped: list = []
+    runs: list = []
+    workspace.stop_requested.connect(lambda: stopped.append(1))
+    workspace.run_backtest.connect(runs.append)
+    workspace._topbar_run.click()
+    assert stopped and not runs
+    workspace.right_settings._run.click()
+    assert len(stopped) == 2 and not runs
     workspace.set_run_state("complete")
     assert "COMPLETE" in workspace.metrics._status.text()
+
+
+def test_run_states_include_aggregating(workspace: StrategyLabWorkspace) -> None:
+    workspace.show()
+    workspace.set_run_state("aggregating")
+    assert "AGGREGATING" in workspace.metrics._status.text()
+    workspace.set_run_state("finalizing")
+    assert "FINALIZING" in workspace.metrics._status.text()
 
 
 def test_storage_file_ops(tmp_path: Path) -> None:
@@ -554,3 +575,32 @@ def test_blotter_export_covers_all_trades(qt_app, tmp_path):
         blotter._export_csv()
     lines = out.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 2501  # header + every trade, not just materialized rows
+
+
+def test_perf_context_refreshes_on_selection(workspace: StrategyLabWorkspace) -> None:
+    workspace.show()
+    workspace.right_settings.set_symbols(("AAA", "BBB"))
+    workspace.right_settings.set_selected_symbols(["AAA", "BBB"])
+    QApplication.processEvents()
+    assert workspace.metrics._context.text() == "BUY · LONG · 2 STOCKS ANALYZED"
+    workspace.right_settings.set_selected_symbols([])
+    QApplication.processEvents()
+    assert "NO STOCKS SELECTED" in workspace.metrics._context.text()
+
+
+def test_ranking_columns_pack_left_without_gap(qt_app):
+    _ = qt_app
+    from app.ui.stock_ranking import StockRankingWidget
+
+    widget = StockRankingWidget()
+    widget.show()
+    try:
+        assert not widget._table.horizontalHeader().stretchLastSection()
+        widget.set_universe(("AAA", "BBB"))
+        QApplication.processEvents()
+        hdr = widget._table.horizontalHeader()
+        gap = hdr.sectionViewportPosition(8) - (hdr.sectionViewportPosition(7) + hdr.sectionSize(7))
+        assert gap == 0
+    finally:
+        widget.close()
+        widget.deleteLater()

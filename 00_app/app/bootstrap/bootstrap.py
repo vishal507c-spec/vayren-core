@@ -41,7 +41,7 @@ from market.loader.symbol_list_loader import SymbolListLoader
 from market.loader.timeframe_list_loader import TimeframeListLoader
 from market.manifest import market_manifest
 from market.repository.symbol_repository import SymbolRepository
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
+from PySide6.QtCore import QEvent, QObject, QRunnable, QThreadPool, Signal
 from PySide6.QtWidgets import QApplication
 
 from app.lifecycle.lifecycle import AppLifecycle
@@ -300,9 +300,19 @@ class Bootstrap:
         data_dir: str | Path,
         limit: int | None = None,
         selection_service: Any | None = None,
+        strategy_dir: str | Path | None = None,
     ) -> None:
         self._bus = EventBus()
         self._services: Registry[Any] = Registry()
+        self._data_dir = Path(data_dir)
+        # Strategy Library root — injected by the composition root (CLI
+        # ``--strategy-dir`` / ``VAYREN_STRATEGIES``) or derived from
+        # ``data_dir``. Never a hardcoded drive letter.
+        from strategy.language.storage import strategy_dir as _resolve_strategy_dir
+
+        self._strategy_dir = (
+            Path(strategy_dir) if strategy_dir is not None else _resolve_strategy_dir(data_dir)
+        )
 
         # ── authoritative broker selection (Phase 21 M4) ──
         # Every broker-facing surface reads THE selection through this
@@ -353,9 +363,10 @@ class Bootstrap:
         # for backward compat; no seeding on VAYREN START.
 
         # BacktestRunner is Python-only: .py Strategy -> PythonStrategy -> Signal
-        # canonical strategy source D:\VAYREN_STRATEGIES  # noqa: E501
+        # Strategy source = the resolved library root (CLI/env/data_dir), never a
+        # hardcoded drive letter.
         backtest_runner = BacktestRunner(
-            repository, registry=strategy_registry, data_dir=r"D:\VAYREN_STRATEGIES"
+            repository, registry=strategy_registry, data_dir=self._strategy_dir
         )
         backtest_worker = BacktestWorker(backtest_runner)
         trade_overlay = TradeOverlay()
@@ -446,11 +457,24 @@ class Bootstrap:
                     if sel is not None
                     else None
                 )
+                # SYSTEM → BROKERS is the auth authority: overlay the manager's
+                # live state so the LIVE pill shows CONNECTED / LOGIN_REQUIRED
+                # without any broker logic leaking into this view.
+                manager = getattr(self, "_broker_manager", None)
+                if manager is not None and sel is not None:
+                    with contextlib.suppress(Exception):
+                        bstate = manager.state(sel.name) or {}
+                        status = getattr(bstate.get("status"), "value", None)
+                        if status:
+                            state["broker"]["status"] = status
+                            if bstate.get("reason"):
+                                state["broker"]["reason"] = str(bstate["reason"])
+                            state["broker"]["connected"] = status in ("CONNECTED", "LIVE_READY")
                 names: list[str] = []
                 with contextlib.suppress(Exception):
                     from strategy.language.storage import list_strategies
 
-                    names = sorted(list_strategies(r"D:\VAYREN_STRATEGIES"))
+                    names = sorted(list_strategies(self._strategy_dir))
                 if names:
                     state["strategy"] = {
                         "id": names[0],
@@ -529,11 +553,192 @@ class Bootstrap:
                     for g in gates
                     if g["status"] != "READY" and g["reason"]
                 ] or ["LIVE broker is not configured"]
+                # ── LIVE trading backend (Strategy Lab → LIVE bridge) ──
+                # Service snapshot owns runtime + setup keys; the static
+                # broker-selection pill and UBL gates above stay authoritative
+                # for identity/readiness display.
+                try:
+                    live = live_service.snapshot()
+                except Exception:  # noqa: BLE001
+                    live = {}
+                if isinstance(live, dict):
+                    for key in (
+                        "mode",
+                        "session_status",
+                        "status_reason",
+                        "positions",
+                        "position",
+                        "orders",
+                        "fills",
+                        "pnl",
+                        "risk",
+                        "reconciliation",
+                        "kill",
+                        "can_halt",
+                        "lifecycle",
+                        "events",
+                        "market_symbol",
+                        "market_timeframe",
+                        "market_bars",
+                        "available_strategies",
+                        "available_symbols",
+                        "selected_symbols",
+                        "available_timeframes",
+                        "selected_timeframe",
+                        "quantity",
+                        "start_blockers",
+                        "active_positions",
+                        "open_orders",
+                        "account",
+                        "execution",
+                        "feed",
+                    ):
+                        if live.get(key) is not None or key == "position":
+                            state[key] = live.get(key)
+                    # Readiness rows concatenate: UBL venue gates first, then
+                    # the service rows (ACCOUNT / ORDER EXECUTION / FEED).
+                    service_gates = live.get("gates") or []
+                    if isinstance(service_gates, list) and service_gates:
+                        state["gates"] = [*gates, *service_gates]
+                        state["arm_blockers"] = [
+                            *state.get("arm_blockers", []),
+                            *[
+                                f"{g['name']}: {g['reason']}"
+                                for g in service_gates
+                                if isinstance(g, dict)
+                                and g.get("status") != "READY"
+                                and g.get("reason")
+                            ],
+                        ]
+                    if live.get("strategy") is not None:
+                        state["strategy"] = live["strategy"]
+                        broker_live = live.get("broker") or {}
+                        if isinstance(broker_live, dict):
+                            state["broker"]["connected"] = broker_live.get("connected")
+                            if broker_live.get("reason"):
+                                state["broker"]["reason"] = broker_live["reason"]
             except Exception:
                 pass
             return state
 
         live_workspace = LiveWorkspace(state_provider=_live_state_provider)
+        # ── SYSTEM → BROKERS: centralized broker management ──
+        # One manager owns configuration/authentication/connection state for
+        # every venue; LIVE and the download engine only consume it. All
+        # network/SDK work runs on the manager's worker thread; the UI sees
+        # snapshots + signals only.
+        from app.services.broker_manager import BrokerManager
+        from app.ui.brokers_workspace import BrokersWorkspace
+
+        broker_manager = BrokerManager(data_dir=data_dir)
+        self._broker_manager = broker_manager
+        brokers_workspace = BrokersWorkspace(state_provider=broker_manager.snapshot)
+        self._brokers_workspace = brokers_workspace
+
+        def _on_broker_message(text: str) -> None:
+            panel = getattr(self, "_event_log", None)
+            with contextlib.suppress(Exception):
+                if panel is not None:
+                    panel.add_entry("INFO", f"Broker: {text}")
+
+        def _on_broker_state_changed(_broker_id: str) -> None:
+            with contextlib.suppress(Exception):
+                brokers_workspace.refresh()
+                live_workspace.refresh()
+
+        broker_manager.message.connect(_on_broker_message)
+        broker_manager.state_changed.connect(_on_broker_state_changed)
+        brokers_workspace.configure_requested.connect(
+            lambda broker_id, values: broker_manager.configure(broker_id, values)
+        )
+        brokers_workspace.login_requested.connect(
+            lambda broker_id: broker_manager.start_login(broker_id)
+        )
+        brokers_workspace.disconnect_requested.connect(
+            lambda broker_id: broker_manager.disconnect_broker(broker_id)
+        )
+
+        def _on_broker_remove(broker_id: str) -> None:
+            try:
+                from PySide6.QtWidgets import QMessageBox
+
+                answer = QMessageBox.question(
+                    brokers_workspace,
+                    "Remove broker",
+                    f"Remove {broker_manager.display_name(broker_id)} configuration"
+                    " and stored session? Historical records are kept.",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                if answer == QMessageBox.StandardButton.Yes:
+                    broker_manager.remove(broker_id)
+            except Exception:  # noqa: BLE001
+                pass
+
+        brokers_workspace.remove_requested.connect(_on_broker_remove)
+        # Startup session check: stored token → CONNECTED or LOGIN_REQUIRED.
+        for broker_id in broker_manager.broker_ids():
+            broker_manager.submit_check(broker_id)
+
+        # LIVE trading backend: Strategy Lab store → per-symbol LiveSessions.
+        # The workspace stays a pure view; every action arrives here as a Qt
+        # signal (subscriptions still only on the bus — G2 untouched).
+        from app.services.live_trading_service import LiveTradingService
+
+        live_service = LiveTradingService(
+            data_dir=data_dir,
+            strategy_dir=self._strategy_dir,
+            selection_service=selection_service,
+            broker_manager=broker_manager,
+        )
+        self._live_service = live_service
+
+        def _on_live_setup(setup: Any) -> None:
+            try:
+                if not isinstance(setup, dict):
+                    return
+                live_service.configure(
+                    strategy_name=str(setup.get("strategy_name", "") or ""),
+                    symbols=tuple(setup.get("symbols", ()) or ()),
+                    timeframe=str(setup.get("timeframe", "") or ""),
+                    quantity=setup.get("quantity", None),
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
+        def _on_live_start() -> None:
+            try:
+                if live_service.config.mode == "LIVE":
+                    from PySide6.QtWidgets import QMessageBox
+
+                    answer = QMessageBox.warning(
+                        live_workspace,
+                        "Confirm LIVE trading",
+                        "Start REAL-MONEY live trading with strategy "
+                        f"'{live_service.config.strategy_name}' on "
+                        f"{', '.join(live_service.config.symbols)}?",
+                        QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel,
+                        QMessageBox.StandardButton.Cancel,
+                    )
+                    if answer != QMessageBox.StandardButton.Ok:
+                        return
+                    live_service.start(confirmed=True)
+                else:
+                    live_service.start(confirmed=False)
+            except Exception:  # noqa: BLE001
+                pass
+
+        live_workspace.configure_broker_requested.connect(
+            lambda: getattr(window, "show_brokers", lambda: None)()
+        )
+        live_workspace.setup_changed.connect(_on_live_setup)
+        live_workspace.start_requested.connect(_on_live_start)
+        live_workspace.stop_requested.connect(lambda: live_service.stop())
+        live_workspace.mode_requested.connect(
+            lambda mode: (
+                live_service.configure(mode=str(mode)) if str(mode) in ("PAPER", "LIVE") else None
+            )
+        )
         from backtest.execution import list_histories
         from strategy.language.storage import list_strategies
 
@@ -543,7 +748,7 @@ class Bootstrap:
 
         research_service = ResearchService(
             data_dir=data_dir,
-            strategy_dir=r"D:\VAYREN_STRATEGIES",
+            strategy_dir=self._strategy_dir,
             list_strategies_fn=list_strategies,
             list_histories_fn=list_histories,
         )
@@ -607,6 +812,7 @@ class Bootstrap:
             live_workspace=live_workspace,
             research_workspace=research_workspace,
             portfolio_workspace=portfolio_workspace,
+            brokers_workspace=brokers_workspace,
             event_log=event_log,
             system_health=system_health,
             trade_context=trade_context_panel,
@@ -1001,7 +1207,7 @@ class Bootstrap:
                     try:
                         from strategy.language.storage import list_strategies
 
-                        strats = list_strategies(r"D:\VAYREN_STRATEGIES")
+                        strats = list_strategies(self._strategy_dir)
                         if ind_name in strats or ind_name.lower() == "obr":
                             is_strategy = True
                         # also check registry
@@ -1025,10 +1231,10 @@ class Bootstrap:
                     try:
                         from strategy.language.storage import load_strategy_record
 
-                        rec = load_strategy_record(ind_name, r"D:\VAYREN_STRATEGIES")
+                        rec = load_strategy_record(ind_name, self._strategy_dir)
                         if rec is None and ind_name.lower() == "obr":
                             # fallback for OBR
-                            rec = load_strategy_record("OBR", r"D:\VAYREN_STRATEGIES")
+                            rec = load_strategy_record("OBR", self._strategy_dir)
                         if rec is None:
                             continue
                         strategy_id = rec.id
@@ -1152,7 +1358,13 @@ class Bootstrap:
             nav_bar.portfolio_clicked.connect(window.show_portfolio)
         if hasattr(nav_bar, "live_clicked"):
             nav_bar.live_clicked.connect(window.show_live)
-        nav_bar.system_clicked.connect(window.toggle_bottom)
+        # SYSTEM → BROKERS: the nav's SYSTEM section opens the centralized
+        # broker management workspace (bottom log stays toggleable via the
+        # brokers workspace's window affordances, not the nav).
+        if hasattr(window, "show_brokers"):
+            nav_bar.system_clicked.connect(window.show_brokers)
+        else:
+            nav_bar.system_clicked.connect(window.toggle_bottom)
 
         # ── control ↔ bus ──
         def _on_backtest_form(form: Any) -> None:
@@ -1414,6 +1626,11 @@ class Bootstrap:
                 )
                 symbols = tuple(cfg.get("symbols") or ())
                 symbol = symbols[0] if symbols else (cfg.get("symbol") or window.current_symbol)
+                # Lab → LIVE handoff: mirror symbols/timeframe to the LIVE tab.
+                with contextlib.suppress(Exception):
+                    svc = getattr(self, "_live_service", None)
+                    if svc is not None:
+                        svc.configure(symbols=symbols, timeframe=form.timeframe)
                 enabled_ids = {d.id for d in strategy_registry.enabled()}
                 errors = validate_backtest_form(form, symbol, enabled_ids)
                 if errors:
@@ -1467,6 +1684,8 @@ class Bootstrap:
 
             lab_workspace.run_backtest.connect(_on_workspace_run)
 
+            lab_workspace.stop_requested.connect(lambda: self._on_lab_stop(event_log))
+
             # ── multi-symbol batch: surface per-symbol errors + bar windows ──
             _multi_lab = getattr(self, "_multi_symbol_coordinator", None)
             if _multi_lab is not None:
@@ -1474,6 +1693,9 @@ class Bootstrap:
                 def _on_batch_finished(outcome: Any) -> None:
                     # Single ranking refresh: the terminal BacktestCompleted
                     # (published right after) rebuilds it once via set_result.
+                    # Merge is done — UI publication (finalizing) starts now.
+                    with contextlib.suppress(Exception):
+                        lab_workspace.set_run_state("finalizing")
                     with contextlib.suppress(Exception):
                         lab_workspace.set_symbol_windows(outcome.bars_by_symbol)
                     with contextlib.suppress(Exception):
@@ -1500,7 +1722,7 @@ class Bootstrap:
 
                 def _on_batch_finalizing(_request_id: object) -> None:
                     with contextlib.suppress(Exception):
-                        lab_workspace.set_run_state("finalizing")
+                        lab_workspace.set_run_state("aggregating")
 
                 _multi_lab.batch_finalizing.connect(_on_batch_finalizing)  # type: ignore[attr-defined]
 
@@ -1746,11 +1968,10 @@ class Bootstrap:
                 pass
 
             # ── code editor SAVE / COMPILE ──
-            # Canonical per product requirement: UI ↔ D:\VAYREN_STRATEGIES
-            # symbol_repository directory is for market data (D:\ZerodhaTradingData),
-            # NOT for strategy source. Canonical is fixed.
+            # The strategy library is its own root (resolved once in __init__)
+            # and is deliberately NOT the market-data directory.
             def _strategy_data_dir() -> str | None:
-                return r"D:\VAYREN_STRATEGIES"
+                return self._strategy_dir
 
             def _refresh_my_strategies() -> None:
                 try:
@@ -1764,7 +1985,7 @@ class Bootstrap:
                 try:
                     from strategy.language.storage import list_strategies
 
-                    names = tuple(sorted(list_strategies(r"D:\VAYREN_STRATEGIES")))
+                    names = tuple(sorted(list_strategies(self._strategy_dir)))
                     window.set_indicator_strategies(names)
                 except Exception:
                     pass
@@ -1773,7 +1994,7 @@ class Bootstrap:
                 try:
                     from strategy.language.storage import list_strategies
 
-                    names = tuple(sorted(list_strategies(r"D:\VAYREN_STRATEGIES")))
+                    names = tuple(sorted(list_strategies(self._strategy_dir)))
                     window.set_indicator_strategies(names)
                 except Exception:
                     pass
@@ -1784,7 +2005,7 @@ class Bootstrap:
                 try:
                     from strategy.language.storage import load_strategy_record
 
-                    rec = load_strategy_record(name, r"D:\VAYREN_STRATEGIES")
+                    rec = load_strategy_record(name, self._strategy_dir)
                     if rec is None:
                         event_log.add_entry("WARN", f"Strategy not found: {name}")
                         return
@@ -2175,6 +2396,12 @@ class Bootstrap:
                         event_log.add_entry("INFO", f"Opened strategy: {name}")
                     else:
                         event_log.add_entry("WARN", f"Strategy not found: {name}")
+                    # Lab → LIVE handoff: preselect the same strategy on the
+                    # LIVE tab (never starts anything by itself).
+                    with contextlib.suppress(Exception):
+                        svc = getattr(self, "_live_service", None)
+                        if svc is not None:
+                            svc.configure(strategy_name=name)
                 except Exception as exc:  # noqa: BLE001
                     event_log.add_entry("ERROR", str(exc))
 
@@ -2423,7 +2650,7 @@ class Bootstrap:
         task = _HistorySaveTask(
             result,
             getattr(self, "_strategy_registry", None),
-            r"D:\VAYREN_STRATEGIES",
+            self._strategy_dir,
             generation,
             emitter,
         )
@@ -2453,6 +2680,30 @@ class Bootstrap:
         with contextlib.suppress(Exception):
             emitter.finished.connect(_done)  # type: ignore[attr-defined]
         QThreadPool.globalInstance().start(task)
+
+    def _on_lab_stop(self, event_log: Any) -> None:  # type: ignore[no-untyped-def]
+        """STOP a running batch; restore idle UI, keep completed results.
+
+        STOP governs batches only (single runs have no safe cancel and never
+        arm STOP). Drops in-flight work, restores idle UI, keeps previous
+        completed results intact.
+        """
+        lab_workspace = getattr(self, "_lab_workspace", None)
+        multi = getattr(self, "_multi_symbol_coordinator", None)
+        if multi is not None and not multi.active:  # type: ignore[attr-defined]
+            return
+        try:
+            if multi is not None:
+                multi.cancel()  # type: ignore[attr-defined]
+        except Exception:  # noqa: BLE001
+            pass
+        if lab_workspace is None:
+            return
+        with contextlib.suppress(Exception):
+            lab_workspace.right_settings.set_busy(False)  # type: ignore[attr-defined]
+        with contextlib.suppress(Exception):
+            lab_workspace.set_run_state("ready")  # type: ignore[attr-defined]
+        event_log.add_entry("INFO", "Backtest stopped by user")
 
     def _on_backtest_failed(
         self, event: Any, lab_control: Any, event_log: Any, system_health: Any
@@ -2486,7 +2737,7 @@ class Bootstrap:
             from strategy.models.parameters import StrategyParameters
             from strategy.runtime import StrategyRuntime
 
-            rec = load_strategy_record(strategy_name, r"D:\VAYREN_STRATEGIES")
+            rec = load_strategy_record(strategy_name, self._strategy_dir)
             if rec is None:
                 _log.warning("_run_strategy_plots: no record for %s", strategy_name)
                 return
@@ -2590,6 +2841,128 @@ class Bootstrap:
         self._services.get("chart_window").showMaximized()
         self._event_log.add_entry("INFO", "VAYREN started — Strategy Lab ready")
         self._bus.publish(AppStarted())
+
+    def stop(self) -> None:
+        """Shut down every worker thread this Bootstrap owns and stop the bus.
+
+        Bootstrap has no other exit path: without this, each constructed
+        instance leaks its QThread workers and Qt widget tree, which
+        accumulates without bound in long-lived processes (notably the test
+        suite, where GC is intentionally disabled). Idempotent — safe to call
+        more than once, and safe to call on a Bootstrap that never started.
+
+        Order matters: detach the bus first so a worker cannot enqueue new
+        work while it is being joined, then join workers, then close windows.
+        """
+        worker_names = ("data_worker", "backtest_worker")
+        stopped: list[str] = []
+        for name in worker_names:
+            if name not in self._services:
+                continue
+            worker = self._services.get(name)
+            shutdown = getattr(worker, "shutdown", None)
+            if callable(shutdown):
+                try:
+                    shutdown()
+                except Exception:
+                    logger.exception("Failed to shut down %s", name)
+                stopped.append(name)
+        # BrokerManager owns its own worker thread, outside the services
+        # registry; its stop_worker() is idempotent.
+        broker_manager = getattr(self, "_broker_manager", None)
+        stop_worker = getattr(broker_manager, "stop_worker", None)
+        if callable(stop_worker):
+            try:
+                stop_worker()
+            except Exception:
+                logger.exception("Failed to shut down the broker manager worker")
+            stopped.append("broker_manager")
+        window = self._services.get("chart_window") if "chart_window" in self._services else None
+        if window is not None:
+            try:
+                window.close()
+            except Exception:
+                logger.exception("Failed to close the chart window")
+        self._bus.clear()
+        # Release this Bootstrap's own strong references to the UI tree. Several
+        # panels are constructed with no parent and only held by ``self._*`` and
+        # by the services registry; while those references live, the panels stay
+        # alive as top-level widgets and are never garbage-collected. The suite
+        # runs with GC disabled (``conftest``), so nothing else can break the
+        # cycle — this is the only place that can.
+        self._release_widget_references()
+        # ``close()`` schedules the window tree for deletion; flush the deferred
+        # deletions now so the widgets are actually released rather than
+        # lingering until the next event-loop turn (which may never come).
+        app = QApplication.instance()
+        if isinstance(app, QApplication):
+            with contextlib.suppress(Exception):
+                app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        if stopped:
+            logger.info("Bootstrap stopped; workers shut down: %s", ", ".join(stopped))
+
+    def _release_widget_references(self) -> None:
+        """Drop strong references to widgets so their trees can be reclaimed.
+
+        Idempotent and defensive: every attribute is optional and any failure
+        is swallowed, because this runs during teardown where raising would be
+        worse than leaking.
+        """
+        from PySide6.QtWidgets import QWidget
+
+        seen: set[int] = set()
+
+        def _consider(value: Any) -> None:
+            if value is None or id(value) in seen:
+                return
+            seen.add(id(value))
+            if isinstance(value, QWidget):
+                with contextlib.suppress(Exception):
+                    value.setParent(None)
+                with contextlib.suppress(Exception):
+                    value.deleteLater()
+
+        # Service registry entries (the primary holder of the orphan panels).
+        for _name, service in list(self._services):
+            if isinstance(service, QWidget):
+                _consider(service)
+        # Instance attributes (``self._lab_control`` and friends).
+        for attr in (
+            "_lab_control",
+            "_lab_list",
+            "_performance_panel",
+            "_lab_workspace",
+            "_market_status",
+            "_event_log",
+            "_system_health",
+            "_nav_bar",
+            "_widget",
+            "_trade_context_panel",
+            "_trade_chart_controller",
+            "_multi_symbol_coordinator",
+            "_plot_overlay",
+            "_trade_overlay",
+        ):
+            if not hasattr(self, attr):
+                continue
+            _consider(getattr(self, attr))
+            with contextlib.suppress(Exception):
+                setattr(self, attr, None)
+        self._drop_gui_service_entries()
+
+    def _drop_gui_service_entries(self) -> None:
+        """Remove widget entries from the services registry (keeps non-widgets).
+
+        ``Registry`` has no ``clear`` and refuses duplicate ``register`` calls,
+        so the underlying dict is rebuilt in place rather than re-registered.
+        """
+        from PySide6.QtWidgets import QWidget
+
+        items = getattr(self._services, "_items", None)
+        if not isinstance(items, dict):
+            return
+        for name in [n for n, v in items.items() if isinstance(v, QWidget)]:
+            items.pop(name, None)
 
     @property
     def bus(self) -> EventBus:

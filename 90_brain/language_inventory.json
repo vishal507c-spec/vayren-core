@@ -8,7 +8,7 @@
   "target": "python-retained-qt",
   "basis": "composition root + Qt shell",
   "qt": true,
-  "status": "INTENTIONALLY_RETAINED"
+  "status": "UNCLASSIFIED"
  },
  {
   "file": "00_app/app/__main__.py",
@@ -30,18 +30,18 @@
   "target": "python-retained-qt",
   "basis": "composition root + Qt shell",
   "qt": false,
-  "status": "INTENTIONALLY_RETAINED"
+  "status": "UNCLASSIFIED"
  },
  {
   "file": "00_app/app/bootstrap/bootstrap.py",
-  "loc": 2610,
+  "loc": 2851,
   "chapter": "app",
   "test": false,
   "responsibility": "APP_UI",
   "target": "python-retained-qt",
   "basis": "composition root + Qt shell",
   "qt": true,
-  "status": "INTENTIONALLY_RETAINED"
+  "status": "UNCLASSIFIED"
  },
  {
   "file": "00_app/app/describe.py",
@@ -52,7 +52,7 @@
   "target": "python-retained-qt",
   "basis": "composition root + Qt shell",
   "qt": true,
-  "status": "INTENTIONALLY_RETAINED"
+  "status": "UNCLASSIFIED"
  },
  {
   "file": "00_app/app/lifecycle/__init__.py",
@@ -63,7 +63,7 @@
   "target": "python-retained-qt",
   "basis": "composition root + Qt shell",
   "qt": false,
-  "status": "INTENTIONALLY_RETAINED"
+  "status": "UNCLASSIFIED"
  },
  {
   "file": "00_app/app/lifecycle/lifecycle.py",
@@ -74,7 +74,7 @@
   "target": "python-retained-qt",
   "basis": "composition root + Qt shell",
   "qt": false,
-  "status": "INTENTIONALLY_RETAINED"
+  "status": "UNCLASSIFIED"
  },
  {
   "file": "00_app/app/services/__init__.py",
@@ -88,6 +88,17 @@
   "status": "PYTHON_OWNED"
  },
  {
+  "file": "00_app/app/services/broker_manager.py",
+  "loc": 444,
+  "chapter": "app",
+  "test": false,
+  "responsibility": "APP_UI",
+  "target": "python-retained-qt",
+  "basis": "composition root + Qt shell",
+  "qt": true,
+  "status": "UNCLASSIFIED"
+ },
+ {
   "file": "00_app/app/services/broker_selection_service.py",
   "loc": 233,
   "chapter": "app",
@@ -97,6 +108,17 @@
   "basis": "composition services",
   "qt": false,
   "status": "PYTHON_OWNED"
+ },
+ {
+  "file": "00_app/app/services/live_trading_service.py",
+  "loc": 1101,
+  "chapter": "app",
+  "test": false,
+  "responsibility": "APP_UI",
+  "target": "python-retained-qt",
+  "basis": "composition root + Qt shell",
+  "qt": true,
+  "status": "UNCLASSIFIED"
  },
  {
   "file": "00_app/app/services/multi_symbol_backtest.py",
@@ -140,7 +162,7 @@
   "target": "python-retained-qt",
   "basis": "composition root + Qt shell",
   "qt": true,
-  "status": "INTENTIONALLY_RETAINED"
+  "status": "UNCLASSIFIED"
  },
  {
   "file": "00_app/app/tests/__init__.py",
@@ -156,6 +178,17 @@
  {
   "file": "00_app/app/tests/conftest.py",
   "loc": 164,
+  "chapter": "app",
+  "test": true,
+  "responsibility": "TEST",
+  "target": "python-test",
+  "basis": "test file",
+  "qt": true,
+  "status": "TEST"
+ },
+ {
+  "file": "00_app/app/tests/test_broker_manager.py",
+  "loc": 335,
   "chapter": "app",
   "test": true,
   "responsibility": "TEST",
@@ -184,6 +217,17 @@
   "target": "python-test",
   "basis": "test file",
   "qt": false,
+  "status": "TEST"
+ },
+ {
+  "file": "00_app/app/tests/test_brokers_workspace.py",
+  "loc": 115,
+  "chapter": "app",
+  "test": true,
+  "responsibility": "TEST",
+  "target": "python-test",
+  "basis": "test file",
+  "qt": true,
   "status": "TEST"
  },
  {
@@ -232,7 +276,18 @@
  },
  {
   "file": "00_app/app/tests/test_lab_workspace.py",
-  "loc": 558,
+  "loc": 606,
+  "chapter": "app",
+  "test": true,
+  "responsibility": "TEST",
+  "target": "python-test",
+  "basis": "test file",
+  "qt": true,
+  "status": "TEST"
+ },
+ {
+  "file": "00_app/app/tests/test_live_trading_service.py",
+  "loc": 215,
   "chapter": "app",
   "test": true,
   "responsibility": "TEST",
@@ -353,7 +408,7 @@
  },
  {
   "file": "00_app/app/tests/test_stock_ranking.py",
-  "loc": 271,
+  "loc": 404,
   "chapter": "app",
   "test": true,
   "responsibility": "TEST",
@@ -407,6 +462,17 @@
   "status": "INTENTIONALLY_RETAINED"
  },
  {
+  "file": "00_app/app/ui/brokers_workspace.py",
+  "loc": 323,
+  "chapter": "app",
+  "test": false,
+  "responsibility": "APP_UI",
+  "target": "python-retained-qt",
+  "basis": "composition root + Qt shell",
+  "qt": true,
+  "status": "INTENTIONALLY_RETAINED"
+ },
+ {
   "file": "00_app/app/ui/event_log_panel.py",
   "loc": 68,
   "chapter": "app",
@@ -430,7 +496,7 @@
  },
  {
   "file": "00_app/app/ui/live_workspace.py",
-  "loc": 764,
+  "loc": 979,
   "chapter": "app",
   "test": false,
   "responsibility": "APP_UI",
@@ -474,7 +540,7 @@
  },
  {
   "file": "00_app/app/ui/stock_ranking.py",
-  "loc": 538,
+  "loc": 813,
   "chapter": "app",
   "test": false,
   "responsibility": "APP_UI",
@@ -485,7 +551,7 @@
  },
  {
   "file": "00_app/app/ui/strategy_lab_workspace.py",
-  "loc": 3161,
+  "loc": 3277,
   "chapter": "app",
   "test": false,
   "responsibility": "APP_UI",
@@ -782,7 +848,7 @@
  },
  {
   "file": "01_core/core/event_bus/event_bus.py",
-  "loc": 33,
+  "loc": 37,
   "chapter": "core",
   "test": false,
   "responsibility": "CORE",
@@ -1376,7 +1442,7 @@
  },
  {
   "file": "02_data/data/downloader/engine.py",
-  "loc": 427,
+  "loc": 431,
   "chapter": "data",
   "test": false,
   "responsibility": "DATA_PROCESSING",
@@ -1398,7 +1464,7 @@
  },
  {
   "file": "02_data/data/downloader/sweep.py",
-  "loc": 118,
+  "loc": 123,
   "chapter": "data",
   "test": false,
   "responsibility": "DATA_PROCESSING",
@@ -1508,7 +1574,7 @@
  },
  {
   "file": "02_data/data/lock.py",
-  "loc": 122,
+  "loc": 124,
   "chapter": "data",
   "test": false,
   "responsibility": "DATA_PROCESSING",
@@ -1596,7 +1662,7 @@
  },
  {
   "file": "02_data/data/provider/factory.py",
-  "loc": 115,
+  "loc": 195,
   "chapter": "data",
   "test": false,
   "responsibility": "DATA_PROCESSING",
@@ -1674,6 +1740,50 @@
  {
   "file": "02_data/data/provider/zerodha/instruments.py",
   "loc": 30,
+  "chapter": "data",
+  "test": false,
+  "responsibility": "DATA_PROCESSING",
+  "target": "rust",
+  "basis": "download/storage engine",
+  "qt": false,
+  "status": "INTENTIONALLY_RETAINED"
+ },
+ {
+  "file": "02_data/data/provider/zerodha/live_activation.py",
+  "loc": 184,
+  "chapter": "data",
+  "test": false,
+  "responsibility": "DATA_PROCESSING",
+  "target": "rust",
+  "basis": "download/storage engine",
+  "qt": false,
+  "status": "INTENTIONALLY_RETAINED"
+ },
+ {
+  "file": "02_data/data/provider/zerodha/live_auth.py",
+  "loc": 307,
+  "chapter": "data",
+  "test": false,
+  "responsibility": "DATA_PROCESSING",
+  "target": "rust",
+  "basis": "download/storage engine",
+  "qt": false,
+  "status": "INTENTIONALLY_RETAINED"
+ },
+ {
+  "file": "02_data/data/provider/zerodha/live_market_data.py",
+  "loc": 168,
+  "chapter": "data",
+  "test": false,
+  "responsibility": "DATA_PROCESSING",
+  "target": "rust",
+  "basis": "download/storage engine",
+  "qt": false,
+  "status": "INTENTIONALLY_RETAINED"
+ },
+ {
+  "file": "02_data/data/provider/zerodha/live_trading.py",
+  "loc": 531,
   "chapter": "data",
   "test": false,
   "responsibility": "DATA_PROCESSING",
@@ -1881,6 +1991,17 @@
   "status": "TEST"
  },
  {
+  "file": "02_data/data/tests/test_live_auth.py",
+  "loc": 232,
+  "chapter": "data",
+  "test": true,
+  "responsibility": "TEST",
+  "target": "python-test",
+  "basis": "test file",
+  "qt": false,
+  "status": "TEST"
+ },
+ {
   "file": "02_data/data/tests/test_manifest.py",
   "loc": 57,
   "chapter": "data",
@@ -2010,7 +2131,7 @@
   "target": "python-retained-qt",
   "basis": "download console UI",
   "qt": false,
-  "status": "PYTHON_OWNED"
+  "status": "INTENTIONALLY_RETAINED"
  },
  {
   "file": "02_data/data/ui/credentials_dialog.py",
@@ -2021,7 +2142,7 @@
   "target": "python-retained-qt",
   "basis": "download console UI",
   "qt": true,
-  "status": "PYTHON_OWNED"
+  "status": "INTENTIONALLY_RETAINED"
  },
  {
   "file": "02_data/data/ui/download_panel.py",
@@ -2032,7 +2153,7 @@
   "target": "python-retained-qt",
   "basis": "download console UI",
   "qt": true,
-  "status": "PYTHON_OWNED"
+  "status": "INTENTIONALLY_RETAINED"
  },
  {
   "file": "02_data/data/ui/historical_panel.py",
@@ -2043,7 +2164,7 @@
   "target": "python-retained-qt",
   "basis": "download console UI",
   "qt": true,
-  "status": "PYTHON_OWNED"
+  "status": "INTENTIONALLY_RETAINED"
  },
  {
   "file": "02_data/data/ui/log_view.py",
@@ -2054,7 +2175,7 @@
   "target": "python-retained-qt",
   "basis": "download console UI",
   "qt": true,
-  "status": "PYTHON_OWNED"
+  "status": "INTENTIONALLY_RETAINED"
  },
  {
   "file": "02_data/data/ui/section_label.py",
@@ -2065,7 +2186,7 @@
   "target": "python-retained-qt",
   "basis": "download console UI",
   "qt": true,
-  "status": "PYTHON_OWNED"
+  "status": "INTENTIONALLY_RETAINED"
  },
  {
   "file": "02_data/data/ui/status_view.py",
@@ -2076,7 +2197,7 @@
   "target": "python-retained-qt",
   "basis": "download console UI",
   "qt": true,
-  "status": "PYTHON_OWNED"
+  "status": "INTENTIONALLY_RETAINED"
  },
  {
   "file": "02_data/data/ui/stock_checklist.py",
@@ -2087,7 +2208,7 @@
   "target": "python-retained-qt",
   "basis": "download console UI",
   "qt": true,
-  "status": "PYTHON_OWNED"
+  "status": "INTENTIONALLY_RETAINED"
  },
  {
   "file": "02_data/data/worker.py",
@@ -2098,7 +2219,7 @@
   "target": "python-retained-qt",
   "basis": "download console UI",
   "qt": true,
-  "status": "PYTHON_OWNED"
+  "status": "INTENTIONALLY_RETAINED"
  },
  {
   "file": "03_market/market/__init__.py",
@@ -2252,7 +2373,7 @@
   "target": "python-retained",
   "basis": "event loader bridge",
   "qt": false,
-  "status": "PYTHON_OWNED"
+  "status": "INTENTIONALLY_RETAINED"
  },
  {
   "file": "03_market/market/loader/market_data_loader.py",
@@ -2263,7 +2384,7 @@
   "target": "python-retained",
   "basis": "event loader bridge",
   "qt": false,
-  "status": "PYTHON_OWNED"
+  "status": "INTENTIONALLY_RETAINED"
  },
  {
   "file": "03_market/market/loader/quote_loader.py",
@@ -2274,7 +2395,7 @@
   "target": "python-retained",
   "basis": "event loader bridge",
   "qt": false,
-  "status": "PYTHON_OWNED"
+  "status": "INTENTIONALLY_RETAINED"
  },
  {
   "file": "03_market/market/loader/symbol_list_loader.py",
@@ -2285,7 +2406,7 @@
   "target": "python-retained",
   "basis": "event loader bridge",
   "qt": false,
-  "status": "PYTHON_OWNED"
+  "status": "INTENTIONALLY_RETAINED"
  },
  {
   "file": "03_market/market/loader/timeframe_list_loader.py",
@@ -2366,7 +2487,7 @@
  },
  {
   "file": "03_market/market/repository/candle_repository.py",
-  "loc": 98,
+  "loc": 122,
   "chapter": "market",
   "test": false,
   "responsibility": "MARKET_DATA",
@@ -2377,7 +2498,7 @@
  },
  {
   "file": "03_market/market/repository/symbol_repository.py",
-  "loc": 103,
+  "loc": 115,
   "chapter": "market",
   "test": false,
   "responsibility": "MARKET_DATA",
@@ -2667,7 +2788,7 @@
   "chapter": "chart",
   "test": false,
   "responsibility": "NATIVE_UI",
-  "target": "rust-egui",
+  "target": "rust-slint",
   "basis": "Qt presentation layer",
   "qt": true,
   "status": "INTENTIONALLY_RETAINED"
@@ -2711,7 +2832,7 @@
   "chapter": "chart",
   "test": false,
   "responsibility": "NATIVE_UI",
-  "target": "rust-egui",
+  "target": "rust-slint",
   "basis": "Qt presentation layer",
   "qt": true,
   "status": "INTENTIONALLY_RETAINED"
@@ -2722,7 +2843,7 @@
   "chapter": "chart",
   "test": false,
   "responsibility": "NATIVE_UI",
-  "target": "rust-egui",
+  "target": "rust-slint",
   "basis": "Qt presentation layer",
   "qt": true,
   "status": "INTENTIONALLY_RETAINED"
@@ -2733,7 +2854,7 @@
   "chapter": "chart",
   "test": false,
   "responsibility": "NATIVE_UI",
-  "target": "rust-egui",
+  "target": "rust-slint",
   "basis": "Qt presentation layer",
   "qt": true,
   "status": "INTENTIONALLY_RETAINED"
@@ -2744,7 +2865,7 @@
   "chapter": "chart",
   "test": false,
   "responsibility": "NATIVE_UI",
-  "target": "rust-egui",
+  "target": "rust-slint",
   "basis": "Qt presentation layer",
   "qt": true,
   "status": "INTENTIONALLY_RETAINED"
@@ -2755,7 +2876,7 @@
   "chapter": "chart",
   "test": false,
   "responsibility": "NATIVE_UI",
-  "target": "rust-egui",
+  "target": "rust-slint",
   "basis": "Qt presentation layer",
   "qt": true,
   "status": "INTENTIONALLY_RETAINED"
@@ -2766,7 +2887,7 @@
   "chapter": "chart",
   "test": false,
   "responsibility": "NATIVE_UI",
-  "target": "rust-egui",
+  "target": "rust-slint",
   "basis": "Qt presentation layer",
   "qt": true,
   "status": "INTENTIONALLY_RETAINED"
@@ -2788,7 +2909,7 @@
   "chapter": "chart",
   "test": false,
   "responsibility": "NATIVE_UI",
-  "target": "rust-egui",
+  "target": "rust-slint",
   "basis": "Qt presentation layer",
   "qt": true,
   "status": "INTENTIONALLY_RETAINED"
@@ -2997,7 +3118,7 @@
   "chapter": "chart",
   "test": false,
   "responsibility": "NATIVE_UI",
-  "target": "rust-egui",
+  "target": "rust-slint",
   "basis": "Qt presentation layer",
   "qt": true,
   "status": "INTENTIONALLY_RETAINED"
@@ -3019,7 +3140,7 @@
   "chapter": "chart",
   "test": false,
   "responsibility": "NATIVE_UI",
-  "target": "rust-egui",
+  "target": "rust-slint",
   "basis": "Qt presentation layer",
   "qt": true,
   "status": "INTENTIONALLY_RETAINED"
@@ -3030,7 +3151,7 @@
   "chapter": "chart",
   "test": false,
   "responsibility": "NATIVE_UI",
-  "target": "rust-egui",
+  "target": "rust-slint",
   "basis": "Qt presentation layer",
   "qt": true,
   "status": "INTENTIONALLY_RETAINED"
@@ -3041,7 +3162,7 @@
   "chapter": "chart",
   "test": false,
   "responsibility": "NATIVE_UI",
-  "target": "rust-egui",
+  "target": "rust-slint",
   "basis": "Qt presentation layer",
   "qt": true,
   "status": "INTENTIONALLY_RETAINED"
@@ -3052,7 +3173,7 @@
   "chapter": "chart",
   "test": false,
   "responsibility": "NATIVE_UI",
-  "target": "rust-egui",
+  "target": "rust-slint",
   "basis": "Qt presentation layer",
   "qt": true,
   "status": "INTENTIONALLY_RETAINED"
@@ -3063,18 +3184,18 @@
   "chapter": "chart",
   "test": false,
   "responsibility": "NATIVE_UI",
-  "target": "rust-egui",
+  "target": "rust-slint",
   "basis": "Qt presentation layer",
   "qt": true,
   "status": "INTENTIONALLY_RETAINED"
  },
  {
   "file": "04_chart/chart/widgets/tools_toolbar.py",
-  "loc": 462,
+  "loc": 438,
   "chapter": "chart",
   "test": false,
   "responsibility": "NATIVE_UI",
-  "target": "rust-egui",
+  "target": "rust-slint",
   "basis": "Qt presentation layer",
   "qt": true,
   "status": "INTENTIONALLY_RETAINED"
@@ -3085,7 +3206,7 @@
   "chapter": "chart",
   "test": false,
   "responsibility": "NATIVE_UI",
-  "target": "rust-egui",
+  "target": "rust-slint",
   "basis": "Qt presentation layer",
   "qt": true,
   "status": "INTENTIONALLY_RETAINED"
@@ -3103,11 +3224,11 @@
  },
  {
   "file": "04_chart/chart/windows/chart_window.py",
-  "loc": 494,
+  "loc": 502,
   "chapter": "chart",
   "test": false,
   "responsibility": "NATIVE_UI",
-  "target": "rust-egui",
+  "target": "rust-slint",
   "basis": "Qt presentation layer",
   "qt": true,
   "status": "INTENTIONALLY_RETAINED"
@@ -3543,7 +3664,7 @@
  },
  {
   "file": "05_strategy/strategy/strategies/obr.py",
-  "loc": 139,
+  "loc": 142,
   "chapter": "strategy",
   "test": false,
   "responsibility": "STRATEGY",
@@ -3554,7 +3675,7 @@
  },
  {
   "file": "05_strategy/strategy/strategies/sma.py",
-  "loc": 83,
+  "loc": 85,
   "chapter": "strategy",
   "test": false,
   "responsibility": "STRATEGY",
@@ -3902,7 +4023,7 @@
   "target": "python-retained-qt",
   "basis": "research UI panel",
   "qt": false,
-  "status": "PYTHON_OWNED"
+  "status": "INTENTIONALLY_RETAINED"
  },
  {
   "file": "06_backtest/backtest/models/metrics.py",
@@ -3961,7 +4082,7 @@
  },
  {
   "file": "06_backtest/backtest/runner.py",
-  "loc": 934,
+  "loc": 947,
   "chapter": "backtest",
   "test": false,
   "responsibility": "BACKTEST",
@@ -4089,7 +4210,7 @@
   "target": "python-retained-qt",
   "basis": "research UI panel",
   "qt": false,
-  "status": "PYTHON_OWNED"
+  "status": "INTENTIONALLY_RETAINED"
  },
  {
   "file": "06_backtest/backtest/ui/analytics_views.py",
@@ -4100,7 +4221,7 @@
   "target": "python-retained-qt",
   "basis": "research UI panel",
   "qt": true,
-  "status": "PYTHON_OWNED"
+  "status": "INTENTIONALLY_RETAINED"
  },
  {
   "file": "06_backtest/backtest/ui/overlay.py",
@@ -4111,7 +4232,7 @@
   "target": "python-retained-qt",
   "basis": "research UI panel",
   "qt": true,
-  "status": "PYTHON_OWNED"
+  "status": "INTENTIONALLY_RETAINED"
  },
  {
   "file": "06_backtest/backtest/ui/performance_panel.py",
@@ -4122,7 +4243,7 @@
   "target": "python-retained-qt",
   "basis": "research UI panel",
   "qt": true,
-  "status": "PYTHON_OWNED"
+  "status": "INTENTIONALLY_RETAINED"
  },
  {
   "file": "06_backtest/backtest/validation.py",
@@ -4144,7 +4265,7 @@
   "target": "python-retained-qt",
   "basis": "research UI panel",
   "qt": true,
-  "status": "PYTHON_OWNED"
+  "status": "INTENTIONALLY_RETAINED"
  },
  {
   "file": "07_risk/risk/__init__.py",
@@ -4247,7 +4368,7 @@
  },
  {
   "file": "08_execution/execution/__init__.py",
-  "loc": 280,
+  "loc": 284,
   "chapter": "execution",
   "test": false,
   "responsibility": "EXECUTION",
@@ -4368,7 +4489,7 @@
  },
  {
   "file": "08_execution/execution/broker/paper.py",
-  "loc": 251,
+  "loc": 260,
   "chapter": "execution",
   "test": false,
   "responsibility": "EXECUTION",
@@ -4401,7 +4522,7 @@
  },
  {
   "file": "08_execution/execution/broker/sandbox.py",
-  "loc": 345,
+  "loc": 352,
   "chapter": "execution",
   "test": false,
   "responsibility": "EXECUTION",
@@ -4456,7 +4577,18 @@
  },
  {
   "file": "08_execution/execution/market_data/__init__.py",
-  "loc": 22,
+  "loc": 26,
+  "chapter": "execution",
+  "test": false,
+  "responsibility": "EXECUTION",
+  "target": "rust",
+  "basis": "live execution core",
+  "qt": false,
+  "status": "INTENTIONALLY_RETAINED"
+ },
+ {
+  "file": "08_execution/execution/market_data/broker_feed.py",
+  "loc": 282,
   "chapter": "execution",
   "test": false,
   "responsibility": "EXECUTION",
@@ -4490,6 +4622,17 @@
  {
   "file": "08_execution/execution/market_data/replay.py",
   "loc": 114,
+  "chapter": "execution",
+  "test": false,
+  "responsibility": "EXECUTION",
+  "target": "rust",
+  "basis": "live execution core",
+  "qt": false,
+  "status": "INTENTIONALLY_RETAINED"
+ },
+ {
+  "file": "08_execution/execution/market_data/sqlite_tail.py",
+  "loc": 254,
   "chapter": "execution",
   "test": false,
   "responsibility": "EXECUTION",
@@ -4763,6 +4906,17 @@
   "status": "TEST"
  },
  {
+  "file": "08_execution/execution/tests/test_broker_feed.py",
+  "loc": 126,
+  "chapter": "execution",
+  "test": true,
+  "responsibility": "TEST",
+  "target": "python-test",
+  "basis": "test file",
+  "qt": false,
+  "status": "TEST"
+ },
+ {
   "file": "08_execution/execution/tests/test_contract_lifecycle.py",
   "loc": 102,
   "chapter": "execution",
@@ -4787,6 +4941,17 @@
  {
   "file": "08_execution/execution/tests/test_gates_credentials.py",
   "loc": 152,
+  "chapter": "execution",
+  "test": true,
+  "responsibility": "TEST",
+  "target": "python-test",
+  "basis": "test file",
+  "qt": false,
+  "status": "TEST"
+ },
+ {
+  "file": "08_execution/execution/tests/test_live_obr_trading.py",
+  "loc": 402,
   "chapter": "execution",
   "test": true,
   "responsibility": "TEST",
@@ -4918,7 +5083,7 @@
  },
  {
   "file": "09_broker/broker/__init__.py",
-  "loc": 142,
+  "loc": 147,
   "chapter": "broker",
   "test": false,
   "responsibility": "BROKER_CONTRACT",
@@ -5027,6 +5192,17 @@
   "status": "PYTHON_OWNED"
  },
  {
+  "file": "09_broker/broker/management.py",
+  "loc": 38,
+  "chapter": "broker",
+  "test": false,
+  "responsibility": "BROKER_CONTRACT",
+  "target": "python",
+  "basis": "UBL design: Python integration glue",
+  "qt": false,
+  "status": "PYTHON_OWNED"
+ },
+ {
   "file": "09_broker/broker/registry.py",
   "loc": 131,
   "chapter": "broker",
@@ -5051,6 +5227,17 @@
  {
   "file": "09_broker/broker/selection_store.py",
   "loc": 100,
+  "chapter": "broker",
+  "test": false,
+  "responsibility": "BROKER_CONTRACT",
+  "target": "python",
+  "basis": "UBL design: Python integration glue",
+  "qt": false,
+  "status": "PYTHON_OWNED"
+ },
+ {
+  "file": "09_broker/broker/status.py",
+  "loc": 36,
   "chapter": "broker",
   "test": false,
   "responsibility": "BROKER_CONTRACT",
@@ -5170,6 +5357,17 @@
   "status": "TEST"
  },
  {
+  "file": "09_broker/broker/tests/test_zerodha_trading.py",
+  "loc": 334,
+  "chapter": "broker",
+  "test": true,
+  "responsibility": "TEST",
+  "target": "python-test",
+  "basis": "test file",
+  "qt": false,
+  "status": "TEST"
+ },
+ {
   "file": "09_broker/broker/vocab.py",
   "loc": 105,
   "chapter": "broker",
@@ -5237,7 +5435,7 @@
  },
  {
   "file": "scripts/build_rust.py",
-  "loc": 77,
+  "loc": 92,
   "chapter": "scripts",
   "test": false,
   "responsibility": "TOOLING",
@@ -5545,7 +5743,7 @@
  },
  {
   "file": "scripts/validate_language_ownership.py",
-  "loc": 229,
+  "loc": 296,
   "chapter": "scripts",
   "test": false,
   "responsibility": "TOOLING",

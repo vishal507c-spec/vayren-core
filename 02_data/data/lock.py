@@ -65,7 +65,9 @@ class EngineLock:
 
     def heartbeat(self) -> None:
         try:
-            existing = self._read() or {}
+            existing = self._read()
+            if existing is None:
+                return
             existing["heartbeat"] = datetime.now().isoformat()
             with open(self._path, "w") as f:
                 for k, v in existing.items():

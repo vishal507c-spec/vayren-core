@@ -1,6 +1,6 @@
 # VAYREN — ARCHITECTURE CONSTITUTION
 
-**Owns:** Language ownership (Rust→Core/Perf, Python→Strategy/AI, Rust+egui→UI), migration principles, final architecture direction. **Not owns:** Detailed module maps/events/contracts/state → `90_brain/`; AI workflow → `AGENTS.md`.
+**Owns:** Language ownership (Rust→Core/Perf, Python→Strategy/AI, Rust+Slint→UI), migration principles, final architecture direction. **Not owns:** Detailed module maps/events/contracts/state → `90_brain/`; AI workflow → `AGENTS.md`.
 **When to read:** Before choosing a language/framework for any new code, before touching legacy code that may migrate.
 **Related:** `AGENTS.md` (how to apply), `90_brain/architecture.md` (current map).
 
@@ -43,7 +43,7 @@ RUST
 PYTHON
 → Strategy + AI/ML + Research
 
-RUST + EGUI
+RUST + SLINT
 → Native UI
 ```
 
@@ -94,12 +94,12 @@ Do not move these responsibilities to Rust merely because Rust is faster.
 
 ---
 
-# 3. RUST + EGUI — UI
+# 3. RUST + SLINT — UI
 
 All NEW native UI development MUST use:
 
 ```text
-Rust + egui
+Rust + Slint
 ```
 
 This includes:
@@ -114,21 +114,23 @@ This includes:
 
 Rule:
 
-> From now onward, every NEW native UI feature must be developed using Rust + egui.
+> From now onward, every NEW native UI feature must be developed using Rust + Slint.
 
 Do not introduce another UI framework or UI technology without explicit architectural approval.
 
 ---
 
-# 4. EXISTING CODE MUST NOT BE MASS-MIGRATED NOW
+# 4. EXISTING CODE — GRADUAL ENFORCED MIGRATION
 
-The existing VAYREN codebase may contain Python implementations of functionality that will eventually belong to Rust or egui.
+The existing VAYREN codebase contains Python implementations of functionality that belongs to Rust or Slint per §1-§3.
 
-Do NOT migrate all of that code now.
+Do NOT perform a big-bang rewrite of the entire codebase at once (§11).
 
-Existing code should continue working.
+However, existing code in wrong-language domains is **not permanently exempt**. It must migrate gradually through feature-driven enforcement (§5). Every feature touching legacy code triggers migration of the directly related slice.
 
-The migration will happen gradually.
+Existing code continues working **only until naturally touched by development**. Once touched, the relevant slice migrates to the target architecture.
+
+The `language_retention.json` tracks each retained file with an explicit state (MIGRATED / MIGRATION_REQUIRED / TEMPORARILY_RETAINED / EXEMPT_WITH_JUSTIFICATION) — not blanket domain-level exemptions. Indefinite anonymous retention is prohibited.
 
 ---
 
@@ -166,7 +168,7 @@ IF IT BELONGS TO PYTHON
 → KEEP IT IN PYTHON
 
 IF IT IS UI
-→ MIGRATE THE RELEVANT UI PART TO RUST + EGUI
+→ MIGRATE THE RELEVANT UI PART TO RUST + SLINT
 ```
 
 **Invisible migration principle — ask automatically:**
@@ -210,13 +212,13 @@ Relevant UI work
      ↓
 Migrate affected portion
      ↓
-Rust + egui
+Rust + Slint
 ```
 
 Eventually:
 
 ```text
-Old Python UI → Rust + egui
+Old Python UI → Rust + Slint
 ```
 
 The same principle applies to Rust-owned core functionality.
@@ -287,7 +289,7 @@ NEW RESEARCH FEATURE
 → Python
 
 NEW NATIVE UI
-→ Rust + egui
+→ Rust + Slint
 ```
 
 Do not create new functionality in the old architecture simply because similar legacy code exists.
@@ -324,7 +326,7 @@ Therefore:
 ```text
 Core / Performance → Rust
 Strategy / AI / Research → Python
-Native UI → Rust + egui
+Native UI → Rust + Slint
 ```
 
 ---
@@ -420,7 +422,7 @@ User asks:
 
 Correct:
 → Work on chart
-→ Implement new chart feature in Rust+egui (§3)
+→ Implement new chart feature in Rust+Slint (§3)
 → Migrate directly related legacy chart/UI slice
 → Preserve behavior → Keep unrelated legacy untouched
 
@@ -486,7 +488,7 @@ First determine the correct architectural ownership.
                             │
              ┌──────────────┼──────────────┐
              │              │              │
-           RUST           PYTHON       RUST + EGUI
+           RUST           PYTHON       RUST + SLINT
              │              │              │
         CORE / SPEED     STRATEGY          UI
         MARKET/DATA      AI/ML
@@ -545,7 +547,7 @@ RESEARCH
 → PYTHON
 
 NATIVE UI
-→ RUST + EGUI
+→ RUST + SLINT
 ```
 
 This mapping is mandatory for NEW development.

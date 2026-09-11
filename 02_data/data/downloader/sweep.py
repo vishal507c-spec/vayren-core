@@ -97,8 +97,13 @@ def forward_sweep(
     all_chunks_zero = False
     if is_head_sweep and total_new == 0:
         earliest_after = candle_db.earliest()
-        # Earliest must still match the pre-sweep earliest (DB did not grow)
-        if (
+        if earliest_before is None and earliest_after is None:
+            all_chunks_zero = True
+            log.info(
+                f"[Sweep] {symbol}/{interval}: head sweep returned 0 new candles "
+                "and the database has no candles. Eligible for LISTING_START boundary."
+            )
+        elif (
             earliest_before is not None
             and earliest_after is not None
             and earliest_after.date() == earliest_before.date()

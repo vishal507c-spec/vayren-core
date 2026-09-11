@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from contextlib import suppress
 from dataclasses import dataclass
@@ -60,33 +61,49 @@ class Strategy(PythonStrategy):
 """
 
 
-def _is_test_data_dir(p: Path) -> bool:
-    s = str(p).lower()
-    return "tmp" in s or "temp" in s or "pytest" in s
+def _library_root() -> Path:
+    """The strategy library root, resolved once per call.
+
+    Precedence: ``VAYREN_STRATEGIES`` env var → ``<data_dir>/strategies`` when a
+    usable ``data_dir`` is supplied → a per-user default under the home
+    directory. There is deliberately **no** machine-specific absolute path
+    here: the previous ``D:\\VAYREN_STRATEGIES`` literal broke on any machine
+    without a ``D:`` drive and contradicted the documented "every path is
+    derived from ``data_dir`` and overridable" contract.
+    """
+    override = os.environ.get("VAYREN_STRATEGIES")
+    if override:
+        return Path(override)
+    return Path.home() / ".vayren" / "strategies"
 
 
-def strategy_dir(data_dir: Path | str | None) -> Path:
-    canonical = Path(r"D:\VAYREN_STRATEGIES")
+def strategy_dir(data_dir: Path | str | None = None) -> Path:
+    """Resolve the strategy library folder.
+
+    ``VAYREN_STRATEGIES`` (env) always wins. Otherwise the library is
+    ``<data_dir>/strategies`` — colocated with the candle store so a single
+    data root is self-contained — except under a test/temp data dir, where
+    the same rule applies but is created eagerly. When no ``data_dir`` is
+    given, a per-user default is used.
+    """
+    env_root = os.environ.get("VAYREN_STRATEGIES")
+    if env_root:
+        d = Path(env_root)
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
     if data_dir is not None:
         p = Path(data_dir)
-        if _is_test_data_dir(p):
-            d = p / "strategies"
+        # Colocate the library with the data root; never escape to a global path.
+        d = p / "strategies"
+        with suppress(Exception):
             d.mkdir(parents=True, exist_ok=True)
-            return d
-        try:
-            if (
-                canonical in p.parents
-                or p == canonical
-                or str(p).lower().startswith(str(canonical).lower())
-            ):
-                canonical.mkdir(parents=True, exist_ok=True)
-                return canonical
-        except Exception:
-            pass
-        canonical.mkdir(parents=True, exist_ok=True)
-        return canonical
-    canonical.mkdir(parents=True, exist_ok=True)
-    return canonical
+        return d
+
+    d = _library_root()
+    with suppress(Exception):
+        d.mkdir(parents=True, exist_ok=True)
+    return d
 
 
 def strategy_path(name: str, data_dir: Path | str | None = None) -> Path:

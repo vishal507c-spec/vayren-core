@@ -52,6 +52,23 @@ class CandleRepository:
         rows = self._database.fetch_candles(symbol, sample)
         return detect_bar_duration([row["timestamp"] for row in rows])
 
+    def detect(self, symbol: str, sample: int = 2000) -> tuple[int, int] | None:
+        """One-shot (base_seconds, session_start) for polling callers.
+
+        A single bounded fetch feeds both detectors. Tail providers cache
+        this per symbol and pass it as the ``detection`` hint to
+        :meth:`get_candles_timeframe`, skipping the per-call sample scan.
+        Detection inputs (granularity, session schedule) are stable for an
+        append-only per-symbol file; re-detect on timeframe change.
+        """
+        rows = self._database.fetch_candles(symbol, sample)
+        if len(rows) < 2:
+            return None
+        base = detect_bar_duration([row["timestamp"] for row in rows])
+        if base is None:
+            return None
+        return base, detect_session_start(rows)
+
     def detect_timeframes(self, symbol: str) -> tuple[str, ...]:
         """Timeframes the database can produce, detected from its own rows.
 
@@ -69,6 +86,7 @@ class CandleRepository:
         limit: int | None,
         start: str | None = None,
         end: str | None = None,
+        detection: tuple[int, int] | None = None,
     ) -> list[Bar]:
         """Return candles for `symbol` at `timeframe`, ascending by timestamp.
 
@@ -77,6 +95,9 @@ class CandleRepository:
         bounds applied to the aggregation window only — timeframe detection
         always uses the unbounded latest sample, so bucket alignment never
         changes. Bounds compose with ``limit``.
+        ``detection`` is an optional ``(base_seconds, session_start)`` hint
+        (see :meth:`detect`): when given, the per-call sample scan is
+        skipped. Polling callers cache it; one-shot callers omit it.
 
         Timeframes at or below the detected base duration fall back to the
         plain fetch. Larger timeframes are aggregated from real rows only.
@@ -84,11 +105,14 @@ class CandleRepository:
         (possibly partial) aggregation window.
         """
         seconds = timeframe_seconds(timeframe)
-        sample_rows = self._database.fetch_candles(symbol, _DETECTION_SAMPLE)
-        base = detect_bar_duration([row["timestamp"] for row in sample_rows])
+        if detection is not None:
+            base, session_start = detection
+        else:
+            sample_rows = self._database.fetch_candles(symbol, _DETECTION_SAMPLE)
+            base = detect_bar_duration([row["timestamp"] for row in sample_rows])
+            session_start = detect_session_start(sample_rows) if base is not None else 0
         if seconds is None or base is None or seconds <= base:
             return self.get_candles(symbol, limit, start, end)
-        session_start = detect_session_start(sample_rows)
         ratio = seconds // base
         if limit is None:
             rows = self._database.fetch_candles(symbol, None, start, end)

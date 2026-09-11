@@ -108,7 +108,7 @@ class PositionManager:
         exit_reason = "SIGNAL"
         if exit_signal:
             slip = bar_close * 0.0002
-            exit_price = bar_close - slip
+            exit_price = bar_close - slip if self._open.side == "LONG" else bar_close + slip
             exit_reason = "SIGNAL"
         elif self._open.side == "LONG":
             if self._open.sl_price is not None and bar_low <= self._open.sl_price:

@@ -89,6 +89,9 @@ class Obr(PythonStrategy):
         bar: Bar = view.bar
         ref_range = calc_range(self.highs, self.lows, 20)
         rsi_val = calc_rsi(self.closes, 14)
+        exit_time = "{:02d}:{:02d}".format(
+            int(self.params.get("exit_hour", 15)), int(self.params.get("exit_min", 15))
+        )
         is_up_break = bar.close > bar.high - ref_range * 0.10
         is_down_break = bar.close < bar.low + ref_range * 0.10
         if is_up_break and rsi_val > 55:
@@ -101,7 +104,7 @@ class Obr(PythonStrategy):
             self.stop_loss(bar.high)
             self.take_profit(bar.close - ref_range)
             return None
-        self.time_exit("15:15")
+        self.time_exit(exit_time)
         return None
 
 

@@ -1,0 +1,436 @@
+﻿// VAYREN application shell â€” Rust + Slint native UI (constitution Â§3).
+//
+// Presentation only: every displayed value is bound to a property fed by the
+// Rust side from the BrokerPanel view-model (backend facts, never UI
+// inference). Screens not yet migrated render their honest migration state.
+
+import { VayrenPalette } from "palette.slint";
+
+export enum ShellScreen {
+    chart,
+    lab,
+    research,
+    portfolio,
+    live,
+    broker,
+    data,
+}
+
+export struct NavItem {
+    label: string,
+    screen: ShellScreen,
+}
+
+export struct CapabilityRowView {
+    id: string,
+    label: string,
+    kind: int,
+}
+
+component PendingCard inherits Rectangle {
+    in property <string> card-title;
+
+    background: transparent;
+
+    Rectangle {
+        width: 420px;
+        height: 132px;
+        border-radius: 4px;
+        background: VayrenPalette.surface;
+        border-width: 1px;
+        border-color: VayrenPalette.hairline;
+
+        VerticalLayout {
+            padding: 16px;
+            spacing: 8px;
+            alignment: center;
+
+            Text {
+                text: root.card-title;
+                color: VayrenPalette.text;
+                font-size: 14px;
+                font-weight: 700;
+            }
+            Text {
+                text: "PENDING MIGRATION";
+                color: VayrenPalette.amber;
+                font-size: 11px;
+                font-weight: 700;
+            }
+            Text {
+                text: "This workspace currently lives in the Python application (Qt shell). Its native surface arrives in a later migration slice.";
+                color: VayrenPalette.muted;
+                font-size: 10px;
+                wrap: word-wrap;
+            }
+        }
+    }
+}
+
+component BrokerPanel inherits Rectangle {
+    in property <string> broker-name;
+    in property <string> broker-id;
+    in property <int> env-kind;
+    in property <string> env-label;
+    in property <string> health-label;
+    in property <bool> health-connected;
+    in property <bool> live-ready;
+    in property <[CapabilityRowView]> capability-rows;
+    in property <[string]> blockers;
+
+    background: transparent;
+
+    function env-color() -> color {
+        return env-kind == 0 ? VayrenPalette.teal
+            : env-kind == 1 ? VayrenPalette.amber
+            : VayrenPalette.red;
+    }
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 12px;
+
+        // Header: identity + environment badge.
+        HorizontalLayout {
+            height: 30px;
+            spacing: 8px;
+
+            Text {
+                text: root.broker-name;
+                color: VayrenPalette.text;
+                font-size: 17px;
+                font-weight: 700;
+                vertical-alignment: center;
+            }
+            Text {
+                text: root.broker-id;
+                color: VayrenPalette.faint;
+                font-size: 10px;
+                vertical-alignment: center;
+            }
+            Rectangle {
+                horizontal-stretch: 1;
+                background: transparent;
+            }
+            Rectangle {
+                width: 74px;
+                height: 20px;
+                border-radius: 3px;
+                background: transparent;
+                border-width: 1px;
+                border-color: root.env-color();
+                VerticalLayout {
+                    alignment: center;
+                    Text {
+                        text: root.env-label;
+                        color: root.env-color();
+                        font-size: 9px;
+                        font-weight: 700;
+                        horizontal-alignment: center;
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: VayrenPalette.hairline;
+        }
+
+        // Health + LIVE rows.
+        VerticalLayout {
+            spacing: 6px;
+
+            HorizontalLayout {
+                height: 18px;
+                spacing: 8px;
+                Text {
+                    width: 64px;
+                    text: "HEALTH";
+                    color: VayrenPalette.muted;
+                    font-size: 10px;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: root.health-label + (root.health-connected ? "" : " (not connected)");
+                    color: root.health-connected ? VayrenPalette.teal : VayrenPalette.muted;
+                    font-size: 11px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                }
+            }
+            HorizontalLayout {
+                height: 18px;
+                spacing: 8px;
+                Text {
+                    width: 64px;
+                    text: "LIVE";
+                    color: VayrenPalette.muted;
+                    font-size: 10px;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: root.live-ready ? "READY" : "NOT READY";
+                    color: root.live-ready ? VayrenPalette.teal : VayrenPalette.red;
+                    font-size: 11px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: VayrenPalette.hairline;
+        }
+
+        Text {
+            text: "CAPABILITIES";
+            color: VayrenPalette.muted;
+            font-size: 9px;
+            font-weight: 700;
+        }
+        VerticalLayout {
+            spacing: 4px;
+
+            for row in root.capability-rows: Rectangle {
+                height: 22px;
+                border-radius: 3px;
+                background: VayrenPalette.surface;
+                HorizontalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    alignment: space-between;
+                    Text {
+                        text: row.id;
+                        color: VayrenPalette.text;
+                        font-size: 10px;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: row.label;
+                        color: row.kind == 0 ? VayrenPalette.teal
+                            : row.kind == 2 ? VayrenPalette.amber
+                            : VayrenPalette.muted;
+                        font-size: 9px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+
+        if root.blockers.length > 0: VerticalLayout {
+            spacing: 4px;
+
+            Rectangle {
+                height: 1px;
+                background: VayrenPalette.hairline;
+            }
+            Text {
+                text: "BLOCKERS";
+                color: VayrenPalette.amber;
+                font-size: 9px;
+                font-weight: 700;
+            }
+            for blocker in root.blockers: Text {
+                text: "Â· " + blocker;
+                color: VayrenPalette.amber;
+                font-size: 10px;
+            }
+        }
+
+        Rectangle {
+            vertical-stretch: 1;
+            background: transparent;
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "VAYREN";
+    background: VayrenPalette.bg;
+    preferred-width: 1280px;
+    preferred-height: 800px;
+    min-width: 1024px;
+    min-height: 640px;
+
+    callback nav-selected(ShellScreen);
+
+    in-out property <ShellScreen> active-screen: ShellScreen.broker;
+    in-out property <string> screen-title: "BROKER";
+    in-out property <bool> screen-pending: false;
+
+    in-out property <string> broker-name: "";
+    in-out property <string> broker-id: "";
+    in-out property <int> env-kind: 0;
+    in-out property <string> env-label: "";
+    in-out property <string> health-label: "";
+    in-out property <bool> health-connected: false;
+    in-out property <bool> live-ready: false;
+    in-out property <[CapabilityRowView]> capability-rows;
+    in-out property <[string]> blockers;
+
+    property <[NavItem]> nav-items: [
+        { label: "CHART", screen: ShellScreen.chart },
+        { label: "LAB", screen: ShellScreen.lab },
+        { label: "RESEARCH", screen: ShellScreen.research },
+        { label: "PORTFOLIO", screen: ShellScreen.portfolio },
+        { label: "LIVE", screen: ShellScreen.live },
+        { label: "BROKER", screen: ShellScreen.broker },
+        { label: "DATA", screen: ShellScreen.data },
+    ];
+
+    FocusScope {
+        key-pressed(event) => {
+            if (event.modifiers.alt && event.text == "1") {
+                root.nav-selected(ShellScreen.chart);
+            }
+            if (event.modifiers.alt && event.text == "2") {
+                root.nav-selected(ShellScreen.lab);
+            }
+            if (event.modifiers.alt && event.text == "3") {
+                root.nav-selected(ShellScreen.research);
+            }
+            if (event.modifiers.alt && event.text == "4") {
+                root.nav-selected(ShellScreen.portfolio);
+            }
+            if (event.modifiers.alt && event.text == "5") {
+                root.nav-selected(ShellScreen.live);
+            }
+            if (event.modifiers.alt && event.text == "6") {
+                root.nav-selected(ShellScreen.broker);
+            }
+            if (event.modifiers.alt && event.text == "7") {
+                root.nav-selected(ShellScreen.data);
+            }
+            return accept;
+        }
+    }
+
+    HorizontalLayout {
+        // Navigation rail â€” permanent, single navigation source (shell state
+        // lives in Rust; this rail only reports clicks).
+        Rectangle {
+            width: 104px;
+            background: VayrenPalette.surface;
+            border-width: 1px;
+            border-color: VayrenPalette.hairline;
+
+            VerticalLayout {
+                padding: 8px;
+                spacing: 2px;
+
+                Rectangle {
+                    height: 34px;
+                    background: transparent;
+                    VerticalLayout {
+                        alignment: center;
+                        Text {
+                            text: "VAYREN";
+                            color: VayrenPalette.accent;
+                            font-size: 13px;
+                            font-weight: 700;
+                            horizontal-alignment: center;
+                        }
+                    }
+                }
+
+                for item in nav-items: Rectangle {
+                    height: 28px;
+                    border-radius: 3px;
+                    background: item.screen == root.active-screen
+                        ? VayrenPalette.accent
+                        : ta.has-hover ? VayrenPalette.hover
+                        : transparent;
+                    ta := TouchArea {
+                        clicked => {
+                            root.nav-selected(item.screen);
+                        }
+                    }
+                    Text {
+                        text: item.label;
+                        color: item.screen == root.active-screen
+                            ? VayrenPalette.accent-text
+                            : ta.has-hover ? VayrenPalette.text
+                            : VayrenPalette.muted;
+                        font-size: 10px;
+                        font-weight: item.screen == root.active-screen ? 700 : 400;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+
+                Rectangle {
+                    vertical-stretch: 1;
+                    background: transparent;
+                }
+
+                Rectangle {
+                    height: 20px;
+                    background: transparent;
+                    VerticalLayout {
+                        alignment: center;
+                        Text {
+                            text: "RUST + SLINT";
+                            color: VayrenPalette.faint;
+                            font-size: 8px;
+                            horizontal-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Content column.
+        VerticalLayout {
+            spacing: 0;
+
+            Rectangle {
+                background: VayrenPalette.bg;
+
+                if root.screen-pending: PendingCard {
+                    card-title: root.screen-title;
+                }
+                if !root.screen-pending && root.active-screen == ShellScreen.broker: BrokerPanel {
+                    broker-name: root.broker-name;
+                    broker-id: root.broker-id;
+                    env-kind: root.env-kind;
+                    env-label: root.env-label;
+                    health-label: root.health-label;
+                    health-connected: root.health-connected;
+                    live-ready: root.live-ready;
+                    capability-rows: root.capability-rows;
+                    blockers: root.blockers;
+                }
+            }
+
+            // Status bar.
+            Rectangle {
+                height: 24px;
+                background: VayrenPalette.surface;
+                border-width: 1px;
+                border-color: VayrenPalette.hairline;
+
+                HorizontalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    alignment: space-between;
+
+                    Text {
+                        text: "VAYREN â€” native shell";
+                        color: VayrenPalette.faint;
+                        font-size: 9px;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: "SCREEN: " + root.screen-title;
+                        color: VayrenPalette.muted;
+                        font-size: 9px;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+}

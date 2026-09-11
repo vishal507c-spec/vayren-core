@@ -100,10 +100,10 @@ def _stroke(painter: QPainter, color: QColor, width: float = 1.2) -> None:
 
 def _draw_watchlist(painter: QPainter, color: QColor) -> None:
     _stroke(painter, color)
-    painter.drawRoundedRect(QRectF(3.0, 3.5, 3.4, 9.0), 1.0, 1.0)
-    painter.drawLine(QPointF(8.5, 5.5), QPointF(13.5, 5.5))
-    painter.drawLine(QPointF(8.5, 8.5), QPointF(13.5, 8.5))
-    painter.drawLine(QPointF(8.5, 11.5), QPointF(13.5, 11.5))
+    painter.drawRoundedRect(QRectF(2.0, 3.3, 2.7, 2.7), 0.7, 0.7)
+    painter.drawLine(QPointF(7.3, 4.7), QPointF(14.0, 4.7))
+    painter.drawRoundedRect(QRectF(2.0, 10.0, 2.7, 2.7), 0.7, 0.7)
+    painter.drawLine(QPointF(7.3, 11.3), QPointF(14.0, 11.3))
 
 
 def _draw_cursor(painter: QPainter, color: QColor) -> None:
@@ -122,33 +122,13 @@ def _draw_cursor(painter: QPainter, color: QColor) -> None:
 
 
 def _draw_download(painter: QPainter, color: QColor) -> None:
-    # Historical Data Download — database + download (clean terminal line-art)
-    # SVG 32×32 (stroke 1.8) scaled to 16×16 logical, optically centered
-    pen = QPen(color, 1.7)
-    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-    painter.setPen(pen)
-    painter.setBrush(Qt.BrushStyle.NoBrush)
-    painter.save()
-    # scale 0.55 from 32 to ~17.6 logical to fill 16 with slight margin, then center
-    painter.translate(0.9, 0.7)
-    # database top ellipse (orig 11,6.5 rx7 ry3.2 -> scaled 0.55)
-    painter.drawEllipse(QRectF(1.65, 1.18, 7.7, 3.52))
-    # vertical sides
-    painter.drawLine(QPointF(1.65, 2.94), QPointF(1.65, 7.45))
-    painter.drawLine(QPointF(9.35, 2.94), QPointF(9.35, 7.45))
-    # bottom ellipse
-    painter.drawEllipse(QRectF(1.65, 5.69, 7.7, 3.52))
-    # middle ellipse
-    painter.drawEllipse(QRectF(1.65, 3.48, 7.7, 3.52))
-    # download arrow vertical
-    painter.drawLine(QPointF(11.0, 5.85), QPointF(11.0, 11.55))
-    # arrow head
-    painter.drawLine(QPointF(8.68, 9.55), QPointF(11.0, 11.87))
-    painter.drawLine(QPointF(13.32, 9.55), QPointF(11.0, 11.87))
-    # tray
-    painter.drawLine(QPointF(8.53, 13.75), QPointF(13.47, 13.75))
-    painter.restore()
+    _stroke(painter, color, 1.5)
+    painter.drawLine(QPointF(2.0, 10.0), QPointF(2.0, 13.0))
+    painter.drawLine(QPointF(2.0, 13.0), QPointF(14.0, 13.0))
+    painter.drawLine(QPointF(14.0, 13.0), QPointF(14.0, 10.0))
+    painter.drawLine(QPointF(8.0, 2.5), QPointF(8.0, 10.0))
+    painter.drawLine(QPointF(5.0, 7.0), QPointF(8.0, 10.0))
+    painter.drawLine(QPointF(11.0, 7.0), QPointF(8.0, 10.0))
 
 
 def _draw_crosshair(painter: QPainter, color: QColor) -> None:
@@ -276,6 +256,7 @@ _ICON_CACHE: dict[str, QIcon] = {}
 def _pixmap(kind: str, color: QColor) -> QPixmap:
     pixmap = QPixmap(32, 32)
     pixmap.setDevicePixelRatio(2.0)
+    pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     painter.scale(2.0, 2.0)
@@ -286,31 +267,24 @@ def _pixmap(kind: str, color: QColor) -> QPixmap:
 
 _SVG_DATA: dict[str, str] = {
     "watchlist": (
-        '<svg xmlns="http://www.w3.org/2000/svg"'
-        ' width="32" height="32" viewBox="0 0 32 32"'
-        ' fill="none">'
-        '<g stroke="currentColor" stroke-width="1.8"'
-        ' stroke-linecap="round" stroke-linejoin="round">'
-        '<rect x="4" y="5" width="24" height="22" rx="4"/>'
-        '<line x1="10" y1="11" x2="26" y2="11"/>'
-        '<line x1="10" y1="16" x2="26" y2="16"/>'
-        '<line x1="10" y1="21" x2="22" y2="21"/>'
+        '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"'
+        ' viewBox="0 0 24 24" fill="none">'
+        '<g stroke="currentColor" stroke-width="2" stroke-linecap="round"'
+        ' stroke-linejoin="round">'
+        '<rect x="3" y="5" width="4" height="4" rx="1"/>'
+        '<path d="M11 7h10"/>'
+        '<rect x="3" y="15" width="4" height="4" rx="1"/>'
+        '<path d="M11 17h10"/>'
         "</g></svg>"
     ),
     "download": (
-        '<svg xmlns="http://www.w3.org/2000/svg"'
-        ' width="32" height="32" viewBox="0 0 32 32"'
-        ' fill="none">'
-        '<g stroke="currentColor" stroke-width="1.8"'
-        ' stroke-linecap="round" stroke-linejoin="round">'
-        '<ellipse cx="14" cy="6.5" rx="7" ry="3.2"/>'
-        '<path d="M7 6.5v8.2c0 1.8 3.1 3.2 7 3.2'
-        's7-1.4 7-3.2V6.5"/>'
-        '<path d="M7 10.7c0 1.8 3.1 3.2 7 3.2'
-        's7-1.4 7-3.2"/>'
-        '<path d="M23 12.5v11"/>'
-        '<path d="M18.8 19.5 23 23.7l4.2-4.2"/>'
-        '<path d="M18.5 27h9"/>'
+        '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"'
+        ' viewBox="0 0 24 24" fill="none">'
+        '<g stroke="currentColor" stroke-width="2" stroke-linecap="round"'
+        ' stroke-linejoin="round">'
+        '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>'
+        '<path d="m7 10 5 5 5-5"/>'
+        '<path d="M12 15V3"/>'
         "</g></svg>"
     ),
 }
@@ -326,13 +300,15 @@ def _svg_icon_pixmap(kind: str, color: QColor) -> QPixmap:
     if not raw:
         return _pixmap(kind, color)
     data = raw.replace("currentColor", color.name())
-    pixmap = QPixmap(32, 32)
-    pixmap.setDevicePixelRatio(2.0)
+    scale = 4
+    side = ICON_SIZE * scale
+    pixmap = QPixmap(side, side)
+    pixmap.setDevicePixelRatio(float(scale))
     pixmap.fill(Qt.GlobalColor.transparent)
     renderer = QSvgRenderer(QByteArray(data.encode("utf-8")))
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-    renderer.render(painter, QRectF(0, 0, 32, 32))
+    renderer.render(painter, QRectF(0, 0, ICON_SIZE, ICON_SIZE))
     painter.end()
     return pixmap
 

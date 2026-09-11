@@ -269,3 +269,136 @@ def test_workspace_ranking_click_filters_journal(qt_app: QApplication) -> None:
     finally:
         workspace.close()
         workspace.deleteLater()
+
+
+def test_rank_row_carries_return_pct(qt_app: QApplication) -> None:
+    _ = qt_app
+    base = _merged((_trade("AAA", "LONG", 2, 50.0),))
+    rows = build_stock_ranking(base, ("AAA",), {}, ("AAA",))
+    assert rows[0].return_pct == base.metrics.net_profit_pct
+    assert rows[0].return_pct is not None
+
+
+def _cell_text(widget, row: int, col: int) -> str:
+    item = widget._table.item(row, col)
+    assert item is not None
+    return item.text()
+
+
+def test_widget_nine_columns_with_return(qt_app: QApplication) -> None:
+    _ = qt_app
+    from app.ui.stock_ranking import _HEADERS
+
+    assert _HEADERS == (
+        "#",
+        "SYMBOL",
+        "NET P&L",
+        "RETURN %",
+        "TRADES",
+        "WIN%",
+        "PF",
+        "MAX DD",
+        "SHARPE",
+    )
+    widget = StockRankingWidget()
+    widget.show()
+    try:
+        widget.set_universe(("AAA", "BBB"))
+        base = _merged((_trade("AAA", "LONG", 2, 50.0), _trade("BBB", "LONG", 3, -20.0)))
+        widget.set_results(base, {}, ("AAA", "BBB"), "BUY — LONG")
+        QApplication.processEvents()
+        assert widget._table.columnCount() == 9
+        assert _cell_text(widget, 0, 1) == "AAA"  # best first
+        assert _cell_text(widget, 0, 3) == "+0.05%"  # RETURN % = 50/100000
+    finally:
+        widget.close()
+        widget.deleteLater()
+
+
+def test_widget_search_filters_display_not_ranks(qt_app: QApplication) -> None:
+    _ = qt_app
+    widget = StockRankingWidget()
+    widget.show()
+    try:
+        widget.set_universe(("AAA", "BBB"))
+        base = _merged((_trade("AAA", "LONG", 2, 50.0), _trade("BBB", "LONG", 3, -20.0)))
+        widget.set_results(base, {}, ("AAA", "BBB"), "BUY — LONG")
+        QApplication.processEvents()
+        assert widget._table.rowCount() == 2
+        widget._search.setText("bbb")
+        QApplication.processEvents()
+        assert widget._table.rowCount() == 1
+        assert _cell_text(widget, 0, 1) == "BBB"
+        # global rank preserved (BBB is still #2, not renumbered to #1)
+        assert widget.rank_for("BBB") == 2
+        widget._search.setText("")
+        QApplication.processEvents()
+        assert widget._table.rowCount() == 2
+    finally:
+        widget.close()
+        widget.deleteLater()
+
+
+def test_widget_sort_dropdown_matches_headers(qt_app: QApplication) -> None:
+    _ = qt_app
+    widget = StockRankingWidget()
+    widget.show()
+    try:
+        widget.set_universe(("AAA", "BBB"))
+        base = _merged((_trade("AAA", "LONG", 2, 10.0), _trade("BBB", "LONG", 3, 50.0)))
+        widget.set_results(base, {}, ("AAA", "BBB"), "BUY — LONG")
+        QApplication.processEvents()
+        assert _cell_text(widget, 0, 1) == "BBB"  # net desc default
+        # dropdown to Trades changes criterion label; header click still works
+        widget._sort_box.setCurrentIndex(2)  # Trades
+        QApplication.processEvents()
+        assert "Trades" in widget._foot.text()
+        widget._table.horizontalHeader().sectionClicked.emit(2)  # NET P&L header
+        QApplication.processEvents()
+        assert _cell_text(widget, 0, 1) == "BBB"
+        assert "Net P&L" in widget._foot.text()
+    finally:
+        widget.close()
+        widget.deleteLater()
+
+
+def test_widget_details_select_and_empty(qt_app: QApplication) -> None:
+    _ = qt_app
+    widget = StockRankingWidget()
+    widget.show()
+    try:
+        widget.set_universe(("AAA", "BBB"))
+        base = _merged((_trade("AAA", "LONG", 2, 50.0), _trade("BBB", "LONG", 3, -20.0)))
+        widget.set_results(base, {}, ("AAA", "BBB"), "BUY — LONG")
+        QApplication.processEvents()
+        # empty state before selection
+        assert widget._detail_title.text() == "SELECT A STOCK"
+        assert not widget._spark.isVisibleTo(widget)
+        # click AAA row → details + sparkline with caption
+        received: list[str] = []
+        widget.symbol_focused.connect(received.append)
+        widget._on_cell_clicked(0, 1)
+        assert received == ["AAA"]
+        assert "AAA" in widget._detail_title.text()
+        assert "Rank #1" in widget._detail_title.text()
+        assert widget._spark.isVisibleTo(widget)
+        assert widget._detail_caption.text() == "AAA — EQUITY CURVE"
+    finally:
+        widget.close()
+        widget.deleteLater()
+
+
+def test_widget_direction_chip_and_scope(qt_app: QApplication) -> None:
+    _ = qt_app
+    widget = StockRankingWidget()
+    widget.show()
+    try:
+        widget.set_universe(("AAA", "BBB"))
+        base = _merged((_trade("AAA", "LONG", 2, 50.0),))
+        widget.set_results(base, {}, ("AAA",), "BUY — LONG")
+        QApplication.processEvents()
+        assert widget._mode.text() == "BUY · LONG"
+        assert "2 stocks analyzed" in widget._scope.text()
+    finally:
+        widget.close()
+        widget.deleteLater()

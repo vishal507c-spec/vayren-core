@@ -46,9 +46,12 @@ from chart.widgets.candle_chart_widget import CandleChartWidget
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QComboBox,
+    QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QPushButton,
     QScrollArea,
     QSplitter,
@@ -104,6 +107,10 @@ class LiveWorkspace(QWidget):
     mode_requested = Signal(str)
     arm_requested = Signal()
     halt_requested = Signal()
+    setup_changed = Signal(dict)
+    start_requested = Signal()
+    stop_requested = Signal()
+    configure_broker_requested = Signal()
 
     def __init__(
         self,
@@ -115,6 +122,8 @@ class LiveWorkspace(QWidget):
         self._on_arm: Callable[[], tuple[bool, str]] | None = None
         self._on_halt: Callable[[], tuple[bool, str]] | None = None
         self._state: dict[str, Any] = {}
+        self._setup_updating = False
+        self._chart_state_key: tuple | None = None
         self._gate_rows: list[tuple[str, Badge, QLabel]] = []
         self._gate_widgets: dict[str, GateRow] = {}
         self._event_known: set[str] = {"ALL EVENTS"}
@@ -148,6 +157,7 @@ class LiveWorkspace(QWidget):
         left_lay.setContentsMargins(0, 0, 0, 0)
         left_lay.setSpacing(6)
         left_lay.addWidget(self._build_chart_panel(), 3)
+        left_lay.addWidget(self._build_positions_panel(), 1)
         tables = QSplitter(Qt.Orientation.Horizontal)
         tables.addWidget(self._build_orders_panel())
         tables.addWidget(self._build_fills_panel())
@@ -160,6 +170,7 @@ class LiveWorkspace(QWidget):
         rail_lay = QVBoxLayout(rail_content)
         rail_lay.setContentsMargins(0, 0, 0, 0)
         rail_lay.setSpacing(6)
+        rail_lay.addWidget(self._build_setup_panel())
         rail_lay.addWidget(self._build_readiness_panel())
         rail_lay.addWidget(self._build_strategy_panel())
         rail_lay.addWidget(self._build_position_panel())
@@ -195,6 +206,10 @@ class LiveWorkspace(QWidget):
         lay.addWidget(self._mode_pill)
         self._broker_pill = Badge(bar)
         lay.addWidget(self._broker_pill)
+        self._brokers_btn = QPushButton("CONFIGURE BROKER", bar)
+        self._brokers_btn.setStyleSheet(t.BUTTON_QSS)
+        self._brokers_btn.clicked.connect(self.configure_broker_requested.emit)
+        lay.addWidget(self._brokers_btn)
         self._conn_pill = Badge(bar)
         lay.addWidget(self._conn_pill)
         self._strategy_pill = Badge(bar)
@@ -231,6 +246,64 @@ class LiveWorkspace(QWidget):
         self._price_label = QLabel("", section)
         self._price_label.setStyleSheet(f"color: {t.TEXT2}; font-size: 11px;")
         section.add(self._price_label)
+        return section
+
+    def _build_setup_panel(self) -> QWidget:
+        """Session setup — strategy/symbols/timeframe/quantity + START/STOP.
+
+        Pure view: every control renders ``self._state`` and emits outward;
+        the backend owns validation (``start_blockers``) and run state.
+        """
+        section = Section("SESSION SETUP")
+        self._setup_strategy = QComboBox(section)
+        self._setup_strategy.setStyleSheet(t.INPUT_QSS)
+        self._setup_strategy.currentTextChanged.connect(lambda _t: self._emit_setup())
+        section.add(QLabel("Strategy", section))
+        section.add(self._setup_strategy)
+        section.add(QLabel("Symbols (Market Watchlist)", section))
+        self._setup_symbols = QListWidget(section)
+        self._setup_symbols.setMaximumHeight(110)
+        self._setup_symbols.itemChanged.connect(lambda _i: self._emit_setup())
+        section.add(self._setup_symbols)
+        section.add(QLabel("Timeframe", section))
+        self._setup_timeframe = QComboBox(section)
+        self._setup_timeframe.setStyleSheet(t.INPUT_QSS)
+        self._setup_timeframe.currentTextChanged.connect(lambda _t: self._emit_setup())
+        section.add(self._setup_timeframe)
+        section.add(QLabel("Quantity (per order)", section))
+        self._setup_qty = QDoubleSpinBox(section)
+        self._setup_qty.setRange(0.0, 1000000.0)
+        self._setup_qty.setDecimals(2)
+        self._setup_qty.setStyleSheet(t.INPUT_QSS)
+        self._setup_qty.valueChanged.connect(lambda _v: self._emit_setup())
+        section.add(self._setup_qty)
+        self._setup_status = Badge(section)
+        section.add(self._setup_status)
+        self._setup_blockers = QLabel("", section)
+        self._setup_blockers.setWordWrap(True)
+        self._setup_blockers.setStyleSheet(f"color: {t.MUTED}; font-size: 11px;")
+        section.add(self._setup_blockers)
+        row = QWidget(section)
+        row_lay = QHBoxLayout(row)
+        row_lay.setContentsMargins(0, 0, 0, 0)
+        row_lay.setSpacing(6)
+        self._start_button = QPushButton("▶ START LIVE", row)
+        self._start_button.setStyleSheet(t.BUTTON_QSS)
+        self._start_button.clicked.connect(self.start_requested.emit)
+        row_lay.addWidget(self._start_button)
+        self._stop_button = QPushButton("■ STOP", row)
+        self._stop_button.setStyleSheet(t.BUTTON_QSS)
+        self._stop_button.clicked.connect(self.stop_requested.emit)
+        row_lay.addWidget(self._stop_button)
+        section.add(row)
+        return section
+
+    def _build_positions_panel(self) -> QWidget:
+        section = Section("POSITIONS")
+        self._positions_table = self._make_table(
+            ["Symbol", "Side", "Qty", "Entry", "Current", "P&L", "Status"]
+        )
+        section.add(self._positions_table)
         return section
 
     def _build_readiness_panel(self) -> QWidget:
@@ -418,15 +491,36 @@ class LiveWorkspace(QWidget):
             self._on_halt()
         self.refresh()
 
+    def _emit_setup(self) -> None:
+        """Forward user setup edits outward (suppressed while rendering)."""
+        if self._setup_updating:
+            return
+        symbols: list[str] = []
+        for row in range(self._setup_symbols.count()):
+            item = self._setup_symbols.item(row)
+            if item is not None and item.checkState() == Qt.CheckState.Checked:
+                symbols.append(item.text())
+        self.setup_changed.emit(
+            {
+                "strategy_name": self._setup_strategy.currentText(),
+                "symbols": symbols,
+                "timeframe": self._setup_timeframe.currentText(),
+                "quantity": float(self._setup_qty.value()),
+            }
+        )
+        self.refresh()
+
     # ── rendering (pure view of self._state) ──────────────────
 
     def _render_all(self) -> None:
         state = self._state
         self._render_status_bar(state)
         self._render_chart(state)
+        self._render_setup(state)
         self._render_gates(state)
         self._render_strategy(state)
         self._render_position(state)
+        self._render_positions_table(state)
         self._render_risk(state)
         self._render_orders(state)
         self._render_fills(state)
@@ -441,8 +535,15 @@ class LiveWorkspace(QWidget):
         if not isinstance(broker, dict):
             broker = {}
         name = broker.get("name") or "NOT CONFIGURED"
+        status = str(broker.get("status", "") or "")
+        label = f"Broker: {name}" + (f" — {status}" if status else "")
         self._broker_pill.set_status(
-            f"Broker: {name}", "muted" if name in ("NOT CONFIGURED", _NA) else "accent"
+            label,
+            "ok"
+            if status in ("CONNECTED", "LIVE_READY")
+            else "muted"
+            if name in ("NOT CONFIGURED", _NA)
+            else "accent",
         )
         connected = broker.get("connected")
         if connected is True:
@@ -482,17 +583,29 @@ class LiveWorkspace(QWidget):
         self._chart.setVisible(has_bars)
         self._chart_empty.setVisible(not has_bars)
         if has_bars:
-            try:
-                from chart.models.chart_model import ChartModel
+            # set_model rebuilds the chart's static pixmap cache; skip when
+            # the dataset is unchanged (same symbol/timeframe/bars tuple).
+            # The backend returns the same cached tuple between candles, so
+            # steady-state refreshes cost zero chart rebuilds.
+            key = (symbol, timeframe, id(bars))
+            if key != self._chart_state_key:
+                self._chart_state_key = key
+                try:
+                    from chart.models.chart_model import ChartModel
 
-                self._chart.set_model(
-                    ChartModel(symbol=symbol, bars=tuple(bars), timeframe=timeframe, exchange="NSE")
-                )
-            except Exception:
-                self._chart.setVisible(False)
-                self._chart_empty.setVisible(True)
-                self._chart_empty.setText("CHART ERROR — model rejected")
-                return
+                    self._chart.set_model(
+                        ChartModel(
+                            symbol=symbol,
+                            bars=tuple(bars),
+                            timeframe=timeframe,
+                            exchange="NSE",
+                        )
+                    )
+                except Exception:
+                    self._chart.setVisible(False)
+                    self._chart_empty.setVisible(True)
+                    self._chart_empty.setText("CHART ERROR — model rejected")
+                    return
         else:
             detail = "  ·  ".join(
                 part
@@ -580,6 +693,108 @@ class LiveWorkspace(QWidget):
             )
         else:
             self._strategy_params.setText("")
+
+    def _render_setup(self, state: dict[str, Any]) -> None:
+        self._setup_updating = True
+        try:
+            strategies = state.get("available_strategies") or []
+            if isinstance(strategies, (list, tuple)):
+                current = self._setup_strategy.currentText()
+                self._setup_strategy.blockSignals(True)
+                try:
+                    self._setup_strategy.clear()
+                    self._setup_strategy.addItems([str(s) for s in strategies])
+                    selected = self._config_strategy_name(state)
+                    if selected:
+                        index = self._setup_strategy.findText(selected)
+                        if index >= 0:
+                            self._setup_strategy.setCurrentIndex(index)
+                    elif current:
+                        index = self._setup_strategy.findText(current)
+                        if index >= 0:
+                            self._setup_strategy.setCurrentIndex(index)
+                finally:
+                    self._setup_strategy.blockSignals(False)
+            offered = state.get("available_symbols") or []
+            picked = state.get("selected_symbols") or []
+            if isinstance(offered, (list, tuple)):
+                self._setup_symbols.blockSignals(True)
+                try:
+                    self._setup_symbols.clear()
+                    for symbol in offered:
+                        item = QListWidgetItem(str(symbol), self._setup_symbols)
+                        item.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
+                        item.setCheckState(
+                            Qt.CheckState.Checked
+                            if str(symbol) in {str(s) for s in picked}
+                            else Qt.CheckState.Unchecked
+                        )
+                finally:
+                    self._setup_symbols.blockSignals(False)
+            frames = state.get("available_timeframes") or []
+            if isinstance(frames, (list, tuple)):
+                self._setup_timeframe.blockSignals(True)
+                try:
+                    self._setup_timeframe.clear()
+                    self._setup_timeframe.addItems([str(f) for f in frames])
+                    wanted = str(state.get("selected_timeframe", ""))
+                    if wanted:
+                        index = self._setup_timeframe.findText(wanted)
+                        if index >= 0:
+                            self._setup_timeframe.setCurrentIndex(index)
+                finally:
+                    self._setup_timeframe.blockSignals(False)
+            try:
+                quantity = float(state.get("quantity", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                quantity = 0.0
+            self._setup_qty.blockSignals(True)
+            try:
+                if abs(self._setup_qty.value() - quantity) > 1e-9:
+                    self._setup_qty.setValue(quantity)
+            finally:
+                self._setup_qty.blockSignals(False)
+        finally:
+            self._setup_updating = False
+        status = str(state.get("session_status", "STOPPED"))
+        tone = {"RUNNING": "ok", "STOPPED": "muted", "ERROR": "bad"}.get(status, "muted")
+        self._setup_status.set_status(f"● {status}", tone)
+        blockers = state.get("start_blockers") or []
+        reason = state.get("status_reason", "")
+        lines = [str(b) for b in blockers] if isinstance(blockers, list) else []
+        if reason:
+            lines.append(str(reason))
+        self._setup_blockers.setText("\n".join(f"• {line}" for line in lines))
+        running = status == "RUNNING"
+        self._start_button.setEnabled(not running and not lines)
+        self._stop_button.setEnabled(running)
+
+    @staticmethod
+    def _config_strategy_name(state: dict[str, Any]) -> str:
+        strategy = state.get("strategy")
+        if isinstance(strategy, dict):
+            return str(strategy.get("id", ""))
+        return ""
+
+    def _render_positions_table(self, state: dict[str, Any]) -> None:
+        positions = state.get("positions") or []
+        rows: list[list[str]] = []
+        if isinstance(positions, list):
+            for position in positions:
+                if not isinstance(position, dict):
+                    continue
+                rows.append(
+                    [
+                        _text(position.get("symbol"), ""),
+                        _text(position.get("side"), ""),
+                        _text(position.get("quantity"), ""),
+                        _text(position.get("entry_price"), ""),
+                        _text(position.get("current_price"), ""),
+                        _money(position.get("pnl")),
+                        _text(position.get("status"), ""),
+                    ]
+                )
+        fill_table(self._positions_table, rows)
 
     def _render_position(self, state: dict[str, Any]) -> None:
         position = state.get("position")

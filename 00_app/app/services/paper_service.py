@@ -23,10 +23,16 @@ from market.repository.symbol_repository import SymbolRepository
 from risk import RiskPolicy
 from strategy import StrategyParameters
 from strategy.language.compiler import compile_strategy
-from strategy.language.storage import list_strategies, load_strategy_record
+from strategy.language.storage import (
+    list_strategies,
+    load_strategy_record,
+    strategy_dir as resolve_strategy_dir,
+)
 from strategy.models.definition import StrategyDefinition
 
-DEFAULT_STRATEGY_DIR = r"D:\VAYREN_STRATEGIES"
+# Default library root — resolved (env var → data_dir → per-user), not a
+# hardcoded drive letter.
+DEFAULT_STRATEGY_DIR = resolve_strategy_dir(None)
 
 
 class PaperError(RuntimeError):

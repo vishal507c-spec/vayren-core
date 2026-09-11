@@ -27,7 +27,11 @@ class EventBus:
             try:
                 handler(event)
             except Exception:
-                logger.exception("Handler %s failed for %s", handler.__name__, event_type.__name__)
+                logger.exception(
+                    "Handler %s failed for %s",
+                    getattr(handler, "__name__", repr(handler)),
+                    event_type.__name__,
+                )
 
     def clear(self) -> None:
         self._subscribers.clear()

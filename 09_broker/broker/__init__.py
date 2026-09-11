@@ -63,6 +63,7 @@ from broker.funds import (
 )
 from broker.health import BrokerHealth, HealthState
 from broker.identity import BrokerIdentity, identity_of
+from broker.management import BrokerSpec
 from broker.registry import (
     BrokerRecord,
     BrokerRegistry,
@@ -78,6 +79,7 @@ from broker.selection import (
     surface_status,
 )
 from broker.selection_store import FileSelectionStore, SelectionLoadError
+from broker.status import READY_STATES, BrokerStatus
 from broker.vocab import (
     BrokerError,
     BrokerNotRegisteredError,
@@ -97,6 +99,8 @@ __all__ = [
     "BrokerRecord",
     "BrokerRegistry",
     "BrokerSelection",
+    "BrokerSpec",
+    "BrokerStatus",
     "Caps",
     "CapabilitySet",
     "CapabilityStatus",
@@ -122,6 +126,7 @@ __all__ = [
     "MarketDataFace",
     "MemorySelectionStore",
     "PluginLike",
+    "READY_STATES",
     "SelectionError",
     "SelectionLoadError",
     "SelectionStore",

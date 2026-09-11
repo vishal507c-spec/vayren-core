@@ -76,6 +76,8 @@ def create_sma_crossover(params: StrategyParameters) -> StrategyLogic:
             norm["fast_period"] = float(v)
         elif k == "Slow period":
             norm["slow_period"] = float(v)
+        elif k == "Min volume":
+            norm["min_volume"] = float(v)
         else:
             norm[k] = float(v)
     s.params = norm

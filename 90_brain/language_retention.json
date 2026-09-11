@@ -1,31 +1,1511 @@
 {
-  "_note": "Proven-retention manifest for the final language migration pass. Every Rust-owned-but-Python file must resolve to a class or file entry here (or MIGRATED status); the ownership validator enforces this. Reasons cite measurements and constitutional clauses, never convenience.",
-  "classes": {
-    "CORE": "Event bus / registries / manifests are stdlib-only foundation glue with measured microsecond overhead (dispatch ~0.3us, snapshot ~0.024ms). Porting the bus would rewire every module at once (big-bang, constitution §11). Retained; numeric authorities migrate per-feature.",
-    "MARKET_DATA": "Repository/SQL/database layers are SQLite IO orchestration, not numeric compute; the aggregation kernel migrated. A full storage port is product-scale with zero measured need. Retained.",
-    "DATA_PROCESSING": "Download engine is IO/threading orchestration (worker threads, locks, auth flows) around the provider boundary; numeric detectors migrated. Retained as orchestration glue.",
-    "RISK": "RiskEngine is fail-closed orchestration over string-keyed audit reasons, kill-switch persistence and session rules; measured ~0.017ms/request with no bottleneck. A port would split safety-critical reason strings across FFI with high regression risk and no measured benefit. Retained; numeric policy kernels are validator-approved future slices.",
-    "EXECUTION": "Session/planner/broker-venue orchestration is event-driven glue with persistence (checkpoints, journals) and Qt-thread coupling. The lifecycle table authority migrated. A full port is product-scale. Retained.",
-    "BACKTEST": "Runner/optimizer/worker are research orchestration over Python strategies (which must stay Python); metrics kernels migrated. Retained.",
-    "PRESENTATION_MODEL": "ChartModel/viewport math is Qt-paint-coupled presentation state; extracting it without the Qt shell is a UI rewrite in disguise. Retained pending the egui shell; no new presentation math in Python.",
-    "NATIVE_UI": "The Qt application shell (watchlist, chart widget, LIVE workspace, labs) is a working product-scale UI. A full egui rewrite in one pass would destroy working behavior (mission §3/§12, constitution §4/§11 gradual). Retained; the Rust+egui target is established in rust/vayren-shell with the broker panel as the first native surface; NEW surfaces must be Rust+egui.",
-    "APP_UI": "Composition root + Qt shell: same proof as NATIVE_UI. Retained; bootstrap wiring stays Python (composition is not numeric core).",
-    "BOUNDARY_LOADER": "Event loader bridges are bus-coupling glue by design. Retained.",
-    "AI_ADJACENT": "Adaptive/regime/ML interfaces are advisory AI-adjacent logic; AI-adjacent stays Python per constitution §2. Retained.",
-    "DATA_UI": "Download console is Qt UI: same proof as NATIVE_UI. Retained.",
-    "RESEARCH_UI": "Research panels are Python-owned research UI. Retained."
+ "_note": "Per-file language retention tracking. Every Python file in a Rust-owned domain MUST have an entry here or the validator fails. Class-level entries are documentation context only â€” enforcement is per-file. States: MIGRATED (file deleted, authority in Rust), MIGRATION_REQUIRED (active legacy, must migrate when touched), TEMPORARILY_RETAINED (active, justified, tracked), EXEMPT_WITH_JUSTIFICATION (permanent exemption with proof).",
+ "version": 2,
+ "classes": {
+  "CORE": "Event bus/registries are stdlib-only foundation glue (dispatch ~0.3us). Porting bus = big-bang (Â§11). Numeric kernels migrate per-feature.",
+  "MARKET_DATA": "Repository/SQL layers are IO orchestration. Aggregation kernel migrated. Storage port = product-scale, zero measured need.",
+  "DATA_PROCESSING": "Download engine is IO/threading orchestration around provider boundary. Numeric detectors migrated.",
+  "RISK": "RiskEngine is fail-closed orchestration (~0.017ms/req). Port splits safety-critical strings across FFI.",
+  "EXECUTION": "Session/planner/broker-venue orchestration. Lifecycle table migrated. Full port = product-scale.",
+  "BACKTEST": "Runner/worker orchestrate Python strategies (must stay Python). Metrics kernels migrated.",
+  "NATIVE_UI": "Qt shell is working product UI. Slint rewrite in one pass destroys behavior (Â§4/Â§11). New surfaces MUST be Rust+Slint."
+ },
+ "files": {
+  "08_execution/execution/runtime/lifecycle.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "EXECUTION",
+   "reason": "LifecycleState machine is session orchestration vocabulary (string reasons, Qt-adjacent). Order-state authority migrated to Rust.",
+   "migration_target": "rust/vayren-core/src/",
+   "migration_condition": "When LiveSession ported to Rust or FFI bridge covers full lifecycle"
   },
-  "files": {
-    "08_execution/execution/runtime/lifecycle.py": "LifecycleState machine retained as session orchestration vocabulary (string reasons, Qt-adjacent lifecycle); the order-state authority (the safety-critical table) migrated. Full port is a future execution-slice candidate, not this pass."
+  "08_execution/execution/market_data/sqlite_tail.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "EXECUTION",
+   "reason": "SQLite-tail provider is IO orchestration (per-symbol polling, watermark dedupe). Zero numeric authority.",
+   "migration_target": "rust/vayren-core/src/",
+   "migration_condition": "When execution market-data layer ported"
   },
-  "qt_workspace_allowlist": {
-    "00_app/app/ui/research_workspace.py": "Product-mandated Research workspace built in the retained Qt shell (egui shell is a standalone binary, not embeddable in the Qt app without destroying working behavior). Pure view over the Python research engine; registered here so the egui-direction rule keeps its teeth everywhere else.",
-    "00_app/app/ui/portfolio_workspace.py": "Product-mandated Portfolio workspace built in the retained Qt shell (same proof as research). Pure view over session/paper state; no new state, no new logic.",
-    "00_app/app/services/research_service.py": "Composition service behind the Research workspace (research stays Python per constitution §2). Service glue, not numeric core."
+  "08_execution/execution/market_data/broker_feed.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "EXECUTION",
+   "reason": "Broker-feed candle builder is stream plumbing over injected face. Zero numeric authority.",
+   "migration_target": "rust/vayren-core/src/",
+   "migration_condition": "Same as sqlite_tail"
   },
-  "migrated": {
-    "08_execution/execution/models/order.py": "TRANSITIONS/TERMINAL_STATES authority -> Rust order_state; enum/models stay as boundary vocabulary",
-    "06_backtest/backtest/engine/metrics.py": "drawdown/equity/sharpe math -> Rust metrics kernels",
-    "03_market/market/timeframe/aggregate.py": "bucketing/accumulation + mode -> Rust aggregate/stats kernels"
+  "02_data/data/provider/zerodha/live_trading.py": {
+   "state": "EXEMPT_WITH_JUSTIFICATION",
+   "domain": "PROVIDER_BOUNDARY",
+   "reason": "Kite order-execution venue in sanctioned SDK boundary. SDK wire protocol, not core math.",
+   "migration_target": "N/A - external SDK adapter stays Python",
+   "migration_condition": "Never - provider SDK boundary is permanently Python"
+  },
+  "02_data/data/provider/zerodha/live_market_data.py": {
+   "state": "EXEMPT_WITH_JUSTIFICATION",
+   "domain": "PROVIDER_BOUNDARY",
+   "reason": "Kite quote-poll face: throttled REST polling. Same SDK boundary proof.",
+   "migration_target": "N/A",
+   "migration_condition": "Never"
+  },
+  "02_data/data/provider/zerodha/live_activation.py": {
+   "state": "EXEMPT_WITH_JUSTIFICATION",
+   "domain": "PROVIDER_BOUNDARY",
+   "reason": "Venue activation glue. No transport math.",
+   "migration_target": "N/A",
+   "migration_condition": "Never"
+  },
+  "00_app/app/ui/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When Slint shell supports this component"
+  },
+  "00_app/app/ui/event_log_panel.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When Slint shell supports this component"
+  },
+  "00_app/app/ui/lab_theme.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When Slint shell supports this component"
+  },
+  "00_app/app/ui/live_workspace.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When Slint shell supports this component"
+  },
+  "00_app/app/ui/market_status_panel.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When Slint shell supports this component"
+  },
+  "00_app/app/ui/portfolio_workspace.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When Slint shell supports this component"
+  },
+  "00_app/app/ui/research_workspace.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When Slint shell supports this component"
+  },
+  "00_app/app/ui/stock_ranking.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When Slint shell supports this component"
+  },
+  "00_app/app/ui/strategy_lab_workspace.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When Slint shell supports this component"
+  },
+  "00_app/app/ui/system_health_panel.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When Slint shell supports this component"
+  },
+  "00_app/app/ui/top_nav_bar.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When Slint shell supports this component"
+  },
+  "00_app/app/ui/trade_context_panel.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When Slint shell supports this component"
+  },
+  "00_app/app/ui/ui_kit.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When Slint shell supports this component"
+  },
+  "00_app/app/ui/watchlist_multiselect.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When Slint shell supports this component"
+  },
+  "04_chart/chart/renderer/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When Slint shell supports this component"
+  },
+  "04_chart/chart/renderer/candle_renderer.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When Slint shell supports this component"
+  },
+  "04_chart/chart/renderer/crosshair_renderer.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When Slint shell supports this component"
+  },
+  "04_chart/chart/renderer/label_renderer.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When Slint shell supports this component"
+  },
+  "04_chart/chart/renderer/overlay_renderer.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When Slint shell supports this component"
+  },
+  "04_chart/chart/renderer/plot_renderer.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When Slint shell supports this component"
+  },
+  "04_chart/chart/renderer/time_axis_renderer.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When Slint shell supports this component"
+  },
+  "04_chart/chart/widgets/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When Slint shell supports this component"
+  },
+  "04_chart/chart/widgets/candle_chart_widget.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When Slint shell supports this component"
+  },
+  "04_chart/chart/widgets/indicator_visibility_panel.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When Slint shell supports this component"
+  },
+  "04_chart/chart/widgets/indicators_toolbar.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When Slint shell supports this component"
+  },
+  "04_chart/chart/widgets/symbol_list_widget.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When Slint shell supports this component"
+  },
+  "04_chart/chart/widgets/timeframe_toolbar.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When Slint shell supports this component"
+  },
+  "04_chart/chart/widgets/tools_toolbar.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When Slint shell supports this component"
+  },
+  "04_chart/chart/widgets/watchlist_widget.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When Slint shell supports this component"
+  },
+  "04_chart/chart/windows/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When Slint shell supports this component"
+  },
+  "04_chart/chart/windows/chart_window.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When Slint shell supports this component"
+  },
+  "01_core/core/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "CORE",
+   "reason": "EventBus/contracts/registry/system-model foundation glue (stdlib-only, dispatch ~0.3us). Porting the bus rewires every module at once (big-bang, constitution section 11). File role: package re-export surface (no logic)",
+   "migration_target": "rust/vayren-core/src/core/",
+   "migration_condition": "When the CORE slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "01_core/core/contracts/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "CORE",
+   "reason": "EventBus/contracts/registry/system-model foundation glue (stdlib-only, dispatch ~0.3us). Porting the bus rewires every module at once (big-bang, constitution section 11). File role: package re-export surface (no logic)",
+   "migration_target": "rust/vayren-core/src/core/",
+   "migration_condition": "When the CORE slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "01_core/core/contracts/capability.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "CORE",
+   "reason": "EventBus/contracts/registry/system-model foundation glue (stdlib-only, dispatch ~0.3us). Porting the bus rewires every module at once (big-bang, constitution section 11). File role: contract declarations (ComponentId/Capability/manifest vocabulary)",
+   "migration_target": "rust/vayren-core/src/core/",
+   "migration_condition": "When the CORE slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "01_core/core/contracts/component.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "CORE",
+   "reason": "EventBus/contracts/registry/system-model foundation glue (stdlib-only, dispatch ~0.3us). Porting the bus rewires every module at once (big-bang, constitution section 11). File role: contract declarations (ComponentId/Capability/manifest vocabulary)",
+   "migration_target": "rust/vayren-core/src/core/",
+   "migration_condition": "When the CORE slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "01_core/core/contracts/contract.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "CORE",
+   "reason": "EventBus/contracts/registry/system-model foundation glue (stdlib-only, dispatch ~0.3us). Porting the bus rewires every module at once (big-bang, constitution section 11). File role: contract declarations (ComponentId/Capability/manifest vocabulary)",
+   "migration_target": "rust/vayren-core/src/core/",
+   "migration_condition": "When the CORE slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "01_core/core/contracts/health.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "CORE",
+   "reason": "EventBus/contracts/registry/system-model foundation glue (stdlib-only, dispatch ~0.3us). Porting the bus rewires every module at once (big-bang, constitution section 11). File role: contract declarations (ComponentId/Capability/manifest vocabulary)",
+   "migration_target": "rust/vayren-core/src/core/",
+   "migration_condition": "When the CORE slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "01_core/core/contracts/manifest.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "CORE",
+   "reason": "EventBus/contracts/registry/system-model foundation glue (stdlib-only, dispatch ~0.3us). Porting the bus rewires every module at once (big-bang, constitution section 11). File role: contract declarations (ComponentId/Capability/manifest vocabulary)",
+   "migration_target": "rust/vayren-core/src/core/",
+   "migration_condition": "When the CORE slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "01_core/core/event_bus/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "CORE",
+   "reason": "EventBus/contracts/registry/system-model foundation glue (stdlib-only, dispatch ~0.3us). Porting the bus rewires every module at once (big-bang, constitution section 11). File role: package re-export surface (no logic)",
+   "migration_target": "rust/vayren-core/src/core/",
+   "migration_condition": "When the CORE slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "01_core/core/event_bus/event_bus.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "CORE",
+   "reason": "EventBus/contracts/registry/system-model foundation glue (stdlib-only, dispatch ~0.3us). Porting the bus rewires every module at once (big-bang, constitution section 11). File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/core/",
+   "migration_condition": "When the CORE slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "01_core/core/events/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "CORE",
+   "reason": "EventBus/contracts/registry/system-model foundation glue (stdlib-only, dispatch ~0.3us). Porting the bus rewires every module at once (big-bang, constitution section 11). File role: package re-export surface (no logic)",
+   "migration_target": "rust/vayren-core/src/core/",
+   "migration_condition": "When the CORE slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "01_core/core/events/app_started.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "CORE",
+   "reason": "EventBus/contracts/registry/system-model foundation glue (stdlib-only, dispatch ~0.3us). Porting the bus rewires every module at once (big-bang, constitution section 11). File role: frozen event dataclass payloads (bus vocabulary, no behavior)",
+   "migration_target": "rust/vayren-core/src/core/",
+   "migration_condition": "When the CORE slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "01_core/core/events/event.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "CORE",
+   "reason": "EventBus/contracts/registry/system-model foundation glue (stdlib-only, dispatch ~0.3us). Porting the bus rewires every module at once (big-bang, constitution section 11). File role: frozen event dataclass payloads (bus vocabulary, no behavior)",
+   "migration_target": "rust/vayren-core/src/core/",
+   "migration_condition": "When the CORE slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "01_core/core/logger/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "CORE",
+   "reason": "EventBus/contracts/registry/system-model foundation glue (stdlib-only, dispatch ~0.3us). Porting the bus rewires every module at once (big-bang, constitution section 11). File role: package re-export surface (no logic)",
+   "migration_target": "rust/vayren-core/src/core/",
+   "migration_condition": "When the CORE slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "01_core/core/logger/setup.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "CORE",
+   "reason": "EventBus/contracts/registry/system-model foundation glue (stdlib-only, dispatch ~0.3us). Porting the bus rewires every module at once (big-bang, constitution section 11). File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/core/",
+   "migration_condition": "When the CORE slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "01_core/core/registry/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "CORE",
+   "reason": "EventBus/contracts/registry/system-model foundation glue (stdlib-only, dispatch ~0.3us). Porting the bus rewires every module at once (big-bang, constitution section 11). File role: package re-export surface (no logic)",
+   "migration_target": "rust/vayren-core/src/core/",
+   "migration_condition": "When the CORE slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "01_core/core/registry/capability_registry.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "CORE",
+   "reason": "EventBus/contracts/registry/system-model foundation glue (stdlib-only, dispatch ~0.3us). Porting the bus rewires every module at once (big-bang, constitution section 11). File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/core/",
+   "migration_condition": "When the CORE slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "01_core/core/registry/component_registry.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "CORE",
+   "reason": "EventBus/contracts/registry/system-model foundation glue (stdlib-only, dispatch ~0.3us). Porting the bus rewires every module at once (big-bang, constitution section 11). File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/core/",
+   "migration_condition": "When the CORE slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "01_core/core/registry/registry.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "CORE",
+   "reason": "EventBus/contracts/registry/system-model foundation glue (stdlib-only, dispatch ~0.3us). Porting the bus rewires every module at once (big-bang, constitution section 11). File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/core/",
+   "migration_condition": "When the CORE slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "01_core/core/system/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "CORE",
+   "reason": "EventBus/contracts/registry/system-model foundation glue (stdlib-only, dispatch ~0.3us). Porting the bus rewires every module at once (big-bang, constitution section 11). File role: package re-export surface (no logic)",
+   "migration_target": "rust/vayren-core/src/core/",
+   "migration_condition": "When the CORE slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "01_core/core/system/capability_graph.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "CORE",
+   "reason": "EventBus/contracts/registry/system-model foundation glue (stdlib-only, dispatch ~0.3us). Porting the bus rewires every module at once (big-bang, constitution section 11). File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/core/",
+   "migration_condition": "When the CORE slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "01_core/core/system/change_impact.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "CORE",
+   "reason": "EventBus/contracts/registry/system-model foundation glue (stdlib-only, dispatch ~0.3us). Porting the bus rewires every module at once (big-bang, constitution section 11). File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/core/",
+   "migration_condition": "When the CORE slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "01_core/core/system/component_graph.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "CORE",
+   "reason": "EventBus/contracts/registry/system-model foundation glue (stdlib-only, dispatch ~0.3us). Porting the bus rewires every module at once (big-bang, constitution section 11). File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/core/",
+   "migration_condition": "When the CORE slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "01_core/core/system/data_flow.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "CORE",
+   "reason": "EventBus/contracts/registry/system-model foundation glue (stdlib-only, dispatch ~0.3us). Porting the bus rewires every module at once (big-bang, constitution section 11). File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/core/",
+   "migration_condition": "When the CORE slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "01_core/core/system/event_graph.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "CORE",
+   "reason": "EventBus/contracts/registry/system-model foundation glue (stdlib-only, dispatch ~0.3us). Porting the bus rewires every module at once (big-bang, constitution section 11). File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/core/",
+   "migration_condition": "When the CORE slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "01_core/core/system/snapshot.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "CORE",
+   "reason": "EventBus/contracts/registry/system-model foundation glue (stdlib-only, dispatch ~0.3us). Porting the bus rewires every module at once (big-bang, constitution section 11). File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/core/",
+   "migration_condition": "When the CORE slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "01_core/core/system/system_model.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "CORE",
+   "reason": "EventBus/contracts/registry/system-model foundation glue (stdlib-only, dispatch ~0.3us). Porting the bus rewires every module at once (big-bang, constitution section 11). File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/core/",
+   "migration_condition": "When the CORE slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "01_core/core/system/workflow.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "CORE",
+   "reason": "EventBus/contracts/registry/system-model foundation glue (stdlib-only, dispatch ~0.3us). Porting the bus rewires every module at once (big-bang, constitution section 11). File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/core/",
+   "migration_condition": "When the CORE slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "02_data/data/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "DATA_PROCESSING",
+   "reason": "Download-engine IO/threading orchestration (worker threads, locks, auth flows) around the provider boundary. Numeric detectors already migrated. File role: package re-export surface (no logic)",
+   "migration_target": "rust/vayren-core/src/data/",
+   "migration_condition": "When the DATA_PROCESSING slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "02_data/data/calendar.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "DATA_PROCESSING",
+   "reason": "Download-engine IO/threading orchestration (worker threads, locks, auth flows) around the provider boundary. Numeric detectors already migrated. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/data/",
+   "migration_condition": "When the DATA_PROCESSING slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "02_data/data/downloader/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "DATA_PROCESSING",
+   "reason": "Download-engine IO/threading orchestration (worker threads, locks, auth flows) around the provider boundary. Numeric detectors already migrated. File role: package re-export surface (no logic)",
+   "migration_target": "rust/vayren-core/src/data/",
+   "migration_condition": "When the DATA_PROCESSING slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "02_data/data/downloader/engine.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "DATA_PROCESSING",
+   "reason": "Download-engine IO/threading orchestration (worker threads, locks, auth flows) around the provider boundary. Numeric detectors already migrated. File role: orchestration driver (wires migrated kernels, holds no migrated math)",
+   "migration_target": "rust/vayren-core/src/data/",
+   "migration_condition": "When the DATA_PROCESSING slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "02_data/data/downloader/queue.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "DATA_PROCESSING",
+   "reason": "Download-engine IO/threading orchestration (worker threads, locks, auth flows) around the provider boundary. Numeric detectors already migrated. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/data/",
+   "migration_condition": "When the DATA_PROCESSING slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "02_data/data/downloader/sweep.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "DATA_PROCESSING",
+   "reason": "Download-engine IO/threading orchestration (worker threads, locks, auth flows) around the provider boundary. Numeric detectors already migrated. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/data/",
+   "migration_condition": "When the DATA_PROCESSING slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "02_data/data/events/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "DATA_PROCESSING",
+   "reason": "Download-engine IO/threading orchestration (worker threads, locks, auth flows) around the provider boundary. Numeric detectors already migrated. File role: package re-export surface (no logic)",
+   "migration_target": "rust/vayren-core/src/data/",
+   "migration_condition": "When the DATA_PROCESSING slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "02_data/data/events/cancel_download.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "DATA_PROCESSING",
+   "reason": "Download-engine IO/threading orchestration (worker threads, locks, auth flows) around the provider boundary. Numeric detectors already migrated. File role: frozen event dataclass payloads (bus vocabulary, no behavior)",
+   "migration_target": "rust/vayren-core/src/data/",
+   "migration_condition": "When the DATA_PROCESSING slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "02_data/data/events/coverage_request.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "DATA_PROCESSING",
+   "reason": "Download-engine IO/threading orchestration (worker threads, locks, auth flows) around the provider boundary. Numeric detectors already migrated. File role: frozen event dataclass payloads (bus vocabulary, no behavior)",
+   "migration_target": "rust/vayren-core/src/data/",
+   "migration_condition": "When the DATA_PROCESSING slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "02_data/data/events/download_completed.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "DATA_PROCESSING",
+   "reason": "Download-engine IO/threading orchestration (worker threads, locks, auth flows) around the provider boundary. Numeric detectors already migrated. File role: frozen event dataclass payloads (bus vocabulary, no behavior)",
+   "migration_target": "rust/vayren-core/src/data/",
+   "migration_condition": "When the DATA_PROCESSING slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "02_data/data/events/download_coverage.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "DATA_PROCESSING",
+   "reason": "Download-engine IO/threading orchestration (worker threads, locks, auth flows) around the provider boundary. Numeric detectors already migrated. File role: frozen event dataclass payloads (bus vocabulary, no behavior)",
+   "migration_target": "rust/vayren-core/src/data/",
+   "migration_condition": "When the DATA_PROCESSING slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "02_data/data/events/download_failed.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "DATA_PROCESSING",
+   "reason": "Download-engine IO/threading orchestration (worker threads, locks, auth flows) around the provider boundary. Numeric detectors already migrated. File role: frozen event dataclass payloads (bus vocabulary, no behavior)",
+   "migration_target": "rust/vayren-core/src/data/",
+   "migration_condition": "When the DATA_PROCESSING slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "02_data/data/events/download_progress.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "DATA_PROCESSING",
+   "reason": "Download-engine IO/threading orchestration (worker threads, locks, auth flows) around the provider boundary. Numeric detectors already migrated. File role: frozen event dataclass payloads (bus vocabulary, no behavior)",
+   "migration_target": "rust/vayren-core/src/data/",
+   "migration_condition": "When the DATA_PROCESSING slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "02_data/data/events/download_request.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "DATA_PROCESSING",
+   "reason": "Download-engine IO/threading orchestration (worker threads, locks, auth flows) around the provider boundary. Numeric detectors already migrated. File role: frozen event dataclass payloads (bus vocabulary, no behavior)",
+   "migration_target": "rust/vayren-core/src/data/",
+   "migration_condition": "When the DATA_PROCESSING slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "02_data/data/events/download_started.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "DATA_PROCESSING",
+   "reason": "Download-engine IO/threading orchestration (worker threads, locks, auth flows) around the provider boundary. Numeric detectors already migrated. File role: frozen event dataclass payloads (bus vocabulary, no behavior)",
+   "migration_target": "rust/vayren-core/src/data/",
+   "migration_condition": "When the DATA_PROCESSING slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "02_data/data/lock.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "DATA_PROCESSING",
+   "reason": "Download-engine IO/threading orchestration (worker threads, locks, auth flows) around the provider boundary. Numeric detectors already migrated. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/data/",
+   "migration_condition": "When the DATA_PROCESSING slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "02_data/data/logging_setup.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "DATA_PROCESSING",
+   "reason": "Download-engine IO/threading orchestration (worker threads, locks, auth flows) around the provider boundary. Numeric detectors already migrated. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/data/",
+   "migration_condition": "When the DATA_PROCESSING slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "02_data/data/manifest.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "DATA_PROCESSING",
+   "reason": "Download-engine IO/threading orchestration (worker threads, locks, auth flows) around the provider boundary. Numeric detectors already migrated. File role: production component manifest (composition metadata)",
+   "migration_target": "rust/vayren-core/src/data/",
+   "migration_condition": "When the DATA_PROCESSING slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "02_data/data/models.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "DATA_PROCESSING",
+   "reason": "Download-engine IO/threading orchestration (worker threads, locks, auth flows) around the provider boundary. Numeric detectors already migrated. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/data/",
+   "migration_condition": "When the DATA_PROCESSING slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "02_data/data/reporter.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "DATA_PROCESSING",
+   "reason": "Download-engine IO/threading orchestration (worker threads, locks, auth flows) around the provider boundary. Numeric detectors already migrated. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/data/",
+   "migration_condition": "When the DATA_PROCESSING slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "02_data/data/settings.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "DATA_PROCESSING",
+   "reason": "Download-engine IO/threading orchestration (worker threads, locks, auth flows) around the provider boundary. Numeric detectors already migrated. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/data/",
+   "migration_condition": "When the DATA_PROCESSING slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "02_data/data/storage/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "DATA_PROCESSING",
+   "reason": "Download-engine IO/threading orchestration (worker threads, locks, auth flows) around the provider boundary. Numeric detectors already migrated. File role: package re-export surface (no logic)",
+   "migration_target": "rust/vayren-core/src/data/",
+   "migration_condition": "When the DATA_PROCESSING slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "02_data/data/storage/candle_db.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "DATA_PROCESSING",
+   "reason": "Download-engine IO/threading orchestration (worker threads, locks, auth flows) around the provider boundary. Numeric detectors already migrated. File role: storage orchestration (SQL IO, no numeric authority)",
+   "migration_target": "rust/vayren-core/src/data/",
+   "migration_condition": "When the DATA_PROCESSING slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "02_data/data/storage/scanner.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "DATA_PROCESSING",
+   "reason": "Download-engine IO/threading orchestration (worker threads, locks, auth flows) around the provider boundary. Numeric detectors already migrated. File role: storage orchestration (SQL IO, no numeric authority)",
+   "migration_target": "rust/vayren-core/src/data/",
+   "migration_condition": "When the DATA_PROCESSING slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "02_data/data/symbols.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "DATA_PROCESSING",
+   "reason": "Download-engine IO/threading orchestration (worker threads, locks, auth flows) around the provider boundary. Numeric detectors already migrated. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/data/",
+   "migration_condition": "When the DATA_PROCESSING slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "02_data/data/throttle.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "DATA_PROCESSING",
+   "reason": "Download-engine IO/threading orchestration (worker threads, locks, auth flows) around the provider boundary. Numeric detectors already migrated. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/data/",
+   "migration_condition": "When the DATA_PROCESSING slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "02_data/data/worker.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "DATA_PROCESSING",
+   "reason": "Download-engine IO/threading orchestration (worker threads, locks, auth flows) around the provider boundary. Numeric detectors already migrated. File role: orchestration driver (wires migrated kernels, holds no migrated math)",
+   "migration_target": "rust/vayren-core/src/data/",
+   "migration_condition": "When the DATA_PROCESSING slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "03_market/market/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "MARKET_DATA",
+   "reason": "SQLite IO orchestration / repository / loader / event payloads. Aggregation kernel already migrated to Rust; full storage port is product-scale with zero measured need. File role: package re-export surface (no logic)",
+   "migration_target": "rust/vayren-core/src/market/",
+   "migration_condition": "When the MARKET_DATA slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "03_market/market/database/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "MARKET_DATA",
+   "reason": "SQLite IO orchestration / repository / loader / event payloads. Aggregation kernel already migrated to Rust; full storage port is product-scale with zero measured need. File role: package re-export surface (no logic)",
+   "migration_target": "rust/vayren-core/src/market/",
+   "migration_condition": "When the MARKET_DATA slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "03_market/market/database/ohlcv.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "MARKET_DATA",
+   "reason": "SQLite IO orchestration / repository / loader / event payloads. Aggregation kernel already migrated to Rust; full storage port is product-scale with zero measured need. File role: storage orchestration (SQL IO, no numeric authority)",
+   "migration_target": "rust/vayren-core/src/market/",
+   "migration_condition": "When the MARKET_DATA slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "03_market/market/database/sqlite.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "MARKET_DATA",
+   "reason": "SQLite IO orchestration / repository / loader / event payloads. Aggregation kernel already migrated to Rust; full storage port is product-scale with zero measured need. File role: storage orchestration (SQL IO, no numeric authority)",
+   "migration_target": "rust/vayren-core/src/market/",
+   "migration_condition": "When the MARKET_DATA slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "03_market/market/events/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "MARKET_DATA",
+   "reason": "SQLite IO orchestration / repository / loader / event payloads. Aggregation kernel already migrated to Rust; full storage port is product-scale with zero measured need. File role: package re-export surface (no logic)",
+   "migration_target": "rust/vayren-core/src/market/",
+   "migration_condition": "When the MARKET_DATA slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "03_market/market/events/data_loaded.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "MARKET_DATA",
+   "reason": "SQLite IO orchestration / repository / loader / event payloads. Aggregation kernel already migrated to Rust; full storage port is product-scale with zero measured need. File role: frozen event dataclass payloads (bus vocabulary, no behavior)",
+   "migration_target": "rust/vayren-core/src/market/",
+   "migration_condition": "When the MARKET_DATA slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "03_market/market/events/list_symbols.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "MARKET_DATA",
+   "reason": "SQLite IO orchestration / repository / loader / event payloads. Aggregation kernel already migrated to Rust; full storage port is product-scale with zero measured need. File role: frozen event dataclass payloads (bus vocabulary, no behavior)",
+   "migration_target": "rust/vayren-core/src/market/",
+   "migration_condition": "When the MARKET_DATA slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "03_market/market/events/list_timeframes.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "MARKET_DATA",
+   "reason": "SQLite IO orchestration / repository / loader / event payloads. Aggregation kernel already migrated to Rust; full storage port is product-scale with zero measured need. File role: frozen event dataclass payloads (bus vocabulary, no behavior)",
+   "migration_target": "rust/vayren-core/src/market/",
+   "migration_condition": "When the MARKET_DATA slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "03_market/market/events/load_symbol.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "MARKET_DATA",
+   "reason": "SQLite IO orchestration / repository / loader / event payloads. Aggregation kernel already migrated to Rust; full storage port is product-scale with zero measured need. File role: frozen event dataclass payloads (bus vocabulary, no behavior)",
+   "migration_target": "rust/vayren-core/src/market/",
+   "migration_condition": "When the MARKET_DATA slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "03_market/market/events/quotes_loaded.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "MARKET_DATA",
+   "reason": "SQLite IO orchestration / repository / loader / event payloads. Aggregation kernel already migrated to Rust; full storage port is product-scale with zero measured need. File role: frozen event dataclass payloads (bus vocabulary, no behavior)",
+   "migration_target": "rust/vayren-core/src/market/",
+   "migration_condition": "When the MARKET_DATA slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "03_market/market/events/symbols_listed.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "MARKET_DATA",
+   "reason": "SQLite IO orchestration / repository / loader / event payloads. Aggregation kernel already migrated to Rust; full storage port is product-scale with zero measured need. File role: frozen event dataclass payloads (bus vocabulary, no behavior)",
+   "migration_target": "rust/vayren-core/src/market/",
+   "migration_condition": "When the MARKET_DATA slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "03_market/market/events/timeframe_changed.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "MARKET_DATA",
+   "reason": "SQLite IO orchestration / repository / loader / event payloads. Aggregation kernel already migrated to Rust; full storage port is product-scale with zero measured need. File role: frozen event dataclass payloads (bus vocabulary, no behavior)",
+   "migration_target": "rust/vayren-core/src/market/",
+   "migration_condition": "When the MARKET_DATA slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "03_market/market/events/timeframes_listed.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "MARKET_DATA",
+   "reason": "SQLite IO orchestration / repository / loader / event payloads. Aggregation kernel already migrated to Rust; full storage port is product-scale with zero measured need. File role: frozen event dataclass payloads (bus vocabulary, no behavior)",
+   "migration_target": "rust/vayren-core/src/market/",
+   "migration_condition": "When the MARKET_DATA slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "03_market/market/loader/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "MARKET_DATA",
+   "reason": "SQLite IO orchestration / repository / loader / event payloads. Aggregation kernel already migrated to Rust; full storage port is product-scale with zero measured need. File role: package re-export surface (no logic)",
+   "migration_target": "rust/vayren-core/src/market/",
+   "migration_condition": "When the MARKET_DATA slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "03_market/market/loader/market_data_loader.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "MARKET_DATA",
+   "reason": "SQLite IO orchestration / repository / loader / event payloads. Aggregation kernel already migrated to Rust; full storage port is product-scale with zero measured need. File role: event loader bridge (bus-coupling glue)",
+   "migration_target": "rust/vayren-core/src/market/",
+   "migration_condition": "When the MARKET_DATA slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "03_market/market/loader/quote_loader.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "MARKET_DATA",
+   "reason": "SQLite IO orchestration / repository / loader / event payloads. Aggregation kernel already migrated to Rust; full storage port is product-scale with zero measured need. File role: event loader bridge (bus-coupling glue)",
+   "migration_target": "rust/vayren-core/src/market/",
+   "migration_condition": "When the MARKET_DATA slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "03_market/market/loader/symbol_list_loader.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "MARKET_DATA",
+   "reason": "SQLite IO orchestration / repository / loader / event payloads. Aggregation kernel already migrated to Rust; full storage port is product-scale with zero measured need. File role: event loader bridge (bus-coupling glue)",
+   "migration_target": "rust/vayren-core/src/market/",
+   "migration_condition": "When the MARKET_DATA slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "03_market/market/loader/timeframe_list_loader.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "MARKET_DATA",
+   "reason": "SQLite IO orchestration / repository / loader / event payloads. Aggregation kernel already migrated to Rust; full storage port is product-scale with zero measured need. File role: event loader bridge (bus-coupling glue)",
+   "migration_target": "rust/vayren-core/src/market/",
+   "migration_condition": "When the MARKET_DATA slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "03_market/market/manifest.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "MARKET_DATA",
+   "reason": "SQLite IO orchestration / repository / loader / event payloads. Aggregation kernel already migrated to Rust; full storage port is product-scale with zero measured need. File role: production component manifest (composition metadata)",
+   "migration_target": "rust/vayren-core/src/market/",
+   "migration_condition": "When the MARKET_DATA slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "03_market/market/models/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "MARKET_DATA",
+   "reason": "SQLite IO orchestration / repository / loader / event payloads. Aggregation kernel already migrated to Rust; full storage port is product-scale with zero measured need. File role: package re-export surface (no logic)",
+   "migration_target": "rust/vayren-core/src/market/",
+   "migration_condition": "When the MARKET_DATA slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "03_market/market/models/bar.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "MARKET_DATA",
+   "reason": "SQLite IO orchestration / repository / loader / event payloads. Aggregation kernel already migrated to Rust; full storage port is product-scale with zero measured need. File role: frozen dataclass vocabulary (data holders, no algorithms)",
+   "migration_target": "rust/vayren-core/src/market/",
+   "migration_condition": "When the MARKET_DATA slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "03_market/market/models/symbol_quote.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "MARKET_DATA",
+   "reason": "SQLite IO orchestration / repository / loader / event payloads. Aggregation kernel already migrated to Rust; full storage port is product-scale with zero measured need. File role: frozen dataclass vocabulary (data holders, no algorithms)",
+   "migration_target": "rust/vayren-core/src/market/",
+   "migration_condition": "When the MARKET_DATA slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "03_market/market/native_aggregate.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "MARKET_DATA",
+   "reason": "SQLite IO orchestration / repository / loader / event payloads. Aggregation kernel already migrated to Rust; full storage port is product-scale with zero measured need. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/market/",
+   "migration_condition": "When the MARKET_DATA slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "03_market/market/repository/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "MARKET_DATA",
+   "reason": "SQLite IO orchestration / repository / loader / event payloads. Aggregation kernel already migrated to Rust; full storage port is product-scale with zero measured need. File role: package re-export surface (no logic)",
+   "migration_target": "rust/vayren-core/src/market/",
+   "migration_condition": "When the MARKET_DATA slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "03_market/market/repository/candle_repository.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "MARKET_DATA",
+   "reason": "SQLite IO orchestration / repository / loader / event payloads. Aggregation kernel already migrated to Rust; full storage port is product-scale with zero measured need. File role: storage orchestration (SQL IO, no numeric authority)",
+   "migration_target": "rust/vayren-core/src/market/",
+   "migration_condition": "When the MARKET_DATA slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "03_market/market/repository/symbol_repository.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "MARKET_DATA",
+   "reason": "SQLite IO orchestration / repository / loader / event payloads. Aggregation kernel already migrated to Rust; full storage port is product-scale with zero measured need. File role: storage orchestration (SQL IO, no numeric authority)",
+   "migration_target": "rust/vayren-core/src/market/",
+   "migration_condition": "When the MARKET_DATA slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "03_market/market/timeframe/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "MARKET_DATA",
+   "reason": "SQLite IO orchestration / repository / loader / event payloads. Aggregation kernel already migrated to Rust; full storage port is product-scale with zero measured need. File role: package re-export surface (no logic)",
+   "migration_target": "rust/vayren-core/src/market/",
+   "migration_condition": "When the MARKET_DATA slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "03_market/market/timeframe/timeframe.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "MARKET_DATA",
+   "reason": "SQLite IO orchestration / repository / loader / event payloads. Aggregation kernel already migrated to Rust; full storage port is product-scale with zero measured need. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/market/",
+   "migration_condition": "When the MARKET_DATA slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "04_chart/chart/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "PRESENTATION_MODEL",
+   "reason": "ChartModel/viewport Qt-paint-coupled presentation state. Numeric/viewport kernels are future Rust slices; extracting now is a UI rewrite in disguise. File role: package re-export surface (no logic)",
+   "migration_target": "rust/vayren-shell/ or rust/vayren-core/src/chart/",
+   "migration_condition": "When the PRESENTATION_MODEL slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "04_chart/chart/engine/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "PRESENTATION_MODEL",
+   "reason": "ChartModel/viewport Qt-paint-coupled presentation state. Numeric/viewport kernels are future Rust slices; extracting now is a UI rewrite in disguise. File role: package re-export surface (no logic)",
+   "migration_target": "rust/vayren-shell/ or rust/vayren-core/src/chart/",
+   "migration_condition": "When the PRESENTATION_MODEL slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "04_chart/chart/engine/chart_engine.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "PRESENTATION_MODEL",
+   "reason": "ChartModel/viewport Qt-paint-coupled presentation state. Numeric/viewport kernels are future Rust slices; extracting now is a UI rewrite in disguise. File role: orchestration driver (wires migrated kernels, holds no migrated math)",
+   "migration_target": "rust/vayren-shell/ or rust/vayren-core/src/chart/",
+   "migration_condition": "When the PRESENTATION_MODEL slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "04_chart/chart/events/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "PRESENTATION_MODEL",
+   "reason": "ChartModel/viewport Qt-paint-coupled presentation state. Numeric/viewport kernels are future Rust slices; extracting now is a UI rewrite in disguise. File role: package re-export surface (no logic)",
+   "migration_target": "rust/vayren-shell/ or rust/vayren-core/src/chart/",
+   "migration_condition": "When the PRESENTATION_MODEL slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "04_chart/chart/events/chart_ready.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "PRESENTATION_MODEL",
+   "reason": "ChartModel/viewport Qt-paint-coupled presentation state. Numeric/viewport kernels are future Rust slices; extracting now is a UI rewrite in disguise. File role: frozen event dataclass payloads (bus vocabulary, no behavior)",
+   "migration_target": "rust/vayren-shell/ or rust/vayren-core/src/chart/",
+   "migration_condition": "When the PRESENTATION_MODEL slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "04_chart/chart/events/window_rendered.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "PRESENTATION_MODEL",
+   "reason": "ChartModel/viewport Qt-paint-coupled presentation state. Numeric/viewport kernels are future Rust slices; extracting now is a UI rewrite in disguise. File role: frozen event dataclass payloads (bus vocabulary, no behavior)",
+   "migration_target": "rust/vayren-shell/ or rust/vayren-core/src/chart/",
+   "migration_condition": "When the PRESENTATION_MODEL slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "04_chart/chart/manifest.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "PRESENTATION_MODEL",
+   "reason": "ChartModel/viewport Qt-paint-coupled presentation state. Numeric/viewport kernels are future Rust slices; extracting now is a UI rewrite in disguise. File role: production component manifest (composition metadata)",
+   "migration_target": "rust/vayren-shell/ or rust/vayren-core/src/chart/",
+   "migration_condition": "When the PRESENTATION_MODEL slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "04_chart/chart/models/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "PRESENTATION_MODEL",
+   "reason": "ChartModel/viewport Qt-paint-coupled presentation state. Numeric/viewport kernels are future Rust slices; extracting now is a UI rewrite in disguise. File role: package re-export surface (no logic)",
+   "migration_target": "rust/vayren-shell/ or rust/vayren-core/src/chart/",
+   "migration_condition": "When the PRESENTATION_MODEL slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "04_chart/chart/models/chart_model.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "PRESENTATION_MODEL",
+   "reason": "ChartModel/viewport Qt-paint-coupled presentation state. Numeric/viewport kernels are future Rust slices; extracting now is a UI rewrite in disguise. File role: frozen dataclass vocabulary (data holders, no algorithms)",
+   "migration_target": "rust/vayren-shell/ or rust/vayren-core/src/chart/",
+   "migration_condition": "When the PRESENTATION_MODEL slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "04_chart/chart/models/chart_viewport.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "PRESENTATION_MODEL",
+   "reason": "ChartModel/viewport Qt-paint-coupled presentation state. Numeric/viewport kernels are future Rust slices; extracting now is a UI rewrite in disguise. File role: frozen dataclass vocabulary (data holders, no algorithms)",
+   "migration_target": "rust/vayren-shell/ or rust/vayren-core/src/chart/",
+   "migration_condition": "When the PRESENTATION_MODEL slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "04_chart/chart/models/crosshair_value.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "PRESENTATION_MODEL",
+   "reason": "ChartModel/viewport Qt-paint-coupled presentation state. Numeric/viewport kernels are future Rust slices; extracting now is a UI rewrite in disguise. File role: frozen dataclass vocabulary (data holders, no algorithms)",
+   "migration_target": "rust/vayren-shell/ or rust/vayren-core/src/chart/",
+   "migration_condition": "When the PRESENTATION_MODEL slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "04_chart/chart/models/timeframe.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "PRESENTATION_MODEL",
+   "reason": "ChartModel/viewport Qt-paint-coupled presentation state. Numeric/viewport kernels are future Rust slices; extracting now is a UI rewrite in disguise. File role: frozen dataclass vocabulary (data holders, no algorithms)",
+   "migration_target": "rust/vayren-shell/ or rust/vayren-core/src/chart/",
+   "migration_condition": "When the PRESENTATION_MODEL slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "04_chart/chart/session/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "PRESENTATION_MODEL",
+   "reason": "ChartModel/viewport Qt-paint-coupled presentation state. Numeric/viewport kernels are future Rust slices; extracting now is a UI rewrite in disguise. File role: package re-export surface (no logic)",
+   "migration_target": "rust/vayren-shell/ or rust/vayren-core/src/chart/",
+   "migration_condition": "When the PRESENTATION_MODEL slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "04_chart/chart/session/session_store.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "PRESENTATION_MODEL",
+   "reason": "ChartModel/viewport Qt-paint-coupled presentation state. Numeric/viewport kernels are future Rust slices; extracting now is a UI rewrite in disguise. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-shell/ or rust/vayren-core/src/chart/",
+   "migration_condition": "When the PRESENTATION_MODEL slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "04_chart/chart/theme.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "PRESENTATION_MODEL",
+   "reason": "ChartModel/viewport Qt-paint-coupled presentation state. Numeric/viewport kernels are future Rust slices; extracting now is a UI rewrite in disguise. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-shell/ or rust/vayren-core/src/chart/",
+   "migration_condition": "When the PRESENTATION_MODEL slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "06_backtest/backtest/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "BACKTEST",
+   "reason": "Runner/optimizer/worker orchestration driving Python strategies (strategies must stay Python). Metrics kernels already migrated. File role: package re-export surface (no logic)",
+   "migration_target": "rust/vayren-core/src/backtest/",
+   "migration_condition": "When the BACKTEST slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "06_backtest/backtest/engine/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "BACKTEST",
+   "reason": "Runner/optimizer/worker orchestration driving Python strategies (strategies must stay Python). Metrics kernels already migrated. File role: package re-export surface (no logic)",
+   "migration_target": "rust/vayren-core/src/backtest/",
+   "migration_condition": "When the BACKTEST slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "06_backtest/backtest/engine/directional.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "BACKTEST",
+   "reason": "Runner/optimizer/worker orchestration driving Python strategies (strategies must stay Python). Metrics kernels already migrated. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/backtest/",
+   "migration_condition": "When the BACKTEST slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "06_backtest/backtest/engine/journal.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "BACKTEST",
+   "reason": "Runner/optimizer/worker orchestration driving Python strategies (strategies must stay Python). Metrics kernels already migrated. File role: persistence/audit glue (records, no compute kernels)",
+   "migration_target": "rust/vayren-core/src/backtest/",
+   "migration_condition": "When the BACKTEST slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "06_backtest/backtest/engine/positions.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "BACKTEST",
+   "reason": "Runner/optimizer/worker orchestration driving Python strategies (strategies must stay Python). Metrics kernels already migrated. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/backtest/",
+   "migration_condition": "When the BACKTEST slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "06_backtest/backtest/engine/replay.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "BACKTEST",
+   "reason": "Runner/optimizer/worker orchestration driving Python strategies (strategies must stay Python). Metrics kernels already migrated. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/backtest/",
+   "migration_condition": "When the BACKTEST slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "06_backtest/backtest/engine/simulator.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "BACKTEST",
+   "reason": "Runner/optimizer/worker orchestration driving Python strategies (strategies must stay Python). Metrics kernels already migrated. File role: orchestration driver (wires migrated kernels, holds no migrated math)",
+   "migration_target": "rust/vayren-core/src/backtest/",
+   "migration_condition": "When the BACKTEST slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "06_backtest/backtest/events/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "BACKTEST",
+   "reason": "Runner/optimizer/worker orchestration driving Python strategies (strategies must stay Python). Metrics kernels already migrated. File role: package re-export surface (no logic)",
+   "migration_target": "rust/vayren-core/src/backtest/",
+   "migration_condition": "When the BACKTEST slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "06_backtest/backtest/events/backtest_events.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "BACKTEST",
+   "reason": "Runner/optimizer/worker orchestration driving Python strategies (strategies must stay Python). Metrics kernels already migrated. File role: frozen event dataclass payloads (bus vocabulary, no behavior)",
+   "migration_target": "rust/vayren-core/src/backtest/",
+   "migration_condition": "When the BACKTEST slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "06_backtest/backtest/execution.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "BACKTEST",
+   "reason": "Runner/optimizer/worker orchestration driving Python strategies (strategies must stay Python). Metrics kernels already migrated. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/backtest/",
+   "migration_condition": "When the BACKTEST slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "06_backtest/backtest/manifest.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "BACKTEST",
+   "reason": "Runner/optimizer/worker orchestration driving Python strategies (strategies must stay Python). Metrics kernels already migrated. File role: production component manifest (composition metadata)",
+   "migration_target": "rust/vayren-core/src/backtest/",
+   "migration_condition": "When the BACKTEST slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "06_backtest/backtest/models/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "BACKTEST",
+   "reason": "Runner/optimizer/worker orchestration driving Python strategies (strategies must stay Python). Metrics kernels already migrated. File role: package re-export surface (no logic)",
+   "migration_target": "rust/vayren-core/src/backtest/",
+   "migration_condition": "When the BACKTEST slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "06_backtest/backtest/models/config.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "BACKTEST",
+   "reason": "Runner/optimizer/worker orchestration driving Python strategies (strategies must stay Python). Metrics kernels already migrated. File role: frozen dataclass vocabulary (data holders, no algorithms)",
+   "migration_target": "rust/vayren-core/src/backtest/",
+   "migration_condition": "When the BACKTEST slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "06_backtest/backtest/models/equity.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "BACKTEST",
+   "reason": "Runner/optimizer/worker orchestration driving Python strategies (strategies must stay Python). Metrics kernels already migrated. File role: frozen dataclass vocabulary (data holders, no algorithms)",
+   "migration_target": "rust/vayren-core/src/backtest/",
+   "migration_condition": "When the BACKTEST slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "06_backtest/backtest/models/metrics.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "BACKTEST",
+   "reason": "Runner/optimizer/worker orchestration driving Python strategies (strategies must stay Python). Metrics kernels already migrated. File role: frozen dataclass vocabulary (data holders, no algorithms)",
+   "migration_target": "rust/vayren-core/src/backtest/",
+   "migration_condition": "When the BACKTEST slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "06_backtest/backtest/models/result.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "BACKTEST",
+   "reason": "Runner/optimizer/worker orchestration driving Python strategies (strategies must stay Python). Metrics kernels already migrated. File role: frozen dataclass vocabulary (data holders, no algorithms)",
+   "migration_target": "rust/vayren-core/src/backtest/",
+   "migration_condition": "When the BACKTEST slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "06_backtest/backtest/models/trade.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "BACKTEST",
+   "reason": "Runner/optimizer/worker orchestration driving Python strategies (strategies must stay Python). Metrics kernels already migrated. File role: frozen dataclass vocabulary (data holders, no algorithms)",
+   "migration_target": "rust/vayren-core/src/backtest/",
+   "migration_condition": "When the BACKTEST slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "06_backtest/backtest/native_metrics.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "BACKTEST",
+   "reason": "Runner/optimizer/worker orchestration driving Python strategies (strategies must stay Python). Metrics kernels already migrated. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/backtest/",
+   "migration_condition": "When the BACKTEST slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "06_backtest/backtest/optimizer.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "BACKTEST",
+   "reason": "Runner/optimizer/worker orchestration driving Python strategies (strategies must stay Python). Metrics kernels already migrated. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/backtest/",
+   "migration_condition": "When the BACKTEST slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "06_backtest/backtest/runner.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "BACKTEST",
+   "reason": "Runner/optimizer/worker orchestration driving Python strategies (strategies must stay Python). Metrics kernels already migrated. File role: orchestration driver (wires migrated kernels, holds no migrated math)",
+   "migration_target": "rust/vayren-core/src/backtest/",
+   "migration_condition": "When the BACKTEST slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "06_backtest/backtest/validation.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "BACKTEST",
+   "reason": "Runner/optimizer/worker orchestration driving Python strategies (strategies must stay Python). Metrics kernels already migrated. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/backtest/",
+   "migration_condition": "When the BACKTEST slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "06_backtest/backtest/worker.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "BACKTEST",
+   "reason": "Runner/optimizer/worker orchestration driving Python strategies (strategies must stay Python). Metrics kernels already migrated. File role: orchestration driver (wires migrated kernels, holds no migrated math)",
+   "migration_target": "rust/vayren-core/src/backtest/",
+   "migration_condition": "When the BACKTEST slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "07_risk/risk/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "RISK",
+   "reason": "Fail-closed orchestration over string-keyed audit reasons, kill-switch persistence, session rules (~0.017ms/req). Port splits safety-critical strings across FFI with regression risk. File role: package re-export surface (no logic)",
+   "migration_target": "rust/vayren-core/src/risk/",
+   "migration_condition": "When the RISK slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "07_risk/risk/engine.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "RISK",
+   "reason": "Fail-closed orchestration over string-keyed audit reasons, kill-switch persistence, session rules (~0.017ms/req). Port splits safety-critical strings across FFI with regression risk. File role: orchestration driver (wires migrated kernels, holds no migrated math)",
+   "migration_target": "rust/vayren-core/src/risk/",
+   "migration_condition": "When the RISK slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "07_risk/risk/kill_switch.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "RISK",
+   "reason": "Fail-closed orchestration over string-keyed audit reasons, kill-switch persistence, session rules (~0.017ms/req). Port splits safety-critical strings across FFI with regression risk. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/risk/",
+   "migration_condition": "When the RISK slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "07_risk/risk/manifest.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "RISK",
+   "reason": "Fail-closed orchestration over string-keyed audit reasons, kill-switch persistence, session rules (~0.017ms/req). Port splits safety-critical strings across FFI with regression risk. File role: production component manifest (composition metadata)",
+   "migration_target": "rust/vayren-core/src/risk/",
+   "migration_condition": "When the RISK slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "07_risk/risk/models.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "RISK",
+   "reason": "Fail-closed orchestration over string-keyed audit reasons, kill-switch persistence, session rules (~0.017ms/req). Port splits safety-critical strings across FFI with regression risk. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/risk/",
+   "migration_condition": "When the RISK slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "07_risk/risk/session.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "RISK",
+   "reason": "Fail-closed orchestration over string-keyed audit reasons, kill-switch persistence, session rules (~0.017ms/req). Port splits safety-critical strings across FFI with regression risk. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/risk/",
+   "migration_condition": "When the RISK slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "08_execution/execution/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "EXECUTION",
+   "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: package re-export surface (no logic)",
+   "migration_target": "rust/vayren-core/src/execution/",
+   "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "08_execution/execution/engine.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "EXECUTION",
+   "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: orchestration driver (wires migrated kernels, holds no migrated math)",
+   "migration_target": "rust/vayren-core/src/execution/",
+   "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "08_execution/execution/events/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "EXECUTION",
+   "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: package re-export surface (no logic)",
+   "migration_target": "rust/vayren-core/src/execution/",
+   "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "08_execution/execution/journal.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "EXECUTION",
+   "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: persistence/audit glue (records, no compute kernels)",
+   "migration_target": "rust/vayren-core/src/execution/",
+   "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "08_execution/execution/manifest.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "EXECUTION",
+   "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: production component manifest (composition metadata)",
+   "migration_target": "rust/vayren-core/src/execution/",
+   "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "08_execution/execution/market_data/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "EXECUTION",
+   "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: package re-export surface (no logic)",
+   "migration_target": "rust/vayren-core/src/execution/",
+   "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "08_execution/execution/market_data/normalizer.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "EXECUTION",
+   "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/execution/",
+   "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "08_execution/execution/market_data/provider.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "EXECUTION",
+   "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/execution/",
+   "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "08_execution/execution/market_data/replay.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "EXECUTION",
+   "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/execution/",
+   "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "08_execution/execution/models/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "EXECUTION",
+   "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: package re-export surface (no logic)",
+   "migration_target": "rust/vayren-core/src/execution/",
+   "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "08_execution/execution/models/contract.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "EXECUTION",
+   "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: frozen dataclass vocabulary (data holders, no algorithms)",
+   "migration_target": "rust/vayren-core/src/execution/",
+   "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "08_execution/execution/models/intent.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "EXECUTION",
+   "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: frozen dataclass vocabulary (data holders, no algorithms)",
+   "migration_target": "rust/vayren-core/src/execution/",
+   "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "08_execution/execution/models/order_state.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "EXECUTION",
+   "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: frozen dataclass vocabulary (data holders, no algorithms)",
+   "migration_target": "rust/vayren-core/src/execution/",
+   "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "08_execution/execution/models/position.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "EXECUTION",
+   "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: frozen dataclass vocabulary (data holders, no algorithms)",
+   "migration_target": "rust/vayren-core/src/execution/",
+   "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "08_execution/execution/modes.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "EXECUTION",
+   "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/execution/",
+   "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "08_execution/execution/native_order_state.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "EXECUTION",
+   "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/execution/",
+   "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "08_execution/execution/planner.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "EXECUTION",
+   "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/execution/",
+   "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "08_execution/execution/portfolio/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "EXECUTION",
+   "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: package re-export surface (no logic)",
+   "migration_target": "rust/vayren-core/src/execution/",
+   "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "08_execution/execution/portfolio/ledger.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "EXECUTION",
+   "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: persistence/audit glue (records, no compute kernels)",
+   "migration_target": "rust/vayren-core/src/execution/",
+   "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "08_execution/execution/portfolio/reconcile.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "EXECUTION",
+   "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: persistence/audit glue (records, no compute kernels)",
+   "migration_target": "rust/vayren-core/src/execution/",
+   "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "08_execution/execution/replay.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "EXECUTION",
+   "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/execution/",
+   "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "08_execution/execution/runtime/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "EXECUTION",
+   "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: package re-export surface (no logic)",
+   "migration_target": "rust/vayren-core/src/execution/",
+   "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "08_execution/execution/runtime/inspector.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "EXECUTION",
+   "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/execution/",
+   "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "08_execution/execution/runtime/session.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "EXECUTION",
+   "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/execution/",
+   "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "08_execution/execution/runtime/strategy_runtime.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "EXECUTION",
+   "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/execution/",
+   "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "00_app/app/ui/brokers_workspace.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it. New surfaces MUST be Rust+Slint in rust/vayren-shell. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When the NATIVE_UI slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "02_data/data/ui/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it. New surfaces MUST be Rust+Slint in rust/vayren-shell. File role: package re-export surface (no logic)",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When the NATIVE_UI slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "02_data/data/ui/credentials_dialog.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it. New surfaces MUST be Rust+Slint in rust/vayren-shell. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When the NATIVE_UI slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "02_data/data/ui/download_panel.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it. New surfaces MUST be Rust+Slint in rust/vayren-shell. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When the NATIVE_UI slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "02_data/data/ui/historical_panel.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it. New surfaces MUST be Rust+Slint in rust/vayren-shell. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When the NATIVE_UI slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "02_data/data/ui/log_view.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it. New surfaces MUST be Rust+Slint in rust/vayren-shell. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When the NATIVE_UI slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "02_data/data/ui/section_label.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it. New surfaces MUST be Rust+Slint in rust/vayren-shell. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When the NATIVE_UI slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "02_data/data/ui/status_view.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it. New surfaces MUST be Rust+Slint in rust/vayren-shell. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When the NATIVE_UI slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "02_data/data/ui/stock_checklist.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it. New surfaces MUST be Rust+Slint in rust/vayren-shell. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When the NATIVE_UI slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "06_backtest/backtest/ui/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it. New surfaces MUST be Rust+Slint in rust/vayren-shell. File role: package re-export surface (no logic)",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When the NATIVE_UI slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "06_backtest/backtest/ui/analytics_views.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it. New surfaces MUST be Rust+Slint in rust/vayren-shell. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When the NATIVE_UI slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "06_backtest/backtest/ui/overlay.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it. New surfaces MUST be Rust+Slint in rust/vayren-shell. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When the NATIVE_UI slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "06_backtest/backtest/ui/performance_panel.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "NATIVE_UI",
+   "reason": "Existing Qt UI surface retained until Slint migration covers it. New surfaces MUST be Rust+Slint in rust/vayren-shell. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When the NATIVE_UI slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "08_execution/execution/broker/__init__.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "EXECUTION",
+   "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: package re-export surface (no logic)",
+   "migration_target": "rust/vayren-core/src/execution/",
+   "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "08_execution/execution/broker/activation.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "EXECUTION",
+   "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/execution/",
+   "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "08_execution/execution/broker/adapter.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "EXECUTION",
+   "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/execution/",
+   "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "08_execution/execution/broker/credentials.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "EXECUTION",
+   "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/execution/",
+   "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "08_execution/execution/broker/factory.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "EXECUTION",
+   "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/execution/",
+   "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "08_execution/execution/broker/gates.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "EXECUTION",
+   "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/execution/",
+   "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "08_execution/execution/broker/paper.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "EXECUTION",
+   "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/execution/",
+   "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "08_execution/execution/broker/readonly.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "EXECUTION",
+   "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/execution/",
+   "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "08_execution/execution/broker/resilience.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "EXECUTION",
+   "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/execution/",
+   "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+  },
+  "08_execution/execution/broker/sandbox.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "domain": "EXECUTION",
+   "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: orchestration glue (no migrated authority)",
+   "migration_target": "rust/vayren-core/src/execution/",
+   "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
   }
+ },
+ "migrated": {
+  "08_execution/execution/models/order.py": "TRANSITIONS/TERMINAL_STATES -> Rust order_state; enum/models stay as boundary vocabulary",
+  "06_backtest/backtest/engine/metrics.py": "drawdown/equity/sharpe math -> Rust metrics kernels",
+  "03_market/market/timeframe/aggregate.py": "bucketing/accumulation + mode -> Rust aggregate/stats kernels"
+ },
+ "qt_workspace_allowlist": {
+  "00_app/app/ui/research_workspace.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "reason": "Research workspace in retained Qt shell. Pure view over Python research engine.",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When Slint shell supports research screen"
+  },
+  "00_app/app/ui/portfolio_workspace.py": {
+   "state": "TEMPORARILY_RETAINED",
+   "reason": "Portfolio workspace in retained Qt shell. Pure view over session/paper state.",
+   "migration_target": "rust/vayren-shell/",
+   "migration_condition": "When Slint shell supports portfolio screen"
+  },
+  "00_app/app/services/research_service.py": {
+   "state": "EXEMPT_WITH_JUSTIFICATION",
+   "reason": "Composition service behind Research workspace. Research stays Python per constitution section 2.",
+   "migration_target": "N/A - Python-owned",
+   "migration_condition": "Never"
+  },
+  "00_app/app/ui/brokers_workspace.py": "Product-mandated SYSTEM-BROKERS workspace built in the retained Qt shell (same proof as research/portfolio). Pure view over BrokerManager snapshots; all actions leave via Qt signals; no credentials, no SDK, no registry access inside the widget."
+ }
 }

@@ -79,6 +79,15 @@ class SymbolRepository:
         finally:
             database.close()
 
+    def detect(self, symbol: str) -> tuple[int, int] | None:
+        """One-shot (base_seconds, session_start) for polling callers."""
+        database = OhlcvCandleDatabase(self._directory / f"{symbol}.db")
+        database.connect()
+        try:
+            return CandleRepository(database).detect(symbol)
+        finally:
+            database.close()
+
     def get_candles_timeframe(
         self,
         symbol: str,
@@ -86,18 +95,21 @@ class SymbolRepository:
         limit: int | None,
         start: str | None = None,
         end: str | None = None,
+        detection: tuple[int, int] | None = None,
     ) -> list[Bar]:
         """Return candles for the symbol at a timeframe.
 
         ``limit`` of ``None`` requests the entire available history.
         ``start``/``end`` are optional inclusive ``YYYY-MM-DD HH:MM:SS``
         bounds on the aggregation window (detection stays unbounded).
+        ``detection`` is an optional cached ``(base_seconds, session_start)``
+        hint from :meth:`detect` that skips the per-call sample scan.
         """
         database = OhlcvCandleDatabase(self._directory / f"{symbol}.db")
         database.connect()
         try:
             return CandleRepository(database).get_candles_timeframe(
-                symbol, timeframe, limit, start, end
+                symbol, timeframe, limit, start, end, detection
             )
         finally:
             database.close()

@@ -1,10 +1,10 @@
 //! Broker panel view-model — pure, headless-testable native UI state
-//! (constitution §3: Rust+egui owns UI state/interaction logic).
+//! (constitution §3: Rust+Slint owns UI state/interaction logic).
 //!
 //! The model is a read-only projection of backend facts. It NEVER invents
 //! CONNECTED / AUTHENTICATED / LIVE-READY: connection is derived only from a
 //! reported health state, and live readiness only from an explicit gate
-//! verdict. This is the authoritative native-UI representation the egui
+//! verdict. This is the authoritative native-UI representation the Slint
 //! renderer binds to.
 
 use std::fmt;

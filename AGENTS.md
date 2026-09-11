@@ -11,13 +11,13 @@ Ye repository ka **Brain** `90_brain/` folder mein hai. AI agent ko code chhune 
 
 | File | Isme kya hai |
 |---|---|
-| `../ARCHITECTURE_CONSTITUTION.md` (repo root) | **SABSE UPAR** — Rust/Python/egui ownership, migration rules (har decision par lagega) |
+| `../ARCHITECTURE_CONSTITUTION.md` (repo root) | **SABSE UPAR** — Rust/Python/Slint ownership, migration rules (har decision par lagega) |
 | `architecture.md` | Module map, layers, event flow, future modules |
 | `event_catalog.md` | Events + owner + payload |
 | `module_contracts.md` | Har module ka public API + SQLite schema |
 | `ai_memory.md` | Abhi kya state hai, kya baaki hai |
 
-> `ARCHITECTURE_CONSTITUTION.md` language ownership ka single source hai — Rust→Core/Perf, Python→Strategy/AI, Rust+egui→UI. Naya code wahi se decide karo. Constitution duplicate mat karo, reference karo.
+> `ARCHITECTURE_CONSTITUTION.md` language ownership ka single source hai — Rust→Core/Perf, Python→Strategy/AI, Rust+Slint→UI. Naya code wahi se decide karo. Constitution duplicate mat karo, reference karo.
 
 Code badalne ke baad `ai_memory.md` update karo.
 
@@ -134,7 +134,7 @@ TODO/FIXME / dead code / mock logic / sample trading logic  ❌
 1. Kya bana raha hu? 2. Kaunsi responsibility? 3. Kaunsa domain? 4. Kaunsi language?
 → Core/Perf/Market/Data/Indicator/Risk/Execution/Backtest → Rust
 → Strategy/AI/Research → Python
-→ Native UI → Rust+egui
+→ Native UI → Rust+Slint
 ```
 **Core rule (per `ARCHITECTURE_CONSTITUTION.md` §5, §13, §17):**
 ```
@@ -147,6 +147,17 @@ NEW FEATURE → target language mein implement
 - **Unrelated mat chhuno:** Sirf feature se directly required/blocking/adjacent code. Koi repo-wide rewrite nahi.
 - **No migration debt:** Naya feature kabhi legacy mein mat banao jab target already defined hai.
 - No big-bang, no new language bina approval. Detail: `CONSTITUTION` §5, §8, §13, §14.
+
+## Language Enforcement — Machine-Checked (NO silent skip)
+
+Migration rules sirf instructions nahi — `make check` / CI mein **hard gate** se enforce hote hain:
+
+- **Policy:** `90_brain/ownership_policy.json` = machine-readable mapping (`file → domain → required language`). Pehle-match order mein evaluate hota hai. Naya rule add karo toh specific paths general parent se PEHLE rakho.
+- **Validator:** `python scripts/validate_language_ownership.py` — Rust-owned domain mein har Python file ko `90_brain/language_retention.json` mein per-file entry chahiye (state + reason + migration_target + migration_condition). Bina entry = **HARD FAIL**, chahe file baseline mein ho.
+- **Baseline = history only:** `90_brain/language_baseline.json` ko validator kabhi read nahi karta. Baseline mein hona koi exemption nahi deta.
+- **States:** `MIGRATED` (file gayab honi chahiye) / `MIGRATION_REQUIRED` (active legacy, touch par migrate) / `TEMPORARILY_RETAINED` (justified, tracked) / `EXEMPT_WITH_JUSTIFICATION` (permanent, proof ke saath). Blanket domain-level exemption ka koi effect nahi.
+- **Feature flow:** Rust-owned file ko touch karo → usi feature mein related slice migrate karo → retention entry update karo → `validate_language_ownership.py` PASS hona chahiye. Sirf tests pass hona enough nahi.
+- **"Smallest useful slice" = minimum migration scope, migration skip karne ka excuse nahi.** Slice bada lage toh scope feature tak limited rakho, lekin Python mein naya wrong-language code mat likho — validator fail karega.
 
 ## Commit Style (from CONTRIBUTING, consolidated)
 

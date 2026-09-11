@@ -124,7 +124,7 @@ def classify(rel: str, chapter: str, is_test: bool, sig: dict) -> tuple[str, str
         return ("DATA_PROCESSING", "rust", "download/storage engine")
     if chapter == "chart":
         if sig["qt"]:
-            return ("NATIVE_UI", "rust-egui", "Qt presentation layer")
+            return ("NATIVE_UI", "rust-slint", "Qt presentation layer")
         return ("PRESENTATION_MODEL", "rust", "chart model/math")
     if chapter == "core":
         if "/ai/" in rel:

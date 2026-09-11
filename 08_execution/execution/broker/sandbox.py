@@ -250,12 +250,19 @@ class SandboxBroker:
         if fill_price <= 0:
             return None
         remaining = plan.quantity - info["filled_qty"]
-        affordable = self._capital / fill_price if fill_price > 0 else 0.0
-        fill_qty = min(remaining, want_qty, affordable)
+        if plan.side == "BUY":
+            affordable = self._capital / fill_price if fill_price > 0 else 0.0
+            fill_qty = min(remaining, want_qty, affordable)
+        else:
+            fill_qty = min(remaining, want_qty)
         if fill_qty <= 0:
             return None
-        commission = fill_price * fill_qty * (self._commission_pct / 100.0)
-        self._capital -= fill_price * fill_qty + commission
+        notional = fill_price * fill_qty
+        commission = notional * (self._commission_pct / 100.0)
+        if plan.side == "BUY":
+            self._capital -= notional + commission
+        else:
+            self._capital += notional - commission
         fill = Fill(
             client_order_id=client_order_id,
             broker_order_id=info["broker_order_id"],

@@ -11,7 +11,7 @@ from market.events.symbols_listed import SymbolsListed
 from market.events.timeframe_changed import TimeframeChanged
 from market.events.timeframes_listed import TimeframesListed
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QCloseEvent, QFont
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -73,6 +73,7 @@ class ChartWindow(QMainWindow):
         live_workspace: QWidget | None = None,
         research_workspace: QWidget | None = None,
         portfolio_workspace: QWidget | None = None,
+        brokers_workspace: QWidget | None = None,
         event_log: QWidget | None = None,
         system_health: QWidget | None = None,
         trade_context: QWidget | None = None,
@@ -91,6 +92,7 @@ class ChartWindow(QMainWindow):
         self._live_workspace = live_workspace
         self._research_workspace = research_workspace
         self._portfolio_workspace = portfolio_workspace
+        self._brokers_workspace = brokers_workspace
         self._event_log = event_log
         self._system_health = system_health
         self._current_symbol: str | None = None
@@ -183,6 +185,8 @@ class ChartWindow(QMainWindow):
                     self._stack.addWidget(research_workspace)
                 if portfolio_workspace is not None:
                     self._stack.addWidget(portfolio_workspace)
+                if brokers_workspace is not None:
+                    self._stack.addWidget(brokers_workspace)
                 self._stack.setCurrentIndex(0)
             else:
                 self._stack = None  # type: ignore[assignment]
@@ -232,6 +236,19 @@ class ChartWindow(QMainWindow):
         tools.download_clicked.connect(lambda: self.toggle_panel("download"))
         self._indicators.strategy_selected.connect(self._on_indicator_strategy_selected)
         self._indicators.indicator_selected.connect(self._on_indicator_selected)
+
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 (Qt override)
+        """Release this window and its widget tree when closed.
+
+        Qt's ``close()`` only hides a window by default, so the whole tree
+        (splitter, chart, panels, watchlist — ~1150 widgets) stayed alive as a
+        top-level object for the process lifetime. In long-lived processes
+        that rebuild the window (notably the test suite, where cyclic GC is
+        disabled) this accumulated without bound. Deleting on close keeps the
+        production lifecycle honest and stops the growth.
+        """
+        super().closeEvent(event)
+        self.deleteLater()
 
     @property
     def active_panel(self) -> str | None:
@@ -414,6 +431,10 @@ class ChartWindow(QMainWindow):
     def show_portfolio(self) -> None:
         """Switch to the Portfolio workspace (when injected)."""
         self._show_workspace("_portfolio_workspace", "PORTFOLIO")
+
+    def show_brokers(self) -> None:
+        """Switch to the SYSTEM → BROKERS workspace (when injected)."""
+        self._show_workspace("_brokers_workspace", "SYSTEM")
 
     def toggle_bottom(self) -> None:
         """Toggle the bottom system/event panels."""

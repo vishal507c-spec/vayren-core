@@ -2,8 +2,8 @@
 
 TradingView-style: one button at top of chart opens a clean searchable panel
 with categories ALL / TREND / MOMENTUM / VOLUME / VOLATILITY / STRATEGIES.
-Strategies are loaded from the existing canonical strategy library
-(D:\\VAYREN_STRATEGIES) via the existing storage/version-control system —
+Strategies are loaded from the canonical strategy library (resolved from the
+CLI/env/config root) via the existing storage/version-control system —
 no duplicate files, no .py strategies.
 
 Pure UI: emits strategy_selected(name) or indicator_selected(name, category);

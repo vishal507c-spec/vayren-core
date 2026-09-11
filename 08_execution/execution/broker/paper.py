@@ -146,8 +146,10 @@ class PaperBroker:
         """Fill a submitted order against `reference_price`. Returns the Fill.
 
         LIMIT buys fill at min(limit, ref+slip); LIMIT sells at
-        max(limit, ref-slip); MARKET fills at ref±slip. Unaffordable size
-        fills partially (deterministic PARTIALLY_FILLED path).
+        max(limit, ref-slip); MARKET fills at ref±slip. Buys are
+        cash-limited (unaffordable size fills partially); sells credit
+        proceeds minus commission (no margin engine, so sells are not
+        cash-constrained).
         """
         self._require_connected()
         info = self._orders.get(client_order_id)
@@ -167,12 +169,19 @@ class PaperBroker:
         if fill_price <= 0:
             return None
         remaining = plan.quantity - info["filled_qty"]
-        affordable = self._capital / fill_price if fill_price > 0 else 0.0
-        fill_qty = min(remaining, affordable)
+        if plan.side == "BUY":
+            affordable = self._capital / fill_price if fill_price > 0 else 0.0
+            fill_qty = min(remaining, affordable)
+        else:
+            fill_qty = remaining
         if fill_qty <= 0:
             return None
-        commission = fill_price * fill_qty * (self._commission_pct / 100.0)
-        self._capital -= fill_price * fill_qty + commission
+        notional = fill_price * fill_qty
+        commission = notional * (self._commission_pct / 100.0)
+        if plan.side == "BUY":
+            self._capital -= notional + commission
+        else:
+            self._capital += notional - commission
         fill = Fill(
             client_order_id=client_order_id,
             broker_order_id=info["broker_order_id"],
