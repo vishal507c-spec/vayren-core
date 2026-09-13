@@ -30,6 +30,7 @@ from chart.renderer.candle_renderer import CandleRenderer
 from chart.renderer.crosshair_renderer import CrosshairRenderer
 from chart.renderer.overlay_renderer import OverlayRenderer
 from chart.renderer.time_axis_renderer import TimeAxisRenderer
+from chart.theme import PLACEHOLDER
 from chart.widgets.indicator_visibility_panel import IndicatorVisibilityPanel
 
 logger = getLogger(__name__)
@@ -1118,7 +1119,7 @@ class CandleChartWidget(QWidget):
         like an unexplained black void. The chart header is intentionally not
         drawn in this state — the message itself communicates the status.
         """
-        from PySide6.QtGui import QColor, QFont
+        from PySide6.QtGui import QFont
 
         chart_rect, _, _ = self._chart_rects()
         # Use full widget rect if chart_rect is degenerate (e.g., zero size)
@@ -1128,7 +1129,7 @@ class CandleChartWidget(QWidget):
         font = QFont("Segoe UI", 9)
         font.setStyleHint(QFont.StyleHint.SansSerif)
         painter.setFont(font)
-        painter.setPen(QColor("#5d6778"))
+        painter.setPen(PLACEHOLDER)
         painter.drawText(target, Qt.AlignmentFlag.AlignCenter, message)
         painter.restore()
 

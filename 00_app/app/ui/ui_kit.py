@@ -31,13 +31,14 @@ from app.ui import lab_theme as t
 
 _NA = "N/A"
 
-# Layout tokens (px). One change here propagates to every screen.
-PAD_XS = 2
-PAD_SM = 4
-PAD_MD = 6
-PAD_LG = 8
-GAP_SM = 3
-GAP_MD = 6
+# Layout tokens (px) — mirrors lab_theme SP_*/ROW_HEIGHT; one change
+# propagates to every screen (UI_DESIGN_SYSTEM.md §3.3).
+PAD_XS = t.SP_XS
+PAD_SM = t.SP_SM
+PAD_MD = t.SP_MD
+PAD_LG = t.SP_MD
+GAP_SM = t.SP_SM
+GAP_MD = t.SP_MD
 ROW_HEIGHT = 22
 
 
@@ -71,9 +72,7 @@ class Section(QWidget):
         layout.setContentsMargins(PAD_LG, PAD_MD, PAD_LG, PAD_MD)
         layout.setSpacing(PAD_SM)
         header = QLabel(title, self)
-        header.setStyleSheet(
-            f"color: {t.MUTED}; font-size: 10px; font-weight: 700; letter-spacing: 1px;"
-        )
+        header.setStyleSheet(t.label())
         layout.addWidget(header)
         self.body = QWidget(self)
         body_layout = QVBoxLayout(self.body)
@@ -113,7 +112,9 @@ class Badge(QLabel):
     def set_tone(self, tone: str) -> None:
         color = self._COLORS.get(tone, t.MUTED)
         self.setStyleSheet(
-            "QLabel#UiKitBadge { color: " + color + "; font-size: 11px; font-weight: 700; }"
+            "QLabel#UiKitBadge { color: "
+            + color
+            + f"; font-size: {t.FS_LABEL}px; font-weight: 700; }}"
         )
 
     def set_status(self, status_text: str, tone: str) -> None:
@@ -140,10 +141,10 @@ class KVBlock(QWidget):
             row_lay.setContentsMargins(0, 0, 0, 0)
             row_lay.setSpacing(PAD_MD)
             name = QLabel(key.replace("_", " ").upper(), row)
-            name.setStyleSheet(f"color: {t.TEXT2}; font-size: 11px;")
+            name.setStyleSheet(t.label(text_color=t.TEXT2))
             name.setMinimumWidth(110)
             value = QLabel(_NA, row)
-            value.setStyleSheet(f"color: {t.TEXT}; font-size: 11px;")
+            value.setStyleSheet(t.body(size=t.FS_LABEL, weight=500))
             value.setWordWrap(True)
             value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             value.setSizePolicy(
@@ -187,11 +188,11 @@ class GateRow(QWidget):
         self.pill = Badge(top)
         top_lay.addWidget(self.pill)
         self.name_label = QLabel(name, top)
-        self.name_label.setStyleSheet(f"color: {t.TEXT}; font-size: 11px;")
+        self.name_label.setStyleSheet(t.body(size=t.FS_LABEL, weight=500))
         top_lay.addWidget(self.name_label, 1)
         layout.addWidget(top)
         self.reason_label = QLabel("", self)
-        self.reason_label.setStyleSheet(f"color: {t.MUTED}; font-size: 10px;")
+        self.reason_label.setStyleSheet(t.label())
         self.reason_label.setWordWrap(True)
         self.reason_label.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.reason_label)
@@ -282,7 +283,7 @@ class EmptyState(QLabel):
         self._detail = detail
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setWordWrap(True)
-        self.setStyleSheet(f"color: {t.MUTED}; font-size: 12px;")
+        self.setStyleSheet(t.body(size=t.FS_SMALL, color=t.MUTED))
         self._refresh()
 
     def _refresh(self) -> None:

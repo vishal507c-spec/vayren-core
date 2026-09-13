@@ -1,0 +1,42 @@
+{
+  "authority": "python",
+  "dependencies": [
+    "execution.order_lifecycle",
+    "risk.engine.evaluate"
+  ],
+  "evidence": [
+    "2026-09-11T19:07:04Z ADVANCE DISCOVERED->ANALYZED: inventory lists unit with sources and dependencies",
+    "2026-09-11T19:07:04Z ADVANCE ANALYZED->PLANNED: dependencies resolved from registry",
+    "2026-09-11T19:07:04Z ADVANCE PLANNED->BLOCKED: waiting on Rust target or dependencies",
+    "2026-09-12T07:18:48Z AGENT ANALYZE migratable=False: no autonomous extractor for this pattern yet \u2014 explicit design required",
+    "2026-09-12T13:39:19Z AGENT ANALYZE migratable=False: session/orchestration scope beyond autonomous kernel: broker, checkpoint, journal, paper, pathlib, strategy_runtime"
+  ],
+  "integration": {
+    "production_uses_rust": false,
+    "python_still_authoritative": true,
+    "status": "INCONCLUSIVE"
+  },
+  "live_critical": true,
+  "migration_id": "vayren-execution.session.lifecycle-v1",
+  "parity": {
+    "cases": 0,
+    "failed": 0,
+    "passed": 0,
+    "status": "INCONCLUSIVE"
+  },
+  "removal": {
+    "status": "INCONCLUSIVE"
+  },
+  "shadow": {
+    "comparisons": 0,
+    "mismatches": 0,
+    "status": "INCONCLUSIVE"
+  },
+  "source": "08_execution/execution/runtime/session.py",
+  "source_hash": "d58531c96a001089c5e51db325f40489d013f00aa08f6ad360b1509daebc5b7e",
+  "state": "BLOCKED",
+  "target": "rust/vayren-core/src/session.rs",
+  "target_hash": "ae42694d880bd36c9d4d9e8f654fb1d6e012c1f801e53698d0555b8e7c1eb733",
+  "unit": "execution.session.lifecycle",
+  "version": 1
+}

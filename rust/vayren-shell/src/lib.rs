@@ -4,6 +4,7 @@
 
 pub mod shell;
 pub mod view_model;
+pub mod viewport;
 
 slint::include_modules!();
 

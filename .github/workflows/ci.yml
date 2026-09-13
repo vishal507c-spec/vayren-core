@@ -22,3 +22,5 @@ jobs:
       - run: python scripts/validate_structure.py
       - run: python scripts/validate_imports.py
       - run: python scripts/validate_language_ownership.py
+      - run: python scripts/validate_migration.py
+      - run: python scripts/validate_architecture_gate.py

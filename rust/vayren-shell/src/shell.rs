@@ -8,9 +8,12 @@
 //! never from UI inference.
 
 use crate::view_model::{BrokerPanel, CapabilityStatus, Environment};
+use crate::viewport::ChartViewportZoom;
 use crate::{AppWindow, CapabilityRowView, ShellScreen};
 use slint::ComponentHandle;
 use slint::Model;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 /// Title text for a navigation target (status bar + pending card).
 pub fn screen_title(screen: ShellScreen) -> &'static str {
@@ -97,6 +100,24 @@ pub fn wire(ui: &AppWindow) {
     ui.on_nav_selected(move |screen| {
         if let Some(ui) = handle.upgrade() {
             select(&ui, screen);
+        }
+    });
+}
+
+/// Bind the chart viewport zoom state to the UI properties.
+pub fn apply_zoom(ui: &AppWindow, zoom: &ChartViewportZoom) {
+    ui.set_chart_zoom_level(zoom.level() as f32);
+    ui.set_chart_zoom_label(zoom.label().into());
+}
+
+/// Register the Reset Zoom action (call once per window). The user action
+/// arrives from Slint; viewport state resets centrally in Rust.
+pub fn wire_zoom(ui: &AppWindow, zoom: Rc<RefCell<ChartViewportZoom>>) {
+    let handle = ui.as_weak();
+    ui.on_reset_zoom(move || {
+        zoom.borrow_mut().reset();
+        if let Some(ui) = handle.upgrade() {
+            apply_zoom(&ui, &zoom.borrow());
         }
     });
 }
@@ -203,5 +224,20 @@ mod tests {
         ui.invoke_nav_selected(ShellScreen::Broker);
         assert_eq!(ui.get_active_screen(), ShellScreen::Broker);
         assert!(!ui.get_screen_pending());
+
+        // Reset Zoom action: UI trigger resets centrally-owned Rust state.
+        let zoom = Rc::new(RefCell::new(ChartViewportZoom::default()));
+        zoom.borrow_mut().set_level(2.5);
+        apply_zoom(&ui, &zoom.borrow());
+        assert_eq!(ui.get_chart_zoom_label(), "250%");
+        wire_zoom(&ui, zoom.clone());
+        ui.invoke_reset_zoom();
+        assert!(zoom.borrow().is_default());
+        assert_eq!(ui.get_chart_zoom_level(), 1.0);
+        assert_eq!(ui.get_chart_zoom_label(), "100%");
+        // Resetting an already-default viewport is a no-op, still consistent.
+        ui.invoke_reset_zoom();
+        assert!(zoom.borrow().is_default());
+        assert_eq!(ui.get_chart_zoom_label(), "100%");
     }
 }

@@ -1,4 +1,4 @@
-.PHONY: setup dev test test-coverage lint format typecheck check validate-structure validate-imports validate-language rust release exe clean
+.PHONY: setup dev test test-coverage lint format typecheck check validate-structure validate-imports validate-language validate-architecture rust release exe clean
 
 # ═══════════════════════════════════════════════════════════════
 # VAYREN — MAKEFILE
@@ -52,6 +52,12 @@ validate-imports:
 validate-language:
 	python scripts/validate_language_ownership.py
 
+validate-migration:
+	python scripts/migration/__main__.py verify
+
+validate-architecture:
+	python scripts/validate_architecture_gate.py
+
 # ── Rust (constitution §8: Rust owns core/perf kernels) ─────────
 
 rust:
@@ -60,7 +66,7 @@ rust:
 
 # ── Full Check ─────────────────────────────────────────────────
 
-check: rust lint typecheck test validate-structure validate-imports validate-language
+check: rust lint typecheck test validate-structure validate-imports validate-language validate-migration validate-architecture
 
 # ── Release (mechanics only; run `make check` first, CI validates on push) ─
 

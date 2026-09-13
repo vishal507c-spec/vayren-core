@@ -6,14 +6,17 @@ from datetime import datetime
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QLabel, QPlainTextEdit, QVBoxLayout, QWidget
 
+from app.ui import lab_theme as t
+
 _MAX_ENTRIES = 200
-_LABEL_STYLE = "color: palette(placeholder-text); font-size: 10px; font-weight: 700;"
+_LABEL_STYLE = t.label()
+_FONT_CODE = "Consolas"  # lab_theme FONT_CODE stack head; 8pt ≈ FS_LABEL
 
 _LEVEL_COLOR = {
-    "INFO": "#8a93a6",
-    "WARN": "#d4a017",
-    "ERROR": "#ef5350",
-    "SUCCESS": "#26a69a",
+    "INFO": t.TEXT2,
+    "WARN": t.WARN,
+    "ERROR": t.NEG,
+    "SUCCESS": t.POS,
 }
 
 
@@ -23,8 +26,8 @@ class EventLogPanel(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 4, 8, 4)
-        layout.setSpacing(4)
+        layout.setContentsMargins(t.SP_MD, t.SP_SM, t.SP_MD, t.SP_SM)
+        layout.setSpacing(t.SP_SM)
 
         caption = QLabel("EVENT LOG", self)
         caption.setStyleSheet(_LABEL_STYLE)
@@ -34,10 +37,12 @@ class EventLogPanel(QWidget):
         self._view.setReadOnly(True)
         self._view.setMaximumBlockCount(_MAX_ENTRIES)
         self._view.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
-        self._view.setFont(QFont("Consolas", 8))
+        self._view.setFont(QFont(_FONT_CODE, 8))
         self._view.setStyleSheet(
-            "QPlainTextEdit { background: palette(base); border: 1px solid palette(midlight);"
-            " border-radius: 3px; padding: 4px; }"
+            f"QPlainTextEdit {{ background: {t.BG1}; border: 1px solid {t.BORDER};"
+            f" border-radius: {t.RADIUS_SM}px; padding: {t.SP_SM}px; color: {t.TEXT};"
+            f" font-size: {t.FS_TABLE}px;"
+            f" selection-background-color: {t.ACCENT_DIM}; }}"
         )
         layout.addWidget(self._view, 1)
 
@@ -46,7 +51,7 @@ class EventLogPanel(QWidget):
     def add_entry(self, level: str, message: str) -> None:
         """Append one timestamped entry."""
         stamp = datetime.now().strftime("%H:%M:%S")
-        color = _LEVEL_COLOR.get(level.upper(), "#8a93a6")
+        color = _LEVEL_COLOR.get(level.upper(), t.TEXT2)
         html = (
             f'<span style="color:{color}">[{stamp}] {level.upper()}</span> {self._escape(message)}'
         )

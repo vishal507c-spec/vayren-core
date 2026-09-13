@@ -12,6 +12,7 @@
 pub mod aggregate;
 pub mod metrics;
 pub mod order_state;
+pub mod risk;
 pub mod stats;
 
 use aggregate::AggBucket;
@@ -209,4 +210,97 @@ pub unsafe extern "C" fn vy_aggregate(
     let out_slice = slice_mut(out, count);
     out_slice.copy_from_slice(&buckets[..count]);
     buckets.len()
+}
+
+// ── risk policy kernel (agent-migrated) ───────────────────────────────
+
+/// Evaluate pure scalar risk checks. Returns the check bitmask.
+/// Wrong-length inputs fail closed (mask 0 = deny); panics are caught.
+#[no_mangle]
+pub unsafe extern "C" fn vy_risk_kernel(
+    f64_values: *const f64,
+    f64_len: usize,
+    i64_values: *const i64,
+    i64_len: usize,
+) -> u32 {
+    let result = std::panic::catch_unwind(|| {
+        if f64_len != 20 || i64_len != 14 {
+            return 0u32;
+        }
+        let f64_values = slice(f64_values, f64_len);
+        let i64_values = slice(i64_values, i64_len);
+        let request_data_age_seconds = f64_values.get(0).copied().unwrap_or(0.0);
+        let policy_require_fresh_data_seconds = f64_values.get(1).copied().unwrap_or(0.0);
+        let request_spread_pct = f64_values.get(2).copied().unwrap_or(0.0);
+        let policy_spread_limit_pct = f64_values.get(3).copied().unwrap_or(0.0);
+        let policy_cooldown_seconds = f64_values.get(4).copied().unwrap_or(0.0);
+        let request_now_epoch = f64_values.get(5).copied().unwrap_or(0.0);
+        let request_last_order_epoch = f64_values.get(6).copied().unwrap_or(0.0);
+        let request_quantity = f64_values.get(7).copied().unwrap_or(0.0);
+        let request_price = f64_values.get(8).copied().unwrap_or(0.0);
+        let policy_max_order_qty = f64_values.get(9).copied().unwrap_or(0.0);
+        let policy_max_notional = f64_values.get(10).copied().unwrap_or(0.0);
+        let request_position_qty = f64_values.get(11).copied().unwrap_or(0.0);
+        let policy_max_position_qty = f64_values.get(12).copied().unwrap_or(0.0);
+        let request_equity = f64_values.get(13).copied().unwrap_or(0.0);
+        let policy_max_exposure_pct = f64_values.get(14).copied().unwrap_or(0.0);
+        let request_day_pnl = f64_values.get(15).copied().unwrap_or(0.0);
+        let policy_daily_loss_limit = f64_values.get(16).copied().unwrap_or(0.0);
+        let request_strategy_day_pnl = f64_values.get(17).copied().unwrap_or(0.0);
+        let policy_strategy_loss_limit = f64_values.get(18).copied().unwrap_or(0.0);
+        let request_available_capital = f64_values.get(19).copied().unwrap_or(0.0);
+        let request_orders_today = i64_values.get(0).copied().unwrap_or(0);
+        let policy_max_orders_per_day = i64_values.get(1).copied().unwrap_or(0);
+        let request_broker_healthy = i64_values.get(2).copied().unwrap_or(0) != 0;
+        let policy_require_fresh_data_seconds_present =
+            i64_values.get(3).copied().unwrap_or(0) != 0;
+        let request_data_age_seconds_present = i64_values.get(4).copied().unwrap_or(0) != 0;
+        let policy_spread_limit_pct_present = i64_values.get(5).copied().unwrap_or(0) != 0;
+        let request_spread_pct_present = i64_values.get(6).copied().unwrap_or(0) != 0;
+        let request_last_order_epoch_present = i64_values.get(7).copied().unwrap_or(0) != 0;
+        let policy_max_orders_per_day_present = i64_values.get(8).copied().unwrap_or(0) != 0;
+        let policy_max_notional_present = i64_values.get(9).copied().unwrap_or(0) != 0;
+        let side_is_buy = i64_values.get(10).copied().unwrap_or(0) != 0;
+        let policy_max_exposure_pct_present = i64_values.get(11).copied().unwrap_or(0) != 0;
+        let policy_daily_loss_limit_present = i64_values.get(12).copied().unwrap_or(0) != 0;
+        let policy_strategy_loss_limit_present = i64_values.get(13).copied().unwrap_or(0) != 0;
+        let inputs = risk::RiskKernelInputs {
+            request_broker_healthy,
+            policy_require_fresh_data_seconds_present,
+            request_data_age_seconds_present,
+            request_data_age_seconds,
+            policy_require_fresh_data_seconds,
+            policy_spread_limit_pct_present,
+            request_spread_pct_present,
+            request_spread_pct,
+            policy_spread_limit_pct,
+            policy_cooldown_seconds,
+            request_last_order_epoch_present,
+            request_now_epoch,
+            request_last_order_epoch,
+            policy_max_orders_per_day_present,
+            request_orders_today,
+            policy_max_orders_per_day,
+            request_quantity,
+            request_price,
+            policy_max_order_qty,
+            policy_max_notional_present,
+            policy_max_notional,
+            request_position_qty,
+            side_is_buy,
+            policy_max_position_qty,
+            policy_max_exposure_pct_present,
+            request_equity,
+            policy_max_exposure_pct,
+            policy_daily_loss_limit_present,
+            request_day_pnl,
+            policy_daily_loss_limit,
+            policy_strategy_loss_limit_present,
+            request_strategy_day_pnl,
+            policy_strategy_loss_limit,
+            request_available_capital,
+        };
+        risk::evaluate_risk_kernel(&inputs)
+    });
+    result.unwrap_or(0)
 }

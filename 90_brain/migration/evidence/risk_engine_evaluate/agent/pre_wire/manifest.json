@@ -1,0 +1,13 @@
+{
+  "at": "2026-09-12T08:39:47Z",
+  "hashes": {
+    "rust/vayren-core/src/risk.rs": "missing",
+    "rust/vayren-core/src/lib.rs": "d84b6aed92b19a92adf838bdc345d364843e8809b74f8ecae14b16a452cf4299",
+    "07_risk/risk/native_checks.py": "missing",
+    "07_risk/risk/engine.py": "af86efa4f61f11303364d2b6152bc9a71f953b49175341f71cc52a3b0bcb2b66",
+    "07_risk/risk/tests/test_risk_kernel_parity.py": "missing",
+    "scripts/migration/agent/oracles/risk_engine_oracle_v1.py": "missing",
+    "scripts/migration/agent/oracles/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "90_brain/language_retention.json": "310bee74e706b9cfb4ba3b6e89481cb6601679ab5081f1b7720d57054fe96fc4"
+  }
+}

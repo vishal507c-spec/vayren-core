@@ -319,6 +319,51 @@ def test_live_gate_consumes_manager_state(manager) -> None:
     assert any("not authenticated" in b and "LOGIN_REQUIRED" in b for b in blockers)
 
 
+def test_snapshot_carries_safe_read_only_details(manager) -> None:
+    """Health values are reduced to safe UI scalars (no secrets, no payloads)."""
+    mgr, _, store = manager
+    ok, _ = mgr.configure("zerodha", {"api_key": "K1234567890", "api_secret": "S-super-secret"})
+    assert ok
+    store.save("vayren:zerodha:session", {"access_token": "tok-fresh"})
+    mgr.submit_check("zerodha")
+    _settle(mgr)
+    snap = mgr.snapshot()
+    card = snap["brokers"][0]
+    assert card["account_id"] == "AB1234"
+    assert card["funds"] == {"available": 100.0, "used": 0.0, "total": 100.0}
+    assert card["positions_open"] == 0
+    assert card["orders_open"] == 0
+    assert card["last_sync"]
+    assert card["can_refresh"] is True
+    assert "S-super-secret" not in repr(snap)
+    assert "tok-fresh" not in repr(snap)
+
+
+def test_health_failure_clears_unavailable_details(manager) -> None:
+    mgr, hooks, store = manager
+    store.save("vayren:zerodha", {"api_key": "K1234567890", "api_secret": "S-super-secret"})
+    store.save("vayren:zerodha:session", {"access_token": "tok-fresh"})
+    hooks.failing = True
+    mgr.submit_check("zerodha")
+    _settle(mgr)
+    snap = mgr.snapshot()["brokers"][0]
+    assert "FAILED" in snap["checks"]["connection"]
+    assert snap["account_id"] == ""
+    assert snap["last_sync"]
+
+
+def test_disconnect_clears_details_keeps_config(manager) -> None:
+    mgr, _, store = manager
+    ok, _ = mgr.configure("zerodha", {"api_key": "K1234567890", "api_secret": "S-super-secret"})
+    assert ok
+    store.save("vayren:zerodha:session", {"access_token": "tok"})
+    mgr.disconnect_broker("zerodha")
+    snap = mgr.snapshot()["brokers"][0]
+    assert snap["configured"] is True
+    assert snap["account_id"] == ""
+    assert snap["funds"] == {"available": None, "used": None, "total": None}
+
+
 def test_strategy_agnostic_no_obr_in_broker_layer() -> None:
     """Broker layer carries zero strategy coupling (no OBR references)."""
     from pathlib import Path

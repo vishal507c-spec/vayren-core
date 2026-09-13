@@ -90,7 +90,7 @@ def zerodha_management_spec() -> BrokerSpec:
     auth flow + session store + venue registration. ``display_name`` comes
     from the adapter package's single source of truth — no alias literals.
     """
-    from broker.adapters.zerodha import DISPLAY_NAME
+    from broker.adapters.zerodha import DISPLAY_NAME, VENUE_SUBTITLE
 
     from data.provider.zerodha.live_activation import (
         LIVE_VENUE_ID,
@@ -132,6 +132,7 @@ def zerodha_management_spec() -> BrokerSpec:
         interactive_login=wait_for_login_token,
         callback_port=DEFAULT_CALLBACK_PORT,
         callback_url=redirect_url(DEFAULT_CALLBACK_PORT),
+        extra={"venue_subtitle": VENUE_SUBTITLE},
     )
 
 

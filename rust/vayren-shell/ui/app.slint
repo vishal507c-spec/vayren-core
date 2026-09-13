@@ -4,7 +4,8 @@
 // Rust side from the BrokerPanel view-model (backend facts, never UI
 // inference). Screens not yet migrated render their honest migration state.
 
-import { VayrenPalette } from "palette.slint";
+import { VayrenPalette, VayrenDesign } from "palette.slint";
+import { VBadge, VButton } from "components.slint";
 
 export enum ShellScreen {
     chart,
@@ -27,7 +28,7 @@ export struct CapabilityRowView {
     kind: int,
 }
 
-component PendingCard inherits Rectangle {
+    component PendingCard inherits Rectangle {
     in property <string> card-title;
 
     background: transparent;
@@ -35,32 +36,30 @@ component PendingCard inherits Rectangle {
     Rectangle {
         width: 420px;
         height: 132px;
-        border-radius: 4px;
+        border-radius: VayrenDesign.radius;
         background: VayrenPalette.surface;
         border-width: 1px;
         border-color: VayrenPalette.hairline;
 
         VerticalLayout {
-            padding: 16px;
-            spacing: 8px;
+            padding: VayrenDesign.sp-xl;
+            spacing: VayrenDesign.sp-md;
             alignment: center;
 
             Text {
                 text: root.card-title;
                 color: VayrenPalette.text;
-                font-size: 14px;
+                font-size: VayrenDesign.fs-body;
                 font-weight: 700;
             }
-            Text {
+            VBadge {
                 text: "PENDING MIGRATION";
-                color: VayrenPalette.amber;
-                font-size: 11px;
-                font-weight: 700;
+                tone: 2;
             }
             Text {
                 text: "This workspace currently lives in the Python application (Qt shell). Its native surface arrives in a later migration slice.";
                 color: VayrenPalette.muted;
-                font-size: 10px;
+                font-size: VayrenDesign.fs-label;
                 wrap: word-wrap;
             }
         }
@@ -81,31 +80,31 @@ component BrokerPanel inherits Rectangle {
     background: transparent;
 
     function env-color() -> color {
-        return env-kind == 0 ? VayrenPalette.teal
+        return env-kind == 0 ? VayrenPalette.pos
             : env-kind == 1 ? VayrenPalette.amber
-            : VayrenPalette.red;
+            : VayrenPalette.neg;
     }
 
     VerticalLayout {
-        padding: 16px;
-        spacing: 12px;
+        padding: VayrenDesign.sp-xl;
+        spacing: VayrenDesign.sp-lg;
 
         // Header: identity + environment badge.
         HorizontalLayout {
             height: 30px;
-            spacing: 8px;
+            spacing: VayrenDesign.sp-md;
 
             Text {
                 text: root.broker-name;
                 color: VayrenPalette.text;
-                font-size: 17px;
+                font-size: VayrenDesign.fs-title;
                 font-weight: 700;
                 vertical-alignment: center;
             }
             Text {
                 text: root.broker-id;
                 color: VayrenPalette.faint;
-                font-size: 10px;
+                font-size: VayrenDesign.fs-label;
                 vertical-alignment: center;
             }
             Rectangle {
@@ -115,7 +114,7 @@ component BrokerPanel inherits Rectangle {
             Rectangle {
                 width: 74px;
                 height: 20px;
-                border-radius: 3px;
+                border-radius: VayrenDesign.radius-sm;
                 background: transparent;
                 border-width: 1px;
                 border-color: root.env-color();
@@ -124,7 +123,7 @@ component BrokerPanel inherits Rectangle {
                     Text {
                         text: root.env-label;
                         color: root.env-color();
-                        font-size: 9px;
+                        font-size: VayrenDesign.fs-label;
                         font-weight: 700;
                         horizontal-alignment: center;
                     }
@@ -139,40 +138,40 @@ component BrokerPanel inherits Rectangle {
 
         // Health + LIVE rows.
         VerticalLayout {
-            spacing: 6px;
+            spacing: VayrenDesign.sp-sm;
 
             HorizontalLayout {
                 height: 18px;
-                spacing: 8px;
+                spacing: VayrenDesign.sp-md;
                 Text {
                     width: 64px;
                     text: "HEALTH";
                     color: VayrenPalette.muted;
-                    font-size: 10px;
+                    font-size: VayrenDesign.fs-label;
                     vertical-alignment: center;
                 }
                 Text {
                     text: root.health-label + (root.health-connected ? "" : " (not connected)");
-                    color: root.health-connected ? VayrenPalette.teal : VayrenPalette.muted;
-                    font-size: 11px;
+                    color: root.health-connected ? VayrenPalette.pos : VayrenPalette.muted;
+                    font-size: VayrenDesign.fs-label;
                     font-weight: 700;
                     vertical-alignment: center;
                 }
             }
             HorizontalLayout {
                 height: 18px;
-                spacing: 8px;
+                spacing: VayrenDesign.sp-md;
                 Text {
                     width: 64px;
                     text: "LIVE";
                     color: VayrenPalette.muted;
-                    font-size: 10px;
+                    font-size: VayrenDesign.fs-label;
                     vertical-alignment: center;
                 }
                 Text {
                     text: root.live-ready ? "READY" : "NOT READY";
-                    color: root.live-ready ? VayrenPalette.teal : VayrenPalette.red;
-                    font-size: 11px;
+                    color: root.live-ready ? VayrenPalette.pos : VayrenPalette.neg;
+                    font-size: VayrenDesign.fs-label;
                     font-weight: 700;
                     vertical-alignment: center;
                 }
@@ -187,32 +186,32 @@ component BrokerPanel inherits Rectangle {
         Text {
             text: "CAPABILITIES";
             color: VayrenPalette.muted;
-            font-size: 9px;
+            font-size: VayrenDesign.fs-label;
             font-weight: 700;
         }
         VerticalLayout {
-            spacing: 4px;
+            spacing: VayrenDesign.sp-sm;
 
             for row in root.capability-rows: Rectangle {
-                height: 22px;
-                border-radius: 3px;
+                height: VayrenDesign.row-height;
+                border-radius: VayrenDesign.radius-sm;
                 background: VayrenPalette.surface;
                 HorizontalLayout {
-                    padding-left: 10px;
-                    padding-right: 10px;
+                    padding-left: VayrenDesign.sp-lg;
+                    padding-right: VayrenDesign.sp-lg;
                     alignment: space-between;
                     Text {
                         text: row.id;
                         color: VayrenPalette.text;
-                        font-size: 10px;
+                        font-size: VayrenDesign.fs-label;
                         vertical-alignment: center;
                     }
                     Text {
                         text: row.label;
-                        color: row.kind == 0 ? VayrenPalette.teal
+                        color: row.kind == 0 ? VayrenPalette.pos
                             : row.kind == 2 ? VayrenPalette.amber
                             : VayrenPalette.muted;
-                        font-size: 9px;
+                        font-size: VayrenDesign.fs-label;
                         font-weight: 700;
                         vertical-alignment: center;
                     }
@@ -221,7 +220,7 @@ component BrokerPanel inherits Rectangle {
         }
 
         if root.blockers.length > 0: VerticalLayout {
-            spacing: 4px;
+            spacing: VayrenDesign.sp-sm;
 
             Rectangle {
                 height: 1px;
@@ -230,13 +229,13 @@ component BrokerPanel inherits Rectangle {
             Text {
                 text: "BLOCKERS";
                 color: VayrenPalette.amber;
-                font-size: 9px;
+                font-size: VayrenDesign.fs-label;
                 font-weight: 700;
             }
             for blocker in root.blockers: Text {
                 text: "Â· " + blocker;
                 color: VayrenPalette.amber;
-                font-size: 10px;
+                font-size: VayrenDesign.fs-label;
             }
         }
 
@@ -256,6 +255,7 @@ export component AppWindow inherits Window {
     min-height: 640px;
 
     callback nav-selected(ShellScreen);
+    callback reset-zoom();
 
     in-out property <ShellScreen> active-screen: ShellScreen.broker;
     in-out property <string> screen-title: "BROKER";
@@ -270,6 +270,11 @@ export component AppWindow inherits Window {
     in-out property <bool> live-ready: false;
     in-out property <[CapabilityRowView]> capability-rows;
     in-out property <[string]> blockers;
+
+    // Chart viewport zoom (Rust-owned state; Slint only renders + reports
+    // the Reset Zoom action).
+    in-out property <float> chart-zoom-level: 1.0;
+    in-out property <string> chart-zoom-label: "100%";
 
     property <[NavItem]> nav-items: [
         { label: "CHART", screen: ShellScreen.chart },
@@ -318,18 +323,18 @@ export component AppWindow inherits Window {
             border-color: VayrenPalette.hairline;
 
             VerticalLayout {
-                padding: 8px;
-                spacing: 2px;
+                padding: VayrenDesign.sp-md;
+                spacing: VayrenDesign.sp-xs;
 
                 Rectangle {
-                    height: 34px;
+                    height: VayrenDesign.h-context;
                     background: transparent;
                     VerticalLayout {
                         alignment: center;
                         Text {
                             text: "VAYREN";
                             color: VayrenPalette.accent;
-                            font-size: 13px;
+                            font-size: VayrenDesign.fs-small;
                             font-weight: 700;
                             horizontal-alignment: center;
                         }
@@ -338,7 +343,7 @@ export component AppWindow inherits Window {
 
                 for item in nav-items: Rectangle {
                     height: 28px;
-                    border-radius: 3px;
+                    border-radius: VayrenDesign.radius-sm;
                     background: item.screen == root.active-screen
                         ? VayrenPalette.accent
                         : ta.has-hover ? VayrenPalette.hover
@@ -354,7 +359,7 @@ export component AppWindow inherits Window {
                             ? VayrenPalette.accent-text
                             : ta.has-hover ? VayrenPalette.text
                             : VayrenPalette.muted;
-                        font-size: 10px;
+                        font-size: VayrenDesign.fs-label;
                         font-weight: item.screen == root.active-screen ? 700 : 400;
                         horizontal-alignment: center;
                         vertical-alignment: center;
@@ -374,7 +379,7 @@ export component AppWindow inherits Window {
                         Text {
                             text: "RUST + SLINT";
                             color: VayrenPalette.faint;
-                            font-size: 8px;
+                            font-size: VayrenDesign.fs-label;
                             horizontal-alignment: center;
                         }
                     }
@@ -385,6 +390,46 @@ export component AppWindow inherits Window {
         // Content column.
         VerticalLayout {
             spacing: 0;
+
+            // Chart toolbar — first migrated chart control. The canvas below
+            // still lives in the Python application until its own slice.
+            if root.active-screen == ShellScreen.chart: Rectangle {
+                height: 36px;
+                background: VayrenPalette.surface;
+                border-width: 1px;
+                border-color: VayrenPalette.hairline;
+
+                HorizontalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    spacing: VayrenDesign.sp-md;
+                    alignment: space-between;
+
+                    HorizontalLayout {
+                        spacing: VayrenDesign.sp-sm;
+
+                        Text {
+                            text: "ZOOM";
+                            color: VayrenPalette.muted;
+                            font-size: VayrenDesign.fs-label;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                        }
+                        Text {
+                            text: root.chart-zoom-label;
+                            color: VayrenPalette.text;
+                            font-size: VayrenDesign.fs-label;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                        }
+                    }
+                    VButton {
+                        label: "Reset Zoom";
+                        variant: 1;
+                        clicked => { root.reset-zoom(); }
+                    }
+                }
+            }
 
             Rectangle {
                 background: VayrenPalette.bg;
@@ -420,13 +465,13 @@ export component AppWindow inherits Window {
                     Text {
                         text: "VAYREN â€” native shell";
                         color: VayrenPalette.faint;
-                        font-size: 9px;
+                        font-size: VayrenDesign.fs-label;
                         vertical-alignment: center;
                     }
                     Text {
                         text: "SCREEN: " + root.screen-title;
                         color: VayrenPalette.muted;
-                        font-size: 9px;
+                        font-size: VayrenDesign.fs-label;
                         vertical-alignment: center;
                     }
                 }

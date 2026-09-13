@@ -35,6 +35,9 @@ from broker.registry import BrokerRecord
 
 BROKER_ID = "zerodha"
 DISPLAY_NAME = "Zerodha"
+# The venue's own product label. Lives here (with DISPLAY_NAME) so UI surfaces
+# read it from the snapshot instead of pinning a broker literal themselves.
+VENUE_SUBTITLE = "Kite Connect"
 
 HISTORICAL_CAPABILITIES: CapabilitySet = capability_set(
     {Domain.HISTORICAL_DATA: (Caps.HIST_CANDLES, Caps.HIST_SYMBOLS)}

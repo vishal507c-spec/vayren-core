@@ -1,0 +1,205 @@
+// VAYREN global native components — UI_DESIGN_SYSTEM.md §6.
+//
+// Reuse-first (§12): every native screen builds from these. A genuinely new
+// global pattern lands HERE (and in UI_DESIGN_SYSTEM.md) before any screen
+// uses it. No screen-local visual inventions. Presentation only: all content
+// arrives via properties; no backend calls, no inference.
+//
+// Tone convention (shared): 0 = muted, 1 = ok/pos, 2 = warn, 3 = bad/neg,
+// 4 = accent.
+
+import { VayrenPalette, VayrenDesign } from "palette.slint";
+
+export component VButton inherits Rectangle {
+    in property <string> label;
+    // 0 primary (filled accent — ONE dominant action per view, §6),
+    // 1 secondary (outlined subordinate mirror),
+    // 2 quiet (bordered, muted text),
+    // 3 danger (armed stop — semantic, never a second run affordance).
+    in property <int> variant: 1;
+    in property <bool> enabled: true;
+    callback clicked();
+
+    function fill() -> color {
+        return !root.enabled ? VayrenPalette.hover
+            : root.variant == 0 ? VayrenPalette.accent
+            : root.variant == 3 ? VayrenPalette.neg
+            : transparent;
+    }
+    function frame() -> color {
+        return !root.enabled ? VayrenPalette.hairline
+            : root.variant == 0 ? VayrenPalette.accent
+            : root.variant == 1 ? VayrenPalette.accent
+            : root.variant == 3 ? VayrenPalette.neg
+            : VayrenPalette.hairline;
+    }
+    function ink() -> color {
+        return !root.enabled ? VayrenPalette.faint
+            : root.variant == 0 ? VayrenPalette.accent-text
+            : root.variant == 1 ? VayrenPalette.accent
+            : root.variant == 3 ? (ta.has-hover ? VayrenPalette.text : VayrenPalette.accent-text)
+            : ta.has-hover ? VayrenPalette.text : VayrenPalette.muted;
+    }
+
+    height: VayrenDesign.h-context;
+    border-radius: VayrenDesign.radius;
+    background: root.fill();
+    border-width: 1px;
+    border-color: root.frame();
+
+    ta := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+    VerticalLayout {
+        alignment: center;
+        Text {
+            text: root.label;
+            color: root.ink();
+            font-size: VayrenDesign.fs-small;
+            font-weight: 700;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+}
+
+export component VBadge inherits Text {
+    // Short status text + semantic tone. Color is never the only signal —
+    // the text always carries the meaning (§6).
+    in property <int> tone: 0;
+
+    function tone-color() -> color {
+        return root.tone == 1 ? VayrenPalette.pos
+            : root.tone == 2 ? VayrenPalette.amber
+            : root.tone == 3 ? VayrenPalette.neg
+            : root.tone == 4 ? VayrenPalette.accent
+            : VayrenPalette.muted;
+    }
+
+    color: root.tone-color();
+    font-size: VayrenDesign.fs-label;
+    font-weight: 700;
+}
+
+export component VStatusDot inherits Rectangle {
+    in property <int> tone: 0;
+
+    width: VayrenDesign.sp-md;
+    height: VayrenDesign.sp-md;
+    border-radius: VayrenDesign.sp-sm;
+    background: root.tone == 1 ? VayrenPalette.pos
+        : root.tone == 2 ? VayrenPalette.amber
+        : root.tone == 3 ? VayrenPalette.neg
+        : root.tone == 4 ? VayrenPalette.accent
+        : VayrenPalette.faint;
+}
+
+export component VSection inherits Rectangle {
+    // Titled panel container — cards exist only for grouping (§1).
+    in property <string> title;
+
+    background: VayrenPalette.surface;
+    border-width: 1px;
+    border-color: VayrenPalette.hairline;
+    border-radius: VayrenDesign.radius;
+
+    VerticalLayout {
+        padding: VayrenDesign.sp-md;
+        spacing: VayrenDesign.sp-sm;
+        Text {
+            text: root.title;
+            color: VayrenPalette.faint;
+            font-size: VayrenDesign.fs-label;
+            font-weight: 700;
+        }
+        @children
+    }
+}
+
+export component VKpi inherits VerticalLayout {
+    // Metric tile: value materially larger than label, always (§3.2).
+    in property <string> label;
+    in property <string> value;
+    in property <int> tone: 0;
+
+    spacing: VayrenDesign.sp-xs;
+    Text {
+        text: root.label;
+        color: VayrenPalette.faint;
+        font-size: VayrenDesign.fs-label;
+        font-weight: 700;
+    }
+    Text {
+        text: root.value;
+        color: root.tone == 1 ? VayrenPalette.pos
+            : root.tone == 2 ? VayrenPalette.amber
+            : root.tone == 3 ? VayrenPalette.neg
+            : VayrenPalette.text;
+        font-size: VayrenDesign.fs-metric-sm;
+        font-weight: 700;
+    }
+}
+
+export component VBanner inherits Rectangle {
+    // Quiet state banner: bordered box, semantic left edge, one optional
+    // action — never a full-bleed block (§6).
+    in property <string> message;
+    in property <int> tone: 2;
+    in property <string> action-label: "";
+    callback action();
+
+    function edge() -> color {
+        return root.tone == 1 ? VayrenPalette.pos
+            : root.tone == 3 ? VayrenPalette.neg
+            : VayrenPalette.amber;
+    }
+
+    background: VayrenPalette.surface;
+    border-width: 1px;
+    border-color: VayrenPalette.hairline;
+    border-radius: VayrenDesign.radius-sm;
+
+    HorizontalLayout {
+        spacing: VayrenDesign.sp-md;
+        Rectangle {
+            width: 3px;
+            background: root.edge();
+        }
+        Text {
+            text: root.message;
+            color: VayrenPalette.text;
+            font-size: VayrenDesign.fs-small;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+        if root.action-label != "": VButton {
+            label: root.action-label;
+            variant: 2;
+            clicked => { root.action(); }
+        }
+    }
+}
+
+export component VEmptyState inherits VerticalLayout {
+    // Centered title + wrapped explanation (§6). Missing data renders as
+    // N/A/—/Unavailable at the value site; this covers empty panels.
+    in property <string> title;
+    in property <string> detail: "";
+
+    spacing: VayrenDesign.sp-sm;
+    alignment: center;
+    Text {
+        text: root.title;
+        color: VayrenPalette.muted;
+        font-size: VayrenDesign.fs-small;
+        horizontal-alignment: center;
+    }
+    if root.detail != "": Text {
+        text: root.detail;
+        color: VayrenPalette.faint;
+        font-size: VayrenDesign.fs-label;
+        wrap: word-wrap;
+        horizontal-alignment: center;
+    }
+}

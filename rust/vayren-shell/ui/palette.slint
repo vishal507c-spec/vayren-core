@@ -1,18 +1,74 @@
-// VAYREN dark visual identity (matches the Qt APP_PALETTE family: cool
-// near-black surfaces, teal accent, muted grays). Palette-only — no
-// component may hardcode colors outside this global.
+// VAYREN canonical UI tokens — single source of truth for the native shell.
+//
+// Implements UI_DESIGN_SYSTEM.md §3. Values are canonical: the Qt retained
+// shell (lab_theme.py) implements THE SAME numbers. A value here that
+// disagrees with UI_DESIGN_SYSTEM.md §3 is wrong — fix it here, never add a
+// second literal at a use site. No component may hardcode colors, type
+// sizes, spacing, or radii outside VayrenPalette / VayrenDesign.
 
 export global VayrenPalette {
-    out property <color> bg: #101418;
-    out property <color> surface: #141922;
-    out property <color> hover: #1a222c;
-    out property <color> hairline: #232a35;
-    out property <color> text: #d7dde8;
-    out property <color> muted: #8a93a6;
-    out property <color> faint: #5d6778;
-    out property <color> accent: #26a69a;
-    out property <color> teal: #26a69a;
-    out property <color> accent-text: #0b0f13;
-    out property <color> red: #ef5350;
-    out property <color> amber: #d9a441;
+    // Surfaces (§3.1).
+    out property <color> bg: #070B10;
+    out property <color> bg1: #0B1017;
+    out property <color> bg2: #0F151D;
+    out property <color> surface: #101720;
+    out property <color> hover: #131B24;
+    out property <color> selected: #18212C;
+    out property <color> hairline: #202B36;
+    out property <color> hairline-soft: #1A232D;
+    // Accent + text.
+    out property <color> accent: #00C7B7;
+    out property <color> accent-dim: #00A99D;
+    out property <color> accent-text: #04211E;
+    out property <color> text: #E6EDF3;
+    out property <color> muted: #8B98A7;
+    out property <color> faint: #596675;
+    // Semantics (§3.1, §10) — identical on every screen.
+    out property <color> pos: #21C58B;
+    out property <color> pos-dim: #16493A;
+    out property <color> neg: #F05A67;
+    out property <color> neg-dim: #4A2027;
+    out property <color> amber: #DDAA45;
+    out property <color> warn-dim: #4A3C18;
+    // Legacy aliases — do NOT use in new code; kept so existing surfaces
+    // keep compiling while they converge onto the canonical names above.
+    out property <color> teal: #21C58B;
+    out property <color> red: #F05A67;
+}
+
+export global VayrenDesign {
+    // Spacing scale (§3.3) — every margin/padding/gap derives from these.
+    // Typed <length> so uses need no conversion; single values only.
+    out property <length> sp-xs: 2px;
+    out property <length> sp-sm: 4px;
+    out property <length> sp-md: 8px;
+    out property <length> sp-lg: 12px;
+    out property <length> sp-xl: 16px;
+    out property <length> sp-xxl: 24px;
+    // Fixed chrome heights (§3.3).
+    out property <length> h-topbar: 42px;
+    out property <length> h-context: 34px;
+    out property <length> h-tabs: 34px;
+    out property <length> h-strip: 36px;
+    out property <length> row-height: 22px;
+    // Radii (§3.3).
+    out property <length> radius: 4px;
+    out property <length> radius-sm: 3px;
+    // Typography (§3.2). Floor: nothing renders below fs-label (11).
+    out property <length> fs-display: 24px;
+    out property <length> fs-hero: 26px;
+    out property <length> fs-title: 18px;
+    out property <length> fs-metric: 19px;
+    out property <length> fs-metric-sm: 16px;
+    out property <length> fs-body: 14px;
+    out property <length> fs-table: 13px;
+    out property <length> fs-small: 12px;
+    out property <length> fs-label: 11px;
+    // Shell minima (§5) — smallest usable window, logical units.
+    out property <length> shell-min-width: 1024px;
+    out property <length> shell-min-height: 640px;
+    out property <length> rail-width: 104px;
+    out property <length> status-height: 24px;
+    // Reflow breakpoint (§5): KPI grids fold 4→2 columns below this width.
+    out property <length> kpi-fold-width: 620px;
 }

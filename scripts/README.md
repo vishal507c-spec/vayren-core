@@ -13,6 +13,10 @@
 | `validate_structure.py` | 9 domains ka layout check (`app`/`core`/`data`/`market`/`chart`/`strategy`/`backtest`/`risk`/`execution`) | `make check` mein |
 | `validate_imports.py` | Cross-module dependency rules check (AST se; `if TYPE_CHECKING:` imports runtime coupling nahi maane jate) | `make check` mein |
 | `benchmark.py` | AEOS velocity harness (`gate`/`begin`/`record`/`impact`/`replay`/`scoreboard`) + corpus/scoreboard/runs-log | Validation cost measure karne, impact plan, scoreboard regen ke liye |
+| `validate_migration.py` | Evidence-driven migration gate (read-only): parity/shadow/integration freshness, false-claim, quarantine, secrets checks | `make check` mein (`validate-migration`) |
+| `validate_architecture_gate.py` | Wrong-language change gate: Rust-owned Python additions + new Qt UI surfaces FAIL; bridges/oracles/tests/retained glue pass | Har commit se pehle, pre-commit hook aur `make check` mein (`validate-architecture`) |
+| `migration/__main__.py` | Migration CLI (`scan`/`plan`/`status`/`verify`/`parity`/`fuzz`/`shadow`/`promote`/`rollback`/`quarantine`/`finalize`/`report`/`db` + `route`/`manifest`/`gate`/`background`/`task-report`) — evidence-driven, no manual mark-migrated | `route` se pehle language decide karo; `background` se migration queue chalao |
+| `migration/agent/` | Autonomous migration agent (`agent-order`/`agent-analyze`/`agent-run`): sandbox analyze → contract spec → Rust generate → repair loop → differential parity → shadow → promote-on-green, rollback-on-red; Slint/UI pipeline se excluded | BLOCKED units ko dependency order me automatically migrate karne ke liye |
 | `speed/__main__.py` | Phase-18 speed instrumentation (`mark`/`record`/`compile-context`/`recommend`/`dashboard`) — engineering-loop timing, task journal, context compiler | Har benchmarked task par (negligible overhead: ek JSONL line) |
 
 ## 3. Example

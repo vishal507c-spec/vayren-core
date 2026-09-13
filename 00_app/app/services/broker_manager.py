@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import contextlib
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -133,17 +134,35 @@ class BrokerManager(QObject):
         return spec.display_name if spec else str(broker_id)
 
     def state(self, broker_id: str) -> dict[str, Any]:
-        return dict(self._states.get(broker_id, {}))
+        current = dict(self._states.get(broker_id, {}))
+        details = current.get("details")
+        if isinstance(details, dict):
+            current["details"] = dict(details)
+        checks = current.get("checks")
+        if isinstance(checks, dict):
+            current["checks"] = dict(checks)
+        return current
 
     def snapshot(self) -> dict[str, Any]:
         brokers = []
         for broker_id in self._specs:
             state = self.state(broker_id)
             spec = self._specs[broker_id]
+            details = state.get("details")
+            if not isinstance(details, dict):
+                details = {}
+            funds = {
+                "available": details.get("funds_available"),
+                "used": details.get("funds_used"),
+                "total": details.get("funds_total"),
+            }
             brokers.append(
                 {
                     "id": broker_id,
                     "name": spec.display_name,
+                    # Venue-supplied product label (adapter-owned constant).
+                    # Surfaces render it instead of pinning broker literals.
+                    "venue_subtitle": str(spec.extra.get("venue_subtitle", "") or ""),
                     "status": state["status"].value,
                     "reason": state["reason"],
                     "checks": dict(state["checks"]),
@@ -158,6 +177,15 @@ class BrokerManager(QObject):
                     ),
                     "can_disconnect": state["configured"]
                     and state["status"] in (BrokerStatus.CONNECTED, BrokerStatus.LIVE_READY),
+                    # Read-only UI details (safe scalars only — never secrets).
+                    # Older consumers ignore unknown keys; new cards render
+                    # account/funds/counts/last-sync from these.
+                    "account_id": str(details.get("account_id", "") or ""),
+                    "funds": funds,
+                    "positions_open": details.get("positions_open"),
+                    "orders_open": details.get("orders_open"),
+                    "last_sync": str(state.get("last_sync", "") or ""),
+                    "can_refresh": bool(state["configured"]),
                 }
             )
         return {"brokers": brokers, "callback_url": self._callback_url()}
@@ -219,6 +247,10 @@ class BrokerManager(QObject):
             if spec.venue_unregister is not None:
                 spec.venue_unregister()
         self._set_status(broker_id, BrokerStatus.LOGIN_REQUIRED, "disconnected — login required")
+        with contextlib.suppress(Exception):
+            cleared = self._states.get(broker_id)
+            if isinstance(cleared, dict):
+                cleared["details"] = self._empty_details()
         self._note(broker_id, "disconnected (configuration kept)")
         return True, "disconnected"
 
@@ -312,26 +344,48 @@ class BrokerManager(QObject):
         self._activate(spec, config, stored.get("access_token", ""), message)
 
     def _job_health(self, spec: BrokerSpec) -> None:
-        """Read-only checks on the active adapter; never places an order."""
+        """Read-only checks on the active adapter; never places an order.
+
+        Return values are reduced to safe UI scalars (account id, fund
+        floats, open counts) the moment they are read — the full adapter
+        payloads never enter manager state, snapshots, logs or signals.
+        """
         state = self._states.get(spec.broker_id, {})
         adapter = state.get("adapter")
         if adapter is None:
             return
-        checks: dict[str, str] = {}
+        details = self._empty_details()
         try:
             healthy, reason = adapter.health()
-            checks["connection"] = "READY" if healthy else f"FAILED: {reason}"
+            checks: dict[str, str] = {"connection": "READY" if healthy else f"FAILED: {reason}"}
         except Exception as exc:
-            checks["connection"] = f"FAILED: {type(exc).__name__}"
+            checks = {"connection": f"FAILED: {type(exc).__name__}"}
+        try:
+            account = adapter.account()
+            checks["account"] = "READY"
+            details["account_id"] = self._account_id_of(account)
+        except Exception as exc:
+            checks["account"] = f"FAILED: {type(exc).__name__}"
+        try:
+            funds = adapter.funds()
+            checks["funds"] = "READY"
+            if isinstance(funds, dict):
+                details["funds_available"] = self._safe_float(funds.get("available"))
+                details["funds_used"] = self._safe_float(funds.get("used"))
+                total = funds.get("total", funds.get("equity"))
+                details["funds_total"] = self._safe_float(total)
+        except Exception as exc:
+            checks["funds"] = f"FAILED: {type(exc).__name__}"
         for key, fn in (
-            ("account", "account"),
-            ("funds", "funds"),
             ("positions", "positions"),
             ("orders", "open_orders"),
         ):
             try:
-                getattr(adapter, fn)()
+                rows = getattr(adapter, fn)()
                 checks[key] = "READY"
+                details["positions_open" if key == "positions" else "orders_open"] = (
+                    len(rows) if isinstance(rows, (list, tuple)) else None
+                )
             except Exception as exc:
                 checks[key] = f"FAILED: {type(exc).__name__}"
         md = state.get("market_data")
@@ -342,6 +396,8 @@ class BrokerManager(QObject):
             except Exception as exc:
                 checks["market_data"] = f"FAILED: {type(exc).__name__}"
         state["checks"] = checks
+        state["details"] = details
+        state["last_sync"] = self._now_stamp()
         failed = [k for k, v in checks.items() if v != "READY"]
         if failed:
             state["status"] = BrokerStatus.ACCOUNT_NOT_READY
@@ -380,6 +436,11 @@ class BrokerManager(QObject):
         state["adapter"] = adapter
         state["market_data"] = md
         state["checks"] = {"connection": "READY", "account": "READY"}
+        details = self._empty_details()
+        with contextlib.suppress(Exception):
+            details["account_id"] = self._account_id_of(adapter.account())
+        state["details"] = details
+        state["last_sync"] = self._now_stamp()
         state["status"] = BrokerStatus.CONNECTED
         state["reason"] = f"{why}; {reg_reason}" if not registered else why
         self._note(spec.broker_id, "connected")
@@ -410,11 +471,52 @@ class BrokerManager(QObject):
             "status": BrokerStatus.NOT_CONFIGURED if not config else BrokerStatus.LOGIN_REQUIRED,
             "reason": "" if config else "no configuration saved",
             "checks": {},
+            "details": self._empty_details(),
+            "last_sync": "",
             "configured": bool(config),
             "adapter": None,
             "market_data": None,
             "api_key_masked": self._mask(config.get("api_key", "") if config else ""),
         }
+
+    @staticmethod
+    def _empty_details() -> dict[str, Any]:
+        """Safe UI scalars only — never secrets, never full payloads."""
+        return {
+            "account_id": "",
+            "funds_available": None,
+            "funds_used": None,
+            "funds_total": None,
+            "positions_open": None,
+            "orders_open": None,
+        }
+
+    @staticmethod
+    def _now_stamp() -> str:
+        with contextlib.suppress(Exception):
+            return datetime.now().strftime("%H:%M:%S")
+        return ""
+
+    @staticmethod
+    def _safe_float(value: Any) -> float | None:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        if number != number or number in (float("inf"), float("-inf")):
+            return None
+        return number
+
+    @staticmethod
+    def _account_id_of(account: Any) -> str:
+        """Reduce an account payload to its display id (no emails/usernames)."""
+        if not isinstance(account, dict):
+            return ""
+        for key in ("account_id", "user_id", "client_id", "id"):
+            candidate = account.get(key)
+            if candidate:
+                return str(candidate)[:64]
+        return ""
 
     @staticmethod
     def _mask(value: str) -> str:
@@ -430,7 +532,9 @@ class BrokerManager(QObject):
             spec = self._specs.get(broker_id)
             if spec is not None:
                 fresh = self._fresh_state(spec)
-                state.update({k: fresh[k] for k in ("configured", "api_key_masked")})
+                state.update(
+                    {k: fresh[k] for k in ("configured", "api_key_masked", "details", "last_sync")}
+                )
         self.state_changed.emit(broker_id)
 
     def _note(self, broker_id: str, text: str) -> None:

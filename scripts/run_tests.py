@@ -34,6 +34,8 @@ PARTS = (
     "08_execution/execution/tests",
     "09_broker/broker/tests",
     "scripts/forensics/tests",
+    "scripts/migration/tests",
+    "scripts/migration/agent/tests",
     "scripts/tests",
 )
 

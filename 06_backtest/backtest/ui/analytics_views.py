@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QRect, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
     QHeaderView,
@@ -65,91 +65,353 @@ class _ChartView(QWidget):
         self.update()
 
 
-class EquityCurveView(_ChartView):
-    """Equity line with starting/ending/drawdown annotations."""
+_AXIS = QColor("#5b6878")
+_PAD_L, _PAD_R, _PAD_T, _PAD_B = 68, 18, 16, 26
+
+
+def _compact_axis_money(value: float) -> str:
+    """Axis tick text — compact, never a wall of digits."""
+    amount = abs(float(value))
+    sign = "-" if value < 0 else ""
+    if amount >= 1e7:
+        return f"{sign}{amount / 1e7:.1f}Cr"
+    if amount >= 1e5:
+        return f"{sign}{amount / 1e5:.2f}L"
+    if amount >= 1e3:
+        return f"{sign}{amount / 1e3:.0f}K"
+    return f"{sign}{amount:.0f}"
+
+
+def _short_stamp(stamp: str) -> str:
+    """'2026-01-02 09:15:00' → '02 Jan 26' (best effort, never raises)."""
+    text = (stamp or "")[:10]
+    try:
+        from datetime import datetime as _dt
+
+        return _dt.strptime(text, "%Y-%m-%d").strftime("%d %b %y")
+    except (ValueError, TypeError):
+        return text or "--"
+
+
+class _HoverChart(_ChartView):
+    """Shared crosshair plumbing for the analytical chart surfaces.
+
+    Hover is a first-class affordance here: the user must be able to read a
+    precise value off the curve without leaving the surface (§18).
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setMouseTracking(True)
+        self._hover_x: float | None = None
+        self._plot: QRect | None = None
+
+    def set_result(self, result: StrategyResult | None) -> None:
+        self._hover_x = None
+        super().set_result(result)
+
+    def mouseMoveEvent(self, event) -> None:  # type: ignore[no-untyped-def]  # noqa: N802
+        point = event.position().toPoint()
+        if self._plot is not None and self._plot.contains(point):
+            self._hover_x = float(point.x())
+        else:
+            self._hover_x = None
+        self.update()
+
+    def leaveEvent(self, event) -> None:  # type: ignore[no-untyped-def]  # noqa: N802
+        self._hover_x = None
+        self.update()
+        super().leaveEvent(event)
+
+    def _hover_index(self, count: int) -> int | None:
+        """Map the hovered x to a data index in the *full* series."""
+        if self._hover_x is None or self._plot is None or count < 2:
+            return None
+        width = max(1, self._plot.width())
+        ratio = (self._hover_x - self._plot.left()) / width
+        return max(0, min(count - 1, int(round(ratio * (count - 1)))))
+
+    def _draw_axes(self, painter: QPainter, plot: QRect, lo: float, hi: float) -> None:
+        """Y gridlines with value labels + frame. One shared visual grammar."""
+        painter.setPen(QPen(_GRID, 1))
+        font = QFont("Segoe UI", 8)
+        painter.setFont(font)
+        for i in range(5):
+            y = plot.top() + plot.height() * i / 4
+            painter.drawLine(plot.left(), int(y), plot.right(), int(y))
+            value = hi - (hi - lo) * i / 4
+            painter.setPen(_AXIS)
+            painter.drawText(
+                QRect(0, int(y) - 8, _PAD_L - 8, 16),
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                _compact_axis_money(value),
+            )
+            painter.setPen(QPen(_GRID, 1))
+
+    def _draw_time_axis(self, painter: QPainter, plot: QRect, first: str, last: str) -> None:
+        painter.setPen(_AXIS)
+        painter.setFont(QFont("Segoe UI", 8))
+        y = plot.bottom() + 5
+        painter.drawText(plot.left(), y + 10, _short_stamp(first))
+        painter.drawText(
+            QRect(plot.left(), y, plot.width(), 14),
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop,
+            _short_stamp(last),
+        )
+
+    def _draw_readout(self, painter: QPainter, plot: QRect, lines: list[str]) -> None:
+        """Cursor-attached readout box — the precise numbers, in place."""
+        if not lines:
+            return
+        painter.setFont(QFont("Segoe UI", 8))
+        metrics = painter.fontMetrics()
+        width = max(metrics.horizontalAdvance(line) for line in lines) + 16
+        height = metrics.height() * len(lines) + 10
+        x = int(self._hover_x or plot.left()) + 14
+        if x + width > plot.right():
+            x = int(self._hover_x or plot.left()) - width - 14
+        x = max(plot.left(), x)
+        y = min(max(plot.top(), plot.top() + 6), plot.bottom() - height)
+        box = QRect(x, y, width, height)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(QColor(7, 11, 16, 235)))
+        painter.drawRoundedRect(box, 3, 3)
+        painter.setPen(QPen(_GRID, 1))
+        painter.drawRoundedRect(box, 3, 3)
+        painter.setPen(QColor("#cfd8dc"))
+        for index, line in enumerate(lines):
+            painter.drawText(
+                box.left() + 8,
+                box.top() + metrics.height() * (index + 1) + 1,
+                line,
+            )
+
+
+class EquityCurveView(_HoverChart):
+    """Equity line: axes, baseline, start/end markers, crosshair readout.
+
+    This is an analytical surface, not decoration — it keeps the space it is
+    given (300-400px on desktop when active) and never compresses into a
+    strip (§18).
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setMinimumHeight(240)
+        self._series: list[float] = []
+        self._stamps: list[str] = []
 
     def set_result(self, result: StrategyResult | None) -> None:
         super().set_result(result)
+        curve = result.equity_curve if result is not None else ()
+        # Cache the numeric series once: hover repaints must never rescan a
+        # 193k-point curve.
+        self._series = [float(p.equity) for p in curve]
+        self._stamps = [str(p.timestamp) for p in curve]
         self.update()
 
     def paintEvent(self, _event) -> None:  # type: ignore[no-untyped-def]  # noqa: N802
         painter = QPainter(self)
         painter.fillRect(self.rect(), _CHART_BG)
-        if self._result is None or not self._result.equity_curve:
+        if self._result is None or len(self._series) < 2:
             painter.setPen(_TEXT)
+            painter.setFont(QFont("Segoe UI", 9))
             painter.drawText(
-                self.rect(), Qt.AlignmentFlag.AlignCenter, "No equity data — run a backtest"
+                self.rect(),
+                Qt.AlignmentFlag.AlignCenter,
+                "NO EQUITY DATA\nRun a backtest to see the capital trajectory.",
             )
+            self._plot = None
             return
-        curve = self._result.equity_curve
-        pad_l, pad_r, pad_t, pad_b = 48, 12, 8, 18
-        plot = self.rect().adjusted(pad_l, pad_t, -pad_r, -pad_b)
+        plot = self.rect().adjusted(_PAD_L, _PAD_T, -_PAD_R, -_PAD_B)
         if plot.width() <= 0 or plot.height() <= 0:
+            self._plot = None
             return
-        equities = decimate_envelope([p.equity for p in curve], max(64, plot.width() * 2))
-        lo, hi = min(equities), max(equities)
-        span = hi - lo or 1.0
-        # grid
-        painter.setPen(QPen(_GRID, 1))
-        for i in range(5):
-            y = plot.top() + plot.height() * i / 4
-            painter.drawLine(plot.left(), int(y), plot.right(), int(y))
-        # polyline
+        self._plot = plot
+        series = self._series
+        lo, hi = min(series), max(series)
+        baseline = float(self._result.metrics.starting_capital or lo)
+        lo, hi = min(lo, baseline), max(hi, baseline)
+        span = (hi - lo) or 1.0
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        painter.setPen(QPen(_EQUITY, 1.6))
+        self._draw_axes(painter, plot, lo, hi)
+        self._draw_time_axis(painter, plot, self._stamps[0], self._stamps[-1])
+
+        def y_of(value: float) -> float:
+            return plot.bottom() - (value - lo) / span * plot.height()
+
+        # baseline at the initial capital — the "did I make money" reference
+        y0 = y_of(baseline)
+        painter.setPen(QPen(QColor("#3b4659"), 1, Qt.PenStyle.DashLine))
+        painter.drawLine(plot.left(), int(y0), plot.right(), int(y0))
+        painter.setPen(_AXIS)
+        painter.setFont(QFont("Segoe UI", 8))
+        painter.drawText(plot.left() + 4, int(y0) - 4, "START CAPITAL")
+
+        # curve (LOD-decimated for paint, full resolution for hover)
+        equities = decimate_envelope(series, max(64, plot.width() * 2))
         pts = []
         for i, equity in enumerate(equities):
             x = plot.left() + i / max(1, len(equities) - 1) * plot.width()
-            y = plot.bottom() - (equity - lo) / span * plot.height()
             from PySide6.QtCore import QPointF as _QPointF
 
-            pts.append(_QPointF(x, y))
+            pts.append(_QPointF(x, y_of(equity)))
+        painter.setPen(QPen(_EQUITY, 1.6))
         for i in range(len(pts) - 1):
             painter.drawLine(pts[i], pts[i + 1])
-        # baseline at initial capital
-        y0 = plot.bottom() - (self._result.metrics.starting_capital - lo) / span * plot.height()
-        painter.setPen(QPen(QColor("#3b4659"), 1, Qt.PenStyle.DashLine))
-        painter.drawLine(plot.left(), int(y0), plot.right(), int(y0))
+
+        # start / end markers with their values
+        start, end = series[0], series[-1]
+        for x, value in ((plot.left(), start), (plot.right(), end)):
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(_EQUITY))
+            painter.drawEllipse(int(x) - 3, int(y_of(value)) - 3, 6, 6)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setFont(QFont("Segoe UI", 8))
+        painter.setPen(QColor("#9fb3c8"))
+        painter.drawText(
+            QRect(plot.left() + 4, int(y_of(start)) + 4, 140, 14),
+            Qt.AlignmentFlag.AlignLeft,
+            f"START {_compact_axis_money(start)}",
+        )
+        painter.drawText(
+            QRect(plot.right() - 150, int(y_of(end)) - 18, 146, 14),
+            Qt.AlignmentFlag.AlignRight,
+            f"END {_compact_axis_money(end)}",
+        )
+
+        # crosshair readout
+        index = self._hover_index(len(series))
+        if index is not None:
+            value = series[index]
+            x = plot.left() + index / max(1, len(series) - 1) * plot.width()
+            painter.setPen(QPen(QColor("#7f8fa4"), 1, Qt.PenStyle.DashLine))
+            painter.drawLine(int(x), plot.top(), int(x), plot.bottom())
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(QColor("#ffffff")))
+            painter.drawEllipse(int(x) - 3, int(y_of(value)) - 3, 6, 6)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            change = (value - start) / start * 100 if start else 0.0
+            self._draw_readout(
+                painter,
+                plot,
+                [
+                    _short_stamp(self._stamps[index]),
+                    f"EQUITY {_compact_axis_money(value)}",
+                    f"CHANGE {change:+.2f}%",
+                ],
+            )
 
 
-class DrawdownView(_ChartView):
-    """Drawdown area chart."""
+def _drawdown_profile(values: list[float]) -> tuple[float, int, bool]:
+    """(max drawdown %, longest underwater run in points, recovered?).
+
+    Derived from the engine's existing per-point ``drawdown_pct`` series —
+    no new metric formula, only a reading of the stored curve.
+    """
+    longest = current = 0
+    for value in values:
+        if value > 0:
+            current += 1
+            longest = max(longest, current)
+        else:
+            current = 0
+    return max(values, default=0.0), longest, (not values or values[-1] <= 0)
+
+
+class DrawdownView(_HoverChart):
+    """Drawdown area chart with max/duration/recovery annotations (§20)."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setMinimumHeight(240)
+        self._draws: list[float] = []
+        self._stamps: list[str] = []
+
+    def set_result(self, result: StrategyResult | None) -> None:
+        super().set_result(result)
+        curve = result.equity_curve if result is not None else ()
+        self._draws = [float(p.drawdown_pct) for p in curve]
+        self._stamps = [str(p.timestamp) for p in curve]
+        self.update()
 
     def paintEvent(self, _event) -> None:  # type: ignore[no-untyped-def]  # noqa: N802
         painter = QPainter(self)
         painter.fillRect(self.rect(), _CHART_BG)
-        if self._result is None or not self._result.equity_curve:
+        if self._result is None or len(self._draws) < 2:
             painter.setPen(_TEXT)
+            painter.setFont(QFont("Segoe UI", 9))
             painter.drawText(
-                self.rect(), Qt.AlignmentFlag.AlignCenter, "No drawdown data — run a backtest"
+                self.rect(),
+                Qt.AlignmentFlag.AlignCenter,
+                "NO DRAWDOWN DATA\nRun a backtest to see the risk profile.",
             )
+            self._plot = None
             return
-        curve = self._result.equity_curve
-        pad_l, pad_r, pad_t, pad_b = 48, 12, 8, 18
-        plot = self.rect().adjusted(pad_l, pad_t, -pad_r, -pad_b)
-        draws = decimate_envelope([p.drawdown_pct for p in curve], max(64, plot.width() * 2))
-        max_dd = max(draws, default=1.0) or 1.0
-        painter.setPen(QPen(_GRID, 1))
-        for i in range(5):
-            y = plot.top() + plot.height() * i / 4
-            painter.drawLine(plot.left(), int(y), plot.right(), int(y))
+        plot = self.rect().adjusted(_PAD_L, _PAD_T + 14, _PAD_R, _PAD_B)
+        if plot.width() <= 0 or plot.height() <= 0:
+            self._plot = None
+            return
+        self._plot = plot
+        draws = self._draws
+        max_dd, longest, recovered = _drawdown_profile(draws)
+        ceiling = max(max_dd, 1e-9)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        painter.setPen(QPen(_DD, 1.2))
-        painter.setBrush(QBrush(QColor(239, 83, 80, 40)))
+        # ── key drawdown facts, stated before the picture ──
+        painter.setFont(QFont("Segoe UI", 8))
+        painter.setPen(QColor("#9fb3c8"))
+        painter.drawText(
+            QRect(plot.left(), 2, plot.width(), 14),
+            Qt.AlignmentFlag.AlignLeft,
+            f"MAX DRAWDOWN  -{max_dd:.2f}%   ·   LONGEST UNDERWATER  {longest} bars"
+            f"   ·   {'RECOVERED' if recovered else 'NOT RECOVERED'}",
+        )
+        self._draw_axes(painter, plot, 0.0, ceiling)
+        self._draw_time_axis(painter, plot, self._stamps[0], self._stamps[-1])
+
+        def y_of(value: float) -> float:
+            return plot.top() + value / ceiling * plot.height()
+
+        # max drawdown reference line
+        y_max = y_of(max_dd)
+        painter.setPen(QPen(QColor("#7a2f36"), 1, Qt.PenStyle.DashLine))
+        painter.drawLine(plot.left(), int(y_max), plot.right(), int(y_max))
+
+        sampled = decimate_envelope(draws, max(64, plot.width() * 2))
         from PySide6.QtCore import QPointF as _QPointF
         from PySide6.QtGui import QPolygonF as _Poly
 
         pts = []
-        for i, dd in enumerate(draws):
-            x = plot.left() + i / max(1, len(draws) - 1) * plot.width()
-            y = plot.top() + dd / max_dd * plot.height()
-            pts.append(_QPointF(x, y))
-        poly_pts = pts + [_QPointF(pts[-1].x(), plot.top()), _QPointF(pts[0].x(), plot.top())]
-        painter.drawPolygon(_Poly(poly_pts))
-        # line on top
+        for i, value in enumerate(sampled):
+            x = plot.left() + i / max(1, len(sampled) - 1) * plot.width()
+            pts.append(_QPointF(x, y_of(value)))
+        painter.setPen(QPen(_DD, 1.2))
+        painter.setBrush(QBrush(QColor(239, 83, 80, 46)))
+        painter.drawPolygon(
+            _Poly(pts + [_QPointF(pts[-1].x(), plot.top()), _QPointF(pts[0].x(), plot.top())])
+        )
         painter.setBrush(Qt.BrushStyle.NoBrush)
         for i in range(len(pts) - 1):
             painter.drawLine(pts[i], pts[i + 1])
+
+        index = self._hover_index(len(draws))
+        if index is not None:
+            value = draws[index]
+            x = plot.left() + index / max(1, len(draws) - 1) * plot.width()
+            painter.setPen(QPen(QColor("#7f8fa4"), 1, Qt.PenStyle.DashLine))
+            painter.drawLine(int(x), plot.top(), int(x), plot.bottom())
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(QColor("#ffffff")))
+            painter.drawEllipse(int(x) - 3, int(y_of(value)) - 3, 6, 6)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            self._draw_readout(
+                painter,
+                plot,
+                [
+                    _short_stamp(self._stamps[index]),
+                    f"DRAWDOWN -{value:.2f}%",
+                ],
+            )
 
 
 class DistributionView(_ChartView):

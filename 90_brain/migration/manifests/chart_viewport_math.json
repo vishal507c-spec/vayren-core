@@ -1,0 +1,40 @@
+{
+  "authority": "python",
+  "dependencies": [
+    "market.timeframe.aggregate"
+  ],
+  "evidence": [
+    "2026-09-11T19:07:04Z ADVANCE DISCOVERED->ANALYZED: inventory lists unit with sources and dependencies",
+    "2026-09-11T19:07:04Z ADVANCE ANALYZED->PLANNED: dependencies resolved from registry",
+    "2026-09-11T19:07:04Z ADVANCE PLANNED->BLOCKED: waiting on Rust target or dependencies",
+    "2026-09-12T07:18:48Z AGENT ANALYZE migratable=False: Qt/Slint-coupled implementation (marker 'PySide6') \u2014 pipeline excluded"
+  ],
+  "integration": {
+    "production_uses_rust": false,
+    "python_still_authoritative": true,
+    "status": "INCONCLUSIVE"
+  },
+  "live_critical": false,
+  "migration_id": "vayren-chart.viewport.math-v1",
+  "parity": {
+    "cases": 0,
+    "failed": 0,
+    "passed": 0,
+    "status": "INCONCLUSIVE"
+  },
+  "removal": {
+    "status": "INCONCLUSIVE"
+  },
+  "shadow": {
+    "comparisons": 0,
+    "mismatches": 0,
+    "status": "INCONCLUSIVE"
+  },
+  "source": "04_chart/chart/models/chart_viewport.py",
+  "source_hash": "622e1074bb35008c296723c408b5737645d7edb615bee7ca71766dc383782a4b",
+  "state": "BLOCKED",
+  "target": "",
+  "target_hash": "none",
+  "unit": "chart.viewport.math",
+  "version": 1
+}

@@ -1,0 +1,52 @@
+{
+  "bridges": [
+    "01_core/core/native/__init__.py",
+    "01_core/core/native/loader.py",
+    "03_market/market/native_aggregate.py",
+    "03_market/market/timeframe/aggregate.py",
+    "06_backtest/backtest/engine/metrics.py",
+    "06_backtest/backtest/native_metrics.py",
+    "07_risk/risk/engine.py",
+    "07_risk/risk/native_checks.py",
+    "08_execution/execution/engine.py",
+    "08_execution/execution/models/order.py",
+    "08_execution/execution/models/order_state.py",
+    "08_execution/execution/native_order_state.py",
+    "scripts/build_rust.py",
+    "scripts/migration/agent/analyzer.py",
+    "scripts/migration/agent/pipeline.py",
+    "scripts/migration/agent/wiring.py",
+    "scripts/migration/change_gate.py",
+    "scripts/migration/fuzzing.py",
+    "scripts/migration/parity.py",
+    "scripts/migration/registry.py",
+    "scripts/migration/scanner.py",
+    "scripts/migration/shadow.py",
+    "scripts/migration/validator.py"
+  ],
+  "migration_claimed": [
+    "03_market/market/timeframe/aggregate.py",
+    "06_backtest/backtest/engine/metrics.py",
+    "08_execution/execution/models/order.py"
+  ],
+  "production_import_edges": 2311,
+  "python_authoritative": [
+    "chart.viewport.math",
+    "execution.session.lifecycle"
+  ],
+  "python_files": 587,
+  "retention_missing": [],
+  "retention_orphaned": [],
+  "rust_files": [
+    "rust/vayren-core/src/aggregate.rs",
+    "rust/vayren-core/src/lib.rs",
+    "rust/vayren-core/src/metrics.rs",
+    "rust/vayren-core/src/order_state.rs",
+    "rust/vayren-core/src/risk.rs",
+    "rust/vayren-core/src/stats.rs"
+  ],
+  "rust_owned_python": 209,
+  "rust_symbols": 53,
+  "rust_unused": [],
+  "unresolved_dependencies": []
+}

@@ -1,0 +1,305 @@
+{
+  "units": {
+    "backtest.metrics.drawdown": {
+      "allowed_paths": [
+        "rust/vayren-core/src/metrics.rs"
+      ],
+      "bridge": [
+        "06_backtest/backtest/native_metrics.py",
+        "06_backtest/backtest/engine/metrics.py"
+      ],
+      "canonical_language": "rust",
+      "canonical_path": "rust/vayren-core/src/metrics.rs",
+      "criticality": "standard",
+      "dependencies": [],
+      "domain": "BACKTEST",
+      "forbidden_paths": [
+        "06_backtest/backtest/engine/metrics.py"
+      ],
+      "migration_state": "RUST_CANONICAL",
+      "oracle": "",
+      "python_allowed": false,
+      "validation_requirements": [
+        "unit tests",
+        "parity where applicable",
+        "validators"
+      ]
+    },
+    "backtest.metrics.equity_curve": {
+      "allowed_paths": [
+        "rust/vayren-core/src/metrics.rs"
+      ],
+      "bridge": [
+        "06_backtest/backtest/native_metrics.py",
+        "06_backtest/backtest/engine/metrics.py"
+      ],
+      "canonical_language": "rust",
+      "canonical_path": "rust/vayren-core/src/metrics.rs",
+      "criticality": "standard",
+      "dependencies": [],
+      "domain": "BACKTEST",
+      "forbidden_paths": [
+        "06_backtest/backtest/engine/metrics.py"
+      ],
+      "migration_state": "RUST_CANONICAL",
+      "oracle": "",
+      "python_allowed": false,
+      "validation_requirements": [
+        "unit tests",
+        "parity where applicable",
+        "validators"
+      ]
+    },
+    "backtest.metrics.sharpe": {
+      "allowed_paths": [
+        "rust/vayren-core/src/metrics.rs"
+      ],
+      "bridge": [
+        "06_backtest/backtest/native_metrics.py",
+        "06_backtest/backtest/engine/metrics.py"
+      ],
+      "canonical_language": "rust",
+      "canonical_path": "rust/vayren-core/src/metrics.rs",
+      "criticality": "standard",
+      "dependencies": [
+        "backtest.metrics.equity_curve"
+      ],
+      "domain": "BACKTEST",
+      "forbidden_paths": [
+        "06_backtest/backtest/engine/metrics.py"
+      ],
+      "migration_state": "RUST_CANONICAL",
+      "oracle": "",
+      "python_allowed": false,
+      "validation_requirements": [
+        "unit tests",
+        "parity where applicable",
+        "validators"
+      ]
+    },
+    "chart.viewport.math": {
+      "allowed_paths": [],
+      "bridge": [],
+      "canonical_language": "rust",
+      "canonical_path": "",
+      "criticality": "standard",
+      "dependencies": [
+        "market.timeframe.aggregate"
+      ],
+      "domain": "PRESENTATION_MODEL",
+      "forbidden_paths": [
+        "04_chart/chart/models/chart_viewport.py"
+      ],
+      "migration_state": "BLOCKED",
+      "oracle": "",
+      "python_allowed": false,
+      "validation_requirements": [
+        "unit tests",
+        "parity where applicable",
+        "validators"
+      ]
+    },
+    "core.event_bus.dispatch": {
+      "allowed_paths": [],
+      "bridge": [],
+      "canonical_language": "rust",
+      "canonical_path": "",
+      "criticality": "standard",
+      "dependencies": [],
+      "domain": "CORE",
+      "forbidden_paths": [
+        "01_core/core/event_bus/event_bus.py"
+      ],
+      "migration_state": "BLOCKED",
+      "oracle": "",
+      "python_allowed": false,
+      "validation_requirements": [
+        "unit tests",
+        "parity where applicable",
+        "validators"
+      ]
+    },
+    "data.download.orchestration": {
+      "allowed_paths": [],
+      "bridge": [],
+      "canonical_language": "rust",
+      "canonical_path": "",
+      "criticality": "standard",
+      "dependencies": [],
+      "domain": "DATA_PROCESSING",
+      "forbidden_paths": [
+        "02_data/data/downloader/engine.py"
+      ],
+      "migration_state": "BLOCKED",
+      "oracle": "",
+      "python_allowed": false,
+      "validation_requirements": [
+        "unit tests",
+        "parity where applicable",
+        "validators"
+      ]
+    },
+    "execution.order_lifecycle": {
+      "allowed_paths": [
+        "rust/vayren-core/src/order_state.rs"
+      ],
+      "bridge": [
+        "08_execution/execution/native_order_state.py",
+        "08_execution/execution/models/order.py"
+      ],
+      "canonical_language": "rust",
+      "canonical_path": "rust/vayren-core/src/order_state.rs",
+      "criticality": "live-critical",
+      "dependencies": [],
+      "domain": "EXECUTION",
+      "forbidden_paths": [
+        "08_execution/execution/models/order.py"
+      ],
+      "migration_state": "RUST_CANONICAL",
+      "oracle": "",
+      "python_allowed": false,
+      "validation_requirements": [
+        "unit tests",
+        "golden tests",
+        "differential parity",
+        "failure-path tests",
+        "regression tests",
+        "shadow validation",
+        "explicit promotion"
+      ]
+    },
+    "execution.session.lifecycle": {
+      "allowed_paths": [
+        "rust/vayren-core/src/session.rs"
+      ],
+      "bridge": [],
+      "canonical_language": "rust",
+      "canonical_path": "rust/vayren-core/src/session.rs",
+      "criticality": "live-critical",
+      "dependencies": [
+        "execution.order_lifecycle",
+        "risk.engine.evaluate"
+      ],
+      "domain": "EXECUTION",
+      "forbidden_paths": [
+        "08_execution/execution/runtime/session.py"
+      ],
+      "migration_state": "BLOCKED",
+      "oracle": "",
+      "python_allowed": false,
+      "validation_requirements": [
+        "unit tests",
+        "golden tests",
+        "differential parity",
+        "failure-path tests",
+        "regression tests",
+        "shadow validation",
+        "explicit promotion"
+      ]
+    },
+    "market.storage.sqlite": {
+      "allowed_paths": [
+        "rust/vayren-core/src/market_storage.rs"
+      ],
+      "bridge": [],
+      "canonical_language": "rust",
+      "canonical_path": "rust/vayren-core/src/market_storage.rs",
+      "criticality": "standard",
+      "dependencies": [],
+      "domain": "MARKET_DATA",
+      "forbidden_paths": [
+        "03_market/market/database/sqlite.py"
+      ],
+      "migration_state": "BLOCKED",
+      "oracle": "",
+      "python_allowed": false,
+      "validation_requirements": [
+        "unit tests",
+        "parity where applicable",
+        "validators"
+      ]
+    },
+    "market.timeframe.aggregate": {
+      "allowed_paths": [
+        "rust/vayren-core/src/aggregate.rs"
+      ],
+      "bridge": [
+        "03_market/market/native_aggregate.py",
+        "03_market/market/timeframe/aggregate.py"
+      ],
+      "canonical_language": "rust",
+      "canonical_path": "rust/vayren-core/src/aggregate.rs",
+      "criticality": "standard",
+      "dependencies": [
+        "market.timeframe.mode"
+      ],
+      "domain": "MARKET_DATA",
+      "forbidden_paths": [
+        "03_market/market/timeframe/aggregate.py"
+      ],
+      "migration_state": "RUST_CANONICAL",
+      "oracle": "",
+      "python_allowed": false,
+      "validation_requirements": [
+        "unit tests",
+        "parity where applicable",
+        "validators"
+      ]
+    },
+    "market.timeframe.mode": {
+      "allowed_paths": [
+        "rust/vayren-core/src/stats.rs"
+      ],
+      "bridge": [
+        "03_market/market/native_aggregate.py",
+        "03_market/market/timeframe/aggregate.py"
+      ],
+      "canonical_language": "rust",
+      "canonical_path": "rust/vayren-core/src/stats.rs",
+      "criticality": "standard",
+      "dependencies": [],
+      "domain": "MARKET_DATA",
+      "forbidden_paths": [
+        "03_market/market/timeframe/aggregate.py"
+      ],
+      "migration_state": "RUST_CANONICAL",
+      "oracle": "",
+      "python_allowed": false,
+      "validation_requirements": [
+        "unit tests",
+        "parity where applicable",
+        "validators"
+      ]
+    },
+    "risk.engine.evaluate": {
+      "allowed_paths": [
+        "rust/vayren-core/src/risk.rs"
+      ],
+      "bridge": [
+        "07_risk/risk/native_checks.py",
+        "07_risk/risk/engine.py"
+      ],
+      "canonical_language": "rust",
+      "canonical_path": "rust/vayren-core/src/risk.rs",
+      "criticality": "live-critical",
+      "dependencies": [],
+      "domain": "RISK",
+      "forbidden_paths": [
+        "07_risk/risk/engine.py"
+      ],
+      "migration_state": "RUST_CANONICAL",
+      "oracle": "scripts/migration/agent/oracles/risk_engine_oracle_v1.py",
+      "python_allowed": false,
+      "validation_requirements": [
+        "unit tests",
+        "golden tests",
+        "differential parity",
+        "failure-path tests",
+        "regression tests",
+        "shadow validation",
+        "explicit promotion"
+      ]
+    }
+  },
+  "version": 1
+}

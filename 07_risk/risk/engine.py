@@ -9,6 +9,22 @@ from __future__ import annotations
 
 from risk.kill_switch import KillSwitch
 from risk.models import RiskCheck, RiskDecision, RiskPolicy, RiskRequest
+from risk.native_checks import (
+    BIT_BROKER_HEALTH,
+    BIT_CAPITAL,
+    BIT_COOLDOWN,
+    BIT_DAILY_LOSS,
+    BIT_EXPOSURE,
+    BIT_FRESH_DATA,
+    BIT_NOTIONAL,
+    BIT_ORDER_QTY,
+    BIT_ORDER_RATE,
+    BIT_POSITION,
+    BIT_SANITY,
+    BIT_SPREAD,
+    BIT_STRATEGY_LOSS,
+)
+from risk.native_checks import check_mask_for as _risk_check_mask_for
 from risk.session import SessionRules, clock_sane, within_session
 
 
@@ -53,6 +69,7 @@ class RiskEngine:
         policy = self._policy
         checks: list[RiskCheck] = []
         ok = True
+        _risk_mask = _risk_check_mask_for(policy, request)
 
         ok &= self._check(
             checks,
@@ -63,7 +80,7 @@ class RiskEngine:
         ok &= self._check(
             checks,
             "broker_health",
-            bool(request.broker_healthy),
+            bool(_risk_mask & BIT_BROKER_HEALTH),
             "" if request.broker_healthy else "broker unhealthy",
         )
         ok &= self._check(
@@ -110,7 +127,7 @@ class RiskEngine:
             ok &= self._check(
                 checks,
                 "fresh_data",
-                fresh,
+                bool(_risk_mask & BIT_FRESH_DATA),
                 "" if fresh else f"stale market data: age={request.data_age_seconds}",
             )
         else:
@@ -118,30 +135,43 @@ class RiskEngine:
         if policy.spread_limit_pct is not None:
             tight = request.spread_pct is not None and request.spread_pct <= policy.spread_limit_pct
             ok &= self._check(
-                checks, "spread", tight, "" if tight else f"spread too wide: {request.spread_pct}"
+                checks,
+                "spread",
+                bool(_risk_mask & BIT_SPREAD),
+                "" if tight else f"spread too wide: {request.spread_pct}",
             )
         else:
             self._check(checks, "spread", True, "spread gate disabled")
         if policy.cooldown_seconds > 0 and request.last_order_epoch is not None:
             cooled = (request.now_epoch - request.last_order_epoch) >= policy.cooldown_seconds
-            ok &= self._check(checks, "cooldown", cooled, "" if cooled else "in cooldown")
+            ok &= self._check(
+                checks,
+                "cooldown",
+                bool(_risk_mask & BIT_COOLDOWN),
+                "" if cooled else "in cooldown",
+            )
         else:
             self._check(checks, "cooldown", True)
         if policy.max_orders_per_day is not None:
             under = request.orders_today < policy.max_orders_per_day
             ok &= self._check(
-                checks, "order_rate", under, "" if under else "max orders per day reached"
+                checks,
+                "order_rate",
+                bool(_risk_mask & BIT_ORDER_RATE),
+                "" if under else "max orders per day reached",
             )
         else:
             self._check(checks, "order_rate", True)
-        if request.quantity <= 0 or request.price <= 0:
-            ok &= self._check(checks, "sanity", False, "non-positive quantity or price")
-        else:
-            self._check(checks, "sanity", True)
+        ok &= self._check(
+            checks,
+            "sanity",
+            bool(_risk_mask & BIT_SANITY),
+            "" if bool(_risk_mask & BIT_SANITY) else "non-positive quantity or price",
+        )
         ok &= self._check(
             checks,
             "order_qty",
-            request.quantity <= policy.max_order_qty,
+            bool(_risk_mask & BIT_ORDER_QTY),
             "" if request.quantity <= policy.max_order_qty else "order quantity exceeds max",
         )
         notional = request.quantity * request.price
@@ -149,7 +179,7 @@ class RiskEngine:
             ok &= self._check(
                 checks,
                 "notional",
-                notional <= policy.max_notional,
+                bool(_risk_mask & BIT_NOTIONAL),
                 "" if notional <= policy.max_notional else "notional exceeds max",
             )
         else:
@@ -159,7 +189,7 @@ class RiskEngine:
         ok &= self._check(
             checks,
             "position",
-            abs(new_position) <= policy.max_position_qty,
+            bool(_risk_mask & BIT_POSITION),
             "" if abs(new_position) <= policy.max_position_qty else "position limit exceeded",
         )
         if policy.max_exposure_pct is not None and request.equity > 0:
@@ -167,7 +197,7 @@ class RiskEngine:
             ok &= self._check(
                 checks,
                 "exposure",
-                exposure <= policy.max_exposure_pct,
+                bool(_risk_mask & BIT_EXPOSURE),
                 "" if exposure <= policy.max_exposure_pct else "exposure limit exceeded",
             )
         else:
@@ -176,7 +206,7 @@ class RiskEngine:
             ok &= self._check(
                 checks,
                 "daily_loss",
-                request.day_pnl >= -abs(policy.daily_loss_limit),
+                bool(_risk_mask & BIT_DAILY_LOSS),
                 ""
                 if request.day_pnl >= -abs(policy.daily_loss_limit)
                 else "daily loss limit breached",
@@ -187,17 +217,19 @@ class RiskEngine:
             ok &= self._check(
                 checks,
                 "strategy_loss",
-                request.strategy_day_pnl >= -abs(policy.strategy_loss_limit),
+                bool(_risk_mask & BIT_STRATEGY_LOSS),
                 ""
                 if request.strategy_day_pnl >= -abs(policy.strategy_loss_limit)
                 else "strategy loss limit breached",
             )
         else:
             self._check(checks, "strategy_loss", True)
-        if request.available_capital <= 0 and request.side == "BUY":
-            ok &= self._check(checks, "capital", False, "no available capital")
-        else:
-            self._check(checks, "capital", True)
+        ok &= self._check(
+            checks,
+            "capital",
+            bool(_risk_mask & BIT_CAPITAL),
+            "" if bool(_risk_mask & BIT_CAPITAL) else "no available capital",
+        )
 
         reasons = tuple(check.detail for check in checks if not check.passed and check.detail)
         if ok:

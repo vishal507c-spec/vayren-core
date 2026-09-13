@@ -4,7 +4,7 @@
 
 [project]
 name = "vayren-core"
-version = "1.14.0"
+version = "1.15.0"
 description = "Event-driven desktop charting platform"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -48,7 +48,9 @@ line-length = 100
 indent-width = 4
 # 90_brain = docs; 99_archive = legacy reference snapshot (not shipped,
 # not tested, not validated — every other tool already ignores it).
-extend-exclude = ["90_brain", "99_archive"]
+# scripts/migration/agent/oracles = frozen verification oracles (byte-stable
+# evidence; never linted/formatted/edited — parity pins their semantics).
+extend-exclude = ["90_brain", "99_archive", "scripts/migration/agent/oracles"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "ARG", "C4", "T10"]
@@ -88,6 +90,7 @@ include = [
     "09_broker/broker",
     "scripts",
 ]
+exclude = ["scripts/migration/agent/oracles"]
 extraPaths = [
     "02_data",
     "scripts/forensics",
@@ -110,6 +113,8 @@ testpaths = [
     "08_execution/execution/tests",
     "09_broker/broker/tests",
     "scripts/forensics/tests",
+    "scripts/migration/tests",
+    "scripts/migration/agent/tests",
     "scripts/tests",
 ]
 addopts = "-v --tb=short"

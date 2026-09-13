@@ -18,8 +18,8 @@ from PySide6.QtWidgets import (
 
 from app.ui import lab_theme as t
 
-_BUY = "#00C7B7"
-_SELL = "#F05A67"
+_BUY = t.ACCENT
+_SELL = t.NEG
 
 
 def _inr(value: float) -> str:
@@ -70,23 +70,29 @@ class TradeContextPanel(QWidget):
         self._strip.setStyleSheet(f"background: {t.BG0}; border-bottom: 1px solid {t.BORDER};")
         self._strip.setFixedHeight(28)
         s_lay = QHBoxLayout(self._strip)
-        s_lay.setContentsMargins(10, 2, 10, 2)
-        s_lay.setSpacing(8)
+        s_lay.setContentsMargins(t.SP_LG, t.SP_XS, t.SP_LG, t.SP_XS)
+        s_lay.setSpacing(t.SP_MD)
 
         self._trade_label = QLabel("", self._strip)
-        self._trade_label.setStyleSheet(f"color: {t.TEXT}; font-size: 11px; font-weight: 700;")
+        self._trade_label.setStyleSheet(
+            f"color: {t.TEXT}; font-size: {t.FS_LABEL}px; font-weight: 700;"
+        )
 
         self._symbol_label = QLabel("", self._strip)
-        self._symbol_label.setStyleSheet(f"color: {t.TEXT2}; font-size: 11px; font-weight: 600;")
+        self._symbol_label.setStyleSheet(
+            f"color: {t.TEXT2}; font-size: {t.FS_LABEL}px; font-weight: 600;"
+        )
 
         self._time_label = QLabel("", self._strip)
-        self._time_label.setStyleSheet(f"color: {t.MUTED}; font-size: 10px;")
+        self._time_label.setStyleSheet(f"color: {t.MUTED}; font-size: {t.FS_LABEL}px;")
 
         self._pnl_label = QLabel("", self._strip)
-        self._pnl_label.setStyleSheet(f"color: {t.TEXT}; font-size: 11px; font-weight: 700;")
+        self._pnl_label.setStyleSheet(
+            f"color: {t.TEXT}; font-size: {t.FS_LABEL}px; font-weight: 700;"
+        )
 
         self._r_label = QLabel("", self._strip)
-        self._r_label.setStyleSheet(f"color: {t.MUTED}; font-size: 10px;")
+        self._r_label.setStyleSheet(f"color: {t.MUTED}; font-size: {t.FS_LABEL}px;")
 
         # subtle prev/next
         self._prev_btn = QPushButton("← PREV", self._strip)
@@ -125,16 +131,16 @@ class TradeContextPanel(QWidget):
             f"QWidget#TradeDetail {{ background: {t.BG1}; border-bottom: 1px solid {t.BORDER}; }}"
         )
         d_lay = QHBoxLayout(self._detail)
-        d_lay.setContentsMargins(10, 4, 10, 4)
-        d_lay.setSpacing(14)
+        d_lay.setContentsMargins(t.SP_LG, t.SP_SM, t.SP_LG, t.SP_SM)
+        d_lay.setSpacing(t.SP_LG)
         self._entry_label = QLabel("", self._detail)
-        self._entry_label.setStyleSheet(f"color: {t.TEXT2}; font-size: 10px;")
+        self._entry_label.setStyleSheet(f"color: {t.TEXT2}; font-size: {t.FS_LABEL}px;")
         self._entry_label.setTextFormat(Qt.TextFormat.RichText)
         self._exit_label = QLabel("", self._detail)
-        self._exit_label.setStyleSheet(f"color: {t.TEXT2}; font-size: 10px;")
+        self._exit_label.setStyleSheet(f"color: {t.TEXT2}; font-size: {t.FS_LABEL}px;")
         self._exit_label.setTextFormat(Qt.TextFormat.RichText)
         self._meta_label = QLabel("", self._detail)
-        self._meta_label.setStyleSheet(f"color: {t.MUTED}; font-size: 10px;")
+        self._meta_label.setStyleSheet(f"color: {t.MUTED}; font-size: {t.FS_LABEL}px;")
         self._meta_label.setTextFormat(Qt.TextFormat.RichText)
 
         sep1 = QFrame(self._detail)
@@ -165,7 +171,9 @@ class TradeContextPanel(QWidget):
         self._detail.setVisible(False)
         self._strip.setVisible(True)
         self._trade_label.setText(message)
-        self._trade_label.setStyleSheet(f"color: {t.MUTED}; font-size: 10px; font-style: italic;")
+        self._trade_label.setStyleSheet(
+            f"color: {t.MUTED}; font-size: {t.FS_LABEL}px; font-style: italic;"
+        )
         self._symbol_label.setText("")
         self._time_label.setText("")
         self._pnl_label.setText("")
@@ -180,7 +188,7 @@ class TradeContextPanel(QWidget):
         self._detail.setVisible(True)
         self._strip.setVisible(True)
         self._trade_label.setText(message)
-        self._trade_label.setStyleSheet(f"color: {t.WARN}; font-size: 10px;")
+        self._trade_label.setStyleSheet(f"color: {t.WARN}; font-size: {t.FS_LABEL}px;")
         self._symbol_label.setText("")
         self._time_label.setText("")
         self._pnl_label.setText("")
@@ -221,16 +229,20 @@ class TradeContextPanel(QWidget):
         side_color = _BUY if is_long else _SELL
 
         self._trade_label.setText(f"TRADE #{trade_index}")
-        self._trade_label.setStyleSheet(f"color: {t.TEXT}; font-size: 11px; font-weight: 800;")
+        self._trade_label.setStyleSheet(
+            f"color: {t.TEXT}; font-size: {t.FS_LABEL}px; font-weight: 800;"
+        )
         self._symbol_label.setText(f"{symbol} · {side_tag}")
-        self._symbol_label.setStyleSheet(f"color: {side_color}; font-size: 11px; font-weight: 700;")
+        self._symbol_label.setStyleSheet(
+            f"color: {side_color}; font-size: {t.FS_LABEL}px; font-weight: 700;"
+        )
         # header time = entry date
         try:
             head_time = entry_time[:16].replace("T", " ")
         except Exception:
             head_time = entry_time[:16]
         self._time_label.setText(f"{timeframe} · {head_time}")
-        self._time_label.setStyleSheet(f"color: {t.MUTED}; font-size: 10px;")
+        self._time_label.setStyleSheet(f"color: {t.MUTED}; font-size: {t.FS_LABEL}px;")
 
         pnl_color = t.POS if pnl >= 0 else t.NEG
         sign = "+" if pnl >= 0 else ""
@@ -244,12 +256,16 @@ class TradeContextPanel(QWidget):
             self._pnl_label.setText(f"+₹{_inr(pnl)}")
         else:
             self._pnl_label.setText(f"₹{_inr(pnl)}")
-        self._pnl_label.setStyleSheet(f"color: {pnl_color}; font-size: 11px; font-weight: 700;")
+        self._pnl_label.setStyleSheet(
+            f"color: {pnl_color}; font-size: {t.FS_LABEL}px; font-weight: 700;"
+        )
 
         if r_multiple is not None:
             r_color = t.POS if r_multiple >= 0 else t.NEG
             self._r_label.setText(f"{r_multiple:+.2f}R")
-            self._r_label.setStyleSheet(f"color: {r_color}; font-size: 10px; font-weight: 700;")
+            self._r_label.setStyleSheet(
+                f"color: {r_color}; font-size: {t.FS_LABEL}px; font-weight: 700;"
+            )
             self._r_label.setVisible(True)
         else:
             self._r_label.setVisible(False)

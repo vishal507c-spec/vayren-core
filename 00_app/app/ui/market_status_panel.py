@@ -3,11 +3,13 @@
 
 from PySide6.QtWidgets import QFrame, QGridLayout, QLabel, QVBoxLayout, QWidget
 
-_SECTION_STYLE = "color: palette(placeholder-text); font-size: 10px; font-weight: 700;"
-_KEY_STYLE = "color: palette(placeholder-text); font-size: 11px;"
-_VALUE_STYLE = "color: palette(text); font-size: 11px; font-weight: 600;"
-_VALUE_MUTED = "color: palette(placeholder-text); font-size: 11px;"
-_SEPARATOR = "background: palette(midlight); border: none;"
+from app.ui import lab_theme as t
+
+_SECTION_STYLE = t.label()
+_KEY_STYLE = t.body(size=t.FS_LABEL, color=t.TEXT2)
+_VALUE_STYLE = t.body(size=t.FS_LABEL, weight=600)
+_VALUE_MUTED = t.body(size=t.FS_LABEL, color=t.TEXT2)
+_SEPARATOR = f"background: {t.BORDER_SOFT}; border: none;"
 
 
 def _separator(parent: QWidget) -> QFrame:
@@ -26,8 +28,8 @@ class MarketStatusPanel(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 4, 8, 4)
-        layout.setSpacing(4)
+        layout.setContentsMargins(t.SP_MD, t.SP_SM, t.SP_MD, t.SP_SM)
+        layout.setSpacing(t.SP_SM)
 
         # ── Market Regime (explicit unavailable until an engine supplies values) ──
         regime_title = QLabel("MARKET REGIME", self)
@@ -35,8 +37,8 @@ class MarketStatusPanel(QWidget):
         layout.addWidget(regime_title)
         self._regime_grid = QGridLayout()
         self._regime_grid.setContentsMargins(0, 0, 0, 0)
-        self._regime_grid.setHorizontalSpacing(8)
-        self._regime_grid.setVerticalSpacing(2)
+        self._regime_grid.setHorizontalSpacing(t.SP_MD)
+        self._regime_grid.setVerticalSpacing(t.SP_XS)
         self._regime_labels: dict[str, QLabel] = {}
         for row, key in enumerate(("Current regime", "Trend strength", "Volatility", "Momentum")):
             kl = QLabel(key, self)
@@ -56,8 +58,8 @@ class MarketStatusPanel(QWidget):
         layout.addWidget(status_title)
         self._status_grid = QGridLayout()
         self._status_grid.setContentsMargins(0, 0, 0, 0)
-        self._status_grid.setHorizontalSpacing(8)
-        self._status_grid.setVerticalSpacing(2)
+        self._status_grid.setHorizontalSpacing(t.SP_MD)
+        self._status_grid.setVerticalSpacing(t.SP_XS)
         self._status_labels: dict[str, QLabel] = {}
         for row, key in enumerate(("Data provider", "Latency", "Last update", "Bars loaded")):
             kl = QLabel(key, self)

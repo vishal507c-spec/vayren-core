@@ -9,12 +9,14 @@ from pathlib import Path
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QGridLayout, QLabel, QVBoxLayout, QWidget
 
-_LABEL_STYLE = "color: palette(placeholder-text); font-size: 10px; font-weight: 700;"
-_KEY_STYLE = "color: palette(placeholder-text); font-size: 11px;"
-_VALUE_OK = "color: #26a69a; font-size: 11px; font-weight: 600;"
-_VALUE_BAD = "color: #ef5350; font-size: 11px; font-weight: 600;"
-_VALUE_NEUTRAL = "color: palette(text); font-size: 11px; font-weight: 600;"
-_VALUE_MUTED = "color: palette(placeholder-text); font-size: 11px;"
+from app.ui import lab_theme as t
+
+_LABEL_STYLE = t.label()
+_KEY_STYLE = t.body(size=t.FS_LABEL, color=t.TEXT2)
+_VALUE_OK = t.body(size=t.FS_LABEL, color=t.POS, weight=600)
+_VALUE_BAD = t.body(size=t.FS_LABEL, color=t.NEG, weight=600)
+_VALUE_NEUTRAL = t.body(size=t.FS_LABEL, weight=600)
+_VALUE_MUTED = t.body(size=t.FS_LABEL, color=t.TEXT2)
 
 
 def _cpu_times() -> tuple[int, int, int] | None:
@@ -70,8 +72,8 @@ class SystemHealthPanel(QWidget):
         self._last_cpu_pct: str = "--"
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 4, 8, 4)
-        layout.setSpacing(4)
+        layout.setContentsMargins(t.SP_MD, t.SP_SM, t.SP_MD, t.SP_SM)
+        layout.setSpacing(t.SP_SM)
 
         caption = QLabel("SYSTEM HEALTH", self)
         caption.setStyleSheet(_LABEL_STYLE)
@@ -79,8 +81,8 @@ class SystemHealthPanel(QWidget):
 
         grid = QGridLayout()
         grid.setContentsMargins(0, 0, 0, 0)
-        grid.setHorizontalSpacing(8)
-        grid.setVerticalSpacing(2)
+        grid.setHorizontalSpacing(t.SP_MD)
+        grid.setVerticalSpacing(t.SP_XS)
 
         self._rows: dict[str, QLabel] = {}
         for row, key in enumerate(

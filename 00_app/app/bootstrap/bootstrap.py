@@ -654,6 +654,9 @@ class Bootstrap:
         brokers_workspace.login_requested.connect(
             lambda broker_id: broker_manager.start_login(broker_id)
         )
+        brokers_workspace.refresh_requested.connect(
+            lambda broker_id: broker_manager.submit_check(broker_id)
+        )
         brokers_workspace.disconnect_requested.connect(
             lambda broker_id: broker_manager.disconnect_broker(broker_id)
         )
@@ -665,8 +668,9 @@ class Bootstrap:
                 answer = QMessageBox.question(
                     brokers_workspace,
                     "Remove broker",
-                    f"Remove {broker_manager.display_name(broker_id)} configuration"
-                    " and stored session? Historical records are kept.",
+                    f"Remove {broker_manager.display_name(broker_id)}?\n\n"
+                    "This will remove the saved broker configuration from VAYREN."
+                    " Historical records are kept.",
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                     QMessageBox.StandardButton.No,
                 )
@@ -2388,11 +2392,20 @@ class Bootstrap:
 
             def _on_strategy_selected(name: str) -> None:
                 try:
-                    from strategy.language.storage import load_strategy
+                    from strategy.language.storage import load_strategy, load_strategy_record
 
                     code = load_strategy(name, _strategy_data_dir())
                     if code is not None:
-                        lab_workspace.open_strategy(name, code)
+                        try:
+                            rec = load_strategy_record(name, _strategy_data_dir())
+                            meta: dict[str, str] | None = (
+                                {"version": rec.version, "updated_at": rec.updated_at}
+                                if rec is not None
+                                else None
+                            )
+                        except Exception:  # noqa: BLE001
+                            meta = None
+                        lab_workspace.open_strategy(name, code, meta)
                         event_log.add_entry("INFO", f"Opened strategy: {name}")
                     else:
                         event_log.add_entry("WARN", f"Strategy not found: {name}")

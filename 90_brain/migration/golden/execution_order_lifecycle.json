@@ -1,0 +1,192 @@
+{
+  "cases": [
+    {
+      "from": 0,
+      "kind": "normal",
+      "to": 1
+    },
+    {
+      "from": 1,
+      "kind": "normal",
+      "to": 2
+    },
+    {
+      "from": 2,
+      "kind": "normal",
+      "to": 3
+    },
+    {
+      "from": 3,
+      "kind": "normal",
+      "to": 4
+    },
+    {
+      "from": 4,
+      "kind": "normal",
+      "to": 5
+    },
+    {
+      "from": 3,
+      "kind": "normal",
+      "to": 7
+    },
+    {
+      "from": 7,
+      "kind": "normal",
+      "to": 8
+    },
+    {
+      "from": 3,
+      "kind": "normal",
+      "to": 9
+    },
+    {
+      "from": 9,
+      "kind": "normal",
+      "to": 10
+    },
+    {
+      "from": 0,
+      "kind": "invalid",
+      "to": 5
+    },
+    {
+      "from": 5,
+      "kind": "invalid",
+      "to": 0
+    },
+    {
+      "from": 8,
+      "kind": "invalid",
+      "to": 5
+    },
+    {
+      "from": -5,
+      "kind": "invalid",
+      "to": 3
+    },
+    {
+      "from": 3,
+      "kind": "invalid",
+      "to": 99
+    },
+    {
+      "from": 12,
+      "kind": "invalid",
+      "to": 0
+    },
+    {
+      "from": 5,
+      "kind": "invalid",
+      "to": 12
+    },
+    {
+      "from": 0,
+      "kind": "boundary",
+      "to": 12
+    },
+    {
+      "from": 1,
+      "kind": "boundary",
+      "to": 12
+    },
+    {
+      "from": 2,
+      "kind": "boundary",
+      "to": 12
+    },
+    {
+      "from": 3,
+      "kind": "boundary",
+      "to": 12
+    },
+    {
+      "from": 4,
+      "kind": "boundary",
+      "to": 12
+    },
+    {
+      "from": 5,
+      "kind": "boundary",
+      "to": 12
+    },
+    {
+      "from": 6,
+      "kind": "boundary",
+      "to": 12
+    },
+    {
+      "from": 7,
+      "kind": "boundary",
+      "to": 12
+    },
+    {
+      "from": 12,
+      "kind": "boundary",
+      "to": 0
+    },
+    {
+      "from": 12,
+      "kind": "boundary",
+      "to": 1
+    },
+    {
+      "from": 12,
+      "kind": "boundary",
+      "to": 2
+    },
+    {
+      "from": 12,
+      "kind": "boundary",
+      "to": 3
+    },
+    {
+      "from": 12,
+      "kind": "boundary",
+      "to": 4
+    },
+    {
+      "from": 12,
+      "kind": "boundary",
+      "to": 5
+    },
+    {
+      "from": 12,
+      "kind": "boundary",
+      "to": 6
+    },
+    {
+      "from": 12,
+      "kind": "boundary",
+      "to": 7
+    },
+    {
+      "from": 12,
+      "kind": "boundary",
+      "to": 8
+    },
+    {
+      "from": 12,
+      "kind": "boundary",
+      "to": 9
+    },
+    {
+      "from": 12,
+      "kind": "boundary",
+      "to": 10
+    },
+    {
+      "from": 12,
+      "kind": "boundary",
+      "to": 11
+    },
+    {
+      "from": 12,
+      "kind": "boundary",
+      "to": 12
+    }
+  ],
+  "category": "lifecycle",
+  "unit": "execution.order_lifecycle",
+  "version": 1
+}

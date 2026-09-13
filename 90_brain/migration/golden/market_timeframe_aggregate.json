@@ -1,0 +1,91 @@
+{
+  "cases": [
+    {
+      "kind": "empty",
+      "rows": 0,
+      "session": 33300,
+      "step": 900,
+      "tf": 900
+    },
+    {
+      "kind": "normal",
+      "rows": 10,
+      "session": 33300,
+      "step": 900,
+      "tf": 900
+    },
+    {
+      "kind": "normal",
+      "rows": 10,
+      "session": 33300,
+      "step": 900,
+      "tf": 1800
+    },
+    {
+      "kind": "boundary",
+      "rows": 200,
+      "session": 33300,
+      "step": 900,
+      "tf": 86400
+    },
+    {
+      "kind": "boundary",
+      "rows": 200,
+      "session": 33300,
+      "step": 900,
+      "tf": 604800
+    },
+    {
+      "kind": "unusual",
+      "rows": 5,
+      "session": 0,
+      "step": 60,
+      "tf": 300
+    },
+    {
+      "kind": "normal",
+      "rows": 89,
+      "session": 33300,
+      "step": 300,
+      "tf": 7200
+    },
+    {
+      "kind": "normal",
+      "rows": 104,
+      "session": 33300,
+      "step": 60,
+      "tf": 1800
+    },
+    {
+      "kind": "normal",
+      "rows": 72,
+      "session": 0,
+      "step": 60,
+      "tf": 3600
+    },
+    {
+      "kind": "normal",
+      "rows": 77,
+      "session": 33300,
+      "step": 900,
+      "tf": 300
+    },
+    {
+      "kind": "normal",
+      "rows": 100,
+      "session": 33300,
+      "step": 300,
+      "tf": 1800
+    },
+    {
+      "kind": "normal",
+      "rows": 45,
+      "session": 33300,
+      "step": 300,
+      "tf": 7200
+    }
+  ],
+  "category": "aggregation",
+  "unit": "market.timeframe.aggregate",
+  "version": 1
+}

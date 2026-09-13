@@ -3,6 +3,8 @@
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QButtonGroup, QHBoxLayout, QLabel, QPushButton, QWidget
 
+from app.ui import lab_theme as t
+
 _SECTIONS = ("MARKET", "STRATEGY LAB", "RESEARCH", "PORTFOLIO", "LIVE", "SYSTEM")
 
 _BAR_STYLE = """
@@ -11,7 +13,7 @@ TopNavBar {
     border-bottom: 1px solid palette(mid);
 }
 TopNavBar QLabel#brand {
-    font-size: 13px;
+    font-size: __FS_TABLE__px;
     font-weight: 800;
     letter-spacing: 1px;
     color: palette(highlight);
@@ -19,8 +21,8 @@ TopNavBar QLabel#brand {
 TopNavBar QPushButton {
     border: none;
     border-radius: 3px;
-    padding: 4px 10px;
-    font-size: 11px;
+    padding: __PAD_Y__px __PAD_X__px;
+    font-size: __FS_LABEL__px;
     font-weight: 600;
     letter-spacing: 0.3px;
     background: transparent;
@@ -31,15 +33,18 @@ TopNavBar QPushButton:hover {
 }
 TopNavBar QPushButton:checked {
     background: transparent;
-    color: #E6EDF3;
-    border-bottom: 2px solid #00C7B7;
+    border-bottom: 2px solid __ACCENT__;
     border-radius: 0;
     padding-bottom: 2px;
 }
 TopNavBar QPushButton:disabled {
     color: palette(placeholder-text);
 }
-"""
+""".replace("__ACCENT__", t.ACCENT, 1)  # tokens injected, never literals
+_BAR_STYLE = _BAR_STYLE.replace("__FS_TABLE__", str(t.FS_TABLE), 1)
+_BAR_STYLE = _BAR_STYLE.replace("__FS_LABEL__", str(t.FS_LABEL), 1)
+_BAR_STYLE = _BAR_STYLE.replace("__PAD_Y__", str(t.SP_SM), 1)
+_BAR_STYLE = _BAR_STYLE.replace("__PAD_X__", str(t.SP_LG), 1)
 
 
 class TopNavBar(QWidget):
@@ -55,17 +60,17 @@ class TopNavBar(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("TopNavBar")
-        self.setFixedHeight(34)
+        self.setFixedHeight(t.H_CONTEXT)
         self.setStyleSheet(_BAR_STYLE)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 2, 10, 2)
-        layout.setSpacing(4)
+        layout.setContentsMargins(t.SP_LG, t.SP_XS, t.SP_LG, t.SP_XS)
+        layout.setSpacing(t.SP_SM)
 
         brand = QLabel("VAYREN", self)
         brand.setObjectName("brand")
         layout.addWidget(brand)
-        layout.addSpacing(16)
+        layout.addSpacing(t.SP_XL)
 
         self._group = QButtonGroup(self)
         self._group.setExclusive(True)

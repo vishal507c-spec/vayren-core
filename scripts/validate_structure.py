@@ -76,7 +76,6 @@ DOMAIN_STRUCTURE: dict[str, list[str]] = {
         "throttle.py",
         "lock.py",
         "models.py",
-        "logging_setup.py",
         "symbols.py",
         "reporter.py",
         "storage/__init__.py",
