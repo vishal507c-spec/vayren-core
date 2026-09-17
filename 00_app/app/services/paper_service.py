@@ -26,6 +26,8 @@ from strategy.language.compiler import compile_strategy
 from strategy.language.storage import (
     list_strategies,
     load_strategy_record,
+)
+from strategy.language.storage import (
     strategy_dir as resolve_strategy_dir,
 )
 from strategy.models.definition import StrategyDefinition

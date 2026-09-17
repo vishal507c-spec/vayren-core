@@ -433,7 +433,7 @@ most tests. M4 is the only user-visible change and is a design decision to confi
 `08_execution/execution/broker/factory.py` (delegation shim),
 `00_app/app/bootstrap/bootstrap.py` (registry wiring + selection), `00_app/app/__init__.py`
 (`--broker` flag), `00_app/app/services/paper_service.py` (selection-aware resolve),
-`00_app/app/ui/live_workspace.py` (selection display), `02_data/data/ui/status_view.py`
+`00_app/app/services/slint_live_host.py` (selection display, native Slint live viewport), `02_data/data/ui/status_view.py`
 (selection display), `02_data/data/settings.py` (derived provider field),
 `pyproject.toml` (testpaths/pyright/coverage/wheel: `09_broker`), `scripts/validate_imports.py`
 (chapter + SDK allowlist), `scripts/validate_structure.py` (new domain),

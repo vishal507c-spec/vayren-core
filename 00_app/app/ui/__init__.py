@@ -1,9 +1,8 @@
 """App UI chrome.
 
-Legacy Qt workspaces that production never constructs (Live/Portfolio —
-native Slint only) are intentionally NOT re-exported here: their modules
-remain importable for their direct-widget tests, but no production import
-edge may reference them.
+Removed legacy Qt workspaces (Live/Portfolio/Brokers — native Slint only):
+these were never constructed in production and have been deleted along with
+their direct-widget tests. Only the panels below remain as Qt chrome.
 """
 
 from app.ui.event_log_panel import EventLogPanel

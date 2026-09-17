@@ -2,7 +2,7 @@
 
 PORTFOLIO is a visible nav item owned by the native Rust+Slint view
 (constitution §3): clicking it shows the in-window Slint viewport and never
-mounts the legacy Qt `portfolio_workspace.py` surface.
+mounts a legacy Qt portfolio surface (that workspace was removed).
 """
 
 from chart.widgets.candle_chart_widget import CandleChartWidget
@@ -15,8 +15,6 @@ from PySide6.QtWidgets import QWidget
 
 from app.services.slint_live_host import SlintLiveHost
 from app.services.slint_portfolio_host import SlintPortfolioHost
-from app.ui.live_workspace import LiveWorkspace
-from app.ui.portfolio_workspace import PortfolioWorkspace
 from app.ui.top_nav_bar import TopNavBar
 
 
@@ -46,7 +44,7 @@ def test_portfolio_nav_routes_to_slint_shell(qt_app) -> None:
 
 
 def test_qt_shell_mounts_no_portfolio_surface(qt_app) -> None:
-    """The Qt window stack must contain no PortfolioWorkspace (Slint only)."""
+    """The Qt window must expose no Qt Portfolio show entry (Slint only)."""
     assert qt_app is not None
     window = ChartWindow(
         CandleChartWidget(),
@@ -58,7 +56,6 @@ def test_qt_shell_mounts_no_portfolio_surface(qt_app) -> None:
         lab_workspace=QWidget(),
     )
     assert not hasattr(window, "show_portfolio")
-    assert window.findChildren(PortfolioWorkspace) == []
 
 
 def test_portfolio_route_shows_slint_host(qt_app) -> None:
@@ -77,7 +74,6 @@ def test_portfolio_route_shows_slint_host(qt_app) -> None:
         slint_portfolio_host=host,
     )
     assert hasattr(window, "show_slint_portfolio")
-    assert window.findChildren(PortfolioWorkspace) == []
     nav.portfolio_clicked.connect(window.show_slint_portfolio)
     nav._buttons["PORTFOLIO"].click()
     assert window._stack is not None
@@ -130,21 +126,6 @@ def test_live_nav_routes_to_slint_shell(qt_app) -> None:
     assert fired == ["LIVE"]
 
 
-def test_qt_shell_mounts_no_live_workspace(qt_app) -> None:
-    """The Qt window stack must contain no LiveWorkspace (Slint only)."""
-    assert qt_app is not None
-    window = ChartWindow(
-        CandleChartWidget(),
-        WatchlistWidget(),
-        TimeframeToolbar(),
-        ChartToolsToolbar(),
-        EventBus(),
-        nav=TopNavBar(),
-        lab_workspace=QWidget(),
-    )
-    assert window.findChildren(LiveWorkspace) == []
-
-
 def test_live_route_shows_slint_host(qt_app) -> None:
     """LIVE nav shows the Slint viewport inside the same window."""
     assert qt_app is not None
@@ -161,7 +142,6 @@ def test_live_route_shows_slint_host(qt_app) -> None:
         slint_live_host=host,
     )
     assert hasattr(window, "show_slint_live")
-    assert window.findChildren(LiveWorkspace) == []
     nav.live_clicked.connect(window.show_slint_live)
     nav._buttons["LIVE"].click()
     assert window._stack is not None
@@ -180,28 +160,10 @@ def test_system_nav_routes_to_slint_shell(qt_app) -> None:
     assert fired == ["SYSTEM"]
 
 
-def test_qt_shell_mounts_no_brokers_workspace(qt_app) -> None:
-    """The Qt window stack must contain no BrokersWorkspace (Slint only)."""
-    assert qt_app is not None
-    from app.ui.brokers_workspace import BrokersWorkspace
-
-    window = ChartWindow(
-        CandleChartWidget(),
-        WatchlistWidget(),
-        TimeframeToolbar(),
-        ChartToolsToolbar(),
-        EventBus(),
-        nav=TopNavBar(),
-        lab_workspace=QWidget(),
-    )
-    assert window.findChildren(BrokersWorkspace) == []
-
-
 def test_system_route_shows_slint_host(qt_app) -> None:
     """SYSTEM nav shows the Slint viewport inside the same window."""
     assert qt_app is not None
     from app.services.slint_system_host import SlintSystemHost
-    from app.ui.brokers_workspace import BrokersWorkspace
 
     nav = TopNavBar()
     host = SlintSystemHost(state_provider=lambda: {})
@@ -216,7 +178,6 @@ def test_system_route_shows_slint_host(qt_app) -> None:
         slint_system_host=host,
     )
     assert hasattr(window, "show_slint_system")
-    assert window.findChildren(BrokersWorkspace) == []
     nav.system_clicked.connect(window.show_slint_system)
     nav._buttons["SYSTEM"].click()
     assert window._stack is not None

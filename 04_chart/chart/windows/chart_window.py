@@ -70,9 +70,7 @@ class ChartWindow(QMainWindow):
         nav: QWidget | None = None,
         left_extra: QWidget | None = None,
         lab_workspace: QWidget | None = None,
-        live_workspace: QWidget | None = None,
         research_workspace: QWidget | None = None,
-        brokers_workspace: QWidget | None = None,
         slint_portfolio_host: QWidget | None = None,
         slint_live_host: QWidget | None = None,
         slint_lab_host: QWidget | None = None,
@@ -93,9 +91,7 @@ class ChartWindow(QMainWindow):
         self._nav = nav
         self._left_extra = left_extra
         self._lab_workspace = lab_workspace
-        self._live_workspace = live_workspace
         self._research_workspace = research_workspace
-        self._brokers_workspace = brokers_workspace
         self._slint_portfolio_host = slint_portfolio_host
         self._slint_live_host = slint_live_host
         self._slint_lab_host = slint_lab_host
@@ -183,9 +179,9 @@ class ChartWindow(QMainWindow):
                 bottom.setMaximumHeight(220)
             self._bottom = bottom
 
-            # stacked middle: market splitter vs lab/live/research/brokers, plus
-            # the in-window native Slint Portfolio viewport (appended last so
-            # existing indices never shift). The viewport draws Slint pixels
+            # stacked middle: market splitter vs lab/research, plus
+            # the in-window native Slint viewports (appended last so
+            # existing indices never shift). The viewports draw Slint pixels
             # only — no Qt Portfolio presentation lives here.
             if lab_workspace is not None:
                 self._stack = QStackedWidget(self)
@@ -196,23 +192,16 @@ class ChartWindow(QMainWindow):
                 self._stack.addWidget(
                     slint_lab_host if slint_lab_host is not None else lab_workspace
                 )
-                if live_workspace is not None:
-                    self._stack.addWidget(live_workspace)
                 if research_workspace is not None:
                     self._stack.addWidget(research_workspace)
-                if brokers_workspace is not None:
-                    self._stack.addWidget(brokers_workspace)
                 if slint_portfolio_host is not None:
                     self._stack.addWidget(slint_portfolio_host)
                 # In-window native Slint Live viewport (constitution §3):
                 # appended after Portfolio so existing indices never shift.
-                # The viewport draws Slint pixels only — the legacy Qt
-                # LiveWorkspace is no longer a production mount surface.
                 if slint_live_host is not None:
                     self._stack.addWidget(slint_live_host)
                 # In-window native Slint System viewport (constitution §3):
-                # appended last so existing indices never shift. The legacy
-                # Qt BrokersWorkspace is no longer a production mount.
+                # appended after Live so existing indices never shift.
                 if slint_system_host is not None:
                     self._stack.addWidget(slint_system_host)
                 # In-window native Slint Research viewport (constitution §3):
@@ -458,20 +447,6 @@ class ChartWindow(QMainWindow):
         if self._nav is not None and hasattr(self._nav, "set_active"):
             with contextlib.suppress(Exception):
                 self._nav.set_active("STRATEGY LAB")  # type: ignore[attr-defined]
-
-    def show_live(self) -> None:
-        """Switch to the LIVE execution workspace (index 2 when present)."""
-        self._lab_active = False
-        stack = getattr(self, "_stack", None)
-        live = getattr(self, "_live_workspace", None)
-        if stack is not None and live is not None:
-            for index in range(stack.count()):
-                if stack.widget(index) is live:
-                    stack.setCurrentIndex(index)
-                    break
-        if self._nav is not None and hasattr(self._nav, "set_active"):
-            with contextlib.suppress(Exception):
-                self._nav.set_active("LIVE")  # type: ignore[attr-defined]
 
     def _show_workspace(self, attr: str, section: str) -> None:
         """Switch to an injected workspace widget by attribute name."""

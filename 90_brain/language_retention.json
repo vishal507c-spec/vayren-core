@@ -74,28 +74,14 @@
    "migration_target": "rust/vayren-shell/",
    "migration_condition": "When Slint shell supports this component"
   },
-  "00_app/app/ui/live_workspace.py": {
+   "00_app/app/ui/market_status_panel.py": {
    "state": "TEMPORARILY_RETAINED",
    "domain": "NATIVE_UI",
    "reason": "Existing Qt UI surface retained until Slint migration covers it",
    "migration_target": "rust/vayren-shell/",
    "migration_condition": "When Slint shell supports this component"
   },
-  "00_app/app/ui/market_status_panel.py": {
-   "state": "TEMPORARILY_RETAINED",
-   "domain": "NATIVE_UI",
-   "reason": "Existing Qt UI surface retained until Slint migration covers it",
-   "migration_target": "rust/vayren-shell/",
-   "migration_condition": "When Slint shell supports this component"
-  },
-  "00_app/app/ui/portfolio_workspace.py": {
-   "state": "TEMPORARILY_RETAINED",
-   "domain": "NATIVE_UI",
-   "reason": "Existing Qt UI surface retained until Slint migration covers it",
-   "migration_target": "rust/vayren-shell/",
-   "migration_condition": "When Slint shell supports this component"
-  },
-  "00_app/app/ui/research_workspace.py": {
+   "00_app/app/ui/research_workspace.py": {
    "state": "TEMPORARILY_RETAINED",
    "domain": "NATIVE_UI",
    "reason": "Existing Qt UI surface retained until Slint migration covers it",
@@ -1308,13 +1294,13 @@
    "migration_target": "rust/vayren-core/src/execution/",
    "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
   },
-  "00_app/app/ui/brokers_workspace.py": {
-   "state": "TEMPORARILY_RETAINED",
-   "domain": "NATIVE_UI",
-   "reason": "Existing Qt UI surface retained until Slint migration covers it. New surfaces MUST be Rust+Slint in rust/vayren-shell. File role: orchestration glue (no migrated authority)",
-   "migration_target": "rust/vayren-shell/",
-   "migration_condition": "When the NATIVE_UI slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
-  },
+   "00_app/app/ui/brokers_workspace.py": {
+    "state": "MIGRATED",
+    "domain": "NATIVE_UI",
+    "reason": "Removed: legacy Qt brokers workspace was never constructed in production (native Slint system viewport is the production surface); deleted with its direct-widget tests.",
+    "migration_target": "rust/vayren-shell/",
+    "migration_condition": "MIGRATED (2026-09-17) - file deleted, Slint system viewport is canonical"
+   },
   "02_data/data/ui/__init__.py": {
    "state": "TEMPORARILY_RETAINED",
    "domain": "NATIVE_UI",
@@ -1482,25 +1468,18 @@
   "06_backtest/backtest/engine/metrics.py": "drawdown/equity/sharpe math -> Rust metrics kernels",
   "03_market/market/timeframe/aggregate.py": "bucketing/accumulation + mode -> Rust aggregate/stats kernels"
  },
- "qt_workspace_allowlist": {
-  "00_app/app/ui/research_workspace.py": {
-   "state": "TEMPORARILY_RETAINED",
-   "reason": "Research workspace in retained Qt shell. Pure view over Python research engine.",
-   "migration_target": "rust/vayren-shell/",
-   "migration_condition": "When Slint shell supports research screen"
-  },
-  "00_app/app/ui/portfolio_workspace.py": {
-   "state": "TEMPORARILY_RETAINED",
-   "reason": "Portfolio workspace in retained Qt shell. Pure view over session/paper state.",
-   "migration_target": "rust/vayren-shell/",
-   "migration_condition": "When Slint shell supports portfolio screen"
-  },
-  "00_app/app/services/research_service.py": {
-   "state": "EXEMPT_WITH_JUSTIFICATION",
-   "reason": "Composition service behind Research workspace. Research stays Python per constitution section 2.",
-   "migration_target": "N/A - Python-owned",
-   "migration_condition": "Never"
-  },
-  "00_app/app/ui/brokers_workspace.py": "Product-mandated SYSTEM-BROKERS workspace built in the retained Qt shell (same proof as research/portfolio). Pure view over BrokerManager snapshots; all actions leave via Qt signals; no credentials, no SDK, no registry access inside the widget."
- }
+  "qt_workspace_allowlist": {
+   "00_app/app/ui/research_workspace.py": {
+    "state": "TEMPORARILY_RETAINED",
+    "reason": "Research workspace in retained Qt shell. Pure view over Python research engine.",
+    "migration_target": "rust/vayren-shell/",
+    "migration_condition": "When Slint shell supports research screen"
+   },
+   "00_app/app/services/research_service.py": {
+    "state": "EXEMPT_WITH_JUSTIFICATION",
+    "reason": "Composition service behind Research workspace. Research stays Python per constitution section 2.",
+    "migration_target": "N/A - Python-owned",
+    "migration_condition": "Never"
+   }
+  }
 }

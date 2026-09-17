@@ -388,9 +388,8 @@ class Bootstrap:
         lab_list = StrategyListPanel()
         # dedicated single-strategy lab workspace (isolated from market)
         lab_workspace = StrategyLabWorkspace()
-        # LIVE execution is native Slint only (constitution §3): the legacy
-        # Qt `LiveWorkspace` widget is NOT constructed or mounted (its file
-        # stays for its direct-widget tests only). The same provider state
+        # LIVE execution is native Slint only (constitution §3): no legacy
+        # Qt workspace is constructed or mounted. The same provider state
         # feeds the in-window Slint viewport constructed below.
 
         def _live_state_provider() -> dict:
@@ -632,9 +631,8 @@ class Bootstrap:
 
         broker_manager = BrokerManager(data_dir=data_dir)
         self._broker_manager = broker_manager
-        # SYSTEM is native Slint only (constitution §3): the legacy Qt
-        # `BrokersWorkspace` is intentionally NOT constructed or mounted here
-        # (its file stays for its direct-widget tests only). Backend flows
+        # SYSTEM is native Slint only (constitution §3): no legacy Qt
+        # brokers workspace is constructed or mounted. Backend flows
         # (configure/login/check/disconnect/remove) stay in `BrokerManager`,
         # untouched; the in-window Slint viewport below renders status.
         from app.services.slint_system_host import SlintSystemHost
@@ -782,9 +780,8 @@ class Bootstrap:
             with contextlib.suppress(Exception):
                 live_service.stop(reason="execution halted")
 
-        # LIVE is native Slint only (constitution §3): the legacy Qt
-        # `LiveWorkspace` is intentionally NOT constructed or mounted here
-        # (its file stays for its direct-widget tests only). The same
+        # LIVE is native Slint only (constitution §3): no legacy Qt
+        # workspace is constructed or mounted here. The same
         # action handlers the Qt signals used are wired to the in-window
         # Slint viewport below — backend semantics unchanged.
         from backtest.execution import list_histories
@@ -812,8 +809,8 @@ class Bootstrap:
 
         slint_research_host = SlintResearchHost(service=research_service)
         self._slint_research_host = slint_research_host
-        # Portfolio is native Slint only (constitution §3): the legacy Qt
-        # PortfolioWorkspace is intentionally NOT constructed or mounted here.
+        # Portfolio is native Slint only (constitution §3): no legacy Qt
+        # workspace is constructed or mounted.
         # This viewport draws Slint pixels only — no Qt Portfolio UI — fed by
         # the same provider shape the LIVE tab consumes. Degrades to an
         # honest status line when the native library is not built.
@@ -840,8 +837,8 @@ class Bootstrap:
         self._slint_lab_host = slint_lab_host
         # LIVE is native Slint only (constitution §3): this viewport draws
         # Slint pixels only — no Qt Live UI — fed by the same provider the
-        # retained Qt `LiveWorkspace` consumed. UI action intents (accepted
-        # fail-closed in Rust) arrive back as the SAME signal contract the
+        # removed legacy Qt workspace consumed. UI action intents (accepted
+        # fail-closed in Rust) arrive back as the SAME signal contract that
         # Qt workspace carried, so the live_service handlers below are
         # unchanged. Degrades to an honest status line when the native
         # library is not built.
@@ -916,7 +913,6 @@ class Bootstrap:
             nav=nav_bar,
             left_extra=market_status,
             lab_workspace=lab_workspace,
-            live_workspace=None,  # legacy Qt LIVE is not production-mounted (Slint host below)
             research_workspace=research_workspace,
             slint_research_host=slint_research_host,
             slint_portfolio_host=slint_portfolio_host,
@@ -1487,14 +1483,13 @@ class Bootstrap:
         if hasattr(nav_bar, "portfolio_clicked"):
             nav_bar.portfolio_clicked.connect(window.show_slint_portfolio)
         # LIVE is owned by the native Slint view hosted in-window (see
-        # SlintLiveHost wiring above). The legacy Qt `LiveWorkspace` is no
-        # longer a production mount surface — only its backend contracts
-        # remain.
+        # SlintLiveHost wiring above). The legacy Qt workspace was removed
+        # — only its backend contracts remain.
         if hasattr(nav_bar, "live_clicked"):
             nav_bar.live_clicked.connect(window.show_slint_live)
         # SYSTEM → native Slint viewport (see SlintSystemHost wiring above).
-        # The legacy Qt `BrokersWorkspace` is no longer a production mount
-        # surface — only its backend contracts remain.
+        # The legacy Qt brokers workspace was removed — only its backend
+        # contracts remain.
         if hasattr(nav_bar, "system_clicked"):
             nav_bar.system_clicked.connect(window.show_slint_system)
 
