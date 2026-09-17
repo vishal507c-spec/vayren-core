@@ -1,5 +1,11 @@
 {
   "bridges": [
+    "00_app/app/services/slint_live_host.py",
+    "00_app/app/services/slint_market_host.py",
+    "00_app/app/services/slint_portfolio_host.py",
+    "00_app/app/services/slint_research_host.py",
+    "00_app/app/services/slint_strategy_lab_host.py",
+    "00_app/app/services/slint_system_host.py",
     "01_core/core/native/__init__.py",
     "01_core/core/native/loader.py",
     "03_market/market/native_aggregate.py",
@@ -29,12 +35,12 @@
     "06_backtest/backtest/engine/metrics.py",
     "08_execution/execution/models/order.py"
   ],
-  "production_import_edges": 2311,
+  "production_import_edges": 2489,
   "python_authoritative": [
     "chart.viewport.math",
     "execution.session.lifecycle"
   ],
-  "python_files": 587,
+  "python_files": 610,
   "retention_missing": [],
   "retention_orphaned": [],
   "rust_files": [

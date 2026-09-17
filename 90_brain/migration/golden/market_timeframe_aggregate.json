@@ -44,44 +44,44 @@
     },
     {
       "kind": "normal",
-      "rows": 89,
+      "rows": 62,
       "session": 33300,
-      "step": 300,
+      "step": 60,
+      "tf": 604800
+    },
+    {
+      "kind": "normal",
+      "rows": 37,
+      "session": 33300,
+      "step": 900,
+      "tf": 60
+    },
+    {
+      "kind": "normal",
+      "rows": 59,
+      "session": 33300,
+      "step": 900,
       "tf": 7200
     },
     {
       "kind": "normal",
-      "rows": 104,
+      "rows": 117,
       "session": 33300,
       "step": 60,
-      "tf": 1800
+      "tf": 900
     },
     {
       "kind": "normal",
-      "rows": 72,
+      "rows": 111,
+      "session": 33300,
+      "step": 60,
+      "tf": 604800
+    },
+    {
+      "kind": "normal",
+      "rows": 82,
       "session": 0,
       "step": 60,
-      "tf": 3600
-    },
-    {
-      "kind": "normal",
-      "rows": 77,
-      "session": 33300,
-      "step": 900,
-      "tf": 300
-    },
-    {
-      "kind": "normal",
-      "rows": 100,
-      "session": 33300,
-      "step": 300,
-      "tf": 1800
-    },
-    {
-      "kind": "normal",
-      "rows": 45,
-      "session": 33300,
-      "step": 300,
       "tf": 7200
     }
   ],

@@ -44,16 +44,14 @@ def _app() -> QGuiApplication:
 def test_format_intraday_single_line() -> None:
     ts = "2026-08-04 10:15:00"
     formatted = OverlayRenderer._format_timestamp(ts, "30m")
-    assert "Aug" in formatted
-    assert "10:15" in formatted
+    assert formatted == "2026-08-04 10:15"
     assert formatted.count("\n") == 0
 
 
 def test_format_timestamp_iso_separator() -> None:
     ts = "2026-08-04T10:15:00"
     formatted = OverlayRenderer._format_timestamp(ts, "1h")
-    assert "Aug" in formatted
-    assert "10:15" in formatted
+    assert formatted == "2026-08-04 10:15"
 
 
 def test_format_timestamp_garbage_returns_raw() -> None:
@@ -65,28 +63,26 @@ def test_format_daily_shows_date_only() -> None:
     ts = "2026-08-04 10:15:00"
     formatted = OverlayRenderer._format_timestamp(ts, "1d")
     assert "\n" not in formatted
-    assert "Aug" in formatted
+    assert formatted == "2026-08-04"
 
 
-def test_format_weekly_shows_week_and_year_single_line() -> None:
+def test_format_weekly_shows_iso_date_single_line() -> None:
     ts = "2026-08-04 10:15:00"
     formatted = OverlayRenderer._format_timestamp(ts, "1w")
-    assert "Week" in formatted
-    assert "2026" in formatted
+    assert formatted == "2026-08-04"
     assert formatted.count("\n") == 0
 
 
-def test_format_monthly_shows_month_and_year() -> None:
+def test_format_monthly_shows_iso_date() -> None:
     ts = "2026-08-04 10:15:00"
     formatted = OverlayRenderer._format_timestamp(ts, "1mo")
-    assert "Aug" in formatted
-    assert "2026" in formatted
+    assert formatted == "2026-08-04"
 
 
 def test_format_intraday_shows_time() -> None:
     ts = "2026-08-04 13:00:00"
     formatted = OverlayRenderer._format_timestamp(ts, "15m")
-    assert "13:00" in formatted
+    assert formatted == "2026-08-04 13:00"
     assert formatted.count("\n") == 0
 
 
@@ -153,6 +149,72 @@ def test_paint_time_clamps_label_within_axis_bounds() -> None:
     painter.end()
     assert rect.left() >= axis_rect.left()
     assert rect.right() <= axis_rect.right()
+
+
+def _is_teal(rgb: int) -> bool:
+    r, g, b = (rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF
+    return all(abs(c - e) <= 2 for c, e in zip((r, g, b), (0x26, 0xA6, 0x9A), strict=False))
+
+
+def _is_dark_text(rgb: int) -> bool:
+    r, g, b = (rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF
+    return max(r, g, b) < 80
+
+
+def test_paint_time_tag_is_teal_with_square_corners_and_dark_text() -> None:
+    _app()
+    image = QImage(400, 24, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(0)
+    painter = QPainter(image)
+    rect = OverlayRenderer.paint_time(
+        painter, _value("2026-08-04 10:15:00"), "1h", 200, QRect(0, 0, 400, 24)
+    )
+    painter.end()
+    assert rect.width() > 0 and rect.height() > 0
+    # Solid teal fill at all four corners => square corners, no rounding.
+    for corner in (
+        (rect.left(), rect.top()),
+        (rect.right(), rect.top()),
+        (rect.left(), rect.bottom()),
+        (rect.right(), rect.bottom()),
+    ):
+        assert _is_teal(int(image.pixelColor(*corner).rgb()))
+    # Dark centered text present inside the tag.
+    text_pixels = 0
+    for y in range(rect.top(), rect.bottom() + 1):
+        for x in range(rect.left(), rect.right() + 1):
+            if _is_dark_text(int(image.pixelColor(x, y).rgb())):
+                text_pixels += 1
+    assert text_pixels > 0
+
+
+def test_paint_time_tag_centered_on_crosshair() -> None:
+    _app()
+    image = QImage(400, 24, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(0)
+    painter = QPainter(image)
+    for crosshair_x in (200, 120, 320):
+        image.fill(0)
+        rect = OverlayRenderer.paint_time(
+            painter, _value("2026-08-04 10:15:00"), "1h", crosshair_x, QRect(0, 0, 400, 24)
+        )
+        center = rect.left() + rect.width() // 2
+        assert abs(center - crosshair_x) <= 1
+    painter.end()
+
+
+def test_paint_time_tag_stays_visible_at_edges() -> None:
+    _app()
+    image = QImage(400, 24, QImage.Format.Format_ARGB32_Premultiplied)
+    painter = QPainter(image)
+    for crosshair_x in (0, 5, 395, 400):
+        image.fill(0)
+        rect = OverlayRenderer.paint_time(
+            painter, _value("2026-08-04 10:15:00"), "1h", crosshair_x, QRect(0, 0, 400, 24)
+        )
+        assert rect.left() >= 0
+        assert rect.right() <= 399
+    painter.end()
 
 
 def test_paint_time_smoke() -> None:

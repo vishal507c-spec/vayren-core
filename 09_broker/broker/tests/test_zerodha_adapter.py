@@ -66,7 +66,7 @@ def test_broker_id_is_stable_and_single() -> None:
 def test_no_alias_ids_in_product_code() -> None:
     """Only two spellings may exist as values: the id ``"zerodha"`` and the
     UI label ``"Zerodha"`` (the latter solely in display-name assignments
-    plus two pinned pre-existing UI labels — display text, never lookup
+    plus pinned pre-existing UI labels — display text, never lookup
     keys, tracked here so no new alias site slips in).
     ``kite``/``kiteconnect``/``ZERODHA`` must never appear as values —
     the SDK is referenced by module import only, never by name string."""
@@ -85,6 +85,8 @@ def test_no_alias_ids_in_product_code() -> None:
     display_label_sites = {
         "00_app/app/bootstrap/bootstrap.py",
         "02_data/data/ui/status_view.py",
+        # Slint MARKET bridge mirrors the pinned Qt provider-card text (display only).
+        "00_app/app/services/slint_market_host.py",
     }
     offenders = []
     for chapter in chapters:

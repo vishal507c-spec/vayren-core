@@ -5,6 +5,10 @@ from PySide6.QtWidgets import QButtonGroup, QHBoxLayout, QLabel, QPushButton, QW
 
 from app.ui import lab_theme as t
 
+# PORTFOLIO is owned by the native Rust+Slint view (constitution §3): this
+# button routes to the in-window Slint viewport and never mounts the legacy
+# Qt `portfolio_workspace.py` surface. `portfolio_workspace.py` remains as
+# unmounted legacy code only.
 _SECTIONS = ("MARKET", "STRATEGY LAB", "RESEARCH", "PORTFOLIO", "LIVE", "SYSTEM")
 
 _BAR_STYLE = """

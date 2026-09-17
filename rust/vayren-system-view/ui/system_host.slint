@@ -1,0 +1,112 @@
+// System host window — integration glue ONLY, never visual design.
+//
+// Root `Window` hosting the EXISTING verified `BrokerPanel` unmodified (all
+// presentation, layout and styling live in `../../vayren-shell/ui/broker.slint`).
+// Every property below is a pure pass-through binding; every action callback
+// forwards outward for the host's action drain. Nothing here may add,
+// restyle, or recompose content — compare against the `app.slint`
+// BrokerPanel instance block.
+import { BrokerPanel, BrokerCheckRow } from "../../vayren-shell/ui/broker.slint";
+
+export component SystemHostWindow inherits Window {
+    title: "VAYREN — System";
+    background: transparent;
+    no-frame: true;
+
+    in-out property <string> broker-name;
+    in-out property <string> broker-id;
+    in-out property <int> env-kind: 0;
+    in-out property <string> env-label;
+    in-out property <string> health-label;
+    in-out property <bool> health-connected: false;
+    in-out property <bool> live-ready: false;
+    in-out property <[string]> blockers;
+    in-out property <string> status-glyph: "○";
+    in-out property <string> status-label: "";
+    in-out property <int> status-tone: 0;
+    in-out property <string> status-explanation: "";
+    in-out property <string> reason-line: "";
+    in-out property <string> account-id: "—";
+    in-out property <string> conn-label: "Not connected";
+    in-out property <int> conn-tone: 0;
+    in-out property <string> last-sync: "—";
+    in-out property <string> health-summary: "";
+    in-out property <int> health-summary-tone: 0;
+    in-out property <[BrokerCheckRow]> check-rows;
+    in-out property <string> funds-line: "—";
+    in-out property <string> funds-sub: "";
+    in-out property <string> positions-line: "—";
+    in-out property <string> positions-sub: "";
+    in-out property <string> orders-line: "—";
+    in-out property <string> orders-sub: "";
+    in-out property <string> credentials-line: "";
+    in-out property <string> callback-display: "—";
+    in-out property <bool> refresh-visible: false;
+    in-out property <string> refresh-label: "REFRESH";
+    in-out property <bool> refresh-enabled: false;
+    in-out property <bool> refresh-primary: false;
+    in-out property <string> login-label: "CONNECT";
+    in-out property <bool> login-enabled: false;
+    in-out property <bool> login-primary: false;
+    in-out property <string> configure-label: "CONFIGURE";
+    in-out property <bool> disconnect-visible: false;
+    in-out property <bool> disconnect-enabled: false;
+    in-out property <bool> remove-visible: false;
+
+    callback login-requested();
+    callback refresh-requested();
+    callback disconnect-requested();
+    callback remove-requested();
+    callback config-saved(string, string);
+    callback copy-callback();
+
+    BrokerPanel {
+        width: 100%;
+        height: 100%;
+        broker-name: root.broker-name;
+        broker-id: root.broker-id;
+        env-kind: root.env-kind;
+        env-label: root.env-label;
+        health-label: root.health-label;
+        health-connected: root.health-connected;
+        live-ready: root.live-ready;
+        blockers: root.blockers;
+        status-glyph: root.status-glyph;
+        status-label: root.status-label;
+        status-tone: root.status-tone;
+        status-explanation: root.status-explanation;
+        reason-line: root.reason-line;
+        account-id: root.account-id;
+        conn-label: root.conn-label;
+        conn-tone: root.conn-tone;
+        last-sync: root.last-sync;
+        health-summary: root.health-summary;
+        health-summary-tone: root.health-summary-tone;
+        check-rows: root.check-rows;
+        funds-line: root.funds-line;
+        funds-sub: root.funds-sub;
+        positions-line: root.positions-line;
+        positions-sub: root.positions-sub;
+        orders-line: root.orders-line;
+        orders-sub: root.orders-sub;
+        credentials-line: root.credentials-line;
+        callback-display: root.callback-display;
+        refresh-visible: root.refresh-visible;
+        refresh-label: root.refresh-label;
+        refresh-enabled: root.refresh-enabled;
+        refresh-primary: root.refresh-primary;
+        login-label: root.login-label;
+        login-enabled: root.login-enabled;
+        login-primary: root.login-primary;
+        configure-label: root.configure-label;
+        disconnect-visible: root.disconnect-visible;
+        disconnect-enabled: root.disconnect-enabled;
+        remove-visible: root.remove-visible;
+        login-requested() => { root.login-requested(); }
+        refresh-requested() => { root.refresh-requested(); }
+        disconnect-requested() => { root.disconnect-requested(); }
+        remove-requested() => { root.remove-requested(); }
+        config-saved(k, s) => { root.config-saved(k, s); }
+        copy-callback() => { root.copy-callback(); }
+    }
+}

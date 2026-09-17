@@ -28,6 +28,14 @@ from .advanced_validation import (
     validate_oos,
 )
 from .analysis import ResearchAnalysis, analyze_dataset
+from .compare import ComparisonResult, MetricDelta, compare_experiments
+from .conditions import ConditionAnalysis, ConditionBucket, SymbolRow, analyze_conditions
+from .data_validation import (
+    BarIssue,
+    DataValidationReport,
+    SymbolValidation,
+    validate_bars,
+)
 from .dataset import ResearchDataset
 from .discovery import Discovery, create_discovery
 from .engine import ResearchEngine
@@ -43,12 +51,45 @@ from .evolution import (
     reject_proposal,
     save_proposal,
 )
-from .experiment import Experiment, Hypothesis
+from .experiment import (
+    EXPERIMENT_STATUSES,
+    RESEARCH_ENGINE_VERSION,
+    TERMINAL_STATUSES,
+    Experiment,
+    Hypothesis,
+    is_stale,
+)
+from .fingerprint import fingerprint_config, fingerprint_result, short_fingerprint
 from .governance import Decision, create_decision, list_decisions, load_decision, save_decision
 from .intelligence import CandidateHypothesis, IntelligenceRun, ResearchIntelligence
 from .lineage import LineageEdge, LineageGraph, LineageNode, load_lineage, save_lineage
+from .report import build_report, conclude
 from .robustness import RobustnessResult, run_parameter_sensitivity, run_robustness
+from .statistics import (
+    BenchmarkResult,
+    EvidenceStats,
+    MonteCarloResult,
+    compare_buy_hold,
+    describe_evidence,
+    evidence_grade_label,
+    overfitting_warnings,
+    run_monte_carlo,
+)
+from .storage import (
+    load_experiment,
+    load_run_artifacts,
+    save_experiment,
+    save_experiment_update,
+    save_run_artifacts,
+)
 from .validation import ValidationResult, validate_experiment
+from .walkforward import (
+    WalkForwardSummary,
+    WindowSpec,
+    split_trades_chronological,
+    summarize_walkforward,
+    walk_forward_windows,
+)
 
 __all__ = [
     "ResearchDataset",
@@ -56,6 +97,44 @@ __all__ = [
     "analyze_dataset",
     "Experiment",
     "Hypothesis",
+    "EXPERIMENT_STATUSES",
+    "RESEARCH_ENGINE_VERSION",
+    "TERMINAL_STATUSES",
+    "is_stale",
+    "fingerprint_config",
+    "fingerprint_result",
+    "short_fingerprint",
+    "BarIssue",
+    "DataValidationReport",
+    "SymbolValidation",
+    "validate_bars",
+    "ConditionAnalysis",
+    "ConditionBucket",
+    "SymbolRow",
+    "analyze_conditions",
+    "EvidenceStats",
+    "MonteCarloResult",
+    "BenchmarkResult",
+    "describe_evidence",
+    "run_monte_carlo",
+    "compare_buy_hold",
+    "overfitting_warnings",
+    "evidence_grade_label",
+    "WindowSpec",
+    "WalkForwardSummary",
+    "split_trades_chronological",
+    "walk_forward_windows",
+    "summarize_walkforward",
+    "MetricDelta",
+    "ComparisonResult",
+    "compare_experiments",
+    "build_report",
+    "conclude",
+    "load_experiment",
+    "load_run_artifacts",
+    "save_experiment",
+    "save_experiment_update",
+    "save_run_artifacts",
     "CandidateHypothesis",
     "IntelligenceRun",
     "ResearchIntelligence",

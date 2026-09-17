@@ -1,0 +1,2462 @@
+// VAYREN Market — native Slint workstation surface (constitution §3,
+// UI_DESIGN_SYSTEM.md). Rust `market.rs` owns ALL state; this screen renders
+// bound properties and reports interactions. The feature surface mirrors the
+// ORIGINAL Qt Market exactly: watchlist (switch/add/remove/filter/sort +
+// reset), timeframe row (canonical order + overflow), INDICATORS popup
+// (search · categories · strategies), floating indicator bar (eye · settings ·
+// source · remove), the candle chart with wheel-zoom-at-cursor, horizontal-wheel
+// + drag pan, price-strip scale + double-click reset, follow-latest, the
+// snapped crosshair with price/time/volume tags, the permanent OHLC header,
+// strategy plot overlays + trade markers, and the right-click / Alt+R reset.
+//
+// Layout contract (never fixed page geometry): regions size by stretch +
+// content minima; the chart gets priority space. Wide/medium host flags only
+// gate the watchlist auto-hide at very small widths — the rail toggle is the
+// primary control, exactly like the Qt tools rail. Chart geometry is
+// data-driven: candle/axis positions derive from normalized model fractions
+// (never screenshot coordinates, never DPI math). Honest states render the Qt
+// widget's centered messages. Tokens only.
+
+import { VayrenPalette, VayrenDesign } from "palette.slint";
+import { LineEdit, ScrollView, ComboBox } from "std-widgets.slint";
+
+// VCell cell tone convention (0 text, 1 pos, 2 warn, 3 neg) -> palette brush.
+// Kept in a global so every region colors identically (top-level fns illegal).
+global MarketTone {
+    public pure function brush(tone: int) -> brush {
+        return tone == 1 ? VayrenPalette.pos
+            : tone == 2 ? VayrenPalette.amber
+            : tone == 3 ? VayrenPalette.neg
+            : VayrenPalette.text;
+    }
+}
+
+export struct MarketWatchRow {
+    symbol: string,
+    price: string,
+    change: string,
+    tone: int,
+    selected: bool,
+}
+
+export struct MarketCandle {
+    x: float,
+    o: float,
+    h: float,
+    l: float,
+    c: float,
+    vol: float,
+    top: float,
+    body: float,
+    tone: int,
+}
+
+export struct MarketTick {
+    pos: float,
+    label: string,
+}
+
+export struct MarketTimeframe {
+    label: string,
+    selected: bool,
+}
+
+export struct MarketIndicator {
+    name: string,
+    visible: bool,
+}
+
+export struct MarketPopupRow {
+    kind: string,
+    label: string,
+    name: string,
+    category: string,
+}
+
+export struct MarketPlotSeg {
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
+    color: int,
+    wide: bool,
+}
+
+export struct MarketMarker {
+    x: float,
+    y: float,
+    // 0 up-triangle, 1 down-triangle, 2 square, 3 circle, 4 circle-x,
+    // 5 diamond, 6 dot.
+    kind: int,
+    // Shared tone convention (1 warn, 2 pos, 3 neg) plus 4 blue, 5 purple,
+    // 6 muted.
+    color: int,
+    label: string,
+    // 0 none, 1 above, 2 below.
+    pill: int,
+    // true = solid marker-color fill + light text (strategy); false = dark
+    // fill + colored border (trade).
+    pill-solid: bool,
+    // 0 tip at anchor (strategy), 1 tip above anchor (trade entry),
+    // 2 tip below anchor (trade exit).
+    tip: int,
+    // Pre-measured pill width (Rust, Qt fallback formula).
+    pill-w: float,
+}
+
+export struct MarketTradeContext {
+    visible: bool,
+    trade: string,
+    symbol-side: string,
+    time: string,
+    pnl: string,
+    r: string,
+}
+
+// ── Historical-Download console bindings (mirrors Rust DownloadView) ──
+export struct DlPlan {
+    stocks: string,
+    interval: string,
+    range: string,
+    days: string,
+    rows: string,
+    error: string,
+}
+
+export struct DlStatus {
+    mode: string,
+    status: string,
+    symbol: string,
+    interval: string,
+    range: string,
+    chunk: string,
+    rows: string,
+    coverage: string,
+    progress-pct: float,
+    progress-note: string,
+    perf-rows: string,
+    perf-elapsed: string,
+    perf-eta: string,
+    perf-size: string,
+    complete-status: string,
+    complete-rows: string,
+    complete-coverage: string,
+    complete-duration: string,
+    complete-size: string,
+    error-line: string,
+    error-detail: string,
+    error-details-shown: bool,
+    cov-symbol: string,
+    cov-interval: string,
+    cov-range: string,
+    cov-coverage: string,
+    cov-rows: string,
+    provider-name: string,
+    provider-status: string,
+    provider-label: string,
+    provider-detail: string,
+    configure-visible: bool,
+    advanced-visible: bool,
+    advanced-open: bool,
+    env-visible: bool,
+    broker-caps: string,
+    broker-error: string,
+}
+
+export struct DlCalDay {
+    day: int,
+    label: string,
+    x: float,
+    y: float,
+}
+
+export struct DlCredField {
+    key: string,
+    label: string,
+    secret: bool,
+    value: string,
+    revealed: bool,
+}
+
+export struct DlKV {
+    k: string,
+    v: string,
+}
+
+export struct DlStock {
+    symbol: string,
+    selected: bool,
+}
+
+component RailButton inherits Rectangle {
+    in property <string> code;
+    in property <bool> active: false;
+    callback picked();
+
+    height: 30px;
+    border-radius: VayrenDesign.radius-sm;
+    background: root.active ? VayrenPalette.selected
+        : ta.has-hover ? VayrenPalette.hover : transparent;
+    ta := TouchArea {
+        clicked => { root.picked(); }
+    }
+    Text {
+        text: root.code;
+        color: root.active ? VayrenPalette.accent : VayrenPalette.muted;
+        font-size: VayrenDesign.fs-label;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    if root.active: Rectangle {
+        width: 2px;
+        height: 100%;
+        background: VayrenPalette.accent;
+    }
+}
+
+component MTimeButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> active: false;
+    callback picked();
+
+    height: VayrenDesign.h-tabs;
+    ta := TouchArea {
+        clicked => { root.picked(); }
+    }
+    VerticalLayout {
+        spacing: 0;
+        alignment: center;
+        HorizontalLayout {
+            padding-left: VayrenDesign.sp-md;
+            padding-right: VayrenDesign.sp-md;
+            Text {
+                text: root.label;
+                color: root.active ? VayrenPalette.text : VayrenPalette.muted;
+                font-size: VayrenDesign.fs-label;
+                font-weight: 700;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+        Rectangle {
+            height: 2px;
+            background: root.active ? VayrenPalette.accent : transparent;
+        }
+    }
+}
+
+component SmallButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> active: false;
+    in property <bool> primary: false;
+    in property <bool> enabled: true;
+    callback picked();
+
+    min-height: 24px;
+    border-radius: VayrenDesign.radius-sm;
+    border-width: root.primary ? 0px : 1px;
+    border-color: root.active ? VayrenPalette.accent-dim : VayrenPalette.hairline;
+    background: root.primary ? VayrenPalette.accent
+        : ta.has-hover && root.enabled ? VayrenPalette.hover : transparent;
+    ta := TouchArea {
+        enabled: root.enabled;
+        clicked => { if root.enabled { root.picked(); } }
+    }
+    HorizontalLayout {
+        padding-left: VayrenDesign.sp-md;
+        padding-right: VayrenDesign.sp-md;
+        Text {
+            text: root.label;
+            color: root.primary ? VayrenPalette.accent-text
+                : root.active ? VayrenPalette.accent
+                : root.enabled ? VayrenPalette.muted : VayrenPalette.faint;
+            font-size: VayrenDesign.fs-label;
+            font-weight: 700;
+            vertical-alignment: center;
+        }
+    }
+}
+
+component MenuRow inherits Rectangle {
+    in property <string> label;
+    in property <bool> selected: false;
+    in property <bool> enabled: true;
+    callback picked();
+
+    height: VayrenDesign.row-height;
+    background: ta.has-hover && root.enabled ? VayrenPalette.selected : transparent;
+    ta := TouchArea {
+        enabled: root.enabled;
+        clicked => { if root.enabled { root.picked(); } }
+    }
+    Text {
+        x: VayrenDesign.sp-md;
+        width: parent.width - 2 * VayrenDesign.sp-md;
+        text: root.label;
+        color: root.enabled ? (root.selected ? VayrenPalette.text : VayrenPalette.muted)
+            : VayrenPalette.faint;
+        font-size: VayrenDesign.fs-table;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+}
+
+// Compact single-glyph icon button for the floating indicator bar
+// (TradingView toolbar parity): fixed 20px hit area, no padding bloat,
+// hover / pressed / active states only — tokens, no literals.
+component IndicatorIconBtn inherits Rectangle {
+    in property <string> glyph;
+    in property <bool> active: false;
+    callback picked();
+
+    width: 20px;
+    height: 20px;
+    border-radius: VayrenDesign.radius-sm;
+    background: ta.pressed ? VayrenPalette.pressed
+        : ta.has-hover ? VayrenPalette.hover : transparent;
+    ta := TouchArea {
+        clicked => { root.picked(); }
+    }
+    Text {
+        text: root.glyph;
+        color: root.active ? VayrenPalette.accent
+            : ta.has-hover ? VayrenPalette.text : VayrenPalette.muted;
+        font-size: VayrenDesign.fs-label;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+component IndicatorBarRow inherits Rectangle {
+    in property <string> name;
+    in property <bool> shown: true;
+    callback toggle();
+    callback settings();
+    callback source();
+    callback remove();
+
+    height: 28px;
+    HorizontalLayout {
+        spacing: VayrenDesign.sp-sm;
+        padding-left: VayrenDesign.sp-md;
+        padding-right: VayrenDesign.sp-sm;
+        Text {
+            text: root.name;
+            color: root.shown ? VayrenPalette.text : VayrenPalette.muted;
+            font-size: VayrenDesign.fs-small;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
+        IndicatorIconBtn {
+            glyph: root.shown ? "◉" : "◎";
+            active: root.shown;
+            picked => { root.toggle(); }
+        }
+        IndicatorIconBtn {
+            glyph: "⚙";
+            picked => { root.settings(); }
+        }
+        IndicatorIconBtn {
+            glyph: "{ }";
+            picked => { root.source(); }
+        }
+        IndicatorIconBtn {
+            glyph: "✕";
+            picked => { root.remove(); }
+        }
+    }
+}
+
+// A rotated hairline segment between two normalized points (plot overlays).
+component OverlaySeg inherits Rectangle {
+    in property <float> x1;
+    in property <float> y1;
+    in property <float> x2;
+    in property <float> y2;
+    in property <length> plot-w;
+    in property <length> grid-h;
+    in property <brush> stroke;
+    in property <bool> wide: false;
+
+    property <float> dx: (x2 - x1) * plot-w / 1px;
+    property <float> dy: (y2 - y1) * grid-h / 1px;
+    property <length> len: Math.sqrt(dx * dx + dy * dy) * 1px;
+
+    // The rotation must live on a non-root element, so the root is a plain
+    // transparent container and the hairline is its rotated child.
+    Rectangle {
+        x: x1 * plot-w;
+        y: y1 * grid-h - 1px;
+        width: len;
+        height: root.wide ? 3px : 2px;
+        border-radius: 1px;
+        background: stroke;
+        transform-rotation: Math.atan2(root.dy, root.dx);
+        transform-origin: { x: 0px, y: 1px };
+    }
+}
+
+// Trade/strategy marker glyph + optional label pill (Qt overlay parity:
+// tip-anchored triangles, exact pill placement, two pill fills).
+component MarkerGlyph inherits Rectangle {
+    in property <float> gx;
+    in property <float> gy;
+    in property <int> kind;
+    in property <color> ink;
+    in property <string> label;
+    in property <int> pill;
+    in property <bool> pill-solid;
+    in property <int> tip;
+    in property <length> plot-w;
+    in property <length> grid-h;
+    // Pill width comes pre-measured from Rust (Qt fallback formula).
+    in property <length> pill-w;
+
+    property <length> ax: gx * plot-w;
+    property <length> ay: gy * grid-h;
+    property <length> pill-h: 15px;
+
+    // up triangle
+    if kind == 0: Path {
+        x: ax - 4.2px;
+        y: tip == 0 ? ay : ay - 7px;
+        width: 8.4px;
+        height: tip == 0 ? 7px : 10.5px;
+        viewbox-x: 0;
+        viewbox-y: 0;
+        viewbox-width: 84;
+        viewbox-height: tip == 0 ? 70 : 105;
+        MoveTo {
+            x: 42;
+            y: 0;
+        }
+        LineTo {
+            x: 0;
+            y: tip == 0 ? 70 : 105;
+        }
+        LineTo {
+            x: 84;
+            y: tip == 0 ? 70 : 105;
+        }
+        Close {}
+        fill: ink;
+    }
+    // down triangle
+    if kind == 1: Path {
+        x: ax - 4.2px;
+        y: tip == 0 ? ay - 7px : ay - 3.5px;
+        width: 8.4px;
+        height: tip == 0 ? 7px : 10.5px;
+        viewbox-x: 0;
+        viewbox-y: 0;
+        viewbox-width: 84;
+        viewbox-height: tip == 0 ? 70 : 105;
+        MoveTo {
+            x: 42;
+            y: tip == 0 ? 70 : 105;
+        }
+        LineTo {
+            x: 0;
+            y: 0;
+        }
+        LineTo {
+            x: 84;
+            y: 0;
+        }
+        Close {}
+        fill: ink;
+    }
+    // square
+    if kind == 2: Rectangle {
+        x: ax - 3.5px;
+        y: ay - 3.5px;
+        width: 7px;
+        height: 7px;
+        background: ink;
+    }
+    // filled circle
+    if kind == 3: Rectangle {
+        x: ax - 3.5px;
+        y: ay - 3.5px;
+        width: 7px;
+        height: 7px;
+        border-radius: 3.5px;
+        background: ink;
+    }
+    // circle-x (outline + cross)
+    if kind == 4: Rectangle {
+        x: ax - 3.5px;
+        y: ay - 3.5px;
+        width: 7px;
+        height: 7px;
+        border-radius: 3.5px;
+        border-width: 1.6px;
+        border-color: ink;
+        Rectangle {
+            x: 3.5px - 2.3px;
+            y: 3.5px - 0.8px;
+            width: 4.6px;
+            height: 1.6px;
+            background: ink;
+            transform-rotation: 45deg;
+            transform-origin: { x: 2.3px, y: 0.8px };
+        }
+        Rectangle {
+            x: 3.5px - 2.3px;
+            y: 3.5px - 0.8px;
+            width: 4.6px;
+            height: 1.6px;
+            background: ink;
+            transform-rotation: -45deg;
+            transform-origin: { x: 2.3px, y: 0.8px };
+        }
+    }
+    // diamond
+    if kind == 5: Path {
+        x: ax - 4.9px;
+        y: ay - 7px;
+        width: 9.8px;
+        height: 14px;
+        viewbox-x: 0;
+        viewbox-y: 0;
+        viewbox-width: 98;
+        viewbox-height: 140;
+        MoveTo { x: 49; y: 0; }
+        LineTo { x: 98; y: 70; }
+        LineTo { x: 49; y: 140; }
+        LineTo { x: 0; y: 70; }
+        Close {}
+        fill: ink;
+    }
+    // dot
+    if kind == 6: Rectangle {
+        x: ax - 2px;
+        y: ay - 2px;
+        width: 4px;
+        height: 4px;
+        border-radius: 2px;
+        background: ink;
+    }
+    // label pill (fixed above/below offsets, Qt reference gaps)
+    if pill > 0: Rectangle {
+        x: ax - pill-w / 2;
+        y: pill == 1 ? ay - 9px - pill-h : ay + 9px;
+        width: pill-w;
+        height: pill-h;
+        border-radius: 2px;
+        background: pill-solid ? ink : VayrenPalette.surface;
+        border-width: pill-solid ? 0px : 1px;
+        border-color: ink;
+        Text {
+            text: label;
+            color: pill-solid ? VayrenPalette.text : ink;
+            font-size: 10px;
+            font-weight: 700;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// One candle: wick + body + volume bar, placed by the normalized model point.
+component CandleGlyph inherits Rectangle {
+    in property <MarketCandle> c;
+    in property <length> plot-w;
+    in property <length> grid-h;
+    in property <length> vol-h;
+    in property <length> slot;
+
+    property <length> body-w: Math.max(1px, slot * 0.6);
+    property <length> cx: c.x * plot-w;
+
+    x: 0px;
+    y: 0px;
+    width: plot-w;
+    height: grid-h + vol-h;
+    // wick
+    Rectangle {
+        x: parent.cx - 0.5px;
+        y: parent.c.h * parent.grid-h;
+        width: 1px;
+        height: Math.max(1px, (parent.c.l - parent.c.h) * parent.grid-h);
+        background: MarketTone.brush(parent.c.tone);
+    }
+    // body
+    Rectangle {
+        x: parent.cx - parent.body-w / 2;
+        y: parent.c.top * parent.grid-h;
+        width: parent.body-w;
+        height: Math.max(1px, parent.c.body * parent.grid-h);
+        background: MarketTone.brush(parent.c.tone);
+    }
+    // volume
+    Rectangle {
+        x: parent.cx - parent.body-w / 2;
+        y: parent.grid-h + parent.vol-h - parent.c.vol * parent.vol-h;
+        width: parent.body-w;
+        height: parent.c.vol * parent.vol-h;
+        background: parent.c.tone == 1 ? VayrenPalette.pos-dim
+            : parent.c.tone == 3 ? VayrenPalette.neg-dim : VayrenPalette.faint;
+    }
+}
+
+// One INDICATORS popup row: section header, selectable item, or empty note.
+component PopupItem inherits Rectangle {
+    in property <MarketPopupRow> pr;
+    callback picked(string);
+
+    height: 28px;
+    if pr.kind == "section": Text {
+        x: 8px;
+        text: pr.label;
+        color: VayrenPalette.faint;
+        font-size: VayrenDesign.fs-label;
+        font-weight: 700;
+        vertical-alignment: center;
+    }
+    if pr.kind == "item": Rectangle {
+        ta := TouchArea {
+            clicked => { root.picked(root.pr.name); }
+        }
+        Text {
+            x: 8px;
+            width: parent.width - 16px;
+            text: pr.label;
+            color: ta.has-hover ? VayrenPalette.text : VayrenPalette.muted;
+            font-size: VayrenDesign.fs-table;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+    if pr.kind == "empty": Text {
+        x: 8px;
+        text: pr.label;
+        color: VayrenPalette.faint;
+        font-size: VayrenDesign.fs-table;
+        vertical-alignment: center;
+    }
+}
+
+// ── Historical-Download console (native dock over the retained Qt panel) ──
+
+component DlSection inherits Rectangle {
+    in property <string> label;
+    height: 22px;
+    Text {
+        x: 0;
+        text: root.label;
+        color: VayrenPalette.faint;
+        font-size: VayrenDesign.fs-label;
+        font-weight: 700;
+        vertical-alignment: center;
+    }
+}
+
+component DlField inherits Rectangle {
+    in property <string> caption;
+    in property <string> value;
+    in property <bool> enabled: true;
+    callback open();
+    height: 44px;
+    VerticalLayout {
+        spacing: 2px;
+        Text {
+            text: root.caption;
+            color: VayrenPalette.faint;
+            font-size: VayrenDesign.fs-label;
+            font-weight: 600;
+        }
+        Rectangle {
+            height: 26px;
+            border-radius: VayrenDesign.radius-sm;
+            border-width: 1px;
+            border-color: VayrenPalette.hairline;
+            background: root.enabled && ta.has-hover ? VayrenPalette.hover : VayrenPalette.bg;
+            ta := TouchArea {
+                enabled: root.enabled;
+                clicked => { root.open(); }
+            }
+            HorizontalLayout {
+                padding-left: 6px;
+                padding-right: 6px;
+                Text {
+                    text: root.value;
+                    color: VayrenPalette.text;
+                    font-size: VayrenDesign.fs-small;
+                    vertical-alignment: center;
+                }
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+                Text {
+                    text: "\u{1f4c5}";
+                    font-size: VayrenDesign.fs-small;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}
+
+component DlKVRow inherits Rectangle {
+    in property <string> caption;
+    in property <string> value;
+    in property <bool> strong: false;
+    in property <bool> wrap: false;
+    height: root.wrap ? Math.max(18px, 34px) : 18px;
+    HorizontalLayout {
+        spacing: 8px;
+        Text {
+            text: root.caption;
+            color: VayrenPalette.faint;
+            font-size: VayrenDesign.fs-label;
+            vertical-alignment: center;
+        }
+        Rectangle { horizontal-stretch: 1; background: transparent; }
+        Text {
+            text: root.value;
+            color: root.strong ? VayrenPalette.text : VayrenPalette.text;
+            font-size: VayrenDesign.fs-label;
+            font-weight: 600;
+            wrap: root.wrap ? TextWrap.word-wrap : TextWrap.no-wrap;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+        }
+    }
+}
+
+component DlCheckRow inherits Rectangle {
+    in property <string> label;
+    in property <bool> checked: false;
+    in property <bool> enabled: true;
+    callback picked();
+    height: 26px;
+    background: ta.has-hover && root.enabled ? VayrenPalette.hover : transparent;
+    ta := TouchArea {
+        enabled: root.enabled;
+        clicked => { if root.enabled { root.picked(); } }
+    }
+    HorizontalLayout {
+        spacing: 8px;
+        padding-left: 6px;
+        Rectangle {
+            width: 14px;
+            height: 14px;
+            border-radius: 3px;
+            border-width: root.checked ? 0px : 1px;
+            border-color: VayrenPalette.hairline;
+            background: root.checked ? VayrenPalette.accent : VayrenPalette.bg;
+            if root.checked: Text {
+                text: "\u{2713}";
+                color: VayrenPalette.accent-text;
+                font-size: VayrenDesign.fs-label;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+        Text {
+            text: root.label;
+            color: root.enabled ? VayrenPalette.text : VayrenPalette.faint;
+            font-size: VayrenDesign.fs-small;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+}
+
+component DlChip inherits Rectangle {
+    in property <string> label;
+    callback removed();
+    height: 20px;
+    border-radius: VayrenDesign.radius-sm;
+    border-width: 1px;
+    border-color: VayrenPalette.hairline;
+    background: ta.has-hover ? VayrenPalette.hover : VayrenPalette.bg;
+    ta := TouchArea {
+        clicked => { root.removed(); }
+    }
+    HorizontalLayout {
+        padding-left: 6px;
+        padding-right: 6px;
+        Text {
+            text: root.label + " \u{00d7}";
+            color: VayrenPalette.accent;
+            font-size: VayrenDesign.fs-label;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+}
+
+component CalDay inherits Rectangle {
+    in property <int> day: 0;
+    in property <string> label;
+    callback picked(int);
+    height: 26px;
+    width: 26px;
+    background: day > 0 && ta.has-hover ? VayrenPalette.hover : transparent;
+    ta := TouchArea {
+        enabled: root.day > 0;
+        clicked => { if root.day > 0 { root.picked(root.day); } }
+    }
+    Text {
+        text: root.label;
+        color: VayrenPalette.text;
+        font-size: VayrenDesign.fs-small;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+component CalendarPopup inherits Rectangle {
+    in property <string> title;
+    in property <[DlCalDay]> days;
+    in property <[string]> weekdays;
+    callback prev();
+    callback next();
+    callback pick(int);
+
+    property <int> rows: Math.ceil(root.days.length / 7);
+
+    width: 236px;
+    height: 96px + root.rows * 26px;
+    border-radius: VayrenDesign.radius-sm;
+    border-width: 1px;
+    border-color: VayrenPalette.hairline;
+    background: VayrenPalette.surface;
+    VerticalLayout {
+        spacing: 4px;
+        padding: 8px;
+        HorizontalLayout {
+            spacing: 6px;
+            SmallButton { label: "\u{2039}"; picked => { root.prev(); } }
+            Text {
+                text: root.title;
+                color: VayrenPalette.text;
+                font-size: VayrenDesign.fs-small;
+                font-weight: 700;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            SmallButton { label: "\u{203a}"; picked => { root.next(); } }
+        }
+        HorizontalLayout {
+            spacing: 0px;
+            for wd in root.weekdays: Text {
+                text: wd;
+                color: VayrenPalette.faint;
+                font-size: VayrenDesign.fs-label;
+                horizontal-alignment: center;
+                horizontal-stretch: 1;
+            }
+        }
+        Rectangle {
+            height: root.rows * 26px;
+            for cell in root.days: CalDay {
+                x: cell.x * (parent.width / 7);
+                y: cell.y * 26px;
+                day: cell.day;
+                label: cell.label;
+                picked(d) => { root.pick(d); }
+            }
+        }
+    }
+}
+
+component CredFieldRow inherits Rectangle {
+    in property <DlCredField> field;
+    callback changed(string);
+    callback reveal();
+    height: 46px;
+    VerticalLayout {
+        spacing: 2px;
+        Text {
+            text: root.field.label;
+            color: VayrenPalette.faint;
+            font-size: VayrenDesign.fs-label;
+        }
+        HorizontalLayout {
+            spacing: 4px;
+            Rectangle {
+                horizontal-stretch: 1;
+                LineEdit {
+                    text: root.field.value;
+                    input-type: root.field.secret && !root.field.revealed
+                        ? InputType.password : InputType.text;
+                    edited(v) => { root.changed(v); }
+                }
+            }
+            if root.field.secret: SmallButton {
+                label: root.field.revealed ? "\u{25d8}" : "\u{25d9}";
+                picked => { root.reveal(); }
+            }
+        }
+    }
+}
+
+component CredentialsModal inherits Rectangle {
+    in property <string> title;
+    in property <[DlCredField]> fields;
+    in property <bool> has-stored: false;
+    in property <string> status;
+    in property <bool> confirm: false;
+    in property <bool> test-running: false;
+    callback close();
+    callback field-changed(string, string);
+    callback reveal(string);
+    callback test();
+    callback save();
+    callback clear();
+    callback confirm-result(bool);
+
+    Rectangle {
+        width: 380px;
+        height: 40px + root.fields.length * 48px + 150px;
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 3;
+        border-radius: VayrenDesign.radius-sm;
+        border-width: 1px;
+        border-color: VayrenPalette.hairline;
+        background: VayrenPalette.surface;
+        VerticalLayout {
+            spacing: 8px;
+            padding: 14px;
+            Text {
+                text: root.title;
+                color: VayrenPalette.text;
+                font-size: VayrenDesign.fs-small;
+                font-weight: 700;
+            }
+            for f in root.fields: CredFieldRow {
+                field: f;
+                changed(v) => { root.field-changed(f.key, v); }
+                reveal() => { root.reveal(f.key); }
+            }
+            SmallButton {
+                label: root.test-running ? "Testing…" : "Test Connection";
+                enabled: !root.test-running;
+                picked => { root.test(); }
+            }
+            Text {
+                text: root.status;
+                color: VayrenPalette.muted;
+                font-size: VayrenDesign.fs-label;
+                font-weight: 600;
+                wrap: word-wrap;
+            }
+            Rectangle { height: 4px; background: transparent; }
+            HorizontalLayout {
+                spacing: 6px;
+                if root.has-stored: SmallButton {
+                    label: "Clear Credentials";
+                    picked => { root.clear(); }
+                }
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+                SmallButton { label: "Cancel"; picked => { root.close(); } }
+                SmallButton {
+                    label: "Save & Connect";
+                    primary: true;
+                    picked => { root.save(); }
+                }
+            }
+        }
+    }
+    // Clear-confirmation sub-dialog (native; Qt used a QMessageBox).
+    if root.confirm: Rectangle {
+        width: 320px;
+        height: 140px;
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+        border-radius: VayrenDesign.radius-sm;
+        border-width: 1px;
+        border-color: VayrenPalette.hairline;
+        background: VayrenPalette.surface;
+        VerticalLayout {
+            spacing: 8px;
+            padding: 14px;
+            Text {
+                text: "Remove saved credentials?";
+                color: VayrenPalette.text;
+                font-size: VayrenDesign.fs-small;
+                font-weight: 700;
+            }
+            Text {
+                text: "This will delete the locally stored provider credentials.";
+                color: VayrenPalette.muted;
+                font-size: VayrenDesign.fs-label;
+                wrap: word-wrap;
+            }
+            Rectangle { vertical-stretch: 1; background: transparent; }
+            HorizontalLayout {
+                spacing: 6px;
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+                SmallButton { label: "Cancel"; picked => { root.confirm-result(false); } }
+                SmallButton {
+                    label: "Remove";
+                    picked => { root.confirm-result(true); }
+                }
+            }
+        }
+    }
+}
+
+component DownloadDock inherits Rectangle {
+    in property <bool> busy: false;
+    in property <int> interval-index: 0;
+    in property <string> interval-label;
+    in property <[string]> interval-items;
+    in property <string> selected-text;
+    in property <string> progress-text;
+    in property <[DlStock]> stock-rows;
+    in property <[string]> chips;
+    in property <string> chips-note;
+    in property <string> filter;
+    in property <string> from-display;
+    in property <string> to-display;
+    in property <DlPlan> plan;
+    in property <DlStatus> status;
+    in property <[string]> brokers;
+    in property <int> broker-index: 0;
+    in property <[string]> log;
+    in property <bool> log-expanded: false;
+    in property <bool> cal-open: false;
+    in property <string> cal-title;
+    in property <[DlCalDay]> cal-days;
+    in property <[string]> weekdays;
+    in property <bool> cred-open: false;
+    in property <[DlCredField]> cred-fields;
+    in property <bool> cred-has-stored: false;
+    in property <string> cred-status;
+    in property <bool> confirm-clear: false;
+
+    callback close();
+    callback interval-picked(string);
+    callback toggle-symbol(string);
+    callback select-all();
+    callback clear-all();
+    callback filter-changed(string);
+    callback open-cal(string);
+    callback close-cal();
+    callback cal-prev();
+    callback cal-next();
+    callback pick-day(int);
+    callback quick(string);
+    callback download();
+    callback coverage();
+    callback cancel();
+    callback retry();
+    callback view-coverage();
+    callback error-details();
+    callback advanced();
+    callback log-toggle();
+    callback log-clear();
+    callback broker-picked(string);
+    callback open-creds();
+    callback close-creds();
+    callback field-changed(string, string);
+    callback reveal(string);
+    callback test();
+    callback save();
+    callback clear();
+    callback confirm-result(bool);
+
+    background: VayrenPalette.bg;
+    VerticalLayout {
+        spacing: 0;
+        // header (title + close) — mirrors HistoricalDownloadPanel._header
+        Rectangle {
+            height: 40px;
+            background: VayrenPalette.surface;
+            HorizontalLayout {
+                spacing: 4px;
+                padding-left: 12px;
+                padding-right: 8px;
+                VerticalLayout {
+                    alignment: center;
+                    Text {
+                        text: "Historical Download";
+                        color: VayrenPalette.text;
+                        font-size: VayrenDesign.fs-small;
+                        font-weight: 600;
+                    }
+                    Text {
+                        text: "Market Data Acquisition";
+                        color: VayrenPalette.faint;
+                        font-size: VayrenDesign.fs-label;
+                    }
+                }
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+                SmallButton {
+                    label: "\u{00d7}";
+                    picked => { root.close(); }
+                }
+            }
+        }
+        Rectangle { height: 1px; background: VayrenPalette.hairline; }
+
+        ScrollView {
+            horizontal-stretch: 1;
+            vertical-stretch: 1;
+            viewport-width: self.width;
+            body := VerticalLayout {
+                spacing: 8px;
+                padding: 12px;
+
+                DlSection { label: "Configuration"; }
+                VerticalLayout {
+                    spacing: 2px;
+                    Text {
+                        text: "INTERVAL";
+                        color: VayrenPalette.faint;
+                        font-size: VayrenDesign.fs-label;
+                        font-weight: 600;
+                    }
+                    ComboBox {
+                        enabled: !root.busy;
+                        model: root.interval-items;
+                        current-value: root.interval-label;
+                        selected(v) => { root.interval-picked(v); }
+                    }
+                }
+                VerticalLayout {
+                    spacing: 4px;
+                    Text {
+                        text: "STOCKS";
+                        color: VayrenPalette.faint;
+                        font-size: VayrenDesign.fs-label;
+                        font-weight: 600;
+                    }
+                    LineEdit {
+                        enabled: !root.busy;
+                        text: root.filter;
+                        placeholder-text: "Search stocks\u{2026}";
+                        edited(v) => { root.filter-changed(v); }
+                    }
+                    HorizontalLayout {
+                        spacing: 2px;
+                        SmallButton { label: "Select All"; enabled: !root.busy; picked => { root.select-all(); } }
+                        SmallButton { label: "Clear All"; enabled: !root.busy; picked => { root.clear-all(); } }
+                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                        Text {
+                            text: root.selected-text;
+                            color: VayrenPalette.faint;
+                            font-size: VayrenDesign.fs-label;
+                            vertical-alignment: center;
+                        }
+                    }
+                    if root.chips.length > 0: HorizontalLayout {
+                        spacing: 4px;
+                        for chip in root.chips: DlChip {
+                            label: chip;
+                            removed() => { root.toggle-symbol(chip); }
+                        }
+                    }
+                    if root.chips-note != "": Text {
+                        text: root.chips-note;
+                        color: VayrenPalette.faint;
+                        font-size: VayrenDesign.fs-label;
+                    }
+                    Rectangle {
+                        height: Math.min(208px, Math.max(120px, root.stock-rows.length * 26px));
+                        border-radius: VayrenDesign.radius-sm;
+                        border-width: 1px;
+                        border-color: VayrenPalette.hairline;
+                        ScrollView {
+                            viewport-width: self.width;
+                            stock-col := VerticalLayout {
+                                spacing: 0;
+                                for s in root.stock-rows: DlCheckRow {
+                                    label: s.symbol;
+                                    checked: s.selected;
+                                    enabled: !root.busy;
+                                    picked() => { root.toggle-symbol(s.symbol); }
+                                }
+                            }
+                        }
+                    }
+                }
+                VerticalLayout {
+                    spacing: 6px;
+                    Text {
+                        text: "DATE RANGE";
+                        color: VayrenPalette.faint;
+                        font-size: VayrenDesign.fs-label;
+                        font-weight: 600;
+                    }
+                    DlField {
+                        caption: "FROM";
+                        value: root.from-display;
+                        enabled: !root.busy;
+                        open() => { root.open-cal("from"); }
+                    }
+                    DlField {
+                        caption: "TO";
+                        value: root.to-display;
+                        enabled: !root.busy;
+                        open() => { root.open-cal("to"); }
+                    }
+                    HorizontalLayout {
+                        spacing: 4px;
+                        for cap in ["1M", "3M", "6M", "1Y", "MAX"]: SmallButton {
+                            label: cap;
+                            enabled: !root.busy;
+                            picked => { root.quick(cap); }
+                        }
+                    }
+                }
+
+                DlSection { label: "Download Plan"; }
+                DlKVRow { caption: "Stocks"; value: root.plan.stocks; }
+                DlKVRow { caption: "Interval"; value: root.plan.interval; }
+                DlKVRow { caption: "Date Range"; value: root.plan.range; wrap: true; }
+                DlKVRow { caption: "Est. Trading Days"; value: root.plan.days; }
+                DlKVRow { caption: "Est. Data Rows"; value: root.plan.rows; }
+                if root.plan.error != "": Text {
+                    text: root.plan.error;
+                    color: VayrenPalette.neg;
+                    font-size: VayrenDesign.fs-label;
+                    wrap: word-wrap;
+                }
+
+                // Action row
+                VerticalLayout {
+                    spacing: 4px;
+                    SmallButton {
+                        label: "Download Data";
+                        primary: true;
+                        enabled: !root.busy && root.plan.error == "";
+                        picked => { root.download(); }
+                    }
+                    HorizontalLayout {
+                        spacing: 4px;
+                        SmallButton {
+                            label: "Check Coverage";
+                            enabled: !root.busy;
+                            picked => { root.coverage(); }
+                        }
+                        if root.busy: SmallButton {
+                            label: "Cancel Download";
+                            picked => { root.cancel(); }
+                        }
+                    }
+                }
+
+                // Status cards (mode-driven)
+                if root.status.mode == "running": VerticalLayout {
+                    spacing: 3px;
+                    DlSection { label: "Download Status"; }
+                    DlKVRow { caption: "Status"; value: root.status.status; }
+                    DlKVRow { caption: "Current Symbol"; value: root.status.symbol; }
+                    DlKVRow { caption: "Interval"; value: root.status.interval; }
+                    DlKVRow { caption: "Current Range"; value: root.status.range; wrap: true; }
+                    DlKVRow { caption: "Current Chunk"; value: root.status.chunk; }
+                    DlKVRow { caption: "Rows Downloaded"; value: root.status.rows; }
+                    DlKVRow { caption: "Coverage"; value: root.status.coverage; }
+                    Rectangle {
+                        height: 8px;
+                        border-radius: 2px;
+                        background: VayrenPalette.bg2;
+                        Rectangle {
+                            width: parent.width * root.status.progress-pct / 100.0;
+                            background: VayrenPalette.accent;
+                        }
+                    }
+                    DlKVRow { caption: "Progress"; value: root.progress-text; }
+                    Text { text: root.status.progress-note; color: VayrenPalette.faint; font-size: VayrenDesign.fs-label; wrap: word-wrap; }
+                    DlSection { label: "Performance"; }
+                    DlKVRow { caption: "Rows/sec"; value: root.status.perf-rows; }
+                    DlKVRow { caption: "Elapsed"; value: root.status.perf-elapsed; }
+                    DlKVRow { caption: "ETA"; value: root.status.perf-eta; }
+                    DlKVRow { caption: "Downloaded (est.)"; value: root.status.perf-size; }
+                }
+                if root.status.mode == "complete": VerticalLayout {
+                    spacing: 3px;
+                    DlSection { label: "Download Complete"; }
+                    Text { text: root.status.complete-status; color: VayrenPalette.pos; font-size: VayrenDesign.fs-label; font-weight: 700; wrap: word-wrap; }
+                    DlKVRow { caption: "Rows"; value: root.status.complete-rows; }
+                    DlKVRow { caption: "Coverage"; value: root.status.complete-coverage; }
+                    DlKVRow { caption: "Duration"; value: root.status.complete-duration; }
+                    DlKVRow { caption: "Data Size (est.)"; value: root.status.complete-size; }
+                    SmallButton { label: "View Coverage"; picked => { root.view-coverage(); } }
+                }
+                if root.status.mode == "failed": VerticalLayout {
+                    spacing: 3px;
+                    DlSection { label: "Download Failed"; }
+                    Text { text: root.status.error-line; color: VayrenPalette.neg; font-size: VayrenDesign.fs-label; font-weight: 600; wrap: word-wrap; }
+                    HorizontalLayout {
+                        spacing: 4px;
+                        SmallButton { label: "Retry"; picked => { root.retry(); } }
+                        SmallButton {
+                            label: root.status.error-details-shown ? "Hide Details" : "View Details";
+                            picked => { root.error-details(); }
+                        }
+                    }
+                    if root.status.error-details-shown: Text {
+                        text: root.status.error-detail;
+                        color: VayrenPalette.muted;
+                        font-size: VayrenDesign.fs-label;
+                        wrap: word-wrap;
+                    }
+                }
+                if root.status.mode == "coverage": VerticalLayout {
+                    spacing: 3px;
+                    DlSection { label: "Coverage"; }
+                    DlKVRow { caption: "Symbol"; value: root.status.cov-symbol; }
+                    DlKVRow { caption: "Interval"; value: root.status.cov-interval; }
+                    DlKVRow { caption: "Range"; value: root.status.cov-range; wrap: true; }
+                    DlKVRow { caption: "Coverage"; value: root.status.cov-coverage; wrap: true; }
+                    DlKVRow { caption: "Rows"; value: root.status.cov-rows; wrap: true; }
+                }
+
+                // Provider Status card
+                VerticalLayout {
+                    spacing: 4px;
+                    DlSection { label: "Provider Status"; }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        Text { text: "Broker"; color: VayrenPalette.faint; font-size: VayrenDesign.fs-label; vertical-alignment: center; }
+                        ComboBox {
+                            model: root.brokers;
+                            horizontal-stretch: 1;
+                            selected(v) => { root.broker-picked(v); }
+                        }
+                    }
+                    if root.status.broker-caps != "": Text { text: root.status.broker-caps; color: VayrenPalette.faint; font-size: VayrenDesign.fs-label; wrap: word-wrap; }
+                    if root.status.broker-error != "": Text { text: root.status.broker-error; color: VayrenPalette.neg; font-size: VayrenDesign.fs-label; wrap: word-wrap; }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Text { text: root.status.provider-name; color: VayrenPalette.text; font-size: VayrenDesign.fs-label; font-weight: 600; }
+                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                        Text { text: root.status.provider-status; color: VayrenPalette.text; font-size: VayrenDesign.fs-label; font-weight: 600; }
+                    }
+                    Text { text: root.status.provider-label; color: VayrenPalette.faint; font-size: VayrenDesign.fs-label; wrap: word-wrap; }
+                    HorizontalLayout {
+                        spacing: 4px;
+                        if root.status.configure-visible: SmallButton {
+                            label: "Configure Credentials";
+                            picked => { root.open-creds(); }
+                        }
+                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                        if root.status.advanced-visible: SmallButton {
+                            label: root.status.advanced-open ? "Advanced \u{25b4}" : "Advanced \u{25be}";
+                            picked => { root.advanced(); }
+                        }
+                    }
+                    if root.status.advanced-open: Text {
+                        text: root.status.provider-detail;
+                        color: VayrenPalette.muted;
+                        font-size: VayrenDesign.fs-label;
+                        wrap: word-wrap;
+                    }
+                    if root.status.env-visible: Text {
+                        text: "VAYREN reads credentials from the secure store or the VAYREN_ZERODHA_* environment fallback; set them, then restart.";
+                        color: VayrenPalette.faint;
+                        font-size: VayrenDesign.fs-label;
+                        wrap: word-wrap;
+                    }
+                }
+
+                // Engine log (collapsible)
+                VerticalLayout {
+                    spacing: 2px;
+                    HorizontalLayout {
+                        spacing: 4px;
+                        SmallButton { label: root.log-expanded ? "\u{2303}" : "\u{2304}"; picked => { root.log-toggle(); } }
+                        Text { text: "ENGINE LOG"; color: VayrenPalette.faint; font-size: VayrenDesign.fs-label; font-weight: 700; vertical-alignment: center; }
+                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                        SmallButton { label: "Clear Log"; picked => { root.log-clear(); } }
+                    }
+                    if root.log-expanded: Rectangle {
+                        height: 150px;
+                        border-radius: VayrenDesign.radius-sm;
+                        border-width: 1px;
+                        border-color: VayrenPalette.hairline;
+                        background: VayrenPalette.bg2;
+                        ScrollView {
+                            viewport-width: self.width;
+                            log-col := VerticalLayout {
+                                spacing: 0;
+                                if root.log.length == 0: Text {
+                                    x: 4px;
+                                    text: "Engine log \u{2014} no output yet.";
+                                    color: VayrenPalette.faint;
+                                    font-size: VayrenDesign.fs-label;
+                                }
+                                for line in root.log: Text {
+                                    text: line;
+                                    color: VayrenPalette.muted;
+                                    font-size: VayrenDesign.fs-label;
+                                    wrap: no-wrap;
+                                    overflow: elide;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Calendar + credential overlays (native popups)
+    if root.cal-open: Rectangle {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        ta := TouchArea { clicked => { root.close-cal(); } }
+    }
+    if root.cal-open: CalendarPopup {
+        x: root.width - 244px;
+        y: 160px;
+        title: root.cal-title;
+        days: root.cal-days;
+        weekdays: root.weekdays;
+        prev() => { root.cal-prev(); }
+        next() => { root.cal-next(); }
+        pick(d) => { root.pick-day(d); }
+    }
+    if root.cred-open: CredentialsModal {
+        width: parent.width;
+        height: parent.height;
+        title: "Configure Provider Credentials";
+        fields: root.cred-fields;
+        has-stored: root.cred-has-stored;
+        status: root.cred-status;
+        confirm: root.confirm-clear;
+        close() => { root.close-creds(); }
+        field-changed(k, v) => { root.field-changed(k, v); }
+        reveal(k) => { root.reveal(k); }
+        test() => { root.test(); }
+        save() => { root.save(); }
+        clear() => { root.clear(); }
+        confirm-result(y) => { root.confirm-result(y); }
+    }
+}
+
+export component MarketScreen inherits Rectangle {
+    // ── bound view state (Rust -> screen) ──
+    in property <bool> panel-visible: true;
+    in property <string> symbol-title;
+    in property <string> timeframe-label;
+    in property <string> exchange-label;
+    in property <string> status-message;
+    in property <bool> has-data: false;
+    in property <string> header-ohlc;
+    in property <[MarketWatchRow]> watch-rows;
+    in property <[string]> watchlists;
+    in property <string> watchlist-name;
+    in property <string> filter;
+    in property <bool> sort-ascending: true;
+    in property <[MarketTimeframe]> timeframes-visible;
+    in property <[MarketTimeframe]> timeframes-overflow;
+    // Logical time-grid slots (window count). The plot lays candles on this
+    // grid, so the newest bar can be dragged left with real empty space right
+    // of it instead of the remaining candles stretching to fill the width.
+    in property <int> plot-slots: 0;
+    in property <[MarketCandle]> candles;
+    in property <[MarketTick]> price-ticks;
+    in property <[MarketTick]> time-ticks;
+    in property <[MarketPlotSeg]> plot-segments;
+    in property <[MarketMarker]> markers;
+    in property <float> hover-x: 0.5;
+    in property <float> hover-y: 0.5;
+    in property <string> hover-price;
+    in property <string> hover-time;
+    in property <string> hover-volume;
+    in property <bool> hover-bull: true;
+    in property <bool> has-hover: false;
+    in property <[MarketIndicator]> indicator-rows;
+    in property <bool> popup-open: false;
+    in property <string> popup-query;
+    in property <string> popup-category: "ALL";
+    in property <[MarketPopupRow]> popup-rows;
+    in property <string> active-label;
+    in property <MarketTradeContext> trade-context;
+    in property <bool> wide: true;
+    in property <bool> medium: true;
+
+    // ── Historical-Download console (bound from Rust DownloadView) ──
+    in property <bool> dl-open: false;
+    in property <bool> dl-busy: false;
+    in property <int> dl-interval-index: 0;
+    in property <string> dl-interval-label;
+    in property <[string]> dl-interval-items;
+    in property <int> dl-selected-count: 0;
+    in property <string> dl-selected-text;
+    in property <string> dl-progress-text;
+    in property <[DlStock]> dl-stock-rows;
+    in property <[string]> dl-chips;
+    in property <string> dl-chips-note;
+    in property <string> dl-filter;
+    in property <string> dl-from-display;
+    in property <string> dl-to-display;
+    in property <DlPlan> dl-plan;
+    in property <DlStatus> dl-status;
+    in property <[string]> dl-brokers;
+    in property <int> dl-broker-index: 0;
+    in property <[string]> dl-log;
+    in property <bool> dl-log-expanded: false;
+    in property <bool> dl-cal-open: false;
+    in property <string> dl-cal-title;
+    in property <[DlCalDay]> dl-cal-days;
+    in property <[string]> dl-weekdays;
+    in property <bool> dl-cred-open: false;
+    in property <[DlCredField]> dl-cred-fields;
+    in property <bool> dl-cred-has-stored: false;
+    in property <string> dl-cred-status;
+    in property <bool> dl-confirm-clear: false;
+
+    callback dl-toggle();
+    callback dl-interval(string);
+    callback dl-toggle-symbol(string);
+    callback dl-select-all();
+    callback dl-clear-all();
+    callback dl-filter-changed(string);
+    callback dl-open-cal(string);
+    callback dl-close-cal();
+    callback dl-cal-prev();
+    callback dl-cal-next();
+    callback dl-pick-day(int);
+    callback dl-quick(string);
+    callback dl-download();
+    callback dl-coverage();
+    callback dl-cancel();
+    callback dl-retry();
+    callback dl-view-coverage();
+    callback dl-error-details();
+    callback dl-advanced();
+    callback dl-log-toggle();
+    callback dl-log-clear();
+    callback dl-broker(string);
+    callback dl-open-creds();
+    callback dl-close-creds();
+    callback dl-cred-field(string, string);
+    callback dl-cred-reveal(string);
+    callback dl-cred-test();
+    callback dl-cred-save();
+    callback dl-cred-clear();
+    callback dl-cred-confirm(bool);
+
+    // ── reported interactions (screen -> Rust) ──
+    callback panel-toggle();
+    callback symbol-selected(string);
+    callback timeframe-picked(string);
+    callback filter-changed(string);
+    callback sort-asc();
+    callback sort-desc();
+    callback add-watchlist();
+    callback remove-watchlist();
+    callback select-watchlist(string);
+    callback reset-view();
+    callback hover-moved(float, float);
+    callback hover-left();
+    callback wheel-zoom(float, float);
+    callback wheel-pan(float);
+    callback drag-start(float, float);
+    callback drag-move(float, float);
+    callback drag-end();
+    callback price-zoom(float, float);
+    callback price-drag(float, float);
+    callback price-drag-end();
+    callback price-reset();
+    callback indicator-popup(bool);
+    callback indicator-query(string);
+    callback indicator-category(string);
+    callback add-indicator(string);
+    callback toggle-indicator-visible(string);
+    callback settings-indicator(string);
+    callback source-indicator(string);
+    callback remove-indicator(string);
+    callback trade-prev();
+    callback trade-next();
+    callback trade-open();
+
+    // ── local presentation state (menus, drag) ──
+    property <string> open-menu: "none";
+    property <length> menu-x: 0px;
+    property <length> menu-y: 0px;
+    property <length> popup-x: 0px;
+    property <bool> dragging: false;
+    property <bool> price-dragging: false;
+    // Price-strip drag anchor (press y fraction) — Qt zooms around the
+    // press pixel, so the delta is measured from it, not the live cursor.
+    property <float> price-anchor-fy: 0.5;
+    // Canvas fractions cached as plain floats (the returning scroll-event
+    // callback cannot re-infer length/length ratios, so `moved` computes them).
+    property <float> px-fx: 0.5;
+    property <float> px-fy: 0.5;
+    property <float> plot-px: 0.0;
+    property <float> plot-h-px: 0.0;
+
+    property <length> price-strip: 96px;
+    property <length> time-axis-h: 24px;
+    property <length> header-h: 24px;
+
+    background: VayrenPalette.bg;
+
+    // Root fill wrapper (ScrollView viewport forces window-box sizing so
+    // stretch children divide real space; no scrollbars when content fits).
+    ScrollView {
+        width: 100%;
+        height: 100%;
+        viewport-width: root.width;
+
+        HorizontalLayout {
+            spacing: 0;
+
+            // ── tools rail (Qt: exactly the watchlist toggle) ──
+            Rectangle {
+                width: 40px;
+                background: VayrenPalette.surface;
+                VerticalLayout {
+                    padding: 5px;
+                    spacing: 2px;
+                    RailButton {
+                        code: "WL";
+                        active: root.panel-visible;
+                        picked => { root.panel-toggle(); }
+                    }
+                    RailButton {
+                        code: "DL";
+                        active: root.dl-open;
+                        picked => { root.dl-toggle(); }
+                    }
+                    Rectangle { vertical-stretch: 1; background: transparent; }
+                }
+            }
+            Rectangle { width: 1px; background: VayrenPalette.hairline; }
+
+            // ── watchlist panel (rail-toggled; hidden below medium) ──
+            if root.panel-visible && root.medium: Rectangle {
+                width: root.wide ? 220px : 200px;
+                background: VayrenPalette.bg;
+                VerticalLayout {
+                    spacing: 0;
+                    HorizontalLayout {
+                        height: 32px;
+                        spacing: 2px;
+                        padding-left: 6px;
+                        padding-right: 6px;
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            SmallButton {
+                                x: 0;
+                                width: parent.width;
+                                height: parent.height;
+                                label: root.watchlist-name + " ▾";
+                                active: root.open-menu == "watchlist";
+                                picked => {
+                                    root.open-menu = "watchlist";
+                                    root.menu-x = self.absolute-position.x;
+                                    root.menu-y = self.absolute-position.y + self.height;
+                                }
+                            }
+                        }
+                        SmallButton {
+                            label: "+";
+                            picked => { root.add-watchlist(); }
+                        }
+                        SmallButton {
+                            label: "↩";
+                            picked => { root.reset-view(); }
+                        }
+                        SmallButton {
+                            label: "⋯";
+                            active: root.open-menu == "more";
+                            picked => {
+                                root.open-menu = "more";
+                                root.menu-x = self.absolute-position.x;
+                                root.menu-y = self.absolute-position.y + self.height;
+                            }
+                        }
+                    }
+                    Rectangle { height: 1px; background: VayrenPalette.hairline; }
+                    HorizontalLayout {
+                        height: 24px;
+                        spacing: 4px;
+                        padding-left: 12px;
+                        padding-right: 6px;
+                        Text {
+                            text: "SYMBOL";
+                            color: VayrenPalette.faint;
+                            font-size: VayrenDesign.fs-label;
+                            font-weight: 600;
+                            vertical-alignment: center;
+                        }
+                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                        SmallButton {
+                            label: "Sort by ▾";
+                            active: root.open-menu == "sort";
+                            picked => {
+                                root.open-menu = "sort";
+                                root.menu-x = self.absolute-position.x;
+                                root.menu-y = self.absolute-position.y + self.height;
+                            }
+                        }
+                    }
+                    Rectangle { height: 1px; background: VayrenPalette.hairline; }
+                    LineEdit {
+                        height: 28px;
+                        text: root.filter;
+                        placeholder-text: "Filter symbols…";
+                        edited(t) => { root.filter-changed(t); }
+                    }
+                    ScrollView {
+                        horizontal-stretch: 1;
+                        vertical-stretch: 1;
+                        viewport-width: self.width;
+                        VerticalLayout {
+                            spacing: 0;
+                            for row in root.watch-rows: Rectangle {
+                                height: 40px;
+                                background: row.selected ? VayrenPalette.selected
+                                    : wta.has-hover ? VayrenPalette.hover : transparent;
+                                wta := TouchArea {
+                                    clicked => { root.symbol-selected(row.symbol); }
+                                }
+                                if row.selected: Rectangle {
+                                    width: 2px;
+                                    height: 100%;
+                                    background: VayrenPalette.accent;
+                                }
+                                VerticalLayout {
+                                    padding-left: 8px;
+                                    padding-right: 8px;
+                                    spacing: 0;
+                                    HorizontalLayout {
+                                        height: 20px;
+                                        Text {
+                                            text: row.symbol;
+                                            color: VayrenPalette.text;
+                                            font-size: VayrenDesign.fs-small;
+                                            font-weight: 600;
+                                            vertical-alignment: center;
+                                            overflow: elide;
+                                        }
+                                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                                        Text {
+                                            text: row.price;
+                                            color: VayrenPalette.text;
+                                            font-size: VayrenDesign.fs-small;
+                                            font-weight: 600;
+                                            horizontal-alignment: right;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                    Text {
+                                        text: row.change;
+                                        color: MarketTone.brush(row.tone);
+                                        font-size: VayrenDesign.fs-label;
+                                        horizontal-alignment: right;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if root.panel-visible && root.medium: Rectangle {
+                width: 1px;
+                background: VayrenPalette.hairline;
+            }
+
+            // ── chart column ──
+            Rectangle {
+                horizontal-stretch: 1;
+                VerticalLayout {
+                    spacing: 0;
+
+                    HorizontalLayout {
+                        height: 34px;
+                        spacing: 4px;
+                        padding-left: 6px;
+                        padding-right: 6px;
+                        for tf in root.timeframes-visible: MTimeButton {
+                            label: tf.label;
+                            active: tf.selected;
+                            picked => { root.timeframe-picked(tf.label); }
+                        }
+                        if root.timeframes-overflow.length > 0: SmallButton {
+                            label: "▾";
+                            active: root.open-menu == "overflow";
+                            picked => {
+                                root.open-menu = "overflow";
+                                root.menu-x = self.absolute-position.x;
+                                root.menu-y = self.absolute-position.y + self.height;
+                            }
+                        }
+                        SmallButton {
+                            label: "INDICATORS";
+                            active: root.popup-open;
+                            picked => {
+                                root.indicator-popup(!root.popup-open);
+                                root.popup-x = self.absolute-position.x;
+                            }
+                        }
+                        if root.active-label != "": Text {
+                            text: root.active-label;
+                            color: VayrenPalette.faint;
+                            font-size: VayrenDesign.fs-label;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                    }
+                    Rectangle { height: 1px; background: VayrenPalette.hairline; }
+
+                    if root.trade-context.visible: Rectangle {
+                        height: VayrenDesign.h-context;
+                        background: VayrenPalette.surface;
+                        HorizontalLayout {
+                            spacing: VayrenDesign.sp-md;
+                            padding-left: VayrenDesign.sp-lg;
+                            padding-right: VayrenDesign.sp-lg;
+                            Text {
+                                text: root.trade-context.trade;
+                                color: VayrenPalette.text;
+                                font-size: VayrenDesign.fs-label;
+                                font-weight: 700;
+                                vertical-alignment: center;
+                            }
+                            Text {
+                                text: root.trade-context.symbol-side;
+                                color: VayrenPalette.text;
+                                font-size: VayrenDesign.fs-label;
+                                font-weight: 600;
+                                vertical-alignment: center;
+                            }
+                            Text {
+                                text: root.trade-context.time;
+                                color: VayrenPalette.muted;
+                                font-size: VayrenDesign.fs-label;
+                                vertical-alignment: center;
+                            }
+                            Text {
+                                text: root.trade-context.pnl;
+                                color: VayrenPalette.text;
+                                font-size: VayrenDesign.fs-label;
+                                font-weight: 700;
+                                vertical-alignment: center;
+                            }
+                            Text {
+                                text: root.trade-context.r;
+                                color: VayrenPalette.muted;
+                                font-size: VayrenDesign.fs-label;
+                                vertical-alignment: center;
+                            }
+                            Rectangle { horizontal-stretch: 1; background: transparent; }
+                            SmallButton { label: "← PREV"; picked => { root.trade-prev(); } }
+                            SmallButton { label: "NEXT →"; picked => { root.trade-next(); } }
+                            SmallButton {
+                                label: "OPEN IN MARKET ↗";
+                                primary: true;
+                                picked => { root.trade-open(); }
+                            }
+                        }
+                    }
+
+                    // plot column + price strip
+                    HorizontalLayout {
+                        vertical-stretch: 1;
+                        spacing: 0;
+
+                        plot := Rectangle {
+                            horizontal-stretch: 1;
+                            clip: true;
+                            background: VayrenPalette.bg;
+                            property <length> grid-h: self.height * 0.85;
+                            property <length> vol-h: self.height * 0.15;
+                            property <int> n: Math.max(
+                                Math.max(root.plot-slots, root.candles.length), 1
+                            );
+                            property <length> slot: self.width / n;
+
+                            // horizontal grid lines (price ticks)
+                            for t in root.price-ticks: Rectangle {
+                                x: 0;
+                                width: plot.width;
+                                height: 1px;
+                                y: t.pos * plot.grid-h;
+                                background: VayrenPalette.hairline-soft;
+                            }
+                            // volume baseline
+                            Rectangle {
+                                x: 0;
+                                width: plot.width;
+                                height: 1px;
+                                y: plot.grid-h;
+                                background: VayrenPalette.hairline;
+                            }
+
+                            // candles + volume (absolute, clipped)
+                            Rectangle {
+                                x: 0;
+                                y: 0;
+                                width: plot.width;
+                                height: plot.height;
+                                for cd in root.candles: CandleGlyph {
+                                    c: cd;
+                                    plot-w: plot.width;
+                                    grid-h: plot.grid-h;
+                                    vol-h: plot.vol-h;
+                                    slot: plot.slot;
+                                }
+                            }
+
+                            // strategy plot overlays (real series)
+                            for s in root.plot-segments: OverlaySeg {
+                                x1: s.x1;
+                                y1: s.y1;
+                                x2: s.x2;
+                                y2: s.y2;
+                                plot-w: plot.width;
+                                grid-h: plot.grid-h;
+                                wide: s.wide;
+                                stroke: s.color == 2 ? VayrenPalette.pos
+                                    : s.color == 1 ? VayrenPalette.amber
+                                    : s.color == 3 ? VayrenPalette.neg
+                                    : s.color == 4 ? VayrenPalette.strat-blue
+                                    : s.color == 5 ? VayrenPalette.strat-purple
+                                    : s.color == 6 ? VayrenPalette.strat-orange
+                                    : s.color == 0 ? VayrenPalette.text
+                                    : VayrenPalette.accent;
+                            }
+
+                            // trade markers (real overlay trades)
+                            for m in root.markers: MarkerGlyph {
+                                gx: m.x;
+                                gy: m.y;
+                                kind: m.kind;
+                                ink: m.color == 1 ? VayrenPalette.amber
+                                    : m.color == 3 ? VayrenPalette.neg
+                                    : m.color == 4 ? VayrenPalette.strat-blue
+                                    : m.color == 5 ? VayrenPalette.strat-purple
+                                    : m.color == 6 ? VayrenPalette.muted
+                                    : VayrenPalette.pos;
+                                label: m.label;
+                                pill: m.pill;
+                                pill-solid: m.pill-solid;
+                                tip: m.tip;
+                                plot-w: plot.width;
+                                grid-h: plot.grid-h;
+                                pill-w: m.pill-w * 1px;
+                            }
+
+                            // permanent OHLC header strip
+                            if root.has-data: Rectangle {
+                                x: 0;
+                                y: 0;
+                                width: plot.width;
+                                height: root.header-h;
+                                background: VayrenPalette.surface;
+                                Rectangle {
+                                    y: root.header-h - 1px;
+                                    height: 1px;
+                                    width: plot.width;
+                                    background: VayrenPalette.hairline;
+                                }
+                                Text {
+                                    x: VayrenDesign.sp-md;
+                                    text: root.symbol-title + "  •  " + root.timeframe-label
+                                        + (root.exchange-label != "" ? "  •  " + root.exchange-label : "");
+                                    color: VayrenPalette.text;
+                                    font-size: VayrenDesign.fs-label;
+                                    font-weight: 700;
+                                    vertical-alignment: center;
+                                    height: root.header-h;
+                                }
+                                Text {
+                                    x: VayrenDesign.sp-md + 200px;
+                                    text: root.header-ohlc;
+                                    color: VayrenPalette.muted;
+                                    font-size: VayrenDesign.fs-label;
+                                    vertical-alignment: center;
+                                    height: root.header-h;
+                                    overflow: elide;
+                                }
+                            }
+
+                            // crosshair + tags
+                            if root.has-hover: Rectangle {
+                                x: 0;
+                                y: 0;
+                                width: plot.width;
+                                height: plot.height;
+                                Rectangle {
+                                    x: root.hover-x * plot.width - 0.5px;
+                                    y: 0px;
+                                    width: 1px;
+                                    height: plot.height;
+                                    background: VayrenPalette.faint;
+                                }
+                                Rectangle {
+                                    x: 0px;
+                                    y: root.hover-y * plot.grid-h - 0.5px;
+                                    width: plot.width;
+                                    height: 1px;
+                                    background: VayrenPalette.faint;
+                                }
+                                Rectangle {
+                                    x: plot.width - root.price-strip;
+                                    y: root.hover-y * plot.grid-h - 9px;
+                                    width: root.price-strip;
+                                    height: 18px;
+                                    background: VayrenPalette.accent;
+                                    Text {
+                                        text: root.hover-price;
+                                        color: VayrenPalette.accent-text;
+                                        font-size: VayrenDesign.fs-label;
+                                        font-weight: 700;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                Rectangle {
+                                    x: Math.max(0px, Math.min(root.hover-x * plot.width - 60px, plot.width - 120px));
+                                    y: plot.height - root.time-axis-h;
+                                    width: 120px;
+                                    height: root.time-axis-h;
+                                    background: VayrenPalette.accent;
+                                    Text {
+                                        text: root.hover-time;
+                                        color: VayrenPalette.accent-text;
+                                        font-size: VayrenDesign.fs-label;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                Text {
+                                    x: plot.width - 96px;
+                                    y: plot.grid-h;
+                                    width: 90px;
+                                    height: plot.vol-h;
+                                    text: root.hover-volume;
+                                    color: root.hover-bull ? VayrenPalette.pos : VayrenPalette.neg;
+                                    font-size: VayrenDesign.fs-label;
+                                    font-weight: 700;
+                                    horizontal-alignment: right;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
+                            }
+
+                            // interaction surface
+                            cta := TouchArea {
+                                x: 0;
+                                y: 0;
+                                width: plot.width;
+                                height: plot.height;
+                                pointer-event(ev) => {
+                                    if ev.kind == PointerEventKind.move {
+                                        // Pointer tracking (hover crosshair, drag pan,
+                                        // price-strip scale): handled here rather
+                                        // than `moved` so press/move/release share
+                                        // one event stream.
+                                        // Y fractions are measured against the
+                                        // PRICE GRID height (plot.grid-h), never
+                                        // the full plot height: the legacy Qt
+                                        // chart maps price/crosshair only inside
+                                        // its chart rect (volume strip excluded),
+                                        // and every Slint candle/overlay/crosshair
+                                        // renders price fractions × grid-h. Using
+                                        // plot.height here placed the horizontal
+                                        // crosshair at 0.85 × the cursor Y.
+                                        root.px-fx = self.mouse-x / plot.width;
+                                        root.px-fy = self.mouse-y / plot.grid-h;
+                                        root.plot-px = plot.width / 1px;
+                                        root.plot-h-px = plot.grid-h / 1px;
+                                        let fx = root.px-fx;
+                                        let fy = root.px-fy;
+                                        if root.dragging {
+                                            root.drag-move(fx, fy);
+                                        } else if root.price-dragging {
+                                            // Qt _drag_price_from: delta from the
+                                            // press point, in wheel notches.
+                                            root.price-drag((fy - root.price-anchor-fy) * root.plot-h-px / 120.0, root.price-anchor-fy);
+                                        } else {
+                                            root.hover-moved(fx, fy);
+                                        }
+                                    } else if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.right {
+                                        root.open-menu = "context";
+                                        root.menu-x = plot.absolute-position.x + self.mouse-x;
+                                        root.menu-y = plot.absolute-position.y + self.mouse-y;
+                                    } else if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left
+                                        && plot.width > 0px {
+                                        if self.mouse-x > plot.width - root.price-strip {
+                                            root.price-dragging = true;
+                                            root.price-anchor-fy = self.mouse-y / plot.grid-h;
+                                        } else {
+                                            root.dragging = true;
+                                            root.drag-start(self.mouse-x / plot.width, self.mouse-y / plot.grid-h);
+                                        }
+                                    } else if ev.kind == PointerEventKind.up {
+                                        if root.dragging { root.drag-end(); root.dragging = false; }
+                                        if root.price-dragging { root.price-drag-end(); root.price-dragging = false; }
+                                    }
+                                }
+                                changed has-hover => {
+                                    if !self.has-hover { root.hover-left(); }
+                                }
+                                double-clicked => {
+                                    if self.mouse-x > plot.width - root.price-strip { root.price-reset(); }
+                                }
+                                scroll-event(ev) => {
+                                    if plot.width <= 0px || root.candles.length == 0 {
+                                        return reject;
+                                    }
+                                    if ev.delta-y != 0px {
+                                        let steps = (ev.delta-y / 1px) / 120.0;
+                                        if self.mouse-x > plot.width - root.price-strip {
+                                            root.price-zoom(steps, root.px-fy);
+                                        } else {
+                                            root.wheel-zoom(root.px-fx, steps);
+                                        }
+                                    } else if ev.delta-x != 0px && root.plot-px > 0.0 {
+                                        root.wheel-pan((ev.delta-x / 1px) / root.plot-px);
+                                    }
+                                    accept
+                                }
+                            }
+
+                            // indicator floating visibility bar (top-left).
+                            // Declared AFTER the chart interaction surface (`cta`)
+                            // on purpose: in Slint the later-declared TouchArea is
+                            // on top for hit-testing, so the bar must come after
+                            // the pan/crosshair surface or its icon buttons can
+                            // never be clicked (TradingView toolbar parity).
+                            if root.indicator-rows.length > 0: Rectangle {
+                                x: 8px;
+                                y: root.header-h + 6px;
+                                width: 260px;
+                                height: root.indicator-rows.length * 30px;
+                                VerticalLayout {
+                                    spacing: 2px;
+                                    for ir in root.indicator-rows: IndicatorBarRow {
+                                        name: ir.name;
+                                        shown: ir.visible;
+                                        toggle => { root.toggle-indicator-visible(ir.name); }
+                                        settings => { root.settings-indicator(ir.name); }
+                                        source => { root.source-indicator(ir.name); }
+                                        remove => { root.remove-indicator(ir.name); }
+                                    }
+                                }
+                            }
+
+                            // honest state message (Qt centered subtle text)
+                            if !root.has-data: VerticalLayout {
+                                alignment: center;
+                                Text {
+                                    text: root.status-message;
+                                    color: VayrenPalette.faint;
+                                    font-size: VayrenDesign.fs-small;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            // INDICATORS popup (search · categories · list)
+                            if root.popup-open: Rectangle {
+                                x: Math.max(0px, Math.min(root.popup-x, plot.width - 360px));
+                                y: root.header-h + 40px;
+                                width: 360px;
+                                height: 380px;
+                                border-radius: VayrenDesign.radius-sm;
+                                border-width: 1px;
+                                border-color: VayrenPalette.hairline;
+                                background: VayrenPalette.surface;
+                                VerticalLayout {
+                                    spacing: 8px;
+                                    padding: 10px;
+                                    LineEdit {
+                                        height: 28px;
+                                        text: root.popup-query;
+                                        placeholder-text: "Search indicators & strategies…";
+                                        edited(t) => { root.indicator-query(t); }
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 4px;
+                                        for cat in ["ALL", "TREND", "MOMENTUM", "VOLUME", "VOLATILITY", "STRATEGIES"]: SmallButton {
+                                            label: cat;
+                                            active: root.popup-category == cat;
+                                            picked => { root.indicator-category(cat); }
+                                        }
+                                    }
+                                    ScrollView {
+                                        vertical-stretch: 1;
+                                        viewport-width: self.width;
+                                        VerticalLayout {
+                                            spacing: 0;
+                                            for pr in root.popup-rows: PopupItem {
+                                                pr: pr;
+                                                picked(name) => {
+                                                    root.add-indicator(name);
+                                                    root.indicator-popup(false);
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Text {
+                                        text: "Indicators and strategies from a single control";
+                                        color: VayrenPalette.faint;
+                                        font-size: VayrenDesign.fs-label;
+                                        horizontal-alignment: center;
+                                    }
+                                    SmallButton {
+                                        label: "CLOSE";
+                                        picked => { root.indicator-popup(false); }
+                                    }
+                                }
+                            }
+                        }
+
+                        // price scale strip (labels + manual scale target)
+                        Rectangle {
+                            width: root.price-strip;
+                            background: VayrenPalette.bg;
+                            property <length> grid-h: self.height * 0.85;
+                            for t in root.price-ticks: Text {
+                                y: t.pos * parent.grid-h;
+                                width: parent.width;
+                                text: t.label;
+                                color: VayrenPalette.faint;
+                                font-size: VayrenDesign.fs-label;
+                                horizontal-alignment: right;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                        }
+                    }
+
+                    // time axis row
+                    Rectangle {
+                        height: root.time-axis-h;
+                        background: VayrenPalette.bg;
+                        Rectangle {
+                            y: 0;
+                            height: 1px;
+                            width: parent.width;
+                            background: VayrenPalette.hairline;
+                        }
+                        for t in root.time-ticks: Text {
+                            x: Math.max(0px, Math.min(t.pos * parent.width - 60px, parent.width - 120px));
+                            width: 120px;
+                            height: parent.height;
+                            text: t.label;
+                            color: VayrenPalette.faint;
+                            font-size: VayrenDesign.fs-label;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                    }
+                }
+            }
+
+            // ── Historical-Download console (right dock; rail "DL" toggles) ──
+            if root.dl-open: Rectangle {
+                width: 1px;
+                background: VayrenPalette.hairline;
+            }
+            if root.dl-open: DownloadDock {
+                width: 340px;
+                busy: root.dl-busy;
+                interval-index: root.dl-interval-index;
+                interval-label: root.dl-interval-label;
+                interval-items: root.dl-interval-items;
+                selected-text: root.dl-selected-text;
+                progress-text: root.dl-progress-text;
+                stock-rows: root.dl-stock-rows;
+                chips: root.dl-chips;
+                chips-note: root.dl-chips-note;
+                filter: root.dl-filter;
+                from-display: root.dl-from-display;
+                to-display: root.dl-to-display;
+                plan: root.dl-plan;
+                status: root.dl-status;
+                brokers: root.dl-brokers;
+                broker-index: root.dl-broker-index;
+                log: root.dl-log;
+                log-expanded: root.dl-log-expanded;
+                cal-open: root.dl-cal-open;
+                cal-title: root.dl-cal-title;
+                cal-days: root.dl-cal-days;
+                weekdays: root.dl-weekdays;
+                cred-open: root.dl-cred-open;
+                cred-fields: root.dl-cred-fields;
+                cred-has-stored: root.dl-cred-has-stored;
+                cred-status: root.dl-cred-status;
+                confirm-clear: root.dl-confirm-clear;
+                interval-picked(i) => { root.dl-interval(i); }
+                toggle-symbol(s) => { root.dl-toggle-symbol(s); }
+                select-all() => { root.dl-select-all(); }
+                clear-all() => { root.dl-clear-all(); }
+                filter-changed(t) => { root.dl-filter-changed(t); }
+                open-cal(which) => { root.dl-open-cal(which); }
+                close-cal() => { root.dl-close-cal(); }
+                cal-prev() => { root.dl-cal-prev(); }
+                cal-next() => { root.dl-cal-next(); }
+                pick-day(d) => { root.dl-pick-day(d); }
+                quick(c) => { root.dl-quick(c); }
+                download() => { root.dl-download(); }
+                coverage() => { root.dl-coverage(); }
+                cancel() => { root.dl-cancel(); }
+                retry() => { root.dl-retry(); }
+                view-coverage() => { root.dl-view-coverage(); }
+                error-details() => { root.dl-error-details(); }
+                advanced() => { root.dl-advanced(); }
+                log-toggle() => { root.dl-log-toggle(); }
+                log-clear() => { root.dl-log-clear(); }
+                broker-picked(v) => { root.dl-broker(v); }
+                open-creds() => { root.dl-open-creds(); }
+                close-creds() => { root.dl-close-creds(); }
+                field-changed(k, v) => { root.dl-cred-field(k, v); }
+                reveal(k) => { root.dl-cred-reveal(k); }
+                test() => { root.dl-cred-test(); }
+                save() => { root.dl-cred-save(); }
+                clear() => { root.dl-cred-clear(); }
+                confirm-result(y) => { root.dl-cred-confirm(y); }
+            }
+        }
+    }
+
+    // keyboard: Alt+R reset, ←/→ trade nav, Esc close (window-scoped in Qt).
+    forward-focus: ks;
+    ks := FocusScope {
+        key-pressed(ev) => {
+            if ev.modifiers.alt && (ev.text == "r" || ev.text == "R") {
+                root.reset-view();
+                return accept;
+            }
+            if ev.text == Key.LeftArrow {
+                root.trade-prev();
+                return accept;
+            }
+            if ev.text == Key.RightArrow {
+                root.trade-next();
+                return accept;
+            }
+            if ev.text == Key.Escape {
+                root.open-menu = "none";
+                if root.popup-open { root.indicator-popup(false); }
+                return accept;
+            }
+            reject
+        }
+    }
+
+    // ── floating menus (rendered last => above content) ──
+    if root.open-menu != "none": Rectangle {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        clip: false;
+        ta := TouchArea {
+            clicked => { root.open-menu = "none"; }
+        }
+    }
+    if root.open-menu == "watchlist": Rectangle {
+        x: root.menu-x;
+        y: root.menu-y;
+        width: 200px;
+        border-radius: VayrenDesign.radius-sm;
+        border-width: 1px;
+        border-color: VayrenPalette.hairline;
+        background: VayrenPalette.surface;
+        VerticalLayout {
+            spacing: 0;
+            for w in root.watchlists: MenuRow {
+                label: w;
+                selected: w == root.watchlist-name;
+                picked => {
+                    root.select-watchlist(w);
+                    root.open-menu = "none";
+                }
+            }
+        }
+    }
+    if root.open-menu == "sort": Rectangle {
+        x: Math.max(0px, root.menu-x - 120px);
+        y: root.menu-y;
+        width: 160px;
+        border-radius: VayrenDesign.radius-sm;
+        border-width: 1px;
+        border-color: VayrenPalette.hairline;
+        background: VayrenPalette.surface;
+        VerticalLayout {
+            spacing: 0;
+            MenuRow {
+                label: "Name A → Z";
+                selected: root.sort-ascending;
+                picked => { root.sort-asc(); root.open-menu = "none"; }
+            }
+            MenuRow {
+                label: "Name Z → A";
+                selected: !root.sort-ascending;
+                picked => { root.sort-desc(); root.open-menu = "none"; }
+            }
+        }
+    }
+    if root.open-menu == "more": Rectangle {
+        x: Math.max(0px, root.menu-x - 120px);
+        y: root.menu-y;
+        width: 180px;
+        border-radius: VayrenDesign.radius-sm;
+        border-width: 1px;
+        border-color: VayrenPalette.hairline;
+        background: VayrenPalette.surface;
+        VerticalLayout {
+            spacing: 0;
+            MenuRow {
+                label: "New watchlist";
+                picked => { root.add-watchlist(); root.open-menu = "none"; }
+            }
+            MenuRow {
+                label: "Remove watchlist";
+                enabled: root.watchlist-name != "All Stocks";
+                picked => { root.remove-watchlist(); root.open-menu = "none"; }
+            }
+        }
+    }
+    if root.open-menu == "overflow": Rectangle {
+        x: root.menu-x;
+        y: root.menu-y;
+        width: 96px;
+        border-radius: VayrenDesign.radius-sm;
+        border-width: 1px;
+        border-color: VayrenPalette.hairline;
+        background: VayrenPalette.surface;
+        VerticalLayout {
+            spacing: 0;
+            for tf in root.timeframes-overflow: MenuRow {
+                label: tf.label;
+                selected: tf.selected;
+                picked => {
+                    root.timeframe-picked(tf.label);
+                    root.open-menu = "none";
+                }
+            }
+        }
+    }
+    if root.open-menu == "context": Rectangle {
+        x: root.menu-x;
+        y: root.menu-y;
+        width: 190px;
+        border-radius: VayrenDesign.radius-sm;
+        border-width: 1px;
+        border-color: VayrenPalette.hairline;
+        background: VayrenPalette.surface;
+        VerticalLayout {
+            spacing: 0;
+            MenuRow {
+                label: "↩ Reset chart view";
+                picked => {
+                    root.reset-view();
+                    root.open-menu = "none";
+                }
+            }
+        }
+    }
+}
+

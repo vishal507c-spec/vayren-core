@@ -1,0 +1,186 @@
+// VAYREN Research headless verification harness — TEST ENTRY ONLY.
+//
+// A plain window hosting ResearchScreen so the breakpoint matrix (including
+// narrow widths no shell window can reach) is exercisable through the
+// testing backend. Production uses AppWindow (ui/app.slint). Compiled as a
+// separate unit from build.rs and included only under cfg(test).
+
+import { ResearchScreen, ResearchMetric, ResearchSignalRow, ResearchTradeRow, ResearchRobustRow, ResearchKv, ResearchCompareRow, ResearchStrategyRow, ResearchExperimentRow, ResearchField, ResearchConfigGroup, ResearchEvidenceDim, ResearchEvidenceWhy, ResearchKvGroup } from "research.slint";
+import { VayrenPalette } from "palette.slint";
+
+export component ResearchHarness inherits Window {
+    title: "VAYREN — Research harness";
+    background: VayrenPalette.bg;
+    min-width: 200px;
+    min-height: 200px;
+
+    in-out property <bool> wide: true;
+    in-out property <bool> medium: true;
+    in property <string> strategy-name;
+    in property <string> context-line;
+    in property <[ResearchStrategyRow]> strategies;
+    in property <[ResearchExperimentRow]> experiments;
+    in property <string> strategy-count;
+    in property <string> experiment-count;
+    in property <[ResearchConfigGroup]> config-groups;
+    in property <string> hypothesis;
+    in property <string> question;
+    in property <string> effect;
+    in property <string> create-error;
+    in property <string> state-label;
+    in property <int> state-tone;
+    in property <bool> has-strategy;
+    in property <bool> show-results;
+    in property <bool> stale;
+    in property <bool> run-enabled;
+    in property <string> run-blocked-reason;
+    in property <bool> cancel-visible;
+    in property <bool> create-visible;
+    in property <[ResearchMetric]> metrics;
+    in property <string> signal-count-line;
+    in property <string> trade-count-line;
+    in property <[ResearchSignalRow]> signals;
+    in property <[ResearchTradeRow]> trades;
+    in property <[ResearchRobustRow]> robustness;
+    in property <[ResearchKv]> validation-rows;
+    in property <[ResearchKv]> quality-rows;
+    in property <[ResearchKv]> inspector-rows;
+    in property <[ResearchKv]> report-sections;
+    in property <[ResearchCompareRow]> compare-rows;
+    in property <string> compare-verdict;
+    in property <string> empty-title;
+    in property <string> empty-detail;
+    in property <string> conclusion;
+    in property <string> validation-status;
+    in property <string> validation-summary;
+    in property <string> fingerprint-line;
+    in property <string> evidence-verdict;
+    in property <int> evidence-tone;
+    in property <string> evidence-grade;
+    in property <[ResearchEvidenceWhy]> evidence-why;
+    in property <[ResearchEvidenceDim]> evidence-dims;
+    in property <[ResearchKv]> stats-rows;
+    in property <[ResearchKv]> montecarlo-rows;
+    in property <[ResearchKv]> benchmark-rows;
+    in property <[ResearchKvGroup]> inspector-groups;
+    in property <bool> hypothesis-open;
+    in property <bool> why-open;
+    in property <bool> technical-open;
+    in property <bool> show-next-steps;
+    in property <int> tab;
+    in property <bool> inspector-open;
+    in property <int> narrow-view;
+    in property <string> signal-filter;
+    in property <[string]> log-lines;
+    in property <string> log-status;
+    in property <bool> log-expanded;
+    in property <string> strategy-version;
+    in property <string> experiment-id;
+
+    out property <string> layout-id: screen.layout-id;
+    out property <bool> inspector-shown: screen.inspector-shown;
+    out property <int> form-cols: screen.form-cols;
+    out property <int> metric-cols: screen.metric-cols;
+
+    callback strategy-picked(int);
+    callback config-edited(string, string);
+    callback config-option(string, string);
+    callback hypothesis-edited(string);
+    callback question-edited(string);
+    callback effect-edited(string);
+    callback create-pressed();
+    callback run-pressed();
+    callback cancel-pressed();
+    callback tab-picked(int);
+    callback inspector-toggled();
+    callback narrow-view-picked(int);
+    callback signal-filter-changed(string);
+    callback experiment-picked(int);
+    callback hypothesis-toggled();
+    callback why-toggled();
+    callback technical-toggled();
+
+    screen := ResearchScreen {
+        width: 100%;
+        height: 100%;
+        wide: root.wide;
+        medium: root.medium;
+        strategy-name: root.strategy-name;
+        strategy-version: root.strategy-version;
+        experiment-id: root.experiment-id;
+        context-line: root.context-line;
+        strategies: root.strategies;
+        experiments: root.experiments;
+        strategy-count: root.strategy-count;
+        experiment-count: root.experiment-count;
+        config-groups: root.config-groups;
+        hypothesis: root.hypothesis;
+        question: root.question;
+        effect: root.effect;
+        create-error: root.create-error;
+        state-label: root.state-label;
+        state-tone: root.state-tone;
+        has-strategy: root.has-strategy;
+        show-results: root.show-results;
+        stale: root.stale;
+        run-enabled: root.run-enabled;
+        run-blocked-reason: root.run-blocked-reason;
+        cancel-visible: root.cancel-visible;
+        create-visible: root.create-visible;
+        metrics: root.metrics;
+        signal-count-line: root.signal-count-line;
+        trade-count-line: root.trade-count-line;
+        signals: root.signals;
+        trades: root.trades;
+        robustness: root.robustness;
+        validation-rows: root.validation-rows;
+        quality-rows: root.quality-rows;
+        inspector-rows: root.inspector-rows;
+        report-sections: root.report-sections;
+        compare-rows: root.compare-rows;
+        compare-verdict: root.compare-verdict;
+        empty-title: root.empty-title;
+        empty-detail: root.empty-detail;
+        conclusion: root.conclusion;
+        validation-status: root.validation-status;
+        validation-summary: root.validation-summary;
+        fingerprint-line: root.fingerprint-line;
+        evidence-verdict: root.evidence-verdict;
+        evidence-tone: root.evidence-tone;
+        evidence-grade: root.evidence-grade;
+        evidence-why: root.evidence-why;
+        evidence-dims: root.evidence-dims;
+        stats-rows: root.stats-rows;
+        montecarlo-rows: root.montecarlo-rows;
+        benchmark-rows: root.benchmark-rows;
+        inspector-groups: root.inspector-groups;
+        hypothesis-open: root.hypothesis-open;
+        why-open: root.why-open;
+        technical-open: root.technical-open;
+        show-next-steps: root.show-next-steps;
+        tab: root.tab;
+        inspector-open: root.inspector-open;
+        narrow-view: root.narrow-view;
+        signal-filter: root.signal-filter;
+        log-lines: root.log-lines;
+        log-status: root.log-status;
+        log-expanded: root.log-expanded;
+        strategy-picked(i) => { root.strategy-picked(i); }
+        config-edited(k, t) => { root.config-edited(k, t); }
+        config-option(k, v) => { root.config-option(k, v); }
+        hypothesis-edited(t) => { root.hypothesis-edited(t); }
+        question-edited(t) => { root.question-edited(t); }
+        effect-edited(t) => { root.effect-edited(t); }
+        create-pressed() => { root.create-pressed(); }
+        run-pressed() => { root.run-pressed(); }
+        cancel-pressed() => { root.cancel-pressed(); }
+        tab-picked(i) => { root.tab-picked(i); }
+        inspector-toggled() => { root.inspector-toggled(); }
+        narrow-view-picked(i) => { root.narrow-view-picked(i); }
+        signal-filter-changed(t) => { root.signal-filter-changed(t); }
+        experiment-picked(i) => { root.experiment-picked(i); }
+        hypothesis-toggled() => { root.hypothesis-toggled(); }
+        why-toggled() => { root.why-toggled(); }
+        technical-toggled() => { root.technical-toggled(); }
+    }
+}

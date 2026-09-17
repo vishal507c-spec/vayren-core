@@ -1,0 +1,140 @@
+// VAYREN LIVE headless verification harness — TEST ENTRY ONLY.
+//
+// A plain window hosting the real LiveScreen so the breakpoint matrix
+// (including narrow widths no shell window can reach) is exercisable
+// through the testing backend. Production uses AppWindow (ui/app.slint).
+// Compiled as a separate unit from build.rs and included only under
+// cfg(test). Layout decisions are read back from LiveScreen's own
+// out-properties — one decision source for screen and tests.
+
+import { LiveScreen, LiveBar, LiveSetup, LiveMarket, LiveSymbolRow, LiveGate, LiveKv, LiveStat, LivePosition, LiveOrder, LiveFill, LiveEventRow, LiveCandle } from "live.slint";
+import { VayrenPalette } from "palette.slint";
+
+export component LiveHarness inherits Window {
+    title: "VAYREN — Live harness";
+    background: VayrenPalette.bg;
+    min-width: 320px;
+    min-height: 240px;
+    // Fixed startup geometry: the window size must never fall back to
+    // content implicit sizes (that would feed layout metrics into the
+    // tier bindings below).
+    preferred-width: 1280px;
+    preferred-height: 800px;
+
+    in-out property <LiveBar> bar;
+    in-out property <bool> inspector-open: true;
+    in property <LiveSetup> setup;
+    in property <LiveMarket> market;
+    in property <[LiveCandle]> candles;
+    in property <[string]> strategy-names;
+    in property <int> strategy-selected: -1;
+    in property <[LiveSymbolRow]> symbols;
+    in property <string> symbol-filter: "";
+    in property <[string]> timeframe-names;
+    in property <int> timeframe-selected: -1;
+    in property <[LiveGate]> gates;
+    in property <string> arm-note: "";
+    in property <[string]> blockers;
+    in property <[LiveKv]> strategy-rows;
+    in property <[LiveKv]> position-rows;
+    in property <[LiveKv]> risk-rows;
+    in property <[LiveKv]> broker-rows;
+    in property <[LiveKv]> recon-rows;
+    in property <[LivePosition]> positions;
+    in property <[LiveOrder]> orders;
+    in property <[LiveFill]> fills;
+    in property <[LiveStat]> stats;
+    in property <[LiveEventRow]> events;
+    in property <[string]> event-types;
+    in property <int> event-type-index: 0;
+    in property <string> event-filter: "";
+
+    // Recomposition tiers are TEST INPUTS (set from the matrix in
+    // shell.rs — exactly the way the Research harness drives its tiers);
+    // deriving them from the window size here would feed layout metrics
+    // into the window. Production computes the same values at window level
+    // via LiveTiers (app.slint).
+    in-out property <bool> tier-dock: false;
+    in-out property <bool> tier-core: false;
+    in-out property <bool> tier-secondary: false;
+    in-out property <bool> tier-extended: false;
+    in-out property <bool> tier-blotter: false;
+    in-out property <bool> tier-tall: false;
+    in-out property <length> tier-inspector-w: 340px;
+
+    out property <bool> show-inspector: screen.show-inspector;
+    out property <bool> drawer-open: screen.drawer-open;
+    out property <bool> workspace-fits: screen.workspace-fits;
+    out property <length> chart-h: screen.chart-h;
+    out property <bool> chart-compact: !screen.market.has-data;
+
+    callback mode-picked(int);
+    callback strategy-picked(string);
+    callback symbol-toggled(int);
+    callback symbol-filter-changed(string);
+    callback timeframe-picked(string);
+    callback quantity-edited(string);
+    callback start-requested();
+    callback stop-requested();
+    callback arm-requested();
+    callback halt-requested();
+    callback confirm-requested();
+    callback event-filter-changed(string);
+    callback event-type-picked(string);
+    callback inspector-toggled();
+    callback configure-broker();
+
+    screen := LiveScreen {
+        width: 100%;
+        height: 100%;
+        bar: root.bar;
+        inspector-open: root.inspector-open;
+        dock-inspector: root.tier-dock;
+        bar-core: root.tier-core;
+        bar-secondary: root.tier-secondary;
+        bar-extended: root.tier-extended;
+        blotters-side-by-side: root.tier-blotter;
+        tall-inspector: root.tier-tall;
+        inspector-w: root.tier-inspector-w;
+        setup: root.setup;
+        market: root.market;
+        candles: root.candles;
+        strategy-names: root.strategy-names;
+        strategy-selected: root.strategy-selected;
+        symbols: root.symbols;
+        symbol-filter: root.symbol-filter;
+        timeframe-names: root.timeframe-names;
+        timeframe-selected: root.timeframe-selected;
+        gates: root.gates;
+        arm-note: root.arm-note;
+        blockers: root.blockers;
+        strategy-rows: root.strategy-rows;
+        position-rows: root.position-rows;
+        risk-rows: root.risk-rows;
+        broker-rows: root.broker-rows;
+        recon-rows: root.recon-rows;
+        positions: root.positions;
+        orders: root.orders;
+        fills: root.fills;
+        stats: root.stats;
+        events: root.events;
+        event-types: root.event-types;
+        event-type-index: root.event-type-index;
+        event-filter: root.event-filter;
+        mode-picked(k) => { root.mode-picked(k); }
+        strategy-picked(i) => { root.strategy-picked(i); }
+        symbol-toggled(i) => { root.symbol-toggled(i); }
+        symbol-filter-changed(t) => { root.symbol-filter-changed(t); }
+        timeframe-picked(i) => { root.timeframe-picked(i); }
+        quantity-edited(t) => { root.quantity-edited(t); }
+        start-requested() => { root.start-requested(); }
+        stop-requested() => { root.stop-requested(); }
+        arm-requested() => { root.arm-requested(); }
+        halt-requested() => { root.halt-requested(); }
+        confirm-requested() => { root.confirm-requested(); }
+        event-filter-changed(t) => { root.event-filter-changed(t); }
+        event-type-picked(i) => { root.event-type-picked(i); }
+        inspector-toggled() => { root.inspector-toggled(); }
+        configure-broker() => { root.configure-broker(); }
+    }
+}

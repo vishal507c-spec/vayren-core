@@ -72,8 +72,12 @@ class ChartWindow(QMainWindow):
         lab_workspace: QWidget | None = None,
         live_workspace: QWidget | None = None,
         research_workspace: QWidget | None = None,
-        portfolio_workspace: QWidget | None = None,
         brokers_workspace: QWidget | None = None,
+        slint_portfolio_host: QWidget | None = None,
+        slint_live_host: QWidget | None = None,
+        slint_lab_host: QWidget | None = None,
+        slint_system_host: QWidget | None = None,
+        slint_research_host: QWidget | None = None,
         event_log: QWidget | None = None,
         system_health: QWidget | None = None,
         trade_context: QWidget | None = None,
@@ -91,8 +95,13 @@ class ChartWindow(QMainWindow):
         self._lab_workspace = lab_workspace
         self._live_workspace = live_workspace
         self._research_workspace = research_workspace
-        self._portfolio_workspace = portfolio_workspace
         self._brokers_workspace = brokers_workspace
+        self._slint_portfolio_host = slint_portfolio_host
+        self._slint_live_host = slint_live_host
+        self._slint_lab_host = slint_lab_host
+        self._slint_system_host = slint_system_host
+        self._slint_research_host = slint_research_host
+        self._slint_market_host: QWidget | None = None
         self._event_log = event_log
         self._system_health = system_health
         self._current_symbol: str | None = None
@@ -174,19 +183,43 @@ class ChartWindow(QMainWindow):
                 bottom.setMaximumHeight(220)
             self._bottom = bottom
 
-            # stacked middle: market splitter vs lab/live/research/portfolio
+            # stacked middle: market splitter vs lab/live/research/brokers, plus
+            # the in-window native Slint Portfolio viewport (appended last so
+            # existing indices never shift). The viewport draws Slint pixels
+            # only — no Qt Portfolio presentation lives here.
             if lab_workspace is not None:
                 self._stack = QStackedWidget(self)
                 self._stack.addWidget(splitter)
-                self._stack.addWidget(lab_workspace)
+                # Strategy Lab slot (index 1) is owned by the native Slint
+                # viewport in production; the legacy Qt workspace is mounted
+                # only as the fallback when no host was injected (§3).
+                self._stack.addWidget(
+                    slint_lab_host if slint_lab_host is not None else lab_workspace
+                )
                 if live_workspace is not None:
                     self._stack.addWidget(live_workspace)
                 if research_workspace is not None:
                     self._stack.addWidget(research_workspace)
-                if portfolio_workspace is not None:
-                    self._stack.addWidget(portfolio_workspace)
                 if brokers_workspace is not None:
                     self._stack.addWidget(brokers_workspace)
+                if slint_portfolio_host is not None:
+                    self._stack.addWidget(slint_portfolio_host)
+                # In-window native Slint Live viewport (constitution §3):
+                # appended after Portfolio so existing indices never shift.
+                # The viewport draws Slint pixels only — the legacy Qt
+                # LiveWorkspace is no longer a production mount surface.
+                if slint_live_host is not None:
+                    self._stack.addWidget(slint_live_host)
+                # In-window native Slint System viewport (constitution §3):
+                # appended last so existing indices never shift. The legacy
+                # Qt BrokersWorkspace is no longer a production mount.
+                if slint_system_host is not None:
+                    self._stack.addWidget(slint_system_host)
+                # In-window native Slint Research viewport (constitution §3):
+                # appended after System so existing indices never shift. The
+                # legacy Qt ResearchWorkspace is no longer a production mount.
+                if slint_research_host is not None:
+                    self._stack.addWidget(slint_research_host)
                 self._stack.setCurrentIndex(0)
             else:
                 self._stack = None  # type: ignore[assignment]
@@ -378,6 +411,31 @@ class ChartWindow(QMainWindow):
         """Currently active timeframe, or None before the first chart."""
         return self._current_timeframe
 
+    def set_slint_market_host(self, host: QWidget) -> None:
+        """Mount the native Slint Market viewport at the market slot.
+
+        Production route (constitution §3): the viewport takes over stack
+        index 0, so ``show_market`` and the nav highlight keep working
+        unchanged. The Qt market splitter and its widgets stay alive as the
+        canonical state holders the bridge reads (all existing
+        subscriptions keep feeding them) but are no longer mounted. The
+        splitter is only unmounted when a stack exists (lab mode); without
+        one the Qt chart remains the production surface.
+        """
+        self._slint_market_host = host
+        stack = getattr(self, "_stack", None)
+        if stack is None or self._splitter is None:
+            return
+        stack.insertWidget(0, host)
+        stack.removeWidget(self._splitter)
+        # removeWidget() leaves the splitter parentless; keep it owned by the
+        # window (hidden, never shown) so Qt tears it down deterministically
+        # while the retained widgets stay alive for the bridge.
+        self._splitter.setParent(self)
+        self._splitter.hide()
+        if not self._lab_active:
+            stack.setCurrentIndex(0)
+
     def show_market(self) -> None:
         """Switch to the market chart view."""
         self._lab_active = False
@@ -388,7 +446,12 @@ class ChartWindow(QMainWindow):
                 self._nav.set_active("MARKET")  # type: ignore[attr-defined]
 
     def show_lab(self) -> None:
-        """Switch to the Strategy Lab workspace."""
+        """Switch to the Strategy Lab workspace.
+
+        Production route: index 1 holds the native Slint Strategy Lab
+        viewport when one was injected (constitution §3); the legacy Qt
+        workspace only occupies that slot as the no-host fallback.
+        """
         self._lab_active = True
         if getattr(self, "_stack", None) is not None and self._stack is not None:
             self._stack.setCurrentIndex(1)
@@ -428,13 +491,38 @@ class ChartWindow(QMainWindow):
         """Switch to the Research workspace (when injected)."""
         self._show_workspace("_research_workspace", "RESEARCH")
 
-    def show_portfolio(self) -> None:
-        """Switch to the Portfolio workspace (when injected)."""
-        self._show_workspace("_portfolio_workspace", "PORTFOLIO")
+    def show_slint_research(self) -> None:
+        """Switch to the native Slint Research viewport (when injected).
+
+        Production route: RESEARCH now shows the Rust+Slint screen; the Qt
+        workspace remains reachable only through the explicit fallback
+        below when no native host was injected.
+        """
+        if getattr(self, "_slint_research_host", None) is not None:
+            self._show_workspace("_slint_research_host", "RESEARCH")
+        else:
+            self._show_workspace("_research_workspace", "RESEARCH")
+
+    def show_slint_portfolio(self) -> None:
+        """Switch to the native Slint Portfolio viewport (when injected)."""
+        self._show_workspace("_slint_portfolio_host", "PORTFOLIO")
+
+    def show_slint_live(self) -> None:
+        """Switch to the native Slint Live viewport (when injected)."""
+        self._show_workspace("_slint_live_host", "LIVE")
+
+    def show_slint_system(self) -> None:
+        """Switch to the native Slint System viewport (when injected)."""
+        self._show_workspace("_slint_system_host", "SYSTEM")
 
     def show_brokers(self) -> None:
-        """Switch to the SYSTEM → BROKERS workspace (when injected)."""
-        self._show_workspace("_brokers_workspace", "SYSTEM")
+        """Switch to the SYSTEM brokers screen (native Slint viewport).
+
+        Kept as the stable entry point for existing callers (e.g. the Live
+        configure-broker action); the legacy Qt workspace is no longer a
+        production mount surface.
+        """
+        self._show_workspace("_slint_system_host", "SYSTEM")
 
     def toggle_bottom(self) -> None:
         """Toggle the bottom system/event panels."""
@@ -462,6 +550,13 @@ class ChartWindow(QMainWindow):
         self._bus.publish(WindowRendered())
         with contextlib.suppress(Exception):
             self.session_changed.emit()
+        # Timeframe/symbol change must reach the native Market view with the
+        # fresh bars (not the 330ms poll): force-push the snapshot so the Rust
+        # ViewModel replaces candles/volume/OHLC/OBR synchronously.
+        with contextlib.suppress(Exception):
+            host = getattr(self, "_slint_market_host", None)
+            if host is not None and hasattr(host, "refresh_now"):
+                host.refresh_now()
 
     def _on_symbol_selected(self, symbol: str) -> None:
         logger.info("User selected symbol: %s", symbol)

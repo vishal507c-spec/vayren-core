@@ -16,6 +16,11 @@ export global VayrenPalette {
     out property <color> selected: #18212C;
     out property <color> hairline: #202B36;
     out property <color> hairline-soft: #1A232D;
+    // Premium interaction states (UI polish — never overrides above).
+    out property <color> pressed: #0D1520;
+    out property <color> focus-ring: #00C7B740;
+    out property <color> elevated: #121A24;
+    out property <color> row-hover: #151E29;
     // Accent + text.
     out property <color> accent: #00C7B7;
     out property <color> accent-dim: #00A99D;
@@ -30,6 +35,12 @@ export global VayrenPalette {
     out property <color> neg-dim: #4A2027;
     out property <color> amber: #DDAA45;
     out property <color> warn-dim: #4A3C18;
+    // Strategy-marker parity tokens (Qt PlotOverlay glyph colors — the
+    // reference chart paints EOD blue / diamond purple; no palette hue
+    // matches, so they land here explicitly instead of as screen literals).
+    out property <color> strat-blue: #42A5F5;
+    out property <color> strat-purple: #AB47BC;
+    out property <color> strat-orange: #FF7043;
     // Legacy aliases — do NOT use in new code; kept so existing surfaces
     // keep compiling while they converge onto the canonical names above.
     out property <color> teal: #21C58B;
@@ -54,6 +65,10 @@ export global VayrenDesign {
     // Radii (§3.3).
     out property <length> radius: 4px;
     out property <length> radius-sm: 3px;
+    out property <length> radius-lg: 6px;
+    // Extra spacing / sizing (UI polish).
+    out property <length> sp-3xl: 32px;
+    out property <length> fs-kpi: 22px;
     // Typography (§3.2). Floor: nothing renders below fs-label (11).
     out property <length> fs-display: 24px;
     out property <length> fs-hero: 26px;
@@ -71,4 +86,28 @@ export global VayrenDesign {
     out property <length> status-height: 24px;
     // Reflow breakpoint (§5): KPI grids fold 4→2 columns below this width.
     out property <length> kpi-fold-width: 620px;
+    // Research recomposition breakpoints (§5): three-region ≥ wide,
+    // navigator + workspace with inspector drawer ≥ medium, single-column
+    // view tabs below. Logical px — DPI-independent by construction.
+    out property <length> research-wide: 1180px;
+    out property <length> research-medium: 760px;
+    // Research chrome heights (§3.3): state-driven log telemetry.
+    out property <length> research-log-compact: 46px;
+    out property <length> research-log-expanded: 132px;
+    out property <length> research-inspector-drawer: 240px;
+    // Live recomposition breakpoints (§29) — derived from CONTENT MINIMA
+    // (logical px, DPI-independent): dock the inspector only when the
+    // 440 px workspace floor + 340 px inspector floor + gutters fit; show
+    // bar groups only while their labels stay readable side by side.
+    out property <length> live-dock-inspector: 800px;
+    out property <length> live-bar-core: 760px;
+    out property <length> live-bar-secondary: 1040px;
+    out property <length> live-bar-extended: 1120px;
+    out property <length> live-blotter-side-by-side: 1240px;
+    // Market recomposition breakpoints (§5): full workstation (rail +
+    // watchlist + chart + inspector) ≥ wide; inspector becomes a drawer
+    // below wide; watchlist compacts to a symbol strip below medium.
+    // Logical px — DPI-independent by construction.
+    out property <length> market-wide: 1180px;
+    out property <length> market-medium: 820px;
 }

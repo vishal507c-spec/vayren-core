@@ -1,0 +1,928 @@
+// VAYREN Portfolio — native Slint workspace surface (constitution §3,
+// UI_DESIGN_SYSTEM.md). First-principles responsive presentation of the
+// existing portfolio backend facts (Rust `portfolio.rs` view-model owns all
+// state; this screen only renders bound properties and reports actions).
+//
+// Layout contract (never fixed page geometry):
+// - ONE page-level ScrollView: content flows and scrolls instead of squeezing
+//   into overlap (incident §13.1). No section carries an arbitrary fixed
+//   height; each takes its natural content size with token min-heights only
+//   where the design system justifies them (row-height, h-tabs chrome).
+// - Responsive composition from AVAILABLE LOGICAL WIDTH (`narrow` folds the
+//   KPI 4→2 grid, stacks Performance/Status and Allocation/Risk, and collapses
+//   lower-priority table columns instead of shrinking text into unreadability).
+// - State-driven sections: empty/missing data renders compact truthful empty
+//   states (`has-*` flags), never giant blank containers.
+// - Hierarchy: ACCOUNT → VALUE (KPI) → PERFORMANCE → POSITIONS →
+//   ALLOCATION + DETAIL → ORDERS → RISK. Secondary content never claims
+//   primary space.
+// - Tokens only (VayrenPalette / VayrenDesign). No hex literals, no ad-hoc
+//   sizes, no absolute positioning, no Python geometry.
+
+import { VayrenPalette, VayrenDesign } from "palette.slint";
+import { VBadge, VButton, VCell, VEmptyState, VSection, VStatusDot } from "components.slint";
+import { ScrollView } from "std-widgets.slint";
+
+export struct PortfolioKpi {
+    label: string,
+    value: string,
+    tone: int, // 0 muted, 1 neutral, 2 positive, 3 negative, 4 warning
+}
+
+export struct PortfolioGate {
+    label: string,
+    status: string,
+    tone: int,
+    detail: string,
+}
+
+export struct PortfolioPosition {
+    symbol: string,
+    side: string,
+    qty: string,
+    avg: string,
+    ltp: string,
+    value: string,
+    pnl: string,
+    pnl-tone: int,
+    alloc: string,
+}
+
+export struct PortfolioAlloc {
+    symbol: string,
+    pct-label: string,
+    pct: float, // 0..100, drives the bar fill proportionally
+}
+
+export struct PortfolioOrder {
+    id: string,
+    time: string,
+    symbol: string,
+    side: string,
+    qty: string,
+    status: string,
+}
+
+export struct PortfolioFill {
+    time: string,
+    symbol: string,
+    side: string,
+    qty: string,
+    price: string,
+}
+
+export struct PortfolioRisk {
+    label: string,
+    value: string,
+}
+
+global PortfolioTones {
+    // Shared tone convention (components.slint §12): 0 muted, 1 ok/pos,
+    // 2 warn, 3 bad/neg, 4 accent. Rust feeds `Tone::badge()`.
+    public pure function color(t: int) -> color {
+        return t == 1 ? VayrenPalette.pos
+            : t == 2 ? VayrenPalette.amber
+            : t == 3 ? VayrenPalette.neg
+            : t == 0 ? VayrenPalette.faint
+            : VayrenPalette.text;
+    }
+}
+
+component Hairline inherits Rectangle {
+    width: 100%;
+    height: 1px;
+    background: VayrenPalette.hairline;
+}
+
+// KPI tile: value materially larger than label (§3.2); hairline separator,
+// never a card-per-metric.
+component PKpiCell inherits Rectangle {
+    in property <string> cell-label;
+    in property <string> cell-value;
+    in property <int> tone: 1;
+    in property <bool> emphasized: false;
+
+    VerticalLayout {
+        padding-left: VayrenDesign.sp-lg;
+        padding-right: VayrenDesign.sp-lg;
+        spacing: 0;
+        alignment: center;
+        Text {
+            text: root.cell-label;
+            color: VayrenPalette.faint;
+            font-size: VayrenDesign.fs-label;
+            font-weight: 700;
+        }
+        Text {
+            text: root.cell-value;
+            color: PortfolioTones.color(root.tone);
+            font-size: root.emphasized ? VayrenDesign.fs-hero : VayrenDesign.fs-metric;
+            font-weight: 700;
+        }
+    }
+    Rectangle {
+        width: 1px;
+        y: VayrenDesign.sp-md;
+        height: parent.height - 2 * VayrenDesign.sp-md;
+        x: parent.width - 1px;
+        background: VayrenPalette.hairline;
+    }
+}
+
+// Readiness row: label, detail, semantic status — reason always visible.
+component PGate inherits Rectangle {
+    in property <string> gate-label;
+    in property <string> gate-status;
+    in property <int> tone: 0;
+    in property <string> gate-detail;
+
+    min-height: VayrenDesign.row-height;
+    HorizontalLayout {
+        spacing: VayrenDesign.sp-md;
+        Text {
+            text: root.gate-label;
+            color: VayrenPalette.muted;
+            font-size: VayrenDesign.fs-label;
+            font-weight: 700;
+            vertical-alignment: center;
+        }
+        Rectangle { horizontal-stretch: 1; background: transparent; }
+        Text {
+            text: root.gate-detail;
+            color: VayrenPalette.faint;
+            font-size: VayrenDesign.fs-label;
+            vertical-alignment: center;
+        }
+        VBadge {
+            text: root.gate-status;
+            tone: root.tone;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// Tables reuse the shared VCell (reuse-first §12) — no screen-local fork.
+component PRowLabel inherits Text {
+    color: VayrenPalette.faint;
+    font-size: VayrenDesign.fs-table;
+    vertical-alignment: center;
+}
+
+// Allocation bar row: symbol, proportional fill, percent label.
+component PAllocRow inherits Rectangle {
+    in property <string> row-symbol;
+    in property <string> row-pct-label;
+    in property <float> row-pct: 0.0;
+
+    min-height: VayrenDesign.row-height;
+    HorizontalLayout {
+        spacing: VayrenDesign.sp-md;
+        Text {
+            text: root.row-symbol;
+            color: VayrenPalette.text;
+            font-size: VayrenDesign.fs-table;
+            font-weight: 700;
+            vertical-alignment: center;
+            min-width: 72px;
+            overflow: elide;
+        }
+        Rectangle {
+            horizontal-stretch: 1;
+            height: VayrenDesign.sp-md;
+            border-radius: VayrenDesign.radius-sm;
+            background: VayrenPalette.hover;
+            Rectangle {
+                width: parent.width * root.row-pct / 100;
+                height: 100%;
+                border-radius: VayrenDesign.radius-sm;
+                background: VayrenPalette.accent-dim;
+            }
+        }
+        Text {
+            text: root.row-pct-label;
+            color: VayrenPalette.text;
+            font-size: VayrenDesign.fs-table;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+            min-width: 52px;
+        }
+    }
+}
+
+// Underline-accent workspace tab (§6): checked = TEXT + 2px accent bar.
+component PTab inherits Rectangle {
+    in property <string> tab-label;
+    in property <bool> active: false;
+    callback picked();
+
+    height: VayrenDesign.h-tabs;
+    min-width: 72px;
+    background: root.active ? VayrenPalette.hover : ta.has-hover ? VayrenPalette.bg2 : transparent;
+    ta := TouchArea {
+        clicked => { root.picked(); }
+    }
+    Text {
+        text: root.tab-label;
+        color: root.active ? VayrenPalette.text : VayrenPalette.muted;
+        font-size: VayrenDesign.fs-label;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    Rectangle {
+        height: 2px;
+        y: parent.height - 2px;
+        width: 100%;
+        background: root.active ? VayrenPalette.accent : transparent;
+    }
+}
+
+export component PortfolioScreen inherits Rectangle {
+    // ── backend-fed state (Rust view-model projects every value) ──
+    in property <string> account-title;
+    in property <int> account-tone: 0;
+    in property <string> account-info;
+    in property <string> account-detail;
+    in property <string> updated-label;
+    in property <[PortfolioKpi]> kpis-primary;
+    in property <[PortfolioKpi]> kpis-secondary;
+    in property <bool> perf-has-data: false;
+    in property <string> perf-trades;
+    in property <string> perf-wins;
+    in property <string> perf-losses;
+    in property <string> perf-winrate;
+    in property <[PortfolioGate]> gates;
+    in property <string> positions-count;
+    in property <[PortfolioPosition]> positions;
+    in property <bool> has-positions: false;
+    in property <string> positions-empty-title;
+    in property <string> positions-empty-detail;
+    in property <int> selected-position: -1;
+    in property <[PortfolioAlloc]> allocation;
+    in property <bool> alloc-has-data: false;
+    in property <string> detail-symbol;
+    in property <string> detail-side;
+    in property <int> detail-side-tone: 0;
+    in property <string> detail-qty;
+    in property <string> detail-avg;
+    in property <string> detail-value;
+    in property <string> detail-pnl;
+    in property <int> detail-pnl-tone: 0;
+    in property <string> detail-alloc;
+    in property <int> orders-tab: 0;
+    in property <[PortfolioOrder]> orders;
+    in property <[PortfolioFill]> fills;
+    in property <bool> active-has-rows: false;
+    in property <string> active-empty-title;
+    in property <string> active-empty-detail;
+    in property <string> health-label;
+    in property <int> health-tone: 0;
+    in property <string> health-note;
+    in property <[PortfolioRisk]> risk-rows;
+    in property <bool> risk-has-data: false;
+    in property <string> risk-empty-detail;
+
+    callback refresh-requested();
+    callback orders-tab-picked(int);
+    callback position-picked(int);
+
+    background: VayrenPalette.bg;
+
+    // Responsive composition from available logical width: the KPI bands fold
+    // 4→2 below the design-system fold width (plus page padding, both tokens —
+    // never a screenshot-derived constant); secondary section pairs stack and
+    // lower-priority table columns collapse instead of squeezing text.
+    property <bool> narrow: root.width < VayrenDesign.kpi-fold-width + 2 * VayrenDesign.sp-xl;
+
+    ScrollView {
+        width: 100%;
+        height: 100%;
+        viewport-width: root.width;
+
+        VerticalLayout {
+            padding: VayrenDesign.sp-xl;
+            spacing: VayrenDesign.sp-lg;
+
+            // ── 1. ACCOUNT STATE (compact header, natural height) ──
+            HorizontalLayout {
+                spacing: VayrenDesign.sp-md;
+                VerticalLayout {
+                    spacing: 0;
+                    alignment: center;
+                    Text {
+                        text: "PORTFOLIO";
+                        color: VayrenPalette.text;
+                        font-size: VayrenDesign.fs-display;
+                        font-weight: 800;
+                    }
+                    Text {
+                        text: "Account, positions, performance and risk";
+                        color: VayrenPalette.muted;
+                        font-size: VayrenDesign.fs-small;
+                    }
+                }
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+                if root.updated-label != "": Text {
+                    text: root.updated-label;
+                    color: VayrenPalette.faint;
+                    font-size: VayrenDesign.fs-label;
+                    vertical-alignment: center;
+                }
+                VButton {
+                    label: "Refresh";
+                    variant: 1;
+                    min-width: 88px;
+                    clicked => { root.refresh-requested(); }
+                }
+            }
+
+            // ── compact account status: never claims primary space ──
+            VSection {
+                title: "ACCOUNT";
+                HorizontalLayout {
+                    spacing: VayrenDesign.sp-md;
+                    VStatusDot {
+                        tone: root.account-tone;
+                    }
+                    VerticalLayout {
+                        spacing: 0;
+                        horizontal-stretch: 1;
+                        VBadge {
+                            text: root.account-title;
+                            tone: root.account-tone;
+                        }
+                        if root.account-info != "": Text {
+                            text: root.account-info;
+                            color: VayrenPalette.muted;
+                            font-size: VayrenDesign.fs-small;
+                            wrap: word-wrap;
+                        }
+                        if root.account-detail != "": Text {
+                            text: root.account-detail;
+                            color: VayrenPalette.faint;
+                            font-size: VayrenDesign.fs-label;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+            }
+
+            // ── 2–3. PORTFOLIO VALUE (one section, responsive KPI bands) ──
+            // Single VSection (unconditional layout child → correct natural
+            // sizing): primary band + hairline + secondary band. Narrow
+            // recomposes to full-width single-column stacks — no index
+            // filtering, no phantom space, never squeezed unreadable.
+            VSection {
+                title: "PORTFOLIO VALUE";
+                if !root.narrow: VerticalLayout {
+                    spacing: 0;
+                    HorizontalLayout {
+                        spacing: 0;
+                        for k[idx] in root.kpis-primary: PKpiCell {
+                            horizontal-stretch: idx == 0 ? 2 : 1;
+                            cell-label: k.label;
+                            cell-value: k.value;
+                            tone: k.tone;
+                            emphasized: idx == 0;
+                        }
+                    }
+                    Hairline { }
+                    HorizontalLayout {
+                        spacing: 0;
+                        for k in root.kpis-secondary: PKpiCell {
+                            horizontal-stretch: 1;
+                            cell-label: k.label;
+                            cell-value: k.value;
+                            tone: k.tone;
+                        }
+                    }
+                }
+                if root.narrow: VerticalLayout {
+                    spacing: VayrenDesign.sp-sm;
+                    VerticalLayout {
+                        spacing: 0;
+                        for k[idx] in root.kpis-primary: PKpiCell {
+                            cell-label: k.label;
+                            cell-value: k.value;
+                            tone: k.tone;
+                            emphasized: idx == 0;
+                        }
+                    }
+                    Hairline { }
+                    VerticalLayout {
+                        spacing: 0;
+                        for k in root.kpis-secondary: PKpiCell {
+                            cell-label: k.label;
+                            cell-value: k.value;
+                            tone: k.tone;
+                        }
+                    }
+                }
+            }
+
+            // ── 7. PERFORMANCE HISTORY + status (side-by-side → stacked) ──
+            if !root.narrow: HorizontalLayout {
+                spacing: VayrenDesign.sp-lg;
+                VSection {
+                    title: "PORTFOLIO PERFORMANCE";
+                    horizontal-stretch: 3;
+                    if root.perf-has-data: VerticalLayout {
+                        spacing: VayrenDesign.sp-xs;
+                        HorizontalLayout {
+                            height: VayrenDesign.row-height;
+                            PRowLabel { text: "Trades"; horizontal-stretch: 1; }
+                            Text {
+                                text: root.perf-trades;
+                                color: VayrenPalette.text;
+                                font-size: VayrenDesign.fs-table;
+                                horizontal-alignment: right;
+                                vertical-alignment: center;
+                            }
+                        }
+                        HorizontalLayout {
+                            height: VayrenDesign.row-height;
+                            PRowLabel { text: "Wins"; horizontal-stretch: 1; }
+                            Text {
+                                text: root.perf-wins;
+                                color: VayrenPalette.text;
+                                font-size: VayrenDesign.fs-table;
+                                horizontal-alignment: right;
+                                vertical-alignment: center;
+                            }
+                        }
+                        HorizontalLayout {
+                            height: VayrenDesign.row-height;
+                            PRowLabel { text: "Losses"; horizontal-stretch: 1; }
+                            Text {
+                                text: root.perf-losses;
+                                color: VayrenPalette.text;
+                                font-size: VayrenDesign.fs-table;
+                                horizontal-alignment: right;
+                                vertical-alignment: center;
+                            }
+                        }
+                        HorizontalLayout {
+                            height: VayrenDesign.row-height;
+                            PRowLabel { text: "Win Rate"; horizontal-stretch: 1; }
+                            Text {
+                                text: root.perf-winrate;
+                                color: VayrenPalette.text;
+                                font-size: VayrenDesign.fs-table;
+                                horizontal-alignment: right;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                    if !root.perf-has-data: VEmptyState {
+                        title: "NO PERFORMANCE DATA";
+                        detail: "Connect an account to view portfolio performance.";
+                    }
+                }
+                VSection {
+                    title: "PORTFOLIO STATUS";
+                    horizontal-stretch: 2;
+                    VerticalLayout {
+                        spacing: VayrenDesign.sp-sm;
+                        for g in root.gates: PGate {
+                            gate-label: g.label;
+                            gate-status: g.status;
+                            tone: g.tone;
+                            gate-detail: g.detail;
+                        }
+                    }
+                }
+            }
+            if root.narrow: VerticalLayout {
+                spacing: VayrenDesign.sp-lg;
+                VSection {
+                    title: "PORTFOLIO PERFORMANCE";
+                    if root.perf-has-data: VerticalLayout {
+                        spacing: VayrenDesign.sp-xs;
+                        HorizontalLayout {
+                            height: VayrenDesign.row-height;
+                            PRowLabel { text: "Trades"; horizontal-stretch: 1; }
+                            Text {
+                                text: root.perf-trades;
+                                color: VayrenPalette.text;
+                                font-size: VayrenDesign.fs-table;
+                                horizontal-alignment: right;
+                                vertical-alignment: center;
+                            }
+                        }
+                        HorizontalLayout {
+                            height: VayrenDesign.row-height;
+                            PRowLabel { text: "Wins"; horizontal-stretch: 1; }
+                            Text {
+                                text: root.perf-wins;
+                                color: VayrenPalette.text;
+                                font-size: VayrenDesign.fs-table;
+                                horizontal-alignment: right;
+                                vertical-alignment: center;
+                            }
+                        }
+                        HorizontalLayout {
+                            height: VayrenDesign.row-height;
+                            PRowLabel { text: "Losses"; horizontal-stretch: 1; }
+                            Text {
+                                text: root.perf-losses;
+                                color: VayrenPalette.text;
+                                font-size: VayrenDesign.fs-table;
+                                horizontal-alignment: right;
+                                vertical-alignment: center;
+                            }
+                        }
+                        HorizontalLayout {
+                            height: VayrenDesign.row-height;
+                            PRowLabel { text: "Win Rate"; horizontal-stretch: 1; }
+                            Text {
+                                text: root.perf-winrate;
+                                color: VayrenPalette.text;
+                                font-size: VayrenDesign.fs-table;
+                                horizontal-alignment: right;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                    if !root.perf-has-data: VEmptyState {
+                        title: "NO PERFORMANCE DATA";
+                        detail: "Connect an account to view portfolio performance.";
+                    }
+                }
+                VSection {
+                    title: "PORTFOLIO STATUS";
+                    VerticalLayout {
+                        spacing: VayrenDesign.sp-sm;
+                        for g in root.gates: PGate {
+                            gate-label: g.label;
+                            gate-status: g.status;
+                            tone: g.tone;
+                            gate-detail: g.detail;
+                        }
+                    }
+                }
+            }
+
+            // ── 4. CURRENT POSITIONS (primary feature, readable rows) ──
+            VSection {
+                title: root.positions-count == "" ? "POSITIONS" : "POSITIONS — " + root.positions-count;
+                if root.has-positions: VerticalLayout {
+                    spacing: 0;
+                    Rectangle {
+                        height: VayrenDesign.row-height;
+                        HorizontalLayout {
+                            padding-left: VayrenDesign.sp-lg;
+                            padding-right: VayrenDesign.sp-lg;
+                            VCell { text: "SYMBOL"; head: true; }
+                            if !root.narrow: VCell { text: "SIDE"; head: true; }
+                            VCell { text: "QTY"; head: true; align: 1; }
+                            if !root.narrow: VCell { text: "AVG PRICE"; head: true; align: 1; }
+                            if !root.narrow: VCell { text: "LTP"; head: true; align: 1; }
+                            VCell { text: "VALUE"; head: true; align: 1; }
+                            VCell { text: "P&L"; head: true; align: 1; }
+                            if !root.narrow: VCell { text: "ALLOC %"; head: true; align: 1; }
+                        }
+                        Hairline {
+                            y: parent.height - 1px;
+                        }
+                    }
+                    for p[idx] in root.positions: Rectangle {
+                        height: VayrenDesign.row-height;
+                        background: idx == root.selected-position ? VayrenPalette.selected
+                            : pta.has-hover ? VayrenPalette.hover
+                            : Math.mod(idx, 2) == 1 ? VayrenPalette.bg2 : transparent;
+                        pta := TouchArea {
+                            clicked => { root.position-picked(idx); }
+                        }
+                        HorizontalLayout {
+                            padding-left: VayrenDesign.sp-lg;
+                            padding-right: VayrenDesign.sp-lg;
+                            VCell { text: p.symbol; }
+                            if !root.narrow: VCell { text: p.side; }
+                            VCell { text: p.qty; align: 1; }
+                            if !root.narrow: VCell { text: p.avg; align: 1; }
+                            if !root.narrow: VCell { text: p.ltp; align: 1; }
+                            VCell { text: p.value; align: 1; }
+                            VCell { text: p.pnl; align: 1; tone: p.pnl-tone; }
+                            if !root.narrow: VCell { text: p.alloc; align: 1; }
+                        }
+                    }
+                }
+                if !root.has-positions: VEmptyState {
+                    title: root.positions-empty-title;
+                    detail: root.positions-empty-detail;
+                }
+            }
+
+            // ── 6. ALLOCATION + POSITION DETAIL (side-by-side → stacked) ──
+            if !root.narrow: HorizontalLayout {
+                spacing: VayrenDesign.sp-lg;
+                VSection {
+                    title: "PORTFOLIO ALLOCATION";
+                    horizontal-stretch: 1;
+                    if root.alloc-has-data: VerticalLayout {
+                        spacing: VayrenDesign.sp-xs;
+                        for a in root.allocation: PAllocRow {
+                            row-symbol: a.symbol;
+                            row-pct-label: a.pct-label;
+                            row-pct: a.pct;
+                        }
+                    }
+                    if !root.alloc-has-data: VEmptyState {
+                        title: "ALLOCATION UNAVAILABLE";
+                        detail: "Position exposure or equity basis is missing.";
+                    }
+                }
+                VSection {
+                    title: "POSITION DETAIL";
+                    horizontal-stretch: 1;
+                    Text {
+                        text: root.detail-symbol;
+                        color: VayrenPalette.text;
+                        font-size: VayrenDesign.fs-title;
+                        font-weight: 800;
+                    }
+                    if root.detail-side != "": VBadge {
+                        text: root.detail-side;
+                        tone: root.detail-side-tone;
+                    }
+                    HorizontalLayout {
+                        height: VayrenDesign.row-height;
+                        PRowLabel { text: "QTY"; horizontal-stretch: 1; }
+                        Text {
+                            text: root.detail-qty;
+                            color: VayrenPalette.text;
+                            font-size: VayrenDesign.fs-table;
+                            horizontal-alignment: right;
+                            vertical-alignment: center;
+                        }
+                    }
+                    HorizontalLayout {
+                        height: VayrenDesign.row-height;
+                        PRowLabel { text: "AVERAGE PRICE"; horizontal-stretch: 1; }
+                        Text {
+                            text: root.detail-avg;
+                            color: VayrenPalette.text;
+                            font-size: VayrenDesign.fs-table;
+                            horizontal-alignment: right;
+                            vertical-alignment: center;
+                        }
+                    }
+                    HorizontalLayout {
+                        height: VayrenDesign.row-height;
+                        PRowLabel { text: "CURRENT VALUE"; horizontal-stretch: 1; }
+                        Text {
+                            text: root.detail-value;
+                            color: VayrenPalette.text;
+                            font-size: VayrenDesign.fs-table;
+                            horizontal-alignment: right;
+                            vertical-alignment: center;
+                        }
+                    }
+                    HorizontalLayout {
+                        height: VayrenDesign.row-height;
+                        PRowLabel { text: "P&L"; horizontal-stretch: 1; }
+                        Text {
+                            text: root.detail-pnl;
+                            color: PortfolioTones.color(root.detail-pnl-tone);
+                            font-size: VayrenDesign.fs-table;
+                            horizontal-alignment: right;
+                            vertical-alignment: center;
+                        }
+                    }
+                    HorizontalLayout {
+                        height: VayrenDesign.row-height;
+                        PRowLabel { text: "ALLOCATION"; horizontal-stretch: 1; }
+                        Text {
+                            text: root.detail-alloc;
+                            color: VayrenPalette.text;
+                            font-size: VayrenDesign.fs-table;
+                            horizontal-alignment: right;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+            if root.narrow: VerticalLayout {
+                spacing: VayrenDesign.sp-lg;
+                VSection {
+                    title: "PORTFOLIO ALLOCATION";
+                    if root.alloc-has-data: VerticalLayout {
+                        spacing: VayrenDesign.sp-xs;
+                        for a in root.allocation: PAllocRow {
+                            row-symbol: a.symbol;
+                            row-pct-label: a.pct-label;
+                            row-pct: a.pct;
+                        }
+                    }
+                    if !root.alloc-has-data: VEmptyState {
+                        title: "ALLOCATION UNAVAILABLE";
+                        detail: "Position exposure or equity basis is missing.";
+                    }
+                }
+                VSection {
+                    title: "POSITION DETAIL";
+                    Text {
+                        text: root.detail-symbol;
+                        color: VayrenPalette.text;
+                        font-size: VayrenDesign.fs-title;
+                        font-weight: 800;
+                    }
+                    if root.detail-side != "": VBadge {
+                        text: root.detail-side;
+                        tone: root.detail-side-tone;
+                    }
+                    HorizontalLayout {
+                        height: VayrenDesign.row-height;
+                        PRowLabel { text: "QTY"; horizontal-stretch: 1; }
+                        Text {
+                            text: root.detail-qty;
+                            color: VayrenPalette.text;
+                            font-size: VayrenDesign.fs-table;
+                            horizontal-alignment: right;
+                            vertical-alignment: center;
+                        }
+                    }
+                    HorizontalLayout {
+                        height: VayrenDesign.row-height;
+                        PRowLabel { text: "AVERAGE PRICE"; horizontal-stretch: 1; }
+                        Text {
+                            text: root.detail-avg;
+                            color: VayrenPalette.text;
+                            font-size: VayrenDesign.fs-table;
+                            horizontal-alignment: right;
+                            vertical-alignment: center;
+                        }
+                    }
+                    HorizontalLayout {
+                        height: VayrenDesign.row-height;
+                        PRowLabel { text: "CURRENT VALUE"; horizontal-stretch: 1; }
+                        Text {
+                            text: root.detail-value;
+                            color: VayrenPalette.text;
+                            font-size: VayrenDesign.fs-table;
+                            horizontal-alignment: right;
+                            vertical-alignment: center;
+                        }
+                    }
+                    HorizontalLayout {
+                        height: VayrenDesign.row-height;
+                        PRowLabel { text: "P&L"; horizontal-stretch: 1; }
+                        Text {
+                            text: root.detail-pnl;
+                            color: PortfolioTones.color(root.detail-pnl-tone);
+                            font-size: VayrenDesign.fs-table;
+                            horizontal-alignment: right;
+                            vertical-alignment: center;
+                        }
+                    }
+                    HorizontalLayout {
+                        height: VayrenDesign.row-height;
+                        PRowLabel { text: "ALLOCATION"; horizontal-stretch: 1; }
+                        Text {
+                            text: root.detail-alloc;
+                            color: VayrenPalette.text;
+                            font-size: VayrenDesign.fs-table;
+                            horizontal-alignment: right;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+
+            // ── 8. ORDERS / ACTIVITY (usable tables, tabbed) ──
+            VSection {
+                title: "ORDERS / ACTIVITY";
+                HorizontalLayout {
+                    spacing: VayrenDesign.sp-sm;
+                    height: VayrenDesign.h-tabs;
+                    PTab {
+                        tab-label: "ORDERS";
+                        active: root.orders-tab == 0;
+                        picked => { root.orders-tab-picked(0); }
+                    }
+                    PTab {
+                        tab-label: "FILLS";
+                        active: root.orders-tab == 1;
+                        picked => { root.orders-tab-picked(1); }
+                    }
+                    Rectangle { horizontal-stretch: 1; background: transparent; }
+                }
+                if root.active-has-rows && root.orders-tab == 0: VerticalLayout {
+                    spacing: 0;
+                    Rectangle {
+                        height: VayrenDesign.row-height;
+                        HorizontalLayout {
+                            padding-left: VayrenDesign.sp-lg;
+                            padding-right: VayrenDesign.sp-lg;
+                            if !root.narrow: VCell { text: "ORDER ID"; head: true; }
+                            VCell { text: "TIME"; head: true; }
+                            VCell { text: "SYMBOL"; head: true; }
+                            if !root.narrow: VCell { text: "SIDE"; head: true; }
+                            VCell { text: "QTY"; head: true; align: 1; }
+                            VCell { text: "STATUS"; head: true; align: 1; }
+                        }
+                        Hairline {
+                            y: parent.height - 1px;
+                        }
+                    }
+                    for o[idx] in root.orders: Rectangle {
+                        height: VayrenDesign.row-height;
+                        background: Math.mod(idx, 2) == 1 ? VayrenPalette.bg2 : transparent;
+                        HorizontalLayout {
+                            padding-left: VayrenDesign.sp-lg;
+                            padding-right: VayrenDesign.sp-lg;
+                            if !root.narrow: VCell { text: o.id; }
+                            VCell { text: o.time; }
+                            VCell { text: o.symbol; }
+                            if !root.narrow: VCell { text: o.side; }
+                            VCell { text: o.qty; align: 1; }
+                            VCell { text: o.status; align: 1; }
+                        }
+                    }
+                }
+                if root.active-has-rows && root.orders-tab == 1: VerticalLayout {
+                    spacing: 0;
+                    Rectangle {
+                        height: VayrenDesign.row-height;
+                        HorizontalLayout {
+                            padding-left: VayrenDesign.sp-lg;
+                            padding-right: VayrenDesign.sp-lg;
+                            VCell { text: "TIME"; head: true; }
+                            VCell { text: "SYMBOL"; head: true; }
+                            if !root.narrow: VCell { text: "SIDE"; head: true; }
+                            VCell { text: "QTY"; head: true; align: 1; }
+                            VCell { text: "PRICE"; head: true; align: 1; }
+                        }
+                        Hairline {
+                            y: parent.height - 1px;
+                        }
+                    }
+                    for f[idx] in root.fills: Rectangle {
+                        height: VayrenDesign.row-height;
+                        background: Math.mod(idx, 2) == 1 ? VayrenPalette.bg2 : transparent;
+                        HorizontalLayout {
+                            padding-left: VayrenDesign.sp-lg;
+                            padding-right: VayrenDesign.sp-lg;
+                            VCell { text: f.time; }
+                            VCell { text: f.symbol; }
+                            if !root.narrow: VCell { text: f.side; }
+                            VCell { text: f.qty; align: 1; }
+                            VCell { text: f.price; align: 1; }
+                        }
+                    }
+                }
+                if !root.active-has-rows: VEmptyState {
+                    title: root.active-empty-title;
+                    detail: root.active-empty-detail;
+                }
+            }
+
+            // ── 5. PORTFOLIO RISK (never clipped, always fully visible) ──
+            VSection {
+                title: "PORTFOLIO RISK";
+                HorizontalLayout {
+                    spacing: VayrenDesign.sp-md;
+                    height: VayrenDesign.row-height;
+                    VBadge {
+                        text: root.health-label;
+                        tone: root.health-tone;
+                        vertical-alignment: center;
+                    }
+                    Rectangle { horizontal-stretch: 1; background: transparent; }
+                }
+                if root.health-note != "": Text {
+                    text: root.health-note;
+                    color: VayrenPalette.faint;
+                    font-size: VayrenDesign.fs-label;
+                    wrap: word-wrap;
+                }
+                if root.risk-has-data: VerticalLayout {
+                    spacing: VayrenDesign.sp-xs;
+                    for r in root.risk-rows: HorizontalLayout {
+                        height: VayrenDesign.row-height;
+                        PRowLabel { text: r.label; horizontal-stretch: 1; }
+                        Text {
+                            text: r.value;
+                            color: VayrenPalette.text;
+                            font-size: VayrenDesign.fs-table;
+                            horizontal-alignment: right;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+                if !root.risk-has-data: VEmptyState {
+                    title: "RISK UNAVAILABLE";
+                    detail: root.risk-empty-detail;
+                }
+            }
+
+            // Surplus absorber: tall viewports must not stretch sections into
+            // empty regions — sections keep natural content height, leftover
+            // space lands here. (Short viewports: zero-size, page scrolls.)
+            Rectangle {
+                vertical-stretch: 1;
+                background: transparent;
+            }
+        }
+    }
+}

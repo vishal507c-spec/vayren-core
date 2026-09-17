@@ -1,0 +1,1426 @@
+// VAYREN LIVE — native Slint execution workstation (constitution §3,
+// UI_DESIGN_SYSTEM.md §5). First-principles responsive layout: ONE screen
+// adapts to any logical viewport, DPI and aspect ratio.
+//
+// Layout contract (no fixed-screen assumptions, §21/§29):
+// - Recomposition thresholds derive from CONTENT MINIMA, not from any
+//   monitor: the inspector needs 340 logical px (wrapped gate reasons) and
+//   the execution workspace needs a 440 px floor (empty-state text, table
+//   horizontal-scroll floor). Below the dock threshold the inspector
+//   becomes an overlay drawer instead of being squeezed (§6/§7).
+// - The chart is the flexible primary workspace ONLY when real bars exist;
+//   with no data it collapses to a compact contextual state — never a giant
+//   empty container (§8/§9).
+// - Tables take natural content height (header + visible rows) inside ONE
+//   page-level ScrollView; sections scroll instead of squeezing into overlap
+//   (§13.1 incident). Horizontal scroll handles width-short blotters.
+// - The safety spine (execution state, session, mode, START/STOP, HALT)
+//   lives in the compact command bar at every supported width; secondary
+//   pills recompose away in priority order (§4/§27/§28).
+//
+// Presentation only: every value arrives via the Rust `LiveState` projection
+// (src/live.rs); this file never infers state or computes numbers.
+
+import { VayrenPalette, VayrenDesign } from "palette.slint";
+import { VBadge, VButton, VBanner, VEmptyState, VCell } from "components.slint";
+import { LineEdit, ScrollView, ComboBox, Switch } from "std-widgets.slint";
+
+// ── projected shapes (mirror src/live.rs) ──────────────────────────────────
+
+export struct LiveBar {
+    mode: int, // 0 PAPER, 1 SANDBOX, 2 LIVE
+    broker-label: string,
+    broker-tone: int,
+    conn-label: string,
+    conn-tone: int,
+    strategy-label: string,
+    strategy-tone: int,
+    risk-label: string,
+    risk-tone: int,
+    recon-label: string,
+    recon-tone: int,
+    exec-label: string,
+    exec-tone: int,
+    halted: bool,
+    halt-enabled: bool,
+    inspector-open: bool,
+    note: string,
+    note-tone: int,
+}
+
+export struct LiveSetup {
+    quantity: string,
+    session-label: string,
+    session-tone: int,
+    can-start: bool,
+    can-stop: bool,
+    can-arm: bool,
+    needs-live-confirm: bool,
+    confirmed-live: bool,
+    symbol-total: string,
+}
+
+export struct LiveMarket {
+    has-data: bool,
+    state-label: string,
+    tone: int,
+    title: string,
+    detail: string,
+    header: string,
+}
+
+export struct LiveSymbolRow {
+    real-index: int,
+    name: string,
+    checked: bool,
+}
+
+export struct LiveGate {
+    name: string,
+    status: string,
+    tone: int,
+    reason: string,
+}
+
+export struct LiveKv {
+    key: string,
+    value: string,
+    tone: int,
+}
+
+export struct LiveStat {
+    label: string,
+    value: string,
+    tone: int,
+}
+
+export struct LivePosition {
+    symbol: string,
+    side: string,
+    qty: string,
+    entry: string,
+    current: string,
+    pnl: string,
+    pnl-tone: int,
+    status: string,
+}
+
+export struct LiveOrder {
+    order-id: string,
+    strategy: string,
+    symbol: string,
+    side: string,
+    qty: string,
+    order-type: string,
+    price: string,
+    status: string,
+    time: string,
+    broker: string,
+    status-tone: int,
+}
+
+export struct LiveFill {
+    time: string,
+    symbol: string,
+    side: string,
+    qty: string,
+    price: string,
+    order-id: string,
+    strategy: string,
+    side-tone: int,
+}
+
+export struct LiveEventRow {
+    timestamp: string,
+    strategy: string,
+    symbol: string,
+    event: string,
+    status: string,
+    status-tone: int,
+}
+
+// View-normalized candle (0..1; presentation transform of real bars only).
+export struct LiveCandle {
+    x: float,
+    open: float,
+    high: float,
+    low: float,
+    close: float,
+    up: bool,
+}
+
+// ── recomposition tiers: ONE pure decision source for screen + tests ───────
+// Every threshold derives from CONTENT MINIMA (logical px, so DPI-
+// independent by construction): the workspace floor is 440 px (compact
+// empty-state text + table scroll floor), the inspector floor is 340 px
+// (wrapped gate reasons), bar groups appear only while their labels stay
+// readable side by side.
+
+export global LiveTiers {
+    public pure function workspace-min-width() -> length {
+        return 440px;
+    }
+    public pure function inspector-min-width() -> length {
+        return 340px;
+    }
+    public pure function dock-inspector(w: length) -> bool {
+        return w >= VayrenDesign.live-dock-inspector;
+    }
+    public pure function bar-core(w: length) -> bool {
+        return w >= VayrenDesign.live-bar-core;
+    }
+    public pure function bar-secondary(w: length) -> bool {
+        return w >= VayrenDesign.live-bar-secondary;
+    }
+    public pure function bar-extended(w: length) -> bool {
+        return w >= VayrenDesign.live-bar-extended;
+    }
+    public pure function blotters-side-by-side(w: length) -> bool {
+        return w >= VayrenDesign.live-blotter-side-by-side;
+    }
+    public pure function inspector-width(w: length) -> length {
+        return Math.max(340px, Math.min(400px, w * 0.32));
+    }
+}
+
+// ── internal building blocks (composition of the GLOBAL component set) ─────
+
+component LHairline inherits Rectangle {
+    width: 100%;
+    height: 1px;
+    background: VayrenPalette.hairline;
+}
+
+component LPill inherits VBadge {
+    vertical-alignment: center;
+    overflow: elide;
+}
+
+component LSeg inherits Rectangle {
+    in property <string> seg-label;
+    in property <bool> active: false;
+    in property <color> active-fill: VayrenPalette.accent;
+    callback seg-clicked();
+
+    border-radius: VayrenDesign.radius-sm;
+    background: active ? active-fill : ta.has-hover ? VayrenPalette.hover : transparent;
+    ta := TouchArea {
+        clicked => { root.seg-clicked(); }
+    }
+    VerticalLayout {
+        alignment: center;
+        Text {
+            text: root.seg-label;
+            color: active ? VayrenPalette.accent-text : ta.has-hover
+                ? VayrenPalette.text : VayrenPalette.muted;
+            font-size: VayrenDesign.fs-label;
+            font-weight: 700;
+            horizontal-alignment: center;
+        }
+    }
+}
+
+component LModeControl inherits Rectangle {
+    // PAPER / SANDBOX / LIVE — mode must be unmistakable (§26): LIVE uses
+    // the semantic danger fill, never a neutral accent.
+    in property <int> mode: 0;
+    callback picked(int);
+
+    width: 178px;
+    height: 26px;
+    border-radius: VayrenDesign.radius;
+    background: VayrenPalette.bg1;
+    border-width: 1px;
+    border-color: VayrenPalette.hairline;
+
+    HorizontalLayout {
+        padding: 2px;
+        spacing: 2px;
+        LSeg {
+            seg-label: "PAPER";
+            active: root.mode == 0;
+            seg-clicked => { root.picked(0); }
+        }
+        LSeg {
+            seg-label: "SANDBOX";
+            active: root.mode == 1;
+            active-fill: VayrenPalette.amber;
+            seg-clicked => { root.picked(1); }
+        }
+        LSeg {
+            seg-label: "LIVE";
+            active: root.mode == 2;
+            active-fill: VayrenPalette.neg;
+            seg-clicked => { root.picked(2); }
+        }
+    }
+}
+
+component LSectionHeader inherits HorizontalLayout {
+    in property <string> title;
+    in property <string> meta: "";
+    in property <int> meta-tone: 0;
+
+    spacing: VayrenDesign.sp-md;
+    height: 24px;
+    Text {
+        text: root.title;
+        color: VayrenPalette.faint;
+        font-size: VayrenDesign.fs-label;
+        font-weight: 700;
+        vertical-alignment: center;
+    }
+    Rectangle { horizontal-stretch: 1; background: transparent; }
+    if root.meta != "": LPill {
+        text: root.meta;
+        tone: root.meta-tone;
+        vertical-alignment: center;
+    }
+}
+
+component LPanel inherits Rectangle {
+    in property <string> panel-title;
+    in property <string> meta: "";
+    in property <int> meta-tone: 0;
+
+    background: VayrenPalette.surface;
+    border-radius: VayrenDesign.radius;
+    border-width: 1px;
+    border-color: VayrenPalette.hairline;
+
+    VerticalLayout {
+        padding: VayrenDesign.sp-md;
+        spacing: VayrenDesign.sp-xs;
+        LSectionHeader {
+            title: root.panel-title;
+            meta: root.meta;
+            meta-tone: root.meta-tone;
+        }
+        @children
+    }
+}
+
+component LKvRow inherits Rectangle {
+    // Key/value row: the value WRAPS — explanations are never truncated
+    // into unreadable lines (§15).
+    in property <string> kv-key;
+    in property <string> kv-value;
+    in property <int> tone: 0;
+
+    function ink() -> color {
+        return root.tone == 1 ? VayrenPalette.pos
+            : root.tone == 2 ? VayrenPalette.amber
+            : root.tone == 3 ? VayrenPalette.neg
+            : VayrenPalette.text;
+    }
+
+    min-height: 18px;
+    HorizontalLayout {
+        spacing: VayrenDesign.sp-md;
+        Text {
+            width: 96px;
+            text: root.kv-key;
+            color: VayrenPalette.muted;
+            font-size: VayrenDesign.fs-label;
+            font-weight: 700;
+            wrap: word-wrap;
+        }
+        Text {
+            text: root.kv-value;
+            color: root.ink();
+            font-size: VayrenDesign.fs-label;
+            font-weight: 500;
+            wrap: word-wrap;
+            horizontal-stretch: 1;
+        }
+    }
+}
+
+component LGateRow inherits Rectangle {
+    // One readiness item: verdict + name, the ACTUAL REASON wrapped
+    // underneath (visible text, never tooltip-only).
+    in property <string> gate-name;
+    in property <string> gate-status;
+    in property <int> tone: 0;
+    in property <string> reason;
+
+    min-height: 18px;
+    VerticalLayout {
+        spacing: 1px;
+        HorizontalLayout {
+            min-height: 18px;
+            spacing: VayrenDesign.sp-md;
+            LPill {
+                text: root.gate-status;
+                tone: root.tone;
+                vertical-alignment: center;
+            }
+            Text {
+                text: root.gate-name;
+                color: VayrenPalette.text;
+                font-size: VayrenDesign.fs-label;
+                font-weight: 600;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+                wrap: word-wrap;
+            }
+        }
+        if root.reason != "": Text {
+            text: root.reason;
+            color: VayrenPalette.faint;
+            font-size: VayrenDesign.fs-label;
+            wrap: word-wrap;
+        }
+    }
+}
+
+component LSymbolRow inherits Rectangle {
+    // Watchlist row: checkbox selection state, full-width click target.
+    in property <int> real-index;
+    in property <string> name;
+    in property <bool> checked;
+    callback toggled(int);
+
+    height: 24px;
+    border-radius: VayrenDesign.radius-sm;
+    background: checked ? VayrenPalette.selected : ta.has-hover ? VayrenPalette.hover : transparent;
+    ta := TouchArea {
+        clicked => { root.toggled(root.real-index); }
+    }
+    HorizontalLayout {
+        spacing: VayrenDesign.sp-md;
+        Switch {
+            checked: root.checked;
+            enabled: false; // the row TouchArea owns the single click target
+        }
+        Text {
+            text: root.name;
+            color: root.checked ? VayrenPalette.text : VayrenPalette.muted;
+            font-size: VayrenDesign.fs-table;
+            font-weight: root.checked ? 700 : 400;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide; // elision is visual-only; rows live in their
+            // own scroll viewport — never below fs-table (§11).
+        }
+    }
+}
+
+component LOrdersBody inherits Rectangle {
+    in property <[LiveOrder]> rows;
+
+    clip: true;
+    ScrollView {
+        width: 100%;
+        height: 100%;
+        viewport-width: Math.max(parent.width, 632px);
+        viewport-height: root.rows.length == 0
+            ? 34px
+            : (Math.min(root.rows.length, 4) + 1) * VayrenDesign.row-height;
+        VerticalLayout {
+            spacing: 0;
+            Rectangle {
+                height: VayrenDesign.row-height;
+                HorizontalLayout {
+                    spacing: VayrenDesign.sp-lg;
+                    Rectangle { width: 78px; VCell { text: "ORDER ID"; head: true; width: 100%; height: 100%; } }
+                    Rectangle { width: 66px; VCell { text: "STRATEGY"; head: true; width: 100%; height: 100%; } }
+                    Rectangle { width: 76px; VCell { text: "SYMBOL"; head: true; width: 100%; height: 100%; } }
+                    Rectangle { width: 42px; VCell { text: "SIDE"; head: true; width: 100%; height: 100%; } }
+                    Rectangle { width: 48px; VCell { text: "QTY"; head: true; align: 1; width: 100%; height: 100%; } }
+                    Rectangle { width: 52px; VCell { text: "TYPE"; head: true; width: 100%; height: 100%; } }
+                    Rectangle { width: 64px; VCell { text: "PRICE"; head: true; align: 1; width: 100%; height: 100%; } }
+                    Rectangle { width: 70px; VCell { text: "STATUS"; head: true; width: 100%; height: 100%; } }
+                    Rectangle { width: 64px; VCell { text: "TIME"; head: true; width: 100%; height: 100%; } }
+                    Rectangle { width: 58px; VCell { text: "BROKER"; head: true; width: 100%; height: 100%; } }
+                }
+                LHairline { y: parent.height - 1px; }
+            }
+            if root.rows.length == 0: Rectangle {
+                height: 34px;
+                VEmptyState {
+                    width: 100%;
+                    height: 100%;
+                    title: "NO OPEN ORDERS";
+                }
+            }
+            for o[idx] in root.rows: Rectangle {
+                height: VayrenDesign.row-height;
+                background: Math.mod(idx, 2) == 1 ? VayrenPalette.bg2 : transparent;
+                HorizontalLayout {
+                    spacing: VayrenDesign.sp-lg;
+                    Rectangle { width: 78px; VCell { text: o.order-id; width: 100%; height: 100%; } }
+                    Rectangle { width: 66px; VCell { text: o.strategy; width: 100%; height: 100%; } }
+                    Rectangle { width: 76px; VCell { text: o.symbol; width: 100%; height: 100%; } }
+                    Rectangle { width: 42px; VCell { text: o.side; width: 100%; height: 100%; } }
+                    Rectangle { width: 48px; VCell { text: o.qty; align: 1; width: 100%; height: 100%; } }
+                    Rectangle { width: 52px; VCell { text: o.order-type; width: 100%; height: 100%; } }
+                    Rectangle { width: 64px; VCell { text: o.price; align: 1; width: 100%; height: 100%; } }
+                    Rectangle { width: 70px; VCell { text: o.status; tone: o.status-tone; width: 100%; height: 100%; } }
+                    Rectangle { width: 64px; VCell { text: o.time; width: 100%; height: 100%; } }
+                    Rectangle { width: 58px; VCell { text: o.broker; width: 100%; height: 100%; } }
+                }
+            }
+        }
+    }
+}
+
+component LFillsBody inherits Rectangle {
+    in property <[LiveFill]> rows;
+
+    clip: true;
+    ScrollView {
+        width: 100%;
+        height: 100%;
+        viewport-width: Math.max(parent.width, 452px);
+        viewport-height: root.rows.length == 0
+            ? 34px
+            : (Math.min(root.rows.length, 4) + 1) * VayrenDesign.row-height;
+        VerticalLayout {
+            spacing: 0;
+            Rectangle {
+                height: VayrenDesign.row-height;
+                HorizontalLayout {
+                    spacing: VayrenDesign.sp-lg;
+                    Rectangle { width: 64px; VCell { text: "TIME"; head: true; width: 100%; height: 100%; } }
+                    Rectangle { width: 76px; VCell { text: "SYMBOL"; head: true; width: 100%; height: 100%; } }
+                    Rectangle { width: 42px; VCell { text: "SIDE"; head: true; width: 100%; height: 100%; } }
+                    Rectangle { width: 48px; VCell { text: "QTY"; head: true; align: 1; width: 100%; height: 100%; } }
+                    Rectangle { width: 64px; VCell { text: "PRICE"; head: true; align: 1; width: 100%; height: 100%; } }
+                    Rectangle { width: 78px; VCell { text: "ORDER ID"; head: true; width: 100%; height: 100%; } }
+                    Rectangle { width: 66px; VCell { text: "STRATEGY"; head: true; width: 100%; height: 100%; } }
+                }
+                LHairline { y: parent.height - 1px; }
+            }
+            if root.rows.length == 0: Rectangle {
+                height: 34px;
+                VEmptyState {
+                    width: 100%;
+                    height: 100%;
+                    title: "NO RECENT FILLS";
+                }
+            }
+            for f[idx] in root.rows: Rectangle {
+                height: VayrenDesign.row-height;
+                background: Math.mod(idx, 2) == 1 ? VayrenPalette.bg2 : transparent;
+                HorizontalLayout {
+                    spacing: VayrenDesign.sp-lg;
+                    Rectangle { width: 64px; VCell { text: f.time; width: 100%; height: 100%; } }
+                    Rectangle { width: 76px; VCell { text: f.symbol; width: 100%; height: 100%; } }
+                    Rectangle { width: 42px; VCell { text: f.side; tone: f.side-tone; width: 100%; height: 100%; } }
+                    Rectangle { width: 48px; VCell { text: f.qty; align: 1; width: 100%; height: 100%; } }
+                    Rectangle { width: 64px; VCell { text: f.price; align: 1; width: 100%; height: 100%; } }
+                    Rectangle { width: 78px; VCell { text: f.order-id; width: 100%; height: 100%; } }
+                    Rectangle { width: 66px; VCell { text: f.strategy; width: 100%; height: 100%; } }
+                }
+            }
+        }
+    }
+}
+
+// ── inspector column (ONE composition; docked or drawer) ───────────────────
+// Declared before LiveScreen: file-local components resolve in file order.
+
+component InspectorColumn inherits Rectangle {
+    in property <LiveBar> bar;
+    in property <LiveSetup> setup;
+    in property <[string]> strategy-names;
+    in property <int> strategy-selected: -1;
+    in property <[LiveSymbolRow]> symbols;
+    in property <string> symbol-filter: "";
+    in property <[string]> timeframe-names;
+    in property <int> timeframe-selected: -1;
+    in property <[LiveGate]> gates;
+    in property <string> arm-note: "";
+    in property <[string]> blockers;
+    in property <[LiveKv]> strategy-rows;
+    in property <[LiveKv]> position-rows;
+    in property <[LiveKv]> risk-rows;
+    in property <[LiveKv]> broker-rows;
+    in property <[LiveKv]> recon-rows;
+    in property <bool> tall: false;
+
+    callback mode-picked(int);
+    callback strategy-picked(string);
+    callback symbol-toggled(int);
+    callback symbol-filter-changed(string);
+    callback timeframe-picked(string);
+    callback quantity-edited(string);
+    callback start-requested();
+    callback stop-requested();
+    callback arm-requested();
+    callback confirm-requested();
+    callback configure-broker();
+
+    background: VayrenPalette.bg;
+
+    // The whole column scrolls — every section keeps its usable height;
+    // recomposition never crushes content (§15).
+    ScrollView {
+        width: 100%;
+        height: 100%;
+        viewport-width: root.width;
+
+        inspbody := VerticalLayout {
+            padding: VayrenDesign.sp-md;
+            spacing: VayrenDesign.sp-md;
+
+            // ── SESSION SETUP (§12): grouped controls, one column ──
+            LPanel {
+                panel-title: "SESSION SETUP";
+                VerticalLayout {
+                    spacing: VayrenDesign.sp-sm;
+
+                    Text {
+                        text: "Strategy";
+                        color: VayrenPalette.muted;
+                        font-size: VayrenDesign.fs-label;
+                        font-weight: 700;
+                    }
+                    ComboBox {
+                        height: 28px;
+                        model: root.strategy-names;
+                        current-index: root.strategy-selected;
+                        selected(v) => { root.strategy-picked(v); }
+                    }
+                    HorizontalLayout {
+                        min-height: 18px;
+                        spacing: VayrenDesign.sp-md;
+                        Text {
+                            text: "Symbols (Market Watchlist)";
+                            color: VayrenPalette.muted;
+                            font-size: VayrenDesign.fs-label;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                        }
+                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                        Text {
+                            text: root.setup.symbol-total;
+                            color: VayrenPalette.faint;
+                            font-size: VayrenDesign.fs-label;
+                            vertical-alignment: center;
+                        }
+                    }
+                    Rectangle {
+                        // The watchlist keeps a real working height with
+                        // its own scroll — never a compressed sliver (§11).
+                        height: root.tall ? 240px : 168px;
+                        background: VayrenPalette.bg1;
+                        border-radius: VayrenDesign.radius-sm;
+                        border-width: 1px;
+                        border-color: VayrenPalette.hairline;
+                        VerticalLayout {
+                            padding: VayrenDesign.sp-sm;
+                            spacing: VayrenDesign.sp-xs;
+                            LineEdit {
+                                height: 24px;
+                                placeholder-text: "Search symbols…";
+                                text: root.symbol-filter;
+                                edited(t) => { root.symbol-filter-changed(t); }
+                            }
+                            ScrollView {
+                                vertical-stretch: 1;
+                                viewport-width: parent.width;
+                                viewport-height: root.symbols.length * 24px;
+                                VerticalLayout {
+                                    spacing: VayrenDesign.sp-xs;
+                                    for s in root.symbols: LSymbolRow {
+                                        real-index: s.real-index;
+                                        name: s.name;
+                                        checked: s.checked;
+                                        toggled(i) => { root.symbol-toggled(i); }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Text {
+                        text: "Timeframe";
+                        color: VayrenPalette.muted;
+                        font-size: VayrenDesign.fs-label;
+                        font-weight: 700;
+                    }
+                    ComboBox {
+                        height: 28px;
+                        model: root.timeframe-names;
+                        current-index: root.timeframe-selected;
+                        selected(v) => { root.timeframe-picked(v); }
+                    }
+                    Text {
+                        text: "Quantity (per order)";
+                        color: VayrenPalette.muted;
+                        font-size: VayrenDesign.fs-label;
+                        font-weight: 700;
+                    }
+                    LineEdit {
+                        // One usable row — never stretched, never crushed (§13).
+                        height: 28px;
+                        text: root.setup.quantity;
+                        edited(t) => { root.quantity-edited(t); }
+                    }
+                }
+            }
+
+            // ── EXECUTION CONTROL GROUP (§5/§14/§26) ──
+            LPanel {
+                panel-title: "EXECUTION";
+                meta: root.setup.session-label;
+                meta-tone: root.setup.session-tone;
+                VerticalLayout {
+                    spacing: VayrenDesign.sp-sm;
+
+                    HorizontalLayout {
+                        spacing: VayrenDesign.sp-sm;
+                        height: VayrenDesign.h-context;
+                        VButton {
+                            horizontal-stretch: 2;
+                            label: "▶  START LIVE";
+                            variant: 0;
+                            enabled: root.setup.can-start;
+                            clicked => { root.start-requested(); }
+                        }
+                        VButton {
+                            horizontal-stretch: 1;
+                            label: "■  STOP";
+                            variant: 2;
+                            enabled: root.setup.can-stop;
+                            clicked => { root.stop-requested(); }
+                        }
+                    }
+                    LModeControl {
+                        mode: root.bar.mode;
+                        picked(kind) => { root.mode-picked(kind); }
+                    }
+                    // LIVE consent: explicit operator action, unmistakable.
+                    if root.setup.needs-live-confirm: VButton {
+                        height: VayrenDesign.h-context;
+                        label: "I CONFIRM LIVE EXECUTION";
+                        variant: 3;
+                        clicked => { root.confirm-requested(); }
+                    }
+                    if root.setup.confirmed-live && root.bar.mode == 2: LPill {
+                        text: "● LIVE CONSENT GIVEN";
+                        tone: 2;
+                    }
+                    // Exact blockers stay visible next to the controls —
+                    // never hidden behind a disabled button (§14/§25).
+                    for b in root.blockers: Text {
+                        text: "•  " + b;
+                        color: VayrenPalette.muted;
+                        font-size: VayrenDesign.fs-label;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+
+            // ── LIVE READINESS — the most important panel (§15) ──
+            LPanel {
+                panel-title: "LIVE READINESS";
+                VerticalLayout {
+                    spacing: VayrenDesign.sp-sm;
+                    for g in root.gates: LGateRow {
+                        gate-name: g.name;
+                        gate-status: g.status;
+                        tone: g.tone;
+                        reason: g.reason;
+                    }
+                    LHairline {}
+                    VButton {
+                        height: VayrenDesign.h-context;
+                        label: "ARM LIVE";
+                        variant: 1;
+                        enabled: root.setup.can-arm;
+                        clicked => { root.arm-requested(); }
+                    }
+                    if root.arm-note != "": Text {
+                        text: root.arm-note;
+                        color: VayrenPalette.muted;
+                        font-size: VayrenDesign.fs-label;
+                        wrap: word-wrap;
+                    }
+                    VButton {
+                        height: 26px;
+                        label: "CONFIGURE BROKER ▸";
+                        variant: 2;
+                        clicked => { root.configure-broker(); }
+                    }
+                }
+            }
+
+            // ── SECONDARY STATE GROUPS (tiered weight, never removed) ──
+            LPanel {
+                panel-title: "ACTIVE STRATEGY";
+                VerticalLayout {
+                    spacing: VayrenDesign.sp-sm;
+                    for row in root.strategy-rows: LKvRow {
+                        kv-key: row.key;
+                        kv-value: row.value;
+                        tone: row.tone;
+                    }
+                }
+            }
+            LPanel {
+                panel-title: "POSITION";
+                VerticalLayout {
+                    spacing: VayrenDesign.sp-sm;
+                    for row in root.position-rows: LKvRow {
+                        kv-key: row.key;
+                        kv-value: row.value;
+                        tone: row.tone;
+                    }
+                }
+            }
+            LPanel {
+                panel-title: "RISK";
+                VerticalLayout {
+                    spacing: VayrenDesign.sp-sm;
+                    for row in root.risk-rows: LKvRow {
+                        kv-key: row.key;
+                        kv-value: row.value;
+                        tone: row.tone;
+                    }
+                }
+            }
+            LPanel {
+                panel-title: "BROKER";
+                VerticalLayout {
+                    spacing: VayrenDesign.sp-sm;
+                    for row in root.broker-rows: LKvRow {
+                        kv-key: row.key;
+                        kv-value: row.value;
+                        tone: row.tone;
+                    }
+                }
+            }
+            LPanel {
+                panel-title: "RECONCILIATION";
+                VerticalLayout {
+                    spacing: VayrenDesign.sp-sm;
+                    for row in root.recon-rows: LKvRow {
+                        kv-key: row.key;
+                        kv-value: row.value;
+                        tone: row.tone;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── the LIVE screen ────────────────────────────────────────────────────────
+
+export component LiveScreen inherits Rectangle {
+    // Command bar + grouped facts (Rust-projected; never inferred here).
+    in property <LiveBar> bar;
+    in property <LiveSetup> setup;
+    in property <LiveMarket> market;
+    in property <[LiveCandle]> candles;
+    in property <[string]> strategy-names;
+    in property <int> strategy-selected: -1;
+    in property <[LiveSymbolRow]> symbols;
+    in property <string> symbol-filter: "";
+    in property <[string]> timeframe-names;
+    in property <int> timeframe-selected: -1;
+    in property <[LiveGate]> gates;
+    in property <string> arm-note: "";
+    in property <[string]> blockers;
+    in property <[LiveKv]> strategy-rows;
+    in property <[LiveKv]> position-rows;
+    in property <[LiveKv]> risk-rows;
+    in property <[LiveKv]> broker-rows;
+    in property <[LiveKv]> recon-rows;
+    in property <[LivePosition]> positions;
+    in property <[LiveOrder]> orders;
+    in property <[LiveFill]> fills;
+    in property <[LiveStat]> stats;
+    in property <[LiveEventRow]> events;
+    in property <[string]> event-types;
+    in property <int> event-type-index: 0;
+    in property <string> event-filter: "";
+
+    // Slint reports intent; the Rust view-model validates + owns state.
+    // ComboBox reports the selected value (Slint has no index callback);
+    // the wiring slice resolves values against the canonical option lists.
+    callback mode-picked(int);
+    callback strategy-picked(string);
+    callback symbol-toggled(int);
+    callback symbol-filter-changed(string);
+    callback timeframe-picked(string);
+    callback quantity-edited(string);
+    callback start-requested();
+    callback stop-requested();
+    callback arm-requested();
+    callback halt-requested();
+    callback confirm-requested();
+    callback event-filter-changed(string);
+    callback event-type-picked(string);
+    callback inspector-toggled();
+    callback configure-broker();
+
+    background: VayrenPalette.bg;
+
+    // ── recomposition tiers: WINDOW-computed inputs (deriving these from
+    //    the screen's own width feeds screen.width into layout implicit
+    //    sizes — the deprecated binding-loop path; LiveTiers is the single
+    //    pure decision source, evaluated by AppWindow and the test harness) ──
+    in property <bool> dock-inspector;
+    in property <bool> bar-core;
+    in property <bool> bar-secondary;
+    in property <bool> bar-extended;
+    in property <bool> blotters-side-by-side;
+    in property <bool> tall-inspector;
+    // Inspector width: what its CONTENT genuinely needs — floor 340,
+    // generous 400, never more (§7).
+    in property <length> inspector-w;
+    // Inspector visibility is intent-owned by Rust (docked or drawer tier).
+    in property <bool> inspector-open: true;
+    out property <bool> show-inspector: root.inspector-open;
+    out property <bool> drawer-open: !root.dock-inspector && root.inspector-open;
+    out property <bool> inspector-docked: root.dock-inspector && root.inspector-open;
+    // Invariant guard: when the inspector is docked the workspace is never
+    // compressed below its content floor (the dock threshold makes that
+    // mathematically safe); in the drawer tier the page-level horizontal
+    // scroll owns any overflow.
+    out property <bool> workspace-fits: !root.inspector-docked
+        || (root.width - root.inspector-w - 1px >= LiveTiers.workspace-min-width());
+
+    // ── content-derived section heights (natural sizes, capped viewports) ──
+    property <length> positions-h: 46px
+        + (root.positions.length == 0
+            ? 34px
+            : (Math.min(root.positions.length, 6) + 1) * VayrenDesign.row-height);
+    property <length> orders-h: 46px
+        + (root.orders.length == 0
+            ? 34px
+            : (Math.min(root.orders.length, 4) + 1) * VayrenDesign.row-height);
+    property <length> fills-h: 46px
+        + (root.fills.length == 0
+            ? 34px
+            : (Math.min(root.fills.length, 4) + 1) * VayrenDesign.row-height);
+    property <length> blotter-h: root.blotters-side-by-side
+        ? Math.max(root.orders-h, root.fills-h)
+        : root.orders-h + root.fills-h + VayrenDesign.sp-md;
+    property <length> stats-h: 58px;
+    property <length> events-h: 76px
+        + (root.events.length == 0
+            ? 34px
+            : (Math.min(root.events.length, 4) + 1) * VayrenDesign.row-height);
+    // Chart region: expands ONLY with real bars; compact contextual state
+    // otherwise — never a giant empty container, never a fixed giant
+    // height (§8/§9).
+    property <length> workspace-fixed: 3 * VayrenDesign.sp-md
+        + root.positions-h + root.blotter-h + root.stats-h + root.events-h
+        + 4 * VayrenDesign.sp-md;
+    out property <length> chart-h: root.market.has-data
+        ? Math.max(220px, root.height - root.workspace-fixed)
+        : 132px;
+
+    VerticalLayout {
+        spacing: 0;
+
+        // ══ LIVE COMMAND / SAFETY BAR — compact, always present (h-strip) ══
+        Rectangle {
+            height: VayrenDesign.h-strip;
+            background: VayrenPalette.surface;
+            HorizontalLayout {
+                padding-left: VayrenDesign.sp-lg;
+                padding-right: VayrenDesign.sp-lg;
+                spacing: VayrenDesign.sp-md;
+
+                Text {
+                    text: "LIVE";
+                    color: VayrenPalette.accent;
+                    font-size: VayrenDesign.fs-small;
+                    font-weight: 800;
+                    vertical-alignment: center;
+                }
+                // Execution state first — the answer to "IS TRADING ON?"
+                LPill {
+                    text: root.bar.exec-label;
+                    tone: root.bar.exec-tone;
+                    vertical-alignment: center;
+                }
+                Rectangle { width: 1px; height: 18px; background: VayrenPalette.hairline; }
+                LPill {
+                    text: root.setup.session-label;
+                    tone: root.setup.session-tone;
+                    vertical-alignment: center;
+                }
+                // Secondary pills recompose away in priority order; the
+                // safety spine above never disappears (§28).
+                if root.bar-secondary: Rectangle { width: 1px; height: 18px; background: VayrenPalette.hairline; }
+                if root.bar-secondary: LPill {
+                    text: root.bar.broker-label;
+                    tone: root.bar.broker-tone;
+                    vertical-alignment: center;
+                }
+                if root.bar-extended: LPill {
+                    text: root.bar.conn-label;
+                    tone: root.bar.conn-tone;
+                    vertical-alignment: center;
+                }
+                if root.bar-extended: LPill {
+                    text: root.bar.strategy-label;
+                    tone: root.bar.strategy-tone;
+                    vertical-alignment: center;
+                }
+                if root.bar-secondary: LPill {
+                    text: root.bar.risk-label;
+                    tone: root.bar.risk-tone;
+                    vertical-alignment: center;
+                }
+                if root.bar-extended: LPill {
+                    text: root.bar.recon-label;
+                    tone: root.bar.recon-tone;
+                    vertical-alignment: center;
+                }
+
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+
+                // Execution-control group (§14): START and STOP as one
+                // obvious pair; enablement follows REAL execution state.
+                if root.bar-extended: HorizontalLayout {
+                    spacing: VayrenDesign.sp-sm;
+                    VButton {
+                        width: 118px;
+                        label: "▶  START LIVE";
+                        variant: 0;
+                        enabled: root.setup.can-start;
+                        clicked => { root.start-requested(); }
+                    }
+                    VButton {
+                        width: 76px;
+                        label: "■  STOP";
+                        variant: 2;
+                        enabled: root.setup.can-stop;
+                        clicked => { root.stop-requested(); }
+                    }
+                }
+                if root.bar-core: LModeControl {
+                    mode: root.bar.mode;
+                    picked(kind) => { root.mode-picked(kind); }
+                }
+                // HALT — the primary safety control at every supported
+                // width, never hidden inside a drawer (§27).
+                VButton {
+                    width: root.bar-core ? 136px : 86px;
+                    label: root.bar-core ? "■  HALT EXECUTION" : "■  HALT";
+                    variant: 3;
+                    enabled: root.bar.halt-enabled;
+                    clicked => { root.halt-requested(); }
+                }
+                VButton {
+                    width: 92px;
+                    label: root.show-inspector ? "SESSION ▾" : "SESSION ▸";
+                    variant: 2;
+                    clicked => { root.inspector-toggled(); }
+                }
+            }
+            LHairline {
+                y: parent.height - 1px;
+            }
+        }
+
+        // Halt banner — quiet semantic strip, only while engaged.
+        if root.bar.halted: Rectangle {
+            height: 34px;
+            background: VayrenPalette.bg;
+            VerticalLayout {
+                padding-left: VayrenDesign.sp-lg;
+                padding-right: VayrenDesign.sp-lg;
+                alignment: center;
+                VBanner {
+                    height: 26px;
+                    width: 100%;
+                    message: "EXECUTION HALTED — kill switch engaged. Reconcile before restarting.";
+                    tone: 3;
+                }
+            }
+        }
+
+        // Action feedback note (arm/mode/quantity refusals — honest text).
+        if root.bar.note != "": Rectangle {
+            height: 28px;
+            background: VayrenPalette.bg;
+            VerticalLayout {
+                padding-left: VayrenDesign.sp-lg;
+                padding-right: VayrenDesign.sp-lg;
+                alignment: center;
+                LPill {
+                    text: root.bar.note;
+                    tone: root.bar.note-tone;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // ══ BODY: workspace (+ docked inspector) + optional drawer ══
+        Rectangle {
+            vertical-stretch: 1;
+            background: VayrenPalette.bg;
+
+            HorizontalLayout {
+                spacing: 0;
+                // The docked inspector is an overlay region on the right
+                // edge: this padding makes the workspace yield exactly that
+                // space (driven by window-computed inputs — no width
+                // feedback loop). In the drawer tier the workspace keeps
+                // full width and the drawer floats above with a scrim.
+                padding-right: root.inspector-docked ? root.inspector-w + 1px : 0px;
+
+                // ── EXECUTION WORKSPACE (primary; owns remaining width) ──
+                // Below the content floor the page scrolls horizontally —
+                // tables and text never get squeezed unreadable (§29).
+                ScrollView {
+                    horizontal-stretch: 1;
+                    viewport-width: Math.max(LiveTiers.workspace-min-width(), self.width);
+
+                    wsbody := VerticalLayout {
+                        spacing: VayrenDesign.sp-md;
+                        padding: VayrenDesign.sp-md;
+
+                        // ── MARKET / CHART region ──
+                        Rectangle {
+                            height: root.chart-h;
+                            background: VayrenPalette.surface;
+                            border-radius: VayrenDesign.radius;
+                            border-width: 1px;
+                            border-color: VayrenPalette.hairline;
+
+                            VerticalLayout {
+                                padding: VayrenDesign.sp-md;
+                                spacing: VayrenDesign.sp-sm;
+
+                                LSectionHeader {
+                                    title: "MARKET";
+                                    meta: root.market.state-label;
+                                    meta-tone: root.market.tone;
+                                }
+
+                                if root.market.has-data: Rectangle {
+                                    vertical-stretch: 1;
+                                    background: VayrenPalette.bg1;
+                                    border-radius: VayrenDesign.radius-sm;
+                                    clip: true;
+                                    // Real bars, view-normalized.
+                                    for c in root.candles: Rectangle {
+                                        width: Math.max(1px, parent.width / root.candles.length * 0.66);
+                                        x: parent.width * c.x - self.width / 2;
+                                        y: parent.height * Math.min(c.high, c.low);
+                                        height: Math.max(1px, parent.height * Math.abs(c.low - c.high));
+                                        background: c.up ? VayrenPalette.pos-dim : VayrenPalette.neg-dim;
+                                        Rectangle {
+                                            width: 100%;
+                                            x: 0;
+                                            y: parent.height * (Math.min(c.open, c.close) - Math.min(c.high, c.low)) / Math.max(0.0001, Math.abs(c.low - c.high));
+                                            height: Math.max(1px, parent.height * Math.abs(c.close - c.open) / Math.max(0.0001, Math.abs(c.low - c.high)));
+                                            background: c.up ? VayrenPalette.pos : VayrenPalette.neg;
+                                        }
+                                    }
+                                }
+                                if root.market.has-data: Text {
+                                    text: root.market.header;
+                                    color: VayrenPalette.muted;
+                                    font-size: VayrenDesign.fs-label;
+                                }
+                                if !root.market.has-data: Rectangle {
+                                    vertical-stretch: 1;
+                                    background: transparent;
+                                    VEmptyState {
+                                        width: 100%;
+                                        height: 100%;
+                                        title: root.market.title;
+                                        detail: root.market.detail;
+                                    }
+                                }
+                            }
+                        }
+
+                        // ── POSITIONS (execution-critical, §16) ──
+                        LPanel {
+                            height: root.positions-h;
+                            panel-title: "POSITIONS";
+                            meta: root.positions.length == 0 ? "FLAT" : "OPEN";
+                            meta-tone: root.positions.length == 0 ? 0 : 1;
+                            Rectangle {
+                                vertical-stretch: 1;
+                                clip: true;
+                                ScrollView {
+                                    width: 100%;
+                                    height: 100%;
+                                    viewport-width: Math.max(parent.width, 502px);
+                                    viewport-height: root.positions.length == 0
+                                        ? 34px
+                                        : (root.positions.length + 1) * VayrenDesign.row-height;
+                                    VerticalLayout {
+                                        spacing: 0;
+                                        Rectangle {
+                                            height: VayrenDesign.row-height;
+                                            HorizontalLayout {
+                                                spacing: VayrenDesign.sp-lg;
+                                                Rectangle { width: 88px; VCell { text: "SYMBOL"; head: true; width: 100%; height: 100%; } }
+                                                Rectangle { width: 48px; VCell { text: "SIDE"; head: true; width: 100%; height: 100%; } }
+                                                Rectangle { width: 56px; VCell { text: "QTY"; head: true; align: 1; width: 100%; height: 100%; } }
+                                                Rectangle { width: 72px; VCell { text: "ENTRY"; head: true; align: 1; width: 100%; height: 100%; } }
+                                                Rectangle { width: 72px; VCell { text: "CURRENT"; head: true; align: 1; width: 100%; height: 100%; } }
+                                                Rectangle { width: 78px; VCell { text: "P&L"; head: true; align: 1; width: 100%; height: 100%; } }
+                                                Rectangle { width: 56px; VCell { text: "STATUS"; head: true; width: 100%; height: 100%; } }
+                                            }
+                                            LHairline { y: parent.height - 1px; }
+                                        }
+                                        if root.positions.length == 0: Rectangle {
+                                            height: 34px;
+                                            VEmptyState {
+                                                width: 100%;
+                                                height: 100%;
+                                                title: "FLAT — NO OPEN POSITIONS";
+                                            }
+                                        }
+                                        for p[idx] in root.positions: Rectangle {
+                                            height: VayrenDesign.row-height;
+                                            background: Math.mod(idx, 2) == 1 ? VayrenPalette.bg2 : transparent;
+                                            HorizontalLayout {
+                                                spacing: VayrenDesign.sp-lg;
+                                                Rectangle { width: 88px; VCell { text: p.symbol; width: 100%; height: 100%; } }
+                                                Rectangle { width: 48px; VCell { text: p.side; width: 100%; height: 100%; } }
+                                                Rectangle { width: 56px; VCell { text: p.qty; align: 1; width: 100%; height: 100%; } }
+                                                Rectangle { width: 72px; VCell { text: p.entry; align: 1; width: 100%; height: 100%; } }
+                                                Rectangle { width: 72px; VCell { text: p.current; align: 1; width: 100%; height: 100%; } }
+                                                Rectangle { width: 78px; VCell { text: p.pnl; align: 1; tone: p.pnl-tone; width: 100%; height: 100%; } }
+                                                Rectangle { width: 56px; VCell { text: p.status; width: 100%; height: 100%; } }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // ── OPEN ORDERS | RECENT FILLS (§17/§18) ──
+                        // Side-by-side only while both stay readable; below
+                        // the fit width they stack — never microscopic.
+                        if root.blotters-side-by-side: Rectangle {
+                            height: root.blotter-h;
+                            HorizontalLayout {
+                                spacing: VayrenDesign.sp-md;
+                                LPanel {
+                                    horizontal-stretch: 1;
+                                    panel-title: "OPEN ORDERS";
+                                    LOrdersBody {
+                                        vertical-stretch: 1;
+                                        rows: root.orders;
+                                    }
+                                }
+                                LPanel {
+                                    horizontal-stretch: 1;
+                                    panel-title: "RECENT FILLS";
+                                    LFillsBody {
+                                        vertical-stretch: 1;
+                                        rows: root.fills;
+                                    }
+                                }
+                            }
+                        }
+                        if !root.blotters-side-by-side: VerticalLayout {
+                            spacing: VayrenDesign.sp-md;
+                            LPanel {
+                                height: root.orders-h;
+                                panel-title: "OPEN ORDERS";
+                                LOrdersBody {
+                                    vertical-stretch: 1;
+                                    rows: root.orders;
+                                }
+                            }
+                            LPanel {
+                                height: root.fills-h;
+                                panel-title: "RECENT FILLS";
+                                LFillsBody {
+                                    vertical-stretch: 1;
+                                    rows: root.fills;
+                                }
+                            }
+                        }
+
+                        // ── SESSION P&L BAND (execution summary, §19) ──
+                        Rectangle {
+                            height: root.stats-h;
+                            background: VayrenPalette.bg1;
+                            border-radius: VayrenDesign.radius;
+                            border-width: 1px;
+                            border-color: VayrenPalette.hairline-soft;
+                            clip: true;
+                            ScrollView {
+                                width: 100%;
+                                height: 100%;
+                                viewport-width: Math.max(parent.width, root.stats.length * 124px);
+                                HorizontalLayout {
+                                    spacing: 0;
+                                    for s in root.stats: Rectangle {
+                                        horizontal-stretch: 1;
+                                        min-width: 124px;
+                                        VerticalLayout {
+                                            padding-left: VayrenDesign.sp-lg;
+                                            padding-right: VayrenDesign.sp-lg;
+                                            spacing: 0;
+                                            alignment: center;
+                                            Text {
+                                                text: s.label;
+                                                color: VayrenPalette.faint;
+                                                font-size: VayrenDesign.fs-label;
+                                                font-weight: 700;
+                                            }
+                                            Text {
+                                                text: s.value;
+                                                color: s.tone == 1 ? VayrenPalette.pos
+                                                    : s.tone == 2 ? VayrenPalette.amber
+                                                    : s.tone == 3 ? VayrenPalette.neg
+                                                    : VayrenPalette.text;
+                                                font-size: VayrenDesign.fs-metric-sm;
+                                                font-weight: 700;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // ── LIVE EVENTS (recent activity, §4 tier #8) ──
+                        LPanel {
+                            height: root.events-h;
+                            panel-title: "LIVE EVENTS";
+                            HorizontalLayout {
+                                height: 26px;
+                                spacing: VayrenDesign.sp-sm;
+                                ComboBox {
+                                    width: 178px;
+                                    height: 26px;
+                                    model: root.event-types;
+                                    current-index: root.event-type-index;
+                                    selected(v) => { root.event-type-picked(v); }
+                                }
+                                LineEdit {
+                                    horizontal-stretch: 1;
+                                    height: 26px;
+                                    placeholder-text: "Filter: strategy, symbol, status…";
+                                    text: root.event-filter;
+                                    edited(t) => { root.event-filter-changed(t); }
+                                }
+                            }
+                            Rectangle {
+                                vertical-stretch: 1;
+                                clip: true;
+                                ScrollView {
+                                    width: 100%;
+                                    height: 100%;
+                                    viewport-width: Math.max(parent.width, 504px);
+                                    viewport-height: root.events.length == 0
+                                        ? 34px
+                                        : (Math.min(root.events.length, 4) + 1) * VayrenDesign.row-height;
+                                    VerticalLayout {
+                                        spacing: 0;
+                                        Rectangle {
+                                            height: VayrenDesign.row-height;
+                                            HorizontalLayout {
+                                                spacing: VayrenDesign.sp-lg;
+                                                Rectangle { width: 116px; VCell { text: "TIMESTAMP"; head: true; width: 100%; height: 100%; } }
+                                                Rectangle { width: 72px; VCell { text: "STRATEGY"; head: true; width: 100%; height: 100%; } }
+                                                Rectangle { width: 84px; VCell { text: "SYMBOL"; head: true; width: 100%; height: 100%; } }
+                                                Rectangle { width: 168px; VCell { text: "EVENT"; head: true; width: 100%; height: 100%; } }
+                                                Rectangle { width: 56px; VCell { text: "STATUS"; head: true; width: 100%; height: 100%; } }
+                                            }
+                                            LHairline { y: parent.height - 1px; }
+                                        }
+                                        if root.events.length == 0: Rectangle {
+                                            height: 34px;
+                                            VEmptyState {
+                                                width: 100%;
+                                                height: 100%;
+                                                title: "NO EVENTS — session activity will stream here";
+                                            }
+                                        }
+                                        for e[idx] in root.events: Rectangle {
+                                            height: VayrenDesign.row-height;
+                                            background: Math.mod(idx, 2) == 1 ? VayrenPalette.bg2 : transparent;
+                                            HorizontalLayout {
+                                                spacing: VayrenDesign.sp-lg;
+                                                Rectangle { width: 116px; VCell { text: e.timestamp; width: 100%; height: 100%; } }
+                                                Rectangle { width: 72px; VCell { text: e.strategy; width: 100%; height: 100%; } }
+                                                Rectangle { width: 84px; VCell { text: e.symbol; width: 100%; height: 100%; } }
+                                                Rectangle { width: 168px; VCell { text: e.event; width: 100%; height: 100%; } }
+                                                Rectangle { width: 56px; VCell { text: e.status; tone: e.status-tone; width: 100%; height: 100%; } }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ══ INSPECTOR — SESSION SETUP + READINESS + RISK ══
+            // One right-edge region; docked (the workspace yields via the
+            // max-width above) or overlay drawer. It COLLAPSES instead of
+            // ever being squeezed below its usable width (§6/§7).
+            if root.show-inspector: Rectangle {
+                x: parent.width - root.inspector-w;
+                y: 0;
+                width: root.inspector-w;
+                height: parent.height;
+                background: VayrenPalette.bg;
+
+                Rectangle {
+                    width: 1px;
+                    height: 100%;
+                    x: 0;
+                    background: VayrenPalette.hairline;
+                }
+
+                InspectorColumn {
+                    x: 1px;
+                    width: parent.width - 1px;
+                    height: 100%;
+                    bar: root.bar;
+                    setup: root.setup;
+                    strategy-names: root.strategy-names;
+                    strategy-selected: root.strategy-selected;
+                    symbols: root.symbols;
+                    symbol-filter: root.symbol-filter;
+                    timeframe-names: root.timeframe-names;
+                    timeframe-selected: root.timeframe-selected;
+                    gates: root.gates;
+                    arm-note: root.arm-note;
+                    blockers: root.blockers;
+                    strategy-rows: root.strategy-rows;
+                    position-rows: root.position-rows;
+                    risk-rows: root.risk-rows;
+                    broker-rows: root.broker-rows;
+                    recon-rows: root.recon-rows;
+                    tall: root.tall-inspector;
+                    mode-picked(kind) => { root.mode-picked(kind); }
+                    strategy-picked(i) => { root.strategy-picked(i); }
+                    symbol-toggled(i) => { root.symbol-toggled(i); }
+                    symbol-filter-changed(t) => { root.symbol-filter-changed(t); }
+                    timeframe-picked(i) => { root.timeframe-picked(i); }
+                    quantity-edited(t) => { root.quantity-edited(t); }
+                    start-requested() => { root.start-requested(); }
+                    stop-requested() => { root.stop-requested(); }
+                    arm-requested() => { root.arm-requested(); }
+                    confirm-requested() => { root.confirm-requested(); }
+                    configure-broker() => { root.configure-broker(); }
+                }
+            }
+
+            // Drawer tier: a click on the workspace area closes it.
+            if root.drawer-open: Rectangle {
+                x: 0;
+                y: 0;
+                width: parent.width - root.inspector-w;
+                height: parent.height;
+                background: transparent;
+                TouchArea {
+                    clicked => { root.inspector-toggled(); }
+                }
+            }
+        }
+    }
+}

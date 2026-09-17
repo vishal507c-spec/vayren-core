@@ -896,7 +896,14 @@ class PlotStore:
                 if record is None:
                     continue
                 if record.bar_index is not None:
-                    break
+                    # A point plot (MARKER/SHAPE/LABEL) anchored before the
+                    # window is a single bar outside it — it can never span
+                    # into view, so skip it. It must NOT terminate the scan:
+                    # a RAY/HORIZONTAL_LEVEL with a slightly lower anchor can
+                    # still reach into the window (viewport-left sliver), and
+                    # the painter draws those (the Slint view culls the same
+                    # way, so both renderers agree at the left edge).
+                    continue
                 if record.covered[1] < first:
                     if anchor < first - 100000:
                         break

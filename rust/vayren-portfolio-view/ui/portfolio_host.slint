@@ -1,0 +1,112 @@
+// Portfolio host window — integration glue ONLY, never visual design.
+//
+// Root `Window` hosting the EXISTING verified `PortfolioScreen` unmodified
+// (all presentation, layout, responsive behavior and styling live in
+// `../../vayren-shell/ui/portfolio.slint`). Every property below is a pure
+// pass-through binding (`host-prop: inner-prop`); every callback forwards
+// outward for the Rust view-model. Nothing here may add, restyle, or
+// recompose content — compare against `app.slint` PortfolioScreen block.
+import { PortfolioScreen, PortfolioKpi, PortfolioGate, PortfolioPosition, PortfolioAlloc, PortfolioOrder, PortfolioFill, PortfolioRisk } from "../../vayren-shell/ui/portfolio.slint";
+
+export component PortfolioHostWindow inherits Window {
+    title: "VAYREN — Portfolio";
+    background: transparent;
+    no-frame: true;
+
+    in-out property <string> account-title;
+    in-out property <int> account-tone: 0;
+    in-out property <string> account-info;
+    in-out property <string> account-detail;
+    in-out property <string> updated-label;
+    in-out property <[PortfolioKpi]> kpis-primary;
+    in-out property <[PortfolioKpi]> kpis-secondary;
+    in-out property <bool> perf-has-data: false;
+    in-out property <string> perf-trades;
+    in-out property <string> perf-wins;
+    in-out property <string> perf-losses;
+    in-out property <string> perf-winrate;
+    in-out property <[PortfolioGate]> gates;
+    in-out property <string> positions-count;
+    in-out property <[PortfolioPosition]> positions;
+    in-out property <bool> has-positions: false;
+    in-out property <string> positions-empty-title;
+    in-out property <string> positions-empty-detail;
+    in-out property <int> selected-position: -1;
+    in-out property <[PortfolioAlloc]> allocation;
+    in-out property <bool> alloc-has-data: false;
+    in-out property <string> detail-symbol;
+    in-out property <string> detail-side;
+    in-out property <int> detail-side-tone: 0;
+    in-out property <string> detail-qty;
+    in-out property <string> detail-avg;
+    in-out property <string> detail-value;
+    in-out property <string> detail-pnl;
+    in-out property <int> detail-pnl-tone: 0;
+    in-out property <string> detail-alloc;
+    in-out property <int> orders-tab: 0;
+    in-out property <[PortfolioOrder]> orders;
+    in-out property <[PortfolioFill]> fills;
+    in-out property <bool> active-has-rows: false;
+    in-out property <string> active-empty-title;
+    in-out property <string> active-empty-detail;
+    in-out property <string> health-label;
+    in-out property <int> health-tone: 0;
+    in-out property <string> health-note;
+    in-out property <[PortfolioRisk]> risk-rows;
+    in-out property <bool> risk-has-data: false;
+    in-out property <string> risk-empty-detail;
+
+    callback refresh-requested();
+    callback orders-tab-picked(int);
+    callback position-picked(int);
+
+    PortfolioScreen {
+        width: 100%;
+        height: 100%;
+        account-title: root.account-title;
+        account-tone: root.account-tone;
+        account-info: root.account-info;
+        account-detail: root.account-detail;
+        updated-label: root.updated-label;
+        kpis-primary: root.kpis-primary;
+        kpis-secondary: root.kpis-secondary;
+        perf-has-data: root.perf-has-data;
+        perf-trades: root.perf-trades;
+        perf-wins: root.perf-wins;
+        perf-losses: root.perf-losses;
+        perf-winrate: root.perf-winrate;
+        gates: root.gates;
+        positions-count: root.positions-count;
+        positions: root.positions;
+        has-positions: root.has-positions;
+        positions-empty-title: root.positions-empty-title;
+        positions-empty-detail: root.positions-empty-detail;
+        selected-position: root.selected-position;
+        allocation: root.allocation;
+        alloc-has-data: root.alloc-has-data;
+        detail-symbol: root.detail-symbol;
+        detail-side: root.detail-side;
+        detail-side-tone: root.detail-side-tone;
+        detail-qty: root.detail-qty;
+        detail-avg: root.detail-avg;
+        detail-value: root.detail-value;
+        detail-pnl: root.detail-pnl;
+        detail-pnl-tone: root.detail-pnl-tone;
+        detail-alloc: root.detail-alloc;
+        orders-tab: root.orders-tab;
+        orders: root.orders;
+        fills: root.fills;
+        active-has-rows: root.active-has-rows;
+        active-empty-title: root.active-empty-title;
+        active-empty-detail: root.active-empty-detail;
+        health-label: root.health-label;
+        health-tone: root.health-tone;
+        health-note: root.health-note;
+        risk-rows: root.risk-rows;
+        risk-has-data: root.risk-has-data;
+        risk-empty-detail: root.risk-empty-detail;
+        refresh-requested() => { root.refresh-requested(); }
+        orders-tab-picked(idx) => { root.orders-tab-picked(idx); }
+        position-picked(idx) => { root.position-picked(idx); }
+    }
+}

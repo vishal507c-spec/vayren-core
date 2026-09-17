@@ -1,4 +1,4 @@
-﻿// VAYREN application shell â€” Rust + Slint native UI (constitution Â§3).
+// VAYREN application shell â€” Rust + Slint native UI (constitution Â§3).
 //
 // Presentation only: every displayed value is bound to a property fed by the
 // Rust side from the BrokerPanel view-model (backend facts, never UI
@@ -6,6 +6,11 @@
 
 import { VayrenPalette, VayrenDesign } from "palette.slint";
 import { VBadge, VButton } from "components.slint";
+import { StrategyLabScreen, LabHeader, LabLibraryRow, LabKpi, LabRankRow, LabTradeRow, LabPoint, LabParam, LabDetailMetric, LabBoardCell, LabMatrixRow } from "lab.slint";
+import { ResearchScreen, ResearchMetric, ResearchSignalRow, ResearchTradeRow, ResearchRobustRow, ResearchKv, ResearchCompareRow, ResearchStrategyRow, ResearchExperimentRow, ResearchField, ResearchConfigGroup, ResearchEvidenceDim, ResearchEvidenceWhy, ResearchKvGroup } from "research.slint";
+import { PortfolioScreen, PortfolioKpi, PortfolioGate, PortfolioPosition, PortfolioAlloc, PortfolioOrder, PortfolioFill, PortfolioRisk } from "portfolio.slint";
+import { LiveScreen, LiveBar, LiveSetup, LiveMarket, LiveSymbolRow, LiveGate, LiveKv, LiveStat, LivePosition, LiveOrder, LiveFill, LiveEventRow, LiveCandle, LiveTiers } from "live.slint";
+import { BrokerPanel, BrokerCheckRow } from "broker.slint";
 
 export enum ShellScreen {
     chart,
@@ -66,186 +71,6 @@ export struct CapabilityRowView {
     }
 }
 
-component BrokerPanel inherits Rectangle {
-    in property <string> broker-name;
-    in property <string> broker-id;
-    in property <int> env-kind;
-    in property <string> env-label;
-    in property <string> health-label;
-    in property <bool> health-connected;
-    in property <bool> live-ready;
-    in property <[CapabilityRowView]> capability-rows;
-    in property <[string]> blockers;
-
-    background: transparent;
-
-    function env-color() -> color {
-        return env-kind == 0 ? VayrenPalette.pos
-            : env-kind == 1 ? VayrenPalette.amber
-            : VayrenPalette.neg;
-    }
-
-    VerticalLayout {
-        padding: VayrenDesign.sp-xl;
-        spacing: VayrenDesign.sp-lg;
-
-        // Header: identity + environment badge.
-        HorizontalLayout {
-            height: 30px;
-            spacing: VayrenDesign.sp-md;
-
-            Text {
-                text: root.broker-name;
-                color: VayrenPalette.text;
-                font-size: VayrenDesign.fs-title;
-                font-weight: 700;
-                vertical-alignment: center;
-            }
-            Text {
-                text: root.broker-id;
-                color: VayrenPalette.faint;
-                font-size: VayrenDesign.fs-label;
-                vertical-alignment: center;
-            }
-            Rectangle {
-                horizontal-stretch: 1;
-                background: transparent;
-            }
-            Rectangle {
-                width: 74px;
-                height: 20px;
-                border-radius: VayrenDesign.radius-sm;
-                background: transparent;
-                border-width: 1px;
-                border-color: root.env-color();
-                VerticalLayout {
-                    alignment: center;
-                    Text {
-                        text: root.env-label;
-                        color: root.env-color();
-                        font-size: VayrenDesign.fs-label;
-                        font-weight: 700;
-                        horizontal-alignment: center;
-                    }
-                }
-            }
-        }
-
-        Rectangle {
-            height: 1px;
-            background: VayrenPalette.hairline;
-        }
-
-        // Health + LIVE rows.
-        VerticalLayout {
-            spacing: VayrenDesign.sp-sm;
-
-            HorizontalLayout {
-                height: 18px;
-                spacing: VayrenDesign.sp-md;
-                Text {
-                    width: 64px;
-                    text: "HEALTH";
-                    color: VayrenPalette.muted;
-                    font-size: VayrenDesign.fs-label;
-                    vertical-alignment: center;
-                }
-                Text {
-                    text: root.health-label + (root.health-connected ? "" : " (not connected)");
-                    color: root.health-connected ? VayrenPalette.pos : VayrenPalette.muted;
-                    font-size: VayrenDesign.fs-label;
-                    font-weight: 700;
-                    vertical-alignment: center;
-                }
-            }
-            HorizontalLayout {
-                height: 18px;
-                spacing: VayrenDesign.sp-md;
-                Text {
-                    width: 64px;
-                    text: "LIVE";
-                    color: VayrenPalette.muted;
-                    font-size: VayrenDesign.fs-label;
-                    vertical-alignment: center;
-                }
-                Text {
-                    text: root.live-ready ? "READY" : "NOT READY";
-                    color: root.live-ready ? VayrenPalette.pos : VayrenPalette.neg;
-                    font-size: VayrenDesign.fs-label;
-                    font-weight: 700;
-                    vertical-alignment: center;
-                }
-            }
-        }
-
-        Rectangle {
-            height: 1px;
-            background: VayrenPalette.hairline;
-        }
-
-        Text {
-            text: "CAPABILITIES";
-            color: VayrenPalette.muted;
-            font-size: VayrenDesign.fs-label;
-            font-weight: 700;
-        }
-        VerticalLayout {
-            spacing: VayrenDesign.sp-sm;
-
-            for row in root.capability-rows: Rectangle {
-                height: VayrenDesign.row-height;
-                border-radius: VayrenDesign.radius-sm;
-                background: VayrenPalette.surface;
-                HorizontalLayout {
-                    padding-left: VayrenDesign.sp-lg;
-                    padding-right: VayrenDesign.sp-lg;
-                    alignment: space-between;
-                    Text {
-                        text: row.id;
-                        color: VayrenPalette.text;
-                        font-size: VayrenDesign.fs-label;
-                        vertical-alignment: center;
-                    }
-                    Text {
-                        text: row.label;
-                        color: row.kind == 0 ? VayrenPalette.pos
-                            : row.kind == 2 ? VayrenPalette.amber
-                            : VayrenPalette.muted;
-                        font-size: VayrenDesign.fs-label;
-                        font-weight: 700;
-                        vertical-alignment: center;
-                    }
-                }
-            }
-        }
-
-        if root.blockers.length > 0: VerticalLayout {
-            spacing: VayrenDesign.sp-sm;
-
-            Rectangle {
-                height: 1px;
-                background: VayrenPalette.hairline;
-            }
-            Text {
-                text: "BLOCKERS";
-                color: VayrenPalette.amber;
-                font-size: VayrenDesign.fs-label;
-                font-weight: 700;
-            }
-            for blocker in root.blockers: Text {
-                text: "Â· " + blocker;
-                color: VayrenPalette.amber;
-                font-size: VayrenDesign.fs-label;
-            }
-        }
-
-        Rectangle {
-            vertical-stretch: 1;
-            background: transparent;
-        }
-    }
-}
-
 export component AppWindow inherits Window {
     title: "VAYREN";
     background: VayrenPalette.bg;
@@ -256,6 +81,92 @@ export component AppWindow inherits Window {
 
     callback nav-selected(ShellScreen);
     callback reset-zoom();
+
+    // Broker parity actions (Slint reports intent only; the embed host
+    // dispatches to BrokerManager. The standalone shell leaves these
+    // unwired — demo surface, no backend).
+    callback broker-login-requested();
+    callback broker-refresh-requested();
+    callback broker-disconnect-requested();
+    callback broker-remove-requested();
+    callback broker-config-saved(string, string);
+    callback broker-copy-callback();
+
+    // Strategy Lab interactions (Slint reports; Rust view-model owns state).
+    callback lab-library-picked(int);
+    callback lab-filter-picked(int);
+    callback lab-search-changed(string);
+    callback lab-mode-picked(int);
+    callback lab-tab-picked(int);
+    callback lab-run-requested();
+    callback lab-save-requested();
+    callback lab-compile-requested();
+    callback lab-new-requested();
+    callback lab-row-menu(int);
+    callback lab-rank-picked(string);
+    callback lab-trade-picked(int);
+    callback lab-export-trades-requested();
+    callback lab-code-changed(string);
+    callback lab-param-committed(string, string);
+    callback lab-sym-open();
+    callback lab-sym-close();
+    callback lab-sym-search-changed(string);
+    callback lab-sym-toggle(string);
+    callback lab-sym-all-visible();
+    callback lab-sym-clear();
+    callback lab-sym-apply();
+    callback lab-timeframe-picked(string);
+    callback lab-capital-committed(string);
+    callback lab-dates-committed(string, string);
+    callback lab-rank-search-changed(string);
+    callback lab-rankby-picked(string);
+    callback lab-rank-order-toggled();
+    callback lab-trade-filter-changed(string);
+    callback lab-cmp-side-picked(int);
+    callback lab-run-buy-requested();
+    callback lab-run-sell-requested();
+    callback lab-run-all-requested();
+
+    // Research interactions (same contract: report-only surface).
+    callback research-strategy-picked(int);
+    callback research-config-edited(string, string);
+    callback research-config-option(string, string);
+    callback research-hypothesis-edited(string);
+    callback research-question-edited(string);
+    callback research-effect-edited(string);
+    callback research-create-pressed();
+    callback research-run-pressed();
+    callback research-cancel-pressed();
+    callback research-tab-picked(int);
+    callback research-inspector-toggled();
+    callback research-narrow-view-picked(int);
+    callback research-signal-filter-changed(string);
+    callback research-experiment-picked(int);
+    callback research-hypothesis-toggled();
+    callback research-why-toggled();
+    callback research-technical-toggled();
+
+    // Portfolio interactions (Slint reports; Rust view-model owns state).
+    callback portfolio-refresh-requested();
+    callback portfolio-orders-tab-picked(int);
+    callback portfolio-position-picked(int);
+
+    // LIVE interactions (Slint reports; Rust view-model owns state).
+    callback live-mode-picked(int);
+    callback live-strategy-picked(string);
+    callback live-symbol-toggled(int);
+    callback live-symbol-filter-changed(string);
+    callback live-timeframe-picked(string);
+    callback live-quantity-edited(string);
+    callback live-start-requested();
+    callback live-stop-requested();
+    callback live-arm-requested();
+    callback live-halt-requested();
+    callback live-confirm-requested();
+    callback live-event-filter-changed(string);
+    callback live-event-type-picked(string);
+    callback live-inspector-toggled();
+    callback live-configure-broker();
 
     in-out property <ShellScreen> active-screen: ShellScreen.broker;
     in-out property <string> screen-title: "BROKER";
@@ -268,13 +179,226 @@ export component AppWindow inherits Window {
     in-out property <string> health-label: "";
     in-out property <bool> health-connected: false;
     in-out property <bool> live-ready: false;
-    in-out property <[CapabilityRowView]> capability-rows;
     in-out property <[string]> blockers;
+    // Broker parity card (Rust `project_card`; render data only).
+    in-out property <string> status-glyph: "○";
+    in-out property <string> status-label: "";
+    in-out property <int> status-tone: 0;
+    in-out property <string> status-explanation: "";
+    in-out property <string> reason-line: "";
+    in-out property <string> account-id: "—";
+    in-out property <string> conn-label: "Not connected";
+    in-out property <int> conn-tone: 0;
+    in-out property <string> last-sync: "—";
+    in-out property <string> health-summary: "";
+    in-out property <int> health-summary-tone: 0;
+    in-out property <[BrokerCheckRow]> check-rows;
+    in-out property <string> funds-line: "—";
+    in-out property <string> funds-sub: "";
+    in-out property <string> positions-line: "—";
+    in-out property <string> positions-sub: "";
+    in-out property <string> orders-line: "—";
+    in-out property <string> orders-sub: "";
+    in-out property <string> credentials-line: "";
+    in-out property <string> callback-display: "—";
+    in-out property <bool> refresh-visible: false;
+    in-out property <string> refresh-label: "REFRESH";
+    in-out property <bool> refresh-enabled: false;
+    in-out property <bool> refresh-primary: false;
+    in-out property <string> login-label: "CONNECT";
+    in-out property <bool> login-enabled: false;
+    in-out property <bool> login-primary: false;
+    in-out property <string> configure-label: "CONFIGURE";
+    in-out property <bool> disconnect-visible: false;
+    in-out property <bool> disconnect-enabled: false;
+    in-out property <bool> remove-visible: false;
 
     // Chart viewport zoom (Rust-owned state; Slint only renders + reports
     // the Reset Zoom action).
     in-out property <float> chart-zoom-level: 1.0;
     in-out property <string> chart-zoom-label: "100%";
+
+    // Strategy Lab — projected LabState (Rust owns it; these are render data).
+    in-out property <LabHeader> lab;
+    in-out property <[LabLibraryRow]> lab-library;
+    in-out property <[LabKpi]> lab-kpis;
+    in-out property <[LabRankRow]> lab-ranking;
+    in-out property <[LabTradeRow]> lab-trades;
+    in-out property <[LabPoint]> lab-equity;
+    in-out property <[LabPoint]> lab-drawdown;
+    in-out property <[LabParam]> lab-params;
+    in-out property <[string]> lab-timeframes;
+    in-out property <[string]> lab-rankby-labels;
+    in-out property <[string]> lab-rank-heads;
+    in-out property <[string]> lab-trade-heads;
+    in-out property <[LabDetailMetric]> lab-detail-metrics;
+    in-out property <[LabPoint]> lab-detail-equity;
+    in-out property <[string]> lab-board-labels;
+    in-out property <[string]> lab-board-columns;
+    in-out property <[string]> lab-board-trades;
+    in-out property <[LabBoardCell]> lab-board-cells;
+    in-out property <int> lab-board-cols: 1;
+    in-out property <[LabMatrixRow]> lab-matrix;
+    in-out property <[LabRankRow]> lab-compare-ranking;
+    in-out property <[LabPoint]> lab-equity-buy;
+    in-out property <[LabPoint]> lab-equity-sell;
+    in-out property <[LabPoint]> lab-drawdown-buy;
+    in-out property <[LabPoint]> lab-drawdown-sell;
+    in-out property <[string]> lab-sym-visible;
+    in-out property <[bool]> lab-sym-visible-on;
+    in-out property <int> lab-filter-active: 0;
+    // Explicit visual-check fixture watermark (empty = real app path).
+    in-out property <string> visual-check-label: "";
+
+    // Research — projected ResearchState. Breakpoints derive from the
+    // content width (window minus rail) so recomposition follows the
+    // available logical viewport, never a physical screen.
+    in-out property <bool> research-wide: (root.width - VayrenDesign.rail-width) >= VayrenDesign.research-wide;
+    in-out property <bool> research-medium: (root.width - VayrenDesign.rail-width) >= VayrenDesign.research-medium;
+    in-out property <string> research-strategy-name;
+    in-out property <string> research-strategy-version;
+    in-out property <string> research-experiment-id;
+    in-out property <string> research-context-line;
+    in-out property <[ResearchStrategyRow]> research-strategies;
+    in-out property <[ResearchExperimentRow]> research-experiments;
+    in-out property <string> research-strategy-count;
+    in-out property <string> research-experiment-count;
+    in-out property <[ResearchConfigGroup]> research-config-groups;
+    in-out property <string> research-hypothesis;
+    in-out property <string> research-question;
+    in-out property <string> research-effect;
+    in-out property <string> research-create-error;
+    in-out property <string> research-state-label;
+    in-out property <int> research-state-tone;
+    in-out property <bool> research-has-strategy;
+    in-out property <bool> research-show-results;
+    in-out property <bool> research-stale;
+    in-out property <bool> research-run-enabled;
+    in-out property <string> research-run-blocked-reason;
+    in-out property <bool> research-cancel-visible;
+    in-out property <bool> research-create-visible;
+    in-out property <[ResearchMetric]> research-metrics;
+    in-out property <string> research-signal-count-line;
+    in-out property <string> research-trade-count-line;
+    in-out property <[ResearchSignalRow]> research-signals;
+    in-out property <[ResearchTradeRow]> research-trades;
+    in-out property <[ResearchRobustRow]> research-robustness;
+    in-out property <[ResearchKv]> research-validation-rows;
+    in-out property <[ResearchKv]> research-quality-rows;
+    in-out property <[ResearchKv]> research-inspector-rows;
+    in-out property <[ResearchKv]> research-report-sections;
+    in-out property <[ResearchCompareRow]> research-compare-rows;
+    in-out property <string> research-compare-verdict;
+    in-out property <string> research-empty-title;
+    in-out property <string> research-empty-detail;
+    in-out property <string> research-conclusion;
+    in-out property <string> research-validation-status;
+    in-out property <string> research-validation-summary;
+    in-out property <string> research-fingerprint-line;
+    in-out property <string> research-evidence-verdict;
+    in-out property <int> research-evidence-tone;
+    in-out property <string> research-evidence-grade;
+    in-out property <[ResearchEvidenceWhy]> research-evidence-why;
+    in-out property <[ResearchEvidenceDim]> research-evidence-dims;
+    in-out property <[ResearchKv]> research-stats-rows;
+    in-out property <[ResearchKv]> research-montecarlo-rows;
+    in-out property <[ResearchKv]> research-benchmark-rows;
+    in-out property <[ResearchKvGroup]> research-inspector-groups;
+    in-out property <bool> research-hypothesis-open;
+    in-out property <bool> research-why-open;
+    in-out property <bool> research-technical-open;
+    in-out property <bool> research-show-next-steps;
+    in-out property <int> research-tab;
+    in-out property <bool> research-inspector-open;
+    in-out property <int> research-narrow-view;
+    in-out property <string> research-signal-filter;
+    in-out property <[string]> research-log-lines;
+    in-out property <string> research-log-status;
+    in-out property <bool> research-log-expanded;
+
+    // Portfolio — projected PortfolioState (Rust owns it; render data only).
+    in-out property <string> portfolio-account-title: "";
+    in-out property <int> portfolio-account-tone: 0;
+    in-out property <string> portfolio-account-info: "";
+    in-out property <string> portfolio-account-detail: "";
+    in-out property <string> portfolio-updated: "";
+    in-out property <[PortfolioKpi]> portfolio-kpis-primary;
+    in-out property <[PortfolioKpi]> portfolio-kpis-secondary;
+    in-out property <bool> portfolio-perf-has-data: false;
+    in-out property <string> portfolio-perf-trades: "";
+    in-out property <string> portfolio-perf-wins: "";
+    in-out property <string> portfolio-perf-losses: "";
+    in-out property <string> portfolio-perf-winrate: "";
+    in-out property <[PortfolioGate]> portfolio-gates;
+    in-out property <string> portfolio-positions-count: "";
+    in-out property <[PortfolioPosition]> portfolio-positions;
+    in-out property <bool> portfolio-has-positions: false;
+    in-out property <string> portfolio-positions-empty-title: "";
+    in-out property <string> portfolio-positions-empty-detail: "";
+    in-out property <int> portfolio-selected-position: -1;
+    in-out property <[PortfolioAlloc]> portfolio-allocation;
+    in-out property <bool> portfolio-alloc-has-data: false;
+    in-out property <string> portfolio-detail-symbol: "";
+    in-out property <string> portfolio-detail-side: "";
+    in-out property <int> portfolio-detail-side-tone: 0;
+    in-out property <string> portfolio-detail-qty: "";
+    in-out property <string> portfolio-detail-avg: "";
+    in-out property <string> portfolio-detail-value: "";
+    in-out property <string> portfolio-detail-pnl: "";
+    in-out property <int> portfolio-detail-pnl-tone: 0;
+    in-out property <string> portfolio-detail-alloc: "";
+    in-out property <int> portfolio-orders-tab: 0;
+    in-out property <[PortfolioOrder]> portfolio-orders;
+    in-out property <[PortfolioFill]> portfolio-fills;
+    in-out property <bool> portfolio-active-has-rows: false;
+    in-out property <string> portfolio-active-empty-title: "";
+    in-out property <string> portfolio-active-empty-detail: "";
+    in-out property <string> portfolio-health-label: "";
+    in-out property <int> portfolio-health-tone: 0;
+    in-out property <string> portfolio-health-note: "";
+    in-out property <[PortfolioRisk]> portfolio-risk-rows;
+    in-out property <bool> portfolio-risk-has-data: false;
+    in-out property <string> portfolio-risk-empty-detail: "";
+
+    // LIVE — projected LiveState (Rust owns it; these are render data only).
+    in-out property <LiveBar> live-bar;
+    in-out property <LiveSetup> live-setup;
+    in-out property <LiveMarket> live-market;
+    in-out property <[LiveCandle]> live-candles;
+    in-out property <[string]> live-strategy-names;
+    in-out property <int> live-strategy-selected: -1;
+    in-out property <[LiveSymbolRow]> live-symbols;
+    in-out property <string> live-symbol-filter;
+    in-out property <[string]> live-timeframe-names;
+    in-out property <int> live-timeframe-selected: -1;
+    in-out property <[LiveGate]> live-gates;
+    in-out property <string> live-arm-note;
+    in-out property <[string]> live-blockers;
+    in-out property <[LiveKv]> live-strategy-rows;
+    in-out property <[LiveKv]> live-position-rows;
+    in-out property <[LiveKv]> live-risk-rows;
+    in-out property <[LiveKv]> live-broker-rows;
+    in-out property <[LiveKv]> live-recon-rows;
+    in-out property <[LivePosition]> live-positions;
+    in-out property <[LiveOrder]> live-orders;
+    in-out property <[LiveFill]> live-fills;
+    in-out property <[LiveStat]> live-stats;
+    in-out property <[LiveEventRow]> live-events;
+    in-out property <[string]> live-event-types;
+    in-out property <int> live-event-type-index: 0;
+    in-out property <string> live-event-filter;
+    in-out property <bool> live-inspector-open: true;
+    // LIVE recomposition tiers evaluated against the content column width
+    // (the window size is platform-owned — screens derive layout from these
+    // inputs, never from their own width: single LiveTiers decision source).
+    in-out property <length> live-screen-width: root.width - VayrenDesign.rail-width;
+    in-out property <bool> live-dock-inspector: LiveTiers.dock-inspector(root.live-screen-width);
+    in-out property <bool> live-bar-core: LiveTiers.bar-core(root.live-screen-width);
+    in-out property <bool> live-bar-secondary: LiveTiers.bar-secondary(root.live-screen-width);
+    in-out property <bool> live-bar-extended: LiveTiers.bar-extended(root.live-screen-width);
+    in-out property <bool> live-blotter-side: LiveTiers.blotters-side-by-side(root.live-screen-width);
+    in-out property <bool> live-tall-inspector: (root.height - VayrenDesign.status-height) >= 720px;
+    in-out property <length> live-inspector-w: LiveTiers.inspector-width(root.live-screen-width);
 
     property <[NavItem]> nav-items: [
         { label: "CHART", screen: ShellScreen.chart },
@@ -445,8 +569,291 @@ export component AppWindow inherits Window {
                     health-label: root.health-label;
                     health-connected: root.health-connected;
                     live-ready: root.live-ready;
-                    capability-rows: root.capability-rows;
                     blockers: root.blockers;
+                    status-glyph: root.status-glyph;
+                    status-label: root.status-label;
+                    status-tone: root.status-tone;
+                    status-explanation: root.status-explanation;
+                    reason-line: root.reason-line;
+                    account-id: root.account-id;
+                    conn-label: root.conn-label;
+                    conn-tone: root.conn-tone;
+                    last-sync: root.last-sync;
+                    health-summary: root.health-summary;
+                    health-summary-tone: root.health-summary-tone;
+                    check-rows: root.check-rows;
+                    funds-line: root.funds-line;
+                    funds-sub: root.funds-sub;
+                    positions-line: root.positions-line;
+                    positions-sub: root.positions-sub;
+                    orders-line: root.orders-line;
+                    orders-sub: root.orders-sub;
+                    credentials-line: root.credentials-line;
+                    callback-display: root.callback-display;
+                    refresh-visible: root.refresh-visible;
+                    refresh-label: root.refresh-label;
+                    refresh-enabled: root.refresh-enabled;
+                    refresh-primary: root.refresh-primary;
+                    login-label: root.login-label;
+                    login-enabled: root.login-enabled;
+                    login-primary: root.login-primary;
+                    configure-label: root.configure-label;
+                    disconnect-visible: root.disconnect-visible;
+                    disconnect-enabled: root.disconnect-enabled;
+                    remove-visible: root.remove-visible;
+                    login-requested() => { root.broker-login-requested(); }
+                    refresh-requested() => { root.broker-refresh-requested(); }
+                    disconnect-requested() => { root.broker-disconnect-requested(); }
+                    remove-requested() => { root.broker-remove-requested(); }
+                    config-saved(key, secret) => { root.broker-config-saved(key, secret); }
+                    copy-callback() => { root.broker-copy-callback(); }
+                }
+                if !root.screen-pending && root.active-screen == ShellScreen.portfolio: PortfolioScreen {
+                    width: 100%;
+                    height: 100%;
+                    account-title: root.portfolio-account-title;
+                    account-tone: root.portfolio-account-tone;
+                    account-info: root.portfolio-account-info;
+                    account-detail: root.portfolio-account-detail;
+                    updated-label: root.portfolio-updated;
+                    kpis-primary: root.portfolio-kpis-primary;
+                    kpis-secondary: root.portfolio-kpis-secondary;
+                    perf-has-data: root.portfolio-perf-has-data;
+                    perf-trades: root.portfolio-perf-trades;
+                    perf-wins: root.portfolio-perf-wins;
+                    perf-losses: root.portfolio-perf-losses;
+                    perf-winrate: root.portfolio-perf-winrate;
+                    gates: root.portfolio-gates;
+                    positions-count: root.portfolio-positions-count;
+                    positions: root.portfolio-positions;
+                    has-positions: root.portfolio-has-positions;
+                    positions-empty-title: root.portfolio-positions-empty-title;
+                    positions-empty-detail: root.portfolio-positions-empty-detail;
+                    selected-position: root.portfolio-selected-position;
+                    allocation: root.portfolio-allocation;
+                    alloc-has-data: root.portfolio-alloc-has-data;
+                    detail-symbol: root.portfolio-detail-symbol;
+                    detail-side: root.portfolio-detail-side;
+                    detail-side-tone: root.portfolio-detail-side-tone;
+                    detail-qty: root.portfolio-detail-qty;
+                    detail-avg: root.portfolio-detail-avg;
+                    detail-value: root.portfolio-detail-value;
+                    detail-pnl: root.portfolio-detail-pnl;
+                    detail-pnl-tone: root.portfolio-detail-pnl-tone;
+                    detail-alloc: root.portfolio-detail-alloc;
+                    orders-tab: root.portfolio-orders-tab;
+                    orders: root.portfolio-orders;
+                    fills: root.portfolio-fills;
+                    active-has-rows: root.portfolio-active-has-rows;
+                    active-empty-title: root.portfolio-active-empty-title;
+                    active-empty-detail: root.portfolio-active-empty-detail;
+                    health-label: root.portfolio-health-label;
+                    health-tone: root.portfolio-health-tone;
+                    health-note: root.portfolio-health-note;
+                    risk-rows: root.portfolio-risk-rows;
+                    risk-has-data: root.portfolio-risk-has-data;
+                    risk-empty-detail: root.portfolio-risk-empty-detail;
+                    refresh-requested() => { root.portfolio-refresh-requested(); }
+                    orders-tab-picked(idx) => { root.portfolio-orders-tab-picked(idx); }
+                    position-picked(idx) => { root.portfolio-position-picked(idx); }
+                }
+                if !root.screen-pending && root.active-screen == ShellScreen.lab: StrategyLabScreen {
+                    head-roomy: root.width >= 1210px;
+                    lab: root.lab;
+                    library: root.lab-library;
+                    kpis: root.lab-kpis;
+                    ranking: root.lab-ranking;
+                    trades: root.lab-trades;
+                    equity: root.lab-equity;
+                    drawdown: root.lab-drawdown;
+                    params: root.lab-params;
+                    timeframes: root.lab-timeframes;
+                    rankby-labels: root.lab-rankby-labels;
+                    rank-heads: root.lab-rank-heads;
+                    trade-heads: root.lab-trade-heads;
+                    detail-metrics: root.lab-detail-metrics;
+                    detail-equity: root.lab-detail-equity;
+                    board-labels: root.lab-board-labels;
+                    board-columns: root.lab-board-columns;
+                    board-trades: root.lab-board-trades;
+                    board-cells: root.lab-board-cells;
+                    board-cols: root.lab-board-cols;
+                    matrix: root.lab-matrix;
+                    compare-ranking: root.lab-compare-ranking;
+                    equity-buy: root.lab-equity-buy;
+                    equity-sell: root.lab-equity-sell;
+                    drawdown-buy: root.lab-drawdown-buy;
+                    drawdown-sell: root.lab-drawdown-sell;
+                    sym-visible: root.lab-sym-visible;
+                    sym-visible-on: root.lab-sym-visible-on;
+                    filter-active: root.lab-filter-active;
+                    library-picked(idx) => { root.lab-library-picked(idx); }
+                    filter-picked(idx) => { root.lab-filter-picked(idx); }
+                    search-changed(text) => { root.lab-search-changed(text); }
+                    mode-picked(idx) => { root.lab-mode-picked(idx); }
+                    tab-picked(idx) => { root.lab-tab-picked(idx); }
+                    run-requested() => { root.lab-run-requested(); }
+                    save-requested() => { root.lab-save-requested(); }
+                    compile-requested() => { root.lab-compile-requested(); }
+                    new-requested() => { root.lab-new-requested(); }
+                    row-menu(idx) => { root.lab-row-menu(idx); }
+                    rank-picked(symbol) => { root.lab-rank-picked(symbol); }
+                    trade-picked(idx) => { root.lab-trade-picked(idx); }
+                    export-trades-requested() => { root.lab-export-trades-requested(); }
+                    code-changed(text) => { root.lab-code-changed(text); }
+                    param-committed(key, text) => { root.lab-param-committed(key, text); }
+                    sym-open() => { root.lab-sym-open(); }
+                    sym-close() => { root.lab-sym-close(); }
+                    sym-search-changed(text) => { root.lab-sym-search-changed(text); }
+                    sym-toggle(symbol) => { root.lab-sym-toggle(symbol); }
+                    sym-all-visible() => { root.lab-sym-all-visible(); }
+                    sym-clear() => { root.lab-sym-clear(); }
+                    sym-apply() => { root.lab-sym-apply(); }
+                    timeframe-picked(text) => { root.lab-timeframe-picked(text); }
+                    capital-committed(text) => { root.lab-capital-committed(text); }
+                    dates-committed(start, end) => { root.lab-dates-committed(start, end); }
+                    rank-search-changed(text) => { root.lab-rank-search-changed(text); }
+                    rankby-picked(text) => { root.lab-rankby-picked(text); }
+                    rank-order-toggled() => { root.lab-rank-order-toggled(); }
+                    trade-filter-changed(text) => { root.lab-trade-filter-changed(text); }
+                    cmp-side-picked(idx) => { root.lab-cmp-side-picked(idx); }
+                    run-buy-requested() => { root.lab-run-buy-requested(); }
+                    run-sell-requested() => { root.lab-run-sell-requested(); }
+                    run-all-requested() => { root.lab-run-all-requested(); }
+                }
+                if !root.screen-pending && root.active-screen == ShellScreen.research: ResearchScreen {
+                    wide: root.research-wide;
+                    medium: root.research-medium;
+                    strategy-name: root.research-strategy-name;
+                    strategy-version: root.research-strategy-version;
+                    experiment-id: root.research-experiment-id;
+                    context-line: root.research-context-line;
+                    strategies: root.research-strategies;
+                    experiments: root.research-experiments;
+                    strategy-count: root.research-strategy-count;
+                    experiment-count: root.research-experiment-count;
+                    config-groups: root.research-config-groups;
+                    hypothesis: root.research-hypothesis;
+                    question: root.research-question;
+                    effect: root.research-effect;
+                    create-error: root.research-create-error;
+                    state-label: root.research-state-label;
+                    state-tone: root.research-state-tone;
+                    has-strategy: root.research-has-strategy;
+                    show-results: root.research-show-results;
+                    stale: root.research-stale;
+                    run-enabled: root.research-run-enabled;
+                    run-blocked-reason: root.research-run-blocked-reason;
+                    cancel-visible: root.research-cancel-visible;
+                    create-visible: root.research-create-visible;
+                    metrics: root.research-metrics;
+                    signal-count-line: root.research-signal-count-line;
+                    trade-count-line: root.research-trade-count-line;
+                    signals: root.research-signals;
+                    trades: root.research-trades;
+                    robustness: root.research-robustness;
+                    validation-rows: root.research-validation-rows;
+                    quality-rows: root.research-quality-rows;
+                    inspector-rows: root.research-inspector-rows;
+                    report-sections: root.research-report-sections;
+                    compare-rows: root.research-compare-rows;
+                    compare-verdict: root.research-compare-verdict;
+                    empty-title: root.research-empty-title;
+                    empty-detail: root.research-empty-detail;
+                    conclusion: root.research-conclusion;
+                    validation-status: root.research-validation-status;
+                    validation-summary: root.research-validation-summary;
+                    fingerprint-line: root.research-fingerprint-line;
+                    evidence-verdict: root.research-evidence-verdict;
+                    evidence-tone: root.research-evidence-tone;
+                    evidence-grade: root.research-evidence-grade;
+                    evidence-why: root.research-evidence-why;
+                    evidence-dims: root.research-evidence-dims;
+                    stats-rows: root.research-stats-rows;
+                    montecarlo-rows: root.research-montecarlo-rows;
+                    benchmark-rows: root.research-benchmark-rows;
+                    inspector-groups: root.research-inspector-groups;
+                    tab: root.research-tab;
+                    inspector-open: root.research-inspector-open;
+                    narrow-view: root.research-narrow-view;
+                    signal-filter: root.research-signal-filter;
+                    log-lines: root.research-log-lines;
+                    log-status: root.research-log-status;
+                    log-expanded: root.research-log-expanded;
+                    hypothesis-open: root.research-hypothesis-open;
+                    why-open: root.research-why-open;
+                    technical-open: root.research-technical-open;
+                    show-next-steps: root.research-show-next-steps;
+                    strategy-picked(idx) => { root.research-strategy-picked(idx); }
+                    config-edited(k, t) => { root.research-config-edited(k, t); }
+                    config-option(k, v) => { root.research-config-option(k, v); }
+                    hypothesis-edited(t) => { root.research-hypothesis-edited(t); }
+                    question-edited(t) => { root.research-question-edited(t); }
+                    effect-edited(t) => { root.research-effect-edited(t); }
+                    create-pressed() => { root.research-create-pressed(); }
+                    run-pressed() => { root.research-run-pressed(); }
+                    cancel-pressed() => { root.research-cancel-pressed(); }
+                    tab-picked(i) => { root.research-tab-picked(i); }
+                    inspector-toggled() => { root.research-inspector-toggled(); }
+                    narrow-view-picked(i) => { root.research-narrow-view-picked(i); }
+                    signal-filter-changed(t) => { root.research-signal-filter-changed(t); }
+                    experiment-picked(i) => { root.research-experiment-picked(i); }
+                    hypothesis-toggled() => { root.research-hypothesis-toggled(); }
+                    why-toggled() => { root.research-why-toggled(); }
+                    technical-toggled() => { root.research-technical-toggled(); }
+                }
+                if !root.screen-pending && root.active-screen == ShellScreen.live: LiveScreen {
+                    width: 100%;
+                    height: 100%;
+                    bar: root.live-bar;
+                    inspector-open: root.live-inspector-open;
+                    dock-inspector: root.live-dock-inspector;
+                    bar-core: root.live-bar-core;
+                    bar-secondary: root.live-bar-secondary;
+                    bar-extended: root.live-bar-extended;
+                    blotters-side-by-side: root.live-blotter-side;
+                    tall-inspector: root.live-tall-inspector;
+                    inspector-w: root.live-inspector-w;
+                    setup: root.live-setup;
+                    market: root.live-market;
+                    candles: root.live-candles;
+                    strategy-names: root.live-strategy-names;
+                    strategy-selected: root.live-strategy-selected;
+                    symbols: root.live-symbols;
+                    symbol-filter: root.live-symbol-filter;
+                    timeframe-names: root.live-timeframe-names;
+                    timeframe-selected: root.live-timeframe-selected;
+                    gates: root.live-gates;
+                    arm-note: root.live-arm-note;
+                    blockers: root.live-blockers;
+                    strategy-rows: root.live-strategy-rows;
+                    position-rows: root.live-position-rows;
+                    risk-rows: root.live-risk-rows;
+                    broker-rows: root.live-broker-rows;
+                    recon-rows: root.live-recon-rows;
+                    positions: root.live-positions;
+                    orders: root.live-orders;
+                    fills: root.live-fills;
+                    stats: root.live-stats;
+                    events: root.live-events;
+                    event-types: root.live-event-types;
+                    event-type-index: root.live-event-type-index;
+                    event-filter: root.live-event-filter;
+                    mode-picked(k) => { root.live-mode-picked(k); }
+                    strategy-picked(i) => { root.live-strategy-picked(i); }
+                    symbol-toggled(i) => { root.live-symbol-toggled(i); }
+                    symbol-filter-changed(t) => { root.live-symbol-filter-changed(t); }
+                    timeframe-picked(i) => { root.live-timeframe-picked(i); }
+                    quantity-edited(t) => { root.live-quantity-edited(t); }
+                    start-requested() => { root.live-start-requested(); }
+                    stop-requested() => { root.live-stop-requested(); }
+                    arm-requested() => { root.live-arm-requested(); }
+                    halt-requested() => { root.live-halt-requested(); }
+                    confirm-requested() => { root.live-confirm-requested(); }
+                    event-filter-changed(t) => { root.live-event-filter-changed(t); }
+                    event-type-picked(i) => { root.live-event-type-picked(i); }
+                    inspector-toggled() => { root.live-inspector-toggled(); }
+                    configure-broker() => { root.live-configure-broker(); }
                 }
             }
 
@@ -466,6 +873,14 @@ export component AppWindow inherits Window {
                         text: "VAYREN â€” native shell";
                         color: VayrenPalette.faint;
                         font-size: VayrenDesign.fs-label;
+                        vertical-alignment: center;
+                    }
+                    if root.visual-check-label != "": Text {
+                        text: root.visual-check-label;
+                        color: VayrenPalette.amber;
+                        font-size: VayrenDesign.fs-label;
+                        font-weight: 700;
+                        horizontal-alignment: center;
                         vertical-alignment: center;
                     }
                     Text {

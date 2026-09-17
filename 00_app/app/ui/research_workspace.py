@@ -19,6 +19,7 @@ from typing import Any
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
+    QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -146,17 +147,31 @@ _COMPARISON_COLUMNS = ("EXPERIMENT", "STRATEGY", "STATUS", "DETAIL")
 _STATUS_TONES = {
     "READY": "muted",
     "RUNNING": "warn",
+    "ANALYZING": "warn",
+    "VALIDATING": "warn",
+    "VALIDATING_RESULT": "warn",
     "COMPLETE": "ok",
+    "COMPLETED": "ok",
     "FAILED": "bad",
     "NO DATA": "muted",
+    "NO_DATA": "muted",
     "NO TRADES": "warn",
+    "INVALID": "bad",
     "INVALID EXPERIMENT": "bad",
     "NOT RUN": "muted",
     "HAS RESULT": "accent",
     "NO RESULT": "muted",
     "RECORDED": "accent",
     "DRAFT": "muted",
+    "STALE": "warn",
+    "CANCELLED": "muted",
 }
+
+_TIMEFRAMES = ("1m", "3m", "5m", "15m", "30m", "45m", "1h", "2h", "4h", "1D", "1W")
+
+_SIDES = ("BOTH", "LONG", "SHORT")
+
+_DIRECTIONS = ("ANY", "LONG", "SHORT")
 
 
 def _field(item: Any, key: str) -> Any:
@@ -185,8 +200,13 @@ class ResearchWorkspace(QWidget):
         self._service: Any | None = None
         self._datasets: list[Any] = []
         self._experiments: list[dict[str, Any]] = []
+        self._strategies: list[str] = []
         self._current_strategy = ""
         self._current_experiment_id = ""
+        self._bundle: dict[str, Any] | None = None
+        self._worker: Any | None = None
+        self._worker_experiment_id = ""
+        self._last_progress_stage = ""
         self._status = "READY"
         self._log_lines: list[str] = []
         self._last_robustness: list[dict[str, Any]] = []
@@ -275,11 +295,115 @@ class ResearchWorkspace(QWidget):
         section.add(self._navigator_hint)
         return section
 
+    def _build_config_section(self) -> QWidget:
+        section = Section("EXPERIMENT CONFIG")
+        form = QWidget(section)
+        grid = QFormLayout(form)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setSpacing(4)
+        self._strategy_combo = QComboBox(form)
+        self._strategy_combo.setStyleSheet(t.INPUT_QSS)
+        self._strategy_combo.currentTextChanged.connect(self._on_strategy_combo)
+        grid.addRow("Strategy:", self._strategy_combo)
+        self._universe_edit = QLineEdit(form)
+        self._universe_edit.setText("NIFTY 500")
+        self._universe_edit.setStyleSheet(t.INPUT_QSS)
+        grid.addRow("Universe:", self._universe_edit)
+        self._symbols_edit = QLineEdit(form)
+        self._symbols_edit.setPlaceholderText("RELIANCE, TCS, … (comma separated)")
+        self._symbols_edit.setStyleSheet(t.INPUT_QSS)
+        grid.addRow("Symbols:", self._symbols_edit)
+        across = QWidget(form)
+        across_lay = QHBoxLayout(across)
+        across_lay.setContentsMargins(0, 0, 0, 0)
+        across_lay.setSpacing(6)
+        self._timeframe_combo = QComboBox(across)
+        self._timeframe_combo.addItems(list(_TIMEFRAMES))
+        self._timeframe_combo.setCurrentText("15m")
+        self._timeframe_combo.setStyleSheet(t.INPUT_QSS)
+        across_lay.addWidget(self._timeframe_combo)
+        self._start_edit = QLineEdit(across)
+        self._start_edit.setText("2023-01-01")
+        self._start_edit.setStyleSheet(t.INPUT_QSS)
+        across_lay.addWidget(self._start_edit)
+        self._end_edit = QLineEdit(across)
+        self._end_edit.setText("2026-09-12")
+        self._end_edit.setStyleSheet(t.INPUT_QSS)
+        across_lay.addWidget(self._end_edit)
+        self._side_combo = QComboBox(across)
+        self._side_combo.addItems(list(_SIDES))
+        self._side_combo.setStyleSheet(t.INPUT_QSS)
+        across_lay.addWidget(self._side_combo)
+        grid.addRow("TF / Start / End / Side:", across)
+        money = QWidget(form)
+        money_lay = QHBoxLayout(money)
+        money_lay.setContentsMargins(0, 0, 0, 0)
+        money_lay.setSpacing(6)
+        self._capital_edit = QLineEdit(money)
+        self._capital_edit.setText("1000000")
+        self._capital_edit.setStyleSheet(t.INPUT_QSS)
+        money_lay.addWidget(self._capital_edit)
+        self._slip_edit = QLineEdit(money)
+        self._slip_edit.setText("0.02")
+        self._slip_edit.setStyleSheet(t.INPUT_QSS)
+        money_lay.addWidget(self._slip_edit)
+        self._comm_edit = QLineEdit(money)
+        self._comm_edit.setText("0.03")
+        self._comm_edit.setStyleSheet(t.INPUT_QSS)
+        money_lay.addWidget(self._comm_edit)
+        grid.addRow("Capital / Slip% / Comm%:", money)
+        self._params_edit = QLineEdit(form)
+        self._params_edit.setPlaceholderText("key=value, key=value … (empty = defaults)")
+        self._params_edit.setStyleSheet(t.INPUT_QSS)
+        grid.addRow("Parameters:", self._params_edit)
+        self._question_edit = QLineEdit(form)
+        self._question_edit.setPlaceholderText("Research question (optional)…")
+        self._question_edit.setStyleSheet(t.INPUT_QSS)
+        grid.addRow("Question:", self._question_edit)
+        frame = QWidget(form)
+        frame_lay = QHBoxLayout(frame)
+        frame_lay.setContentsMargins(0, 0, 0, 0)
+        frame_lay.setSpacing(6)
+        self._direction_combo = QComboBox(frame)
+        self._direction_combo.addItems(list(_DIRECTIONS))
+        self._direction_combo.setStyleSheet(t.INPUT_QSS)
+        frame_lay.addWidget(self._direction_combo)
+        self._effect_edit = QLineEdit(frame)
+        self._effect_edit.setPlaceholderText("Expected effect (optional)…")
+        self._effect_edit.setStyleSheet(t.INPUT_QSS)
+        frame_lay.addWidget(self._effect_edit, 1)
+        grid.addRow("Expectation:", frame)
+        section.add(form)
+        self._config_status = QLabel("", section)
+        self._config_status.setWordWrap(True)
+        self._config_status.setStyleSheet(f"color: {t.MUTED}; font-size: 11px;")
+        section.add(self._config_status)
+        buttons = QWidget(section)
+        btn_lay = QHBoxLayout(buttons)
+        btn_lay.setContentsMargins(0, 0, 0, 0)
+        btn_lay.setSpacing(6)
+        self._create_button = QPushButton("CREATE EXPERIMENT", buttons)
+        self._create_button.setStyleSheet(t.BUTTON_QSS)
+        self._create_button.clicked.connect(self._on_create_clicked)
+        btn_lay.addWidget(self._create_button)
+        self._research_run_button = QPushButton("RUN RESEARCH", buttons)
+        self._research_run_button.setStyleSheet(t.PRIMARY_QSS)
+        self._research_run_button.clicked.connect(self._on_research_run_clicked)
+        btn_lay.addWidget(self._research_run_button)
+        self._cancel_button = QPushButton("CANCEL", buttons)
+        self._cancel_button.setStyleSheet(t.BUTTON_QSS)
+        self._cancel_button.setEnabled(False)
+        self._cancel_button.clicked.connect(self._on_research_cancel_clicked)
+        btn_lay.addWidget(self._cancel_button)
+        section.add(buttons)
+        return section
+
     def _build_center(self) -> QWidget:
         panel = QWidget(self)
         lay = QVBoxLayout(panel)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(6)
+        lay.addWidget(self._build_config_section())
 
         hypothesis = Section("HYPOTHESIS")
         self._hypothesis_edit = QTextEdit(hypothesis)
@@ -404,6 +528,10 @@ class ResearchWorkspace(QWidget):
             "NO EXPERIMENTS", "Save experiments to compare them here.", panel
         )
         lay.addWidget(self._comparison_empty)
+        self._comparison_detail = QLabel("", panel)
+        self._comparison_detail.setWordWrap(True)
+        self._comparison_detail.setStyleSheet(f"color: {t.MUTED}; font-size: 11px;")
+        lay.addWidget(self._comparison_detail)
         return panel
 
     def _build_quality_tab(self) -> QWidget:
@@ -498,13 +626,16 @@ class ResearchWorkspace(QWidget):
         self.refresh()
 
     def refresh(self) -> None:
-        """Pull datasets + experiments from the service. Never raises."""
+        """Pull strategies + datasets + experiments from the service. Never raises."""
         with contextlib.suppress(Exception):
             if self._service is None:
                 self._render_empty("No research service attached.")
                 return
             self._datasets = list(self._service.refresh_datasets() or [])
             self._experiments = list(self._service.experiments() or [])
+            with contextlib.suppress(Exception):
+                available = self._service.available_strategies()
+                self._strategies = [str(name) for name in (available or [])]
             if self._datasets and self._current_strategy not in {
                 str(getattr(d, "strategy_id", d)) for d in self._datasets
             }:
@@ -512,6 +643,7 @@ class ResearchWorkspace(QWidget):
                 self._current_strategy = str(getattr(first, "strategy_id", first))
             self._log("Datasets refreshed.")
             self._render_all()
+            self._sync_strategy_combo()
 
     def _render_empty(self, message: str) -> None:
         self._set_status("READY")
@@ -690,6 +822,14 @@ class ResearchWorkspace(QWidget):
                 return
 
     def _show_experiment(self, exp: dict[str, Any]) -> None:
+        bundle = None
+        if self._service is not None and hasattr(self._service, "experiment_bundle"):
+            with contextlib.suppress(Exception):
+                bundle = self._service.experiment_bundle(str(exp.get("experiment_id", "")))
+        if bundle is not None and isinstance(bundle.get("experiment"), dict):
+            self._render_experiment_bundle(bundle)
+            return
+        self._bundle = None
         self._current_experiment_id = str(exp.get("experiment_id", ""))
         self._inspector_block.set("experiment_id", _text(exp.get("experiment_id")))
         self._inspector_block.set("strategy", _text(exp.get("strategy_id")))
@@ -843,6 +983,467 @@ class ResearchWorkspace(QWidget):
             self.experiment_created.emit(str(saved.get("experiment_id", "")))
         self._log_label.setText("Experiment saved with full reproducibility metadata.")
         self._log("Experiment saved with reproducibility metadata.")
+
+    # ── real experiment workflow ──────────────────────────────
+
+    def _sync_strategy_combo(self) -> None:
+        with contextlib.suppress(Exception):
+            combo = self._strategy_combo
+            combo.blockSignals(True)
+            combo.clear()
+            for name in self._strategies:
+                combo.addItem(name)
+            if self._strategies and not combo.currentText():
+                combo.setCurrentIndex(0)
+            combo.blockSignals(False)
+
+    def _on_strategy_combo(self, name: str) -> None:
+        if not name or self._service is None:
+            return
+        with contextlib.suppress(Exception):
+            described = self._service.describe_strategy(name)
+            if isinstance(described, dict) and "compile_error" not in described:
+                params = described.get("parameters", {})
+                if isinstance(params, dict) and params:
+                    hints = ", ".join(
+                        f"{k}={v.get('default', '?')}" for k, v in sorted(params.items())
+                    )
+                    self._config_status.setText(f"{name}: {hints}")
+                    return
+            self._config_status.setText(f"{name}: parameters unavailable")
+
+    def _parse_params_text(self, text: str) -> dict[str, float]:
+        params: dict[str, float] = {}
+        for chunk in str(text or "").replace(";", ",").split(","):
+            piece = chunk.strip()
+            if not piece or "=" not in piece:
+                continue
+            key, _, raw = piece.partition("=")
+            try:
+                params[key.strip()] = float(raw.strip())
+            except (TypeError, ValueError):
+                continue
+        return params
+
+    def _parse_symbols_text(self, text: str) -> list[str]:
+        out: list[str] = []
+        for chunk in str(text or "").replace(";", ",").split(","):
+            symbol = chunk.strip().upper()
+            if symbol and symbol not in out:
+                out.append(symbol)
+        return out
+
+    def _collect_config(self) -> dict[str, Any]:
+        return {
+            "strategy_name": self._strategy_combo.currentText().strip(),
+            "universe": self._universe_edit.text().strip(),
+            "symbols": self._parse_symbols_text(self._symbols_edit.text()),
+            "timeframe": self._timeframe_combo.currentText().strip(),
+            "start_date": self._start_edit.text().strip()[:10],
+            "end_date": self._end_edit.text().strip()[:10],
+            "side": self._side_combo.currentText().strip().upper() or "BOTH",
+            "initial_capital": self._to_float(self._capital_edit.text(), 0.0),
+            "slippage_pct": self._to_float(self._slip_edit.text(), 0.0),
+            "commission_pct": self._to_float(self._comm_edit.text(), 0.0),
+            "parameters": self._parse_params_text(self._params_edit.text()),
+            "hypothesis": {"text": self._hypothesis_edit.toPlainText().strip()},
+            "research_question": self._question_edit.text().strip(),
+            "expected_direction": self._direction_combo.currentText().strip(),
+            "expected_effect": self._effect_edit.text().strip(),
+        }
+
+    @staticmethod
+    def _to_float(text: str, default: float) -> float:
+        try:
+            return float(str(text or "").strip())
+        except (TypeError, ValueError):
+            return default
+
+    def _current_experiment_dict(self) -> dict[str, Any] | None:
+        for exp in self._experiments:
+            if (
+                isinstance(exp, dict)
+                and str(exp.get("experiment_id")) == self._current_experiment_id
+            ):
+                return exp
+        return None
+
+    def _on_create_clicked(self) -> None:
+        if self._service is None or not hasattr(self._service, "create_research_experiment"):
+            self._log_label.setText("Research execution unavailable: no service.")
+            return
+        config = self._collect_config()
+        if not config["hypothesis"]["text"]:
+            self._log_label.setText("Write a hypothesis before creating the experiment.")
+            return
+        try:
+            saved = self._service.create_research_experiment(config)
+        except Exception as exc:
+            self._log_label.setText(f"Create failed: {exc}")
+            self._log(f"Create failed: {exc}")
+            return
+        with contextlib.suppress(Exception):
+            self._experiments = list(self._service.experiments() or [])
+        self._render_all()
+        if isinstance(saved, dict):
+            self._current_experiment_id = str(saved.get("experiment_id", ""))
+            self._render_all()
+            self._show_experiment(saved)
+            with contextlib.suppress(Exception):
+                self.experiment_created.emit(self._current_experiment_id)
+            status = str(saved.get("status", "DRAFT"))
+            self._log_label.setText(f"Experiment {self._current_experiment_id} created ({status}).")
+            self._log(f"Experiment {self._current_experiment_id} created ({status}).")
+            errors = (saved.get("reproducibility", {}) or {}).get("validation_errors", [])
+            for error in errors:
+                self._log(f"Config: {error}")
+
+    def _on_research_run_clicked(self) -> None:
+        if self._service is None or not hasattr(self._service, "run_experiment"):
+            self._log_label.setText("Research execution unavailable: no service.")
+            return
+        if self._worker is not None:
+            self._log_label.setText("Research already running — cancel it first.")
+            return
+        current = self._current_experiment_dict()
+        terminal = {"COMPLETED", "FAILED", "CANCELLED", "INVALID", "NO_DATA"}
+        if current is None or (
+            str(current.get("status", "")) in terminal and current.get("result_fingerprint")
+        ):
+            # Immutable results are never re-run in place: fork the live form
+            # configuration into a fresh experiment, then execute that.
+            config = self._collect_config()
+            if not config["hypothesis"]["text"]:
+                self._log_label.setText("Write a hypothesis before running research.")
+                return
+            try:
+                created = self._service.create_research_experiment(config)
+            except Exception as exc:
+                self._log_label.setText(f"Create failed: {exc}")
+                return
+            with contextlib.suppress(Exception):
+                self._experiments = list(self._service.experiments() or [])
+            self._current_experiment_id = str(created.get("experiment_id", ""))
+            if str(created.get("status", "")) == "INVALID":
+                self._render_all()
+                self._show_experiment(created)
+                self._log_label.setText("Experiment INVALID — fix the configuration errors.")
+                return
+            self._log(f"Experiment {self._current_experiment_id} created for this run.")
+        from app.services.research_service import ResearchWorker
+
+        worker = ResearchWorker(self._service, self._current_experiment_id)
+        worker.progressed.connect(self._on_worker_progress)
+        worker.log_line.connect(self._on_worker_log)
+        worker.finished_ok.connect(self._on_worker_finished_ok)
+        worker.finished_fail.connect(self._on_worker_finished_fail)
+        self._worker = worker
+        self._worker_experiment_id = self._current_experiment_id
+        self._last_progress_stage = ""
+        self._cancel_button.setEnabled(True)
+        self._research_run_button.setEnabled(False)
+        self._set_status("RUNNING")
+        self._log_label.setText(f"Research running: {self._current_experiment_id}.")
+        self._log(f"Research running: {self._current_experiment_id}.")
+        worker.start()
+
+    def _on_research_cancel_clicked(self) -> None:
+        worker = self._worker
+        if worker is None:
+            return
+        with contextlib.suppress(Exception):
+            worker.request_cancel()
+        self._log_label.setText("Cancellation requested — stopping at a safe checkpoint.")
+        self._log("Cancellation requested.")
+
+    def _on_worker_progress(self, exp_id: str, stage: str, done: int, total: int) -> None:
+        if exp_id != self._worker_experiment_id:
+            return
+        self._set_status("RUNNING")
+        if stage != self._last_progress_stage or done >= total:
+            self._last_progress_stage = stage
+            self._log_label.setText(f"{stage} ({done}/{total}): {exp_id}.")
+            self._log(f"{stage} ({done}/{total}).")
+
+    def _on_worker_log(self, exp_id: str, message: str) -> None:
+        if exp_id != self._worker_experiment_id:
+            return
+        self._log(str(message))
+
+    def _finish_worker(self) -> str:
+        worker, self._worker = self._worker, None
+        if worker is not None:
+            with contextlib.suppress(Exception):
+                worker.deleteLater()
+        exp_id, self._worker_experiment_id = self._worker_experiment_id, ""
+        self._cancel_button.setEnabled(False)
+        self._research_run_button.setEnabled(True)
+        return exp_id
+
+    def _on_worker_finished_ok(self, exp_id: str) -> None:
+        self._finish_worker()
+        service = self._service
+        if service is None:
+            return
+        with contextlib.suppress(Exception):
+            self._experiments = list(service.experiments() or [])
+        self._render_all()
+        bundle = None
+        with contextlib.suppress(Exception):
+            bundle = service.experiment_bundle(exp_id)
+        if bundle is not None:
+            self._render_experiment_bundle(bundle)
+        self._log(f"Research finished: {exp_id}.")
+        self.analysis_finished.emit(exp_id)
+
+    def _on_worker_finished_fail(self, exp_id: str, message: str) -> None:  # noqa: ARG002
+        self._finish_worker()
+        self._set_status("FAILED")
+        self._log_label.setText(f"Research failed: {message}")
+        self._log(f"Research failed: {message}")
+
+    @staticmethod
+    def _fmt(value: Any) -> str:
+        if value is None or value == "":
+            return "N/A"
+        if isinstance(value, bool):
+            return "YES" if value else "NO"
+        if isinstance(value, float):
+            return f"{value:,.4f}"
+        return str(value)
+
+    def _render_experiment_bundle(self, bundle: dict[str, Any]) -> None:
+        exp = dict(bundle.get("experiment", {}) or {})
+        status = str(exp.get("status", "DRAFT"))
+        self._current_experiment_id = str(exp.get("experiment_id", ""))
+        stale = False
+        if status == "COMPLETED" and self._service is not None:
+            with contextlib.suppress(Exception):
+                if hasattr(self._service, "current_fingerprint"):
+                    live_fp = self._service.current_fingerprint(self._collect_config())
+                    stored_fp = str(exp.get("config_fingerprint", "") or "")
+                    stale = bool(live_fp) and bool(stored_fp) and live_fp != stored_fp
+        display = "STALE" if stale else status
+        self._set_status(display)
+        # Inspector — every value is stored engine output, never invented.
+        self._inspector_block.set("experiment_id", _text(exp.get("experiment_id")))
+        self._inspector_block.set("strategy", _text(exp.get("strategy_id")))
+        self._inspector_block.set("version", _text(exp.get("strategy_version")))
+        self._inspector_block.set("created", _text(exp.get("created_at")))
+        executions = exp.get("execution_ids") or []
+        self._inspector_block.set(
+            "executions",
+            str(len(executions)) if isinstance(executions, list) else _text(executions),
+        )
+        self._inspector_block.set("status", display)
+        hypothesis = exp.get("hypothesis")
+        if isinstance(hypothesis, dict):
+            with contextlib.suppress(Exception):
+                self._hypothesis_edit.setPlainText(str(hypothesis.get("text", "")))
+        configuration = (
+            exp.get("configuration") if isinstance(exp.get("configuration"), dict) else {}
+        )
+        assert isinstance(configuration, dict)
+        self._config_block.set("strategy", _text(exp.get("strategy_id")))
+        self._config_block.set("version", _text(exp.get("strategy_version")))
+        self._config_block.set("timeframe", _text(exp.get("timeframe")))
+        self._config_block.set("parameters", _text(exp.get("parameters")))
+        symbols = exp.get("symbols") or []
+        universe = str(exp.get("universe", "") or configuration.get("universe", "NSE"))
+        self._data_block.set("universe", _text(universe))
+        self._data_block.set("symbol", _text(f"{len(symbols)} symbols" if symbols else None))
+        start = _text(exp.get("start_date"))
+        end = _text(exp.get("end_date"))
+        period = f"{start} → {end}" if start != "N/A" and end != "N/A" else "N/A"
+        self._data_block.set("period", period)
+        self._data_block.set(
+            "executions",
+            str(len(executions)) if isinstance(executions, list) else _text(executions),
+        )
+        summary = dict(bundle.get("summary", {}) or {})
+        report = dict(exp.get("report", {}) or bundle.get("report", {}) or {})
+        conclusion = str(report.get("conclusion", "") or "")
+        result_fp = str(exp.get("result_fingerprint", "") or "")
+        config_fp = str(exp.get("config_fingerprint", "") or "")
+        executed = str(exp.get("executed_at", "") or "")
+        result_lines = [
+            f"{summary.get('trade_count', 0)} trades · {summary.get('signal_count', 0)} signals",
+            f"Net P&L {self._fmt(summary.get('net_pnl'))}",
+            conclusion,
+            f"result {result_fp[:12]} · config {config_fp[:12]}" if result_fp else "not executed",
+            f"executed {executed}" if executed else "",
+        ]
+        self._result_label.setText("\n".join(line for line in result_lines if line))
+        self._inspector_status.set_status(display, _STATUS_TONES.get(display, "muted"))
+        analysis = dict(bundle.get("analysis", {}) or {})
+        validation = dict(analysis.get("validation", {}) or bundle.get("validation", {}) or {})
+        if not validation:
+            validation = {
+                "status": _text(exp.get("validation_status")),
+                "summary": "",
+            }
+        self._last_validation = validation
+        self._validation_block.set("status", _text(validation.get("status")))
+        self._validation_block.set("summary", _text(validation.get("summary")))
+        repro = dict(exp.get("reproducibility", {}) or bundle.get("reproducibility", {}) or {})
+        self._repro_block.set("experiment_id", _text(repro.get("experiment_id")))
+        self._repro_block.set("strategy_version", _text(repro.get("strategy_version")))
+        self._repro_block.set("dataset", _text(repro.get("strategy_id")))
+        self._repro_block.set("dataset_version", _text(repro.get("dataset_version")))
+        self._repro_block.set("parameters", _text(repro.get("parameters")))
+        self._repro_block.set("timeframe", _text(repro.get("timeframe")))
+        self._repro_block.set("date_range", _text(repro.get("date_range")))
+        # Center — metrics from the executed summary only.
+        self._metrics_block.set("trades", str(summary.get("trade_count", "N/A")))
+        self._metrics_block.set("signals", str(summary.get("signal_count", "N/A")))
+        for key, source in (
+            ("win_rate", "win_rate"),
+            ("avg_win", "avg_win"),
+            ("avg_loss", "avg_loss"),
+            ("expectancy", "expectancy"),
+            ("profit_factor", "profit_factor"),
+            ("net_profit", "net_pnl"),
+            ("drawdown_pct", "max_drawdown_pct"),
+            ("sharpe", "sharpe"),
+            ("sortino", "sortino"),
+            ("payoff_ratio", "payoff_ratio"),
+        ):
+            self._metrics_block.set(key, self._fmt(summary.get(source)))
+        self._metrics_block.set("max_drawdown", self._fmt(summary.get("max_drawdown_abs")))
+        self._metrics_block.set("drawdown_abs", self._fmt(summary.get("max_drawdown_abs")))
+        self._metrics_block.set("cagr", "N/A")
+        self._metrics_block.set("volatility", "N/A")
+        self._metrics_block.set("exposure", "N/A")
+        self._metrics_block.set("turnover", "N/A")
+        self._metrics_block.set("total_trades", str(summary.get("trade_count", "N/A")))
+        notes = [conclusion] if conclusion else []
+        if stale:
+            notes.append(
+                "Configuration changed since execution — result is STALE. Re-run to refresh."
+            )
+        if status == "DRAFT":
+            notes = ["DRAFT — not executed yet. Press RUN RESEARCH."]
+        elif status in ("RUNNING", "ANALYZING", "VALIDATING", "VALIDATING_RESULT"):
+            notes = [f"{status} — execution in progress."]
+        elif status == "CANCELLED":
+            notes = ["CANCELLED — partial run discarded; saved experiments untouched."]
+        elif status in ("FAILED", "INVALID", "NO_DATA"):
+            errors = list(
+                (repro.get("validation_errors", {}) or [])
+                if isinstance(repro.get("validation_errors"), dict)
+                else (repro.get("validation_errors", []) or [])
+            )
+            notes = [
+                f"{status} — "
+                + ("; ".join(str(e) for e in errors) if errors else "see research log.")
+            ]
+        self._notes_label.setText("\n".join(notes))
+        self._render_bundle_tables(bundle, status)
+        self._render_comparison()
+        self._render_bundle_quality(bundle, status)
+        self._log_label.setText(
+            f"{display}: {exp.get('experiment_id', '?')} — "
+            f"{summary.get('trade_count', 0)} trades, {summary.get('signal_count', 0)} signals."
+            if status == "COMPLETED"
+            else f"{display}: {exp.get('experiment_id', '?')}."
+        )
+
+    def _render_bundle_tables(self, bundle: dict[str, Any], status: str) -> None:
+        signals = bundle.get("signals", []) or []
+        rows = [
+            [
+                str(item.get("time", "")),
+                str(item.get("symbol", "N/A")),
+                str(item.get("timeframe", "N/A")),
+                str(item.get("side", "")),
+                str(item.get("price", "")),
+                str(item.get("event", "SIGNAL")),
+                str(item.get("strategy", "")),
+                str(item.get("experiment", "")),
+            ]
+            for item in signals[:500]
+        ]
+        self._signals_table.setSortingEnabled(False)
+        fill_table(self._signals_table, rows)
+        self._signals_table.setSortingEnabled(True)
+        self._signals_empty.setVisible(not rows)
+        if status == "COMPLETED" and not rows:
+            self._signals_empty.set_detail("Experiment executed but produced no signals in range.")
+        elif not rows:
+            self._signals_empty.set_detail("No experiment executed yet — create and run one.")
+        self._apply_signal_filter(self._signal_filter.text())
+        trades = bundle.get("trades", []) or []
+        trade_rows = []
+        for index, item in enumerate(trades[:500], start=1):
+            if not isinstance(item, dict):
+                continue
+            trade_rows.append(
+                [
+                    str(index),
+                    _first_text(item, ("entry_time",), ""),
+                    _first_text(item, ("exit_time",), ""),
+                    _first_text(item, ("side", "direction"), ""),
+                    _first_text(item, ("quantity", "qty"), ""),
+                    _first_text(item, ("pnl",), ""),
+                    _first_text(item, ("exit_reason", "reason"), ""),
+                    _first_text(item, ("bars_held", "holding"), ""),
+                ]
+            )
+        self._trades_table.setSortingEnabled(False)
+        fill_table(self._trades_table, trade_rows)
+        self._trades_table.setSortingEnabled(True)
+        self._trades_empty.setVisible(not trade_rows)
+        if not trade_rows:
+            self._trade_detail_block.set_all_na()
+        self._apply_trade_filter(self._trade_filter.text())
+        analysis = dict(bundle.get("analysis", {}) or {})
+        robustness = analysis.get("robustness", []) or bundle.get("robustness", []) or []
+        self._last_robustness = list(robustness)
+        robust_rows = [
+            [
+                str(item.get("test_type", "?")),
+                _text(item.get("input")),
+                str(item.get("stability", "WARNING")),
+                _text(item.get("evidence")),
+            ]
+            for item in robustness
+            if isinstance(item, dict)
+        ]
+        self._robustness_table.setSortingEnabled(False)
+        fill_table(self._robustness_table, robust_rows)
+        self._robustness_table.setSortingEnabled(True)
+        self._robustness_empty.setVisible(not robust_rows)
+        if not robust_rows:
+            self._robustness_empty.set_detail(
+                "NOT RUN — robustness executes with the experiment."
+                if status != "COMPLETED"
+                else "No robustness dimensions produced."
+            )
+
+    def _render_bundle_quality(self, bundle: dict[str, Any], status: str) -> None:
+        exp = dict(bundle.get("experiment", {}) or {})
+        repro = dict(exp.get("reproducibility", {}) or {})
+        reference = dict(repro.get("data_reference", {}) or {})
+        per_symbol = dict(reference.get("per_symbol", {}) or {})
+        failed = dict(reference.get("failed", {}) or {})
+        total_bars = sum(
+            int(info.get("bars", 0) or 0) for info in per_symbol.values() if isinstance(info, dict)
+        )
+        self._quality_block.set("bars", str(total_bars) if per_symbol else "N/A")
+        self._quality_block.set("symbols", str(len(per_symbol)) if per_symbol else "N/A")
+        start = _text(exp.get("start_date"))
+        end = _text(exp.get("end_date"))
+        self._quality_block.set(
+            "date_range", f"{start} → {end}" if start != "N/A" and end != "N/A" else "N/A"
+        )
+        self._quality_block.set(
+            "missing_bars", "; ".join(sorted(failed)) if failed else "CHECKED — none"
+        )
+        self._quality_block.set(
+            "duplicate_bars", "CHECKED — none" if status == "COMPLETED" else "N/A"
+        )
+        self._quality_block.set("timezone", "N/A")
+        self._quality_block.set("data_status", status)
 
     # ── center tabs ───────────────────────────────────────────
 
@@ -1050,6 +1651,32 @@ class ResearchWorkspace(QWidget):
         fill_table(self._comparison_table, rows)
         self._comparison_table.setSortingEnabled(True)
         self._comparison_empty.setVisible(not rows)
+        self._render_comparison_verdict(rows_data)
+
+    def _render_comparison_verdict(self, rows_data: list[dict[str, Any]]) -> None:
+        """Pair verdict for the selected experiment vs the latest other one."""
+        self._comparison_detail.setText("")
+        if self._service is None or not hasattr(self._service, "compare_pair"):
+            return
+        current = self._current_experiment_id
+        others = [
+            str(item.get("experiment_id", ""))
+            for item in rows_data
+            if str(item.get("experiment_id", "")) != current
+        ]
+        if not current or not others:
+            return
+        with contextlib.suppress(Exception):
+            verdict = self._service.compare_pair(current, others[-1])
+            if isinstance(verdict, dict):
+                differences = ", ".join(
+                    verdict.get("config_differences", []) or ["identical setup"]
+                )
+                warnings = "; ".join(verdict.get("warnings", []) or ["none"])
+                self._comparison_detail.setText(
+                    f"{current} vs {others[-1]}: {verdict.get('verdict', '')} "
+                    f"[differs: {differences}] [warnings: {warnings}]"
+                )
 
     def _render_quality(self) -> None:
         if self._service is None or not self._current_strategy:

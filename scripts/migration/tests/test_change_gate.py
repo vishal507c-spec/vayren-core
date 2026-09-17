@@ -203,3 +203,37 @@ def test_rust_and_slint_files_pass(tmp_path: Path) -> None:
     report = check_changes(root=root, unit_states={})
     assert report.verdict == "PASS"
     assert report.files_checked == 2
+
+
+def test_ui_redesign_acceptance_matrix(tmp_path: Path) -> None:
+    """A UI redesign must be Slint/Rust; new Python UI is a violation.
+
+    Encodes the five acceptance outcomes for a Strategy-Lab-style task:
+      new Python UI file          -> FAIL (new-python-ui)
+      new Qt widget in Qt file    -> FAIL (new-qt-widget)
+      new Slint surface           -> PASS
+      new Rust backend            -> PASS
+      justified legacy Python glue-> PASS (warn)
+    """
+    root = _mkrepo(
+        tmp_path, retention={"00_app/app/ui/panel.py": {"state": "TEMPORARILY_RETAINED"}}
+    )
+    (root / "00_app" / "app" / "ui" / "lab_redesign.py").write_text(
+        "class Lab(QWidget):\n    pass\n", encoding="utf-8"
+    )
+    report = check_changes(root=root, unit_states={})
+    assert report.verdict == "FAIL"
+    assert any(v.rule == "new-python-ui" for v in report.violations)
+
+    (root / "00_app" / "app" / "ui" / "lab_redesign.py").unlink()
+    (root / "rust").mkdir(exist_ok=True)
+    (root / "rust" / "vayren-shell").mkdir(exist_ok=True)
+    (root / "rust" / "vayren-shell" / "lab.slint").write_text(
+        "export component Lab inherits Rectangle {}\n", encoding="utf-8"
+    )
+    (root / "rust" / "vayren-shell" / "lab_state.rs").write_text(
+        "pub struct LabState;\n", encoding="utf-8"
+    )
+    report = check_changes(root=root, unit_states={})
+    assert report.verdict == "PASS"
+    assert any(".slint" in d for d in report.details)

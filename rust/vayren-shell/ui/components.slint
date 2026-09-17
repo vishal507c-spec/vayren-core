@@ -22,6 +22,7 @@ export component VButton inherits Rectangle {
 
     function fill() -> color {
         return !root.enabled ? VayrenPalette.hover
+            : ta.pressed ? VayrenPalette.pressed
             : root.variant == 0 ? VayrenPalette.accent
             : root.variant == 3 ? VayrenPalette.neg
             : transparent;
@@ -140,6 +141,61 @@ export component VKpi inherits VerticalLayout {
         font-weight: 700;
     }
 }
+
+export component VCell inherits Rectangle {
+    // Table cell: left-aligned labels, right-aligned numbers (shared by all
+    // data screens — screens never fork their own cell). Two Text variants
+    // because enum literals cannot appear inside ternary expressions.
+    in property <string> text;
+    in property <int> align: 0; // 0 left, 1 right
+    in property <int> tone: 1; // shared tone convention
+    in property <bool> head: false;
+    // Dimmed rows (e.g. ranking rows with no valid result — the row stays
+    // legible but steps back, same as the Qt muted-row treatment).
+    in property <bool> dim: false;
+
+    pure function ink() -> color {
+        return root.dim ? VayrenPalette.faint
+            : root.head ? VayrenPalette.muted
+            : root.tone == 1 ? VayrenPalette.pos
+            : root.tone == 2 ? VayrenPalette.amber
+            : root.tone == 3 ? VayrenPalette.neg
+            : VayrenPalette.text;
+    }
+
+    HorizontalLayout {
+        spacing: 0;
+        // Symmetric breathing room: identical in every column, so cross-row
+        // alignment is preserved while adjacent values can never touch.
+        padding-left: VayrenDesign.sp-sm;
+        padding-right: VayrenDesign.sp-sm;
+        if root.align == 0: Text {
+            text: root.text;
+            color: root.ink();
+            font-size: root.head ? VayrenDesign.fs-label : VayrenDesign.fs-table;
+            font-weight: root.head ? 700 : 400;
+            horizontal-alignment: left;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        if root.align == 0: Rectangle { horizontal-stretch: 1; background: transparent; }
+        if root.align == 1: Rectangle { horizontal-stretch: 1; background: transparent; }
+        if root.align == 1: Text {
+            text: root.text;
+            color: root.ink();
+            font-size: root.head ? VayrenDesign.fs-label : VayrenDesign.fs-table;
+            font-weight: root.head ? 700 : 400;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        // Alignment gutter: right-aligned runs paint ~1 advance past their
+        // measured box (text-stack shaping); this token-sized spacer absorbs
+        // it inside the cell so values can never touch neighbors or clip.
+        if root.align == 1: Rectangle { width: VayrenDesign.sp-md; background: transparent; }
+    }
+}
+
 
 export component VBanner inherits Rectangle {
     // Quiet state banner: bordered box, semantic left edge, one optional

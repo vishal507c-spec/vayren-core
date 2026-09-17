@@ -1,0 +1,1972 @@
+// VAYREN Research â€” institutional quant research workstation (constitution
+// Â§3, UI_DESIGN_SYSTEM.md). Presentation only: every value arrives via bound
+// properties projected by the Rust view-model (research_state.rs); the
+// screen reports user actions through callbacks and never infers state.
+//
+// Workstation information architecture (advanced, never complicated):
+//   COMMAND CENTER  identity â†’ context â†’ primary action (2-second read)
+//   SETUP           grouped config: the dependency chain as one model
+//   HYPOTHESIS      progressive-disclosure research workbench
+//   EVIDENCE        verdict â†’ why â†’ supporting â†’ key results â†’ technical
+//   DIAGNOSTICS     full evidence tables (one interaction away)
+//   INSPECTOR       professional grouped context panel
+//
+// Progressive disclosure is the sophistication mechanism: DEFAULT answers
+// "what do I need to know", SECONDARY "what might I inspect", ADVANCED
+// "what an expert must verify" â€” the three never compete visually.
+//
+// First-principles responsive contract (no fixed page heights, no pixel
+// assumptions â€” the unit of layout is the available logical viewport):
+//   WIDE   (â‰¥ research-wide):   navigator + workspace + inspector side by side.
+//   MEDIUM (â‰¥ research-medium): navigator + workspace; inspector is a drawer.
+//   NARROW (below):             single-column view tabs (recomposed, never
+//                               squeezed). The host computes `wide`/`medium`
+//   from the content width and passes them in; panes are file-level
+//   components with explicit interfaces (Slint components never inherit
+//   scope). Heights are natural (content-sized) except compact chrome;
+//   overflow scrolls inside its region. Lengths are logical px â€”
+//   DPI-independent by construction.
+
+import { VayrenPalette, VayrenDesign } from "palette.slint";
+import { VBadge, VButton, VBanner, VEmptyState, VKpi, VCell } from "components.slint";
+import { LineEdit, TextEdit, ComboBox, ScrollView } from "std-widgets.slint";
+
+export struct ResearchMetric {
+    label: string,
+    value: string,
+    tone: int,
+    emphasized: bool,
+}
+
+export struct ResearchSignalRow {
+    time: string,
+    symbol: string,
+    tf: string,
+    side: string,
+    price: string,
+    event: string,
+    strategy: string,
+    exp: string,
+}
+
+export struct ResearchTradeRow {
+    no: string,
+    entry: string,
+    exit: string,
+    side: string,
+    qty: string,
+    pnl: string,
+    reason: string,
+    hold: string,
+    pnl-tone: int,
+}
+
+export struct ResearchRobustRow {
+    test: string,
+    input: string,
+    stability: string,
+    stability-tone: int,
+    evidence: string,
+}
+
+export struct ResearchKv {
+    label: string,
+    value: string,
+}
+
+export struct ResearchCompareRow {
+    exp: string,
+    strategy: string,
+    status: string,
+    detail: string,
+}
+
+export struct ResearchStrategyRow {
+    name: string,
+    description: string,
+    version: string,
+    selected: bool,
+}
+
+export struct ResearchExperimentRow {
+    id: string,
+    strategy: string,
+    status: string,
+    status-tone: int,
+    selected: bool,
+}
+
+export struct ResearchField {
+    key: string,
+    label: string,
+    value: string,
+    kind: int, // 0 text, 1 select
+    options: [string],
+    selected: int,
+}
+
+// One configuration group â€” the dependency chain reads as one model.
+export struct ResearchConfigGroup {
+    title: string,
+    hint: string,
+    fields: [ResearchField],
+}
+
+// One validation dimension (engine status + short evidence detail).
+export struct ResearchEvidenceDim {
+    name: string,
+    status: string,
+    tone: int,
+    detail: string,
+}
+
+// One line of the honest "why" layer (FAIL / WARN / NOTE).
+export struct ResearchEvidenceWhy {
+    kind: string,
+    text: string,
+}
+
+// One inspector section of the professional context panel.
+export struct ResearchKvGroup {
+    title: string,
+    rows: [ResearchKv],
+}
+
+// â”€â”€ shared primitives â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+component Hairline inherits Rectangle {
+    width: 100%;
+    height: 1px;
+    background: VayrenPalette.hairline;
+}
+
+// Tone â†’ semantic color (shared convention: 0 muted, 1 pos, 2 warn, 3 neg,
+// 4 accent). Inlined at every use site so a bad result can never look
+// impressive â€” tone color + wording carry the meaning together.
+
+component RTab inherits Rectangle {
+    in property <string> tab-label;
+    in property <bool> active: false;
+    callback picked();
+
+    height: VayrenDesign.h-tabs;
+    background: active ? VayrenPalette.hover : tap.has-hover ? VayrenPalette.bg2 : transparent;
+    animate background { duration: 100ms; }
+    tap := TouchArea {
+        clicked => { root.picked(); }
+    }
+    VerticalLayout {
+        Text {
+            text: root.tab-label;
+            color: active ? VayrenPalette.text : VayrenPalette.muted;
+            font-size: VayrenDesign.fs-label;
+            font-weight: 700;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        Rectangle {
+            height: 2px;
+            background: active ? VayrenPalette.accent : transparent;
+        }
+    }
+}
+
+component RField inherits Rectangle {
+    in property <string> field-key;
+    in property <string> field-label;
+    in property <string> field-value;
+    in property <int> kind: 0;
+    in property <[string]> options;
+    in property <int> selected: 0;
+    callback edited(string, string);
+    callback option-picked(string, string);
+
+    VerticalLayout {
+        spacing: VayrenDesign.sp-xs;
+        Text {
+            text: root.field-label;
+            color: VayrenPalette.faint;
+            font-size: VayrenDesign.fs-label;
+            font-weight: 700;
+        }
+        if root.kind == 0: LineEdit {
+            text: root.field-value;
+            edited(t) => { root.edited(root.field-key, t); }
+        }
+        if root.kind == 1: ComboBox {
+            model: root.options;
+            current-index: root.selected;
+            selected(v) => { root.option-picked(root.field-key, v); }
+        }
+    }
+}
+
+component RKv inherits Rectangle {
+    in property <string> kv-label;
+    in property <string> kv-value;
+    in property <bool> strong: false;
+
+    height: 20px;
+    HorizontalLayout {
+        spacing: VayrenDesign.sp-md;
+        Text {
+            text: root.kv-label;
+            color: VayrenPalette.faint;
+            font-size: VayrenDesign.fs-label;
+            font-weight: 700;
+            width: 116px;
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.kv-value == "" ? "â€”" : root.kv-value;
+            color: root.strong ? VayrenPalette.text : VayrenPalette.muted;
+            font-size: root.strong ? VayrenDesign.fs-small : VayrenDesign.fs-label;
+            font-weight: root.strong ? 700 : 400;
+            wrap: word-wrap;
+            horizontal-stretch: 1;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+}
+
+component NavRow inherits Rectangle {
+    in property <string> row-title;
+    in property <string> row-detail;
+    in property <bool> selected: false;
+    callback picked();
+
+    height: 40px;
+    border-radius: VayrenDesign.radius-sm;
+    background: selected ? VayrenPalette.selected : tap.has-hover ? VayrenPalette.hover : transparent;
+    animate background { duration: 100ms; }
+    border-width: selected ? 1px : 0px;
+    border-color: VayrenPalette.accent-dim;
+    tap := TouchArea {
+        clicked => { root.picked(); }
+    }
+    HorizontalLayout {
+        padding-left: VayrenDesign.sp-md;
+        padding-right: VayrenDesign.sp-sm;
+        spacing: VayrenDesign.sp-sm;
+        // Selection accent: a quiet 3px bar, never a filled pill.
+        Rectangle {
+            width: 3px;
+            background: root.selected ? VayrenPalette.accent : transparent;
+        }
+        VerticalLayout {
+            spacing: 0;
+            alignment: center;
+            Text {
+                text: root.row-title;
+                color: selected ? VayrenPalette.text : VayrenPalette.muted;
+                font-size: VayrenDesign.fs-small;
+                font-weight: selected ? 700 : 400;
+                overflow: elide;
+            }
+            Text {
+                text: root.row-detail;
+                color: VayrenPalette.faint;
+                font-size: VayrenDesign.fs-label;
+                overflow: elide;
+            }
+        }
+    }
+}
+
+component NavPane inherits Rectangle {
+    in property <[ResearchStrategyRow]> strategies;
+    in property <[ResearchExperimentRow]> experiments;
+    in property <string> strategy-count;
+    in property <string> experiment-count;
+    callback strategy-picked(int);
+    callback experiment-picked(int);
+
+    background: VayrenPalette.bg;
+    VerticalLayout {
+        padding: VayrenDesign.sp-md;
+        spacing: VayrenDesign.sp-sm;
+        HorizontalLayout {
+            spacing: VayrenDesign.sp-sm;
+            Text {
+                text: "STRATEGIES";
+                color: VayrenPalette.muted;
+                font-size: VayrenDesign.fs-label;
+                font-weight: 700;
+            }
+            Rectangle { horizontal-stretch: 1; background: transparent; }
+            Text {
+                text: root.strategy-count;
+                color: VayrenPalette.faint;
+                font-size: VayrenDesign.fs-label;
+            }
+        }
+        ScrollView {
+            vertical-stretch: 1;
+            viewport-width: self.width;
+            VerticalLayout {
+                spacing: VayrenDesign.sp-xs;
+                for s[idx] in root.strategies: NavRow {
+                    row-title: s.name;
+                    row-detail: s.description;
+                    selected: s.selected;
+                    picked => { root.strategy-picked(idx); }
+                }
+            }
+        }
+        HorizontalLayout {
+            spacing: VayrenDesign.sp-sm;
+            Text {
+                text: "EXPERIMENTS";
+                color: VayrenPalette.muted;
+                font-size: VayrenDesign.fs-label;
+                font-weight: 700;
+            }
+            Rectangle { horizontal-stretch: 1; background: transparent; }
+            Text {
+                text: root.experiment-count;
+                color: VayrenPalette.faint;
+                font-size: VayrenDesign.fs-label;
+            }
+        }
+        ScrollView {
+            vertical-stretch: 1;
+            viewport-width: self.width;
+            VerticalLayout {
+                spacing: VayrenDesign.sp-xs;
+                for e[idx] in root.experiments: NavRow {
+                    row-title: e.id;
+                    row-detail: e.strategy + " Â· " + e.status;
+                    selected: e.selected;
+                    picked => { root.experiment-picked(idx); }
+                }
+            }
+        }
+    }
+}
+
+// â”€â”€ lifecycle section header: accent bar + title + right-aligned hint â”€â”€
+// Collapsible variants carry a chevron and hover affordance.
+component RSectionHead inherits Rectangle {
+    in property <string> section-title;
+    in property <string> section-hint: "";
+    in property <bool> collapsible: false;
+    in property <bool> open: true;
+    in property <int> badge-count: 0;
+    callback toggled();
+
+    height: 28px;
+    background: root.collapsible && tap.has-hover ? VayrenPalette.hover : transparent;
+    animate background { duration: 100ms; }
+    tap := TouchArea {
+        enabled: root.collapsible;
+        clicked => { root.toggled(); }
+    }
+    HorizontalLayout {
+        spacing: VayrenDesign.sp-sm;
+        Rectangle {
+            width: 2px;
+            background: VayrenPalette.accent-dim;
+        }
+        Text {
+            text: root.section-title;
+            color: VayrenPalette.text;
+            font-size: VayrenDesign.fs-small;
+            font-weight: 800;
+            vertical-alignment: center;
+        }
+        if root.collapsible: Text {
+            text: root.open ? "â–¾" : "â–¸";
+            color: VayrenPalette.faint;
+            font-size: VayrenDesign.fs-label;
+            vertical-alignment: center;
+        }
+        if root.badge-count > 0: Rectangle {
+            height: 16px;
+            width: 16px + 6px * (root.badge-count > 9 ? 2 : 1);
+            border-radius: 8px;
+            background: VayrenPalette.warn-dim;
+            Text {
+                text: root.badge-count;
+                color: VayrenPalette.amber;
+                font-size: VayrenDesign.fs-label;
+                font-weight: 800;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+        Rectangle { horizontal-stretch: 1; background: transparent; }
+        Text {
+            text: root.section-hint;
+            color: VayrenPalette.faint;
+            font-size: VayrenDesign.fs-label;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+}
+
+// â”€â”€ evidence quality bar: the honest verdict, never decorative â”€â”€
+// A weak result must look weak: tone color + wording carry the meaning.
+component REvidenceBar inherits Rectangle {
+    in property <string> verdict;
+    in property <int> tone;
+    in property <string> grade;
+    in property <string> summary;
+
+    background: VayrenPalette.surface;
+    border-width: 1px;
+    border-color: VayrenPalette.hairline;
+    border-radius: VayrenDesign.radius;
+
+    HorizontalLayout {
+        spacing: VayrenDesign.sp-md;
+        // Verdict edge: the strongest (and only) semantic color weight here.
+        Rectangle {
+            width: 3px;
+            background: root.tone == 1 ? VayrenPalette.pos : root.tone == 2 ? VayrenPalette.amber : root.tone == 3 ? VayrenPalette.neg : root.tone == 4 ? VayrenPalette.accent : VayrenPalette.muted;
+        }
+        VerticalLayout {
+            spacing: VayrenDesign.sp-xs;
+            HorizontalLayout {
+                spacing: VayrenDesign.sp-sm;
+                Text {
+                    text: "EVIDENCE QUALITY";
+                    color: VayrenPalette.faint;
+                    font-size: VayrenDesign.fs-label;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                }
+                Rectangle {
+                    height: 18px;
+                    width: 92px;
+                    border-radius: 9px;
+                    background: root.tone == 1 ? VayrenPalette.pos-dim
+                        : root.tone == 2 ? VayrenPalette.warn-dim
+                        : root.tone == 3 ? VayrenPalette.neg-dim
+                        : VayrenPalette.bg2;
+                    Text {
+                        text: root.verdict == "" ? "INCONCLUSIVE" : root.verdict;
+                        color: root.tone == 1 ? VayrenPalette.pos : root.tone == 2 ? VayrenPalette.amber : root.tone == 3 ? VayrenPalette.neg : root.tone == 4 ? VayrenPalette.accent : VayrenPalette.muted;
+                        font-size: VayrenDesign.fs-label;
+                        font-weight: 800;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+                if root.grade != "": Text {
+                    text: "GRADE Â· " + root.grade;
+                    color: VayrenPalette.muted;
+                    font-size: VayrenDesign.fs-label;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                }
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+            }
+            if root.summary != "": Text {
+                text: root.summary;
+                color: VayrenPalette.muted;
+                font-size: VayrenDesign.fs-small;
+                wrap: word-wrap;
+            }
+        }
+    }
+}
+
+// â”€â”€ one validation dimension: name + status + short evidence detail â”€â”€
+component RDimChip inherits Rectangle {
+    in property <string> chip-name;
+    in property <string> chip-status;
+    in property <int> tone;
+    in property <string> detail;
+
+    height: 52px;
+    background: VayrenPalette.surface;
+    border-width: 1px;
+    border-color: VayrenPalette.hairline;
+    border-radius: VayrenDesign.radius-sm;
+    VerticalLayout {
+        padding: VayrenDesign.sp-sm;
+        spacing: VayrenDesign.sp-xs;
+        HorizontalLayout {
+            spacing: VayrenDesign.sp-xs;
+            Rectangle {
+                width: 6px;
+                height: 6px;
+                y: 4px;
+                border-radius: 3px;
+                background: root.tone == 1 ? VayrenPalette.pos : root.tone == 2 ? VayrenPalette.amber : root.tone == 3 ? VayrenPalette.neg : root.tone == 4 ? VayrenPalette.accent : VayrenPalette.muted;
+            }
+            Text {
+                text: root.chip-name;
+                color: VayrenPalette.text;
+                font-size: VayrenDesign.fs-label;
+                font-weight: 700;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            Rectangle { horizontal-stretch: 1; background: transparent; }
+            Text {
+                text: root.chip-status;
+                color: root.tone == 1 ? VayrenPalette.pos : root.tone == 2 ? VayrenPalette.amber : root.tone == 3 ? VayrenPalette.neg : root.tone == 4 ? VayrenPalette.accent : VayrenPalette.muted;
+                font-size: VayrenDesign.fs-label;
+                font-weight: 800;
+                vertical-alignment: center;
+            }
+        }
+        Text {
+            text: root.detail;
+            color: VayrenPalette.faint;
+            font-size: VayrenDesign.fs-label;
+            overflow: elide;
+        }
+    }
+}
+
+// â”€â”€ inspector section: titled group of compact aligned rows â”€â”€
+component RInspectorGroup inherits Rectangle {
+    in property <string> group-title;
+    in property <[ResearchKv]> rows;
+
+    VerticalLayout {
+        spacing: VayrenDesign.sp-xs;
+        Text {
+            text: root.group-title;
+            color: VayrenPalette.accent-dim;
+            font-size: VayrenDesign.fs-label;
+            font-weight: 800;
+        }
+        for r in root.rows: RKv {
+            kv-label: r.label;
+            kv-value: r.value;
+        }
+    }
+}
+
+component InspectorPane inherits Rectangle {
+    in property <[ResearchKvGroup]> groups;
+    in property <[ResearchKv]> rows;
+    in property <string> conclusion;
+    in property <string> fingerprint;
+    in property <string> validation-status;
+    in property <string> validation-summary;
+    in property <bool> has-groups: false;
+
+    background: VayrenPalette.bg;
+    VerticalLayout {
+        padding: VayrenDesign.sp-md;
+        spacing: VayrenDesign.sp-sm;
+        HorizontalLayout {
+            spacing: VayrenDesign.sp-sm;
+            Text {
+                text: "EXPERIMENT INSPECTOR";
+                color: VayrenPalette.muted;
+                font-size: VayrenDesign.fs-label;
+                font-weight: 700;
+            }
+            Rectangle { horizontal-stretch: 1; background: transparent; }
+            Text {
+                text: "CONTEXT";
+                color: VayrenPalette.faint;
+                font-size: VayrenDesign.fs-label;
+            }
+        }
+        ScrollView {
+            vertical-stretch: 1;
+            viewport-width: self.width;
+            VerticalLayout {
+                spacing: VayrenDesign.sp-md;
+                // Grouped professional panel (primary presentation).
+                if root.has-groups: VerticalLayout {
+                    spacing: VayrenDesign.sp-md;
+                    for g in root.groups: RInspectorGroup {
+                        group-title: g.title;
+                        rows: g.rows;
+                    }
+                }
+                // Flat fallback (kept for host compatibility / legacy rows).
+                if !root.has-groups: VerticalLayout {
+                    spacing: VayrenDesign.sp-sm;
+                    for r in root.rows: RKv {
+                        kv-label: r.label;
+                        kv-value: r.value;
+                    }
+                }
+                if root.conclusion != "": Text {
+                    text: root.conclusion;
+                    color: VayrenPalette.text;
+                    font-size: VayrenDesign.fs-small;
+                    wrap: word-wrap;
+                }
+                if root.validation-status != "": HorizontalLayout {
+                    spacing: VayrenDesign.sp-sm;
+                    Text {
+                        text: "VALIDATION";
+                        color: VayrenPalette.faint;
+                        font-size: VayrenDesign.fs-label;
+                        font-weight: 700;
+                        width: 116px;
+                    }
+                    Text {
+                        text: root.validation-status + (root.validation-summary == "" ? "" : " â€” " + root.validation-summary);
+                        color: VayrenPalette.muted;
+                        font-size: VayrenDesign.fs-small;
+                        wrap: word-wrap;
+                        horizontal-stretch: 1;
+                    }
+                }
+                if root.fingerprint != "": Text {
+                    text: root.fingerprint;
+                    color: VayrenPalette.faint;
+                    font-size: VayrenDesign.fs-label;
+                    wrap: word-wrap;
+                }
+            }
+        }
+    }
+}
+
+// â”€â”€ lifecycle form (SETUP + HYPOTHESIS): shared by both page branches â”€â”€
+component RFormPane inherits Rectangle {
+    in property <[ResearchConfigGroup]> config-groups;
+    in property <int> form-cols: 1;
+    in property <string> hypothesis;
+    in property <string> question;
+    in property <string> effect;
+    in property <bool> hypothesis-open: false;
+
+    callback config-edited(string, string);
+    callback config-option(string, string);
+    callback hypothesis-edited(string);
+    callback question-edited(string);
+    callback effect-edited(string);
+    callback hypothesis-toggled();
+
+    background: VayrenPalette.bg;
+    VerticalLayout {
+        spacing: VayrenDesign.sp-xl;
+
+        // â”€â”€ SETUP: intelligent grouped configuration â”€â”€
+        VerticalLayout {
+            spacing: VayrenDesign.sp-md;
+            RSectionHead {
+                section-title: "SETUP";
+                section-hint: "Data Â· period Â· capital Â· execution";
+            }
+            for g in root.config-groups: VerticalLayout {
+                spacing: VayrenDesign.sp-sm;
+                HorizontalLayout {
+                    spacing: VayrenDesign.sp-sm;
+                    Text {
+                        text: g.title;
+                        color: VayrenPalette.muted;
+                        font-size: VayrenDesign.fs-label;
+                        font-weight: 800;
+                    }
+                    Rectangle { horizontal-stretch: 1; background: transparent; }
+                    Text {
+                        text: g.hint;
+                        color: VayrenPalette.faint;
+                        font-size: VayrenDesign.fs-label;
+                        overflow: elide;
+                    }
+                }
+                GridLayout {
+                    spacing: VayrenDesign.sp-md;
+                    for f[idx] in g.fields: RField {
+                        row: Math.floor(idx / root.form-cols);
+                        col: Math.mod(idx, root.form-cols);
+                        field-key: f.key;
+                        field-label: f.label;
+                        field-value: f.value;
+                        kind: f.kind;
+                        options: f.options;
+                        selected: f.selected;
+                        edited(k, t) => { root.config-edited(k, t); }
+                        option-picked(k, v) => { root.config-option(k, v); }
+                    }
+                }
+            }
+        }
+
+        // â”€â”€ HYPOTHESIS: progressive-disclosure workbench â”€â”€
+        VerticalLayout {
+            spacing: VayrenDesign.sp-md;
+            RSectionHead {
+                section-title: "HYPOTHESIS";
+                section-hint: root.hypothesis-open ? "Editing â€” state the claim under test"
+                    : (root.hypothesis == "" ? "Not stated â€” required to create" : "Stated â€” click to revise");
+                collapsible: true;
+                open: root.hypothesis-open;
+                toggled => { root.hypothesis-toggled(); }
+            }
+            if root.hypothesis-open: VerticalLayout {
+                spacing: VayrenDesign.sp-sm;
+                LineEdit {
+                    placeholder-text: "Research question â€” what behavior are you testing?";
+                    text: root.question;
+                    edited(t) => { root.question-edited(t); }
+                }
+                TextEdit {
+                    placeholder-text: "Hypothesis â€” the falsifiable claim under testâ€¦";
+                    text: root.hypothesis;
+                    min-height: 72px;
+                    edited(t) => { root.hypothesis-edited(t); }
+                }
+                LineEdit {
+                    placeholder-text: "Expected effect â€” direction and magnitude you predict";
+                    text: root.effect;
+                    edited(t) => { root.effect-edited(t); }
+                }
+            }
+            if !root.hypothesis-open: VerticalLayout {
+                spacing: VayrenDesign.sp-xs;
+                if root.hypothesis == "": Text {
+                    text: "No hypothesis stated â€” a falsifiable claim is required before an experiment can be created.";
+                    color: VayrenPalette.faint;
+                    font-size: VayrenDesign.fs-small;
+                    wrap: word-wrap;
+                }
+                if root.hypothesis != "": Text {
+                    text: "â€œ" + root.hypothesis + "â€";
+                    color: VayrenPalette.text;
+                    font-size: VayrenDesign.fs-small;
+                    wrap: word-wrap;
+                }
+                if root.question != "": Text {
+                    text: "QUESTION  " + root.question;
+                    color: VayrenPalette.muted;
+                    font-size: VayrenDesign.fs-label;
+                    wrap: word-wrap;
+                }
+                if root.effect != "": Text {
+                    text: "EXPECTED  " + root.effect;
+                    color: VayrenPalette.muted;
+                    font-size: VayrenDesign.fs-label;
+                    wrap: word-wrap;
+                }
+            }
+        }
+    }
+}
+
+// â”€â”€ evidence block: verdict â†’ why â†’ supporting â†’ key results â†’ technical â”€â”€
+component REvidencePane inherits Rectangle {
+    in property <bool> wide;
+    in property <string> verdict;
+    in property <int> tone;
+    in property <string> grade;
+    in property <string> summary;
+    in property <[ResearchEvidenceWhy]> why;
+    in property <bool> why-open: false;
+    in property <[ResearchEvidenceDim]> dims;
+    in property <[ResearchMetric]> metrics;
+    in property <int> metric-cols: 2;
+    in property <[ResearchKv]> stats-rows;
+    in property <[ResearchKv]> montecarlo-rows;
+    in property <[ResearchKv]> benchmark-rows;
+    in property <bool> technical-open: false;
+    in property <string> fingerprint-line;
+
+    callback why-toggled();
+    callback technical-toggled();
+
+    property <int> dim-cols: root.wide ? 4 : 2;
+
+    background: VayrenPalette.bg;
+    VerticalLayout {
+        spacing: VayrenDesign.sp-md;
+
+        RSectionHead {
+            section-title: "EVIDENCE";
+            section-hint: "Validation Â· robustness Â· outcome";
+        }
+
+        REvidenceBar {
+            verdict: root.verdict;
+            tone: root.tone;
+            grade: root.grade;
+            summary: root.summary;
+        }
+
+        // WHY â€” honest concerns, one interaction away.
+        if root.why.length > 0: VerticalLayout {
+            spacing: VayrenDesign.sp-xs;
+            RSectionHead {
+                section-title: "WHY";
+                section-hint: root.why-open ? "Engine concerns behind this verdict" : "Click to see the concerns behind this verdict";
+                collapsible: true;
+                open: root.why-open;
+                badge-count: root.why.length;
+                toggled => { root.why-toggled(); }
+            }
+            if root.why-open: VerticalLayout {
+                spacing: VayrenDesign.sp-xs;
+                for w in root.why: HorizontalLayout {
+                    spacing: VayrenDesign.sp-sm;
+                    width: 100%;
+                    Text {
+                        text: w.kind;
+                        color: w.kind == "FAIL" ? VayrenPalette.neg
+                            : w.kind == "WARN" ? VayrenPalette.amber
+                            : VayrenPalette.faint;
+                        font-size: VayrenDesign.fs-label;
+                        font-weight: 800;
+                        width: 44px;
+                        vertical-alignment: top;
+                    }
+                    Text {
+                        text: w.text;
+                        color: VayrenPalette.muted;
+                        font-size: VayrenDesign.fs-small;
+                        wrap: word-wrap;
+                        horizontal-stretch: 1;
+                    }
+                }
+            }
+        }
+
+        // SUPPORTING EVIDENCE â€” per-dimension grid.
+        if root.dims.length > 0: VerticalLayout {
+            spacing: VayrenDesign.sp-sm;
+            Text {
+                text: "SUPPORTING EVIDENCE";
+                color: VayrenPalette.faint;
+                font-size: VayrenDesign.fs-label;
+                font-weight: 700;
+            }
+            GridLayout {
+                spacing: VayrenDesign.sp-sm;
+                for d[idx] in root.dims: RDimChip {
+                    row: Math.floor(idx / root.dim-cols);
+                    col: Math.mod(idx, root.dim-cols);
+                    chip-name: d.name;
+                    chip-status: d.status;
+                    tone: d.tone;
+                    detail: d.detail;
+                }
+            }
+        }
+
+        // KEY RESULTS â€” the metrics that answer "what happened".
+        VerticalLayout {
+            spacing: VayrenDesign.sp-sm;
+            Text {
+                text: "KEY RESULTS";
+                color: VayrenPalette.faint;
+                font-size: VayrenDesign.fs-label;
+                font-weight: 700;
+            }
+            GridLayout {
+                spacing: VayrenDesign.sp-md;
+                for m[idx] in root.metrics: VKpi {
+                    row: Math.floor(idx / root.metric-cols);
+                    col: Math.mod(idx, root.metric-cols);
+                    label: m.label;
+                    value: m.value;
+                    tone: m.tone;
+                }
+            }
+        }
+
+        // TECHNICAL DETAILS â€” what an expert verifies (significance,
+        // monte carlo paths, benchmark). Collapsed by default.
+        if root.stats-rows.length > 0 || root.montecarlo-rows.length > 0
+            || root.benchmark-rows.length > 0: VerticalLayout {
+            spacing: VayrenDesign.sp-xs;
+            RSectionHead {
+                section-title: "TECHNICAL DETAILS";
+                section-hint: root.technical-open ? "Statistics Â· monte carlo Â· benchmark"
+                    : "Significance, distributions, benchmark";
+                collapsible: true;
+                open: root.technical-open;
+                toggled => { root.technical-toggled(); }
+            }
+            if root.technical-open: VerticalLayout {
+                spacing: VayrenDesign.sp-md;
+                if root.stats-rows.length > 0: VerticalLayout {
+                    spacing: VayrenDesign.sp-xs;
+                    Text {
+                        text: "STATISTICAL SIGNIFICANCE";
+                        color: VayrenPalette.muted;
+                        font-size: VayrenDesign.fs-label;
+                        font-weight: 800;
+                    }
+                    for r in root.stats-rows: RKv {
+                        kv-label: r.label;
+                        kv-value: r.value;
+                    }
+                }
+                if root.montecarlo-rows.length > 0: VerticalLayout {
+                    spacing: VayrenDesign.sp-xs;
+                    Text {
+                        text: "MONTE CARLO";
+                        color: VayrenPalette.muted;
+                        font-size: VayrenDesign.fs-label;
+                        font-weight: 800;
+                    }
+                    for r in root.montecarlo-rows: RKv {
+                        kv-label: r.label;
+                        kv-value: r.value;
+                    }
+                }
+                if root.benchmark-rows.length > 0: VerticalLayout {
+                    spacing: VayrenDesign.sp-xs;
+                    Text {
+                        text: "BENCHMARK";
+                        color: VayrenPalette.muted;
+                        font-size: VayrenDesign.fs-label;
+                        font-weight: 800;
+                    }
+                    for r in root.benchmark-rows: RKv {
+                        kv-label: r.label;
+                        kv-value: r.value;
+                    }
+                }
+                if root.fingerprint-line != "": Text {
+                    text: root.fingerprint-line;
+                    color: VayrenPalette.faint;
+                    font-size: VayrenDesign.fs-label;
+                    wrap: word-wrap;
+                }
+            }
+        }
+    }
+}
+
+// â”€â”€ workspace: the experiment lifecycle (evidence-first when complete) â”€â”€
+component WorkspacePane inherits Rectangle {
+    in property <[ResearchConfigGroup]> config-groups;
+    in property <int> form-cols: 1;
+    in property <string> hypothesis;
+    in property <string> question;
+    in property <string> effect;
+    in property <bool> hypothesis-open: false;
+    in property <[ResearchMetric]> metrics;
+    in property <int> metric-cols: 2;
+    in property <bool> show-results;
+    in property <bool> wide;
+    in property <int> tab;
+    in property <[string]> tab-labels;
+    in property <string> signal-filter;
+    in property <string> signal-count-line;
+    in property <[ResearchSignalRow]> signals;
+    in property <string> trade-count-line;
+    in property <[ResearchTradeRow]> trades;
+    in property <[ResearchRobustRow]> robustness;
+    in property <string> compare-verdict;
+    in property <[ResearchCompareRow]> compare-rows;
+    in property <[ResearchKv]> quality-rows;
+    in property <string> validation-status;
+    in property <string> validation-summary;
+    in property <[ResearchKv]> validation-rows;
+    in property <string> conclusion;
+    in property <[ResearchKv]> report-sections;
+    in property <string> fingerprint-line;
+    in property <string> empty-title;
+    in property <string> empty-detail;
+    // â”€â”€ evidence-first layer â”€â”€
+    in property <string> evidence-verdict;
+    in property <int> evidence-tone;
+    in property <string> evidence-grade;
+    in property <[ResearchEvidenceWhy]> evidence-why;
+    in property <bool> why-open: false;
+    in property <[ResearchEvidenceDim]> evidence-dims;
+    in property <[ResearchKv]> stats-rows;
+    in property <[ResearchKv]> montecarlo-rows;
+    in property <[ResearchKv]> benchmark-rows;
+    in property <bool> technical-open: false;
+    in property <bool> show-next-steps: true;
+
+    callback config-edited(string, string);
+    callback config-option(string, string);
+    callback hypothesis-edited(string);
+    callback question-edited(string);
+    callback effect-edited(string);
+    callback tab-picked(int);
+    callback signal-filter-changed(string);
+    callback hypothesis-toggled();
+    callback why-toggled();
+    callback technical-toggled();
+
+    background: VayrenPalette.bg;
+
+    // Completed work reads EVIDENCE-first: the verdict answers "what
+    // happened / can I trust it" before any configuration is revisited.
+    if root.show-results: ScrollView {
+        width: 100%;
+        height: 100%;
+        viewport-width: self.width;
+        VerticalLayout {
+            padding: VayrenDesign.sp-xl;
+            spacing: VayrenDesign.sp-xl;
+            REvidencePane {
+                wide: root.wide;
+                verdict: root.evidence-verdict;
+                tone: root.evidence-tone;
+                grade: root.evidence-grade;
+                summary: root.validation-summary;
+                why: root.evidence-why;
+                why-open: root.why-open;
+                dims: root.evidence-dims;
+                metrics: root.metrics;
+                metric-cols: root.metric-cols;
+                stats-rows: root.stats-rows;
+                montecarlo-rows: root.montecarlo-rows;
+                benchmark-rows: root.benchmark-rows;
+                technical-open: root.technical-open;
+                fingerprint-line: root.fingerprint-line;
+                why-toggled => { root.why-toggled(); }
+                technical-toggled => { root.technical-toggled(); }
+            }
+            RFormPane {
+                config-groups: root.config-groups;
+                form-cols: root.form-cols;
+                hypothesis: root.hypothesis;
+                question: root.question;
+                effect: root.effect;
+                hypothesis-open: root.hypothesis-open;
+                config-edited(k, t) => { root.config-edited(k, t); }
+                config-option(k, v) => { root.config-option(k, v); }
+                hypothesis-edited(t) => { root.hypothesis-edited(t); }
+                question-edited(t) => { root.question-edited(t); }
+                effect-edited(t) => { root.effect-edited(t); }
+                hypothesis-toggled => { root.hypothesis-toggled(); }
+            }
+
+
+            // â”€â”€ 04 DIAGNOSTICS: full evidence tables, one interaction away â”€â”€
+            if root.show-results: VerticalLayout {
+                spacing: VayrenDesign.sp-sm;
+                Rectangle {
+                    height: VayrenDesign.h-tabs;
+                    background: VayrenPalette.bg;
+                    HorizontalLayout {
+                        spacing: 0;
+                        for lbl[idx] in root.tab-labels: RTab {
+                            tab-label: lbl;
+                            active: root.tab == idx;
+                            picked => { root.tab-picked(idx); }
+                        }
+                    }
+                    Hairline {
+                        y: parent.height - 1px;
+                    }
+                }
+                Rectangle {
+                    vertical-stretch: 1;
+                    min-height: 220px;
+                    background: VayrenPalette.bg;
+
+                    if root.tab == 0: VerticalLayout {
+                        spacing: VayrenDesign.sp-sm;
+                        HorizontalLayout {
+                            height: 30px;
+                            spacing: VayrenDesign.sp-md;
+                            LineEdit {
+                                placeholder-text: "Filter signalsâ€¦";
+                                text: root.signal-filter;
+                                horizontal-stretch: 1;
+                                edited(t) => { root.signal-filter-changed(t); }
+                            }
+                            Text {
+                                text: root.signal-count-line;
+                                color: VayrenPalette.faint;
+                                font-size: VayrenDesign.fs-label;
+                                font-weight: 700;
+                                vertical-alignment: center;
+                            }
+                        }
+                        Rectangle {
+                            height: VayrenDesign.row-height;
+                            HorizontalLayout {
+                                padding-left: VayrenDesign.sp-lg;
+                                padding-right: VayrenDesign.sp-lg;
+                                // Shared column weights (heads + rows identical):
+                                // independent row layouts can never drift apart.
+                                Rectangle { horizontal-stretch: 3; VCell { text: "TIME"; head: true; width: 100%; height: 100%; } }
+                                Rectangle { horizontal-stretch: 2; VCell { text: "SYMBOL"; head: true; width: 100%; height: 100%; } }
+                                if root.wide: Rectangle { horizontal-stretch: 1; VCell { text: "TF"; head: true; width: 100%; height: 100%; } }
+                                Rectangle { horizontal-stretch: 1; VCell { text: "SIDE"; head: true; width: 100%; height: 100%; } }
+                                Rectangle { horizontal-stretch: 2; VCell { text: "PRICE"; head: true; align: 1; width: 100%; height: 100%; } }
+                                Rectangle { horizontal-stretch: 2; VCell { text: "EVENT"; head: true; width: 100%; height: 100%; } }
+                                if root.wide: Rectangle { horizontal-stretch: 2; VCell { text: "STRATEGY"; head: true; width: 100%; height: 100%; } }
+                                if root.wide: Rectangle { horizontal-stretch: 2; VCell { text: "EXP"; head: true; width: 100%; height: 100%; } }
+                            }
+                            Hairline {
+                                y: parent.height - 1px;
+                            }
+                        }
+                        ScrollView {
+                            vertical-stretch: 1;
+                            viewport-width: self.width;
+                            VerticalLayout {
+                                spacing: 0;
+                                for s[idx] in root.signals: Rectangle {
+                                    height: VayrenDesign.row-height;
+                                    shov := TouchArea { }
+                                    background: shov.has-hover ? VayrenPalette.hover
+                                        : Math.mod(idx, 2) == 1 ? VayrenPalette.bg2 : transparent;
+                                    HorizontalLayout {
+                                        padding-left: VayrenDesign.sp-lg;
+                                        padding-right: VayrenDesign.sp-lg;
+                                        Rectangle { horizontal-stretch: 3; VCell { text: s.time; width: 100%; height: 100%; } }
+                                        Rectangle { horizontal-stretch: 2; VCell { text: s.symbol; width: 100%; height: 100%; } }
+                                        if root.wide: Rectangle { horizontal-stretch: 1; VCell { text: s.tf; width: 100%; height: 100%; } }
+                                        Rectangle { horizontal-stretch: 1; VCell { text: s.side; width: 100%; height: 100%; } }
+                                        Rectangle { horizontal-stretch: 2; VCell { text: s.price; align: 1; width: 100%; height: 100%; } }
+                                        Rectangle { horizontal-stretch: 2; VCell { text: s.event; width: 100%; height: 100%; } }
+                                        if root.wide: Rectangle { horizontal-stretch: 2; VCell { text: s.strategy; width: 100%; height: 100%; } }
+                                        if root.wide: Rectangle { horizontal-stretch: 2; VCell { text: s.exp; width: 100%; height: 100%; } }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if root.tab == 1: VerticalLayout {
+                        spacing: 0;
+                        HorizontalLayout {
+                            height: 30px;
+                            spacing: VayrenDesign.sp-md;
+                            Text {
+                                text: "CLOSED TRADES";
+                                color: VayrenPalette.text;
+                                font-size: VayrenDesign.fs-small;
+                                font-weight: 800;
+                                vertical-alignment: center;
+                            }
+                            Rectangle { horizontal-stretch: 1; background: transparent; }
+                            Text {
+                                text: root.trade-count-line;
+                                color: VayrenPalette.faint;
+                                font-size: VayrenDesign.fs-label;
+                                font-weight: 700;
+                                vertical-alignment: center;
+                            }
+                        }
+                        Rectangle {
+                            height: VayrenDesign.row-height;
+                            HorizontalLayout {
+                                padding-left: VayrenDesign.sp-lg;
+                                padding-right: VayrenDesign.sp-lg;
+                                Rectangle { horizontal-stretch: 1; VCell { text: "#"; head: true; width: 100%; height: 100%; } }
+                                Rectangle { horizontal-stretch: 3; VCell { text: "ENTRY"; head: true; width: 100%; height: 100%; } }
+                                Rectangle { horizontal-stretch: 3; VCell { text: "EXIT"; head: true; width: 100%; height: 100%; } }
+                                Rectangle { horizontal-stretch: 1; VCell { text: "SIDE"; head: true; width: 100%; height: 100%; } }
+                                Rectangle { horizontal-stretch: 2; VCell { text: "P&L"; head: true; align: 1; width: 100%; height: 100%; } }
+                                if root.wide: Rectangle { horizontal-stretch: 1; VCell { text: "QTY"; head: true; align: 1; width: 100%; height: 100%; } }
+                                if root.wide: Rectangle { horizontal-stretch: 2; VCell { text: "REASON"; head: true; width: 100%; height: 100%; } }
+                                if root.wide: Rectangle { horizontal-stretch: 1; VCell { text: "HOLD"; head: true; align: 1; width: 100%; height: 100%; } }
+                            }
+                            Hairline {
+                                y: parent.height - 1px;
+                            }
+                        }
+                        ScrollView {
+                            vertical-stretch: 1;
+                            viewport-width: self.width;
+                            VerticalLayout {
+                                spacing: 0;
+                                for t[idx] in root.trades: Rectangle {
+                                    height: VayrenDesign.row-height;
+                                    thov := TouchArea { }
+                                    background: thov.has-hover ? VayrenPalette.hover
+                                        : Math.mod(idx, 2) == 1 ? VayrenPalette.bg2 : transparent;
+                                    HorizontalLayout {
+                                        padding-left: VayrenDesign.sp-lg;
+                                        padding-right: VayrenDesign.sp-lg;
+                                        Rectangle { horizontal-stretch: 1; VCell { text: t.no; width: 100%; height: 100%; } }
+                                        Rectangle { horizontal-stretch: 3; VCell { text: t.entry; width: 100%; height: 100%; } }
+                                        Rectangle { horizontal-stretch: 3; VCell { text: t.exit; width: 100%; height: 100%; } }
+                                        Rectangle { horizontal-stretch: 1; VCell { text: t.side; width: 100%; height: 100%; } }
+                                        Rectangle { horizontal-stretch: 2; VCell { text: t.pnl; align: 1; tone: t.pnl-tone; width: 100%; height: 100%; } }
+                                        if root.wide: Rectangle { horizontal-stretch: 1; VCell { text: t.qty; align: 1; width: 100%; height: 100%; } }
+                                        if root.wide: Rectangle { horizontal-stretch: 2; VCell { text: t.reason; width: 100%; height: 100%; } }
+                                        if root.wide: Rectangle { horizontal-stretch: 1; VCell { text: t.hold; align: 1; width: 100%; height: 100%; } }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if root.tab == 2: ScrollView {
+                        width: 100%;
+                        height: 100%;
+                        viewport-width: self.width;
+                        VerticalLayout {
+                            padding-top: VayrenDesign.sp-md;
+                            spacing: VayrenDesign.sp-md;
+                            for r in root.robustness: VerticalLayout {
+                                spacing: VayrenDesign.sp-xs;
+                                HorizontalLayout {
+                                    spacing: VayrenDesign.sp-md;
+                                    Text {
+                                        text: r.test;
+                                        color: VayrenPalette.text;
+                                        font-size: VayrenDesign.fs-small;
+                                        font-weight: 700;
+                                        vertical-alignment: center;
+                                    }
+                                    Rectangle { horizontal-stretch: 1; background: transparent; }
+                                    VBadge {
+                                        text: r.stability;
+                                        tone: r.stability-tone;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                Text {
+                                    text: r.input;
+                                    color: VayrenPalette.faint;
+                                    font-size: VayrenDesign.fs-label;
+                                }
+                                Text {
+                                    text: r.evidence;
+                                    color: VayrenPalette.muted;
+                                    font-size: VayrenDesign.fs-small;
+                                    wrap: word-wrap;
+                                }
+                                Hairline { }
+                            }
+                        }
+                    }
+
+                    if root.tab == 3: VerticalLayout {
+                        spacing: VayrenDesign.sp-sm;
+                        Text {
+                            text: root.compare-verdict == "" ? "Save experiments to compare them here." : root.compare-verdict;
+                            color: VayrenPalette.muted;
+                            font-size: VayrenDesign.fs-small;
+                            wrap: word-wrap;
+                        }
+                        Rectangle {
+                            height: VayrenDesign.row-height;
+                            HorizontalLayout {
+                                padding-left: VayrenDesign.sp-lg;
+                                padding-right: VayrenDesign.sp-lg;
+                                Rectangle { horizontal-stretch: 2; VCell { text: "EXPERIMENT"; head: true; width: 100%; height: 100%; } }
+                                Rectangle { horizontal-stretch: 2; VCell { text: "STRATEGY"; head: true; width: 100%; height: 100%; } }
+                                Rectangle { horizontal-stretch: 1; VCell { text: "STATUS"; head: true; width: 100%; height: 100%; } }
+                                Rectangle { horizontal-stretch: 3; VCell { text: "DETAIL"; head: true; width: 100%; height: 100%; } }
+                            }
+                            Hairline {
+                                y: parent.height - 1px;
+                            }
+                        }
+                        ScrollView {
+                            vertical-stretch: 1;
+                            viewport-width: self.width;
+                            VerticalLayout {
+                                spacing: 0;
+                                for c[idx] in root.compare-rows: Rectangle {
+                                    height: VayrenDesign.row-height;
+                                    background: Math.mod(idx, 2) == 1 ? VayrenPalette.bg2 : transparent;
+                                    HorizontalLayout {
+                                        padding-left: VayrenDesign.sp-lg;
+                                        padding-right: VayrenDesign.sp-lg;
+                                        Rectangle { horizontal-stretch: 2; VCell { text: c.exp; width: 100%; height: 100%; } }
+                                        Rectangle { horizontal-stretch: 2; VCell { text: c.strategy; width: 100%; height: 100%; } }
+                                        Rectangle { horizontal-stretch: 1; VCell { text: c.status; width: 100%; height: 100%; } }
+                                        Rectangle { horizontal-stretch: 3; VCell { text: c.detail; width: 100%; height: 100%; } }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if root.tab == 4: ScrollView {
+                        width: 100%;
+                        height: 100%;
+                        viewport-width: self.width;
+                        VerticalLayout {
+                            padding-top: VayrenDesign.sp-md;
+                            spacing: VayrenDesign.sp-sm;
+                            for q in root.quality-rows: RKv {
+                                kv-label: q.label;
+                                kv-value: q.value;
+                            }
+                        }
+                    }
+
+                    if root.tab == 5: ScrollView {
+                        width: 100%;
+                        height: 100%;
+                        viewport-width: self.width;
+                        VerticalLayout {
+                            padding-top: VayrenDesign.sp-md;
+                            spacing: VayrenDesign.sp-sm;
+                            HorizontalLayout {
+                                spacing: VayrenDesign.sp-md;
+                                Text {
+                                    text: "VALIDATION";
+                                    color: VayrenPalette.text;
+                                    font-size: VayrenDesign.fs-small;
+                                    font-weight: 800;
+                                    vertical-alignment: center;
+                                }
+                                VBadge {
+                                    text: root.validation-status == "" ? "NOT RUN" : root.validation-status;
+                                    tone: 0;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            Text {
+                                text: root.validation-summary;
+                                color: VayrenPalette.muted;
+                                font-size: VayrenDesign.fs-small;
+                                wrap: word-wrap;
+                            }
+                            for v in root.validation-rows: RKv {
+                                kv-label: v.label;
+                                kv-value: v.value;
+                            }
+                        }
+                    }
+
+                    if root.tab == 6: ScrollView {
+                        width: 100%;
+                        height: 100%;
+                        viewport-width: self.width;
+                        VerticalLayout {
+                            padding-top: VayrenDesign.sp-md;
+                            spacing: VayrenDesign.sp-sm;
+                            VBanner {
+                                width: 100%;
+                                message: root.conclusion;
+                                tone: 1;
+                            }
+                            for s in root.report-sections: RKv {
+                                kv-label: s.label;
+                                kv-value: s.value;
+                            }
+                            Text {
+                                text: root.fingerprint-line;
+                                color: VayrenPalette.faint;
+                                font-size: VayrenDesign.fs-label;
+                                wrap: word-wrap;
+                            }
+                        }
+                    }
+
+                    if root.tab == 7: VEmptyState {
+                        width: 100%;
+                        height: 100%;
+                        title: "NO CHART SERIES";
+                        detail: "Price / equity / drawdown charts appear here once the engine supplies a dated series. No synthetic charts.";
+                    }
+                }
+            }
+
+        }
+    }
+
+    // Awaiting execution: SETUP-first; the next-steps panel absorbs all
+    // remaining height so tall windows show guidance, never voids.
+    if !root.show-results: sv := ScrollView {
+        width: 100%;
+        height: 100%;
+        viewport-width: self.width;
+        page := VerticalLayout {
+            // Floor the page at the viewport height: the guidance panel's
+            // stretch absorbs the slack (no void at tall windows), while
+            // taller content scrolls normally.
+            min-height: sv.height;
+            padding: VayrenDesign.sp-xl;
+            spacing: VayrenDesign.sp-xl;
+            RFormPane {
+                config-groups: root.config-groups;
+                form-cols: root.form-cols;
+                hypothesis: root.hypothesis;
+                question: root.question;
+                effect: root.effect;
+                hypothesis-open: root.hypothesis-open;
+                config-edited(k, t) => { root.config-edited(k, t); }
+                config-option(k, v) => { root.config-option(k, v); }
+                hypothesis-edited(t) => { root.hypothesis-edited(t); }
+                question-edited(t) => { root.question-edited(t); }
+                effect-edited(t) => { root.effect-edited(t); }
+                hypothesis-toggled => { root.hypothesis-toggled(); }
+            }
+            Rectangle {
+                vertical-stretch: 1;
+                min-height: 220px;
+                VerticalLayout {
+                    padding: VayrenDesign.sp-lg;
+                    spacing: VayrenDesign.sp-md;
+                    Hairline { }
+                    RSectionHead {
+                        section-title: "EVIDENCE";
+                        section-hint: "Awaiting execution â€” the verdict leads this page once results exist";
+                    }
+                    if root.show-next-steps: VerticalLayout {
+                        spacing: VayrenDesign.sp-xs;
+                        HorizontalLayout {
+                            spacing: VayrenDesign.sp-sm;
+                            width: 100%;
+                            Text {
+                                text: "01";
+                                color: VayrenPalette.accent-dim;
+                                font-size: VayrenDesign.fs-label;
+                                font-weight: 800;
+                                width: 22px;
+                            }
+                            Text {
+                                text: "Finalize the setup â€” data, period, capital, costs, execution";
+                                color: VayrenPalette.muted;
+                                font-size: VayrenDesign.fs-small;
+                                vertical-alignment: center;
+                            }
+                        }
+                        HorizontalLayout {
+                            spacing: VayrenDesign.sp-sm;
+                            width: 100%;
+                            Text {
+                                text: "02";
+                                color: VayrenPalette.accent-dim;
+                                font-size: VayrenDesign.fs-label;
+                                font-weight: 800;
+                                width: 22px;
+                            }
+                            Text {
+                                text: "State a falsifiable hypothesis â€” the evidence will judge it, not hope";
+                                color: VayrenPalette.muted;
+                                font-size: VayrenDesign.fs-small;
+                                vertical-alignment: center;
+                            }
+                        }
+                        HorizontalLayout {
+                            spacing: VayrenDesign.sp-sm;
+                            width: 100%;
+                            Text {
+                                text: "03";
+                                color: VayrenPalette.accent-dim;
+                                font-size: VayrenDesign.fs-label;
+                                font-weight: 800;
+                                width: 22px;
+                            }
+                            Text {
+                                text: "Create the experiment, then RUN RESEARCH";
+                                color: VayrenPalette.muted;
+                                font-size: VayrenDesign.fs-small;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                    VEmptyState {
+                        width: 100%;
+                        vertical-stretch: 1;
+                        title: root.empty-title;
+                        detail: root.empty-detail;
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component ResearchScreen inherits Rectangle {
+    // Breakpoints arrive from the host (computed from the content width).
+    in property <bool> wide;
+    in property <bool> medium;
+    // === identity / configuration (pre-formatted by the Rust bridge) ===
+    in property <string> strategy-name;
+    in property <string> strategy-version;
+    in property <string> experiment-id;
+    in property <string> context-line;
+    in property <[ResearchStrategyRow]> strategies;
+    in property <[ResearchExperimentRow]> experiments;
+    in property <string> strategy-count;
+    in property <string> experiment-count;
+    in property <[ResearchConfigGroup]> config-groups;
+    in property <string> hypothesis;
+    in property <string> question;
+    in property <string> effect;
+    in property <string> create-error;
+    // === execution state ===
+    in property <string> state-label;
+    in property <int> state-tone;
+    in property <bool> has-strategy;
+    in property <bool> show-results;
+    in property <bool> stale;
+    in property <bool> run-enabled;
+    in property <string> run-blocked-reason;
+    in property <bool> cancel-visible;
+    in property <bool> create-visible;
+    // === results ===
+    in property <[ResearchMetric]> metrics;
+    in property <string> signal-count-line;
+    in property <string> trade-count-line;
+    in property <[ResearchSignalRow]> signals;
+    in property <[ResearchTradeRow]> trades;
+    in property <[ResearchRobustRow]> robustness;
+    in property <[ResearchKv]> validation-rows;
+    in property <[ResearchKv]> quality-rows;
+    in property <[ResearchKv]> inspector-rows;
+    in property <[ResearchKv]> report-sections;
+    in property <[ResearchCompareRow]> compare-rows;
+    in property <string> compare-verdict;
+    in property <string> empty-title;
+    in property <string> empty-detail;
+    in property <string> conclusion;
+    in property <string> validation-status;
+    in property <string> validation-summary;
+    in property <string> fingerprint-line;
+    // === evidence-first layer ===
+    in property <string> evidence-verdict;
+    in property <int> evidence-tone;
+    in property <string> evidence-grade;
+    in property <[ResearchEvidenceWhy]> evidence-why;
+    in property <[ResearchEvidenceDim]> evidence-dims;
+    in property <[ResearchKv]> stats-rows;
+    in property <[ResearchKv]> montecarlo-rows;
+    in property <[ResearchKv]> benchmark-rows;
+    in property <[ResearchKvGroup]> inspector-groups;
+    // === chrome state ===
+    in property <int> tab;
+    in property <bool> inspector-open;
+    in property <int> narrow-view;
+    in property <string> signal-filter;
+    in property <[string]> log-lines;
+    in property <string> log-status;
+    in property <bool> log-expanded;
+    in property <bool> hypothesis-open;
+    in property <bool> why-open;
+    in property <bool> technical-open;
+    in property <bool> show-next-steps;
+
+    callback strategy-picked(int);
+    callback config-edited(string, string);
+    callback config-option(string, string);
+    callback hypothesis-edited(string);
+    callback question-edited(string);
+    callback effect-edited(string);
+    callback create-pressed();
+    callback run-pressed();
+    callback cancel-pressed();
+    callback tab-picked(int);
+    callback inspector-toggled();
+    callback narrow-view-picked(int);
+    callback signal-filter-changed(string);
+    callback experiment-picked(int);
+    callback hypothesis-toggled();
+    callback why-toggled();
+    callback technical-toggled();
+
+    // Read-only observables for embedders and headless verification.
+    out property <string> layout-id: wide ? "wide" : medium ? "medium-navigator" : narrow-view == 1 ? "narrow-navigator" : narrow-view == 2 ? "narrow-inspector" : "narrow-workspace";
+    out property <bool> inspector-shown: wide || (medium && inspector-open) || (!medium && narrow-view == 2);
+    out property <int> form-cols: wide ? 3 : medium ? 2 : 1;
+    out property <int> metric-cols: wide ? 5 : medium ? 3 : 2;
+
+    property <length> nav-width: wide ? 232px : 200px;
+    property <[string]> tab-labels: ["SIGNALS", "TRADES", "ROBUSTNESS", "COMPARE", "DATA", "VALIDATION", "REPORT", "VISUALS"];
+
+    background: VayrenPalette.bg;
+
+    VerticalLayout {
+        spacing: 0;
+
+        // â”€â”€ research command center: identity â†’ context â†’ action â”€â”€
+        // The whole research state reads in under two seconds.
+        Rectangle {
+            background: VayrenPalette.bg1;
+            VerticalLayout {
+                padding-left: VayrenDesign.sp-xl;
+                padding-right: VayrenDesign.sp-lg;
+                padding-top: VayrenDesign.sp-md;
+                padding-bottom: VayrenDesign.sp-md;
+                spacing: VayrenDesign.sp-sm;
+                HorizontalLayout {
+                    spacing: VayrenDesign.sp-md;
+                    Text {
+                        text: "RESEARCH";
+                        color: VayrenPalette.text;
+                        font-size: VayrenDesign.fs-body;
+                        font-weight: 800;
+                        vertical-alignment: center;
+                    }
+                    Rectangle {
+                        height: 18px;
+                        width: 118px;
+                        border-radius: 9px;
+                        background: root.state-tone == 1 ? VayrenPalette.pos-dim
+                            : root.state-tone == 2 ? VayrenPalette.warn-dim
+                            : root.state-tone == 3 ? VayrenPalette.neg-dim
+                            : VayrenPalette.bg2;
+                        Text {
+                            text: root.state-label;
+                            color: root.state-tone == 1 ? VayrenPalette.pos : root.state-tone == 2 ? VayrenPalette.amber : root.state-tone == 3 ? VayrenPalette.neg : root.state-tone == 4 ? VayrenPalette.accent : VayrenPalette.muted;
+                            font-size: VayrenDesign.fs-label;
+                            font-weight: 800;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                    Rectangle { horizontal-stretch: 1; background: transparent; }
+                    if !wide && medium: VButton {
+                        label: root.inspector-open ? "HIDE INSPECTOR" : "INSPECTOR";
+                        variant: 2;
+                        clicked => { root.inspector-toggled(); }
+                    }
+                    if root.create-visible: VButton {
+                        label: "CREATE EXPERIMENT";
+                        variant: 1;
+                        clicked => { root.create-pressed(); }
+                    }
+                    if root.cancel-visible: VButton {
+                        label: "CANCEL";
+                        variant: 3;
+                        clicked => { root.cancel-pressed(); }
+                    }
+                    VButton {
+                        label: "â–¶  RUN RESEARCH";
+                        variant: 0;
+                        enabled: root.run-enabled;
+                        clicked => { root.run-pressed(); }
+                    }
+                }
+                // Context: strategy Â· universe Â· symbols Â· timeframe Â· period.
+                Text {
+                    text: root.context-line;
+                    color: VayrenPalette.muted;
+                    font-size: VayrenDesign.fs-label;
+                    overflow: elide;
+                }
+                if root.create-error != "": VBanner {
+                    width: 100%;
+                    message: root.create-error;
+                    tone: 3;
+                }
+                if root.run-blocked-reason != "" && !root.run-enabled: Text {
+                    text: root.run-blocked-reason;
+                    color: VayrenPalette.faint;
+                    font-size: VayrenDesign.fs-label;
+                }
+                if root.stale: VBanner {
+                    width: 100%;
+                    message: "Results are STALE â€” configuration changed since execution. Stored evidence is kept, not presented as current.";
+                    tone: 2;
+                }
+            }
+            Hairline {
+                y: parent.height - 1px;
+            }
+        }
+
+        // â”€â”€ adaptive body: recompose, never squeeze â”€â”€
+        Rectangle {
+            vertical-stretch: 1;
+            background: VayrenPalette.bg;
+
+            if wide: HorizontalLayout {
+                spacing: 0;
+                NavPane {
+                    width: root.nav-width;
+                    strategies: root.strategies;
+                    experiments: root.experiments;
+                    strategy-count: root.strategy-count;
+                    experiment-count: root.experiment-count;
+                    strategy-picked(i) => { root.strategy-picked(i); }
+                    experiment-picked(i) => { root.experiment-picked(i); }
+                }
+                Rectangle { width: 1px; background: VayrenPalette.hairline; }
+                WorkspacePane {
+                    horizontal-stretch: 1;
+                    config-groups: root.config-groups;
+                    form-cols: root.form-cols;
+                    hypothesis: root.hypothesis;
+                    question: root.question;
+                    effect: root.effect;
+                    hypothesis-open: root.hypothesis-open;
+                    metrics: root.metrics;
+                    metric-cols: root.metric-cols;
+                    show-results: root.show-results;
+                    wide: root.wide;
+                    tab: root.tab;
+                    tab-labels: root.tab-labels;
+                    signal-filter: root.signal-filter;
+                    signal-count-line: root.signal-count-line;
+                    signals: root.signals;
+                    trade-count-line: root.trade-count-line;
+                    trades: root.trades;
+                    robustness: root.robustness;
+                    compare-verdict: root.compare-verdict;
+                    compare-rows: root.compare-rows;
+                    quality-rows: root.quality-rows;
+                    validation-status: root.validation-status;
+                    validation-summary: root.validation-summary;
+                    validation-rows: root.validation-rows;
+                    conclusion: root.conclusion;
+                    report-sections: root.report-sections;
+                    fingerprint-line: root.fingerprint-line;
+                    empty-title: root.empty-title;
+                    empty-detail: root.empty-detail;
+                    evidence-verdict: root.evidence-verdict;
+                    evidence-tone: root.evidence-tone;
+                    evidence-grade: root.evidence-grade;
+                    evidence-why: root.evidence-why;
+                    why-open: root.why-open;
+                    evidence-dims: root.evidence-dims;
+                    stats-rows: root.stats-rows;
+                    montecarlo-rows: root.montecarlo-rows;
+                    benchmark-rows: root.benchmark-rows;
+                    technical-open: root.technical-open;
+                    show-next-steps: root.show-next-steps;
+                    config-edited(k, t) => { root.config-edited(k, t); }
+                    config-option(k, i) => { root.config-option(k, i); }
+                    hypothesis-edited(t) => { root.hypothesis-edited(t); }
+                    question-edited(t) => { root.question-edited(t); }
+                    effect-edited(t) => { root.effect-edited(t); }
+                    tab-picked(i) => { root.tab-picked(i); }
+                    signal-filter-changed(t) => { root.signal-filter-changed(t); }
+                    hypothesis-toggled => { root.hypothesis-toggled(); }
+                    why-toggled => { root.why-toggled(); }
+                    technical-toggled => { root.technical-toggled(); }
+                }
+                Rectangle { width: 1px; background: VayrenPalette.hairline; }
+                InspectorPane {
+                    width: 300px;
+                    groups: root.inspector-groups;
+                    has-groups: root.inspector-groups.length > 0;
+                    rows: root.inspector-rows;
+                    conclusion: root.conclusion;
+                    fingerprint: root.fingerprint-line;
+                    validation-status: root.validation-status;
+                    validation-summary: root.validation-summary;
+                }
+            }
+
+            if !wide && medium: VerticalLayout {
+                spacing: 0;
+                HorizontalLayout {
+                    vertical-stretch: 1;
+                    spacing: 0;
+                    NavPane {
+                        width: root.nav-width;
+                        strategies: root.strategies;
+                        experiments: root.experiments;
+                        strategy-count: root.strategy-count;
+                        experiment-count: root.experiment-count;
+                        strategy-picked(i) => { root.strategy-picked(i); }
+                        experiment-picked(i) => { root.experiment-picked(i); }
+                    }
+                    Rectangle { width: 1px; background: VayrenPalette.hairline; }
+                    WorkspacePane {
+                        horizontal-stretch: 1;
+                        config-groups: root.config-groups;
+                        form-cols: root.form-cols;
+                        hypothesis: root.hypothesis;
+                        question: root.question;
+                        effect: root.effect;
+                        hypothesis-open: root.hypothesis-open;
+                        metrics: root.metrics;
+                        metric-cols: root.metric-cols;
+                        show-results: root.show-results;
+                        wide: root.wide;
+                        tab: root.tab;
+                        tab-labels: root.tab-labels;
+                        signal-filter: root.signal-filter;
+                        signal-count-line: root.signal-count-line;
+                        signals: root.signals;
+                        trade-count-line: root.trade-count-line;
+                        trades: root.trades;
+                        robustness: root.robustness;
+                        compare-verdict: root.compare-verdict;
+                        compare-rows: root.compare-rows;
+                        quality-rows: root.quality-rows;
+                        validation-status: root.validation-status;
+                        validation-summary: root.validation-summary;
+                        validation-rows: root.validation-rows;
+                        conclusion: root.conclusion;
+                        report-sections: root.report-sections;
+                        fingerprint-line: root.fingerprint-line;
+                        empty-title: root.empty-title;
+                        empty-detail: root.empty-detail;
+                        evidence-verdict: root.evidence-verdict;
+                        evidence-tone: root.evidence-tone;
+                        evidence-grade: root.evidence-grade;
+                        evidence-why: root.evidence-why;
+                        why-open: root.why-open;
+                        evidence-dims: root.evidence-dims;
+                        stats-rows: root.stats-rows;
+                        montecarlo-rows: root.montecarlo-rows;
+                        benchmark-rows: root.benchmark-rows;
+                        technical-open: root.technical-open;
+                        show-next-steps: root.show-next-steps;
+                        config-edited(k, t) => { root.config-edited(k, t); }
+                        config-option(k, v) => { root.config-option(k, v); }
+                        hypothesis-edited(t) => { root.hypothesis-edited(t); }
+                        question-edited(t) => { root.question-edited(t); }
+                        effect-edited(t) => { root.effect-edited(t); }
+                        tab-picked(i) => { root.tab-picked(i); }
+                        signal-filter-changed(t) => { root.signal-filter-changed(t); }
+                        hypothesis-toggled => { root.hypothesis-toggled(); }
+                        why-toggled => { root.why-toggled(); }
+                        technical-toggled => { root.technical-toggled(); }
+                    }
+                }
+                if root.inspector-open: Rectangle {
+                    height: VayrenDesign.research-inspector-drawer;
+                    background: VayrenPalette.bg;
+                    InspectorPane {
+                        width: 100%;
+                        height: 100%;
+                        groups: root.inspector-groups;
+                        has-groups: root.inspector-groups.length > 0;
+                        rows: root.inspector-rows;
+                        conclusion: root.conclusion;
+                        fingerprint: root.fingerprint-line;
+                        validation-status: root.validation-status;
+                        validation-summary: root.validation-summary;
+                    }
+                    Hairline {
+                        y: 0px;
+                    }
+                }
+            }
+
+            if !medium: VerticalLayout {
+                spacing: 0;
+                HorizontalLayout {
+                    height: VayrenDesign.h-tabs;
+                    padding-left: VayrenDesign.sp-md;
+                    spacing: VayrenDesign.sp-sm;
+                    RTab {
+                        tab-label: "WORKSPACE";
+                        active: root.narrow-view == 0;
+                        picked => { root.narrow-view-picked(0); }
+                    }
+                    RTab {
+                        tab-label: "NAVIGATOR";
+                        active: root.narrow-view == 1;
+                        picked => { root.narrow-view-picked(1); }
+                    }
+                    RTab {
+                        tab-label: "INSPECTOR";
+                        active: root.narrow-view == 2;
+                        picked => { root.narrow-view-picked(2); }
+                    }
+                }
+                Hairline { }
+                if root.narrow-view == 0: WorkspacePane {
+                    vertical-stretch: 1;
+                    config-groups: root.config-groups;
+                    form-cols: root.form-cols;
+                    hypothesis: root.hypothesis;
+                    question: root.question;
+                    effect: root.effect;
+                    hypothesis-open: root.hypothesis-open;
+                    metrics: root.metrics;
+                    metric-cols: root.metric-cols;
+                    show-results: root.show-results;
+                    wide: root.wide;
+                    tab: root.tab;
+                    tab-labels: root.tab-labels;
+                    signal-filter: root.signal-filter;
+                    signal-count-line: root.signal-count-line;
+                    signals: root.signals;
+                    trade-count-line: root.trade-count-line;
+                    trades: root.trades;
+                    robustness: root.robustness;
+                    compare-verdict: root.compare-verdict;
+                    compare-rows: root.compare-rows;
+                    quality-rows: root.quality-rows;
+                    validation-status: root.validation-status;
+                    validation-summary: root.validation-summary;
+                    validation-rows: root.validation-rows;
+                    conclusion: root.conclusion;
+                    report-sections: root.report-sections;
+                    fingerprint-line: root.fingerprint-line;
+                    empty-title: root.empty-title;
+                    empty-detail: root.empty-detail;
+                    evidence-verdict: root.evidence-verdict;
+                    evidence-tone: root.evidence-tone;
+                    evidence-grade: root.evidence-grade;
+                    evidence-why: root.evidence-why;
+                    why-open: root.why-open;
+                    evidence-dims: root.evidence-dims;
+                    stats-rows: root.stats-rows;
+                    montecarlo-rows: root.montecarlo-rows;
+                    benchmark-rows: root.benchmark-rows;
+                    technical-open: root.technical-open;
+                    show-next-steps: root.show-next-steps;
+                    config-edited(k, t) => { root.config-edited(k, t); }
+                    config-option(k, i) => { root.config-option(k, i); }
+                    hypothesis-edited(t) => { root.hypothesis-edited(t); }
+                    question-edited(t) => { root.question-edited(t); }
+                    effect-edited(t) => { root.effect-edited(t); }
+                    tab-picked(i) => { root.tab-picked(i); }
+                    signal-filter-changed(t) => { root.signal-filter-changed(t); }
+                    hypothesis-toggled => { root.hypothesis-toggled(); }
+                    why-toggled => { root.why-toggled(); }
+                    technical-toggled => { root.technical-toggled(); }
+                }
+                if root.narrow-view == 1: NavPane {
+                    vertical-stretch: 1;
+                    strategies: root.strategies;
+                    experiments: root.experiments;
+                    strategy-count: root.strategy-count;
+                    experiment-count: root.experiment-count;
+                    strategy-picked(i) => { root.strategy-picked(i); }
+                    experiment-picked(i) => { root.experiment-picked(i); }
+                }
+                if root.narrow-view == 2: InspectorPane {
+                    vertical-stretch: 1;
+                    groups: root.inspector-groups;
+                    has-groups: root.inspector-groups.length > 0;
+                    rows: root.inspector-rows;
+                    conclusion: root.conclusion;
+                    fingerprint: root.fingerprint-line;
+                    validation-status: root.validation-status;
+                    validation-summary: root.validation-summary;
+                }
+            }
+        }
+
+        // â”€â”€ research log: state-driven telemetry strip â”€â”€
+        Rectangle {
+            height: root.log-expanded ? VayrenDesign.research-log-expanded : VayrenDesign.research-log-compact;
+            background: VayrenPalette.bg1;
+            VerticalLayout {
+                spacing: 0;
+                Hairline { }
+                HorizontalLayout {
+                    height: VayrenDesign.research-log-compact;
+                    padding-left: VayrenDesign.sp-lg;
+                    padding-right: VayrenDesign.sp-lg;
+                    spacing: VayrenDesign.sp-md;
+                    Text {
+                        text: "LOG";
+                        color: VayrenPalette.faint;
+                        font-size: VayrenDesign.fs-label;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: root.log-status;
+                        color: VayrenPalette.muted;
+                        font-size: VayrenDesign.fs-label;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                        overflow: elide;
+                    }
+                }
+                if root.log-expanded: ScrollView {
+                    vertical-stretch: 1;
+                    viewport-width: self.width;
+                    VerticalLayout {
+                        padding-left: VayrenDesign.sp-lg;
+                        padding-right: VayrenDesign.sp-lg;
+                        spacing: 0;
+                        for line in root.log-lines: Text {
+                            text: line;
+                            color: VayrenPalette.muted;
+                            font-size: VayrenDesign.fs-label;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

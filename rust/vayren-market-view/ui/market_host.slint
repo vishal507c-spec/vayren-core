@@ -1,0 +1,292 @@
+// Market host window — integration glue ONLY, never visual design.
+//
+// Root `Window` hosting the EXISTING verified `MarketScreen` unmodified
+// (all presentation, layout, responsive behavior and styling live in
+// `../../vayren-shell/ui/market.slint`). Every property below is a pure
+// pass-through binding; every callback forwards outward for the Rust
+// view-model. Nothing here may add, restyle, or recompose content.
+
+import {
+    MarketScreen,
+    MarketWatchRow,
+    MarketCandle,
+    MarketTick,
+    MarketTimeframe,
+    MarketIndicator,
+    MarketPopupRow,
+    MarketPlotSeg,
+    MarketMarker,
+    MarketTradeContext,
+    DlPlan,
+    DlStatus,
+    DlCalDay,
+    DlCredField,
+    DlStock,
+} from "../../vayren-shell/ui/market.slint";
+
+export component MarketHostWindow inherits Window {
+    title: "VAYREN \u{2014} Market";
+    background: transparent;
+    no-frame: true;
+
+    in-out property <bool> panel-visible: true;
+    in-out property <string> symbol-title;
+    in-out property <string> timeframe-label;
+    in-out property <string> exchange-label;
+    in-out property <string> status-message;
+    in-out property <bool> has-data: false;
+    in-out property <string> header-ohlc;
+    in-out property <[MarketWatchRow]> watch-rows;
+    in-out property <[string]> watchlists;
+    in-out property <string> watchlist-name;
+    in-out property <string> filter;
+    in-out property <bool> sort-ascending: true;
+    in-out property <[MarketTimeframe]> timeframes-visible;
+    in-out property <[MarketTimeframe]> timeframes-overflow;
+    in-out property <int> plot-slots: 0;
+    in-out property <[MarketCandle]> candles;
+    in-out property <[MarketTick]> price-ticks;
+    in-out property <[MarketTick]> time-ticks;
+    in-out property <[MarketPlotSeg]> plot-segments;
+    in-out property <[MarketMarker]> markers;
+    in-out property <float> hover-x: 0.5;
+    in-out property <float> hover-y: 0.5;
+    in-out property <string> hover-price;
+    in-out property <string> hover-time;
+    in-out property <string> hover-volume;
+    in-out property <bool> hover-bull: true;
+    in-out property <bool> has-hover: false;
+    in-out property <[MarketIndicator]> indicator-rows;
+    in-out property <bool> popup-open: false;
+    in-out property <string> popup-query;
+    in-out property <string> popup-category: "ALL";
+    in-out property <[MarketPopupRow]> popup-rows;
+    in-out property <string> active-label;
+    in-out property <MarketTradeContext> trade-context;
+    in-out property <bool> wide: true;
+    in-out property <bool> medium: true;
+
+    // Historical-Download console pass-through
+    in-out property <bool> dl-open: false;
+    in-out property <bool> dl-busy: false;
+    in-out property <int> dl-interval-index: 0;
+    in-out property <string> dl-interval-label;
+    in-out property <[string]> dl-interval-items;
+    in-out property <string> dl-selected-text;
+    in-out property <string> dl-progress-text;
+    in-out property <[DlStock]> dl-stock-rows;
+    in-out property <[string]> dl-chips;
+    in-out property <string> dl-chips-note;
+    in-out property <string> dl-filter;
+    in-out property <string> dl-from-display;
+    in-out property <string> dl-to-display;
+    in-out property <DlPlan> dl-plan;
+    in-out property <DlStatus> dl-status;
+    in-out property <[string]> dl-brokers;
+    in-out property <int> dl-broker-index: 0;
+    in-out property <[string]> dl-log;
+    in-out property <bool> dl-log-expanded: false;
+    in-out property <bool> dl-cal-open: false;
+    in-out property <string> dl-cal-title;
+    in-out property <[DlCalDay]> dl-cal-days;
+    in-out property <[string]> dl-weekdays;
+    in-out property <bool> dl-cred-open: false;
+    in-out property <[DlCredField]> dl-cred-fields;
+    in-out property <bool> dl-cred-has-stored: false;
+    in-out property <string> dl-cred-status;
+    in-out property <bool> dl-confirm-clear: false;
+    callback dl-toggle();
+    callback dl-interval(string);
+    callback dl-toggle-symbol(string);
+    callback dl-select-all();
+    callback dl-clear-all();
+    callback dl-filter-changed(string);
+    callback dl-open-cal(string);
+    callback dl-close-cal();
+    callback dl-cal-prev();
+    callback dl-cal-next();
+    callback dl-pick-day(int);
+    callback dl-quick(string);
+    callback dl-download();
+    callback dl-coverage();
+    callback dl-cancel();
+    callback dl-retry();
+    callback dl-view-coverage();
+    callback dl-error-details();
+    callback dl-advanced();
+    callback dl-log-toggle();
+    callback dl-log-clear();
+    callback dl-broker(string);
+    callback dl-open-creds();
+    callback dl-close-creds();
+    callback dl-cred-field(string, string);
+    callback dl-cred-reveal(string);
+    callback dl-cred-test();
+    callback dl-cred-save();
+    callback dl-cred-clear();
+    callback dl-cred-confirm(bool);
+
+    callback panel-toggle();
+    callback symbol-selected(string);
+    callback timeframe-picked(string);
+    callback filter-changed(string);
+    callback sort-asc();
+    callback sort-desc();
+    callback add-watchlist();
+    callback remove-watchlist();
+    callback select-watchlist(string);
+    callback reset-view();
+    callback hover-moved(float, float);
+    callback hover-left();
+    callback wheel-zoom(float, float);
+    callback wheel-pan(float);
+    callback drag-start(float, float);
+    callback drag-move(float, float);
+    callback drag-end();
+    callback price-zoom(float, float);
+    callback price-drag(float, float);
+    callback price-drag-end();
+    callback price-reset();
+    callback indicator-popup(bool);
+    callback indicator-query(string);
+    callback indicator-category(string);
+    callback add-indicator(string);
+    callback toggle-indicator-visible(string);
+    callback settings-indicator(string);
+    callback source-indicator(string);
+    callback remove-indicator(string);
+    callback trade-prev();
+    callback trade-next();
+    callback trade-open();
+
+    MarketScreen {
+        width: 100%;
+        height: 100%;
+        panel-visible: root.panel-visible;
+        symbol-title: root.symbol-title;
+        timeframe-label: root.timeframe-label;
+        exchange-label: root.exchange-label;
+        status-message: root.status-message;
+        has-data: root.has-data;
+        header-ohlc: root.header-ohlc;
+        watch-rows: root.watch-rows;
+        watchlists: root.watchlists;
+        watchlist-name: root.watchlist-name;
+        filter: root.filter;
+        sort-ascending: root.sort-ascending;
+        timeframes-visible: root.timeframes-visible;
+        timeframes-overflow: root.timeframes-overflow;
+        plot-slots: root.plot-slots;
+        candles: root.candles;
+        price-ticks: root.price-ticks;
+        time-ticks: root.time-ticks;
+        plot-segments: root.plot-segments;
+        markers: root.markers;
+        hover-x: root.hover-x;
+        hover-y: root.hover-y;
+        hover-price: root.hover-price;
+        hover-time: root.hover-time;
+        hover-volume: root.hover-volume;
+        hover-bull: root.hover-bull;
+        has-hover: root.has-hover;
+        indicator-rows: root.indicator-rows;
+        popup-open: root.popup-open;
+        popup-query: root.popup-query;
+        popup-category: root.popup-category;
+        popup-rows: root.popup-rows;
+        active-label: root.active-label;
+        trade-context: root.trade-context;
+        wide: root.wide;
+        medium: root.medium;
+        panel-toggle() => { root.panel-toggle(); }
+        symbol-selected(s) => { root.symbol-selected(s); }
+        timeframe-picked(s) => { root.timeframe-picked(s); }
+        filter-changed(s) => { root.filter-changed(s); }
+        sort-asc() => { root.sort-asc(); }
+        sort-desc() => { root.sort-desc(); }
+        add-watchlist() => { root.add-watchlist(); }
+        remove-watchlist() => { root.remove-watchlist(); }
+        select-watchlist(s) => { root.select-watchlist(s); }
+        reset-view() => { root.reset-view(); }
+        hover-moved(x, y) => { root.hover-moved(x, y); }
+        hover-left() => { root.hover-left(); }
+        wheel-zoom(x, s) => { root.wheel-zoom(x, s); }
+        wheel-pan(f) => { root.wheel-pan(f); }
+        drag-start(x, y) => { root.drag-start(x, y); }
+        drag-move(x, y) => { root.drag-move(x, y); }
+        drag-end() => { root.drag-end(); }
+        price-zoom(s, y) => { root.price-zoom(s, y); }
+        price-drag(n, a) => { root.price-drag(n, a); }
+        price-drag-end() => { root.price-drag-end(); }
+        price-reset() => { root.price-reset(); }
+        indicator-popup(b) => { root.indicator-popup(b); }
+        indicator-query(s) => { root.indicator-query(s); }
+        indicator-category(s) => { root.indicator-category(s); }
+        add-indicator(s) => { root.add-indicator(s); }
+        toggle-indicator-visible(s) => { root.toggle-indicator-visible(s); }
+        settings-indicator(s) => { root.settings-indicator(s); }
+        source-indicator(s) => { root.source-indicator(s); }
+        remove-indicator(s) => { root.remove-indicator(s); }
+        trade-prev() => { root.trade-prev(); }
+        trade-next() => { root.trade-next(); }
+        trade-open() => { root.trade-open(); }
+        dl-open: root.dl-open;
+        dl-busy: root.dl-busy;
+        dl-interval-index: root.dl-interval-index;
+        dl-interval-label: root.dl-interval-label;
+        dl-interval-items: root.dl-interval-items;
+        dl-selected-text: root.dl-selected-text;
+        dl-progress-text: root.dl-progress-text;
+        dl-stock-rows: root.dl-stock-rows;
+        dl-chips: root.dl-chips;
+        dl-chips-note: root.dl-chips-note;
+        dl-filter: root.dl-filter;
+        dl-from-display: root.dl-from-display;
+        dl-to-display: root.dl-to-display;
+        dl-plan: root.dl-plan;
+        dl-status: root.dl-status;
+        dl-brokers: root.dl-brokers;
+        dl-broker-index: root.dl-broker-index;
+        dl-log: root.dl-log;
+        dl-log-expanded: root.dl-log-expanded;
+        dl-cal-open: root.dl-cal-open;
+        dl-cal-title: root.dl-cal-title;
+        dl-cal-days: root.dl-cal-days;
+        dl-weekdays: root.dl-weekdays;
+        dl-cred-open: root.dl-cred-open;
+        dl-cred-fields: root.dl-cred-fields;
+        dl-cred-has-stored: root.dl-cred-has-stored;
+        dl-cred-status: root.dl-cred-status;
+        dl-confirm-clear: root.dl-confirm-clear;
+        dl-toggle() => { root.dl-toggle(); }
+        dl-interval(v) => { root.dl-interval(v); }
+        dl-toggle-symbol(s) => { root.dl-toggle-symbol(s); }
+        dl-select-all() => { root.dl-select-all(); }
+        dl-clear-all() => { root.dl-clear-all(); }
+        dl-filter-changed(v) => { root.dl-filter-changed(v); }
+        dl-open-cal(w) => { root.dl-open-cal(w); }
+        dl-close-cal() => { root.dl-close-cal(); }
+        dl-cal-prev() => { root.dl-cal-prev(); }
+        dl-cal-next() => { root.dl-cal-next(); }
+        dl-pick-day(d) => { root.dl-pick-day(d); }
+        dl-quick(c) => { root.dl-quick(c); }
+        dl-download() => { root.dl-download(); }
+        dl-coverage() => { root.dl-coverage(); }
+        dl-cancel() => { root.dl-cancel(); }
+        dl-retry() => { root.dl-retry(); }
+        dl-view-coverage() => { root.dl-view-coverage(); }
+        dl-error-details() => { root.dl-error-details(); }
+        dl-advanced() => { root.dl-advanced(); }
+        dl-log-toggle() => { root.dl-log-toggle(); }
+        dl-log-clear() => { root.dl-log-clear(); }
+        dl-broker(v) => { root.dl-broker(v); }
+        dl-open-creds() => { root.dl-open-creds(); }
+        dl-close-creds() => { root.dl-close-creds(); }
+        dl-cred-field(k, v) => { root.dl-cred-field(k, v); }
+        dl-cred-reveal(k) => { root.dl-cred-reveal(k); }
+        dl-cred-test() => { root.dl-cred-test(); }
+        dl-cred-save() => { root.dl-cred-save(); }
+        dl-cred-clear() => { root.dl-cred-clear(); }
+        dl-cred-confirm(y) => { root.dl-cred-confirm(y); }
+    }
+}

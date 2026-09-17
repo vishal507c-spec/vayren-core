@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["vayren-core", "vayren-shell"]
+members = ["vayren-core", "vayren-shell", "vayren-portfolio-view", "vayren-live-view", "vayren-research-view", "vayren-system-view", "vayren-strategy-lab-view", "vayren-market-view"]
 
 [workspace.package]
 version = "0.1.0"

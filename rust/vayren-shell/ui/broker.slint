@@ -1,0 +1,583 @@
+// VAYREN broker (SYSTEM) panel — the parity surface of the migrated Slint
+// system screen (constitution §3, UI_DESIGN_SYSTEM.md).
+//
+// Presentation only: every displayed value is bound to properties fed by the
+// Rust `BrokerPanel::project_card` (backend facts, never UI inference).
+// Action affordances report intent through callbacks; the embed host
+// dispatches them to the Python BrokerManager (the same signal contract the
+// retained Qt cards carried). Lives in its own file so BOTH the application
+// shell (`app.slint`) and the embed host (`vayren-system-view`) instantiate
+// this one component — no second broker UI.
+
+import { VayrenPalette, VayrenDesign } from "palette.slint";
+import { VBadge, VButton } from "components.slint";
+import { LineEdit, ScrollView } from "std-widgets.slint";
+
+export struct BrokerCheckRow {
+    key: string,
+    label: string,
+    value: string,
+    tone: int, // shared convention: 0 muted, 1 ok, 2 warn, 3 bad
+}
+
+export component BrokerPanel inherits Rectangle {
+// Parity surface (Qt BrokersWorkspace card rules): identity + status +
+// hero stats + health grid + metrics + action bar + credentials form +
+// integration details. Facts arrive via in-properties (Rust
+// `project_card`); `show-config-form` / field text / `confirm-remove`
+// are ephemeral Slint-local UI state. Actions report outward only.
+in property <string> broker-name;
+in property <string> broker-id;
+in property <int> env-kind;
+in property <string> env-label;
+in property <string> health-label;
+in property <bool> health-connected;
+in property <bool> live-ready;
+in property <[string]> blockers;
+// Parity facts (Rust `BrokerCardView`).
+in property <string> status-glyph: "○";
+in property <string> status-label: "";
+in property <int> status-tone: 0;
+in property <string> status-explanation: "";
+in property <string> reason-line: "";
+in property <string> account-id: "—";
+in property <string> conn-label: "Not connected";
+in property <int> conn-tone: 0;
+in property <string> last-sync: "—";
+in property <string> health-summary: "";
+in property <int> health-summary-tone: 0;
+in property <[BrokerCheckRow]> check-rows;
+in property <string> funds-line: "—";
+in property <string> funds-sub: "";
+in property <string> positions-line: "—";
+in property <string> positions-sub: "";
+in property <string> orders-line: "—";
+in property <string> orders-sub: "";
+in property <string> credentials-line: "";
+in property <string> callback-display: "—";
+in property <bool> refresh-visible: false;
+in property <string> refresh-label: "REFRESH";
+in property <bool> refresh-enabled: false;
+in property <bool> refresh-primary: false;
+in property <string> login-label: "CONNECT";
+in property <bool> login-enabled: false;
+in property <bool> login-primary: false;
+in property <string> configure-label: "CONFIGURE";
+in property <bool> disconnect-visible: false;
+in property <bool> disconnect-enabled: false;
+in property <bool> remove-visible: false;
+callback login-requested();
+callback refresh-requested();
+callback disconnect-requested();
+callback remove-requested();
+callback config-saved(string, string);
+callback copy-callback();
+
+property <bool> show-config-form: false;
+property <string> config-key: "";
+property <string> config-secret: "";
+property <bool> confirm-remove: false;
+
+background: transparent;
+
+function env-color() -> color {
+    return env-kind == 0 ? VayrenPalette.pos
+        : env-kind == 1 ? VayrenPalette.amber
+        : VayrenPalette.neg;
+}
+
+function tone-color(tone: int) -> color {
+    return tone == 1 ? VayrenPalette.pos
+        : tone == 2 ? VayrenPalette.amber
+        : tone == 3 ? VayrenPalette.neg
+        : VayrenPalette.muted;
+}
+
+ScrollView {
+    width: 100%;
+    height: 100%;
+    viewport-width: root.width;
+
+    pb := VerticalLayout {
+        padding: VayrenDesign.sp-xl;
+        spacing: VayrenDesign.sp-md;
+        alignment: start;
+
+        // Header: identity + environment badge.
+        HorizontalLayout {
+            height: 30px;
+            spacing: VayrenDesign.sp-md;
+
+            Text {
+                text: root.broker-name;
+                color: VayrenPalette.text;
+                font-size: VayrenDesign.fs-title;
+                font-weight: 700;
+                vertical-alignment: center;
+            }
+            Text {
+                text: root.broker-id;
+                color: VayrenPalette.faint;
+                font-size: VayrenDesign.fs-label;
+                vertical-alignment: center;
+            }
+            Rectangle {
+                horizontal-stretch: 1;
+                background: transparent;
+            }
+            Rectangle {
+                width: 74px;
+                height: 20px;
+                border-radius: VayrenDesign.radius-sm;
+                background: transparent;
+                border-width: 1px;
+                border-color: root.env-color();
+                VerticalLayout {
+                    alignment: center;
+                    Text {
+                        text: root.env-label;
+                        color: root.env-color();
+                        font-size: VayrenDesign.fs-label;
+                        font-weight: 700;
+                        horizontal-alignment: center;
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: VayrenPalette.hairline;
+        }
+
+        // Status: glyph + label + explanation + backend reason.
+        HorizontalLayout {
+            height: 18px;
+            spacing: VayrenDesign.sp-md;
+            Text {
+                width: 64px;
+                text: "STATUS";
+                color: VayrenPalette.muted;
+                font-size: VayrenDesign.fs-label;
+                vertical-alignment: center;
+            }
+            Text {
+                text: root.status-glyph + " " + root.status-label;
+                color: root.tone-color(root.status-tone);
+                font-size: VayrenDesign.fs-label;
+                font-weight: 700;
+                vertical-alignment: center;
+            }
+        }
+        if root.reason-line != "": Text {
+            text: root.reason-line;
+            color: VayrenPalette.muted;
+            font-size: VayrenDesign.fs-small;
+            wrap: word-wrap;
+        }
+
+        // Hero stats: account / connection / last sync.
+        HorizontalLayout {
+            spacing: VayrenDesign.sp-xl;
+            VerticalLayout {
+                spacing: 1px;
+                alignment: start;
+                horizontal-stretch: 1;
+                Text {
+                    text: "ACCOUNT";
+                    color: VayrenPalette.muted;
+                    font-size: VayrenDesign.fs-label;
+                }
+                Text {
+                    text: root.account-id;
+                    color: VayrenPalette.text;
+                    font-size: VayrenDesign.fs-metric-sm;
+                    font-weight: 700;
+                }
+            }
+            VerticalLayout {
+                spacing: 1px;
+                alignment: start;
+                horizontal-stretch: 1;
+                Text {
+                    text: "CONNECTION";
+                    color: VayrenPalette.muted;
+                    font-size: VayrenDesign.fs-label;
+                }
+                Text {
+                    text: root.conn-label;
+                    color: root.tone-color(root.conn-tone);
+                    font-size: VayrenDesign.fs-metric-sm;
+                    font-weight: 700;
+                }
+            }
+            VerticalLayout {
+                spacing: 1px;
+                alignment: start;
+                horizontal-stretch: 1;
+                Text {
+                    text: "LAST SYNC";
+                    color: VayrenPalette.muted;
+                    font-size: VayrenDesign.fs-label;
+                }
+                Text {
+                    text: root.last-sync;
+                    color: VayrenPalette.text;
+                    font-size: VayrenDesign.fs-metric-sm;
+                    font-weight: 700;
+                }
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: VayrenPalette.hairline;
+        }
+
+        // Health + LIVE rows.
+        VerticalLayout {
+            spacing: VayrenDesign.sp-sm;
+            alignment: start;
+
+            HorizontalLayout {
+                height: 18px;
+                spacing: VayrenDesign.sp-md;
+                Text {
+                    width: 64px;
+                    text: "HEALTH";
+                    color: VayrenPalette.muted;
+                    font-size: VayrenDesign.fs-label;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: root.health-label + (root.health-connected ? "" : " (not connected)");
+                    color: root.health-connected ? VayrenPalette.pos : VayrenPalette.muted;
+                    font-size: VayrenDesign.fs-label;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                }
+            }
+            HorizontalLayout {
+                height: 18px;
+                spacing: VayrenDesign.sp-md;
+                Text {
+                    width: 64px;
+                    text: "LIVE";
+                    color: VayrenPalette.muted;
+                    font-size: VayrenDesign.fs-label;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: root.live-ready ? "READY" : "NOT READY";
+                    color: root.live-ready ? VayrenPalette.pos : VayrenPalette.neg;
+                    font-size: VayrenDesign.fs-label;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: VayrenPalette.hairline;
+        }
+
+        // Broker health grid + summary.
+        HorizontalLayout {
+            height: 18px;
+            spacing: VayrenDesign.sp-md;
+            Text {
+                text: "BROKER HEALTH";
+                color: VayrenPalette.muted;
+                font-size: VayrenDesign.fs-label;
+                font-weight: 700;
+                vertical-alignment: center;
+            }
+            Rectangle { horizontal-stretch: 1; background: transparent; }
+            Text {
+                text: root.health-summary;
+                color: root.tone-color(root.health-summary-tone);
+                font-size: VayrenDesign.fs-label;
+                font-weight: 700;
+                vertical-alignment: center;
+            }
+        }
+        GridLayout {
+            spacing: VayrenDesign.sp-sm;
+            for cell in root.check-rows: VerticalLayout {
+                spacing: 1px;
+                alignment: start;
+                horizontal-stretch: 1;
+                Text {
+                    text: cell.label;
+                    color: VayrenPalette.muted;
+                    font-size: VayrenDesign.fs-label;
+                }
+                Text {
+                    text: cell.value;
+                    color: root.tone-color(cell.tone);
+                    font-size: VayrenDesign.fs-small;
+                    font-weight: 600;
+                }
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: VayrenPalette.hairline;
+        }
+
+        // Metrics: account / funds / positions / orders.
+        HorizontalLayout {
+            spacing: VayrenDesign.sp-xl;
+            VerticalLayout {
+                spacing: 1px;
+                alignment: start;
+                horizontal-stretch: 1;
+                Text {
+                    text: "ACCOUNT";
+                    color: VayrenPalette.muted;
+                    font-size: VayrenDesign.fs-label;
+                }
+                Text {
+                    text: root.account-id;
+                    color: VayrenPalette.text;
+                    font-size: VayrenDesign.fs-metric;
+                    font-weight: 700;
+                }
+            }
+            VerticalLayout {
+                spacing: 1px;
+                alignment: start;
+                horizontal-stretch: 1;
+                Text {
+                    text: "FUNDS";
+                    color: VayrenPalette.muted;
+                    font-size: VayrenDesign.fs-label;
+                }
+                Text {
+                    text: root.funds-line;
+                    color: VayrenPalette.text;
+                    font-size: VayrenDesign.fs-metric;
+                    font-weight: 700;
+                }
+                if root.funds-sub != "": Text {
+                    text: root.funds-sub;
+                    color: VayrenPalette.muted;
+                    font-size: VayrenDesign.fs-label;
+                }
+            }
+            VerticalLayout {
+                spacing: 1px;
+                alignment: start;
+                horizontal-stretch: 1;
+                Text {
+                    text: "POSITIONS";
+                    color: VayrenPalette.muted;
+                    font-size: VayrenDesign.fs-label;
+                }
+                Text {
+                    text: root.positions-line;
+                    color: VayrenPalette.text;
+                    font-size: VayrenDesign.fs-metric;
+                    font-weight: 700;
+                }
+                if root.positions-sub != "": Text {
+                    text: root.positions-sub;
+                    color: VayrenPalette.muted;
+                    font-size: VayrenDesign.fs-label;
+                }
+            }
+            VerticalLayout {
+                spacing: 1px;
+                alignment: start;
+                horizontal-stretch: 1;
+                Text {
+                    text: "ORDERS";
+                    color: VayrenPalette.muted;
+                    font-size: VayrenDesign.fs-label;
+                }
+                Text {
+                    text: root.orders-line;
+                    color: VayrenPalette.text;
+                    font-size: VayrenDesign.fs-metric;
+                    font-weight: 700;
+                }
+                if root.orders-sub != "": Text {
+                    text: root.orders-sub;
+                    color: VayrenPalette.muted;
+                    font-size: VayrenDesign.fs-label;
+                }
+            }
+        }
+        if root.credentials-line != "": Text {
+            text: root.credentials-line;
+            color: VayrenPalette.muted;
+            font-size: VayrenDesign.fs-small;
+        }
+
+        Rectangle {
+            height: 1px;
+            background: VayrenPalette.hairline;
+        }
+
+        // Action bar (state-driven labels/styles from Rust).
+        HorizontalLayout {
+            spacing: VayrenDesign.sp-md;
+            if root.refresh-visible: VButton {
+                label: root.refresh-label;
+                variant: root.refresh-primary ? 0 : 1;
+                enabled: root.refresh-enabled;
+                clicked => { root.refresh-requested(); }
+            }
+            VButton {
+                label: root.login-label;
+                variant: root.login-primary ? 0 : 1;
+                enabled: root.login-enabled;
+                clicked => {
+                    if root.broker-id == "" {
+                        root.show-config-form = true;
+                    } else {
+                        root.login-requested();
+                    }
+                }
+            }
+            VButton {
+                label: root.configure-label;
+                variant: 1;
+                clicked => { root.show-config-form = !root.show-config-form; }
+            }
+            if root.disconnect-visible: VButton {
+                label: "DISCONNECT";
+                variant: 1;
+                enabled: root.disconnect-enabled;
+                clicked => { root.disconnect-requested(); }
+            }
+            Rectangle { horizontal-stretch: 1; background: transparent; }
+            if root.remove-visible && !root.confirm-remove: VButton {
+                label: "REMOVE";
+                variant: 2;
+                clicked => { root.confirm-remove = true; }
+            }
+            if root.remove-visible && root.confirm-remove: Text {
+                text: "Remove broker?";
+                color: VayrenPalette.amber;
+                font-size: VayrenDesign.fs-label;
+                font-weight: 700;
+                vertical-alignment: center;
+            }
+            if root.remove-visible && root.confirm-remove: VButton {
+                label: "YES";
+                variant: 3;
+                clicked => {
+                    root.confirm-remove = false;
+                    root.remove-requested();
+                }
+            }
+            if root.remove-visible && root.confirm-remove: VButton {
+                label: "NO";
+                variant: 2;
+                clicked => { root.confirm-remove = false; }
+            }
+        }
+
+        // Credentials form (ephemeral; secrets never retained).
+        if root.show-config-form: VerticalLayout {
+            spacing: VayrenDesign.sp-sm;
+            alignment: start;
+            Text {
+                text: "API KEY";
+                color: VayrenPalette.muted;
+                font-size: VayrenDesign.fs-label;
+                font-weight: 700;
+            }
+            LineEdit {
+                height: 28px;
+                placeholder-text: "API key";
+                text: root.config-key;
+                edited(t) => { root.config-key = t; }
+            }
+            Text {
+                text: "API SECRET";
+                color: VayrenPalette.muted;
+                font-size: VayrenDesign.fs-label;
+                font-weight: 700;
+            }
+            LineEdit {
+                height: 28px;
+                placeholder-text: "API secret (stored securely, never shown)";
+                input-type: InputType.password;
+                text: root.config-secret;
+                edited(t) => { root.config-secret = t; }
+            }
+            HorizontalLayout {
+                spacing: VayrenDesign.sp-sm;
+                VButton {
+                    label: "SAVE";
+                    variant: 0;
+                    clicked => {
+                        root.config-saved(root.config-key, root.config-secret);
+                        root.config-key = "";
+                        root.config-secret = "";
+                        root.show-config-form = false;
+                    }
+                }
+                VButton {
+                    label: "CANCEL";
+                    variant: 2;
+                    clicked => {
+                        root.config-key = "";
+                        root.config-secret = "";
+                        root.show-config-form = false;
+                    }
+                }
+            }
+        }
+
+        // Integration details.
+        HorizontalLayout {
+            spacing: VayrenDesign.sp-md;
+            Text {
+                text: "CALLBACK URL";
+                color: VayrenPalette.muted;
+                font-size: VayrenDesign.fs-label;
+                vertical-alignment: center;
+            }
+            Text {
+                text: root.callback-display;
+                color: VayrenPalette.muted;
+                font-size: VayrenDesign.fs-small;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+                overflow: elide;
+            }
+            VButton {
+                label: "COPY";
+                variant: 2;
+                clicked => { root.copy-callback(); }
+            }
+        }
+
+        if root.blockers.length > 0: VerticalLayout {
+            spacing: VayrenDesign.sp-sm;
+            alignment: start;
+
+            Rectangle {
+                height: 1px;
+                background: VayrenPalette.hairline;
+            }
+            Text {
+                text: "BLOCKERS";
+                color: VayrenPalette.amber;
+                font-size: VayrenDesign.fs-label;
+                font-weight: 700;
+            }
+            for blocker in root.blockers: Text {
+                text: "· " + blocker;
+                color: VayrenPalette.amber;
+                font-size: VayrenDesign.fs-label;
+            }
+        }
+    }
+}
+}

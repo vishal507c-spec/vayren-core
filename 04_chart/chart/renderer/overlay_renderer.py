@@ -225,27 +225,17 @@ class OverlayRenderer:
     def _format_timestamp(timestamp: str, timeframe: str = "1d") -> str:
         """Format an ISO timestamp as a single-line bottom label.
 
-        Reads the exact timestamp from the candle — no estimation.
+        Reads the exact timestamp from the candle — no estimation. The label
+        is always ISO style: intraday timeframes show ``YYYY-MM-DD HH:MM``
+        (e.g. ``2026-05-25 12:15``); daily/weekly/monthly show the ISO date.
         """
         dt = OverlayRenderer._parse_ts(timestamp)
         if dt is None:
             return timestamp
         tf = timeframe.lower()
-        date_part = dt.strftime("%a %d %b '%y")
         if tf.endswith("m") or tf.endswith("h"):
-            return f"{date_part}  {dt.strftime('%H:%M')}"
-        if tf.startswith("w") or tf == "1w":
-            iso_cal = dt.isocalendar()
-            week = iso_cal[1]
-            year = dt.year
-            if dt.month == 12 and dt.day >= 28 and week == 1:
-                year = dt.year + 1
-            return f"Week {week}  {year}"
-        if tf.startswith("mo") or tf == "1mo":
-            return dt.strftime("%b %Y")
-        if tf.endswith("d"):
-            return dt.strftime("%a %d %b '%y")
-        return f"{date_part}  {dt.strftime('%H:%M')}"
+            return dt.strftime("%Y-%m-%d %H:%M")
+        return dt.strftime("%Y-%m-%d")
 
     @staticmethod
     def _parse_ts(timestamp: str) -> datetime | None:

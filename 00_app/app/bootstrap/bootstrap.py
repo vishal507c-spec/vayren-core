@@ -388,8 +388,10 @@ class Bootstrap:
         lab_list = StrategyListPanel()
         # dedicated single-strategy lab workspace (isolated from market)
         lab_workspace = StrategyLabWorkspace()
-        # LIVE execution workspace: pure view over provider state, no bus/SQL/broker.
-        from app.ui.live_workspace import LiveWorkspace
+        # LIVE execution is native Slint only (constitution §3): the legacy
+        # Qt `LiveWorkspace` widget is NOT constructed or mounted (its file
+        # stays for its direct-widget tests only). The same provider state
+        # feeds the in-window Slint viewport constructed below.
 
         def _live_state_provider() -> dict:
             """Read-only snapshot for the LIVE tab. Never trades, never raises."""
@@ -621,19 +623,83 @@ class Bootstrap:
                 pass
             return state
 
-        live_workspace = LiveWorkspace(state_provider=_live_state_provider)
         # ── SYSTEM → BROKERS: centralized broker management ──
         # One manager owns configuration/authentication/connection state for
         # every venue; LIVE and the download engine only consume it. All
         # network/SDK work runs on the manager's worker thread; the UI sees
         # snapshots + signals only.
         from app.services.broker_manager import BrokerManager
-        from app.ui.brokers_workspace import BrokersWorkspace
 
         broker_manager = BrokerManager(data_dir=data_dir)
         self._broker_manager = broker_manager
-        brokers_workspace = BrokersWorkspace(state_provider=broker_manager.snapshot)
-        self._brokers_workspace = brokers_workspace
+        # SYSTEM is native Slint only (constitution §3): the legacy Qt
+        # `BrokersWorkspace` is intentionally NOT constructed or mounted here
+        # (its file stays for its direct-widget tests only). Backend flows
+        # (configure/login/check/disconnect/remove) stay in `BrokerManager`,
+        # untouched; the in-window Slint viewport below renders status.
+        from app.services.slint_system_host import SlintSystemHost
+
+        def _system_state_provider() -> dict:
+            """Read-only SYSTEM snapshot: current selection + manager record."""
+            try:
+                sel = selection_service.current_or_none()
+            except Exception:
+                return {"selection": None, "record": None, "callback_url": ""}
+            if sel is None:
+                return {"selection": None, "record": None, "callback_url": ""}
+            try:
+                snapshot = broker_manager.snapshot()
+            except Exception:
+                snapshot = {}
+            record = None
+            for entry in snapshot.get("brokers", []) if isinstance(snapshot, dict) else []:
+                if isinstance(entry, dict) and entry.get("id") == sel.name:
+                    record = entry
+                    break
+            try:
+                environment = sel.environment.value
+            except Exception:
+                environment = "paper"
+            return {
+                "selection": {"name": sel.name, "environment": environment},
+                "record": record,
+                "callback_url": str(snapshot.get("callback_url", "") or ""),
+            }
+
+        slint_system_host = SlintSystemHost(state_provider=_system_state_provider)
+        self._slint_system_host = slint_system_host
+        # Panel action intents route to the SAME manager methods the
+        # retained Qt cards used (validation/auth/safety live in the
+        # manager, untouched here). REMOVE arrives only after the Slint
+        # inline YES/NO confirmation.
+        slint_system_host.login_requested.connect(
+            lambda broker_id: broker_manager.start_login(broker_id)
+        )
+        slint_system_host.refresh_requested.connect(
+            lambda broker_id: broker_manager.submit_check(broker_id)
+        )
+        slint_system_host.disconnect_requested.connect(
+            lambda broker_id: broker_manager.disconnect_broker(broker_id)
+        )
+        slint_system_host.configure_requested.connect(
+            lambda broker_id, values: broker_manager.configure(broker_id, values)
+        )
+        slint_system_host.remove_requested.connect(
+            lambda broker_id: broker_manager.remove(broker_id)
+        )
+
+        def _on_copy_callback(_broker_id: str) -> None:
+            try:
+                from PySide6.QtWidgets import QApplication
+
+                url = str(broker_manager.snapshot().get("callback_url", "") or "")
+                clipboard = QApplication.clipboard()
+                if clipboard is not None and url:
+                    clipboard.setText(url)
+            except Exception:  # noqa: BLE001
+                pass
+
+        slint_system_host.copy_callback_requested.connect(_on_copy_callback)
 
         def _on_broker_message(text: str) -> None:
             panel = getattr(self, "_event_log", None)
@@ -643,43 +709,15 @@ class Bootstrap:
 
         def _on_broker_state_changed(_broker_id: str) -> None:
             with contextlib.suppress(Exception):
-                brokers_workspace.refresh()
-                live_workspace.refresh()
+                system_host = getattr(self, "_slint_system_host", None)
+                if system_host is not None:
+                    system_host.refresh_now()
+                live_host = getattr(self, "_slint_live_host", None)
+                if live_host is not None:
+                    live_host.refresh_now()
 
         broker_manager.message.connect(_on_broker_message)
         broker_manager.state_changed.connect(_on_broker_state_changed)
-        brokers_workspace.configure_requested.connect(
-            lambda broker_id, values: broker_manager.configure(broker_id, values)
-        )
-        brokers_workspace.login_requested.connect(
-            lambda broker_id: broker_manager.start_login(broker_id)
-        )
-        brokers_workspace.refresh_requested.connect(
-            lambda broker_id: broker_manager.submit_check(broker_id)
-        )
-        brokers_workspace.disconnect_requested.connect(
-            lambda broker_id: broker_manager.disconnect_broker(broker_id)
-        )
-
-        def _on_broker_remove(broker_id: str) -> None:
-            try:
-                from PySide6.QtWidgets import QMessageBox
-
-                answer = QMessageBox.question(
-                    brokers_workspace,
-                    "Remove broker",
-                    f"Remove {broker_manager.display_name(broker_id)}?\n\n"
-                    "This will remove the saved broker configuration from VAYREN."
-                    " Historical records are kept.",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.No,
-                )
-                if answer == QMessageBox.StandardButton.Yes:
-                    broker_manager.remove(broker_id)
-            except Exception:  # noqa: BLE001
-                pass
-
-        brokers_workspace.remove_requested.connect(_on_broker_remove)
         # Startup session check: stored token → CONNECTED or LOGIN_REQUIRED.
         for broker_id in broker_manager.broker_ids():
             broker_manager.submit_check(broker_id)
@@ -710,13 +748,19 @@ class Bootstrap:
             except Exception:  # noqa: BLE001
                 pass
 
-        def _on_live_start() -> None:
+        def _on_live_start(confirmed: bool = False) -> None:
+            """START intent (Qt workspace signal or Slint host action).
+
+            LIVE mode keeps the existing explicit-consent dialog unless the
+            operator already confirmed in the Slint confirmation control
+            (the host forwards ``confirmed=True``). PAPER never prompts.
+            """
             try:
-                if live_service.config.mode == "LIVE":
+                if live_service.config.mode == "LIVE" and not confirmed:
                     from PySide6.QtWidgets import QMessageBox
 
                     answer = QMessageBox.warning(
-                        live_workspace,
+                        window,
                         "Confirm LIVE trading",
                         "Start REAL-MONEY live trading with strategy "
                         f"'{live_service.config.strategy_name}' on "
@@ -728,26 +772,25 @@ class Bootstrap:
                         return
                     live_service.start(confirmed=True)
                 else:
-                    live_service.start(confirmed=False)
+                    live_service.start(confirmed=confirmed)
             except Exception:  # noqa: BLE001
                 pass
 
-        live_workspace.configure_broker_requested.connect(
-            lambda: getattr(window, "show_brokers", lambda: None)()
-        )
-        live_workspace.setup_changed.connect(_on_live_setup)
-        live_workspace.start_requested.connect(_on_live_start)
-        live_workspace.stop_requested.connect(lambda: live_service.stop())
-        live_workspace.mode_requested.connect(
-            lambda mode: (
-                live_service.configure(mode=str(mode)) if str(mode) in ("PAPER", "LIVE") else None
-            )
-        )
+        def _on_live_halt() -> None:
+            """HALT intent: stop the session immediately (kill-switch path
+            of the service — no new signals, open orders stay tracked)."""
+            with contextlib.suppress(Exception):
+                live_service.stop(reason="execution halted")
+
+        # LIVE is native Slint only (constitution §3): the legacy Qt
+        # `LiveWorkspace` is intentionally NOT constructed or mounted here
+        # (its file stays for its direct-widget tests only). The same
+        # action handlers the Qt signals used are wired to the in-window
+        # Slint viewport below — backend semantics unchanged.
         from backtest.execution import list_histories
         from strategy.language.storage import list_strategies
 
         from app.services.research_service import ResearchService
-        from app.ui.portfolio_workspace import PortfolioWorkspace
         from app.ui.research_workspace import ResearchWorkspace
 
         research_service = ResearchService(
@@ -755,12 +798,72 @@ class Bootstrap:
             strategy_dir=self._strategy_dir,
             list_strategies_fn=list_strategies,
             list_histories_fn=list_histories,
+            repository=repository,
         )
         research_workspace = ResearchWorkspace()
         research_workspace.set_service(research_service)
-        # Portfolio shares the authoritative workspace-state pipeline (no
-        # duplicated state): same provider shape the LIVE tab consumes.
-        portfolio_workspace = PortfolioWorkspace(state_provider=_live_state_provider)
+        # In-window native Slint Research viewport (constitution §3): the
+        # production RESEARCH surface. The viewport draws Rust+Slint pixels
+        # only and dispatches UI intents back to the SAME Python Research
+        # service/engine — zero Qt Research presentation is mounted in the
+        # route below (legacy workspace kept injected only as no-host
+        # fallback).
+        from app.services.slint_research_host import SlintResearchHost
+
+        slint_research_host = SlintResearchHost(service=research_service)
+        self._slint_research_host = slint_research_host
+        # Portfolio is native Slint only (constitution §3): the legacy Qt
+        # PortfolioWorkspace is intentionally NOT constructed or mounted here.
+        # This viewport draws Slint pixels only — no Qt Portfolio UI — fed by
+        # the same provider shape the LIVE tab consumes. Degrades to an
+        # honest status line when the native library is not built.
+        from app.services.slint_portfolio_host import SlintPortfolioHost
+
+        slint_portfolio_host = SlintPortfolioHost(state_provider=_live_state_provider)
+        self._slint_portfolio_host = slint_portfolio_host
+        # STRATEGY LAB is native Slint in production (constitution §3): the
+        # legacy Qt workspace stays constructed as the canonical state holder
+        # and engine bridge (subscriptions/updates keep feeding it), but it is
+        # NOT mounted — this viewport draws Slint pixels only, fed by
+        # read-only snapshots of that state; Slint interactions are drained
+        # back into the same public methods/signals a user click would use.
+        from app.services.slint_strategy_lab_host import (
+            SlintStrategyLabHost,
+            apply_lab_strategy_action,
+            strategy_lab_snapshot_dict,
+        )
+
+        slint_lab_host = SlintStrategyLabHost(
+            state_provider=lambda: strategy_lab_snapshot_dict(lab_workspace),
+            action_sink=lambda action: apply_lab_strategy_action(lab_workspace, action),
+        )
+        self._slint_lab_host = slint_lab_host
+        # LIVE is native Slint only (constitution §3): this viewport draws
+        # Slint pixels only — no Qt Live UI — fed by the same provider the
+        # retained Qt `LiveWorkspace` consumed. UI action intents (accepted
+        # fail-closed in Rust) arrive back as the SAME signal contract the
+        # Qt workspace carried, so the live_service handlers below are
+        # unchanged. Degrades to an honest status line when the native
+        # library is not built.
+        from app.services.slint_live_host import SlintLiveHost
+
+        slint_live_host = SlintLiveHost(state_provider=_live_state_provider)
+        self._slint_live_host = slint_live_host
+        slint_live_host.configure_broker_requested.connect(
+            lambda: getattr(window, "show_brokers", lambda: None)()
+        )
+        slint_live_host.setup_changed.connect(_on_live_setup)
+        slint_live_host.start_requested.connect(_on_live_start)
+        slint_live_host.stop_requested.connect(lambda: live_service.stop())
+        slint_live_host.halt_requested.connect(_on_live_halt)
+        slint_live_host.arm_requested.connect(
+            lambda: logger.debug("slint live host: arm requested (no armed backend)")
+        )
+        slint_live_host.mode_requested.connect(
+            lambda mode: (
+                live_service.configure(mode=str(mode)) if str(mode) in ("PAPER", "LIVE") else None
+            )
+        )
         from backtest.ui.performance_panel import PerformancePanel
 
         performance_panel = PerformancePanel()
@@ -813,14 +916,35 @@ class Bootstrap:
             nav=nav_bar,
             left_extra=market_status,
             lab_workspace=lab_workspace,
-            live_workspace=live_workspace,
+            live_workspace=None,  # legacy Qt LIVE is not production-mounted (Slint host below)
             research_workspace=research_workspace,
-            portfolio_workspace=portfolio_workspace,
-            brokers_workspace=brokers_workspace,
+            slint_research_host=slint_research_host,
+            slint_portfolio_host=slint_portfolio_host,
+            slint_live_host=slint_live_host,
+            slint_system_host=slint_system_host,
+            slint_lab_host=slint_lab_host,
             event_log=event_log,
             system_health=system_health,
             trade_context=trade_context_panel,
         )
+        # MARKET is native Slint in production (constitution §3): the Qt
+        # market splitter widgets stay alive as the canonical state holders
+        # (subscriptions and the ChartReady chain keep feeding them) but the
+        # splitter is NOT mounted — this viewport draws Slint pixels only,
+        # fed by read-only snapshots of the same widgets; Slint interactions
+        # drain back through the SAME signals a user click emits.
+        from app.services.slint_market_host import (
+            SlintMarketHost,
+            apply_market_action,
+            market_snapshot_dict,
+        )
+
+        slint_market_host = SlintMarketHost(
+            state_provider=lambda: market_snapshot_dict(window),
+            action_sink=lambda action: apply_market_action(window, action),
+        )
+        self._slint_market_host = slint_market_host
+        window.set_slint_market_host(slint_market_host)
         lifecycle = AppLifecycle(self._bus)
 
         # ── Chart session persistence (TradingView exact restore) ──
@@ -1357,18 +1481,22 @@ class Bootstrap:
         if hasattr(nav_bar, "strategy_lab_clicked"):
             nav_bar.strategy_lab_clicked.connect(window.show_lab)
         if hasattr(nav_bar, "research_clicked"):
-            nav_bar.research_clicked.connect(window.show_research)
+            nav_bar.research_clicked.connect(window.show_slint_research)
+        # PORTFOLIO is owned by the native Slint view hosted in-window (see
+        # SlintPortfolioHost wiring below). No Qt Portfolio surface is mounted.
         if hasattr(nav_bar, "portfolio_clicked"):
-            nav_bar.portfolio_clicked.connect(window.show_portfolio)
+            nav_bar.portfolio_clicked.connect(window.show_slint_portfolio)
+        # LIVE is owned by the native Slint view hosted in-window (see
+        # SlintLiveHost wiring above). The legacy Qt `LiveWorkspace` is no
+        # longer a production mount surface — only its backend contracts
+        # remain.
         if hasattr(nav_bar, "live_clicked"):
-            nav_bar.live_clicked.connect(window.show_live)
-        # SYSTEM → BROKERS: the nav's SYSTEM section opens the centralized
-        # broker management workspace (bottom log stays toggleable via the
-        # brokers workspace's window affordances, not the nav).
-        if hasattr(window, "show_brokers"):
-            nav_bar.system_clicked.connect(window.show_brokers)
-        else:
-            nav_bar.system_clicked.connect(window.toggle_bottom)
+            nav_bar.live_clicked.connect(window.show_slint_live)
+        # SYSTEM → native Slint viewport (see SlintSystemHost wiring above).
+        # The legacy Qt `BrokersWorkspace` is no longer a production mount
+        # surface — only its backend contracts remain.
+        if hasattr(nav_bar, "system_clicked"):
+            nav_bar.system_clicked.connect(window.show_slint_system)
 
         # ── control ↔ bus ──
         def _on_backtest_form(form: Any) -> None:
@@ -2768,8 +2896,11 @@ class Bootstrap:
                 len(raw),
                 list(raw.keys())[:4],
             )
-            if not raw:
-                return
+            # NOTE: no early return on empty `raw`. Strategies like OBR emit
+            # ONLY universal PlotEvents (plot_ray/plot_marker — REF HIGH/LOW,
+            # BUY/SELL/EOD/NO-TRADE) and no plot() series at all; returning
+            # here would silently drop every live OBR plot from the chart.
+            # Fall through: series (if any) then the universal plot events.
 
             chart_series_list = []
             for (owner, title), vals in raw.items():

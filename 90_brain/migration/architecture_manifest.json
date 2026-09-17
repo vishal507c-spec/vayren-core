@@ -1,4 +1,630 @@
 {
+  "screens": {
+    "__init__": {
+      "canonical_language": "slint",
+      "canonical_path": "rust/vayren-shell/",
+      "domain": "NATIVE_UI",
+      "forbidden_as_canonical": [
+        "06_backtest/backtest/ui/__init__.py"
+      ],
+      "python": {
+        "file": "06_backtest/backtest/ui/__init__.py",
+        "migration_target": "rust/vayren-shell/",
+        "reason": "Existing Qt UI surface retained until Slint migration covers it. New surfaces MUST be Rust+Slint in rust/vayren-shell. File role: package re-export surface (no logic)",
+        "role": "legacy_glue",
+        "state": "TEMPORARILY_RETAINED"
+      },
+      "secondary_language": "rust"
+    },
+    "analytics_views": {
+      "canonical_language": "slint",
+      "canonical_path": "rust/vayren-shell/",
+      "domain": "NATIVE_UI",
+      "forbidden_as_canonical": [
+        "06_backtest/backtest/ui/analytics_views.py"
+      ],
+      "python": {
+        "file": "06_backtest/backtest/ui/analytics_views.py",
+        "migration_target": "rust/vayren-shell/",
+        "reason": "Existing Qt UI surface retained until Slint migration covers it. New surfaces MUST be Rust+Slint in rust/vayren-shell. File role: orchestration glue (no migrated authority)",
+        "role": "legacy_glue",
+        "state": "TEMPORARILY_RETAINED"
+      },
+      "secondary_language": "rust"
+    },
+    "brokers_workspace": {
+      "canonical_language": "slint",
+      "canonical_path": "rust/vayren-shell/",
+      "domain": "NATIVE_UI",
+      "forbidden_as_canonical": [
+        "00_app/app/ui/brokers_workspace.py"
+      ],
+      "python": {
+        "file": "00_app/app/ui/brokers_workspace.py",
+        "migration_target": "rust/vayren-shell/",
+        "reason": "Existing Qt UI surface retained until Slint migration covers it. New surfaces MUST be Rust+Slint in rust/vayren-shell. File role: orchestration glue (no migrated authority)",
+        "role": "legacy_glue",
+        "state": "TEMPORARILY_RETAINED"
+      },
+      "secondary_language": "rust"
+    },
+    "candle_chart_widget": {
+      "canonical_language": "slint",
+      "canonical_path": "rust/vayren-shell/",
+      "domain": "NATIVE_UI",
+      "forbidden_as_canonical": [
+        "04_chart/chart/widgets/candle_chart_widget.py"
+      ],
+      "python": {
+        "file": "04_chart/chart/widgets/candle_chart_widget.py",
+        "migration_target": "rust/vayren-shell/",
+        "reason": "Existing Qt UI surface retained until Slint migration covers it",
+        "role": "legacy_glue",
+        "state": "TEMPORARILY_RETAINED"
+      },
+      "secondary_language": "rust"
+    },
+    "candle_renderer": {
+      "canonical_language": "slint",
+      "canonical_path": "rust/vayren-shell/",
+      "domain": "NATIVE_UI",
+      "forbidden_as_canonical": [
+        "04_chart/chart/renderer/candle_renderer.py"
+      ],
+      "python": {
+        "file": "04_chart/chart/renderer/candle_renderer.py",
+        "migration_target": "rust/vayren-shell/",
+        "reason": "Existing Qt UI surface retained until Slint migration covers it",
+        "role": "legacy_glue",
+        "state": "TEMPORARILY_RETAINED"
+      },
+      "secondary_language": "rust"
+    },
+    "chart_window": {
+      "canonical_language": "slint",
+      "canonical_path": "rust/vayren-shell/",
+      "domain": "NATIVE_UI",
+      "forbidden_as_canonical": [
+        "04_chart/chart/windows/chart_window.py"
+      ],
+      "python": {
+        "file": "04_chart/chart/windows/chart_window.py",
+        "migration_target": "rust/vayren-shell/",
+        "reason": "Existing Qt UI surface retained until Slint migration covers it",
+        "role": "legacy_glue",
+        "state": "TEMPORARILY_RETAINED"
+      },
+      "secondary_language": "rust"
+    },
+    "credentials_dialog": {
+      "canonical_language": "slint",
+      "canonical_path": "rust/vayren-shell/",
+      "domain": "NATIVE_UI",
+      "forbidden_as_canonical": [
+        "02_data/data/ui/credentials_dialog.py"
+      ],
+      "python": {
+        "file": "02_data/data/ui/credentials_dialog.py",
+        "migration_target": "rust/vayren-shell/",
+        "reason": "Existing Qt UI surface retained until Slint migration covers it. New surfaces MUST be Rust+Slint in rust/vayren-shell. File role: orchestration glue (no migrated authority)",
+        "role": "legacy_glue",
+        "state": "TEMPORARILY_RETAINED"
+      },
+      "secondary_language": "rust"
+    },
+    "crosshair_renderer": {
+      "canonical_language": "slint",
+      "canonical_path": "rust/vayren-shell/",
+      "domain": "NATIVE_UI",
+      "forbidden_as_canonical": [
+        "04_chart/chart/renderer/crosshair_renderer.py"
+      ],
+      "python": {
+        "file": "04_chart/chart/renderer/crosshair_renderer.py",
+        "migration_target": "rust/vayren-shell/",
+        "reason": "Existing Qt UI surface retained until Slint migration covers it",
+        "role": "legacy_glue",
+        "state": "TEMPORARILY_RETAINED"
+      },
+      "secondary_language": "rust"
+    },
+    "download_panel": {
+      "canonical_language": "slint",
+      "canonical_path": "rust/vayren-shell/",
+      "domain": "NATIVE_UI",
+      "forbidden_as_canonical": [
+        "02_data/data/ui/download_panel.py"
+      ],
+      "python": {
+        "file": "02_data/data/ui/download_panel.py",
+        "migration_target": "rust/vayren-shell/",
+        "reason": "Existing Qt UI surface retained until Slint migration covers it. New surfaces MUST be Rust+Slint in rust/vayren-shell. File role: orchestration glue (no migrated authority)",
+        "role": "legacy_glue",
+        "state": "TEMPORARILY_RETAINED"
+      },
+      "secondary_language": "rust"
+    },
+    "event_log_panel": {
+      "canonical_language": "slint",
+      "canonical_path": "rust/vayren-shell/",
+      "domain": "NATIVE_UI",
+      "forbidden_as_canonical": [
+        "00_app/app/ui/event_log_panel.py"
+      ],
+      "python": {
+        "file": "00_app/app/ui/event_log_panel.py",
+        "migration_target": "rust/vayren-shell/",
+        "reason": "Existing Qt UI surface retained until Slint migration covers it",
+        "role": "legacy_glue",
+        "state": "TEMPORARILY_RETAINED"
+      },
+      "secondary_language": "rust"
+    },
+    "historical_panel": {
+      "canonical_language": "slint",
+      "canonical_path": "rust/vayren-shell/",
+      "domain": "NATIVE_UI",
+      "forbidden_as_canonical": [
+        "02_data/data/ui/historical_panel.py"
+      ],
+      "python": {
+        "file": "02_data/data/ui/historical_panel.py",
+        "migration_target": "rust/vayren-shell/",
+        "reason": "Existing Qt UI surface retained until Slint migration covers it. New surfaces MUST be Rust+Slint in rust/vayren-shell. File role: orchestration glue (no migrated authority)",
+        "role": "legacy_glue",
+        "state": "TEMPORARILY_RETAINED"
+      },
+      "secondary_language": "rust"
+    },
+    "indicator_visibility_panel": {
+      "canonical_language": "slint",
+      "canonical_path": "rust/vayren-shell/",
+      "domain": "NATIVE_UI",
+      "forbidden_as_canonical": [
+        "04_chart/chart/widgets/indicator_visibility_panel.py"
+      ],
+      "python": {
+        "file": "04_chart/chart/widgets/indicator_visibility_panel.py",
+        "migration_target": "rust/vayren-shell/",
+        "reason": "Existing Qt UI surface retained until Slint migration covers it",
+        "role": "legacy_glue",
+        "state": "TEMPORARILY_RETAINED"
+      },
+      "secondary_language": "rust"
+    },
+    "indicators_toolbar": {
+      "canonical_language": "slint",
+      "canonical_path": "rust/vayren-shell/",
+      "domain": "NATIVE_UI",
+      "forbidden_as_canonical": [
+        "04_chart/chart/widgets/indicators_toolbar.py"
+      ],
+      "python": {
+        "file": "04_chart/chart/widgets/indicators_toolbar.py",
+        "migration_target": "rust/vayren-shell/",
+        "reason": "Existing Qt UI surface retained until Slint migration covers it",
+        "role": "legacy_glue",
+        "state": "TEMPORARILY_RETAINED"
+      },
+      "secondary_language": "rust"
+    },
+    "lab_theme": {
+      "canonical_language": "slint",
+      "canonical_path": "rust/vayren-shell/",
+      "domain": "NATIVE_UI",
+      "forbidden_as_canonical": [
+        "00_app/app/ui/lab_theme.py"
+      ],
+      "python": {
+        "file": "00_app/app/ui/lab_theme.py",
+        "migration_target": "rust/vayren-shell/",
+        "reason": "Existing Qt UI surface retained until Slint migration covers it",
+        "role": "legacy_glue",
+        "state": "TEMPORARILY_RETAINED"
+      },
+      "secondary_language": "rust"
+    },
+    "label_renderer": {
+      "canonical_language": "slint",
+      "canonical_path": "rust/vayren-shell/",
+      "domain": "NATIVE_UI",
+      "forbidden_as_canonical": [
+        "04_chart/chart/renderer/label_renderer.py"
+      ],
+      "python": {
+        "file": "04_chart/chart/renderer/label_renderer.py",
+        "migration_target": "rust/vayren-shell/",
+        "reason": "Existing Qt UI surface retained until Slint migration covers it",
+        "role": "legacy_glue",
+        "state": "TEMPORARILY_RETAINED"
+      },
+      "secondary_language": "rust"
+    },
+    "live_workspace": {
+      "canonical_language": "slint",
+      "canonical_path": "rust/vayren-shell/",
+      "domain": "NATIVE_UI",
+      "forbidden_as_canonical": [
+        "00_app/app/ui/live_workspace.py"
+      ],
+      "python": {
+        "file": "00_app/app/ui/live_workspace.py",
+        "migration_target": "rust/vayren-shell/",
+        "reason": "Existing Qt UI surface retained until Slint migration covers it",
+        "role": "legacy_glue",
+        "state": "TEMPORARILY_RETAINED"
+      },
+      "secondary_language": "rust"
+    },
+    "log_view": {
+      "canonical_language": "slint",
+      "canonical_path": "rust/vayren-shell/",
+      "domain": "NATIVE_UI",
+      "forbidden_as_canonical": [
+        "02_data/data/ui/log_view.py"
+      ],
+      "python": {
+        "file": "02_data/data/ui/log_view.py",
+        "migration_target": "rust/vayren-shell/",
+        "reason": "Existing Qt UI surface retained until Slint migration covers it. New surfaces MUST be Rust+Slint in rust/vayren-shell. File role: orchestration glue (no migrated authority)",
+        "role": "legacy_glue",
+        "state": "TEMPORARILY_RETAINED"
+      },
+      "secondary_language": "rust"
+    },
+    "market_status_panel": {
+      "canonical_language": "slint",
+      "canonical_path": "rust/vayren-shell/",
+      "domain": "NATIVE_UI",
+      "forbidden_as_canonical": [
+        "00_app/app/ui/market_status_panel.py"
+      ],
+      "python": {
+        "file": "00_app/app/ui/market_status_panel.py",
+        "migration_target": "rust/vayren-shell/",
+        "reason": "Existing Qt UI surface retained until Slint migration covers it",
+        "role": "legacy_glue",
+        "state": "TEMPORARILY_RETAINED"
+      },
+      "secondary_language": "rust"
+    },
+    "overlay": {
+      "canonical_language": "slint",
+      "canonical_path": "rust/vayren-shell/",
+      "domain": "NATIVE_UI",
+      "forbidden_as_canonical": [
+        "06_backtest/backtest/ui/overlay.py"
+      ],
+      "python": {
+        "file": "06_backtest/backtest/ui/overlay.py",
+        "migration_target": "rust/vayren-shell/",
+        "reason": "Existing Qt UI surface retained until Slint migration covers it. New surfaces MUST be Rust+Slint in rust/vayren-shell. File role: orchestration glue (no migrated authority)",
+        "role": "legacy_glue",
+        "state": "TEMPORARILY_RETAINED"
+      },
+      "secondary_language": "rust"
+    },
+    "overlay_renderer": {
+      "canonical_language": "slint",
+      "canonical_path": "rust/vayren-shell/",
+      "domain": "NATIVE_UI",
+      "forbidden_as_canonical": [
+        "04_chart/chart/renderer/overlay_renderer.py"
+      ],
+      "python": {
+        "file": "04_chart/chart/renderer/overlay_renderer.py",
+        "migration_target": "rust/vayren-shell/",
+        "reason": "Existing Qt UI surface retained until Slint migration covers it",
+        "role": "legacy_glue",
+        "state": "TEMPORARILY_RETAINED"
+      },
+      "secondary_language": "rust"
+    },
+    "performance_panel": {
+      "canonical_language": "slint",
+      "canonical_path": "rust/vayren-shell/",
+      "domain": "NATIVE_UI",
+      "forbidden_as_canonical": [
+        "06_backtest/backtest/ui/performance_panel.py"
+      ],
+      "python": {
+        "file": "06_backtest/backtest/ui/performance_panel.py",
+        "migration_target": "rust/vayren-shell/",
+        "reason": "Existing Qt UI surface retained until Slint migration covers it. New surfaces MUST be Rust+Slint in rust/vayren-shell. File role: orchestration glue (no migrated authority)",
+        "role": "legacy_glue",
+        "state": "TEMPORARILY_RETAINED"
+      },
+      "secondary_language": "rust"
+    },
+    "plot_renderer": {
+      "canonical_language": "slint",
+      "canonical_path": "rust/vayren-shell/",
+      "domain": "NATIVE_UI",
+      "forbidden_as_canonical": [
+        "04_chart/chart/renderer/plot_renderer.py"
+      ],
+      "python": {
+        "file": "04_chart/chart/renderer/plot_renderer.py",
+        "migration_target": "rust/vayren-shell/",
+        "reason": "Existing Qt UI surface retained until Slint migration covers it",
+        "role": "legacy_glue",
+        "state": "TEMPORARILY_RETAINED"
+      },
+      "secondary_language": "rust"
+    },
+    "portfolio_workspace": {
+      "canonical_language": "slint",
+      "canonical_path": "rust/vayren-shell/",
+      "domain": "NATIVE_UI",
+      "forbidden_as_canonical": [
+        "00_app/app/ui/portfolio_workspace.py"
+      ],
+      "python": {
+        "file": "00_app/app/ui/portfolio_workspace.py",
+        "migration_target": "rust/vayren-shell/",
+        "reason": "Existing Qt UI surface retained until Slint migration covers it",
+        "role": "legacy_glue",
+        "state": "TEMPORARILY_RETAINED"
+      },
+      "secondary_language": "rust"
+    },
+    "research_workspace": {
+      "canonical_language": "slint",
+      "canonical_path": "rust/vayren-shell/",
+      "domain": "NATIVE_UI",
+      "forbidden_as_canonical": [
+        "00_app/app/ui/research_workspace.py"
+      ],
+      "python": {
+        "file": "00_app/app/ui/research_workspace.py",
+        "migration_target": "rust/vayren-shell/",
+        "reason": "Existing Qt UI surface retained until Slint migration covers it",
+        "role": "legacy_glue",
+        "state": "TEMPORARILY_RETAINED"
+      },
+      "secondary_language": "rust"
+    },
+    "section_label": {
+      "canonical_language": "slint",
+      "canonical_path": "rust/vayren-shell/",
+      "domain": "NATIVE_UI",
+      "forbidden_as_canonical": [
+        "02_data/data/ui/section_label.py"
+      ],
+      "python": {
+        "file": "02_data/data/ui/section_label.py",
+        "migration_target": "rust/vayren-shell/",
+        "reason": "Existing Qt UI surface retained until Slint migration covers it. New surfaces MUST be Rust+Slint in rust/vayren-shell. File role: orchestration glue (no migrated authority)",
+        "role": "legacy_glue",
+        "state": "TEMPORARILY_RETAINED"
+      },
+      "secondary_language": "rust"
+    },
+    "status_view": {
+      "canonical_language": "slint",
+      "canonical_path": "rust/vayren-shell/",
+      "domain": "NATIVE_UI",
+      "forbidden_as_canonical": [
+        "02_data/data/ui/status_view.py"
+      ],
+      "python": {
+        "file": "02_data/data/ui/status_view.py",
+        "migration_target": "rust/vayren-shell/",
+        "reason": "Existing Qt UI surface retained until Slint migration covers it. New surfaces MUST be Rust+Slint in rust/vayren-shell. File role: orchestration glue (no migrated authority)",
+        "role": "legacy_glue",
+        "state": "TEMPORARILY_RETAINED"
+      },
+      "secondary_language": "rust"
+    },
+    "stock_checklist": {
+      "canonical_language": "slint",
+      "canonical_path": "rust/vayren-shell/",
+      "domain": "NATIVE_UI",
+      "forbidden_as_canonical": [
+        "02_data/data/ui/stock_checklist.py"
+      ],
+      "python": {
+        "file": "02_data/data/ui/stock_checklist.py",
+        "migration_target": "rust/vayren-shell/",
+        "reason": "Existing Qt UI surface retained until Slint migration covers it. New surfaces MUST be Rust+Slint in rust/vayren-shell. File role: orchestration glue (no migrated authority)",
+        "role": "legacy_glue",
+        "state": "TEMPORARILY_RETAINED"
+      },
+      "secondary_language": "rust"
+    },
+    "stock_ranking": {
+      "canonical_language": "slint",
+      "canonical_path": "rust/vayren-shell/",
+      "domain": "NATIVE_UI",
+      "forbidden_as_canonical": [
+        "00_app/app/ui/stock_ranking.py"
+      ],
+      "python": {
+        "file": "00_app/app/ui/stock_ranking.py",
+        "migration_target": "rust/vayren-shell/",
+        "reason": "Existing Qt UI surface retained until Slint migration covers it",
+        "role": "legacy_glue",
+        "state": "TEMPORARILY_RETAINED"
+      },
+      "secondary_language": "rust"
+    },
+    "strategy_lab_workspace": {
+      "canonical_language": "slint",
+      "canonical_path": "rust/vayren-shell/",
+      "domain": "NATIVE_UI",
+      "forbidden_as_canonical": [
+        "00_app/app/ui/strategy_lab_workspace.py"
+      ],
+      "python": {
+        "file": "00_app/app/ui/strategy_lab_workspace.py",
+        "migration_target": "rust/vayren-shell/",
+        "reason": "Existing Qt UI surface retained until Slint migration covers it",
+        "role": "legacy_glue",
+        "state": "TEMPORARILY_RETAINED"
+      },
+      "secondary_language": "rust"
+    },
+    "symbol_list_widget": {
+      "canonical_language": "slint",
+      "canonical_path": "rust/vayren-shell/",
+      "domain": "NATIVE_UI",
+      "forbidden_as_canonical": [
+        "04_chart/chart/widgets/symbol_list_widget.py"
+      ],
+      "python": {
+        "file": "04_chart/chart/widgets/symbol_list_widget.py",
+        "migration_target": "rust/vayren-shell/",
+        "reason": "Existing Qt UI surface retained until Slint migration covers it",
+        "role": "legacy_glue",
+        "state": "TEMPORARILY_RETAINED"
+      },
+      "secondary_language": "rust"
+    },
+    "system_health_panel": {
+      "canonical_language": "slint",
+      "canonical_path": "rust/vayren-shell/",
+      "domain": "NATIVE_UI",
+      "forbidden_as_canonical": [
+        "00_app/app/ui/system_health_panel.py"
+      ],
+      "python": {
+        "file": "00_app/app/ui/system_health_panel.py",
+        "migration_target": "rust/vayren-shell/",
+        "reason": "Existing Qt UI surface retained until Slint migration covers it",
+        "role": "legacy_glue",
+        "state": "TEMPORARILY_RETAINED"
+      },
+      "secondary_language": "rust"
+    },
+    "time_axis_renderer": {
+      "canonical_language": "slint",
+      "canonical_path": "rust/vayren-shell/",
+      "domain": "NATIVE_UI",
+      "forbidden_as_canonical": [
+        "04_chart/chart/renderer/time_axis_renderer.py"
+      ],
+      "python": {
+        "file": "04_chart/chart/renderer/time_axis_renderer.py",
+        "migration_target": "rust/vayren-shell/",
+        "reason": "Existing Qt UI surface retained until Slint migration covers it",
+        "role": "legacy_glue",
+        "state": "TEMPORARILY_RETAINED"
+      },
+      "secondary_language": "rust"
+    },
+    "timeframe_toolbar": {
+      "canonical_language": "slint",
+      "canonical_path": "rust/vayren-shell/",
+      "domain": "NATIVE_UI",
+      "forbidden_as_canonical": [
+        "04_chart/chart/widgets/timeframe_toolbar.py"
+      ],
+      "python": {
+        "file": "04_chart/chart/widgets/timeframe_toolbar.py",
+        "migration_target": "rust/vayren-shell/",
+        "reason": "Existing Qt UI surface retained until Slint migration covers it",
+        "role": "legacy_glue",
+        "state": "TEMPORARILY_RETAINED"
+      },
+      "secondary_language": "rust"
+    },
+    "tools_toolbar": {
+      "canonical_language": "slint",
+      "canonical_path": "rust/vayren-shell/",
+      "domain": "NATIVE_UI",
+      "forbidden_as_canonical": [
+        "04_chart/chart/widgets/tools_toolbar.py"
+      ],
+      "python": {
+        "file": "04_chart/chart/widgets/tools_toolbar.py",
+        "migration_target": "rust/vayren-shell/",
+        "reason": "Existing Qt UI surface retained until Slint migration covers it",
+        "role": "legacy_glue",
+        "state": "TEMPORARILY_RETAINED"
+      },
+      "secondary_language": "rust"
+    },
+    "top_nav_bar": {
+      "canonical_language": "slint",
+      "canonical_path": "rust/vayren-shell/",
+      "domain": "NATIVE_UI",
+      "forbidden_as_canonical": [
+        "00_app/app/ui/top_nav_bar.py"
+      ],
+      "python": {
+        "file": "00_app/app/ui/top_nav_bar.py",
+        "migration_target": "rust/vayren-shell/",
+        "reason": "Existing Qt UI surface retained until Slint migration covers it",
+        "role": "legacy_glue",
+        "state": "TEMPORARILY_RETAINED"
+      },
+      "secondary_language": "rust"
+    },
+    "trade_context_panel": {
+      "canonical_language": "slint",
+      "canonical_path": "rust/vayren-shell/",
+      "domain": "NATIVE_UI",
+      "forbidden_as_canonical": [
+        "00_app/app/ui/trade_context_panel.py"
+      ],
+      "python": {
+        "file": "00_app/app/ui/trade_context_panel.py",
+        "migration_target": "rust/vayren-shell/",
+        "reason": "Existing Qt UI surface retained until Slint migration covers it",
+        "role": "legacy_glue",
+        "state": "TEMPORARILY_RETAINED"
+      },
+      "secondary_language": "rust"
+    },
+    "ui_kit": {
+      "canonical_language": "slint",
+      "canonical_path": "rust/vayren-shell/",
+      "domain": "NATIVE_UI",
+      "forbidden_as_canonical": [
+        "00_app/app/ui/ui_kit.py"
+      ],
+      "python": {
+        "file": "00_app/app/ui/ui_kit.py",
+        "migration_target": "rust/vayren-shell/",
+        "reason": "Existing Qt UI surface retained until Slint migration covers it",
+        "role": "legacy_glue",
+        "state": "TEMPORARILY_RETAINED"
+      },
+      "secondary_language": "rust"
+    },
+    "watchlist_multiselect": {
+      "canonical_language": "slint",
+      "canonical_path": "rust/vayren-shell/",
+      "domain": "NATIVE_UI",
+      "forbidden_as_canonical": [
+        "00_app/app/ui/watchlist_multiselect.py"
+      ],
+      "python": {
+        "file": "00_app/app/ui/watchlist_multiselect.py",
+        "migration_target": "rust/vayren-shell/",
+        "reason": "Existing Qt UI surface retained until Slint migration covers it",
+        "role": "legacy_glue",
+        "state": "TEMPORARILY_RETAINED"
+      },
+      "secondary_language": "rust"
+    },
+    "watchlist_widget": {
+      "canonical_language": "slint",
+      "canonical_path": "rust/vayren-shell/",
+      "domain": "NATIVE_UI",
+      "forbidden_as_canonical": [
+        "04_chart/chart/widgets/watchlist_widget.py"
+      ],
+      "python": {
+        "file": "04_chart/chart/widgets/watchlist_widget.py",
+        "migration_target": "rust/vayren-shell/",
+        "reason": "Existing Qt UI surface retained until Slint migration covers it",
+        "role": "legacy_glue",
+        "state": "TEMPORARILY_RETAINED"
+      },
+      "secondary_language": "rust"
+    }
+  },
   "units": {
     "backtest.metrics.drawdown": {
       "allowed_paths": [
@@ -301,5 +927,5 @@
       ]
     }
   },
-  "version": 1
+  "version": 2
 }

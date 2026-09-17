@@ -1,9 +1,11 @@
 """Build the Rust workspace (constitution §8: Rust owns core/perf).
 
 Builds the `vayren-core` cdylib (release) consumed by the Python boundary
-via ctypes, builds the `vayren-shell` native UI binary, and verifies the
-ABI handshake. Also runs `cargo test` for the whole workspace with
-`--test`. Fail-closed: any cargo failure exits nonzero with the log tail.
+via ctypes, the `vayren-portfolio-view` cdylib (release) hosting the native
+Slint Portfolio screen inside the Qt window, builds the `vayren-shell`
+native UI binary, and verifies the ABI handshake. Also runs `cargo test`
+for the whole workspace with `--test`. Fail-closed: any cargo failure
+exits nonzero with the log tail.
 """
 
 from __future__ import annotations
@@ -25,6 +27,60 @@ def _lib_name() -> str:
     if system == "darwin":
         return "libvayren_core.dylib"
     return "libvayren_core.so"
+
+
+def _view_lib_name() -> str:
+    system = platform.system().lower()
+    if system.startswith("win"):
+        return "vayren_portfolio_view.dll"
+    if system == "darwin":
+        return "libvayren_portfolio_view.dylib"
+    return "libvayren_portfolio_view.so"
+
+
+def _live_lib_name() -> str:
+    system = platform.system().lower()
+    if system.startswith("win"):
+        return "vayren_live_view.dll"
+    if system == "darwin":
+        return "libvayren_live_view.dylib"
+    return "libvayren_live_view.so"
+
+
+def _lab_lib_name() -> str:
+    system = platform.system().lower()
+    if system.startswith("win"):
+        return "vayren_strategy_lab_view.dll"
+    if system == "darwin":
+        return "libvayren_strategy_lab_view.dylib"
+    return "libvayren_strategy_lab_view.so"
+
+
+def _system_lib_name() -> str:
+    system = platform.system().lower()
+    if system.startswith("win"):
+        return "vayren_system_view.dll"
+    if system == "darwin":
+        return "libvayren_system_view.dylib"
+    return "libvayren_system_view.so"
+
+
+def _research_lib_name() -> str:
+    system = platform.system().lower()
+    if system.startswith("win"):
+        return "vayren_research_view.dll"
+    if system == "darwin":
+        return "libvayren_research_view.dylib"
+    return "libvayren_research_view.so"
+
+
+def _market_lib_name() -> str:
+    system = platform.system().lower()
+    if system.startswith("win"):
+        return "vayren_market_view.dll"
+    if system == "darwin":
+        return "libvayren_market_view.dylib"
+    return "libvayren_market_view.so"
 
 
 def _bin_name() -> str:
@@ -71,6 +127,120 @@ def main() -> int:
         print(f"ERROR: expected cdylib missing after build: {lib}")
         return 1
     print(f"built {lib} ({lib.stat().st_size} bytes)")
+
+    rc = _run(
+        [
+            "cargo",
+            "build",
+            "--release",
+            "-p",
+            "vayren-portfolio-view",
+            "--manifest-path",
+            "rust/Cargo.toml",
+        ]
+    )
+    if rc != 0:
+        return rc
+    view_lib = ROOT / "rust" / "target" / "release" / _view_lib_name()
+    if not view_lib.is_file():
+        print(f"ERROR: expected portfolio view cdylib missing after build: {view_lib}")
+        return 1
+    print(f"built {view_lib} ({view_lib.stat().st_size} bytes)")
+
+    rc = _run(
+        [
+            "cargo",
+            "build",
+            "--release",
+            "-p",
+            "vayren-live-view",
+            "--manifest-path",
+            "rust/Cargo.toml",
+        ]
+    )
+    if rc != 0:
+        return rc
+    live_lib = ROOT / "rust" / "target" / "release" / _live_lib_name()
+    if not live_lib.is_file():
+        print(f"ERROR: expected live view cdylib missing after build: {live_lib}")
+        return 1
+    print(f"built {live_lib} ({live_lib.stat().st_size} bytes)")
+
+    rc = _run(
+        [
+            "cargo",
+            "build",
+            "--release",
+            "-p",
+            "vayren-system-view",
+            "--manifest-path",
+            "rust/Cargo.toml",
+        ]
+    )
+    if rc != 0:
+        return rc
+    system_lib = ROOT / "rust" / "target" / "release" / _system_lib_name()
+    if not system_lib.is_file():
+        print(f"ERROR: expected system view cdylib missing after build: {system_lib}")
+        return 1
+    print(f"built {system_lib} ({system_lib.stat().st_size} bytes)")
+
+    rc = _run(
+        [
+            "cargo",
+            "build",
+            "--release",
+            "-p",
+            "vayren-strategy-lab-view",
+            "--manifest-path",
+            "rust/Cargo.toml",
+        ]
+    )
+    if rc != 0:
+        return rc
+    lab_lib = ROOT / "rust" / "target" / "release" / _lab_lib_name()
+    if not lab_lib.is_file():
+        print(f"ERROR: expected strategy lab view cdylib missing after build: {lab_lib}")
+        return 1
+    print(f"built {lab_lib} ({lab_lib.stat().st_size} bytes)")
+
+    rc = _run(
+        [
+            "cargo",
+            "build",
+            "--release",
+            "-p",
+            "vayren-research-view",
+            "--manifest-path",
+            "rust/Cargo.toml",
+        ]
+    )
+    if rc != 0:
+        return rc
+    research_lib = ROOT / "rust" / "target" / "release" / _research_lib_name()
+    if not research_lib.is_file():
+        print(f"ERROR: expected research view cdylib missing after build: {research_lib}")
+        return 1
+    print(f"built {research_lib} ({research_lib.stat().st_size} bytes)")
+
+    rc = _run(
+        [
+            "cargo",
+            "build",
+            "--release",
+            "-p",
+            "vayren-market-view",
+            "--manifest-path",
+            "rust/Cargo.toml",
+        ]
+    )
+    if rc != 0:
+        return rc
+    market_lib = ROOT / "rust" / "target" / "release" / _market_lib_name()
+    if not market_lib.is_file():
+        print(f"ERROR: expected market view cdylib missing after build: {market_lib}")
+        return 1
+    print(f"built {market_lib} ({market_lib.stat().st_size} bytes)")
 
     rc = _run(["cargo", "build", "-p", "vayren-shell", "--manifest-path", "rust/Cargo.toml"])
     if rc != 0:

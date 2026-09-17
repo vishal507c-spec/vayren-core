@@ -405,3 +405,61 @@ def test_ohlc_positioned_in_top_bar() -> None:
     top_bar = ohlc_calls[0]
     assert top_bar.top() == chart_rect.top()
     assert top_bar.height() == CandleChartWidget.SYMBOL_HEIGHT
+
+
+def test_query_visible_includes_spanning_ray_past_left_edge() -> None:
+    """OBR left-edge parity: a RAY anchored just before the viewport whose
+    extension reaches into the window must be returned even when a MARKER
+    record is interleaved at a slightly higher anchor. The store's spanning
+    scan must skip point plots, not terminate on them (the Slint view culls
+    the same way; both renderers must agree at the left edge).
+    """
+    _app()
+    from strategy.models.plot_event import (
+        MarkerType,
+        PlotEvent,
+        PlotLifecycle,
+        PlotType,
+        RenderLayer,
+        make_event_id,
+    )
+
+    from chart.renderer.plot_renderer import PlotOverlay
+
+    def _ev(bar: int, plot_id: str, plot_type: PlotType, price: float, marker=None, ext=None):
+        return PlotEvent(
+            event_id=make_event_id("OBR", "X", "30m", bar, plot_id),
+            source_strategy="OBR",
+            plot_id=plot_id,
+            plot_type=plot_type,
+            symbol="X",
+            timeframe="30m",
+            bar_index=bar if plot_type is PlotType.MARKER else None,
+            start_bar=bar if plot_type is PlotType.RAY else None,
+            price=price if plot_type is PlotType.MARKER else None,
+            start_price=price if plot_type is PlotType.RAY else None,
+            marker_type=marker,
+            lifecycle=PlotLifecycle.ACTIVE,
+            layer=RenderLayer.MARKER,
+            extend_bars=ext,
+        )
+
+    # MARKER at 89 (a point plot just below the window) and a RAY at 88 whose
+    # 5-bar extension covers [88, 92] — it reaches into the [90, 100) window.
+    events = (
+        _ev(88, "ref_high", PlotType.RAY, 100.0, ext=5),
+        _ev(89, "buy_89", PlotType.MARKER, 101.0, marker=MarkerType.UP_ARROW),
+        _ev(95, "eod_95", PlotType.MARKER, 102.0, marker=MarkerType.TRIANGLE_BLUE),
+    )
+    overlay = PlotOverlay()
+    overlay.ingest_plot_events(events)
+    visible = overlay._store.query_visible(90, 100)
+    by_id = {r.plot_id: r for r in visible}
+    assert "eod_95" in by_id, "marker inside the window must be present"
+    ref = by_id.get("ref_high")
+    assert ref is not None, (
+        "ray anchored at 88 with extend_bars=5 covers bar 92 and must be "
+        "returned for the [90,100) window (left-edge sliver parity)"
+    )
+    assert ref.plot_type == "RAY"  # store normalizes to uppercase strings
+    assert ref.covered == (88, 92)

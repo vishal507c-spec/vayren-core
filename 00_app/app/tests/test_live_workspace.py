@@ -501,6 +501,7 @@ def test_no_fake_live_data(workspace: LiveWorkspace) -> None:
 def test_market_ui_unchanged() -> None:
     nav = TopNavBar()
     assert nav.active == "MARKET"
+    # Canonical six-section nav (PORTFOLIO is the native Slint viewport).
     assert set(nav._buttons) == {
         "MARKET",
         "STRATEGY LAB",

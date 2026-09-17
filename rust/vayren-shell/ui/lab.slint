@@ -1,0 +1,1857 @@
+// VAYREN Strategy Lab — native Slint workstation surface (constitution §3,
+// UI_DESIGN_SYSTEM.md). Presentation only: every value arrives via the `lab`
+// struct + row models projected by the Rust view-model (lab.rs); the screen
+// reports user actions through callbacks and never infers state.
+//
+// Visual contract: ONE unified strategy header (replaces the fragmented
+// NO STRATEGY / BUY—LONG / -- / READY strip), mode segmented control lives
+// HERE only (floating BUY/LONG box removed), compact institutional config
+// toolbar, hairline-separated KPI band (no card-per-metric, Net P&L
+// strongest), analysis tabs whose content always fills the remaining space
+// (no giant voids), and stock ranking integrated as the PERFORMANCE section.
+
+import { VayrenPalette, VayrenDesign } from "palette.slint";
+import { VBadge, VButton, VBanner, VEmptyState, VCell } from "components.slint";
+import { LineEdit, ScrollView, ComboBox, TextEdit } from "std-widgets.slint";
+
+export struct LabPoint {
+    x: length,
+    y: length,
+}
+
+export struct LabHeader {
+    has-strategy: bool,
+    name: string,
+    description: string,
+    tags: string,
+    version: string,
+    modified: string,
+    last-backtest: string,
+    state-label: string,
+    state-tone: int, // VBadge tone
+    mode: int,       // 0 LONG, 1 SHORT, 2 COMPARE
+    outdated: bool,
+    run-enabled: bool,
+    universe: string,
+    timeframe: string,
+    dates: string,
+    capital: string,
+    cost: string,
+    show-results: bool,
+    tab: int,
+    summary-line: string,
+    empty-reason: string,
+    equity-caption: string,
+    drawdown-caption: string,
+    ranking-count: string,
+    run-stop: bool,
+    verdict-label: string,
+    verdict-note: string,
+    verdict-tone: int,
+    progress-label: string,
+    run-label: string,
+    code: string,
+    dirty: bool,
+    cfg-universe-csv: string,
+    timeframe-index: int,
+    cfg-dates-start: string,
+    cfg-dates-end: string,
+    cfg-capital: string,
+    config-error: string,
+    rank-search: string,
+    rank-desc: bool,
+    rankby-current: int,
+    trade-needle: string,
+    trade-symbol: string,
+    trade-filters-active: bool,
+    selected-trade: int,
+    compare-side: int, // 0 ALL, 1 LONG, 2 SHORT
+    is-compare: bool,
+    // drill-down (empty symbol = none selected)
+    detail-symbol: string,
+    detail-title: string,
+    detail-stats: string,
+    detail-caption: string,
+    // compare page
+    cmp-verdict: string,
+    cmp-reason: string,
+    cmp-tone: int,
+    cmp-trade-summary: string,
+    cmp-stale: string,
+    cmp-scope: string,
+    cmp-leader: string,
+    cmp-has-sides: bool,
+    sym-open: bool,
+    sym-search: string,
+    sym-button-line: string,
+    sym-count-line: string,
+}
+
+export struct LabLibraryRow {
+    real-index: int,
+    name: string,
+    description: string,
+    state-label: string,
+    favorite: bool,
+    selected: bool,
+}
+
+export struct LabKpi {
+    label: string,
+    value: string,
+    tone: int, // 0 muted, 1 neutral, 2 positive, 3 negative, 4 warning
+    emphasized: bool,
+}
+
+export struct LabRankRow {
+    rank: string,
+    symbol: string,
+    pnl: string,
+    ret: string,
+    trades: string,
+    win: string,
+    pf: string,
+    dd: string,
+    sharpe: string,
+    pnl-tone: int,
+    pf-tone: int,
+    unranked: bool,
+}
+
+export struct LabTradeRow {
+    no: string,
+    abs-index: int,
+    symbol: string,
+    side: string,
+    entry: string,
+    entry-px: string,
+    exit: string,
+    exit-px: string,
+    pnl: string,
+    r: string,
+    bars: string,
+    reason: string,
+    pnl-tone: int,
+    selected: bool,
+}
+
+export struct LabParam {
+    key: string,
+    label: string,
+    value: string,
+}
+
+export struct LabDetailMetric {
+    label: string,
+    value: string,
+}
+
+export struct LabBoardCell {
+    symbol: string,
+    text: string,
+    best: bool,
+}
+
+export struct LabMatrixRow {
+    key: string,
+    buy: string,
+    sell: string,
+    winner: int, // 0 none, 1 BUY, 2 SELL
+}
+
+global ToneColors {
+    public pure function color(t: int) -> color {
+        return t == 2 ? VayrenPalette.pos
+            : t == 3 ? VayrenPalette.neg
+            : t == 4 ? VayrenPalette.amber
+            : t == 0 ? VayrenPalette.faint
+            : VayrenPalette.text;
+    }
+}
+
+component Hairline inherits Rectangle {
+    width: 100%;
+    height: 1px;
+    background: VayrenPalette.hairline;
+}
+
+component KpiCell inherits Rectangle {
+    in property <string> cell-label;
+    in property <string> cell-value;
+    in property <int> tone: 1;
+    in property <bool> emphasized: false;
+    in property <bool> last: false;
+
+    VerticalLayout {
+        padding-left: VayrenDesign.sp-lg;
+        padding-right: VayrenDesign.sp-lg;
+        spacing: 2px;
+        alignment: center;
+        Text {
+            text: root.cell-label;
+            color: VayrenPalette.faint;
+            font-size: VayrenDesign.fs-label;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+        Text {
+            text: root.cell-value;
+            color: ToneColors.color(root.tone);
+            font-size: root.emphasized ? VayrenDesign.fs-kpi : VayrenDesign.fs-metric;
+            font-weight: 700;
+            font-family: "monospace";
+        }
+    }
+    if !root.last: Rectangle {
+        width: 1px;
+        y: VayrenDesign.sp-md;
+        height: parent.height - 2 * VayrenDesign.sp-md;
+        x: parent.width - 1px;
+        background: VayrenPalette.hairline-soft;
+    }
+}
+
+component SegButton inherits Rectangle {
+    in property <string> seg-label;
+    in property <bool> active: false;
+    in property <color> active-fill: VayrenPalette.accent;
+    callback seg-clicked();
+
+    border-radius: VayrenDesign.radius;
+    background: active ? active-fill : ta.pressed ? VayrenPalette.pressed : ta.has-hover ? VayrenPalette.hover : transparent;
+    ta := TouchArea {
+        clicked => { root.seg-clicked(); }
+    }
+    VerticalLayout {
+        alignment: center;
+        Text {
+            text: root.seg-label;
+            color: active ? VayrenPalette.accent-text : ta.has-hover
+                ? VayrenPalette.text : VayrenPalette.muted;
+            font-size: VayrenDesign.fs-label;
+            font-weight: 700;
+            letter-spacing: 0.3px;
+            horizontal-alignment: center;
+        }
+    }
+}
+
+component ChartPanel inherits Rectangle {
+    in property <string> chart-title;
+    in property <string> chart-caption;
+    in property <[LabPoint]> points;
+    in property <color> line-color;
+    in property <[LabPoint]> points2;
+    in property <color> line-color2: transparent;
+
+    border-radius: VayrenDesign.radius-sm;
+    background: VayrenPalette.bg1;
+    border-width: 1px;
+    border-color: VayrenPalette.hairline;
+
+    VerticalLayout {
+        padding: VayrenDesign.sp-md;
+        spacing: VayrenDesign.sp-xs;
+        HorizontalLayout {
+            height: 20px;
+            spacing: VayrenDesign.sp-md;
+            Text {
+                text: root.chart-title;
+                color: VayrenPalette.text;
+                font-size: VayrenDesign.fs-small;
+                font-weight: 700;
+                vertical-alignment: center;
+            }
+            Rectangle { horizontal-stretch: 1; background: transparent; }
+            Text {
+                text: root.chart-caption;
+                color: VayrenPalette.faint;
+                font-size: VayrenDesign.fs-label;
+                vertical-alignment: center;
+            }
+        }
+        Rectangle {
+            vertical-stretch: 1;
+            background: transparent;
+            clip: true;
+            if root.points.length == 0: VEmptyState {
+                x: 0;
+                y: 0;
+                width: parent.width;
+                height: parent.height;
+                title: "NO CHART DATA";
+                detail: "The engine has not produced this series.";
+            }
+            // Series markers in view coordinates (model pre-scales to the
+            // 1000x300 box; presentation transform only, data untouched).
+            for p in root.points: Rectangle {
+                width: 3px;
+                height: 3px;
+                border-radius: 2px;
+                x: parent.width * (p.x / 1000px) - 1.5px;
+                y: parent.height - parent.height * (p.y / 300px) - 1.5px;
+                background: root.line-color;
+            }
+            for p in root.points2: Rectangle {
+                width: 3px;
+                height: 3px;
+                border-radius: 2px;
+                x: parent.width * (p.x / 1000px) - 1.5px;
+                y: parent.height - parent.height * (p.y / 300px) - 1.5px;
+                background: root.line-color2;
+            }
+            Rectangle {
+                height: 1px;
+                y: parent.height - 1px;
+                width: 100%;
+                background: VayrenPalette.hairline-soft;
+            }
+        }
+    }
+}
+
+export component StrategyLabScreen inherits Rectangle {
+    in property <LabHeader> lab;
+    in property <[LabLibraryRow]> library;
+    in property <[LabKpi]> kpis;
+    in property <[LabRankRow]> ranking;
+    in property <[LabTradeRow]> trades;
+    in property <[LabPoint]> equity;
+    in property <[LabPoint]> drawdown;
+    in property <[LabParam]> params;
+    in property <[string]> timeframes;
+    in property <[string]> rankby-labels;
+    in property <[string]> rank-heads;
+    in property <[string]> trade-heads;
+    in property <[LabDetailMetric]> detail-metrics;
+    in property <[LabPoint]> detail-equity;
+    in property <[string]> board-labels;
+    in property <[string]> board-columns;
+    in property <[string]> board-trades;
+    in property <[LabBoardCell]> board-cells;
+    in property <int> board-cols: 1;
+    in property <[LabMatrixRow]> matrix;
+    in property <[LabRankRow]> compare-ranking;
+    in property <[LabPoint]> equity-buy;
+    in property <[LabPoint]> equity-sell;
+    in property <[LabPoint]> drawdown-buy;
+    in property <[LabPoint]> drawdown-sell;
+    in property <[string]> sym-visible;
+    in property <[bool]> sym-visible-on;
+    in property <int> filter-active: 0;
+    property <[string]> config-labels: ["UNIVERSE", "TIMEFRAME", "DATE RANGE", "CAPITAL", "TRANSACTION COST"];
+
+    in property <bool> head-roomy: true;
+
+    callback library-picked(int);
+    callback filter-picked(int);
+    callback search-changed(string);
+    callback mode-picked(int);
+    callback tab-picked(int);
+    callback run-requested();
+    callback save-requested();
+    callback compile-requested();
+    callback new-requested();
+    callback row-menu(int);
+    callback rank-picked(string);
+    callback trade-picked(int);
+    callback export-trades-requested();
+    callback code-changed(string);
+    callback param-committed(string, string);
+    callback timeframe-picked(string);
+    callback capital-committed(string);
+    callback dates-committed(string, string);
+    callback sym-open();
+    callback sym-close();
+    callback sym-search-changed(string);
+    callback sym-toggle(string);
+    callback sym-all-visible();
+    callback sym-clear();
+    callback sym-apply();
+    callback rank-search-changed(string);
+    callback rankby-picked(string);
+    callback rank-order-toggled();
+    callback trade-filter-changed(string);
+    callback cmp-side-picked(int);
+    callback run-buy-requested();
+    callback run-sell-requested();
+    callback run-all-requested();
+
+    background: VayrenPalette.bg;
+
+    HorizontalLayout {
+        // ── strategy library (compact research library) ──
+        Rectangle {
+            width: 210px;
+            background: VayrenPalette.bg;
+
+            VerticalLayout {
+                padding: VayrenDesign.sp-md;
+                spacing: VayrenDesign.sp-sm;
+
+                HorizontalLayout {
+                    spacing: VayrenDesign.sp-sm;
+                    Text {
+                        text: "STRATEGIES";
+                        color: VayrenPalette.muted;
+                        font-size: VayrenDesign.fs-label;
+                        font-weight: 700;
+                        letter-spacing: 0.5px;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    VButton {
+                        width: 58px;
+                        height: 22px;
+                        label: "+  NEW";
+                        variant: 2;
+                        clicked => { root.new-requested(); }
+                    }
+                }
+                LineEdit {
+                    placeholder-text: "Search…";
+                    edited(t) => { root.search-changed(t); }
+                }
+                HorizontalLayout {
+                    spacing: VayrenDesign.sp-xs;
+                    height: 24px;
+                    for f[idx] in ["ALL", "FAVORITES", "RECENT"]: SegButton {
+                        width: idx == 0 ? 44px : 76px;
+                        seg-label: f;
+                        active: idx == root.filter-active;
+                        seg-clicked => { root.filter-picked(idx); }
+                    }
+                }
+                ScrollView {
+                    viewport-width: 186px;
+                    VerticalLayout {
+                        spacing: VayrenDesign.sp-xs;
+                        for row in root.library: Rectangle {
+                            height: 42px;
+                            border-radius: VayrenDesign.radius-sm;
+                            background: row.selected ? VayrenPalette.selected
+                                : lta.has-hover ? VayrenPalette.hover : transparent;
+                            lta := TouchArea {
+                                clicked => { root.library-picked(row.real-index); }
+                            }
+                            // Selected accent bar — left edge glow.
+                            if row.selected: Rectangle {
+                                x: 0;
+                                y: 4px;
+                                width: 3px;
+                                height: parent.height - 8px;
+                                border-radius: 2px;
+                                background: VayrenPalette.accent;
+                            }
+                            HorizontalLayout {
+                                padding-left: row.selected ? VayrenDesign.sp-lg : VayrenDesign.sp-md;
+                                padding-right: VayrenDesign.sp-sm;
+                                spacing: VayrenDesign.sp-sm;
+                                VerticalLayout {
+                                    spacing: 1px;
+                                    alignment: center;
+                                    horizontal-stretch: 1;
+                                    HorizontalLayout {
+                                        spacing: VayrenDesign.sp-xs;
+                                        if row.favorite: Text {
+                                            text: "★";
+                                            color: VayrenPalette.accent;
+                                            font-size: VayrenDesign.fs-small;
+                                            vertical-alignment: center;
+                                        }
+                                        Text {
+                                            text: row.name;
+                                            color: row.selected ? VayrenPalette.text : VayrenPalette.muted;
+                                            font-size: VayrenDesign.fs-small;
+                                            font-weight: row.selected ? 700 : 500;
+                                            overflow: elide;
+                                        }
+                                    }
+                                    Text {
+                                        text: row.description;
+                                        color: VayrenPalette.faint;
+                                        font-size: VayrenDesign.fs-label;
+                                        overflow: elide;
+                                    }
+                                }
+                                Text {
+                                    text: row.state-label;
+                                    color: VayrenPalette.faint;
+                                    font-size: VayrenDesign.fs-label;
+                                    font-weight: 700;
+                                    vertical-alignment: center;
+                                }
+                                Text {
+                                    text: "⋮";
+                                    color: mta.has-hover ? VayrenPalette.text : VayrenPalette.faint;
+                                    font-size: VayrenDesign.fs-small;
+                                    font-weight: 700;
+                                    width: 18px;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                    visible: lta.has-hover || row.selected;
+                                    mta := TouchArea {
+                                        clicked => { root.row-menu(row.real-index); }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Rectangle {
+            width: 1px;
+            background: VayrenPalette.hairline;
+        }
+
+        // ── workspace column (explicit width: layouts leave implicit-only gaps) ──
+        Rectangle {
+            width: root.width - 211px;
+            background: VayrenPalette.bg;
+            VerticalLayout {
+            spacing: 0;
+
+            // Unified strategy workspace header — ONE clean professional row.
+            Rectangle {
+                height: root.head-roomy ? 62px : 84px;
+                background: VayrenPalette.bg;
+                VerticalLayout {
+                    x: 0;
+                    y: 0;
+                    width: parent.width;
+                    height: parent.height;
+                    padding-left: VayrenDesign.sp-xl;
+                    padding-right: VayrenDesign.sp-lg;
+                    spacing: VayrenDesign.sp-xs;
+                    alignment: center;
+
+                    HorizontalLayout {
+                        spacing: VayrenDesign.sp-md;
+                        Text {
+                            text: root.lab.name;
+                            color: root.lab.has-strategy ? VayrenPalette.text : VayrenPalette.faint;
+                            font-size: VayrenDesign.fs-title;
+                            font-weight: 800;
+                            vertical-alignment: center;
+                            overflow: elide;
+                            horizontal-stretch: 1;
+                            min-width: 120px;
+                        }
+                        if root.head-roomy && root.lab.has-strategy && root.lab.description != "": Text {
+                            text: root.lab.description;
+                            color: VayrenPalette.muted;
+                            font-size: VayrenDesign.fs-small;
+                            vertical-alignment: center;
+                        }
+                        if root.head-roomy && root.lab.has-strategy && root.lab.tags != "": Text {
+                            text: root.lab.tags;
+                            color: VayrenPalette.faint;
+                            font-size: VayrenDesign.fs-label;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                        }
+                        VBadge {
+                            visible: root.head-roomy;
+                            text: root.lab.state-label;
+                            tone: root.lab.state-tone;
+                        }
+                        if root.lab.has-strategy && root.lab.verdict-label != "": VBadge {
+                            text: root.lab.verdict-label;
+                            tone: root.lab.verdict-tone;
+                        }
+                        if root.head-roomy && root.lab.verdict-note != "": Text {
+                            text: root.lab.verdict-note;
+                            color: VayrenPalette.faint;
+                            font-size: VayrenDesign.fs-label;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                        if root.lab.progress-label != "": Text {
+                            text: root.lab.progress-label;
+                            color: VayrenPalette.accent;
+                            font-size: VayrenDesign.fs-label;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                        }
+                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                        // Mode segmented control — header only (row1 when
+                        // roomy; row2 under the identity line when narrow).
+                        if root.head-roomy: Rectangle {
+                            width: 222px;
+                            height: 28px;
+                            border-radius: VayrenDesign.radius-lg;
+                            background: VayrenPalette.bg1;
+                            border-width: 1px;
+                            border-color: VayrenPalette.hairline;
+                            HorizontalLayout {
+                                padding: 3px;
+                                spacing: 2px;
+                                SegButton {
+                                    seg-label: "LONG";
+                                    active: root.lab.mode == 0;
+                                    seg-clicked => { root.mode-picked(0); }
+                                }
+                                SegButton {
+                                    seg-label: "SHORT";
+                                    active: root.lab.mode == 1;
+                                    active-fill: VayrenPalette.neg;
+                                    seg-clicked => { root.mode-picked(1); }
+                                }
+                                SegButton {
+                                    seg-label: "COMPARE";
+                                    active: root.lab.mode == 2;
+                                    seg-clicked => { root.mode-picked(2); }
+                                }
+                            }
+                        }
+                        Rectangle {
+                            visible: root.head-roomy;
+                            width: 96px;
+                            background: transparent;
+                            VerticalLayout {
+                                spacing: 0;
+                                alignment: center;
+                                Text {
+                                    text: "VERSION " + (root.lab.version == "" ? "—" : root.lab.version);
+                                    color: VayrenPalette.faint;
+                                    font-size: VayrenDesign.fs-label;
+                                }
+                                Text {
+                                    text: "MOD " + (root.lab.modified == "" ? "—" : root.lab.modified);
+                                    color: VayrenPalette.faint;
+                                    font-size: VayrenDesign.fs-label;
+                                }
+                            }
+                        }
+                        Rectangle {
+                            visible: root.head-roomy;
+                            width: 128px;
+                            background: transparent;
+                            VerticalLayout {
+                                spacing: 0;
+                                alignment: center;
+                                Text {
+                                    text: "LAST BACKTEST";
+                                    color: VayrenPalette.faint;
+                                    font-size: VayrenDesign.fs-label;
+                                    font-weight: 700;
+                                }
+                                Text {
+                                    text: root.lab.last-backtest == "" ? "—" : root.lab.last-backtest;
+                                    color: VayrenPalette.muted;
+                                    font-size: VayrenDesign.fs-label;
+                                    font-weight: 700;
+                                }
+                            }
+                        }
+                        VButton {
+                            visible: root.head-roomy && root.lab.has-strategy;
+                            label: "Save";
+                            variant: 2;
+                            clicked => { root.save-requested(); }
+                        }
+                        VButton {
+                            visible: root.head-roomy && root.lab.has-strategy;
+                            label: "Compile";
+                            variant: 2;
+                            clicked => { root.compile-requested(); }
+                        }
+                        VButton {
+                            width: 156px;
+                            // Verbatim echo of the real topbar RUN button
+                            // (RUN BUY / RUN SELL / RUN ALL / RUNNING…).
+                            label: root.lab.run-label;
+                            variant: root.lab.run-stop ? 3 : 0;
+                            enabled: root.lab.run-enabled || root.lab.run-stop;
+                            clicked => { root.run-requested(); }
+                        }
+                    }
+                    if !root.head-roomy: HorizontalLayout {
+                        height: 28px;
+                        spacing: VayrenDesign.sp-md;
+                        Rectangle {
+                            width: 222px;
+                            height: 28px;
+                            border-radius: VayrenDesign.radius-lg;
+                            background: VayrenPalette.bg1;
+                            border-width: 1px;
+                            border-color: VayrenPalette.hairline;
+                            HorizontalLayout {
+                                padding: 3px;
+                                spacing: 2px;
+                                SegButton {
+                                    seg-label: "LONG";
+                                    active: root.lab.mode == 0;
+                                    seg-clicked => { root.mode-picked(0); }
+                                }
+                                SegButton {
+                                    seg-label: "SHORT";
+                                    active: root.lab.mode == 1;
+                                    active-fill: VayrenPalette.neg;
+                                    seg-clicked => { root.mode-picked(1); }
+                                }
+                                SegButton {
+                                    seg-label: "COMPARE";
+                                    active: root.lab.mode == 2;
+                                    seg-clicked => { root.mode-picked(2); }
+                                }
+                            }
+                        }
+                        VBadge {
+                            text: root.lab.state-label;
+                            tone: root.lab.state-tone;
+                        }
+                        Text {
+                            text: (root.lab.description == "" ? "No description" : root.lab.description) + (root.lab.tags == "" ? "" : "  ·  " + root.lab.tags);
+                            color: VayrenPalette.muted;
+                            font-size: VayrenDesign.fs-label;
+                            overflow: elide;
+                            vertical-alignment: center;
+                            horizontal-stretch: 2;
+                        }
+                        Text {
+                            text: (root.lab.version == "" ? "" : "v" + root.lab.version + " · ") + (root.lab.modified == "" ? "—" : root.lab.modified) + " · last " + (root.lab.last-backtest == "" ? "—" : root.lab.last-backtest);
+                            color: VayrenPalette.faint;
+                            font-size: VayrenDesign.fs-label;
+                            overflow: elide;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                    }
+                }
+                Hairline {
+                    y: parent.height - 1px;
+                }
+            }
+
+            // Backtest configuration — the Qt 4-column grid (UNIVERSE →
+            // TIMEFRAME → DATE RANGE → CAPITAL) with the same editors: text
+            // entry commits on Enter, timeframe is a combo box, costs are a
+            // fixed disclosure, the panel's inline error echoes verbatim.
+            Rectangle {
+                height: 44px;
+                background: VayrenPalette.bg1;
+                HorizontalLayout {
+                    x: 0;
+                    y: 0;
+                    width: parent.width;
+                    height: parent.height;
+                    padding-left: VayrenDesign.sp-xl;
+                    padding-right: VayrenDesign.sp-lg;
+                    spacing: VayrenDesign.sp-lg;
+                    VerticalLayout {
+                        spacing: 0;
+                        alignment: center;
+                        Text {
+                            text: "UNIVERSE";
+                            color: VayrenPalette.faint;
+                            font-size: VayrenDesign.fs-label;
+                            font-weight: 700;
+                        }
+                        Rectangle {
+                            width: 170px;
+                            height: 24px;
+                            border-radius: VayrenDesign.radius-sm;
+                            background: root.lab.sym-open ? VayrenPalette.selected : ta-u.has-hover ? VayrenPalette.hover : VayrenPalette.bg2;
+                            border-width: 1px;
+                            border-color: VayrenPalette.hairline;
+                            ta-u := TouchArea {
+                                clicked => { root.sym-open(); }
+                            }
+                            HorizontalLayout {
+                                padding-left: VayrenDesign.sp-md;
+                                padding-right: VayrenDesign.sp-sm;
+                                spacing: VayrenDesign.sp-xs;
+                                Text {
+                                    text: root.lab.sym-button-line;
+                                    color: VayrenPalette.text;
+                                    font-size: VayrenDesign.fs-small;
+                                    font-weight: 600;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                    horizontal-stretch: 1;
+                                }
+                                Text {
+                                    text: "▾";
+                                    color: VayrenPalette.faint;
+                                    font-size: VayrenDesign.fs-label;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+                    VerticalLayout {
+                        spacing: 0;
+                        alignment: center;
+                        Text {
+                            text: "TIMEFRAME";
+                            color: VayrenPalette.faint;
+                            font-size: VayrenDesign.fs-label;
+                            font-weight: 700;
+                        }
+                        ComboBox {
+                            width: 104px;
+                            height: 24px;
+                            model: root.timeframes;
+                            current-index: root.lab.timeframe-index;
+                            selected(t) => { root.timeframe-picked(t); }
+                        }
+                    }
+                    VerticalLayout {
+                        spacing: 0;
+                        alignment: center;
+                        Text {
+                            text: "DATE RANGE";
+                            color: VayrenPalette.faint;
+                            font-size: VayrenDesign.fs-label;
+                            font-weight: 700;
+                        }
+                        HorizontalLayout {
+                            spacing: VayrenDesign.sp-xs;
+                            start-edit := LineEdit {
+                                width: 88px;
+                                height: 24px;
+                                text: root.lab.cfg-dates-start;
+                                accepted(t) => { root.dates-committed(t, end-edit.text); }
+                            }
+                            Text {
+                                text: "→";
+                                color: VayrenPalette.muted;
+                                font-size: VayrenDesign.fs-small;
+                                vertical-alignment: center;
+                            }
+                            end-edit := LineEdit {
+                                width: 88px;
+                                height: 24px;
+                                text: root.lab.cfg-dates-end;
+                                accepted(t) => { root.dates-committed(start-edit.text, t); }
+                            }
+                        }
+                    }
+                    VerticalLayout {
+                        spacing: 0;
+                        alignment: center;
+                        Text {
+                            text: "CAPITAL";
+                            color: VayrenPalette.faint;
+                            font-size: VayrenDesign.fs-label;
+                            font-weight: 700;
+                        }
+                        LineEdit {
+                            width: 110px;
+                            height: 24px;
+                            text: root.lab.cfg-capital;
+                            accepted(t) => { root.capital-committed(t); }
+                        }
+                    }
+                    VerticalLayout {
+                        spacing: 0;
+                        alignment: center;
+                        Text {
+                            text: "TRANSACTION COST";
+                            color: VayrenPalette.faint;
+                            font-size: VayrenDesign.fs-label;
+                            font-weight: 700;
+                        }
+                        Text {
+                            text: root.lab.cost;
+                            color: VayrenPalette.text;
+                            font-size: VayrenDesign.fs-small;
+                            font-weight: 600;
+                            vertical-alignment: center;
+                            height: 24px;
+                        }
+                    }
+                    Rectangle { horizontal-stretch: 1; background: transparent; }
+                }
+                Hairline {
+                    y: parent.height - 1px;
+                }
+            }
+            if root.lab.config-error != "": Rectangle {
+                height: 24px;
+                background: VayrenPalette.bg1;
+                HorizontalLayout {
+                    padding-left: VayrenDesign.sp-xl;
+                    padding-right: VayrenDesign.sp-lg;
+                    Text {
+                        text: root.lab.config-error;
+                        color: VayrenPalette.neg;
+                        font-size: VayrenDesign.fs-small;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
+                Hairline {
+                    y: parent.height - 1px;
+                }
+            }
+
+            // outdated notice — compact inline banner (never a tall block)
+            if root.lab.outdated: Rectangle {
+                height: 34px;
+                background: VayrenPalette.bg;
+                VerticalLayout {
+                    alignment: center;
+                    HorizontalLayout {
+                        padding-left: VayrenDesign.sp-xl;
+                        padding-right: VayrenDesign.sp-lg;
+                        VBanner {
+                            height: 26px;
+                            width: 100%;
+                            message: "Results are outdated — configuration changed since the last backtest.";
+                            tone: 2;
+                            action-label: "RUN AGAIN";
+                            action() => { root.run-requested(); }
+                        }
+                    }
+                }
+            }
+
+            // results chrome only once a strategy is open
+            if root.lab.has-strategy: VerticalLayout {
+                spacing: 0;
+
+                // KPI band — hairline separators, Net P&L strongest.
+                // Wide: stretch to fill. Narrow: fixed cells in a horizontal
+                // scroll viewport — values never clip (§7).
+                Rectangle {
+                    height: 66px;
+                    background: VayrenPalette.bg1;
+                    if root.head-roomy: HorizontalLayout {
+                        x: 0;
+                        y: 0;
+                        width: parent.width;
+                        height: parent.height;
+                        spacing: 0;
+                        for k in root.kpis: KpiCell {
+                            horizontal-stretch: k.emphasized ? 2 : 1;
+                            cell-label: k.label;
+                            cell-value: k.value;
+                            tone: k.tone;
+                            emphasized: k.emphasized;
+                        }
+                    }
+                    if !root.head-roomy: ScrollView {
+                        x: 0;
+                        y: 0;
+                        width: parent.width;
+                        height: parent.height;
+                        HorizontalLayout {
+                            spacing: 0;
+                            for k in root.kpis: KpiCell {
+                                width: k.emphasized ? 210px : 122px;
+                                cell-label: k.label;
+                                cell-value: k.value;
+                                tone: k.tone;
+                                emphasized: k.emphasized;
+                            }
+                        }
+                    }
+                    Hairline {
+                        y: parent.height - 1px;
+                    }
+                }
+
+                // analysis tabs — compact, active state obvious
+                Rectangle {
+                    height: VayrenDesign.h-tabs;
+                    background: VayrenPalette.bg;
+                    HorizontalLayout {
+                        x: 0;
+                        y: 0;
+                        width: parent.width;
+                        height: parent.height;
+                        padding-left: VayrenDesign.sp-xl;
+                        spacing: VayrenDesign.sp-sm;
+                        for lbl[idx] in ["EDITOR", "PERFORMANCE", "TRADES", "EQUITY", "DRAWDOWN"]: Rectangle {
+                            min-width: 48px;
+                            background: root.lab.tab == idx ? VayrenPalette.bg1
+                                : t2.has-hover ? VayrenPalette.bg2 : transparent;
+                            t2 := TouchArea {
+                                clicked => { root.tab-picked(idx); }
+                            }
+                            HorizontalLayout {
+                                padding-left: VayrenDesign.sp-lg;
+                                padding-right: VayrenDesign.sp-lg;
+                                alignment: center;
+                                Text {
+                                    text: lbl;
+                                    color: root.lab.tab == idx ? VayrenPalette.text : t2.has-hover ? VayrenPalette.muted : VayrenPalette.faint;
+                                    font-size: VayrenDesign.fs-label;
+                                    font-weight: 700;
+                                    letter-spacing: 0.3px;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            Rectangle {
+                                height: 2px;
+                                y: parent.height - 2px;
+                                width: 100%;
+                                background: root.lab.tab == idx ? VayrenPalette.accent : transparent;
+                            }
+                        }
+                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                        if root.lab.show-results && root.lab.tab == 2: Text {
+                            text: "EXPORT CSV";
+                            color: eta.has-hover ? VayrenPalette.text : VayrenPalette.muted;
+                            font-size: VayrenDesign.fs-label;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                            eta := TouchArea {
+                                clicked => { root.export-trades-requested(); }
+                            }
+                        }
+                        if root.lab.tab != 2: Text {
+                            visible: root.head-roomy;
+                            text: root.lab.summary-line;
+                            color: VayrenPalette.muted;
+                            font-size: VayrenDesign.fs-label;
+                            vertical-alignment: center;
+                        }
+                    }
+                    Hairline {
+                        y: parent.height - 1px;
+                    }
+                }
+
+                // analysis content — always fills remaining space
+                Rectangle {
+                    vertical-stretch: 1;
+                    background: VayrenPalette.bg;
+
+                    if !root.lab.show-results: VEmptyState {
+                        x: 0;
+                        y: 0;
+                        width: parent.width;
+                        height: parent.height;
+                        title: "NO BACKTEST RESULTS";
+                        detail: root.lab.empty-reason;
+                    }
+
+                    // EDITOR: strategy code + parameters (the Qt center
+                    // column — always live, tab 0 never touches the backend).
+                    if root.lab.has-strategy && root.lab.tab == 0: Rectangle {
+                        VerticalLayout {
+                            padding-left: VayrenDesign.sp-xl;
+                            padding-right: VayrenDesign.sp-xl;
+                            padding-top: VayrenDesign.sp-md;
+                            padding-bottom: VayrenDesign.sp-md;
+                            spacing: VayrenDesign.sp-sm;
+                            HorizontalLayout {
+                                height: 26px;
+                                spacing: VayrenDesign.sp-md;
+                                Text {
+                                    text: "STRATEGY CODE";
+                                    color: VayrenPalette.text;
+                                    font-size: VayrenDesign.fs-small;
+                                    font-weight: 800;
+                                    letter-spacing: 0.3px;
+                                    vertical-alignment: center;
+                                }
+                                Text {
+                                    text: "Python";
+                                    color: VayrenPalette.faint;
+                                    font-size: VayrenDesign.fs-label;
+                                    vertical-alignment: center;
+                                }
+                                if root.lab.dirty: VBadge {
+                                    text: "● EDITED";
+                                    tone: 2;
+                                    vertical-alignment: center;
+                                }
+                                Rectangle { horizontal-stretch: 1; background: transparent; }
+                                VButton {
+                                    label: "Save";
+                                    variant: 2;
+                                    clicked => { root.save-requested(); }
+                                }
+                                VButton {
+                                    label: "Compile";
+                                    variant: 2;
+                                    clicked => { root.compile-requested(); }
+                                }
+                            }
+                            Rectangle {
+                                vertical-stretch: 3;
+                                border-radius: VayrenDesign.radius-sm;
+                                background: VayrenPalette.bg1;
+                                border-width: code-edit.has-focus ? 1px : 1px;
+                                border-color: code-edit.has-focus ? VayrenPalette.accent-dim : VayrenPalette.hairline;
+                                clip: true;
+                                code-edit := TextEdit {
+                                    x: VayrenDesign.sp-sm;
+                                    y: VayrenDesign.sp-sm;
+                                    width: parent.width - 2 * VayrenDesign.sp-sm;
+                                    height: parent.height - 2 * VayrenDesign.sp-sm;
+                                    text: root.lab.code;
+                                    font-family: "monospace";
+                                    edited(t) => { root.code-changed(t); }
+                                }
+                            }
+                            Text {
+                                text: "PARAMETERS";
+                                color: VayrenPalette.text;
+                                font-size: VayrenDesign.fs-small;
+                                font-weight: 800;
+                                height: 22px;
+                                vertical-alignment: center;
+                            }
+                            if root.params.length == 0: Text {
+                                text: "No parameters — use input(value, \"label\") in code.";
+                                color: VayrenPalette.faint;
+                                font-size: VayrenDesign.fs-label;
+                                height: 22px;
+                                vertical-alignment: center;
+                            }
+                            ScrollView {
+                                vertical-stretch: 1;
+                                viewport-width: root.width - 460px;
+                                VerticalLayout {
+                                    spacing: VayrenDesign.sp-xs;
+                                    for p in root.params: HorizontalLayout {
+                                        height: 26px;
+                                        spacing: VayrenDesign.sp-md;
+                                        Text {
+                                            text: p.label;
+                                            color: VayrenPalette.muted;
+                                            font-size: VayrenDesign.fs-small;
+                                            vertical-alignment: center;
+                                            width: 220px;
+                                            overflow: elide;
+                                        }
+                                        LineEdit {
+                                            width: 120px;
+                                            height: 24px;
+                                            text: p.value;
+                                            accepted(t) => { root.param-committed(p.key, t); }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // PERFORMANCE: single mode = stock ranking + drill-down;
+                    // COMPARE mode = banner + run trio + board + ranking + matrix.
+                    if root.lab.show-results && root.lab.tab == 1: Rectangle {
+                        if !root.lab.is-compare: VerticalLayout {
+                            padding-left: VayrenDesign.sp-xl;
+                            padding-right: VayrenDesign.sp-xl;
+                            padding-top: VayrenDesign.sp-md;
+                            spacing: VayrenDesign.sp-xs;
+                            HorizontalLayout {
+                                height: 26px;
+                                spacing: VayrenDesign.sp-md;
+                                Text {
+                                    text: "STOCK RANKING";
+                                    color: VayrenPalette.text;
+                                    font-size: VayrenDesign.fs-small;
+                                    font-weight: 800;
+                                    letter-spacing: 0.3px;
+                                    vertical-alignment: center;
+                                }
+                                Text {
+                                    text: root.lab.ranking-count;
+                                    color: VayrenPalette.faint;
+                                    font-size: VayrenDesign.fs-label;
+                                    vertical-alignment: center;
+                                }
+                                Rectangle { horizontal-stretch: 1; background: transparent; }
+                                LineEdit {
+                                    width: 150px;
+                                    height: 24px;
+                                    placeholder-text: "Search stocks…";
+                                    text: root.lab.rank-search;
+                                    edited(t) => { root.rank-search-changed(t); }
+                                }
+                                ComboBox {
+                                    width: 120px;
+                                    height: 24px;
+                                    model: root.rankby-labels;
+                                    current-index: root.lab.rankby-current;
+                                    selected(t) => { root.rankby-picked(t); }
+                                }
+                                Text {
+                                    text: root.lab.rank-desc ? "▼" : "▲";
+                                    color: ota.has-hover ? VayrenPalette.text : VayrenPalette.muted;
+                                    font-size: VayrenDesign.fs-small;
+                                    font-weight: 700;
+                                    width: 22px;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                    ota := TouchArea {
+                                        clicked => { root.rank-order-toggled(); }
+                                    }
+                                }
+                            }
+                            Rectangle {
+                                height: VayrenDesign.row-height;
+                                background: VayrenPalette.bg;
+                                HorizontalLayout {
+                                    padding-left: VayrenDesign.sp-lg;
+                                    padding-right: VayrenDesign.sp-lg;
+                                    for h[idx] in root.rank-heads: VCell {
+                                        text: h;
+                                        head: true;
+                                        align: idx >= 2 ? 1 : 0;
+                                    }
+                                }
+                                Hairline {
+                                    y: parent.height - 1px;
+                                }
+                            }
+                            ScrollView {
+                                vertical-stretch: 1;
+                                viewport-width: root.width - 460px;
+                                VerticalLayout {
+                                    // Min content width keeps all 9 columns
+                                    // reachable by horizontal scroll on narrow
+                                    // viewports instead of clipping.
+                                    width: Math.max(parent.width, 780px);
+                                    spacing: 0;
+                                    for r[idx] in root.ranking: Rectangle {
+                                        height: VayrenDesign.row-height;
+                                        background: rta.has-hover ? VayrenPalette.row-hover
+                                            : Math.mod(idx, 2) == 1 ? VayrenPalette.bg2 : transparent;
+                                        rta := TouchArea {
+                                            clicked => { root.rank-picked(r.symbol); }
+                                        }
+                                        HorizontalLayout {
+                                            padding-left: VayrenDesign.sp-lg;
+                                            padding-right: VayrenDesign.sp-lg;
+                                            spacing: 0;
+                                            VCell { text: r.rank; align: 0; tone: 0; dim: r.unranked; }
+                                            VCell { text: r.symbol; align: 0; tone: 0; dim: r.unranked; }
+                                            VCell { text: r.pnl; align: 1; tone: r.unranked ? 0 : r.pnl-tone; dim: r.unranked; }
+                                            VCell { text: r.ret; align: 1; tone: r.unranked ? 0 : r.pnl-tone; dim: r.unranked; }
+                                            VCell { text: r.trades; align: 1; tone: 0; dim: r.unranked; }
+                                            VCell { text: r.win; align: 1; tone: 0; dim: r.unranked; }
+                                            VCell { text: r.pf; align: 1; tone: r.unranked ? 0 : r.pf-tone; dim: r.unranked; }
+                                            VCell { text: r.dd; align: 1; tone: 0; dim: r.unranked; }
+                                            VCell { text: r.sharpe; align: 1; tone: 0; dim: r.unranked; }
+                                        }
+                                    }
+                                }
+                            }
+                            // Drill-down: the detail panel's own rendered facts.
+                            if root.lab.detail-symbol != "": Rectangle {
+                                height: 158px;
+                                background: VayrenPalette.bg;
+                                VerticalLayout {
+                                    spacing: VayrenDesign.sp-xs;
+                                    padding-top: VayrenDesign.sp-sm;
+                                    HorizontalLayout {
+                                        height: 20px;
+                                        spacing: VayrenDesign.sp-md;
+                                        Text {
+                                            text: root.lab.detail-title;
+                                            color: VayrenPalette.text;
+                                            font-size: VayrenDesign.fs-small;
+                                            font-weight: 800;
+                                            vertical-alignment: center;
+                                            overflow: elide;
+                                        }
+                                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                                        Text {
+                                            text: root.lab.detail-stats;
+                                            color: VayrenPalette.muted;
+                                            font-size: VayrenDesign.fs-label;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                    HorizontalLayout {
+                                        height: 130px;
+                                        spacing: VayrenDesign.sp-lg;
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            spacing: VayrenDesign.sp-xs;
+                                            HorizontalLayout {
+                                                spacing: 0;
+                                                for m in root.detail-metrics: KpiCell {
+                                                    horizontal-stretch: 1;
+                                                    cell-label: m.label;
+                                                    cell-value: m.value;
+                                                    tone: 1;
+                                                }
+                                            }
+                                        }
+                                        ChartPanel {
+                                            width: 300px;
+                                            chart-title: "DETAIL";
+                                            chart-caption: root.lab.detail-caption;
+                                            points: root.detail-equity;
+                                            line-color: VayrenPalette.accent;
+                                        }
+                                    }
+                                }
+                                Hairline {
+                                    y: 0;
+                                }
+                            }
+                        }
+                        if root.lab.is-compare: ScrollView {
+                            x: 0;
+                            y: 0;
+                            width: parent.width;
+                            height: parent.height;
+                            viewport-width: root.width - 260px;
+                            VerticalLayout {
+                                padding-left: VayrenDesign.sp-xl;
+                                padding-right: VayrenDesign.sp-xl;
+                                padding-top: VayrenDesign.sp-md;
+                                padding-bottom: VayrenDesign.sp-md;
+                                spacing: VayrenDesign.sp-sm;
+                                HorizontalLayout {
+                                    spacing: VayrenDesign.sp-md;
+                                    VBadge {
+                                        text: root.lab.cmp-verdict == "" ? "NOTHING TO COMPARE YET" : root.lab.cmp-verdict;
+                                        tone: root.lab.cmp-tone;
+                                        vertical-alignment: center;
+                                    }
+                                    Text {
+                                        text: root.lab.cmp-reason;
+                                        color: VayrenPalette.muted;
+                                        font-size: VayrenDesign.fs-small;
+                                        vertical-alignment: center;
+                                        overflow: elide;
+                                    }
+                                    Rectangle { horizontal-stretch: 1; background: transparent; }
+                                    VButton {
+                                        label: "▶  RUN ALL";
+                                        variant: 0;
+                                        clicked => { root.run-all-requested(); }
+                                    }
+                                    VButton {
+                                        label: "BUY only";
+                                        variant: 2;
+                                        clicked => { root.run-buy-requested(); }
+                                    }
+                                    VButton {
+                                        label: "SELL only";
+                                        variant: 2;
+                                        clicked => { root.run-sell-requested(); }
+                                    }
+                                }
+                                if root.lab.cmp-stale != "": VBanner {
+                                    height: 26px;
+                                    width: 100%;
+                                    message: root.lab.cmp-stale;
+                                    tone: 2;
+                                }
+                                HorizontalLayout {
+                                    spacing: VayrenDesign.sp-md;
+                                    Text {
+                                        text: "STOCK COMPARISON";
+                                        color: VayrenPalette.text;
+                                        font-size: VayrenDesign.fs-small;
+                                        font-weight: 800;
+                                        letter-spacing: 0.3px;
+                                        vertical-alignment: center;
+                                    }
+                                    Text {
+                                        text: root.lab.cmp-scope;
+                                        color: VayrenPalette.faint;
+                                        font-size: VayrenDesign.fs-label;
+                                        vertical-alignment: center;
+                                    }
+                                    Rectangle { horizontal-stretch: 1; background: transparent; }
+                                    Text {
+                                        text: root.lab.cmp-leader;
+                                        color: VayrenPalette.accent;
+                                        font-size: VayrenDesign.fs-label;
+                                        font-weight: 700;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                // Per-stock columns: symbol header + one cell
+                                // per board row (row-major flattening).
+                                HorizontalLayout {
+                                    spacing: 0;
+                                    Rectangle { width: 110px; background: transparent; }
+                                    for col-sym[c] in root.board-columns: VerticalLayout {
+                                        horizontal-stretch: 1;
+                                        spacing: 0;
+                                        Text {
+                                            text: col-sym;
+                                            color: VayrenPalette.text;
+                                            font-size: VayrenDesign.fs-small;
+                                            font-weight: 800;
+                                            horizontal-alignment: right;
+                                        }
+                                        Text {
+                                            text: root.board-trades[c];
+                                            color: VayrenPalette.faint;
+                                            font-size: VayrenDesign.fs-label;
+                                            horizontal-alignment: right;
+                                        }
+                                    }
+                                }
+                                for brow[r] in root.board-labels: HorizontalLayout {
+                                    height: VayrenDesign.row-height;
+                                    spacing: 0;
+                                    Text {
+                                        text: brow;
+                                        color: VayrenPalette.muted;
+                                        font-size: VayrenDesign.fs-label;
+                                        font-weight: 700;
+                                        width: 110px;
+                                        horizontal-alignment: right;
+                                        vertical-alignment: center;
+                                    }
+                                    for col-sym[c] in root.board-columns: Text {
+                                        text: root.board-cells[r * root.board-cols + c].text;
+                                        color: VayrenPalette.text;
+                                        font-size: VayrenDesign.fs-small;
+                                        font-weight: root.board-cells[r * root.board-cols + c].best ? 800 : 600;
+                                        horizontal-alignment: right;
+                                        vertical-alignment: center;
+                                        horizontal-stretch: 1;
+                                    }
+                                }
+                                // Compare ranking table (same rows/columns as the
+                                // single-mode ranking, backed by the synced
+                                // compare ranking widget).
+                                HorizontalLayout {
+                                    height: 22px;
+                                    spacing: VayrenDesign.sp-md;
+                                    Text {
+                                        text: "STOCK RANKING";
+                                        color: VayrenPalette.text;
+                                        font-size: VayrenDesign.fs-small;
+                                        font-weight: 800;
+                                        vertical-alignment: center;
+                                    }
+                                    Text {
+                                        text: root.lab.cmp-scope;
+                                        color: VayrenPalette.faint;
+                                        font-size: VayrenDesign.fs-label;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                Rectangle {
+                                    height: VayrenDesign.row-height;
+                                    background: VayrenPalette.bg;
+                                    HorizontalLayout {
+                                        padding-left: VayrenDesign.sp-lg;
+                                        padding-right: VayrenDesign.sp-lg;
+                                        for h[idx] in root.rank-heads: VCell {
+                                            text: h;
+                                            head: true;
+                                            align: idx >= 2 ? 1 : 0;
+                                        }
+                                    }
+                                }
+                                for r[idx] in root.compare-ranking: Rectangle {
+                                    height: VayrenDesign.row-height;
+                                    background: rta2.has-hover ? VayrenPalette.row-hover
+                                        : Math.mod(idx, 2) == 1 ? VayrenPalette.bg2 : transparent;
+                                    rta2 := TouchArea {
+                                        clicked => { root.rank-picked(r.symbol); }
+                                    }
+                                    HorizontalLayout {
+                                        padding-left: VayrenDesign.sp-lg;
+                                        padding-right: VayrenDesign.sp-lg;
+                                        spacing: 0;
+                                        VCell { text: r.rank; align: 0; tone: 0; dim: r.unranked; }
+                                        VCell { text: r.symbol; align: 0; tone: 0; dim: r.unranked; }
+                                        VCell { text: r.pnl; align: 1; tone: r.unranked ? 0 : r.pnl-tone; dim: r.unranked; }
+                                        VCell { text: r.ret; align: 1; tone: r.unranked ? 0 : r.pnl-tone; dim: r.unranked; }
+                                        VCell { text: r.trades; align: 1; tone: 0; dim: r.unranked; }
+                                        VCell { text: r.win; align: 1; tone: 0; dim: r.unranked; }
+                                        VCell { text: r.pf; align: 1; tone: r.unranked ? 0 : r.pf-tone; dim: r.unranked; }
+                                        VCell { text: r.dd; align: 1; tone: 0; dim: r.unranked; }
+                                        VCell { text: r.sharpe; align: 1; tone: 0; dim: r.unranked; }
+                                    }
+                                }
+                                Text {
+                                    text: "PERFORMANCE COMPARISON";
+                                    color: VayrenPalette.muted;
+                                    font-size: VayrenDesign.fs-label;
+                                    font-weight: 700;
+                                    height: 22px;
+                                    vertical-alignment: center;
+                                }
+                                HorizontalLayout {
+                                    spacing: VayrenDesign.sp-lg;
+                                    Text {
+                                        text: "";
+                                        width: 110px;
+                                    }
+                                    Text {
+                                        text: "BUY (LONG)";
+                                        color: VayrenPalette.accent;
+                                        font-size: VayrenDesign.fs-label;
+                                        font-weight: 700;
+                                        horizontal-stretch: 1;
+                                    }
+                                    Text {
+                                        text: "SELL (SHORT)";
+                                        color: VayrenPalette.neg;
+                                        font-size: VayrenDesign.fs-label;
+                                        font-weight: 700;
+                                        horizontal-stretch: 1;
+                                    }
+                                }
+                                for m in root.matrix: HorizontalLayout {
+                                    height: 22px;
+                                    spacing: VayrenDesign.sp-lg;
+                                    Text {
+                                        text: m.key;
+                                        color: VayrenPalette.muted;
+                                        font-size: VayrenDesign.fs-label;
+                                        font-weight: 600;
+                                        width: 110px;
+                                        vertical-alignment: center;
+                                    }
+                                    Rectangle {
+                                        horizontal-stretch: 1;
+                                        background: m.winner == 1 ? VayrenPalette.accent-dim : transparent;
+                                        border-radius: 2px;
+                                        Text {
+                                            text: m.buy;
+                                            color: m.winner == 1 ? VayrenPalette.text : VayrenPalette.muted;
+                                            font-size: VayrenDesign.fs-label;
+                                            font-weight: m.winner == 1 ? 800 : 600;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                    Rectangle {
+                                        horizontal-stretch: 1;
+                                        background: m.winner == 2 ? VayrenPalette.neg-dim : transparent;
+                                        border-radius: 2px;
+                                        Text {
+                                            text: m.sell;
+                                            color: m.winner == 2 ? VayrenPalette.text : VayrenPalette.muted;
+                                            font-size: VayrenDesign.fs-label;
+                                            font-weight: m.winner == 2 ? 800 : 600;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // TRADES: dense 11-column blotter (Qt order verbatim) with
+                    // the same text filter; in COMPARE the side segment
+                    // filters the full trade list and the summary echoes.
+                    if root.lab.show-results && root.lab.tab == 2: Rectangle {
+                        VerticalLayout {
+                            spacing: 0;
+                            HorizontalLayout {
+                                height: 30px;
+                                padding-left: VayrenDesign.sp-xl;
+                                padding-right: VayrenDesign.sp-xl;
+                                spacing: VayrenDesign.sp-md;
+                                Text {
+                                    text: "TRADE BLOTTER";
+                                    color: VayrenPalette.text;
+                                    font-size: VayrenDesign.fs-small;
+                                    font-weight: 800;
+                                    letter-spacing: 0.3px;
+                                    vertical-alignment: center;
+                                }
+                                if root.lab.is-compare: Text {
+                                    text: root.lab.cmp-trade-summary;
+                                    color: VayrenPalette.faint;
+                                    font-size: VayrenDesign.fs-label;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                    horizontal-stretch: 1;
+                                }
+                                if root.lab.is-compare: Rectangle {
+                                    width: 204px;
+                                    height: 28px;
+                                    border-radius: VayrenDesign.radius-lg;
+                                    background: VayrenPalette.bg1;
+                                    border-width: 1px;
+                                    border-color: VayrenPalette.hairline;
+                                    HorizontalLayout {
+                                        padding: 3px;
+                                        spacing: 2px;
+                                        SegButton {
+                                            seg-label: "ALL";
+                                            active: root.lab.compare-side == 0;
+                                            seg-clicked => { root.cmp-side-picked(0); }
+                                        }
+                                        SegButton {
+                                            seg-label: "LONG";
+                                            active: root.lab.compare-side == 1;
+                                            seg-clicked => { root.cmp-side-picked(1); }
+                                        }
+                                        SegButton {
+                                            seg-label: "SHORT";
+                                            active: root.lab.compare-side == 2;
+                                            active-fill: VayrenPalette.neg;
+                                            seg-clicked => { root.cmp-side-picked(2); }
+                                        }
+                                    }
+                                }
+                                if !root.lab.is-compare: Rectangle { horizontal-stretch: 1; background: transparent; }
+                                if root.lab.trade-symbol != "ALL" && root.lab.trade-symbol != "": VBadge {
+                                    text: root.lab.trade-symbol;
+                                    tone: 4;
+                                    vertical-alignment: center;
+                                }
+                                LineEdit {
+                                    width: 150px;
+                                    height: 24px;
+                                    placeholder-text: "Filter trades";
+                                    text: root.lab.trade-needle;
+                                    edited(t) => { root.trade-filter-changed(t); }
+                                }
+                            }
+                            ScrollView {
+                                vertical-stretch: 1;
+                                viewport-width: root.width;
+                                VerticalLayout {
+                                    // 11 blotter columns need ~1060px; narrow
+                                    // viewports scroll horizontally, never clip.
+                                    width: Math.max(parent.width, 1060px);
+                                    spacing: 0;
+                                    Rectangle {
+                                        height: VayrenDesign.row-height;
+                                        background: VayrenPalette.bg;
+                                        HorizontalLayout {
+                                            padding-left: VayrenDesign.sp-lg;
+                                            padding-right: VayrenDesign.sp-lg;
+                                            for h[idx] in root.trade-heads: VCell {
+                                                text: h;
+                                                head: true;
+                                                align: idx >= 3 ? 1 : 0;
+                                            }
+                                        }
+                                        Hairline {
+                                            y: parent.height - 1px;
+                                        }
+                                    }
+                                    for t[idx] in root.trades: Rectangle {
+                                        height: VayrenDesign.row-height;
+                                        background: t.selected ? VayrenPalette.selected
+                                            : tta.has-hover ? VayrenPalette.row-hover
+                                            : Math.mod(idx, 2) == 1 ? VayrenPalette.bg2 : transparent;
+                                        border-width: t.selected ? 1px : 0px;
+                                        border-color: VayrenPalette.accent-dim;
+                                        tta := TouchArea {
+                                            clicked => { root.trade-picked(t.abs-index); }
+                                        }
+                                        HorizontalLayout {
+                                            padding-left: VayrenDesign.sp-lg;
+                                            padding-right: VayrenDesign.sp-lg;
+                                            VCell { text: t.no; align: 0; tone: 0; }
+                                            VCell { text: t.symbol; align: 0; tone: 0; }
+                                            VCell { text: t.side; align: 0; tone: t.side == "LONG" ? 4 : 3; }
+                                            VCell { text: t.entry; align: 1; tone: 0; }
+                                            VCell { text: t.entry-px; align: 1; tone: 0; }
+                                            VCell { text: t.exit; align: 1; tone: 0; }
+                                            VCell { text: t.exit-px; align: 1; tone: 0; }
+                                            VCell { text: t.pnl; align: 1; tone: t.pnl-tone; }
+                                            VCell { text: t.r; align: 1; tone: 0; }
+                                            VCell { text: t.bars; align: 1; tone: 0; }
+                                            VCell { text: t.reason; align: 0; tone: 0; }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // EQUITY + DRAWDOWN: single mode shows both charts;
+                    // COMPARE overlays BUY (teal) and SELL (red) on one
+                    // shared scale, like the Qt dual view.
+                    if root.lab.show-results && (root.lab.tab == 3 || root.lab.tab == 4): Rectangle {
+                        if !root.lab.is-compare: HorizontalLayout {
+                            padding: VayrenDesign.sp-lg;
+                            spacing: VayrenDesign.sp-lg;
+                            ChartPanel {
+                                horizontal-stretch: 1;
+                                chart-title: "EQUITY CURVE";
+                                chart-caption: root.lab.equity-caption;
+                                points: root.equity;
+                                line-color: VayrenPalette.accent;
+                            }
+                            ChartPanel {
+                                horizontal-stretch: 1;
+                                chart-title: "DRAWDOWN";
+                                chart-caption: root.lab.drawdown-caption;
+                                points: root.drawdown;
+                                line-color: VayrenPalette.neg;
+                            }
+                        }
+                        if root.lab.is-compare && root.lab.tab == 3: HorizontalLayout {
+                            padding: VayrenDesign.sp-lg;
+                            spacing: VayrenDesign.sp-lg;
+                            ChartPanel {
+                                horizontal-stretch: 1;
+                                chart-title: "EQUITY COMPARISON";
+                                chart-caption: "BUY (teal) vs SELL (red) · shared scale";
+                                points: root.equity-buy;
+                                line-color: VayrenPalette.accent;
+                                points2: root.equity-sell;
+                                line-color2: VayrenPalette.neg;
+                            }
+                        }
+                        if root.lab.is-compare && root.lab.tab == 4: HorizontalLayout {
+                            padding: VayrenDesign.sp-lg;
+                            spacing: VayrenDesign.sp-lg;
+                            ChartPanel {
+                                horizontal-stretch: 1;
+                                chart-title: "DRAWDOWN COMPARISON";
+                                chart-caption: "BUY (teal) vs SELL (red) · shared scale";
+                                points: root.drawdown-buy;
+                                line-color: VayrenPalette.accent;
+                                points2: root.drawdown-sell;
+                                line-color2: VayrenPalette.neg;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // no-strategy page: honest empty state, fills remaining space
+            if !root.lab.has-strategy: Rectangle {
+                vertical-stretch: 1;
+                background: VayrenPalette.bg;
+                VEmptyState {
+                    x: 0;
+                    y: 0;
+                    width: parent.width;
+                    height: parent.height;
+                    title: "NO STRATEGY SELECTED";
+                    detail: "Pick a strategy in the library to open the workspace.";
+                }
+            }
+        }
+            // Symbol selector dropdown (Market Watchlist universe, live
+            // toggles like the Qt popup — no apply/cancel split there).
+            // Direct child of the workspace column (NOT the vertical flow),
+            // so absolute placement paints above KPI/tabs/content.
+            if root.lab.sym-open: Rectangle {
+                x: 12px;
+                y: (root.head-roomy ? 62px : 84px) + 44px + (root.lab.config-error != "" ? 24px : 0px) + 4px;
+                width: 460px;
+                height: 372px;
+                border-radius: VayrenDesign.radius-lg;
+                background: VayrenPalette.elevated;
+                border-width: 1px;
+                border-color: VayrenPalette.hairline;
+                VerticalLayout {
+                    padding: VayrenDesign.sp-lg;
+                    spacing: VayrenDesign.sp-sm;
+                    HorizontalLayout {
+                        height: 24px;
+                        spacing: VayrenDesign.sp-md;
+                        Text {
+                            text: "WATCHLIST";
+                            color: VayrenPalette.text;
+                            font-size: VayrenDesign.fs-small;
+                            font-weight: 800;
+                            letter-spacing: 0.3px;
+                            vertical-alignment: center;
+                        }
+                        Text {
+                            text: root.lab.sym-count-line;
+                            color: VayrenPalette.muted;
+                            font-size: VayrenDesign.fs-label;
+                            font-weight: 600;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                            overflow: elide;
+                        }
+                        Rectangle {
+                            width: 24px;
+                            height: 24px;
+                            border-radius: VayrenDesign.radius-sm;
+                            background: sx.has-hover ? VayrenPalette.hover : transparent;
+                            sx := TouchArea {
+                                clicked => { root.sym-close(); }
+                            }
+                            Text {
+                                text: "✕";
+                                color: sx.has-hover ? VayrenPalette.text : VayrenPalette.faint;
+                                font-size: VayrenDesign.fs-small;
+                                font-weight: 700;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                    LineEdit {
+                        height: 26px;
+                        placeholder-text: "Search symbols…";
+                        text: root.lab.sym-search;
+                        edited(t) => { root.sym-search-changed(t); }
+                    }
+                    if root.sym-visible.length == 0: Text {
+                        text: "No symbols match.";
+                        color: VayrenPalette.faint;
+                        font-size: VayrenDesign.fs-small;
+                        height: 26px;
+                        vertical-alignment: center;
+                    }
+                    ScrollView {
+                        vertical-stretch: 1;
+                        viewport-width: 428px;
+                        VerticalLayout {
+                            spacing: 0;
+                            for sym[idx] in root.sym-visible: Rectangle {
+                                height: 28px;
+                                border-radius: VayrenDesign.radius-sm;
+                                background: sta.has-hover ? VayrenPalette.hover
+                                    : Math.mod(idx, 2) == 1 ? VayrenPalette.bg1 : transparent;
+                                sta := TouchArea {
+                                    clicked => { root.sym-toggle(sym); }
+                                }
+                                HorizontalLayout {
+                                    padding-left: VayrenDesign.sp-md;
+                                    padding-right: VayrenDesign.sp-md;
+                                    spacing: VayrenDesign.sp-md;
+                                    Text {
+                                        text: root.sym-visible-on[idx] ? "☑" : "☐";
+                                        color: root.sym-visible-on[idx] ? VayrenPalette.accent : VayrenPalette.faint;
+                                        font-size: VayrenDesign.fs-body;
+                                        font-weight: 700;
+                                        vertical-alignment: center;
+                                        width: 18px;
+                                    }
+                                    Text {
+                                        text: sym;
+                                        color: root.sym-visible-on[idx] ? VayrenPalette.text : VayrenPalette.muted;
+                                        font-size: VayrenDesign.fs-small;
+                                        font-weight: root.sym-visible-on[idx] ? 600 : 400;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Hairline {}
+                    HorizontalLayout {
+                        height: 32px;
+                        spacing: VayrenDesign.sp-sm;
+                        VButton {
+                            label: "ALL VISIBLE";
+                            variant: 2;
+                            clicked => { root.sym-all-visible(); }
+                        }
+                        VButton {
+                            label: "CLEAR";
+                            variant: 2;
+                            clicked => { root.sym-clear(); }
+                        }
+                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                        VButton {
+                            label: "Apply";
+                            variant: 0;
+                            clicked => { root.sym-apply(); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

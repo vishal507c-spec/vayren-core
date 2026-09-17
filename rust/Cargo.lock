@@ -5143,12 +5143,74 @@ name = "vayren-core"
 version = "0.1.0"
 
 [[package]]
+name = "vayren-live-view"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "slint",
+ "slint-build",
+ "vayren-shell",
+]
+
+[[package]]
+name = "vayren-market-view"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "slint",
+ "slint-build",
+ "vayren-shell",
+]
+
+[[package]]
+name = "vayren-portfolio-view"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "slint",
+ "slint-build",
+ "vayren-shell",
+]
+
+[[package]]
+name = "vayren-research-view"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "slint",
+ "slint-build",
+ "vayren-shell",
+]
+
+[[package]]
 name = "vayren-shell"
 version = "0.1.0"
 dependencies = [
  "i-slint-backend-testing",
+ "serde",
+ "serde_json",
  "slint",
  "slint-build",
+]
+
+[[package]]
+name = "vayren-strategy-lab-view"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "slint",
+ "slint-build",
+ "vayren-shell",
+]
+
+[[package]]
+name = "vayren-system-view"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "slint",
+ "slint-build",
+ "vayren-shell",
 ]
 
 [[package]]

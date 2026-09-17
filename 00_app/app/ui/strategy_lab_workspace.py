@@ -1002,6 +1002,37 @@ class BacktestRunPanel(QWidget):
         if idx >= 0:
             self._tf_combo.setCurrentIndex(idx)
 
+    def set_capital(self, value: object) -> bool:
+        """Replace the capital (bridge glue for the native view).
+
+        Drives the existing spin box, so the established ``valueChanged`` →
+        ``config_changed`` path (validation display, staleness) runs
+        unchanged. Returns False when the value is outside the widget range.
+        """
+        try:
+            amount = float(value)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return False
+        if not 10000 <= amount <= 1e9:
+            return False
+        self._capital.setValue(amount)
+        return True
+
+    def set_dates(self, start: str, end: str) -> bool:
+        """Replace the date range (``YYYY-MM-DD``; bridge glue).
+
+        Drives the existing date edits, so the established ``dateChanged`` →
+        ``config_changed`` path runs unchanged. Range validity (end after
+        start) stays a RUN-time check in ``_emit`` — same as typed edits.
+        """
+        start_date = QDate.fromString(str(start), "yyyy-MM-dd")
+        end_date = QDate.fromString(str(end), "yyyy-MM-dd")
+        if not start_date.isValid() or not end_date.isValid():
+            return False
+        self._from.setDate(start_date)
+        self._to.setDate(end_date)
+        return True
+
     def current_config(self) -> dict[str, object]:
         selected = self._symbols.selected_symbols()
         return {
