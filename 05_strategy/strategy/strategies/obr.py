@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from market import Bar
 
-from strategy.models.parameters import ParameterSpec, StrategyParameters
-from strategy.runtime import BarView, StrategyLogic
+from strategy.models.parameters import ParameterSpec
+from strategy.runtime import BarView
 from strategy.strategies.base import PythonStrategy
 from strategy.strategies.indicators import calc_range, calc_rsi
 
@@ -106,37 +106,3 @@ class Obr(PythonStrategy):
             return None
         self.time_exit(exit_time)
         return None
-
-
-def create_obr_sell_v10(params: StrategyParameters) -> StrategyLogic:
-    s = ObrSellV10(params)
-    # map label keys to internal keys if needed
-    # params may be keyed by label; normalize
-    norm: dict[str, float] = {}
-    for k, v in dict(params).items():
-        if k == "C1 Range":
-            norm["c1_thresh"] = float(v)
-        elif k == "C4 Range":
-            norm["c4_thresh"] = float(v)
-        elif k == "RSI Threshold":
-            norm["rsi_thr"] = float(v)
-        else:
-            norm[k] = float(v)
-    s.params = norm
-    return s
-
-
-def create_obr(params: StrategyParameters) -> StrategyLogic:
-    s = Obr(params)
-    norm: dict[str, float] = {}
-    for k, v in dict(params).items():
-        if k == "Reference Candle Index":
-            norm["ref_index"] = float(v)
-        elif k == "Exit Hour":
-            norm["exit_hour"] = float(v)
-        elif k == "Exit Minute":
-            norm["exit_min"] = float(v)
-        else:
-            norm[k] = float(v)
-    s.params = norm
-    return s

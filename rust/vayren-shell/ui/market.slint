@@ -3,8 +3,9 @@
 // bound properties and reports interactions. The feature surface mirrors the
 // ORIGINAL Qt Market exactly: watchlist (switch/add/remove/filter/sort +
 // reset), timeframe row (canonical order + overflow), INDICATORS popup
-// (search · categories · strategies), floating indicator bar (eye · settings ·
-// source · remove), the candle chart with wheel-zoom-at-cursor, horizontal-wheel
+// (search · categories · strategies), floating indicator toolbar
+// (eye · settings · delete — three actions only), indicator settings panel,
+// the candle chart with wheel-zoom-at-cursor, horizontal-wheel
 // + drag pan, price-strip scale + double-click reset, follow-latest, the
 // snapped crosshair with price/time/volume tags, the permanent OHLC header,
 // strategy plot overlays + trade markers, and the right-click / Alt+R reset.
@@ -18,7 +19,7 @@
 // widget's centered messages. Tokens only.
 
 import { VayrenPalette, VayrenDesign } from "palette.slint";
-import { LineEdit, ScrollView, ComboBox } from "std-widgets.slint";
+import { LineEdit, ScrollView, ComboBox, SpinBox } from "std-widgets.slint";
 
 // VCell cell tone convention (0 text, 1 pos, 2 warn, 3 neg) -> palette brush.
 // Kept in a global so every region colors identically (top-level fns illegal).
@@ -64,6 +65,26 @@ export struct MarketTimeframe {
 export struct MarketIndicator {
     name: string,
     visible: bool,
+}
+
+// One market-status row (Qt `MarketStatusPanel` grid parity): key + value
+// where `muted = true` renders the honest-unknown `--` state.
+export struct MarketStatusRow {
+    key: string,
+    value: string,
+    muted: bool,
+}
+
+// One editable parameter of an indicator (the native settings panel renders
+// exactly these rows — the backend owns spec + current values).
+export struct MarketSettingsRow {
+    key: string,
+    label: string,
+    value: float,
+    min: float,
+    max: float,
+    step: float,
+    decimals: int,
 }
 
 export struct MarketPopupRow {
@@ -302,11 +323,65 @@ component MenuRow inherits Rectangle {
     }
 }
 
-// Compact single-glyph icon button for the floating indicator bar
-// (TradingView toolbar parity): fixed 20px hit area, no padding bloat,
-// hover / pressed / active states only — tokens, no literals.
+// Crisp vector icons for the indicator toolbar — the geometry of the shared
+// SVG asset (assets/indicator_bar/vayren_3_action_toolbar.svg) expressed as
+// Slint paths so it renders identically at any DPR without font glyphs.
+// 24x24 viewBox scaled to the 16px icon box.
+component IndicatorIcon inherits Rectangle {
+    in property <string> kind; // eye | eye_off | settings | delete
+    in property <color> ink: VayrenPalette.muted;
+    width: 16px;
+    height: 16px;
+    background: transparent;
+    Rectangle {
+        width: 24px;
+        height: 24px;
+        transform-scale: 16.0 / 24.0;
+        transform-origin: { x: 0px, y: 0px };
+        background: transparent;
+        Path {
+            visible: root.kind == "eye" || root.kind == "eye_off";
+            commands:
+                "M2.5 12 s3.5 -6 9.5 -6 s9.5 6 9.5 6 s-3.5 6 -9.5 6 s-9.5 -6 -9.5 -6 Z"
+                + " M9.2 12 a2.8 2.8 0 1 0 5.6 0 a2.8 2.8 0 1 0 -5.6 0 Z";
+            fill: transparent;
+            stroke: root.ink;
+            stroke-width: 1.8px;
+        }
+        Path {
+            visible: root.kind == "eye_off";
+            commands: "M4 4 L20 20";
+            fill: transparent;
+            stroke: root.ink;
+            stroke-width: 1.8px;
+        }
+        Path {
+            visible: root.kind == "settings";
+            commands:
+                "M19.4 13.5 a7.8 7.8 0 0 0 0 -3 l2 -1.5 -2 -3.4 -2.4 1 a8 8 0 0 0 -2.6 -1.5"
+                + " L14 2.5 h-4 l-0.4 2.6 a8 8 0 0 0 -2.6 1.5 l-2.4 -1 -2 3.4 2 1.5"
+                + " a7.8 7.8 0 0 0 0 3 l-2 1.5 2 3.4 2.4 -1 a8 8 0 0 0 2.6 1.5"
+                + " l0.4 2.6 h4 l0.4 -2.6 a8 8 0 0 0 2.6 -1.5 l2.4 1 2 -3.4 -2 -1.5 Z"
+                + " M12 8.5 a3.5 3.5 0 1 0 0 7 a3.5 3.5 0 1 0 0 -7 Z";
+            fill: transparent;
+            stroke: root.ink;
+            stroke-width: 1.6px;
+        }
+        Path {
+            visible: root.kind == "delete";
+            commands: "M4.5 7 h15 M9 4 h6 M7 7 l0.8 13 h8.4 L17 7 M10 10.5 v6 M14 10.5 v6";
+            fill: transparent;
+            stroke: root.ink;
+            stroke-width: 1.8px;
+        }
+    }
+}
+
+// Compact icon button for the floating indicator toolbar
+// (TradingView parity): fixed 20px hit area, hover / pressed / active states
+// only — tokens, no literals.
 component IndicatorIconBtn inherits Rectangle {
-    in property <string> glyph;
+    in property <string> kind;
     in property <bool> active: false;
     callback picked();
 
@@ -318,13 +393,12 @@ component IndicatorIconBtn inherits Rectangle {
     ta := TouchArea {
         clicked => { root.picked(); }
     }
-    Text {
-        text: root.glyph;
-        color: root.active ? VayrenPalette.accent
+    IndicatorIcon {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        kind: root.kind;
+        ink: root.active ? VayrenPalette.accent
             : ta.has-hover ? VayrenPalette.text : VayrenPalette.muted;
-        font-size: VayrenDesign.fs-label;
-        horizontal-alignment: center;
-        vertical-alignment: center;
     }
 }
 
@@ -333,12 +407,11 @@ component IndicatorBarRow inherits Rectangle {
     in property <bool> shown: true;
     callback toggle();
     callback settings();
-    callback source();
     callback remove();
 
     height: 28px;
     HorizontalLayout {
-        spacing: VayrenDesign.sp-sm;
+        spacing: VayrenDesign.sp-xs;
         padding-left: VayrenDesign.sp-md;
         padding-right: VayrenDesign.sp-sm;
         Text {
@@ -348,21 +421,18 @@ component IndicatorBarRow inherits Rectangle {
             font-weight: 600;
             vertical-alignment: center;
         }
+        // The ONLY three actions: eye · settings · delete.
         IndicatorIconBtn {
-            glyph: root.shown ? "◉" : "◎";
+            kind: root.shown ? "eye" : "eye_off";
             active: root.shown;
             picked => { root.toggle(); }
         }
         IndicatorIconBtn {
-            glyph: "⚙";
+            kind: "settings";
             picked => { root.settings(); }
         }
         IndicatorIconBtn {
-            glyph: "{ }";
-            picked => { root.source(); }
-        }
-        IndicatorIconBtn {
-            glyph: "✕";
+            kind: "delete";
             picked => { root.remove(); }
         }
     }
@@ -635,6 +705,99 @@ component PopupItem inherits Rectangle {
         color: VayrenPalette.faint;
         font-size: VayrenDesign.fs-table;
         vertical-alignment: center;
+    }
+}
+
+// ── Indicator settings panel (the ⚙ action) ──────────────────────────────
+
+// One labeled numeric parameter row.
+component SettingsField inherits Rectangle {
+    in property <MarketSettingsRow> field;
+    callback edited(float);
+
+    height: 34px;
+    HorizontalLayout {
+        spacing: VayrenDesign.sp-md;
+        padding-left: VayrenDesign.sp-md;
+        padding-right: VayrenDesign.sp-md;
+        Text {
+            text: root.field.label;
+            color: VayrenPalette.muted;
+            font-size: VayrenDesign.fs-small;
+            vertical-alignment: center;
+        }
+        Rectangle { horizontal-stretch: 1; background: transparent; }
+        SpinBox {
+            width: 110px;
+            height: 26px;
+            value: root.field.value;
+            minimum: root.field.min;
+            maximum: root.field.max;
+            edited(v) => { root.edited(v); }
+        }
+    }
+}
+
+component IndicatorSettingsPopup inherits Rectangle {
+    in property <string> name;
+    in property <[MarketSettingsRow]> rows;
+    // Edits round-trip through the Rust state model (Slint rows are values):
+    // each SpinBox change reports to the owner, SAVE commits, RESET restores.
+    callback edit-param(string, float);
+    callback save();
+    callback reset();
+    callback close();
+
+    width: 280px;
+    height: 40px + root.rows.length * 34px + 8px;
+    border-radius: VayrenDesign.radius-sm;
+    border-width: 1px;
+    border-color: VayrenPalette.hairline;
+    background: VayrenPalette.surface;
+    VerticalLayout {
+        spacing: VayrenDesign.sp-sm;
+        padding: VayrenDesign.sp-md;
+        Text {
+            text: root.name + " — Settings";
+            color: VayrenPalette.text;
+            font-size: VayrenDesign.fs-small;
+            font-weight: 700;
+        }
+        if root.rows.length > 0: Rectangle {
+            vertical-stretch: 1;
+            background: transparent;
+            VerticalLayout {
+                spacing: 0;
+                for f in root.rows: SettingsField {
+                    field: f;
+                    edited(v) => { root.edit-param(f.key, v); }
+                }
+            }
+        }
+        if root.rows.length == 0: Text {
+            text: "No adjustable parameters for this indicator.";
+            color: VayrenPalette.faint;
+            font-size: VayrenDesign.fs-label;
+            wrap: TextWrap.word-wrap;
+        }
+        HorizontalLayout {
+            spacing: VayrenDesign.sp-sm;
+            SmallButton {
+                label: "RESET";
+                picked => { root.reset(); }
+            }
+            Rectangle { horizontal-stretch: 1; background: transparent; }
+            SmallButton {
+                label: "CANCEL";
+                picked => { root.close(); }
+            }
+            SmallButton {
+                label: "SAVE";
+                primary: root.rows.length > 0;
+                enabled: root.rows.length > 0;
+                picked => { root.save(); }
+            }
+        }
     }
 }
 
@@ -1470,8 +1633,17 @@ export component MarketScreen inherits Rectangle {
     in property <string> popup-query;
     in property <string> popup-category: "ALL";
     in property <[MarketPopupRow]> popup-rows;
+    in property <bool> settings-open: false;
+    in property <string> settings-name;
+    in property <[MarketSettingsRow]> settings-rows;
     in property <string> active-label;
     in property <MarketTradeContext> trade-context;
+    // Market-status strip (Qt `MarketStatusPanel` parity): collapsed by
+    // default (the Qt dock starts hidden), rows render honest "--" values.
+    in property <bool> market-status-open: false;
+    in property <[MarketStatusRow]> market-status-regime;
+    in property <[MarketStatusRow]> market-status-data;
+    callback status-toggle();
     in property <bool> wide: true;
     in property <bool> medium: true;
 
@@ -1564,8 +1736,12 @@ export component MarketScreen inherits Rectangle {
     callback indicator-category(string);
     callback add-indicator(string);
     callback toggle-indicator-visible(string);
-    callback settings-indicator(string);
-    callback source-indicator(string);
+    // ⚙ action: open/close the indicator's settings panel (name; empty on
+    // close). The panel's edits/save/reset are the three callbacks below.
+    callback settings-popup(bool, string);
+    callback settings-edit(string, float);
+    callback settings-save();
+    callback settings-reset();
     callback remove-indicator(string);
     callback trade-prev();
     callback trade-next();
@@ -1620,6 +1796,11 @@ export component MarketScreen inherits Rectangle {
                         code: "DL";
                         active: root.dl-open;
                         picked => { root.dl-toggle(); }
+                    }
+                    RailButton {
+                        code: "MS";
+                        active: root.market-status-open;
+                        picked => { root.status-toggle(); }
                     }
                     Rectangle { vertical-stretch: 1; background: transparent; }
                 }
@@ -1856,10 +2037,70 @@ export component MarketScreen inherits Rectangle {
                         }
                     }
 
-                    // plot column + price strip
+            // ── market-status strip (Qt MarketStatusPanel parity) ──
+            if root.market-status-open: Rectangle {
+                background: VayrenPalette.surface;
+                VerticalLayout {
+                    padding: VayrenDesign.sp-md;
+                    spacing: VayrenDesign.sp-sm;
+                    Text {
+                        text: "MARKET STATUS";
+                        color: VayrenPalette.faint;
+                        font-size: VayrenDesign.fs-label;
+                        font-weight: 600;
+                    }
                     HorizontalLayout {
-                        vertical-stretch: 1;
-                        spacing: 0;
+                        spacing: VayrenDesign.sp-xl;
+                        // Qt "MARKET REGIME" section.
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+                            spacing: VayrenDesign.sp-xs;
+                            for row in root.market-status-regime: HorizontalLayout {
+                                Text {
+                                    text: row.key;
+                                    color: VayrenPalette.muted;
+                                    font-size: VayrenDesign.fs-label;
+                                    vertical-alignment: center;
+                                }
+                                Rectangle { horizontal-stretch: 1; background: transparent; }
+                                Text {
+                                    text: row.value;
+                                    color: row.muted ? VayrenPalette.muted : VayrenPalette.text;
+                                    font-size: VayrenDesign.fs-label;
+                                    font-weight: 600;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                        // Qt "DATA STATUS" section.
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+                            spacing: VayrenDesign.sp-xs;
+                            for row in root.market-status-data: HorizontalLayout {
+                                Text {
+                                    text: row.key;
+                                    color: VayrenPalette.muted;
+                                    font-size: VayrenDesign.fs-label;
+                                    vertical-alignment: center;
+                                }
+                                Rectangle { horizontal-stretch: 1; background: transparent; }
+                                Text {
+                                    text: row.value;
+                                    color: row.muted ? VayrenPalette.muted : VayrenPalette.text;
+                                    font-size: VayrenDesign.fs-label;
+                                    font-weight: 600;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // plot column + price strip
+            HorizontalLayout {
+                vertical-stretch: 1;
+                spacing: 0;
 
                         plot := Rectangle {
                             horizontal-stretch: 1;
@@ -2106,11 +2347,18 @@ export component MarketScreen inherits Rectangle {
                                         return reject;
                                     }
                                     if ev.delta-y != 0px {
+                                        // Host forwards the natural wheel delta
+                                        // (UP = positive): ScrollView regions
+                                        // consume it natively. Only time-zoom
+                                        // negates, keeping the WheelZoom
+                                        // steps<0 = zoom-in contract (Qt: UP
+                                        // zooms IN); price-zoom already matches
+                                        // Qt inside its Rust kernel.
                                         let steps = (ev.delta-y / 1px) / 120.0;
                                         if self.mouse-x > plot.width - root.price-strip {
                                             root.price-zoom(steps, root.px-fy);
                                         } else {
-                                            root.wheel-zoom(root.px-fx, steps);
+                                            root.wheel-zoom(root.px-fx, -steps);
                                         }
                                     } else if ev.delta-x != 0px && root.plot-px > 0.0 {
                                         root.wheel-pan((ev.delta-x / 1px) / root.plot-px);
@@ -2136,11 +2384,24 @@ export component MarketScreen inherits Rectangle {
                                         name: ir.name;
                                         shown: ir.visible;
                                         toggle => { root.toggle-indicator-visible(ir.name); }
-                                        settings => { root.settings-indicator(ir.name); }
-                                        source => { root.source-indicator(ir.name); }
+                                        settings => { root.settings-popup(true, ir.name); }
                                         remove => { root.remove-indicator(ir.name); }
                                     }
                                 }
+                            }
+
+                            // indicator settings panel (the ⚙ action): anchored
+                            // under the indicator bar, above the chart surface.
+                            if root.settings-open: IndicatorSettingsPopup {
+                                x: 8px;
+                                y: root.header-h + 6px
+                                    + root.indicator-rows.length * 30px + 2px;
+                                name: root.settings-name;
+                                rows: root.settings-rows;
+                                edit-param(key, value) => { root.settings-edit(key, value); }
+                                save => { root.settings-save(); }
+                                reset => { root.settings-reset(); }
+                                close => { root.settings-popup(false, ""); }
                             }
 
                             // honest state message (Qt centered subtle text)
@@ -2339,6 +2600,7 @@ export component MarketScreen inherits Rectangle {
             if ev.text == Key.Escape {
                 root.open-menu = "none";
                 if root.popup-open { root.indicator-popup(false); }
+                if root.settings-open { root.settings-popup(false, ""); }
                 return accept;
             }
             reject

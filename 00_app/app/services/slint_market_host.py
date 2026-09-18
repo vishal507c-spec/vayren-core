@@ -24,9 +24,12 @@ Bridge snapshot schema (owned here; Rust parses defensively via
 ``selected_symbol``, ``watchlists[]``, ``active_watchlist``,
 ``timeframes[]``, ``timeframe``, ``exchange``, ``bars`` (null | [] |
 ``[{time,open,high,low,close,volume}]`` raw numbers), ``status``
-(ready|loading|empty|error), ``status_detail``, ``indicators`` (name->bool),
-``volume_visible``, ``bars_total`` (full backend count when the ``bars`` tail is
-wrapped to the viewable window).
+(ready|loading|empty|error), ``status_detail``, ``indicators`` (name->bool,
+driven by the retained panel ROWS so a deleted indicator never re-lists),
+``indicator_params`` (name -> ``[{key,label,value,min,max,step,decimals}]``
+editable parameters for the native settings popup), ``volume_visible``,
+``bars_total`` (full backend count when the ``bars`` tail is wrapped to the
+viewable window).
 """
 
 from __future__ import annotations
@@ -54,6 +57,15 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QWidget
 
 logger = logging.getLogger(__name__)
+
+
+def _is_num(value: object) -> bool:
+    try:
+        float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return False
+    return True
+
 
 ABI_VERSION = 1
 VIEW_LIB_ENV_OVERRIDE = "VAYREN_MARKET_VIEW_LIB"
@@ -159,6 +171,7 @@ def market_snapshot_dict(window: Any) -> dict[str, Any]:
         "bars": None,
         "status": "loading",
         "indicators": {},
+        "indicator_params": {},
         "strategies": [],
         "plot_series": [],
         "trades": [],
@@ -226,8 +239,27 @@ def market_snapshot_dict(window: Any) -> dict[str, Any]:
         snap["status"] = "empty" if snap["selected_symbol"] else "loading"
     if widget is not None:
         with contextlib.suppress(Exception):
-            visibility = dict(widget.indicator_visibility)
-            snap["indicators"] = {str(k): bool(v) for k, v in visibility.items()}
+            # The native indicator bar mirrors the PANEL ROWS (name -> visible),
+            # not the widget's internal dict: a deleted indicator has no row,
+            # so it can never reappear here on refresh / timeframe / symbol
+            # change (only a fresh user add re-lists it).
+            snap["indicators"] = {
+                str(row.name): bool(row.is_visible) for row in widget.visibility_panel.rows
+            }
+        # Editable parameters for the native settings popup: spec rows merged
+        # with the indicator's stored values (presentation only — the values
+        # travel back through the same wire a Qt settings save produces).
+        with contextlib.suppress(Exception):
+            from chart.widgets.indicator_settings_dialog import param_rows_for
+
+            params: dict[str, list[dict[str, Any]]] = {}
+            for row in widget.visibility_panel.rows:
+                with contextlib.suppress(Exception):
+                    stored = widget.indicator_settings_for(str(row.name))
+                    rows = param_rows_for(str(row.name), stored)
+                    if rows:
+                        params[str(row.name)] = list(rows)
+            snap["indicator_params"] = params
         # Real strategy plot series (owner-aware PlotOverlay._series), with
         # absolute bar indices re-based onto the delivered tail window.
         with contextlib.suppress(Exception):
@@ -421,6 +453,24 @@ def market_snapshot_dict(window: Any) -> dict[str, Any]:
                 "pnl": str(panel._pnl_label.text()),
                 "r": str(panel._r_label.text()),
             }
+    # Market-status panel facts (read-only projection of the retained Qt
+    # panel — regime/data rows exactly as they render today; "--" stays the
+    # honest-unknown until an engine reports).
+    with contextlib.suppress(Exception):
+        panel = getattr(window, "_left_extra", None)
+        if panel is not None:
+            regime = getattr(panel, "_regime_labels", {}) or {}
+            status = getattr(panel, "_status_labels", {}) or {}
+            snap["market_status"] = {
+                "regime_current": _text(regime.get("Current regime")),
+                "regime_trend": _text(regime.get("Trend strength")),
+                "regime_volatility": _text(regime.get("Volatility")),
+                "regime_momentum": _text(regime.get("Momentum")),
+                "provider": _text(status.get("Data provider")),
+                "latency": _text(status.get("Latency")),
+                "last_update": _text(status.get("Last update")),
+                "bars_loaded": _text(status.get("Bars loaded")),
+            }
     snap["download"] = _download_snapshot(window)
     return snap
 
@@ -576,11 +626,11 @@ def apply_market_action(window: Any, action: str) -> None:
 
     Public methods and the same signals a user click emits — the retained Qt
     widgets keep single ownership of behavior (symbol load, timeframe load,
-    watchlist add/remove/switch, indicator add/visibility/settings/source/
-    remove, reset view, trade-context navigation). The ⚙ and `{}` indicator
-    buttons re-emit the visibility panel's ``settings_requested`` /
-    ``source_requested`` signals, so they reach the identical legacy handlers
-    a Qt toolbar click reaches (no settings/source surface is invented).
+    watchlist add/remove/switch, indicator add/visibility/settings/remove,
+    reset view, trade-context navigation). The indicator toolbar's three
+    actions (eye -> visibility, settings -> parameters panel, delete ->
+    removal) replay through the retained widget's own methods, so a native
+    click and a legacy toolbar click reach identical handlers.
     """
     if window is None or not action:
         return
@@ -609,21 +659,32 @@ def apply_market_action(window: Any, action: str) -> None:
             if widget is not None:
                 name = action.split(":", 2)[2]
                 widget.set_indicator_visible(name, not widget.is_indicator_visible(name))
-        elif action.startswith("indicator:settings:"):
-            # Legacy ⚙ path: re-emit the visibility panel's settings_requested
-            # signal — the SAME path a Qt toolbar click takes (the retained
-            # widget owns the response; no surface is invented here).
+        elif action.startswith("indicator:params:"):
+            # Native settings popup SAVE: store the edited parameters and
+            # re-run the indicator's live plots with them merged over the
+            # strategy's defaults (immediate chart update, logic untouched).
             if widget is not None:
-                name = action.split(":", 2)[2]
-                if name:
-                    widget.visibility_panel.settings_requested.emit(name)
-        elif action.startswith("indicator:source:"):
-            # Legacy `{}` path: re-emit source_requested (same handler the Qt
-            # toolbar button reaches). The retained widget owns the response.
+                rest = action.split(":", 2)[2] if action.count(":") >= 2 else ""
+                name, _, payload = rest.partition(":")
+                if name and payload:
+                    try:
+                        params = json.loads(payload)
+                    except Exception:
+                        params = None
+                    if isinstance(params, dict):
+                        if params:
+                            widget.set_indicator_settings(
+                                name, {k: v for k, v in params.items() if _is_num(v)}
+                            )
+                        else:
+                            widget.clear_indicator_settings(name)
+        elif action.startswith("indicator:clear-params:"):
+            # Native settings RESET: drop stored overrides — the strategy's
+            # own defaults take over again.
             if widget is not None:
-                name = action.split(":", 2)[2]
+                name = action.split(":", 2)[2] if action.count(":") >= 2 else ""
                 if name:
-                    widget.visibility_panel.source_requested.emit(name)
+                    widget.clear_indicator_settings(name)
         elif action.startswith("indicator:rm:"):
             if widget is not None:
                 widget.remove_indicator(action.split(":", 2)[2])
@@ -1005,13 +1066,16 @@ class SlintMarketHost(QWidget):
         if self._lib is not None and self._view is not None:
             delta = event.angleDelta()
             pos = event.position()
+            # Natural delta, never negated: Slint ScrollView regions
+            # (watchlist, download, log) consume +y = wheel UP natively.
+            # Chart zoom keeps its own sign contract inside market.slint.
             with contextlib.suppress(Exception):
                 self._lib.vayren_market_view_scroll(
                     self._view,
                     pos.x(),
                     pos.y(),
                     delta.x() / 120.0 * WHEEL_PX_PER_NOTCH,
-                    -delta.y() / 120.0 * WHEEL_PX_PER_NOTCH,
+                    delta.y() / 120.0 * WHEEL_PX_PER_NOTCH,
                 )
 
     def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802 (Qt override)

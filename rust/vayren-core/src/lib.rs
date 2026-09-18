@@ -10,10 +10,30 @@
 //! inputs fail closed.
 
 pub mod aggregate;
+pub mod backtest;
+pub mod backtest_directional;
+pub mod backtest_engine;
+pub mod backtest_events;
+pub mod chart_events;
+pub mod chart_math;
+pub mod chart_model;
+pub mod data_events;
+pub mod download;
+pub mod event_bus;
+pub mod execution;
+pub mod execution_engine;
+pub mod execution_events;
+pub mod indicator;
+pub mod kill_switch;
+pub mod market;
+pub mod market_events;
 pub mod metrics;
 pub mod order_state;
+pub mod registry;
 pub mod risk;
+pub mod risk_engine;
 pub mod stats;
+pub mod throttle;
 
 use aggregate::AggBucket;
 
@@ -212,6 +232,101 @@ pub unsafe extern "C" fn vy_aggregate(
     buckets.len()
 }
 
+// ── technical indicators ─────────────────────────────────────────────────
+
+/// SMA: write output into `out` (capacity >= n - period + 1). Returns count
+/// written. Period zero or too-short input -> 0.
+#[no_mangle]
+pub unsafe extern "C" fn vy_sma(
+    prices: *const f64,
+    n: usize,
+    period: usize,
+    out: *mut f64,
+    out_cap: usize,
+) -> usize {
+    let result = indicator::sma(slice(prices, n), period);
+    let count = result.len().min(out_cap);
+    let out_slice = slice_mut(out, count);
+    out_slice.copy_from_slice(&result[..count]);
+    result.len()
+}
+
+/// EMA: write output into `out` (capacity >= n). Returns 1 on success, 0 on
+/// empty/zero-period input.
+#[no_mangle]
+pub unsafe extern "C" fn vy_ema(prices: *const f64, n: usize, period: usize, out: *mut f64) -> i32 {
+    match indicator::ema(slice(prices, n), period) {
+        Some(result) => {
+            let out_slice = slice_mut(out, n);
+            out_slice.copy_from_slice(&result);
+            1
+        }
+        None => 0,
+    }
+}
+
+/// RSI: write output into `out` (capacity >= n). Each element is either a
+/// valid RSI (0-100) or NaN (not enough data). Returns n.
+#[no_mangle]
+pub unsafe extern "C" fn vy_rsi(
+    prices: *const f64,
+    n: usize,
+    period: usize,
+    out: *mut f64,
+) -> usize {
+    let result = indicator::rsi(slice(prices, n), period);
+    let out_slice = slice_mut(out, n);
+    for (i, val) in result.iter().enumerate() {
+        out_slice[i] = val.unwrap_or(f64::NAN);
+    }
+    n
+}
+
+/// ATR: write output into `out` (capacity >= n). Each element is either a
+/// valid ATR or NaN (not enough data). Returns n.
+#[no_mangle]
+pub unsafe extern "C" fn vy_atr(
+    highs: *const f64,
+    lows: *const f64,
+    closes: *const f64,
+    n: usize,
+    period: usize,
+    out: *mut f64,
+) -> usize {
+    let result = indicator::atr(slice(highs, n), slice(lows, n), slice(closes, n), period);
+    let out_slice = slice_mut(out, n);
+    for (i, val) in result.iter().enumerate() {
+        out_slice[i] = val.unwrap_or(f64::NAN);
+    }
+    n
+}
+
+/// VWAP: write output into `out` (capacity >= n). Returns 1 on success, 0 on
+/// mismatched/empty input.
+#[no_mangle]
+pub unsafe extern "C" fn vy_vwap(
+    highs: *const f64,
+    lows: *const f64,
+    closes: *const f64,
+    volumes: *const f64,
+    n: usize,
+    out: *mut f64,
+) -> i32 {
+    match indicator::vwap(
+        slice(highs, n),
+        slice(lows, n),
+        slice(closes, n),
+        slice(volumes, n),
+    ) {
+        Some(result) => {
+            let out_slice = slice_mut(out, n);
+            out_slice.copy_from_slice(&result);
+            1
+        }
+        None => 0,
+    }
+}
+
 // ── risk policy kernel (agent-migrated) ───────────────────────────────
 
 /// Evaluate pure scalar risk checks. Returns the check bitmask.
@@ -303,4 +418,151 @@ pub unsafe extern "C" fn vy_risk_kernel(
         risk::evaluate_risk_kernel(&inputs)
     });
     result.unwrap_or(0)
+}
+
+// ── execution core kernels ────────────────────────────────────────────────
+
+#[no_mangle]
+pub extern "C" fn vy_exec_arm_transition(current: i32, target: i32) -> i32 {
+    use execution_engine::LiveArm;
+    let map = |c: i32| match c {
+        0 => Some(LiveArm::Disarmed),
+        1 => Some(LiveArm::Arming),
+        2 => Some(LiveArm::Armed),
+        3 => Some(LiveArm::Running),
+        4 => Some(LiveArm::Halted),
+        _ => None,
+    };
+    let unmap = |a: LiveArm| match a {
+        LiveArm::Disarmed => 0,
+        LiveArm::Arming => 1,
+        LiveArm::Armed => 2,
+        LiveArm::Running => 3,
+        LiveArm::Halted => 4,
+    };
+    let (Some(cur), Some(tgt)) = (map(current), map(target)) else {
+        return -1;
+    };
+    match execution_engine::arm_transition(cur, tgt) {
+        Ok(res) => unmap(res),
+        Err(_) => -1,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn vy_exec_lifecycle_transition_allowed(from: i32, to: i32) -> i32 {
+    use execution_engine::LifecycleState;
+    let map = |c: i32| match c {
+        0 => Some(LifecycleState::Created),
+        1 => Some(LifecycleState::Validating),
+        2 => Some(LifecycleState::WarmingUp),
+        3 => Some(LifecycleState::Ready),
+        4 => Some(LifecycleState::Running),
+        5 => Some(LifecycleState::Paused),
+        6 => Some(LifecycleState::Stopping),
+        7 => Some(LifecycleState::Stopped),
+        8 => Some(LifecycleState::Error),
+        9 => Some(LifecycleState::Recovering),
+        10 => Some(LifecycleState::Reconciling),
+        _ => None,
+    };
+    let (Some(f), Some(t)) = (map(from), map(to)) else {
+        return 0;
+    };
+    let mut sl = execution_engine::StrategyLifecycle {
+        state: f,
+        reason: String::new(),
+    };
+    if sl.transition(t, "").is_ok() {
+        1
+    } else {
+        0
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn vy_exec_planner_plan(
+    quantity: f64,
+    order_type: i32, // 0 = MARKET, 1 = LIMIT
+    reference_price: f64,
+    prefer_limit: i32,
+    size_multiplier: f64,
+    out_qty: *mut f64,
+    out_order_type: *mut i32,
+    out_has_limit: *mut i32,
+    out_limit_price: *mut f64,
+) -> i32 {
+    if size_multiplier <= 0.0 || size_multiplier > 1.0 {
+        return -1;
+    }
+    let planned_qty = quantity * size_multiplier;
+    let is_limit = prefer_limit != 0 || order_type == 1;
+    if !out_qty.is_null() {
+        *out_qty = planned_qty;
+    }
+    if !out_order_type.is_null() {
+        *out_order_type = if is_limit { 1 } else { 0 };
+    }
+    if !out_has_limit.is_null() {
+        *out_has_limit = if is_limit { 1 } else { 0 };
+    }
+    if !out_limit_price.is_null() {
+        *out_limit_price = if is_limit { reference_price } else { 0.0 };
+    }
+    0
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn vy_exec_ledger_apply_fill(
+    pos_qty: f64,
+    pos_avg_price: f64,
+    pos_realized_pnl: f64,
+    side: i32, // 0 = BUY, 1 = SELL
+    fill_qty: f64,
+    fill_price: f64,
+    commission: f64,
+    out_qty: *mut f64,
+    out_avg_price: *mut f64,
+    out_realized_pnl: *mut f64,
+    out_day_pnl_delta: *mut f64,
+) -> i32 {
+    use execution::Side;
+    let side = if side == 0 { Side::Buy } else { Side::Sell };
+    let signed = side.direction() * fill_qty;
+    let new_qty = pos_qty + signed;
+
+    let is_flat = pos_qty == 0.0;
+    let same_sign = (pos_qty > 0.0) == (signed > 0.0);
+
+    let (final_qty, final_avg, final_realized, day_pnl_delta) = if is_flat || same_sign {
+        let total_cost = pos_avg_price * pos_qty.abs() + fill_price * fill_qty;
+        let denom = new_qty.abs();
+        let avg = if denom > 0.0 { total_cost / denom } else { 0.0 };
+        (new_qty, avg, pos_realized_pnl, 0.0)
+    } else {
+        let closing = pos_qty.abs().min(fill_qty);
+        let mut pnl = (fill_price - pos_avg_price)
+            * closing
+            * (if pos_qty > 0.0 { 1.0 } else { -1.0 });
+        if fill_qty != 0.0 {
+            pnl -= commission * (closing / fill_qty);
+        }
+        let realized = pos_realized_pnl + pnl;
+        let avg = if new_qty.abs() > 0.0 { fill_price } else { 0.0 };
+        (new_qty, avg, realized, pnl)
+    };
+
+    if !out_qty.is_null() {
+        *out_qty = final_qty;
+    }
+    if !out_avg_price.is_null() {
+        *out_avg_price = final_avg;
+    }
+    if !out_realized_pnl.is_null() {
+        *out_realized_pnl = final_realized;
+    }
+    if !out_day_pnl_delta.is_null() {
+        *out_day_pnl_delta = day_pnl_delta;
+    }
+    0
 }

@@ -221,9 +221,6 @@ def strategy_lab_snapshot_dict(workspace: Any) -> dict[str, Any]:
         end = str(cfg.get("end_date") or "")[:10]
         config["dates"] = f"{start} → {end}" if start and end else "—"
         config["capital"] = _fmt_money(cfg.get("initial_capital"))
-        slip, comm = cfg.get("slippage_pct"), cfg.get("commission_pct")
-        if slip is not None and comm is not None:
-            config["cost"] = f"{slip}% / {comm}%"
     except Exception:  # noqa: BLE001
         pass
     snap["config"] = config

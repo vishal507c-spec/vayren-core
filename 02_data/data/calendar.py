@@ -54,7 +54,3 @@ def count_trading_days(d1: datetime, d2: datetime, settings) -> int:
             count += 1
         cur += timedelta(days=1)
     return count
-
-
-def dt_str(dt: datetime) -> str:
-    return dt.strftime("%Y-%m-%d %H:%M:%S")

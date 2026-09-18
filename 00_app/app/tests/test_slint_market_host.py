@@ -297,28 +297,33 @@ def test_actions_re_enter_backend_through_user_click_signals(qt_app) -> None:
     apply_market_action(None, "select:TCS")
 
 
-def test_indicator_settings_and_source_replay_legacy_signals(qt_app) -> None:
-    """The ⚙ and `{}` buttons re-enter the backend through the SAME
-    ``settings_requested`` / ``source_requested`` signals a Qt toolbar click
-    emits - the retained widget owns the response, no surface is invented."""
+def test_indicator_settings_params_wire_stores_and_reruns(qt_app) -> None:
+    """The native settings popup SAVE (``indicator:params:NAME:{json}``)
+    stores real parameters on the chart and never mutates visibility itself.
+    Malformed payloads are ignored (fail-closed); RESET clears overrides."""
+    import json
+
     assert qt_app is not None
     window = _funded_window()
     chart = window._widget
-    settings_seen: list[str] = []
-    source_seen: list[str] = []
-    chart.visibility_panel.settings_requested.connect(settings_seen.append)
-    chart.visibility_panel.source_requested.connect(source_seen.append)
-    apply_market_action(window, "indicator:settings:SMA")
-    apply_market_action(window, "indicator:source:SMA")
-    assert settings_seen == ["SMA"]
-    assert source_seen == ["SMA"]
-    # Settings/source never mutate visibility (the eye/delete own that).
+    apply_market_action(window, "indicator:add:SMA")
+    seen: list[tuple[str, dict]] = []
+    chart.indicator_settings_changed.connect(lambda n, p: seen.append((n, dict(p))))
+    apply_market_action(window, "indicator:params:SMA:" + json.dumps({"period": 21}))
+    assert chart.indicator_settings_for("SMA") == {"period": 21.0}
+    assert seen and seen[-1][0] == "SMA"
+    # Settings never mutate visibility (the eye/delete own that).
     assert chart.indicator_visibility["SMA"] is True
-    # Unknown/empty names forward nothing.
-    settings_seen.clear()
-    source_seen.clear()
-    apply_market_action(window, "indicator:settings:")
-    assert settings_seen == []
+    # Malformed / empty payloads are ignored.
+    apply_market_action(window, "indicator:params:SMA:not-json")
+    apply_market_action(window, "indicator:params:")
+    assert chart.indicator_settings_for("SMA") == {"period": 21.0}
+    # RESET clears overrides back to strategy defaults.
+    apply_market_action(window, "indicator:clear-params:SMA")
+    assert chart.indicator_settings_for("SMA") == {}
+    # Non-numeric values are dropped, numeric ones kept.
+    apply_market_action(window, "indicator:params:SMA:" + json.dumps({"period": "x"}))
+    assert chart.indicator_settings_for("SMA") == {}
 
 
 class _Combo:
@@ -614,3 +619,42 @@ def test_drain_delivers_queued_select_to_sink(qt_app) -> None:
     finally:
         host.destroy_view()
         host.close()
+
+
+def test_snapshot_projects_market_status_panel_facts(qt_app) -> None:
+    """The Market-status strip projects the retained Qt panel's real labels.
+
+    Qt contract (market_status_panel.py): regime + data-status rows default to
+    "--" (honest unknown), muted until set; set_* updates pass through
+    unchanged. The bridge reads the same labels — Slint renders identical text.
+    """
+    assert qt_app is not None
+    from app.ui.market_status_panel import MarketStatusPanel
+
+    panel = MarketStatusPanel()
+    window = _funded_window()
+    window._left_extra = panel
+
+    snapshot = market_snapshot_dict(window)
+    status = snapshot["market_status"]
+    # Defaults: Qt renders "--" everywhere; bridge passes it through raw.
+    assert status["regime_current"] == "--"
+    assert status["provider"] == "--"
+    assert status["bars_loaded"] == "--"
+    assert status["latency"] == "--"
+
+    # Set values → snapshot mirrors exactly (same Qt setter path).
+    panel.set_regime({"Current regime": "TRENDING", "Momentum": "RISING"})
+    panel.set_data_status(provider="zerodha", latency="4ms", bars_loaded=61676)
+    status = market_snapshot_dict(window)["market_status"]
+    assert status["regime_current"] == "TRENDING"
+    assert status["regime_momentum"] == "RISING"
+    assert status["regime_trend"] == "--"
+    assert status["provider"] == "zerodha"
+    assert status["latency"] == "4ms"
+    assert status["bars_loaded"] == "61676"
+
+    # No panel on the window → honest absence (no invented keys/values).
+    plain = market_snapshot_dict(_funded_window())
+    assert "market_status" not in plain
+    json.dumps(snapshot, sort_keys=True, default=str)

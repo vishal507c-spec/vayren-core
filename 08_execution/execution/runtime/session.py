@@ -195,10 +195,6 @@ class LiveSession:
 
     # ── wiring ──────────────────────────────────────────────────
 
-    def attach_bus(self, bus: Any) -> None:
-        """Optional EventBus for journal facts (subscriptions stay in bootstrap)."""
-        self._bus = bus
-
     def _emit(self, event: Any) -> None:
         if self._bus is not None:
             self._bus.publish(event)

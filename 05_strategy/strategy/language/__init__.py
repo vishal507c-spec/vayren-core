@@ -10,8 +10,6 @@ from .storage import (
     create_strategy,
     delete_strategy,
     duplicate_strategy,
-    ensure_builtin_strategies,
-    ensure_default,
     get_strategy_by_id,
     list_strategies,
     list_strategies_with_mtime,
@@ -32,7 +30,6 @@ __all__ = [
     "LEGACY_OBR_CODE",
     "LEGACY_OBR_NAME",
     "StrategyRecord",
-    "ensure_default",
     "list_strategies",
     "list_strategies_with_mtime",
     "list_strategy_records",
@@ -45,5 +42,4 @@ __all__ = [
     "delete_strategy",
     "duplicate_strategy",
     "rename_strategy",
-    "ensure_builtin_strategies",
 ]

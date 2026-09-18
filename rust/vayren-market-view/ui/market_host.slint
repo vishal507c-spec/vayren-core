@@ -14,9 +14,11 @@ import {
     MarketTimeframe,
     MarketIndicator,
     MarketPopupRow,
+    MarketSettingsRow,
     MarketPlotSeg,
     MarketMarker,
     MarketTradeContext,
+    MarketStatusRow,
     DlPlan,
     DlStatus,
     DlCalDay,
@@ -61,8 +63,16 @@ export component MarketHostWindow inherits Window {
     in-out property <string> popup-query;
     in-out property <string> popup-category: "ALL";
     in-out property <[MarketPopupRow]> popup-rows;
+    in-out property <bool> settings-open: false;
+    in-out property <string> settings-name;
+    in-out property <[MarketSettingsRow]> settings-rows;
     in-out property <string> active-label;
     in-out property <MarketTradeContext> trade-context;
+    // Market-status strip pass-through (pure glue, no visuals here).
+    in-out property <bool> market-status-open: false;
+    in-out property <[MarketStatusRow]> market-status-regime;
+    in-out property <[MarketStatusRow]> market-status-data;
+    callback status-toggle();
     in-out property <bool> wide: true;
     in-out property <bool> medium: true;
 
@@ -152,8 +162,10 @@ export component MarketHostWindow inherits Window {
     callback indicator-category(string);
     callback add-indicator(string);
     callback toggle-indicator-visible(string);
-    callback settings-indicator(string);
-    callback source-indicator(string);
+    callback settings-popup(bool, string);
+    callback settings-edit(string, float);
+    callback settings-save();
+    callback settings-reset();
     callback remove-indicator(string);
     callback trade-prev();
     callback trade-next();
@@ -194,8 +206,15 @@ export component MarketHostWindow inherits Window {
         popup-query: root.popup-query;
         popup-category: root.popup-category;
         popup-rows: root.popup-rows;
+        settings-open: root.settings-open;
+        settings-name: root.settings-name;
+        settings-rows: root.settings-rows;
         active-label: root.active-label;
         trade-context: root.trade-context;
+        market-status-open: root.market-status-open;
+        market-status-regime: root.market-status-regime;
+        market-status-data: root.market-status-data;
+        status-toggle() => { root.status-toggle(); }
         wide: root.wide;
         medium: root.medium;
         panel-toggle() => { root.panel-toggle(); }
@@ -224,8 +243,10 @@ export component MarketHostWindow inherits Window {
         indicator-category(s) => { root.indicator-category(s); }
         add-indicator(s) => { root.add-indicator(s); }
         toggle-indicator-visible(s) => { root.toggle-indicator-visible(s); }
-        settings-indicator(s) => { root.settings-indicator(s); }
-        source-indicator(s) => { root.source-indicator(s); }
+        settings-popup(open, name) => { root.settings-popup(open, name); }
+        settings-edit(key, value) => { root.settings-edit(key, value); }
+        settings-save() => { root.settings-save(); }
+        settings-reset() => { root.settings-reset(); }
         remove-indicator(s) => { root.remove-indicator(s); }
         trade-prev() => { root.trade-prev(); }
         trade-next() => { root.trade-next(); }

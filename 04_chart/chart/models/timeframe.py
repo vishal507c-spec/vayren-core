@@ -83,11 +83,6 @@ def _gaps(bars: tuple[Bar, ...]) -> list[float]:
     return [t2 - t1 for t1, t2 in zip(times, times[1:], strict=False) if t2 > t1]
 
 
-def _median_gaps(bars: tuple[Bar, ...]) -> list[float]:
-    """Backward compat alias — use _gaps (mode)."""
-    return _gaps(bars)
-
-
 def _parse_times(bars: tuple[Bar, ...]) -> list[float]:
     times: list[float] = []
     for bar in bars[: _INFERENCE_SAMPLE + 1]:

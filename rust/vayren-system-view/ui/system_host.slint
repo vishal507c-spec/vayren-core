@@ -7,6 +7,22 @@
 // restyle, or recompose content — compare against the `app.slint`
 // BrokerPanel instance block.
 import { BrokerPanel, BrokerCheckRow } from "../../vayren-shell/ui/broker.slint";
+import { VayrenPalette, VayrenDesign } from "../../vayren-shell/ui/palette.slint";
+import { ScrollView } from "std-widgets.slint";
+
+// One system-health grid row (Qt `SystemHealthPanel` parity): key + value,
+// tone follows the Qt stylesheet rule (ok=pos, bad=neg, "--"=muted).
+export struct HealthRow {
+    label: string,
+    value: string,
+    tone: int,
+}
+
+// One event-log line (Qt `EventLogPanel` parity): level-tagged text.
+export struct LogRow {
+    text: string,
+    tone: int,
+}
 
 export component SystemHostWindow inherits Window {
     title: "VAYREN — System";
@@ -53,6 +69,15 @@ export component SystemHostWindow inherits Window {
     in-out property <bool> disconnect-enabled: false;
     in-out property <bool> remove-visible: false;
 
+    // System-health grid + event log (Qt `SystemHealthPanel`/`EventLogPanel`
+    // parity). Templates/hidden defaults mirror the Qt docks (hidden).
+    in-out property <bool> health-open: false;
+    in-out property <bool> log-open: false;
+    in-out property <[HealthRow]> health-rows;
+    in-out property <[LogRow]> log-rows;
+    callback health-toggle();
+    callback log-toggle();
+
     callback login-requested();
     callback refresh-requested();
     callback disconnect-requested();
@@ -60,53 +85,154 @@ export component SystemHostWindow inherits Window {
     callback config-saved(string, string);
     callback copy-callback();
 
-    BrokerPanel {
-        width: 100%;
-        height: 100%;
-        broker-name: root.broker-name;
-        broker-id: root.broker-id;
-        env-kind: root.env-kind;
-        env-label: root.env-label;
-        health-label: root.health-label;
-        health-connected: root.health-connected;
-        live-ready: root.live-ready;
-        blockers: root.blockers;
-        status-glyph: root.status-glyph;
-        status-label: root.status-label;
-        status-tone: root.status-tone;
-        status-explanation: root.status-explanation;
-        reason-line: root.reason-line;
-        account-id: root.account-id;
-        conn-label: root.conn-label;
-        conn-tone: root.conn-tone;
-        last-sync: root.last-sync;
-        health-summary: root.health-summary;
-        health-summary-tone: root.health-summary-tone;
-        check-rows: root.check-rows;
-        funds-line: root.funds-line;
-        funds-sub: root.funds-sub;
-        positions-line: root.positions-line;
-        positions-sub: root.positions-sub;
-        orders-line: root.orders-line;
-        orders-sub: root.orders-sub;
-        credentials-line: root.credentials-line;
-        callback-display: root.callback-display;
-        refresh-visible: root.refresh-visible;
-        refresh-label: root.refresh-label;
-        refresh-enabled: root.refresh-enabled;
-        refresh-primary: root.refresh-primary;
-        login-label: root.login-label;
-        login-enabled: root.login-enabled;
-        login-primary: root.login-primary;
-        configure-label: root.configure-label;
-        disconnect-visible: root.disconnect-visible;
-        disconnect-enabled: root.disconnect-enabled;
-        remove-visible: root.remove-visible;
-        login-requested() => { root.login-requested(); }
-        refresh-requested() => { root.refresh-requested(); }
-        disconnect-requested() => { root.disconnect-requested(); }
-        remove-requested() => { root.remove-requested(); }
-        config-saved(k, s) => { root.config-saved(k, s); }
-        copy-callback() => { root.copy-callback(); }
+    VerticalLayout {
+        spacing: 0;
+
+        // ── collapsible ops sections (Qt dock toggles, native home here) ──
+        Rectangle {
+            height: 24px;
+            background: VayrenPalette.surface;
+            HorizontalLayout {
+                padding-left: VayrenDesign.sp-md;
+                padding-right: VayrenDesign.sp-md;
+                spacing: VayrenDesign.sp-sm;
+                TouchArea {
+                    width: health-lbl.width + 8px;
+                    health-lbl := Text {
+                        text: root.health-open ? "SYSTEM HEALTH ▾" : "SYSTEM HEALTH ▸";
+                        color: root.health-open ? VayrenPalette.text : VayrenPalette.muted;
+                        font-size: VayrenDesign.fs-label;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                    }
+                    clicked => { root.health-toggle(); }
+                }
+                TouchArea {
+                    width: log-lbl.width + 8px;
+                    log-lbl := Text {
+                        text: root.log-open ? "EVENT LOG ▾" : "EVENT LOG ▸";
+                        color: root.log-open ? VayrenPalette.text : VayrenPalette.muted;
+                        font-size: VayrenDesign.fs-label;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                    }
+                    clicked => { root.log-toggle(); }
+                }
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+            }
+        }
+
+        if root.health-open: Rectangle {
+            background: VayrenPalette.surface;
+            VerticalLayout {
+                padding: VayrenDesign.sp-md;
+                spacing: VayrenDesign.sp-sm;
+                for row in root.health-rows: HorizontalLayout {
+                    Text {
+                        text: row.label;
+                        color: VayrenPalette.muted;
+                        font-size: VayrenDesign.fs-label;
+                        vertical-alignment: center;
+                    }
+                    Rectangle { horizontal-stretch: 1; background: transparent; }
+                    Text {
+                        text: row.value;
+                        color: row.tone == 1 ? VayrenPalette.pos
+                            : row.tone == 3 ? VayrenPalette.neg
+                            : VayrenPalette.muted;
+                        font-size: VayrenDesign.fs-label;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+
+        if root.log-open: Rectangle {
+            background: VayrenPalette.bg;
+            border-color: VayrenPalette.hairline;
+            border-width: 1px;
+            height: min(200px, log-view.preferred-height + 12px);
+            log-view := ScrollView {
+                viewport-width: root.width - 2 * VayrenDesign.sp-md;
+                VerticalLayout {
+                    padding: VayrenDesign.sp-md;
+                    spacing: 2px;
+                    if root.log-rows.length == 0: Text {
+                        text: "No events yet.";
+                        color: VayrenPalette.muted;
+                        font-size: VayrenDesign.fs-label;
+                        vertical-alignment: center;
+                    }
+                    for row in root.log-rows: Text {
+                        text: row.text;
+                        color: row.tone == 1 ? VayrenPalette.pos
+                            : row.tone == 2 ? VayrenPalette.amber
+                            : row.tone == 3 ? VayrenPalette.neg
+                            : VayrenPalette.muted;
+                        font-size: VayrenDesign.fs-label;
+                        wrap: no-wrap;
+                        overflow: elide;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+
+        ScrollView {
+            vertical-stretch: 1;
+            viewport-width: root.width;
+
+            BrokerPanel {
+                width: root.width;
+                height: max(self.preferred-height, root.height);
+                broker-name: root.broker-name;
+                broker-id: root.broker-id;
+                env-kind: root.env-kind;
+                env-label: root.env-label;
+                health-label: root.health-label;
+                health-connected: root.health-connected;
+                live-ready: root.live-ready;
+                blockers: root.blockers;
+                status-glyph: root.status-glyph;
+                status-label: root.status-label;
+                status-tone: root.status-tone;
+                status-explanation: root.status-explanation;
+                reason-line: root.reason-line;
+                account-id: root.account-id;
+                conn-label: root.conn-label;
+                conn-tone: root.conn-tone;
+                last-sync: root.last-sync;
+                health-summary: root.health-summary;
+                health-summary-tone: root.health-summary-tone;
+                check-rows: root.check-rows;
+                funds-line: root.funds-line;
+                funds-sub: root.funds-sub;
+                positions-line: root.positions-line;
+                positions-sub: root.positions-sub;
+                orders-line: root.orders-line;
+                orders-sub: root.orders-sub;
+                credentials-line: root.credentials-line;
+                callback-display: root.callback-display;
+                refresh-visible: root.refresh-visible;
+                refresh-label: root.refresh-label;
+                refresh-enabled: root.refresh-enabled;
+                refresh-primary: root.refresh-primary;
+                login-label: root.login-label;
+                login-enabled: root.login-enabled;
+                login-primary: root.login-primary;
+                configure-label: root.configure-label;
+                disconnect-visible: root.disconnect-visible;
+                disconnect-enabled: root.disconnect-enabled;
+                remove-visible: root.remove-visible;
+                login-requested() => { root.login-requested(); }
+                refresh-requested() => { root.refresh-requested(); }
+                disconnect-requested() => { root.disconnect-requested(); }
+                remove-requested() => { root.remove-requested(); }
+                config-saved(k, s) => { root.config-saved(k, s); }
+                copy-callback() => { root.copy-callback(); }
+            }
+        }
     }
 }
+

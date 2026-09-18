@@ -136,14 +136,13 @@ pub struct LabConfig {
     pub timeframe: String,
     pub dates: String,
     pub capital: String,
-    pub cost: String,
 }
 
 impl LabConfig {
     pub fn fingerprint(&self) -> String {
         format!(
-            "{}|{}|{}|{}|{}",
-            self.universe, self.timeframe, self.dates, self.capital, self.cost
+            "{}|{}|{}|{}",
+            self.universe, self.timeframe, self.dates, self.capital
         )
     }
 }
@@ -795,7 +794,6 @@ pub struct LabView {
     pub timeframe: String,
     pub dates: String,
     pub capital: String,
-    pub cost: String,
     pub show_results: bool,
     pub tabs_enabled: bool,
     pub tab: usize,
@@ -1206,7 +1204,6 @@ pub fn project(state: &LabState) -> LabView {
         timeframe: state.config.timeframe.clone(),
         dates: state.config.dates.clone(),
         capital: state.config.capital.clone(),
-        cost: state.config.cost.clone(),
         show_results,
         tabs_enabled: show_results,
         tab: state.tab,
@@ -1383,7 +1380,6 @@ mod tests {
             timeframe: "15m".into(),
             dates: "02 Jan → 12 Sep '26".into(),
             capital: "₹10,00,000".into(),
-            cost: "0.02% / 0.03%".into(),
         };
         st
     }
@@ -1848,7 +1844,6 @@ pub fn apply_snapshot_json(state: &mut LabState, value: &serde_json::Value) {
             timeframe: opt_str(&config, "timeframe"),
             dates: opt_str(&config, "dates"),
             capital: opt_str(&config, "capital"),
-            cost: opt_str(&config, "cost"),
         };
     }
     match value.get("mode").and_then(|v| v.as_str()) {

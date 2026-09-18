@@ -1198,6 +1198,68 @@ class EditorPane(QWidget):
         tb_lay.addStretch(1)
         lay.addWidget(tab_bar)
 
+        # ── source action bar: complete-source copy/paste + edit tools ──
+        # OBR-grade sources are large: "Copy All" always places the FULL
+        # document on the clipboard, never just the visible selection.
+        self._source_bar = QWidget(self)
+        self._source_bar.setObjectName("SourceBar")
+        self._source_bar.setStyleSheet(
+            f"QWidget#SourceBar {{ background: {t.BG0}; border-bottom: 1px solid {t.BORDER}; }}"
+        )
+        self._source_bar.setFixedHeight(24)
+        sb_lay = QHBoxLayout(self._source_bar)
+        sb_lay.setContentsMargins(12, 0, 12, 0)
+        sb_lay.setSpacing(2)
+
+        def _src_btn(label: str, tip: str, handler) -> QToolButton:
+            btn = QToolButton(self._source_bar)
+            btn.setText(label)
+            btn.setToolTip(tip)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setStyleSheet(t.TOOL_QSS)
+            btn.clicked.connect(handler)
+            return btn
+
+        # Handlers defer self.editor access to click time — the editor is
+        # constructed after this bar (see the stacked-content block below).
+        sb_lay.addWidget(
+            _src_btn(
+                "⧉ Copy All", "Copy the COMPLETE strategy source", lambda: self.editor.copy_all()
+            )
+        )
+        sb_lay.addWidget(
+            _src_btn("Select All", "Select the complete source", lambda: self.editor.select_all())
+        )
+        sb_lay.addWidget(
+            _src_btn("Paste", "Paste from the clipboard", lambda: self.editor.paste_source())
+        )
+        sb_lay.addSpacing(6)
+        sb_lay.addWidget(
+            _src_btn("↩ Undo", "Undo the last edit (Ctrl+Z)", lambda: self.editor.undo_edit())
+        )
+        sb_lay.addWidget(
+            _src_btn(
+                "↪ Redo", "Redo the last undone edit (Ctrl+Y)", lambda: self.editor.redo_edit()
+            )
+        )
+        sb_lay.addSpacing(6)
+        sb_lay.addWidget(
+            _src_btn("Find", "Find in source (Ctrl+F)", lambda: self.editor._find_dialog())
+        )
+        sb_lay.addWidget(
+            _src_btn("Replace", "Find and replace (Ctrl+H)", lambda: self.editor._replace_dialog())
+        )
+        sb_lay.addSpacing(6)
+        sb_lay.addWidget(
+            _src_btn(
+                "≡ Format",
+                "Re-indent the source from the token stream",
+                lambda: self.editor.format_source(),
+            )
+        )
+        sb_lay.addStretch(1)
+        lay.addWidget(self._source_bar)
+
         # ── stacked content: editor / params / backtest ──
         self.editor = CodeEditor(self)
         self.params = ParamsPane(self)
@@ -1225,6 +1287,8 @@ class EditorPane(QWidget):
 
     def _switch(self, index: int) -> None:
         self._stack.setCurrentIndex(index)
+        # Source actions apply to the editor only.
+        self._source_bar.setVisible(index == 0)
 
     def show_parameters(self) -> None:
         self._switch(1)

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 import random
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 
@@ -351,10 +351,3 @@ def evidence_grade_label(stats: EvidenceStats, has_oos: bool, robustness_fail: b
     if stats.p_value is not None and stats.p_value < 0.05:
         return "WEAK — significant in-sample, unconfirmed out-of-sample"
     return "INCONCLUSIVE — interval includes zero"
-
-
-@dataclass(frozen=True)
-class StatsSummary:
-    """JSON-safe statistical summary for persistence/display."""
-
-    fields: dict[str, Any] = field(default_factory=dict)

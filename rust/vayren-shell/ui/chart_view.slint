@@ -1,0 +1,101 @@
+// Basic chart view component — proof of concept for Qt → Slint migration.
+// Full 6,578 LOC Qt renderer/widget/window port is separate effort per constitution.
+
+import { VerticalBox, HorizontalBox, Button } from "std-widgets.slint";
+
+export struct CandleData {
+    timestamp: string,
+    open: float,
+    high: float,
+    low: float,
+    close: float,
+    volume: int,
+}
+
+export component ChartView inherits Rectangle {
+    in property <string> symbol: "";
+    in property <string> timeframe: "1d";
+    in property <[CandleData]> candles: [];
+    
+    callback load-symbol(string);
+    callback change-timeframe(string);
+    
+    background: #0A0D12;
+    
+    VerticalBox {
+        padding: 10px;
+        spacing: 10px;
+        
+        // Header
+        HorizontalBox {
+            height: 40px;
+            alignment: start;
+            spacing: 10px;
+            
+            Text {
+                text: symbol;
+                color: #E0E0E0;
+                font-size: 18px;
+                font-weight: 600;
+            }
+            
+            Text {
+                text: timeframe;
+                color: #808080;
+                font-size: 14px;
+            }
+            
+            Rectangle {
+                width: 1px;
+                background: #303030;
+            }
+            
+            Text {
+                text: "Candles: " + candles.length;
+                color: #808080;
+                font-size: 14px;
+            }
+        }
+        
+        // Chart area placeholder
+        Rectangle {
+            background: #0F131C;
+            border-radius: 8px;
+            
+            Text {
+                text: "Chart rendering area\n(Full QPainter → Slint port in progress)";
+                color: #606060;
+                font-size: 14px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+        
+        // Timeframe toolbar
+        HorizontalBox {
+            height: 36px;
+            spacing: 8px;
+            
+            Button {
+                text: "1m";
+                clicked => { change-timeframe("1m"); }
+            }
+            Button {
+                text: "5m";
+                clicked => { change-timeframe("5m"); }
+            }
+            Button {
+                text: "15m";
+                clicked => { change-timeframe("15m"); }
+            }
+            Button {
+                text: "1h";
+                clicked => { change-timeframe("1h"); }
+            }
+            Button {
+                text: "1d";
+                clicked => { change-timeframe("1d"); }
+            }
+        }
+    }
+}

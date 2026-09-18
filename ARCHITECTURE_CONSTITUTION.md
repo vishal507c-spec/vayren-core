@@ -1,573 +1,481 @@
 # VAYREN — ARCHITECTURE CONSTITUTION
 
-**Owns:** Language ownership (Rust→Core/Perf, Python→Strategy/AI, Rust+Slint→UI), migration principles, final architecture direction. **Not owns:** Detailed module maps/events/contracts/state → `90_brain/`; AI workflow → `AGENTS.md`.
-**When to read:** Before choosing a language/framework for any new code, before touching legacy code that may migrate.
-**Related:** `AGENTS.md` (how to apply), `90_brain/architecture.md` (current map).
+## 1. PURPOSE
 
-## TASK CONTEXT
+This document defines the temporary architectural priority for VAYREN during the current migration phase.
 
-Create a NEW file at the repository root:
+The current priority is simple:
 
-```text
-ARCHITECTURE_CONSTITUTION.md
-```
+> **COMPLETE THE APPROVED VAYREN MIGRATION FIRST.**
 
-## IMPORTANT
+Until the migration is fully completed and validated, no additional architectural rules, development policies, redesign decisions, or new migration strategies should be introduced.
 
-This task is ONLY to create the architectural constitution.
-
-### DO NOT migrate the existing codebase now.
-
-Do NOT:
-
-* rewrite the existing Python code
-* migrate the entire repository
-* convert all existing UI
-* change existing functionality
-* delete existing code
-* perform a big-bang migration
-* introduce or modify unrelated code
-
-The purpose of this file is to permanently define how VAYREN will be developed from this point forward.
+This document is intentionally minimal during the migration phase.
 
 ---
 
-# VAYREN LANGUAGE & DEVELOPMENT ARCHITECTURE
+# 2. CURRENT STATUS
 
-The future architecture has exactly these primary technology responsibilities:
+```text
+VAYREN MIGRATION
+STATUS: ACTIVE
+
+PRIORITY: MIGRATION COMPLETION
+```
+
+The migration is currently **NOT COMPLETE**.
+
+Therefore, VAYREN remains in **MIGRATION MODE**.
+
+---
+
+# 3. HARD MIGRATION RULE
+
+Until the current approved migration is completely finished:
+
+> **ALL PRIMARY DEVELOPMENT PRIORITY MUST REMAIN ON COMPLETING THE MIGRATION.**
+
+The migration must be:
+
+```text
+IMPLEMENT
+    ↓
+INTEGRATE
+    ↓
+TEST
+    ↓
+VALIDATE
+    ↓
+FIX
+    ↓
+RE-VALIDATE
+    ↓
+MIGRATION COMPLETE
+```
+
+Do not treat partial migration as completed migration.
+
+Do not declare migration complete until the currently approved migration scope has actually been implemented, integrated, tested, and validated.
+
+---
+
+# 4. WHAT MUST NOT HAPPEN DURING MIGRATION
+
+While migration status is:
+
+```text
+MIGRATION = ACTIVE
+```
+
+DO NOT introduce additional rules or scope.
+
+Specifically:
+
+* Do NOT create new architectural rules.
+* Do NOT create additional migration policies.
+* Do NOT change the migration strategy.
+* Do NOT start a new broad migration.
+* Do NOT redesign the architecture.
+* Do NOT create unrelated refactors.
+* Do NOT rewrite unrelated code.
+* Do NOT remove existing functionality.
+* Do NOT change existing behavior unnecessarily.
+* Do NOT introduce unrelated frameworks.
+* Do NOT introduce unrelated languages.
+* Do NOT redesign the UI unless it is directly required by the approved migration.
+* Do NOT start unrelated feature development.
+* Do NOT expand the migration scope merely because another old component exists.
+* Do NOT turn the current migration into a repository-wide redesign.
+
+The purpose is to **finish the current migration**, not continuously redefine the project.
+
+---
+
+# 5. MIGRATION SCOPE
+
+Only the **currently approved migration scope** is part of this migration.
+
+```text
+CURRENT APPROVED MIGRATION
+        ↓
+IMPLEMENT
+        ↓
+INTEGRATE
+        ↓
+TEST
+        ↓
+VALIDATE
+        ↓
+COMPLETE
+```
+
+Do not automatically add new modules, new responsibilities, or unrelated components to the migration.
+
+If something is outside the currently approved migration scope, leave it alone unless it is technically required to complete the approved migration.
+
+---
+
+# 6. EXISTING FUNCTIONALITY
+
+Existing functionality must be preserved during migration.
+
+Migration means:
+
+```text
+EXISTING IMPLEMENTATION
+        ↓
+TARGET IMPLEMENTATION
+        ↓
+SAME INTENDED BEHAVIOR
+```
+
+Do not use migration as an excuse to redesign functionality.
+
+Do not intentionally remove functionality simply because it is inconvenient to migrate.
+
+Do not change business logic unless the change is required to correctly complete the approved migration.
+
+---
+
+# 7. MIGRATION PRINCIPLE
+
+The current goal is:
+
+> **Migrate the existing implementation to the approved target architecture without unnecessary changes.**
+
+The migration should prioritize:
+
+1. Existing functionality
+2. Existing behavior
+3. Existing data semantics
+4. Existing interfaces/contracts where required
+5. Correct target implementation
+6. Testing
+7. Validation
+
+The objective is not to create a new system.
+
+The objective is to complete the migration of the existing system.
+
+---
+
+# 8. NO NEW ARCHITECTURAL DECISIONS DURING MIGRATION
+
+During the active migration phase, do not continuously make new architectural decisions.
+
+If a decision is already part of the approved migration, follow it.
+
+If something is not required to complete the migration:
+
+```text
+DO NOT EXPAND SCOPE
+```
+
+If a completely new architectural question appears:
+
+```text
+DEFER IT
+```
+
+It can be addressed after the migration is complete.
+
+---
+
+# 9. MIGRATION COMPLETION CRITERIA
+
+The migration can only be marked complete when:
+
+* The approved migration scope has been implemented.
+* Required integrations are complete.
+* Existing functionality is preserved.
+* Tests pass.
+* Validation passes.
+* No known migration component remains unfinished within the approved scope.
+* The migrated implementation is actually being used where required.
+* The old implementation is removed only where removal is safe and part of the approved migration.
+* No critical migration errors remain.
+
+Then:
+
+```text
+MIGRATION STATUS
+        ↓
+COMPLETE
+```
+
+---
+
+# 10. AFTER MIGRATION IS COMPLETE
+
+Only after the migration is fully completed and validated should this constitution be updated.
+
+The post-migration process is:
+
+```text
+CURRENT MIGRATION
+        ↓
+100% COMPLETE
+        ↓
+VALIDATE
+        ↓
+MARK MIGRATION COMPLETE
+        ↓
+UPDATE THIS CONSTITUTION
+        ↓
+DEFINE FUTURE ARCHITECTURE RULES
+```
+
+Until that point, do not prematurely apply future architectural policies as additional migration requirements.
+
+---
+
+# 11. POST-MIGRATION ARCHITECTURE
+
+After migration is complete, the architecture may be formally defined and expanded.
+
+The intended target architecture currently identified for VAYREN is:
+
+```text
+                    VAYREN
+                       │
+          ┌────────────┼────────────┐
+          │            │            │
+         RUST        PYTHON     RUST + SLINT
+          │            │            │
+       CORE /       STRATEGY       NATIVE UI
+       PERFORMANCE    AI/ML
+       MARKET/DATA    RESEARCH
+       INDICATORS
+       RISK
+       EXECUTION
+       BACKTEST
+```
+
+This section describes the intended target direction.
+
+It does NOT expand the current migration scope.
+
+---
+
+# 12. TARGET TECHNOLOGY OWNERSHIP
+
+The intended target ownership is:
 
 ```text
 RUST
-→ Core + Performance
+→ Core
+→ Performance
+→ Market/Data
+→ Indicators
+→ Numerical calculations
+→ Risk
+→ Execution
+→ Backtesting
+→ Performance-critical processing
+```
 
+```text
 PYTHON
-→ Strategy + AI/ML + Research
+→ Strategy
+→ Strategy experimentation
+→ AI
+→ Machine Learning
+→ Research
+→ Statistical experimentation
+→ Research workflows
+→ Model experimentation
+```
 
+```text
 RUST + SLINT
 → Native UI
 ```
 
-## 1. RUST — CORE & PERFORMANCE
+These are the intended post-migration architectural responsibilities.
 
-All NEW functionality belonging to these responsibilities MUST be written in Rust:
-
-* Core Engine
-* Engine infrastructure
-* Market/Data processing
-* Indicators
-* Numerical calculations
-* Risk management
-* Execution
-* Backtesting
-* Performance-critical processing
-* High-throughput processing
-* Latency-sensitive processing
-* Memory/performance-critical systems
-
-Rule:
-
-> If a NEW feature belongs to the Rust-owned core/performance domain, implement it in Rust.
-
-Do not choose Python for convenience.
+They must not be used to create unrelated migration work before the current approved migration is complete.
 
 ---
 
-# 2. PYTHON — STRATEGY, AI & RESEARCH
+# 13. AI CODING AGENT RULE
 
-All NEW functionality belonging to these responsibilities MUST remain in Python:
-
-* Trading Strategy
-* Strategy logic
-* Strategy experimentation
-* AI
-* Machine Learning
-* Research
-* Statistical experimentation
-* Research workflows
-* Model experimentation
-
-Rule:
-
-> If a NEW feature belongs to the Python-owned strategy/AI/research domain, implement it in Python.
-
-Do not move these responsibilities to Rust merely because Rust is faster.
-
----
-
-# 3. RUST + SLINT — UI
-
-All NEW native UI development MUST use:
+Every AI coding agent working on VAYREN during the active migration phase must understand:
 
 ```text
-Rust + Slint
-```
-
-This includes:
-
-* New screens
-* New panels
-* New controls
-* New windows
-* New UI components
-* New native UI functionality
-* New UI state/interaction logic
-
-Rule:
-
-> From now onward, every NEW native UI feature must be developed using Rust + Slint.
-
-Do not introduce another UI framework or UI technology without explicit architectural approval.
-
----
-
-# 4. EXISTING CODE — GRADUAL ENFORCED MIGRATION
-
-The existing VAYREN codebase contains Python implementations of functionality that belongs to Rust or Slint per §1-§3.
-
-Do NOT perform a big-bang rewrite of the entire codebase at once (§11).
-
-However, existing code in wrong-language domains is **not permanently exempt**. It must migrate gradually through feature-driven enforcement (§5). Every feature touching legacy code triggers migration of the directly related slice.
-
-Existing code continues working **only until naturally touched by development**. Once touched, the relevant slice migrates to the target architecture.
-
-The `language_retention.json` tracks each retained file with an explicit state (MIGRATED / MIGRATION_REQUIRED / TEMPORARILY_RETAINED / EXEMPT_WITH_JUSTIFICATION) — not blanket domain-level exemptions. Indefinite anonymous retention is prohibited.
-
----
-
-# 5. CONTINUOUS / OPPORTUNISTIC MIGRATION — INVISIBLE FEATURE-DRIVEN
-
-Existing code must migrate gradually when it is naturally touched by future development. Migration is **not a separate project** — it is a natural consequence of feature development.
-
-**Core flow for every new feature:**
-
-```text
-NEW FEATURE
-  → Identify correct target module/language (§1-§3, §8)
-  → Implement NEW functionality in target architecture
-  → Identify EXISTING legacy code directly related to that feature
-  → Migrate that relevant legacy slice as part of the SAME feature
-  → Integrate → Test → Validate → Finish
-```
-
-This means:
-
-```text
-EXISTING CODE
-→ KEEP WORKING (until touched)
-
-NEW FEATURE
-→ USE FINAL ARCHITECTURE (§8)
-
-FUTURE CHANGE TO OLD COMPONENT
-→ IDENTIFY ITS RESPONSIBILITY
-
-IF IT BELONGS TO RUST
-→ MIGRATE THE RELEVANT PART TO RUST
-
-IF IT BELONGS TO PYTHON
-→ KEEP IT IN PYTHON
-
-IF IT IS UI
-→ MIGRATE THE RELEVANT UI PART TO RUST + SLINT
-```
-
-**Invisible migration principle — ask automatically:**
-
-1. Is there existing legacy code responsible for this feature?
-2. Can that code safely move toward the target architecture?
-3. Is it directly related to the feature?
-4. Can it be migrated without unnecessary scope expansion?
-5. Can the migrated result preserve existing behavior?
-
-If YES → migrate it **as part of the feature**. Do NOT leave the old implementation untouched merely because the user did not explicitly say "migrate this". The feature request itself is sufficient context.
-
-**Do NOT migrate unrelated code** — only code directly required by, blocking, adjacent to, or necessary to remove the legacy implementation of that feature. See §13 for scope limits.
-
-**No migration debt by default:** Do NOT create new legacy code around a feature when the target architecture already defines where the feature belongs. Prefer `NEW FEATURE → target architecture immediately` over `→ legacy → "migrate later"`.
-
-**Speed principle:** `FEATURE → NEW CODE → RELATED LEGACY REMOVED → TARGET EXPANDS`. Each feature must leave the touched area more migrated than before. Over time `Legacy ██████████ → ██`, `Target ██ → ██████████` — incrementally, never big-bang.
-
-Do NOT migrate unrelated components just because they are old.
-
----
-
-# 6. UI MIGRATION EXAMPLE
-
-If an existing UI component is currently implemented in Python:
-
-```text
-Old Python UI
-     ↓
-Do NOT migrate immediately
-```
-
-Later, when that UI component naturally needs a feature/change:
-
-```text
-Old Python UI
-     ↓
-Feature request
-     ↓
-Relevant UI work
-     ↓
-Migrate affected portion
-     ↓
-Rust + Slint
-```
-
-Eventually:
-
-```text
-Old Python UI → Rust + Slint
-```
-
-The same principle applies to Rust-owned core functionality.
-
----
-
-# 7. CORE MIGRATION EXAMPLE
-
-If an existing Python component performs a Rust-owned responsibility:
-
-```text
-Existing Python
-      ↓
-Keep working for now
-```
-
-When future development naturally touches that component:
-
-```text
-Existing Python
-      ↓
-Identify Rust-owned responsibility
-      ↓
-Migrate affected functionality
-      ↓
-Rust
-```
-
-Do not rewrite unrelated Python code.
-
----
-
-# 8. NEW DEVELOPMENT ALWAYS USES THE FINAL ARCHITECTURE
-
-This is the most important rule.
-
-From the adoption of this constitution:
-
-```text
-NEW CORE FEATURE
-→ Rust
-
-NEW PERFORMANCE FEATURE
-→ Rust
-
-NEW MARKET/DATA FEATURE
-→ Rust
-
-NEW INDICATOR
-→ Rust
-
-NEW RISK FEATURE
-→ Rust
-
-NEW EXECUTION FEATURE
-→ Rust
-
-NEW BACKTEST FEATURE
-→ Rust
-
-NEW STRATEGY
-→ Python
-
-NEW AI/ML FEATURE
-→ Python
-
-NEW RESEARCH FEATURE
-→ Python
-
-NEW NATIVE UI
-→ Rust + Slint
-```
-
-Do not create new functionality in the old architecture simply because similar legacy code exists.
-
----
-
-# 9. LANGUAGE IS DETERMINED BY RESPONSIBILITY
-
-Never select a language based on:
-
-* personal preference
-* convenience
-* familiarity
-* shorter code
-* AI preference
-* existing legacy language
-
-Instead:
-
-```text
-WHAT IS BEING BUILT?
+MIGRATION ACTIVE
         ↓
-WHAT RESPONSIBILITY DOES IT HAVE?
+FINISH CURRENT APPROVED MIGRATION
         ↓
-WHICH DOMAIN OWNS IT?
-        ↓
-WHICH LANGUAGE OWNS THAT DOMAIN?
-        ↓
-IMPLEMENT
+DO NOT EXPAND SCOPE
 ```
 
-Therefore:
+Before making a change, the agent should ask:
 
 ```text
-Core / Performance → Rust
-Strategy / AI / Research → Python
-Native UI → Rust + Slint
+1. Is this required for the current approved migration?
+2. Is this directly necessary to complete the migration?
+3. Will this preserve existing functionality?
+4. Can the migration be completed without this change?
 ```
+
+If the answer is:
+
+```text
+NOT REQUIRED
+```
+
+then do not include the change in the migration.
 
 ---
 
-# 10. NO LANGUAGE CREEP
+# 14. NO ACCIDENTAL SCOPE EXPANSION
 
-Do not introduce another programming language for new VAYREN functionality.
-
-Do not introduce another UI framework.
-
-Do not replace the defined technology stack because another technology appears easier or newer.
-
-Any change to the language architecture requires explicit architectural approval.
-
----
-
-# 11. NO BIG-BANG REWRITE
-
-Never perform:
+The following pattern is prohibited during the active migration:
 
 ```text
-Entire Python repository
-        ↓
-Entire Rust rewrite
+Migration
+   ↓
+"While we are here..."
+   ↓
+Another module
+   ↓
+Another refactor
+   ↓
+Another architecture change
+   ↓
+Another framework
+   ↓
+Another migration
 ```
 
 Instead:
 
 ```text
-Existing system
-      ↓
-New work follows new architecture
-      ↓
-Old component is naturally touched
-      ↓
-Relevant part migrates
-      ↓
+Approved Migration
+       ↓
+Complete Migration
+       ↓
 Validate
-      ↓
-Continue
-```
-
-Migration is intentionally incremental.
-
----
-
-# 12. PRESERVE EXISTING BEHAVIOR
-
-When gradually migrating an old component:
-
-* preserve existing functionality
-* preserve intended behavior
-* preserve data semantics
-* preserve user workflows
-* preserve important edge cases
-
-Do not combine migration with unrelated redesign unless explicitly requested.
-
----
-
-# 13. MIGRATION SHOULD BE SMALL AND NATURAL — BUT FAST THROUGH FEATURES
-
-When touching legacy code:
-
-> Migrate only the part that belongs in the new architecture and is relevant to the current task — **smallest useful slice**, not 50k LOC.
-
-Do not turn every feature request into a repository-wide migration.
-
-**Migration priority for a feature:**
-
-1. Direct feature implementation
-2. Its immediate dependencies
-3. Its direct callers/consumers
-4. Its obsolete compatibility layer
-5. Only then nearby cleanup
-
-**Completed feature checklist:**
-
-- [ ] New functionality uses target architecture (§8)
-- [ ] Directly related legacy code was identified (§5)
-- [ ] Relevant legacy migrated where practical, redundant old removed where safe
-- [ ] No unrelated migration performed
-- [ ] Tests + `scripts/validate_imports.py` / `validate_structure.py` pass
-- [ ] Existing behavior preserved (§12)
-
-**When NOT to migrate:** unrelated to feature, would massively expand scope, unsafe architectural change, target not ready, risk of data loss.
-
-Example:
-
-```text
-User asks:
-"Add a new feature to old chart."
-
-Correct:
-→ Work on chart
-→ Implement new chart feature in Rust+Slint (§3)
-→ Migrate directly related legacy chart/UI slice
-→ Preserve behavior → Keep unrelated legacy untouched
-
-Incorrect:
-→ Rewrite the entire application
-→ Migrate unrelated strategy/database/execution
+       ↓
+STOP
 ```
 
 ---
 
-# 14. AI AGENT RULE
+# 15. PRIORITY ORDER
 
-Every future AI coding agent must follow this constitution.
-
-**Before creating new code, determine:**
+During the active migration, priority is:
 
 ```text
-1. What am I building?
-2. What responsibility does it have?
-3. Which domain owns it?
-4. Which language is mandatory for that domain? (§9)
-5. Is this new functionality or legacy code modification?
-6. If legacy code is being touched, is migration appropriate for this specific work? (§5, §13)
+1. CURRENT APPROVED MIGRATION
+2. REQUIRED DEPENDENCIES
+3. REQUIRED INTEGRATION
+4. TESTING
+5. VALIDATION
+6. BUG FIXES REQUIRED FOR MIGRATION
 ```
 
-**During feature implementation (invisible migration):**
-
-1. Is there legacy code for this feature? → Can it safely move to target? → Is it directly related? → Without scope explosion? → Preserving behavior? → **Migrate it in the same feature** (§5).
-2. Do NOT create new legacy code when target already defined.
-3. Do NOT migrate unrelated modules.
-
-**Decision model:**
-
-- NEW functionality → follow final architecture (§8)
-- Modification to EXISTING code → preserve behavior unless naturally migrating (§12)
-- Existing code meaningfully touched → consider gradual migration (§5, §13)
-- Would require large unrelated changes → do NOT auto-migrate
-- Large-scale migration explicitly approved → follow scope + §5-§13
-
-Then implement and verify with `make check`.
+Everything else is secondary and should not expand the migration unnecessarily.
 
 ---
 
-# 15. WHEN UNCERTAIN
+# 16. MIGRATION MODE ENDS ONLY ON COMPLETION
 
-If the responsibility is unclear:
+The migration mode remains active until explicitly confirmed complete.
 
 ```text
-DO NOT GUESS.
-DO NOT INVENT A NEW LANGUAGE.
-DO NOT INVENT A NEW UI FRAMEWORK.
-DO NOT MASS-MIGRATE.
+MIGRATION = ACTIVE
 ```
 
-First determine the correct architectural ownership.
-
----
-
-# 16. FINAL ARCHITECTURE
+means:
 
 ```text
-                         VAYREN
-                            │
-             ┌──────────────┼──────────────┐
-             │              │              │
-           RUST           PYTHON       RUST + SLINT
-             │              │              │
-        CORE / SPEED     STRATEGY          UI
-        MARKET/DATA      AI/ML
-        INDICATORS       RESEARCH
-        RISK
-        EXECUTION
-        BACKTEST
+FINISH MIGRATION FIRST
+```
+
+It does not mean:
+
+```text
+START NEW ARCHITECTURE PROJECTS
+```
+
+It does not mean:
+
+```text
+CONTINUOUSLY EXPAND MIGRATION
+```
+
+It means:
+
+```text
+COMPLETE THE CURRENT MIGRATION.
 ```
 
 ---
 
-# 17. FINAL PRINCIPLE
+# 17. FINAL MIGRATION RULE
 
-## BUILD NEW, MIGRATE GRADUALLY — FEATURE IS THE VEHICLE
+The fundamental rule of the current VAYREN development phase is:
+
+> **DO NOT MOVE ON UNTIL THE CURRENT APPROVED MIGRATION IS COMPLETE.**
+
+The migration is the current priority.
+
+No additional architectural policy is required during this phase.
+
+No additional migration philosophy is required during this phase.
+
+No unrelated redesign is required during this phase.
+
+No unrelated modernization is required during this phase.
+
+No new architecture project is required during this phase.
 
 ```text
-OLD CODE
-→ Keep working
-
-NEW CODE
-→ Final architecture immediately
-
-OLD CODE WHEN TOUCHED BY A FEATURE
-→ Migrate directly related slice as part of that feature (§5)
-
-NO BIG-BANG REWRITE
+CURRENT APPROVED MIGRATION
+            ↓
+        COMPLETE
+            ↓
+        VALIDATE
+            ↓
+     MIGRATION COMPLETE
+            ↓
+   UPDATE CONSTITUTION
+            ↓
+ FUTURE ARCHITECTURE RULES
 ```
-
-**Long-term model — feature development IS migration:**
-
-```text
-FEATURE = NEW FUNCTIONALITY + TARGET-ARCHITECTURE ADOPTION + RELEVANT LEGACY MIGRATION
-```
-
-The fundamental rule is:
-
-> **Do not migrate everything today. Build everything new in the correct architecture today, and let every feature automatically carry the directly related legacy toward the target — incrementally, invisibly, and fast enough that the legacy steadily shrinks without a dedicated migration project. Think: FEATURE → NEW CODE → RELATED LEGACY REMOVED → TARGET EXPANDS.**
 
 ---
 
-# 18. AI QUICK REFERENCE
-
-Whenever a future AI agent needs to decide what technology to use, use this:
+# 18. FINAL PRINCIPLE
 
 ```text
-CORE / PERFORMANCE
-→ RUST
-
-STRATEGY
-→ PYTHON
-
-AI / ML
-→ PYTHON
-
-RESEARCH
-→ PYTHON
-
-NATIVE UI
-→ RUST + SLINT
+┌──────────────────────────────────────┐
+│       VAYREN MIGRATION MODE          │
+├──────────────────────────────────────┤
+│                                      │
+│  CURRENT MIGRATION = PRIORITY        │
+│                                      │
+│  COMPLETE IT                         │
+│  TEST IT                             │
+│  VALIDATE IT                         │
+│                                      │
+│  DO NOT EXPAND SCOPE                 │
+│  DO NOT ADD NEW RULES                │
+│  DO NOT REDESIGN                     │
+│  DO NOT START UNRELATED WORK         │
+│                                      │
+│  AFTER COMPLETE:                     │
+│  UPDATE ARCHITECTURE CONSTITUTION    │
+│                                      │
+└──────────────────────────────────────┘
 ```
 
-This mapping is mandatory for NEW development.
-
-Existing legacy code is migrated gradually and only when appropriate.
-
----
-
-# 19. FILE AUTHORITY
-
-This file:
+**Current state:**
 
 ```text
-ARCHITECTURE_CONSTITUTION.md
+MIGRATION_ACTIVE = TRUE
+MIGRATION_COMPLETE = FALSE
 ```
 
-is the highest-level architectural reference for language ownership and future development direction.
-
-AI agents must read and follow it before making architectural decisions.
-
-Do not modify this constitution as part of ordinary feature development.
-
-Changes to this constitution require explicit architectural approval.
+**Until `MIGRATION_COMPLETE = TRUE`, the current approved migration remains the primary architectural priority.**

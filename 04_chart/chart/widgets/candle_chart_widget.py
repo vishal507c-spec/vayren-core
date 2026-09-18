@@ -21,7 +21,7 @@ from PySide6.QtGui import (
     QTouchEvent,
     QWheelEvent,
 )
-from PySide6.QtWidgets import QMenu, QWidget
+from PySide6.QtWidgets import QDialog, QMenu, QWidget
 
 from chart.models.chart_model import ChartModel
 from chart.models.chart_viewport import ChartOverlay, ChartViewport
@@ -34,6 +34,14 @@ from chart.theme import PLACEHOLDER
 from chart.widgets.indicator_visibility_panel import IndicatorVisibilityPanel
 
 logger = getLogger(__name__)
+
+
+def _is_number(value: object) -> bool:
+    try:
+        float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return False
+    return True
 
 
 class CandleChartWidget(QWidget):
@@ -62,6 +70,7 @@ class CandleChartWidget(QWidget):
 
     session_changed = Signal()
     indicator_added = Signal(str)
+    indicator_settings_changed = Signal(str, dict)  # name, parameters
 
     MIN_VISIBLE_BARS = 10
     # TradingView-style minimum readable candle slot (px): one candle's full
@@ -130,8 +139,6 @@ class CandleChartWidget(QWidget):
         self._visibility_panel.visibility_changed.connect(self._on_indicator_visibility_changed)
         self._visibility_panel.indicator_removed.connect(self._on_indicator_removed)
         self._visibility_panel.settings_requested.connect(self._on_indicator_settings)
-        self._visibility_panel.source_requested.connect(self._on_indicator_source)
-        self._visibility_panel.more_requested.connect(self._on_indicator_more)
         self._position_visibility_panel()
         self._reset_action = QAction("↩ Reset chart view", self)
         self._reset_action.setShortcut(QKeySequence(Qt.Modifier.ALT | Qt.Key.Key_R))
@@ -309,37 +316,35 @@ class CandleChartWidget(QWidget):
             self.session_changed.emit()
 
     def _on_indicator_removed(self, name: str) -> None:
-        """Panel Delete clicked — remove indicator completely (owner-aware)."""
+        """Panel Delete clicked — remove the indicator completely.
+
+        The row is already gone from the panel (the panel owns the list);
+        here the chart drops its visibility state, every plot/marker/label the
+        indicator rendered, and the overlay slot when nothing else owns it.
+        ``Vol`` (the volume strip) and ``OBR`` (the trade-result overlay slot)
+        stay flagged hidden rather than vanishing, so their built-in rendering
+        surface stays off; every other indicator is popped. Because the native
+        indicator bar is driven by the panel ROWS (not this dict), a deleted
+        name cannot reappear on refresh / timeframe / symbol change.
+        """
         key = self._normalize_indicator_name(name)
         if key in ("Vol", "OBR"):
             self._indicator_visible[key] = False
         else:
             self._indicator_visible.pop(key, None)
-        # For PlotOverlay (single instance handling many owners), just remove that owner's series
-        # Don't pop the overlay itself — keep it for other owners
-        if key in self._overlays:
-            ov = self._overlays.get(key)
-            if ov is not None and hasattr(ov, "remove_owner"):  # type: ignore[attr-defined]
+        # owner-aware chart cleanup — drop this owner's series/markers/labels
+        # from every PlotOverlay (a single instance serves many owners).
+        for ov in list(self._overlays.values()):
+            if hasattr(ov, "remove_owner"):
                 with contextlib.suppress(Exception):
                     ov.remove_owner(key)  # type: ignore[attr-defined]
-                # keep PlotOverlay in dict — don't pop, it may hold other owners' series
-                # only pop if it's not a PlotOverlay (i.e., TradeOverlay)
-                pass
-            else:
-                self._overlays.pop(key, None)
-        # owner-aware chart cleanup — remove all plot series for this owner from any PlotOverlay
-        try:
-            for ov in list(self._overlays.values()):
-                if hasattr(ov, "remove_owner"):
-                    with contextlib.suppress(Exception):
-                        ov.remove_owner(key)  # type: ignore[attr-defined]  # type: ignore[attr-defined]
-            if hasattr(self, "_plot_overlay") and self._plot_overlay is not None:  # type: ignore[attr-defined]
-                with contextlib.suppress(Exception):
-                    self._plot_overlay.remove_owner(key)  # type: ignore[attr-defined]
-        except Exception:
-            pass
-        # If we removed the overlay entry and it was the only one, keep PlotOverlay for other owners
-        # No need to pop PLOT overlay when removing OBR — keep it
+        ov = self._overlays.get(key)
+        if ov is not None and not hasattr(ov, "remove_owner"):
+            # non-plot overlay (e.g. the trade overlay): nothing else owns it
+            self._overlays.pop(key, None)
+        if hasattr(self, "_plot_overlay") and self._plot_overlay is not None:  # type: ignore[attr-defined]
+            with contextlib.suppress(Exception):
+                self._plot_overlay.remove_owner(key)  # type: ignore[attr-defined]
         self._position_visibility_panel()
         self._static_cache = None
         self._static_key = None
@@ -350,13 +355,72 @@ class CandleChartWidget(QWidget):
             self.session_changed.emit()
 
     def _on_indicator_settings(self, name: str) -> None:
-        logger.info("Indicator settings requested: %s", name)
+        """Settings action — open the indicator's real parameter panel.
 
-    def _on_indicator_source(self, name: str) -> None:
-        logger.info("Indicator source requested: %s", name)
+        Pure presentation here: the dialog edits the stored parameter dict,
+        then the app layer re-runs the plots with those values merged over the
+        strategy's own defaults. Indicator calculation logic is untouched.
+        """
+        from chart.widgets.indicator_settings_dialog import (
+            build_indicator_settings_dialog,
+            read_indicator_settings,
+        )
 
-    def _on_indicator_more(self, name: str, pos: object) -> None:
-        logger.info("Indicator more requested: %s at %s", name, pos)
+        key = self._normalize_indicator_name(name)
+        stored = self._indicator_settings().get(key, {})
+        dialog = build_indicator_settings_dialog(key, stored, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        params = read_indicator_settings(dialog)
+        if not params:
+            return
+        self.set_indicator_settings(key, params)
+
+    def _indicator_settings(self) -> dict[str, dict[str, float]]:
+        """Per-indicator stored parameters (session-persisted dict)."""
+        store = getattr(self, "_indicator_settings_store", None)
+        if not isinstance(store, dict):
+            store = {}
+            self._indicator_settings_store = store
+        return store
+
+    def set_indicator_settings(self, name: str, params: dict[str, float]) -> None:
+        """Store edited parameters, persist, repaint and notify the app layer
+        so live plots re-run with the merged values (immediate chart update)."""
+        key = self._normalize_indicator_name(name)
+        clean = {str(k): float(v) for k, v in params.items() if _is_number(v)}
+        if not clean:
+            return
+        self._indicator_settings()[key] = clean
+        self._static_cache = None
+        self._static_key = None
+        self._grid_cache = None
+        self._grid_key = None
+        self.update()
+        with contextlib.suppress(Exception):
+            self.indicator_settings_changed.emit(key, clean)
+        with contextlib.suppress(Exception):
+            self.session_changed.emit()
+
+    def indicator_settings_for(self, name: str) -> dict[str, float]:
+        """Stored parameters for one indicator (copy; empty when untouched)."""
+        return dict(self._indicator_settings().get(self._normalize_indicator_name(name), {}))
+
+    def clear_indicator_settings(self, name: str) -> None:
+        """Drop stored overrides for an indicator (settings RESET) — the
+        strategy's own defaults take over again and the plots re-run."""
+        key = self._normalize_indicator_name(name)
+        if key in self._indicator_settings():
+            self._indicator_settings().pop(key, None)
+            self._static_cache = None
+            self._static_key = None
+            self._grid_cache = None
+            self._grid_key = None
+            self.update()
+            with contextlib.suppress(Exception):
+                self.indicator_settings_changed.emit(key, {})
+            with contextlib.suppress(Exception):
+                self.session_changed.emit()
 
     def _position_visibility_panel(self) -> None:
         """Place panel top-left, just below header strip, compact, not covering price."""

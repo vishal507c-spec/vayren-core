@@ -101,9 +101,9 @@ fn render_at(w: u32, h: u32, bars: usize) {
 
     // Wheel-zoom must actually change the rendered geometry (behavior parity):
     // capture, scroll-zoom in, and require the frame to differ from the base.
-    // delta_y is negative so the inverted wheel direction zooms IN here (the
-    // fixture shows the full 160-bar history, so zooming OUT is capped and
-    // would not repaint).
+    // delta_y is positive: the host forwards the natural wheel delta (UP),
+    // and the chart negates it into a zoom-IN (the fixture shows the full
+    // 160-bar history, so zooming OUT is capped and would not repaint).
     let base = out.clone();
     assert_eq!(
         vayren_market_view_scroll(
@@ -111,7 +111,7 @@ fn render_at(w: u32, h: u32, bars: usize) {
             (w as f32 * 0.5).floor(),
             (h as f32 * 0.4).floor(),
             0.0,
-            -120.0
+            120.0
         ),
         0
     );
@@ -591,8 +591,11 @@ fn market_indicator_toolbar_buttons_queue_wires() {
     }
     let (ex, ey) = eye.expect("eye glyph must render and be clickable (indicator:vis:OBR)");
 
-    // Sibling buttons: settings / source / delete sit at +24/+48/+72 px.
-    for (dx, label) in [(24.0, "settings"), (48.0, "source"), (72.0, "delete")] {
+    // Sibling buttons: exactly two — settings (+22) and delete (+44).
+    // 20px buttons + 2px spacing = 22px stride. The settings click opens the
+    // native panel (view-local: no wire); delete queues `indicator:rm:OBR`.
+    // No fourth button exists, so no `indicator:source:` wire may appear.
+    for (dx, _label) in [(22.0, "settings"), (44.0, "delete")] {
         let cx = ex + dx;
         assert_eq!(vayren_market_view_pointer_move(view, cx, ey), 0);
         assert_eq!(vayren_market_view_pointer_press(view, cx, ey, 0), 0);
@@ -606,7 +609,6 @@ fn market_indicator_toolbar_buttons_queue_wires() {
             }
             got.push(String::from_utf8_lossy(&buf[..n as usize]).into_owned());
         }
-        let _ = label;
     }
 
     assert!(
@@ -614,16 +616,16 @@ fn market_indicator_toolbar_buttons_queue_wires() {
         "eye button must queue indicator:vis:OBR (got {got:?})"
     );
     assert!(
-        got.iter().any(|a| a == "indicator:settings:OBR"),
-        "settings button must queue indicator:settings:OBR (got {got:?})"
-    );
-    assert!(
-        got.iter().any(|a| a == "indicator:source:OBR"),
-        "source button must queue indicator:source:OBR (got {got:?})"
-    );
-    assert!(
         got.iter().any(|a| a == "indicator:rm:OBR"),
         "delete button must queue indicator:rm:OBR (got {got:?})"
+    );
+    assert!(
+        !got.iter().any(|a| a.starts_with("indicator:source:")),
+        "no source/code button may exist (got {got:?})"
+    );
+    assert!(
+        !got.iter().any(|a| a.starts_with("indicator:settings:")),
+        "settings opens the native panel, it must not queue a wire (got {got:?})"
     );
     vayren_market_view_destroy(view);
 }

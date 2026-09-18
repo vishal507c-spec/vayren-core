@@ -302,6 +302,7 @@ def test_no_concrete_zerodha_imports_outside_boundary() -> None:
     Readers: ``02_data/data/provider/factory.py`` (UBL seed wiring),
     ``02_data/data/settings.py`` (single-sourced default id),
     ``02_data/data/provider/zerodha/**`` (the implementation itself),
+    ``02_data/data/provider/fyers/**`` (the second venue's implementation),
     ``00_app/.../broker_selection_service.py`` (compatibility default id).
     Anything else importing the concrete transport or the adapter package
     fails here — discovery must go through the registry.
@@ -313,6 +314,7 @@ def test_no_concrete_zerodha_imports_outside_boundary() -> None:
     }
     allowed_prefixes = (
         "02_data/data/provider/zerodha/",
+        "02_data/data/provider/fyers/",
         "09_broker/broker/adapters/",
     )
     offenders = []

@@ -23,6 +23,22 @@ from data.provider.contract import (
     ProviderError,
 )
 from data.provider.credentials_store import provider_service
+from data.provider.fyers import FyersProvider
+from data.provider.fyers.live_auth import (
+    DEFAULT_CALLBACK_PORT as FYERS_CALLBACK_PORT,
+)
+from data.provider.fyers.live_auth import (
+    SESSION_SERVICE as FYERS_SESSION_SERVICE,
+)
+from data.provider.fyers.live_auth import (
+    FyersAuthFlow,
+    FyersSessionStore,
+    fyers_interactive_login,
+)
+from data.provider.fyers.live_auth import (
+    default_redirect_url as fyers_redirect_url,
+)
+from data.provider.fyers.session_adapter import FyersSessionAdapter
 from data.provider.zerodha import ZerodhaProvider
 from data.settings import DownloadSettings
 
@@ -82,6 +98,29 @@ def _seed_zerodha() -> None:
 _seed_zerodha()
 
 
+def _seed_fyers() -> None:
+    """Idempotent registration of the FYERS venue (authentication phase).
+
+    Same single-registration-point discipline as Zerodha: identity and
+    capability matrix come from the UBL adapter package; only the
+    transport constructor stays local. The record advertises no history
+    capabilities, so history resolution fails closed with the recorded
+    reason while broker management + selection work.
+    """
+    from broker.adapters.fyers import BROKER_ID as FYERS_BROKER_ID
+    from broker.adapters.fyers import fyers_plugin_record
+
+    registry = default_registry()
+    if FYERS_BROKER_ID in registry:
+        registry.unregister(FYERS_BROKER_ID)
+    registry.register(
+        fyers_plugin_record(lambda settings: FyersProvider(settings))  # type: ignore[arg-type,return-value]
+    )
+
+
+_seed_fyers()
+
+
 def zerodha_management_spec() -> BrokerSpec:
     """The bundled venue's SYSTEM → BROKERS management wiring.
 
@@ -136,6 +175,78 @@ def zerodha_management_spec() -> BrokerSpec:
     )
 
 
+def fyers_management_spec() -> BrokerSpec:
+    """The FYERS venue's SYSTEM → BROKERS management wiring.
+
+    Lives here (not in app) for the same chapter-pinning reason as the
+    Zerodha spec: adapter + auth flow + session store are concrete venue
+    boundary code. ``display_name`` comes from the UBL adapter package's
+    single source of truth — no alias literals.
+
+    Authentication phase: the venue is auth-only. ``venue_register``
+    records the authenticated session WITHOUT touching the UBL registry
+    (no ``fyers-live`` trading venue exists yet), so no execution path
+    can resolve FYERS for orders. Health/account verification still runs
+    through the read-only session adapter.
+    """
+    from broker.adapters.fyers import DISPLAY_NAME, VENUE_SUBTITLE
+
+    def _register_session(adapter: object, _market_data: object | None) -> tuple[bool, str]:
+        if adapter is None:
+            return False, "no authenticated adapter provided"
+        return True, "authenticated FYERS session (auth-only — no trading venue in this phase)"
+
+    def _unregister() -> None:
+        return None
+
+    def _auto_authenticate(config: dict[str, str], session_store: object) -> tuple[bool, str]:
+        """Startup/check-time automatic login (Zerodha-experience parity).
+
+        Runs on the manager's worker thread: valid stored session → True
+        with one probe; missing/expired + complete auto-login triple →
+        the official TOTP+PIN flow; anything else → False with the exact
+        missing piece (the manager shows LOGIN_REQUIRED and the user can
+        still CONNECT through the interactive browser flow — capture
+        stays automatic either way).
+        """
+        from data.provider.fyers.auto_auth import FyersAutoAuthEngine
+        from data.provider.fyers.credentials import FyersCredentials
+
+        credentials = FyersCredentials(
+            app_id=config.get("app_id", ""),
+            secret=config.get("secret", ""),
+            redirect_uri=config.get("redirect_uri", ""),
+            pin=config.get("pin", ""),
+            client_id=config.get("client_id", ""),
+            totp_secret=config.get("totp_secret", ""),
+        )
+        return FyersAutoAuthEngine(credentials).ensure_session(session_store)
+
+    return BrokerSpec(
+        broker_id="fyers",
+        display_name=DISPLAY_NAME,
+        config_service=provider_service("fyers"),
+        session_service=FYERS_SESSION_SERVICE,
+        required_config=("app_id", "secret"),
+        masked_config=("app_id", "secret"),
+        key_field="app_id",
+        secret_field="secret",
+        redirect_uri_field="redirect_uri",
+        config_key_map={"api_key": "app_id", "api_secret": "secret"},
+        build_adapter=lambda app_id, token: FyersSessionAdapter(app_id=app_id, access_token=token),
+        build_market_data=None,
+        build_flow=FyersAuthFlow,
+        build_session_store=lambda store, service: FyersSessionStore(store, service),
+        venue_register=_register_session,
+        venue_unregister=_unregister,
+        interactive_login=fyers_interactive_login,
+        auto_authenticate=_auto_authenticate,
+        callback_port=FYERS_CALLBACK_PORT,
+        callback_url=fyers_redirect_url(FYERS_CALLBACK_PORT),
+        extra={"venue_subtitle": VENUE_SUBTITLE, "auth_only": "true"},
+    )
+
+
 def ensure_live_venues() -> tuple[bool, str]:
     """Best-effort explicit live-venue activation (idempotent, no network).
 
@@ -159,6 +270,7 @@ def ensure_live_venues() -> tuple[bool, str]:
 
 
 _seed_zerodha()
+_seed_fyers()
 
 
 def build_provider(settings: DownloadSettings) -> Provider:

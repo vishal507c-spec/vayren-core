@@ -2,6 +2,7 @@
 //! pure and headless-tested; the binary in `main.rs` binds them to the Slint
 //! component defined in `ui/app.slint`.
 
+pub mod chart_demo;
 pub mod lab;
 pub mod live;
 pub mod market;

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from strategy.models.parameters import ParameterSpec, StrategyParameters
-from strategy.runtime import BarView, StrategyLogic
+from strategy.runtime import BarView
 from strategy.strategies.base import PythonStrategy
 from strategy.strategies.indicators import calc_sma
 
@@ -66,20 +66,3 @@ class SmaCrossover(PythonStrategy):
         self.prev_fast = fast
         self.prev_slow = slow
         return None
-
-
-def create_sma_crossover(params: StrategyParameters) -> StrategyLogic:
-    s = SmaCrossover(params)
-    norm: dict[str, float] = {}
-    for k, v in dict(params).items():
-        if k == "Fast period":
-            norm["fast_period"] = float(v)
-        elif k == "Slow period":
-            norm["slow_period"] = float(v)
-        elif k == "Min volume":
-            norm["min_volume"] = float(v)
-        else:
-            norm[k] = float(v)
-    s.params = norm
-    # reset prev to None for fresh run (factory creates new instance each run, so fine)
-    return s

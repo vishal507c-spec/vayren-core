@@ -104,7 +104,6 @@ class ChartWindow(QMainWindow):
         self._current_timeframe: str | None = None
         self._active_panel: str | None = "watchlist"
         self._lab_active = False
-        self._bottom_visible = False
 
         self._trade_context = trade_context
         # ── Chart top bar: ONE horizontal line (TradingView-style) ──
@@ -462,10 +461,6 @@ class ChartWindow(QMainWindow):
             with contextlib.suppress(Exception):
                 self._nav.set_active(section)  # type: ignore[attr-defined]
 
-    def show_research(self) -> None:
-        """Switch to the Research workspace (when injected)."""
-        self._show_workspace("_research_workspace", "RESEARCH")
-
     def show_slint_research(self) -> None:
         """Switch to the native Slint Research viewport (when injected).
 
@@ -498,18 +493,6 @@ class ChartWindow(QMainWindow):
         production mount surface.
         """
         self._show_workspace("_slint_system_host", "SYSTEM")
-
-    def toggle_bottom(self) -> None:
-        """Toggle the bottom system/event panels."""
-        self._bottom_visible = not self._bottom_visible
-        bottom = getattr(self, "_bottom", None)
-        if bottom is not None:
-            bottom.setVisible(self._bottom_visible)
-        # left extra toggles with bottom as well (market status)
-        left = getattr(self, "_left_extra", None)
-        if left is not None:
-            with contextlib.suppress(Exception):
-                left.setVisible(self._bottom_visible)
 
     def on_chart_ready(self, event: ChartReady) -> None:
         """Display the prepared chart model and highlight its symbol."""

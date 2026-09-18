@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 from execution.models.intent import ExecutionIntent
 from execution.models.order import OrderPlan
+from execution.native_execution import native_plan_order
 
 
 @dataclass(frozen=True)
@@ -35,12 +36,13 @@ class OrderPlanner:
         preferences: ExecutionPreferences | None = None,
     ) -> OrderPlan:
         prefs = preferences if preferences is not None else ExecutionPreferences()
-        quantity = intent.quantity * prefs.size_multiplier
-        order_type = intent.preferred_order_type
-        limit_price: float | None = None
-        if prefs.prefer_limit or order_type == "LIMIT":
-            order_type = "LIMIT"
-            limit_price = reference_price
+        quantity, order_type, limit_price = native_plan_order(
+            intent.quantity,
+            intent.preferred_order_type,
+            reference_price,
+            prefs.prefer_limit,
+            prefs.size_multiplier,
+        )
         bracket: tuple[dict[str, object], ...] = ()
         return OrderPlan(
             intent_id=intent.intent_id,

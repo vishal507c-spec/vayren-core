@@ -433,35 +433,6 @@ def _draw_placed_markers(painter: Any, placed: list[tuple[_MarkerJob, float, flo
     painter.restore()
 
 
-def _paint_markers(
-    painter: Any,
-    series: dict[int, float],
-    title: str,
-    kind: str,
-    fmt: str | None,
-    first: int,
-    last: int,
-    low: float,
-    high: float,
-    rect: QRectF,
-) -> None:
-    """Draw one glyph (+ optional pill) per visible point on its exact bar."""
-    font = QFont("Segoe UI", 7)
-    font.setBold(True)
-    painter.save()
-    painter.setFont(font)
-    metrics = painter.fontMetrics()
-
-    def _measure(text: str) -> tuple[float, float]:
-        # Compact reference-style pill: tight padding, small radius.
-        return (metrics.horizontalAdvance(text) + 6, metrics.height() + 2)
-
-    painter.restore()
-    jobs: list[_MarkerJob] = []
-    _collect_marker_jobs(jobs, series, title, kind, fmt, _measure, first, last, low, high, rect)
-    _draw_placed_markers(painter, _layout_marker_pills(jobs, rect))
-
-
 _PLOT_TYPES = frozenset(
     {
         "LINE",
@@ -1053,17 +1024,11 @@ class PlotOverlay:
         with contextlib.suppress(Exception):
             self._store.remove_strategy(str(owner_id))
 
-    def clear_owner(self, owner_id: str) -> None:
-        self.remove_owner(owner_id)
-
     def clear(self) -> None:
         self._series.clear()
         self._meta.clear()
         self._store.clear()
         self._text_cache.clear()
-
-    def is_empty(self) -> bool:
-        return not self._series and len(self._store) == 0
 
     # ── universal plot pipeline (strategy-owned events, generic render) ──
 

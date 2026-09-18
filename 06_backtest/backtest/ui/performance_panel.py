@@ -146,11 +146,6 @@ class PerformancePanel(QWidget):
         self._collapsed = not self._collapsed
         self._apply_collapsed()
 
-    def set_collapsed(self, collapsed: bool) -> None:
-        """Set collapsed state explicitly."""
-        self._collapsed = collapsed
-        self._apply_collapsed()
-
     def _apply_collapsed(self) -> None:
         self._body.setVisible(not self._collapsed)
         self._toggle.setText("▸" if self._collapsed else "▾")

@@ -120,9 +120,9 @@ class BrokerManager(QObject):
 
     @staticmethod
     def _default_specs() -> dict[str, BrokerSpec]:
-        from data.provider.factory import zerodha_management_spec
+        from data.provider.factory import fyers_management_spec, zerodha_management_spec
 
-        return {"zerodha": zerodha_management_spec()}
+        return {"zerodha": zerodha_management_spec(), "fyers": fyers_management_spec()}
 
     # ── public surface (UI + LIVE consume only these) ────────────
 
@@ -186,26 +186,37 @@ class BrokerManager(QObject):
                     "orders_open": details.get("orders_open"),
                     "last_sync": str(state.get("last_sync", "") or ""),
                     "can_refresh": bool(state["configured"]),
+                    # Per-venue redirect URL (the FYERS/Zerodha app dashboard
+                    # must register exactly this). The top-level
+                    # ``callback_url`` stays for backward compatibility.
+                    "callback_url": spec.callback_url,
                 }
             )
         return {"brokers": brokers, "callback_url": self._callback_url()}
 
     def configure(self, broker_id: str, values: dict[str, str]) -> tuple[bool, str]:
-        """Save required config (credentials store). Secret values never echoed."""
+        """Save required config (credentials store). Secret values never echoed.
+
+        UI-submitted keys are translated to the venue's storage keys via
+        ``spec.config_key_map`` (identity for Zerodha); required-field
+        validation runs on storage keys, so every venue enforces its own
+        credential shape with zero manager-side branching.
+        """
         spec = self._specs.get(broker_id)
         if spec is None:
             return False, f"unknown broker: {broker_id}"
         clean = {str(k): str(v or "").strip() for k, v in values.items()}
-        missing = [key for key in spec.required_config if not clean.get(key)]
+        stored = {spec.config_key_map.get(key, key): value for key, value in clean.items()}
+        missing = [key for key in spec.required_config if not stored.get(key)]
         if missing:
             return False, f"missing configuration: {', '.join(missing)}"
         try:
-            self._store.save(spec.config_service, clean)
+            self._store.save(spec.config_service, stored)
         except Exception as exc:
             return False, f"secure storage refused: {type(exc).__name__}"
         state = self._states[broker_id]
         state["configured"] = True
-        state["api_key_masked"] = self._mask(clean["api_key"])
+        state["api_key_masked"] = self._mask(stored.get(spec.key_field, ""))
         if state["status"] is BrokerStatus.NOT_CONFIGURED:
             state["status"] = BrokerStatus.LOGIN_REQUIRED
             state["reason"] = "configured — session check pending"
@@ -304,22 +315,65 @@ class BrokerManager(QObject):
             return
         stored = self._session_store(spec).load_token()
         if stored is None:
+            if self._try_auto_auth(spec, config):
+                return
             self._set_status(spec.broker_id, BrokerStatus.LOGIN_REQUIRED, "no active session")
             return
         flow = spec.build_flow() if spec.build_flow is not None else None
         if flow is None:
             self._set_status(spec.broker_id, BrokerStatus.ERROR, "auth flow not wired")
             return
-        ok, reason = flow.validate(config["api_key"], stored["access_token"])
+        ok, reason = flow.validate(config[spec.key_field], stored["access_token"])
         if not ok:
             if "unreachable" in reason:
                 self._set_status(spec.broker_id, BrokerStatus.DISCONNECTED, reason)
+            elif self._try_auto_auth(spec, config):
+                return
             else:
                 self._set_status(
                     spec.broker_id, BrokerStatus.LOGIN_REQUIRED, f"session expired — {reason}"
                 )
             return
         self._activate(spec, config, stored["access_token"], reason)
+
+    def _try_auto_auth(self, spec: BrokerSpec, config: dict[str, str]) -> bool:
+        """Run the venue's automatic authentication when wired.
+
+        Returns True when the hook handled the outcome (the status is
+        already set: CONNECTED via ``_activate`` or LOGIN_REQUIRED with
+        the exact reason). ``None`` hook (Zerodha default) returns False
+        so the caller keeps the legacy LOGIN_REQUIRED path — Zerodha
+        behavior is unchanged.
+        """
+        if spec.auto_authenticate is None:
+            return False
+        self._set_status(
+            spec.broker_id, BrokerStatus.AUTHENTICATING, "authenticating automatically…"
+        )
+        try:
+            ok, message = spec.auto_authenticate(config, self._session_store(spec))
+        except Exception as exc:
+            self._set_status(
+                spec.broker_id,
+                BrokerStatus.LOGIN_REQUIRED,
+                f"automatic authentication failed: {type(exc).__name__}",
+            )
+            return True
+        self._note(spec.broker_id, message)
+        if not ok:
+            self._set_status(spec.broker_id, BrokerStatus.LOGIN_REQUIRED, message)
+            return True
+        stored = self._session_store(spec).load_token() or {}
+        token = str(stored.get("access_token", "") or "")
+        if not token:
+            self._set_status(
+                spec.broker_id,
+                BrokerStatus.LOGIN_REQUIRED,
+                "automatic authentication did not store a session",
+            )
+            return True
+        self._activate(spec, config, token, message)
+        return True
 
     def _job_login(self, spec: BrokerSpec) -> None:
         config = self._config_values(spec)
@@ -328,13 +382,20 @@ class BrokerManager(QObject):
             return
         assert spec.interactive_login is not None and spec.build_flow is not None
         session_store = self._session_store(spec)
+        login_kwargs: dict[str, Any] = {
+            "port": int(spec.callback_port or CALLBACK_PORT),
+            "open_browser": self._browser,
+        }
+        if spec.redirect_uri_field:
+            login_kwargs["redirect_uri"] = (
+                config.get(spec.redirect_uri_field, "") or spec.callback_url
+            )
         ok, message = spec.interactive_login(
             spec.build_flow(),
-            config["api_key"],
-            config["api_secret"],
+            config[spec.key_field],
+            config[spec.secret_field],
             session_store,
-            port=int(spec.callback_port or CALLBACK_PORT),
-            open_browser=self._browser,
+            **login_kwargs,
         )
         self._note(spec.broker_id, message)
         if not ok:
@@ -413,7 +474,7 @@ class BrokerManager(QObject):
         """Build the authenticated adapter, register the venue, health-check."""
         assert spec.build_adapter is not None
         try:
-            adapter = spec.build_adapter(config["api_key"], token)
+            adapter = spec.build_adapter(config[spec.key_field], token)
             adapter.connect()
         except Exception as exc:
             text = str(exc)
@@ -476,7 +537,7 @@ class BrokerManager(QObject):
             "configured": bool(config),
             "adapter": None,
             "market_data": None,
-            "api_key_masked": self._mask(config.get("api_key", "") if config else ""),
+            "api_key_masked": self._mask(config.get(spec.key_field, "") if config else ""),
         }
 
     @staticmethod

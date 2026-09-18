@@ -260,6 +260,24 @@ impl SystemView {
         let refresh = Rc::new(Cell::new(false));
         let busy = Rc::new(Cell::new(false));
         wire_view(&ui, actions.clone(), refresh.clone(), busy.clone());
+        // Ops-section toggles are view-local (Qt dock visibility parity):
+        // no event leaves the view for them.
+        {
+            let weak = ui.as_weak();
+            ui.on_health_toggle(move || {
+                if let Some(ui) = weak.upgrade() {
+                    ui.set_health_open(!ui.get_health_open());
+                }
+            });
+        }
+        {
+            let weak = ui.as_weak();
+            ui.on_log_toggle(move || {
+                if let Some(ui) = weak.upgrade() {
+                    ui.set_log_open(!ui.get_log_open());
+                }
+            });
+        }
         let mut view = Box::new(SystemView {
             window,
             _ui: ui,
@@ -425,6 +443,10 @@ pub extern "C" fn vayren_system_view_set_snapshot(
         let panel = BrokerPanel::from_json(&value);
         view.refresh_busy.set(false);
         apply_view(&view._ui, &panel, view.refresh_busy.get());
+        // Ops-section facts (system health grid + event log) from the same
+        // snapshot — absent keys keep the retained "--"/empty projections.
+        let (health_rows, log_rows): (Vec<HealthRow>, Vec<LogRow>) = parse_ops_extras(&value);
+        apply_ops_extras(&view._ui, health_rows, log_rows);
         view.panel = panel;
         view.window.request_redraw();
         Ok(0)

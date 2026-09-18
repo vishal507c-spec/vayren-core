@@ -47,6 +47,20 @@ pub struct IndicatorEntry {
     pub visible: bool,
 }
 
+/// One editable indicator parameter as the native settings panel renders it.
+/// Values come from the backend's parameter specs (merged with the indicator's
+/// stored overrides); the panel edits a local buffer and commits on SAVE.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SettingsRow {
+    pub key: String,
+    pub label: String,
+    pub value: f64,
+    pub min: f64,
+    pub max: f64,
+    pub step: f64,
+    pub decimals: i32,
+}
+
 /// One plotted strategy series (owner-aware, mirrors `PlotOverlay._series`:
 /// `(owner, title) -> {bar_index: value}`). Gaps break the line.
 #[derive(Debug, Clone, PartialEq)]
@@ -202,19 +216,31 @@ pub enum MarketAction {
     AddIndicator(String),
     /// Floating-bar eye: per-indicator visibility.
     ToggleIndicatorVisible(String),
-    /// Floating-bar ⚙: open the indicator's settings surface. The retained
-    /// Qt widget owns the response (legacy `settings_requested` handler);
-    /// the view only forwards the click — it never invents a surface.
-    SettingsIndicator(String),
-    /// Floating-bar `{}`: open the indicator's source/code surface. Same
-    /// contract as `SettingsIndicator` (legacy `source_requested` handler).
-    SourceIndicator(String),
-    /// Floating-bar delete (also via More → Remove).
+    /// Floating-bar ⚙: open the indicator's settings panel (name), or close
+    /// it when the flag is false (name empty). The panel is a native surface;
+    /// its rows come from the backend's parameter specs.
+    SettingsPopup(bool, String),
+    /// Settings panel: one SpinBox edit (key, new value) — kept in the local
+    /// buffer until SAVE or RESET.
+    SettingsEdit(String, f64),
+    /// Settings panel SAVE (name, json payload) — committed to the backend,
+    /// which stores the parameters and re-runs the indicator's plots with
+    /// them merged over the strategy's own defaults.
+    ApplyIndicatorSettings(String, String),
+    /// Settings panel RESET — the backend drops stored overrides for the
+    /// indicator (strategy defaults take over again).
+    ResetIndicatorSettings(String),
+    /// Floating-bar delete: remove the indicator completely (row, plots,
+    /// renderer objects). The panel ROWS drive the bar, so a removed name
+    /// cannot reappear on refresh / timeframe / symbol change.
     RemoveIndicator(String),
     /// Trade context strip prev/next/open (backend controller owns them).
     TradePrev,
     TradeNext,
     TradeOpen,
+    /// Toggle the market-status strip (rail button; view-local like
+    /// `PanelToggle` — no backend wire).
+    ToggleStatus,
 }
 
 // Viewport numbers ported 1:1 from `CandleChartWidget` (behavior parity).
@@ -275,6 +301,39 @@ pub struct MarketHover {
     pub price: f64,
 }
 
+/// Market-status panel facts — the native port of Qt `MarketStatusPanel`.
+/// Honest-unknown semantics preserved exactly: every value defaults to "--"
+/// and `--` renders muted (never zero-filled, never invented).
+#[derive(Debug, Clone, PartialEq)]
+pub struct MarketStatusFacts {
+    /// Collapsed by default (Qt dock starts hidden; the app toggles it).
+    pub open: bool,
+    pub regime_current: String,
+    pub regime_trend: String,
+    pub regime_volatility: String,
+    pub regime_momentum: String,
+    pub provider: String,
+    pub latency: String,
+    pub last_update: String,
+    pub bars_loaded: String,
+}
+
+impl Default for MarketStatusFacts {
+    fn default() -> Self {
+        Self {
+            open: false,
+            regime_current: "--".to_string(),
+            regime_trend: "--".to_string(),
+            regime_volatility: "--".to_string(),
+            regime_momentum: "--".to_string(),
+            provider: "--".to_string(),
+            latency: "--".to_string(),
+            last_update: "--".to_string(),
+            bars_loaded: "--".to_string(),
+        }
+    }
+}
+
 /// Single source of Market presentation state.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MarketState {
@@ -300,6 +359,13 @@ pub struct MarketState {
     pub price_drag_active: bool,
     pub hover: Option<MarketHover>,
     pub indicators: Vec<IndicatorEntry>,
+    /// Editable parameter specs per indicator, as the backend reports them
+    /// (name -> rows). The settings panel renders exactly these rows.
+    pub indicator_params: std::collections::HashMap<String, Vec<SettingsRow>>,
+    /// Settings panel state: open flag, edited indicator, local edit buffer.
+    pub settings_open: bool,
+    pub settings_name: String,
+    pub settings_rows: Vec<SettingsRow>,
     pub popup_open: bool,
     pub popup_query: String,
     pub popup_category: String,
@@ -319,6 +385,9 @@ pub struct MarketState {
     pub width_cap: usize,
     /// Historical-Download console (native port of the retained Qt panel).
     pub download: DownloadState,
+    /// Market-status panel (regime + data-status grid; Qt
+    /// `MarketStatusPanel` parity).
+    pub market_status: MarketStatusFacts,
     /// Queued backend intents for the embedded host to drain (mirrors
     /// `LabState::pending_actions`).
     pub pending_actions: Vec<String>,
@@ -347,6 +416,10 @@ impl Default for MarketState {
             price_drag_active: false,
             hover: None,
             indicators: Vec::new(),
+            indicator_params: std::collections::HashMap::new(),
+            settings_open: false,
+            settings_name: String::new(),
+            settings_rows: Vec::new(),
             popup_open: false,
             popup_query: String::new(),
             popup_category: "ALL".to_string(),
@@ -360,6 +433,7 @@ impl Default for MarketState {
             trade_context: TradeContext::default(),
             width_cap: MAX_VISIBLE_BARS,
             download: DownloadState::default(),
+            market_status: MarketStatusFacts::default(),
             pending_actions: Vec::new(),
         }
     }
@@ -529,6 +603,10 @@ impl MarketState {
         match action {
             MarketAction::PanelToggle => {
                 self.panel_visible = !self.panel_visible;
+                true
+            }
+            MarketAction::ToggleStatus => {
+                self.market_status.open = !self.market_status.open;
                 true
             }
             MarketAction::SelectSymbol(symbol) => {
@@ -799,24 +877,67 @@ impl MarketState {
                     false
                 }
             }
-            MarketAction::SettingsIndicator(name) | MarketAction::SourceIndicator(name) => {
-                // Legacy Qt contract: the retained widget answers via the
-                // `settings_requested` / `source_requested` handlers. The view
-                // forwards only rows that actually exist — never an invented
-                // surface for an unknown indicator.
+            MarketAction::SettingsPopup(open, name) => {
+                if !open {
+                    self.settings_open = false;
+                    self.settings_name.clear();
+                    self.settings_rows.clear();
+                    return true;
+                }
+                // Open only for a row that actually exists, seeded from the
+                // backend's parameter specs for that indicator (defaults
+                // already merged with stored overrides in the snapshot).
                 let key = normalize_indicator_name(&name);
-                self.indicators.iter().any(|e| e.name == key)
+                if !self.indicators.iter().any(|e| e.name == key) {
+                    return false;
+                }
+                self.settings_rows = self.indicator_params.get(&key).cloned().unwrap_or_default();
+                self.settings_name = key.clone();
+                self.settings_open = true;
+                true
+            }
+            MarketAction::SettingsEdit(key, value) => {
+                // Local buffer only — nothing reaches the backend until SAVE.
+                if let Some(row) = self.settings_rows.iter_mut().find(|r| r.key == key) {
+                    row.value = value;
+                    true
+                } else {
+                    false
+                }
+            }
+            MarketAction::ApplyIndicatorSettings(name, _payload) => {
+                // Commit: the wire carries the JSON payload to the backend,
+                // which stores the parameters and re-runs the indicator's
+                // plots (calculation logic untouched — inputs only).
+                let key = normalize_indicator_name(&name);
+                let known = self.indicators.iter().any(|e| e.name == key);
+                if known {
+                    self.settings_open = false;
+                    self.settings_name.clear();
+                    self.settings_rows.clear();
+                }
+                known
+            }
+            MarketAction::ResetIndicatorSettings(name) => {
+                let key = normalize_indicator_name(&name);
+                if !self.indicators.iter().any(|e| e.name == key) {
+                    return false;
+                }
+                // Drop the backend's stored overrides (they return to the
+                // strategy's own defaults) and re-seed the panel rows.
+                self.indicator_params.remove(&key);
+                self.settings_rows = self.indicator_params.get(&key).cloned().unwrap_or_default();
+                true
             }
             MarketAction::RemoveIndicator(name) => {
                 let key = normalize_indicator_name(&name);
-                // Qt: the built-in Vol/OBR rows stay listed but hidden;
-                // every other indicator is removed from the bar completely.
-                if key == "Vol" || key == "OBR" {
-                    if let Some(entry) = self.indicators.iter_mut().find(|e| e.name == key) {
-                        entry.visible = false;
-                        return true;
-                    }
-                    return false;
+                // The panel ROWS drive the bar: a deleted name leaves the row
+                // list entirely, so no refresh / timeframe / symbol change can
+                // re-list it. The backend clears its plots + state in parallel.
+                if self.settings_open && self.settings_name == key {
+                    self.settings_open = false;
+                    self.settings_name.clear();
+                    self.settings_rows.clear();
                 }
                 let before = self.indicators.len();
                 self.indicators.retain(|e| e.name != key);
@@ -830,6 +951,30 @@ impl MarketState {
         // Qt re-snaps at the stored pixel after viewport changes; the native
         // screen re-reports on the next pointer move, so clearing is honest.
         self.hover = None;
+    }
+
+    /// Build the SAVE payload (indicator name, JSON object) from the local
+    /// edit buffer. ``None`` when no settings panel is open. The JSON only
+    /// carries numbers — keys/labels live in the specs, never here.
+    pub fn settings_payload(&self) -> Option<(String, String)> {
+        if !self.settings_open || self.settings_name.is_empty() {
+            return None;
+        }
+        let name = self.settings_name.clone();
+        let mut json = String::from("{");
+        for (index, row) in self.settings_rows.iter().enumerate() {
+            if index > 0 {
+                json.push(',');
+            }
+            json.push('"');
+            json.push_str(&row.key);
+            json.push_str("\":");
+            // shortest round-trip rendering; SpinBox values are finite and
+            // within range, so this is always valid JSON
+            json.push_str(&format!("{}", row.value));
+        }
+        json.push('}');
+        Some((name, json))
     }
 
     /// Slint-reported interaction: apply optimistically, then queue the wire
@@ -846,8 +991,8 @@ impl MarketState {
                 | MarketAction::ResetView
                 | MarketAction::AddIndicator(_)
                 | MarketAction::ToggleIndicatorVisible(_)
-                | MarketAction::SettingsIndicator(_)
-                | MarketAction::SourceIndicator(_)
+                | MarketAction::ApplyIndicatorSettings(_, _)
+                | MarketAction::ResetIndicatorSettings(_)
                 | MarketAction::RemoveIndicator(_)
                 | MarketAction::TradePrev
                 | MarketAction::TradeNext
@@ -1174,9 +1319,19 @@ pub struct MarketView {
     pub popup_query: String,
     pub popup_category: String,
     pub popup_rows: Vec<PopupRow>,
+    pub settings_open: bool,
+    pub settings_name: String,
+    pub settings_rows: Vec<SettingsRow>,
     pub active_label: String,
     pub trade_context: TradeContext,
     pub download: DownloadView,
+    /// Market-status strip (Qt `MarketStatusPanel` parity): open flag +
+    /// (key, value, muted) rows in the Qt grid order.
+    pub market_status_open: bool,
+    /// "MARKET REGIME" section rows.
+    pub market_status_regime: Vec<(String, String, bool)>,
+    /// "DATA STATUS" section rows.
+    pub market_status_data: Vec<(String, String, bool)>,
 }
 
 fn last_change(bars: &[MarketBar]) -> (String, Tone) {
@@ -1739,6 +1894,12 @@ pub fn project(state: &MarketState) -> MarketView {
         })
         .collect();
 
+    // Settings panel rows for the open indicator (already seeded/edited in
+    // state; empty list renders the honest "no parameters" note).
+    let settings_rows: Vec<SettingsRow> = state.settings_rows.clone();
+    let settings_name = state.settings_name.clone();
+    let settings_open = state.settings_open;
+
     // Indicator popup contents: sections per category + search, "No matches".
     let mut popup_rows: Vec<PopupRow> = Vec::new();
     if state.popup_open {
@@ -1852,10 +2013,43 @@ pub fn project(state: &MarketState) -> MarketView {
         popup_query: state.popup_query.clone(),
         popup_category: state.popup_category.clone(),
         popup_rows,
+        settings_open,
+        settings_name,
+        settings_rows,
         active_label,
         trade_context: state.trade_context.clone(),
         download: mdownload::project_download(&state.download),
+        market_status_open: state.market_status.open,
+        market_status_regime: market_status_rows(&state.market_status).0,
+        market_status_data: market_status_rows(&state.market_status).1,
     }
+}
+
+/// Qt grid split: MARKET REGIME (4 rows) + DATA STATUS (4 rows).
+/// `"--"` renders muted — the honest-unknown styling rule (never zero-filled).
+fn market_status_rows(
+    facts: &MarketStatusFacts,
+) -> (Vec<(String, String, bool)>, Vec<(String, String, bool)>) {
+    let mut regime = Vec::with_capacity(4);
+    let mut data = Vec::with_capacity(4);
+    for (k, v) in [
+        ("Current regime", facts.regime_current.as_str()),
+        ("Trend strength", facts.regime_trend.as_str()),
+        ("Volatility", facts.regime_volatility.as_str()),
+        ("Momentum", facts.regime_momentum.as_str()),
+        ("Data provider", facts.provider.as_str()),
+        ("Latency", facts.latency.as_str()),
+        ("Last update", facts.last_update.as_str()),
+        ("Bars loaded", facts.bars_loaded.as_str()),
+    ] {
+        let row = (k.to_string(), v.to_string(), v == "--");
+        if regime.len() < 4 {
+            regime.push(row);
+        } else {
+            data.push(row);
+        }
+    }
+    (regime, data)
 }
 
 // ── bridge: Python backend snapshot -> canonical state (embedded view) ────
@@ -1958,8 +2152,9 @@ pub fn apply_snapshot_json(state: &mut MarketState, value: &serde_json::Value) {
             _ => MarketStatus::Loading,
         };
     }
-    // Indicator visibility: the Qt chart's dynamic dict (name -> bool). Only
+    // Indicator visibility: the retained panel ROWS (name -> bool). Only
     // entries the backend confirms are kept; nothing is seeded or invented.
+    // A deleted indicator has no row, so it can never reappear here.
     if let Some(map) = value.get("indicators").and_then(|v| v.as_object()) {
         state.indicators = map
             .iter()
@@ -1968,6 +2163,36 @@ pub fn apply_snapshot_json(state: &mut MarketState, value: &serde_json::Value) {
                 visible: visible.as_bool().unwrap_or(true),
             })
             .collect();
+    }
+    // Editable parameter specs per indicator: {name: [{key,label,value,
+    // min,max,step,decimals}]}. Feeds the native settings panel; the values
+    // already merge the indicator's stored overrides.
+    if let Some(map) = value.get("indicator_params").and_then(|v| v.as_object()) {
+        let mut params = std::collections::HashMap::new();
+        for (name, rows) in map {
+            if let Some(arr) = rows.as_array() {
+                let mut out = Vec::with_capacity(arr.len());
+                for row in arr {
+                    let key = snap_str(row, "key");
+                    if key.is_empty() {
+                        continue;
+                    }
+                    out.push(SettingsRow {
+                        key,
+                        label: snap_str(row, "label"),
+                        value: row.get("value").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                        min: row.get("min").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                        max: row.get("max").and_then(|v| v.as_f64()).unwrap_or(1.0),
+                        step: row.get("step").and_then(|v| v.as_f64()).unwrap_or(0.1),
+                        decimals: row.get("decimals").and_then(|v| v.as_i64()).unwrap_or(2) as i32,
+                    });
+                }
+                if !out.is_empty() {
+                    params.insert(normalize_indicator_name(name), out);
+                }
+            }
+        }
+        state.indicator_params = params;
     }
     // Strategy plot series: [{owner,title,points,extend,cap}]
     if let Some(rows) = value.get("plot_series").and_then(|v| v.as_array()) {
@@ -2143,6 +2368,26 @@ pub fn apply_snapshot_json(state: &mut MarketState, value: &serde_json::Value) {
     if let Some(dl) = value.get("download") {
         if dl.is_object() {
             mdownload::apply_download_snapshot(&mut state.download, dl);
+        }
+    }
+    // Market status (Qt `MarketStatusPanel` read-only projection; the
+    // panel's `open` state is view-local and never overwritten here).
+    if let Some(ms) = value.get("market_status") {
+        if ms.is_object() {
+            let facts = &mut state.market_status;
+            let set = |slot: &mut String, val: String| {
+                if !val.is_empty() {
+                    *slot = val;
+                }
+            };
+            set(&mut facts.regime_current, snap_str(ms, "regime_current"));
+            set(&mut facts.regime_trend, snap_str(ms, "regime_trend"));
+            set(&mut facts.regime_volatility, snap_str(ms, "regime_volatility"));
+            set(&mut facts.regime_momentum, snap_str(ms, "regime_momentum"));
+            set(&mut facts.provider, snap_str(ms, "provider"));
+            set(&mut facts.latency, snap_str(ms, "latency"));
+            set(&mut facts.last_update, snap_str(ms, "last_update"));
+            set(&mut facts.bars_loaded, snap_str(ms, "bars_loaded"));
         }
     }
 }
@@ -2397,49 +2642,84 @@ mod tests {
         assert!(st.indicators[0].visible);
         assert!(st.apply(MarketAction::ToggleIndicatorVisible("SMA".to_string())));
         assert!(!st.indicators[0].visible);
+        // One indicator's toggle must not touch another.
+        assert!(st.apply(MarketAction::AddIndicator("Stochastic".to_string())));
+        assert!(st.indicators[1].visible);
         assert!(st.apply(MarketAction::RemoveIndicator("SMA".to_string())));
+        assert_eq!(st.indicators.len(), 1);
+        assert_eq!(st.indicators[0].name, "Stochastic");
+        // Delete removes completely (OBR too) — no resurrection on refresh.
+        assert!(st.apply(MarketAction::RemoveIndicator("Stochastic".to_string())));
         assert!(st.indicators.is_empty());
-        // Vol hides (built-in), not removed
         assert!(st.apply(MarketAction::AddIndicator("Volume".to_string())));
         assert_eq!(st.indicators[0].name, "Vol");
         assert!(st.apply(MarketAction::RemoveIndicator("Volume".to_string())));
-        assert_eq!(st.indicators.len(), 1);
-        assert!(!st.indicators[0].visible);
+        assert!(st.indicators.is_empty());
     }
 
     #[test]
-    fn settings_and_source_forward_existing_rows_only() {
+    fn settings_popup_semantics() {
         let mut st = MarketState::default();
         assert!(st.apply(MarketAction::AddIndicator("OBR".to_string())));
-        // ⚙ / `{}` name backend-owned behavior: they forward only rows that
-        // exist (the retained widget answers; the view invents no surface).
-        assert!(st.apply(MarketAction::SettingsIndicator("OBR".to_string())));
-        assert!(st.apply(MarketAction::SourceIndicator("OBR".to_string())));
-        assert!(!st.apply(MarketAction::SettingsIndicator("RSI".to_string())));
-        assert!(!st.apply(MarketAction::SourceIndicator("RSI".to_string())));
-        // Visibility is untouched by settings/source (the eye owns it).
+        // Seed backend-reported specs (as the snapshot would).
+        st.indicator_params.insert(
+            "OBR".to_string(),
+            vec![SettingsRow {
+                key: "c1_thresh".to_string(),
+                label: "C1 Threshold".to_string(),
+                value: 1.25,
+                min: 0.5,
+                max: 5.0,
+                step: 0.05,
+                decimals: 2,
+            }],
+        );
+        // Opening for a missing row fails; for an existing row it seeds.
+        assert!(!st.apply(MarketAction::SettingsPopup(true, "RSI".to_string())));
+        assert!(st.apply(MarketAction::SettingsPopup(true, "OBR".to_string())));
+        assert!(st.settings_open);
+        assert_eq!(st.settings_name, "OBR");
+        assert_eq!(st.settings_rows.len(), 1);
+        let v = project(&st);
+        assert!(v.settings_open);
+        assert_eq!(v.settings_name, "OBR");
+        assert_eq!(v.settings_rows.len(), 1);
+        assert_eq!(v.settings_rows[0].key, "c1_thresh");
+        // Edits hit the local buffer only, one indicator at a time.
+        assert!(st.apply(MarketAction::SettingsEdit("c1_thresh".to_string(), 2.0)));
+        assert!(!st.apply(MarketAction::SettingsEdit("nope".to_string(), 1.0)));
+        assert_eq!(st.settings_rows[0].value, 2.0);
         assert!(st.indicators[0].visible);
-        // interact queues the wire for the Qt host to replay.
+        // SAVE payload is name + JSON over the buffer.
+        let (name, json) = st.settings_payload().expect("payload");
+        assert_eq!(name, "OBR");
+        assert_eq!(json, "{\"c1_thresh\":2}");
+        // Commit closes and stays backend-owned (wire queued by the view).
         let mut q = MarketState::default();
         assert!(q.apply(MarketAction::AddIndicator("OBR".to_string())));
+        assert!(q.apply(MarketAction::SettingsPopup(true, "OBR".to_string())));
         q.interact(
-            "indicator:settings:OBR",
-            MarketAction::SettingsIndicator("OBR".to_string()),
-        );
-        q.interact(
-            "indicator:source:OBR",
-            MarketAction::SourceIndicator("OBR".to_string()),
+            "indicator:params:OBR:{\"c1_thresh\":2}",
+            MarketAction::ApplyIndicatorSettings(
+                "OBR".to_string(),
+                "{\"c1_thresh\":2}".to_string(),
+            ),
         );
         assert_eq!(
             q.pending_actions,
-            vec!["indicator:settings:OBR", "indicator:source:OBR"]
+            vec!["indicator:params:OBR:{\"c1_thresh\":2}".to_string()]
         );
+        assert!(!q.settings_open);
         // Unknown indicator: apply fails, no wire queued.
         q.interact(
-            "indicator:settings:GHOST",
-            MarketAction::SettingsIndicator("GHOST".to_string()),
+            "indicator:params:GHOST:{}",
+            MarketAction::ApplyIndicatorSettings("GHOST".to_string(), "{}".to_string()),
         );
-        assert_eq!(q.pending_actions.len(), 2);
+        assert_eq!(q.pending_actions.len(), 1);
+        // RESET drops overrides and re-seeds an empty panel.
+        assert!(q.apply(MarketAction::SettingsPopup(true, "OBR".to_string())));
+        assert!(q.apply(MarketAction::ResetIndicatorSettings("OBR".to_string())));
+        assert!(q.settings_rows.is_empty());
     }
 
     #[test]
@@ -2875,5 +3155,85 @@ mod tests {
             assert_eq!(v_pan.hover_time, short_time(&bar_pan.time));
             assert!(v_pan.header_ohlc.contains(&fmt_price(bar_pan.close)));
         }
+    }
+
+    // ── market status panel (Qt MarketStatusPanel parity) ────────────────
+
+    #[test]
+    fn market_status_defaults_to_honest_unknown() {
+        let state = MarketState::default();
+        assert!(!state.market_status.open);
+        let view = project(&state);
+        assert!(!view.market_status_open);
+        // Exact Qt grid: 4 regime rows then 4 data rows, all "--", all muted.
+        let regime_keys: Vec<&str> = view
+            .market_status_regime
+            .iter()
+            .map(|(k, _, _)| k.as_str())
+            .collect();
+        let data_keys: Vec<&str> = view
+            .market_status_data
+            .iter()
+            .map(|(k, _, _)| k.as_str())
+            .collect();
+        assert_eq!(
+            regime_keys,
+            vec!["Current regime", "Trend strength", "Volatility", "Momentum"]
+        );
+        assert_eq!(
+            data_keys,
+            vec!["Data provider", "Latency", "Last update", "Bars loaded"]
+        );
+        let all: Vec<_> = view
+            .market_status_regime
+            .iter()
+            .chain(view.market_status_data.iter())
+            .collect();
+        assert!(all.iter().all(|(_, v, muted)| v == "--" && *muted));
+    }
+
+    #[test]
+    fn market_status_snapshot_sets_values_and_unmutes() {
+        let mut state = MarketState::default();
+        let json = serde_json::json!({
+            "market_status": {
+                "provider": "Zerodha",
+                "latency": "12ms",
+                "last_update": "2026-09-17 15:30:00",
+                "bars_loaded": "61,676",
+                "regime_current": "TRENDING",
+            }
+        });
+        apply_snapshot_json(&mut state, &json);
+        let view = project(&state);
+        let by_key: std::collections::HashMap<&str, (&str, bool)> = view
+            .market_status_data
+            .iter()
+            .chain(view.market_status_regime.iter())
+            .map(|(k, v, m)| (k.as_str(), (v.as_str(), *m)))
+            .collect();
+        assert_eq!(by_key["Data provider"], ("Zerodha", false));
+        assert_eq!(by_key["Latency"], ("12ms", false));
+        assert_eq!(by_key["Bars loaded"], ("61,676", false));
+        assert_eq!(by_key["Current regime"], ("TRENDING", false));
+        // Untouched rows stay honest-unknown + muted.
+        assert_eq!(by_key["Trend strength"], ("--", true));
+        // Snapshot NEVER touches the view-local open flag.
+        assert!(!view.market_status_open);
+    }
+
+    #[test]
+    fn market_status_toggle_is_view_local() {
+        let mut state = MarketState::default();
+        assert!(state.apply(MarketAction::ToggleStatus));
+        assert!(state.market_status.open);
+        assert!(state.apply(MarketAction::ToggleStatus));
+        assert!(!state.market_status.open);
+        // Toggle is view-local: no wire is queued for the backend.
+        assert!(state.pending_actions.is_empty());
+        let view = project(&state);
+        state.apply(MarketAction::ToggleStatus);
+        let view2 = project(&state);
+        assert_ne!(view.market_status_open, view2.market_status_open);
     }
 }

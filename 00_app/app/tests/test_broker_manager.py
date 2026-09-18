@@ -131,6 +131,8 @@ def _spec(hooks: SpecHooks) -> BrokerSpec:
         venue_register=register,
         venue_unregister=unregister,
         extra={"callback_port": 0},
+        callback_port=9474,
+        callback_url="http://127.0.0.1:9474/vayren/callback",
     )
 
 
@@ -374,7 +376,218 @@ def test_strategy_agnostic_no_obr_in_broker_layer() -> None:
         "09_broker/broker/status.py",
         "02_data/data/provider/zerodha/live_auth.py",
         "02_data/data/provider/zerodha/live_activation.py",
+        "02_data/data/provider/fyers/live_auth.py",
+        "02_data/data/provider/fyers/session_adapter.py",
     ):
         text = (root / rel).read_text(encoding="utf-8").upper()
         assert "OBR" not in text, rel
     assert VENUE  # spec venue id unused marker (keeps constant honest)
+
+
+# ── universal auth: second venue through the same manager, zero branching ──
+
+
+def _fyers_shaped_spec(hooks: SpecHooks) -> BrokerSpec:
+    """FYERS-shaped scripted spec: own storage keys, UI key map, redirect URI."""
+
+    def adapter(app_id: str, token: str) -> FakeAdapter:
+        a = FakeAdapter(app_id, token)
+        a._spec_ref = lambda: hooks  # type: ignore[method-assign]
+        return a
+
+    def flow() -> FakeFlow:
+        return FakeFlow(hooks)
+
+    def register(adapter: Any, md: Any) -> tuple[bool, str]:
+        hooks.registered.append((adapter, md))
+        return True, "registered"
+
+    def unregister() -> None:
+        hooks.unregistered += 1
+
+    return BrokerSpec(
+        broker_id="fyers",
+        display_name="Fyers",
+        config_service="vayren:fyers",
+        session_service="vayren:fyers:session",
+        required_config=("app_id", "secret"),
+        masked_config=("app_id", "secret"),
+        key_field="app_id",
+        secret_field="secret",
+        redirect_uri_field="redirect_uri",
+        config_key_map={"api_key": "app_id", "api_secret": "secret"},
+        build_adapter=adapter,
+        build_market_data=None,
+        build_flow=flow,
+        build_session_store=lambda st, service: _FakeSessionStore(st, service),
+        venue_register=register,
+        venue_unregister=unregister,
+        callback_port=9475,
+        callback_url="http://127.0.0.1:9475/vayren/fyers-callback",
+        extra={"venue_subtitle": "FYERS API v3"},
+    )
+
+
+def test_default_specs_cover_both_venues(manager) -> None:
+    mgr, _, _ = manager
+    assert mgr.broker_ids() == ("zerodha", "fyers")
+    assert mgr.display_name("fyers") == "Fyers"
+    snap = mgr.snapshot()
+    assert [card["id"] for card in snap["brokers"]] == ["zerodha", "fyers"]
+    by_id = {card["id"]: card for card in snap["brokers"]}
+    assert by_id["zerodha"]["callback_url"] == "http://127.0.0.1:9474/vayren/callback"
+    assert by_id["fyers"]["callback_url"] == "http://127.0.0.1:9475/vayren/fyers-callback"
+    # Top-level URL stays the compatibility default (first venue).
+    assert snap["callback_url"] == "http://127.0.0.1:9474/vayren/callback"
+
+
+def test_fyers_shaped_configure_maps_ui_keys_to_storage_keys(manager) -> None:
+    mgr, _, store = manager
+    mgr._specs["fyers"] = _fyers_shaped_spec(SpecHooks())
+    mgr._states["fyers"] = mgr._fresh_state(mgr._specs["fyers"])
+    ok, reason = mgr.configure("fyers", {"api_key": "APP-1234567890"})
+    assert not ok and "secret" in reason
+    ok, reason = mgr.configure(
+        "fyers", {"api_key": "APP-1234567890", "api_secret": "SHH-super-secret"}
+    )
+    assert ok, reason
+    stored = store.data["vayren:fyers"]
+    assert stored == {"app_id": "APP-1234567890", "secret": "SHH-super-secret"}
+    snap = mgr.snapshot()
+    text = repr(snap)
+    assert "SHH-super-secret" not in text
+    card = {entry["id"]: entry for entry in snap["brokers"]}["fyers"]
+    assert card["api_key_masked"].startswith("APP-")
+    assert "secret" not in card
+
+
+def test_fyers_shaped_session_check_uses_own_key_field(manager) -> None:
+    mgr, hooks, store = manager
+    mgr._specs["fyers"] = _fyers_shaped_spec(hooks)
+    mgr._states["fyers"] = mgr._fresh_state(mgr._specs["fyers"])
+    store.save("vayren:fyers", {"app_id": "APP-1234567890", "secret": "SHH-secret"})
+    store.save("vayren:fyers:session", {"access_token": "tok-fyers"})
+    mgr.submit_check("fyers")
+    _settle(mgr)
+    state = mgr.state("fyers")
+    assert state["status"] in (BrokerStatus.CONNECTED, BrokerStatus.ACCOUNT_NOT_READY)
+    assert hooks.registered and hooks.registered[0][0].api_key == "APP-1234567890"
+    assert mgr.is_connected("fyers")
+
+
+def test_fyers_shaped_login_receives_redirect_uri(manager) -> None:
+    mgr, _, store = manager
+    mgr._specs["fyers"] = _fyers_shaped_spec(SpecHooks())
+    mgr._states["fyers"] = mgr._fresh_state(mgr._specs["fyers"])
+    store.save("vayren:fyers", {"app_id": "APP-1234567890", "secret": "SHH-secret"})
+    seen: dict[str, Any] = {}
+
+    def fake_login(_flow, _app_id, _secret, session_store, **kwargs):
+        seen.update(kwargs)
+        assert _app_id == "APP-1234567890"
+        assert _secret == "SHH-secret"
+        session_store.save_token("tok-fyers-new", "FY1234")
+        return True, "connected: authenticated as FY1234"
+
+    mgr._specs["fyers"].interactive_login = fake_login
+    ok, _ = mgr.start_login("fyers")
+    assert ok
+    _settle(mgr)
+    assert seen.get("port") == 9475
+    assert seen.get("redirect_uri") == "http://127.0.0.1:9475/vayren/fyers-callback"
+    assert store.data["vayren:fyers:session"]["access_token"] == "tok-fyers-new"
+
+
+def test_real_fyers_spec_wires_without_network(manager) -> None:
+    """Production FYERS spec through configure + session check (zero network:
+    no session stored and the real spec's auto-auth reports the missing
+    triple, so the manager stops at LOGIN_REQUIRED with the exact reason)."""
+    mgr, _, store = manager
+    ok, _ = mgr.configure("fyers", {"api_key": "APP-1", "api_secret": "S-1"})
+    assert ok
+    assert store.data["vayren:fyers"] == {"app_id": "APP-1", "secret": "S-1"}
+    mgr.submit_check("fyers")
+    _settle(mgr)
+    state = mgr.state("fyers")
+    assert state["status"] is BrokerStatus.LOGIN_REQUIRED
+    assert state["configured"] is True
+    assert "Client ID" in state["reason"]
+
+
+def test_session_check_runs_wired_auto_auth(manager) -> None:
+    mgr, hooks, store = manager
+    spec = _fyers_shaped_spec(hooks)
+    auto_calls: list[dict[str, str]] = []
+
+    def fake_auto(config: dict[str, str], session_store: Any) -> tuple[bool, str]:
+        auto_calls.append(dict(config))
+        session_store.save_token("tok-auto", "FY1234")
+        return True, "connected: authenticated as FY1234"
+
+    spec.auto_authenticate = fake_auto
+    mgr._specs["fyers"] = spec
+    mgr._states["fyers"] = mgr._fresh_state(spec)
+    store.save("vayren:fyers", {"app_id": "APP-1", "secret": "S-1"})
+    mgr.submit_check("fyers")  # no session stored → auto-auth runs
+    _settle(mgr)
+    assert len(auto_calls) == 1
+    assert auto_calls[0]["app_id"] == "APP-1"
+    assert mgr.state("fyers")["status"] in (
+        BrokerStatus.CONNECTED,
+        BrokerStatus.ACCOUNT_NOT_READY,
+    )
+
+
+def test_failing_auto_auth_stays_login_required(manager) -> None:
+    mgr, hooks, store = manager
+    spec = _fyers_shaped_spec(hooks)
+
+    def failing_auto(_config: dict[str, str], _session_store: Any) -> tuple[bool, str]:
+        return False, "automatic login failed — check the log"
+
+    spec.auto_authenticate = failing_auto
+    mgr._specs["fyers"] = spec
+    mgr._states["fyers"] = mgr._fresh_state(spec)
+    store.save("vayren:fyers", {"app_id": "APP-1", "secret": "S-1"})
+    mgr.submit_check("fyers")
+    _settle(mgr)
+    assert mgr.state("fyers")["status"] is BrokerStatus.LOGIN_REQUIRED
+
+
+def test_exploding_auto_auth_never_kills_the_check(manager) -> None:
+    mgr, hooks, store = manager
+    spec = _fyers_shaped_spec(hooks)
+
+    def exploding_auto(_config: dict[str, str], _session_store: Any) -> tuple[bool, str]:
+        raise RuntimeError("boom")
+
+    spec.auto_authenticate = exploding_auto
+    mgr._specs["fyers"] = spec
+    mgr._states["fyers"] = mgr._fresh_state(spec)
+    store.save("vayren:fyers", {"app_id": "APP-1", "secret": "S-1"})
+    mgr.submit_check("fyers")
+    _settle(mgr)
+    assert mgr.state("fyers")["status"] is BrokerStatus.LOGIN_REQUIRED
+
+
+def test_real_fyers_spec_is_auth_only_and_registry_clean(manager) -> None:
+    """Production FYERS spec: own keys, auth-only venue registration (the
+    UBL registry gains no trading venue in this phase)."""
+    from broker.registry import default_registry
+    from data.provider.factory import fyers_management_spec
+
+    spec = fyers_management_spec()
+    assert spec.broker_id == "fyers"
+    assert spec.required_config == ("app_id", "secret")
+    assert spec.key_field == "app_id"
+    assert spec.secret_field == "secret"
+    assert spec.redirect_uri_field == "redirect_uri"
+    assert spec.config_key_map == {"api_key": "app_id", "api_secret": "secret"}
+    assert spec.callback_port == 9475
+    assert "fyers-callback" in spec.callback_url
+    assert spec.venue_register is not None
+    ok, _ = spec.venue_register(object(), None)
+    assert ok
+    assert "fyers-live" not in default_registry()
+    mgr, _, _ = manager
+    assert "fyers" in mgr.broker_ids()

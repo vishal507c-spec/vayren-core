@@ -19,6 +19,8 @@ One coordination boundary between VAYREN and any venue:
 - ``registry`` — the ONLY name→plugin map.
 - ``selection`` — the ``BrokerSelection`` contract (single source of truth).
 - ``selection_store`` — file-backed persistence for that selection (M4).
+- ``auth`` — universal broker authentication contract (``BrokerAuthContract``,
+  ``AuthCapability`` schema vocabulary, secret-free results/states).
 
 Fail-closed by design: unknown broker → :class:`BrokerNotRegisteredError`,
 unsupported capability → :class:`UnsupportedCapabilityError`, corrupt
@@ -32,6 +34,18 @@ funds surface (Paper/Sandbox cash-only, Zerodha history-only).
 NO real broker integration (M5+ done for identity, M7+), NO LIVE.
 """
 
+from broker.auth import (
+    AccountIdentity,
+    AuthCapability,
+    AuthErrorCode,
+    AuthField,
+    AuthResult,
+    BrokerAuthContract,
+    ConnectionState,
+    describe_schema,
+    mask_secret,
+    schema_keys,
+)
 from broker.capabilities import CapabilitySet, CapabilityStatus, Caps, Domain, capability_status
 from broker.credentials import (
     CredentialMetadata,
@@ -91,6 +105,12 @@ from broker.vocab import (
 )
 
 __all__ = [
+    "AccountIdentity",
+    "AuthCapability",
+    "AuthErrorCode",
+    "AuthField",
+    "AuthResult",
+    "BrokerAuthContract",
     "BrokerError",
     "BrokerHealth",
     "BrokerIdentity",
@@ -104,6 +124,7 @@ __all__ = [
     "Caps",
     "CapabilitySet",
     "CapabilityStatus",
+    "ConnectionState",
     "CredentialsNotReadyError",
     "CredentialMetadata",
     "CredentialRef",
@@ -135,11 +156,14 @@ __all__ = [
     "UnsupportedCapabilityError",
     "capability_status",
     "default_registry",
+    "describe_schema",
     "error_code_from_legacy",
     "identity_of",
     "is_unknown",
     "is_unsupported",
+    "mask_secret",
     "require_funds",
+    "schema_keys",
     "surface_resolution",
     "surface_status",
     "validate_metadata",

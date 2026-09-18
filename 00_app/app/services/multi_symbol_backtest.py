@@ -132,10 +132,6 @@ class MultiSymbolBacktestCoordinator(QObject):
         """True while a multi-symbol batch is in flight."""
         return self._request is not None
 
-    def attach_worker(self, worker: Any) -> None:
-        """Inject the background worker (bootstrap wiring)."""
-        self._worker = worker
-
     def cancel(self) -> None:
         """Drop the batch (Lab reset). In-flight results are discarded."""
         try:

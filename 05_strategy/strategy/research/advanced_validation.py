@@ -7,7 +7,6 @@ All computations are real — no placeholders, no mock logic.
 
 from __future__ import annotations
 
-import hashlib
 import itertools
 import json
 import math
@@ -21,10 +20,6 @@ from typing import Any
 from .dataset import ResearchDataset
 from .discovery import Discovery  # noqa: F401
 from .experiment import Experiment  # noqa: F401
-
-
-def _hash(data: Any) -> str:
-    return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()[:8]
 
 
 def _extract_pnl(t: Any) -> float:

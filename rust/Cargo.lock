@@ -5191,6 +5191,7 @@ dependencies = [
  "serde_json",
  "slint",
  "slint-build",
+ "vayren-core",
 ]
 
 [[package]]

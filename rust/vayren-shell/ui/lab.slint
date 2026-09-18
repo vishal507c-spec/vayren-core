@@ -36,7 +36,6 @@ export struct LabHeader {
     timeframe: string,
     dates: string,
     capital: string,
-    cost: string,
     show-results: bool,
     tab: int,
     summary-line: string,
@@ -339,7 +338,6 @@ export component StrategyLabScreen inherits Rectangle {
     in property <[string]> sym-visible;
     in property <[bool]> sym-visible-on;
     in property <int> filter-active: 0;
-    property <[string]> config-labels: ["UNIVERSE", "TIMEFRAME", "DATE RANGE", "CAPITAL", "TRANSACTION COST"];
 
     in property <bool> head-roomy: true;
 
@@ -727,8 +725,8 @@ export component StrategyLabScreen inherits Rectangle {
 
             // Backtest configuration — the Qt 4-column grid (UNIVERSE →
             // TIMEFRAME → DATE RANGE → CAPITAL) with the same editors: text
-            // entry commits on Enter, timeframe is a combo box, costs are a
-            // fixed disclosure, the panel's inline error echoes verbatim.
+            // entry commits on Enter, timeframe is a combo box, the panel's
+            // inline error echoes verbatim.
             Rectangle {
                 height: 44px;
                 background: VayrenPalette.bg1;
@@ -843,24 +841,6 @@ export component StrategyLabScreen inherits Rectangle {
                             height: 24px;
                             text: root.lab.cfg-capital;
                             accepted(t) => { root.capital-committed(t); }
-                        }
-                    }
-                    VerticalLayout {
-                        spacing: 0;
-                        alignment: center;
-                        Text {
-                            text: "TRANSACTION COST";
-                            color: VayrenPalette.faint;
-                            font-size: VayrenDesign.fs-label;
-                            font-weight: 700;
-                        }
-                        Text {
-                            text: root.lab.cost;
-                            color: VayrenPalette.text;
-                            font-size: VayrenDesign.fs-small;
-                            font-weight: 600;
-                            vertical-alignment: center;
-                            height: 24px;
                         }
                     }
                     Rectangle { horizontal-stretch: 1; background: transparent; }

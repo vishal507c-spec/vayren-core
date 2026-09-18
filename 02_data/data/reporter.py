@@ -122,7 +122,3 @@ class RecordingReporter(NullReporter):
     def on_error(self, symbol: str, interval: str, message: str) -> None:
         self._record("on_error", symbol=symbol, interval=interval, message=message)
         self.messages.append(f"ERROR {symbol} {interval}: {message}")
-
-
-def fmt_range(from_dt: datetime, to_dt: datetime) -> str:
-    return f"{from_dt.strftime('%Y-%m-%d')} → {to_dt.strftime('%Y-%m-%d')}"

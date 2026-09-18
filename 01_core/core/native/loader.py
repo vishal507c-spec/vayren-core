@@ -96,6 +96,40 @@ def _configure(lib: ctypes.CDLL) -> ctypes.CDLL:
         ctypes.c_size_t,
         ctypes.POINTER(ctypes.c_int64),
     ]
+    if hasattr(lib, "vy_exec_arm_transition"):
+        lib.vy_exec_arm_transition.restype = ctypes.c_int32
+        lib.vy_exec_arm_transition.argtypes = [ctypes.c_int32, ctypes.c_int32]
+    if hasattr(lib, "vy_exec_lifecycle_transition_allowed"):
+        lib.vy_exec_lifecycle_transition_allowed.restype = ctypes.c_int32
+        lib.vy_exec_lifecycle_transition_allowed.argtypes = [ctypes.c_int32, ctypes.c_int32]
+    if hasattr(lib, "vy_exec_planner_plan"):
+        lib.vy_exec_planner_plan.restype = ctypes.c_int32
+        lib.vy_exec_planner_plan.argtypes = [
+            ctypes.c_double,
+            ctypes.c_int32,
+            ctypes.c_double,
+            ctypes.c_int32,
+            ctypes.c_double,
+            ctypes.POINTER(ctypes.c_double),
+            ctypes.POINTER(ctypes.c_int32),
+            ctypes.POINTER(ctypes.c_int32),
+            ctypes.POINTER(ctypes.c_double),
+        ]
+    if hasattr(lib, "vy_exec_ledger_apply_fill"):
+        lib.vy_exec_ledger_apply_fill.restype = ctypes.c_int32
+        lib.vy_exec_ledger_apply_fill.argtypes = [
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_int32,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.POINTER(ctypes.c_double),
+            ctypes.POINTER(ctypes.c_double),
+            ctypes.POINTER(ctypes.c_double),
+            ctypes.POINTER(ctypes.c_double),
+        ]
     return lib
 
 

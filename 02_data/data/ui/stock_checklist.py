@@ -20,8 +20,9 @@ from PySide6.QtCore import (
     Qt,
     Signal,
 )
-from PySide6.QtGui import QPainter, QPalette, QPen
+from PySide6.QtGui import QPainter, QPalette, QPen, QWheelEvent
 from PySide6.QtWidgets import (
+    QApplication,
     QHBoxLayout,
     QLabel,
     QLayout,
@@ -236,12 +237,48 @@ class _ChecklistList(QListWidget):
     stop the form from claiming the available middle height; the list is
     the stretch target of the panel, so its preference scales with the
     universe (capped so a 500-stock universe cannot balloon the panel).
+
+    Wheel handling is explicit and natural (root-cause fix, not a visual
+    reversal): the viewport's content offset IS the vertical scrollbar
+    value (``minimum`` = top/first row, ``maximum`` = bottom/last row).
+    A positive wheel/trackpad delta (wheel UP) must therefore DECREASE
+    the offset (upper stocks appear) and a negative delta (wheel DOWN)
+    must INCREASE it. The event is always accepted and clamped so a
+    wheel at the top/bottom never bubbles to the outer panel scroll
+    area (no overscroll, no outside-panel movement). Trackpad
+    ``pixelDelta`` (1:1 pixels) and mouse ``angleDelta`` (120 units =
+    one notch = ``wheelScrollLines × singleStep`` pixels) share the
+    same sign mapping.
     """
 
     def sizeHint(self) -> QSize:
         hint = super().sizeHint()
         rows = min(max(self.count(), 1), _LIST_VISIBLE_ROWS)
         return QSize(hint.width(), rows * 26)
+
+    def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802 (Qt override)
+        bar = self.verticalScrollBar()
+        pixel = event.pixelDelta()
+        angle = event.angleDelta()
+        if not pixel.isNull() and pixel.y() != 0:
+            delta_px = float(pixel.y())
+        elif angle.y() != 0:
+            try:
+                lines = int(QApplication.wheelScrollLines())
+            except Exception:
+                lines = 3
+            step = int(bar.singleStep()) if int(bar.singleStep()) > 0 else 26
+            delta_px = float(angle.y()) / 120.0 * float(lines) * float(step)
+        else:
+            super().wheelEvent(event)
+            return
+        if bar.maximum() <= bar.minimum():
+            event.accept()
+            return
+        target = int(round(float(bar.value()) - delta_px))
+        target = max(bar.minimum(), min(bar.maximum(), target))
+        bar.setValue(target)
+        event.accept()
 
 
 class _SlimButton(QPushButton):

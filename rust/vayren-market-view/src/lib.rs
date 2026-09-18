@@ -201,6 +201,22 @@ fn apply_state(ui: &MarketHostWindow, state: &MarketState) {
             })
             .collect(),
     ));
+    ui.set_settings_open(view.settings_open);
+    ui.set_settings_name(view.settings_name.into());
+    ui.set_settings_rows(model(
+        view.settings_rows
+            .into_iter()
+            .map(|r| MarketSettingsRow {
+                key: r.key.into(),
+                label: r.label.into(),
+                value: r.value as f32,
+                min: r.min as f32,
+                max: r.max as f32,
+                step: r.step as f32,
+                decimals: r.decimals,
+            })
+            .collect(),
+    ));
     ui.set_active_label(view.active_label.into());
     ui.set_trade_context(MarketTradeContext {
         visible: view.trade_context.visible,
@@ -210,6 +226,21 @@ fn apply_state(ui: &MarketHostWindow, state: &MarketState) {
         pnl: view.trade_context.pnl.into(),
         r: view.trade_context.r.into(),
     });
+    ui.set_market_status_open(view.market_status_open);
+    let status_rows =
+        |rows: Vec<(String, String, bool)>| -> slint::ModelRc<MarketStatusRow> {
+            model(
+                rows.into_iter()
+                    .map(|(key, value, muted)| MarketStatusRow {
+                        key: key.into(),
+                        value: value.into(),
+                        muted,
+                    })
+                    .collect(),
+            )
+        };
+    ui.set_market_status_regime(status_rows(view.market_status_regime));
+    ui.set_market_status_data(status_rows(view.market_status_data));
     set_dl(ui, &view.download);
 }
 
@@ -483,6 +514,9 @@ fn wire_view(ui: &MarketHostWindow, state: Rc<RefCell<MarketState>>) {
     bind!(on_trade_prev, "trade:prev", MarketAction::TradePrev);
     bind!(on_trade_next, "trade:next", MarketAction::TradeNext);
     bind!(on_trade_open, "trade:open", MarketAction::TradeOpen);
+    // View-local market-status strip toggle (Qt MarketStatusPanel parity;
+    // no backend wire — same track as PanelToggle).
+    bind!(on_status_toggle, "", MarketAction::ToggleStatus);
 
     macro_rules! bind_str {
         ($set:ident, $make:expr) => {{
@@ -518,18 +552,72 @@ fn wire_view(ui: &MarketHostWindow, state: Rc<RefCell<MarketState>>) {
         format!("indicator:vis:{s}"),
         MarketAction::ToggleIndicatorVisible(s)
     ));
-    bind_str!(on_settings_indicator, |s| (
-        format!("indicator:settings:{s}"),
-        MarketAction::SettingsIndicator(s)
-    ));
-    bind_str!(on_source_indicator, |s| (
-        format!("indicator:source:{s}"),
-        MarketAction::SourceIndicator(s)
-    ));
     bind_str!(on_remove_indicator, |s| (
         format!("indicator:rm:{s}"),
         MarketAction::RemoveIndicator(s)
     ));
+    // ⚙ action — the native settings panel: open/close is view-local state,
+    // SAVE/RESET commit to the backend through the same wire namespace the
+    // retained Qt toolbar reaches.
+    {
+        let strong = state.clone();
+        let weak = ui.as_weak();
+        ui.on_settings_popup(move |open: bool, name: SharedString| {
+            let Some(ui) = weak.upgrade() else { return };
+            report(
+                &ui,
+                &strong,
+                "",
+                MarketAction::SettingsPopup(open, name.to_string()),
+            );
+        });
+    }
+    {
+        let strong = state.clone();
+        let weak = ui.as_weak();
+        ui.on_settings_edit(move |key: SharedString, value: f32| {
+            let Some(ui) = weak.upgrade() else { return };
+            report(
+                &ui,
+                &strong,
+                "",
+                MarketAction::SettingsEdit(key.to_string(), value as f64),
+            );
+        });
+    }
+    {
+        let strong = state.clone();
+        let weak = ui.as_weak();
+        ui.on_settings_save(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let payload = strong.borrow().settings_payload();
+            if let Some((name, json)) = payload {
+                report(
+                    &ui,
+                    &strong,
+                    &format!("indicator:params:{name}:{json}"),
+                    MarketAction::ApplyIndicatorSettings(name, json),
+                );
+            }
+        });
+    }
+    {
+        let strong = state.clone();
+        let weak = ui.as_weak();
+        ui.on_settings_reset(move || {
+            let name = strong.borrow().settings_name.clone();
+            if name.is_empty() {
+                return;
+            }
+            let Some(ui) = weak.upgrade() else { return };
+            report(
+                &ui,
+                &strong,
+                &format!("indicator:clear-params:{name}"),
+                MarketAction::ResetIndicatorSettings(name),
+            );
+        });
+    }
     bind_str!(on_indicator_query, |s| (
         String::new(),
         MarketAction::IndicatorQuery(s)

@@ -1,19 +1,36 @@
-"""IndicatorVisibilityPanel — TradingView native indicator overlay bar.
+"""IndicatorVisibilityPanel — TradingView-style indicator overlay bar.
 
-Uses provided SVG assets exactly as supplied (vector, transparent background).
-Single-row bar at chart top-left: OBR + 5 icons. No background/box/card.
+Each indicator row carries exactly THREE compact actions, rendered from the
+single SVG asset ``vayren_3_action_toolbar.svg``:
+
+* eye      — show/hide the indicator on the chart (state lives in the chart
+             widget; the eye is only a toggle, never an owner of data);
+* settings — open the indicator's real parameter panel (``IndicatorSettingsDialog``);
+* delete   — remove the indicator completely (row + plots + renderer objects).
+
+No fourth button, no code/source button, no "more" menu — the old duplicated
+glyph row (eye + settings + source + delete + more) is replaced by this one
+consistent horizontal group. Indicator calculation logic is untouched: the eye
+only flips rendering visibility, settings only edit stored parameters, delete
+only clears what the chart already rendered.
 """
 
 from __future__ import annotations
 
-import contextlib
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QFont, QIcon
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QMenu, QToolButton, QVBoxLayout, QWidget
+from PySide6.QtCore import QByteArray, QRectF, QSize, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QToolButton, QVBoxLayout, QWidget
+
+from chart.theme import ACCENT, PLACEHOLDER, TEXT
 
 _ASSET_DIR = Path(__file__).resolve().parent.parent / "assets" / "indicator_bar"
+_ASSET_FILE = _ASSET_DIR / "vayren_3_action_toolbar.svg"
+
+_ICON_SIZE = 16
+_BUTTON_SIZE = 20
+_ROW_HEIGHT = 28
 
 _PANEL_STYLE = """
 QFrame#IndicatorVisibilityPanel {
@@ -30,47 +47,102 @@ QLabel#IndicatorName {
 QLabel#IndicatorName[hidden="true"] {
     color: #6b7280;
 }
-QToolButton#EyeButton, QToolButton#IconButton {
+QToolButton#EyeButton, QToolButton#ActionButton {
     border: none;
     border-radius: 4px;
     background: transparent;
     padding: 0px;
 }
-QToolButton#EyeButton:hover, QToolButton#IconButton:hover {
-    background: transparent;
+QToolButton#EyeButton:hover, QToolButton#ActionButton:hover {
+    background: rgba(255, 255, 255, 0.08);
 }
-QToolButton#EyeButton:pressed, QToolButton#IconButton:pressed {
-    background: transparent;
+QToolButton#EyeButton:pressed, QToolButton#ActionButton:pressed {
+    background: rgba(255, 255, 255, 0.16);
+}
+QToolButton#EyeButton:checked {
+    background: rgba(38, 166, 154, 0.16);
 }
 """
 
-_ICON_SIZE = 16
-_ROW_HEIGHT = 28
+# One renderer per tint (currentColor is substituted before parsing).
+_RENDERER_CACHE: dict[str, object] = {}
+_PIXMAP_CACHE: dict[tuple[str, str, int], QPixmap] = {}
 
 
-def _icon_from_svg(name: str) -> QIcon:
-    p = _ASSET_DIR / f"{name}.svg"
-    if p.exists():
-        return QIcon(str(p))
-    # fallback to empty
-    return QIcon()
+def _asset_text() -> str:
+    return _ASSET_FILE.read_text(encoding="utf-8")
 
 
-def _eye_icon(visible: bool) -> QIcon:
-    return _icon_from_svg("eye" if visible else "eye_off")
+def _renderer(color: QColor) -> object:
+    key = color.name()
+    renderer = _RENDERER_CACHE.get(key)
+    if renderer is None:
+        from PySide6.QtSvg import QSvgRenderer
+
+        data = _asset_text().replace("currentColor", key)
+        renderer = QSvgRenderer(QByteArray(data.encode("utf-8")))
+        _RENDERER_CACHE[key] = renderer
+    return renderer
 
 
-def _icon(kind: str) -> QIcon:
-    # kind: settings, source, delete, more
-    return _icon_from_svg(kind)
+def _toolbar_pixmap(kind: str, color: QColor, size: int = _ICON_SIZE) -> QPixmap:
+    """Render one icon of the shared asset, aspect-fit into ``size`` px.
+
+    Crisp at any DPR: the pixmap is drawn at 4x and device-pixel-ratio scaled.
+    """
+    key = (kind, color.name(), size)
+    cached = _PIXMAP_CACHE.get(key)
+    if cached is not None:
+        return cached
+    from PySide6.QtSvg import QSvgRenderer
+
+    renderer = _RENDERER_CACHE.get(color.name())
+    if renderer is None:
+        renderer = _renderer(color)
+    assert isinstance(renderer, QSvgRenderer)
+    scale = 4
+    side = size * scale
+    pixmap = QPixmap(side, side)
+    pixmap.setDevicePixelRatio(float(scale))
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    bounds = renderer.boundsOnElement(kind)
+    if not bounds.isEmpty():
+        # uniform aspect-fit + centering so every icon shares one optical size
+        fit = min(size / bounds.width(), size / bounds.height())
+        w = bounds.width() * fit
+        h = bounds.height() * fit
+        target = QRectF((size - w) / 2.0, (size - h) / 2.0, w, h)
+        renderer.render(painter, kind, target)
+    painter.end()
+    _PIXMAP_CACHE[key] = pixmap
+    return pixmap
+
+
+def _action_icon(kind: str) -> QIcon:
+    """Settings/delete icons: a single normal state in the text color."""
+    icon = QIcon()
+    icon.addPixmap(_toolbar_pixmap(kind, TEXT), QIcon.Mode.Normal, QIcon.State.Off)
+    icon.addPixmap(_toolbar_pixmap(kind, PLACEHOLDER), QIcon.Mode.Disabled, QIcon.State.Off)
+    return icon
+
+
+def _eye_icon() -> QIcon:
+    """Eye icon: ON (visible) shows the open eye in the accent color, OFF
+    (hidden) shows the crossed eye muted."""
+    icon = QIcon()
+    icon.addPixmap(_toolbar_pixmap("eye", ACCENT), QIcon.Mode.Normal, QIcon.State.On)
+    icon.addPixmap(_toolbar_pixmap("eye_off", TEXT), QIcon.Mode.Normal, QIcon.State.Off)
+    return icon
 
 
 class _IndicatorRow(QWidget):
+    """One indicator name + its three compact actions."""
+
     toggled = Signal(str, bool)
     settings_requested = Signal(str)
-    source_requested = Signal(str)
     delete_requested = Signal(str)
-    more_requested = Signal(str, object)
 
     def __init__(self, name: str, visible: bool = True, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -81,7 +153,7 @@ class _IndicatorRow(QWidget):
         self.setMouseTracking(True)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(10, 4, 8, 4)
-        lay.setSpacing(6)
+        lay.setSpacing(2)
 
         self._label = QLabel(name, self)
         self._label.setObjectName("IndicatorName")
@@ -92,80 +164,51 @@ class _IndicatorRow(QWidget):
         self._label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
         lay.addWidget(self._label, 1)
 
+        # ── the ONLY three actions: eye · settings · delete ────────────
         self._eye = QToolButton(self)
         self._eye.setObjectName("EyeButton")
-        self._eye.setFixedSize(_ICON_SIZE, _ICON_SIZE)
-        self._eye.setIconSize(QSize(16, 16))
+        self._eye.setFixedSize(_BUTTON_SIZE, _BUTTON_SIZE)
+        self._eye.setIconSize(QSize(_ICON_SIZE, _ICON_SIZE))
         self._eye.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._eye.setCheckable(True)
+        self._eye.setChecked(visible)
         self._eye.setToolTip("Hide" if visible else "Show")
-        self._eye.setIcon(_eye_icon(visible))
+        self._eye.setIcon(_eye_icon())
         self._eye.clicked.connect(self._on_eye_clicked)
         lay.addWidget(self._eye, 0, Qt.AlignmentFlag.AlignVCenter)
 
         self._settings = QToolButton(self)
-        self._settings.setObjectName("IconButton")
-        self._settings.setFixedSize(_ICON_SIZE, _ICON_SIZE)
-        self._settings.setIconSize(QSize(16, 16))
+        self._settings.setObjectName("ActionButton")
+        self._settings.setFixedSize(_BUTTON_SIZE, _BUTTON_SIZE)
+        self._settings.setIconSize(QSize(_ICON_SIZE, _ICON_SIZE))
         self._settings.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._settings.setToolTip("Settings")
-        self._settings.setIcon(_icon("settings"))
+        self._settings.setToolTip(f"Settings — {name}")
+        self._settings.setIcon(_action_icon("settings"))
         self._settings.clicked.connect(lambda: self.settings_requested.emit(self._name))
         lay.addWidget(self._settings, 0, Qt.AlignmentFlag.AlignVCenter)
 
-        self._source = QToolButton(self)
-        self._source.setObjectName("IconButton")
-        self._source.setFixedSize(_ICON_SIZE, _ICON_SIZE)
-        self._source.setIconSize(QSize(16, 16))
-        self._source.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._source.setToolTip("Source code")
-        self._source.setIcon(_icon("source"))
-        self._source.clicked.connect(lambda: self.source_requested.emit(self._name))
-        lay.addWidget(self._source, 0, Qt.AlignmentFlag.AlignVCenter)
-
         self._delete = QToolButton(self)
-        self._delete.setObjectName("IconButton")
-        self._delete.setFixedSize(_ICON_SIZE, _ICON_SIZE)
-        self._delete.setIconSize(QSize(16, 16))
+        self._delete.setObjectName("ActionButton")
+        self._delete.setFixedSize(_BUTTON_SIZE, _BUTTON_SIZE)
+        self._delete.setIconSize(QSize(_ICON_SIZE, _ICON_SIZE))
         self._delete.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._delete.setToolTip("Remove")
-        self._delete.setIcon(_icon("delete"))
+        self._delete.setToolTip(f"Remove — {name}")
+        self._delete.setIcon(_action_icon("delete"))
         self._delete.clicked.connect(lambda: self.delete_requested.emit(self._name))
         lay.addWidget(self._delete, 0, Qt.AlignmentFlag.AlignVCenter)
 
-        self._more = QToolButton(self)
-        self._more.setObjectName("IconButton")
-        self._more.setFixedSize(_ICON_SIZE, _ICON_SIZE)
-        self._more.setIconSize(QSize(16, 16))
-        self._more.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._more.setToolTip("More")
-        self._more.setIcon(_icon("more"))
-        self._more.clicked.connect(self._on_more_clicked)
-        lay.addWidget(self._more, 0, Qt.AlignmentFlag.AlignVCenter)
-
-        self.setStyleSheet("""
-        _IndicatorRow {
-            background: transparent;
-            border: none;
-        }
-        _IndicatorRow:hover {
-            background: transparent;
-            border: none;
-        }
-        """)
+        self.setStyleSheet(
+            """
+            _IndicatorRow {
+                background: transparent;
+                border: none;
+            }
+            """
+        )
 
     def _on_eye_clicked(self) -> None:
-        self._visible = not self._visible
-        self._eye.setIcon(_eye_icon(self._visible))
-        self._eye.setToolTip("Show" if not self._visible else "Hide")
-        self._label.setProperty("hidden", "false" if self._visible else "true")
-        self._label.style().unpolish(self._label)
-        self._label.style().polish(self._label)
-        self._label.update()
+        self.set_visible(not self._visible)
         self.toggled.emit(self._name, self._visible)
-
-    def _on_more_clicked(self) -> None:
-        pos = self._more.mapToGlobal(self._more.rect().bottomLeft())
-        self.more_requested.emit(self._name, pos)
 
     @property
     def name(self) -> str:
@@ -176,10 +219,17 @@ class _IndicatorRow(QWidget):
         return self._visible
 
     def set_visible(self, visible: bool) -> None:
+        """Synchronize eye state (icon, check, label dim) — chart-side source
+        of truth calls this; it never repaints the chart itself."""
         if visible == self._visible:
+            self._eye.blockSignals(True)
+            self._eye.setChecked(visible)
+            self._eye.blockSignals(False)
             return
         self._visible = visible
-        self._eye.setIcon(_eye_icon(visible))
+        self._eye.blockSignals(True)
+        self._eye.setChecked(visible)
+        self._eye.blockSignals(False)
         self._eye.setToolTip("Hide" if visible else "Show")
         self._label.setProperty("hidden", "false" if visible else "true")
         self._label.style().unpolish(self._label)
@@ -195,16 +245,8 @@ class _IndicatorRow(QWidget):
         return self._settings
 
     @property
-    def source_button(self) -> QToolButton:
-        return self._source
-
-    @property
     def delete_button(self) -> QToolButton:
         return self._delete
-
-    @property
-    def more_button(self) -> QToolButton:
-        return self._more
 
     @property
     def label(self) -> QLabel:
@@ -214,9 +256,7 @@ class _IndicatorRow(QWidget):
 class IndicatorVisibilityPanel(QFrame):
     visibility_changed = Signal(str, bool)
     settings_requested = Signal(str)
-    source_requested = Signal(str)
     indicator_removed = Signal(str)
-    more_requested = Signal(str, object)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -231,6 +271,11 @@ class IndicatorVisibilityPanel(QFrame):
         self._layout = lay
         self.hide()
 
+    def _connect_row(self, row: _IndicatorRow) -> None:
+        row.toggled.connect(self._on_row_toggled)
+        row.settings_requested.connect(self.settings_requested.emit)
+        row.delete_requested.connect(self._on_delete)
+
     def add_indicator(self, name: str) -> None:
         if name in self._rows:
             return
@@ -243,11 +288,7 @@ class IndicatorVisibilityPanel(QFrame):
             return
         row = _IndicatorRow(display, True, self)
         row._name = key  # type: ignore[attr-defined]
-        row.toggled.connect(self._on_row_toggled)
-        row.settings_requested.connect(self.settings_requested.emit)
-        row.source_requested.connect(self.source_requested.emit)
-        row.delete_requested.connect(self._on_delete)
-        row.more_requested.connect(self._on_more)
+        self._connect_row(row)
         self._layout.addWidget(row)
         self._rows[key] = row
         self._update_geometry()
@@ -287,11 +328,7 @@ class IndicatorVisibilityPanel(QFrame):
             visible = existing_vis.get(key, existing_vis.get(name, True))
             row = _IndicatorRow(display, visible, self)
             row._name = key  # type: ignore[attr-defined]
-            row.toggled.connect(self._on_row_toggled)
-            row.settings_requested.connect(self.settings_requested.emit)
-            row.source_requested.connect(self.source_requested.emit)
-            row.delete_requested.connect(self._on_delete)
-            row.more_requested.connect(self._on_more)
+            self._connect_row(row)
             self._layout.addWidget(row)
             self._rows[key] = row
         self._update_geometry()
@@ -305,16 +342,6 @@ class IndicatorVisibilityPanel(QFrame):
 
     def _on_delete(self, name: str) -> None:
         self.remove_indicator(name)
-
-    def _on_more(self, name: str, pos: object) -> None:
-        menu = QMenu(self)
-        menu.addAction("Settings", lambda: self.settings_requested.emit(name))
-        menu.addAction("Source code", lambda: self.source_requested.emit(name))
-        menu.addSeparator()
-        menu.addAction("Remove", lambda: self.remove_indicator(name))
-        with contextlib.suppress(Exception):
-            menu.exec(pos)  # type: ignore[arg-type]
-        self.more_requested.emit(name, pos)
 
     def _update_geometry(self) -> None:
         count = len(self._rows)

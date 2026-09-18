@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+  <!-- VAYREN 3-action indicator toolbar: eye / settings / delete (+ eye-off state).
+       Single asset; consumers render one icon by element id. Strokes use
+       currentColor so hover/active/pressed states recolor via the paint context. -->
+  <g id="eye" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"/>
+    <circle cx="12" cy="12" r="2.8"/>
+  </g>
+  <g id="eye_off" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"/>
+    <circle cx="12" cy="12" r="2.8"/>
+    <path d="M4 4l16 16"/>
+  </g>
+  <g id="settings" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z" stroke-width="1.8"/>
+    <path d="M19.4 13.5a7.8 7.8 0 0 0 0-3l2-1.5-2-3.4-2.4 1a8 8 0 0 0-2.6-1.5L14 2.5h-4l-.4 2.6A8 8 0 0 0 7 6.6l-2.4-1-2 3.4 2 1.5a7.8 7.8 0 0 0 0 3l-2 1.5 2 3.4 2.4-1a8 8 0 0 0 2.6 1.5l.4 2.6h4l.4-2.6a8 8 0 0 0 2.6-1.5l2.4 1 2-3.4-2-1.5Z"/>
+  </g>
+  <g id="delete" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4.5 7h15M9 4h6M7 7l.8 13h8.4L17 7M10 10.5v6M14 10.5v6"/>
+  </g>
+</svg>

@@ -470,17 +470,6 @@ def list_versions(strategy_id: str, data_dir: Path | str | None = None) -> list[
     return versions
 
 
-def get_version_graph(strategy_id: str, data_dir: Path | str | None = None) -> dict[str, list[str]]:
-    """Return parent -> [children] mapping for the version graph."""
-    versions = list_versions(strategy_id, data_dir)
-    graph: dict[str, list[str]] = {}
-    for v in versions:
-        parent = v.parent_version_id or "__root__"
-        graph.setdefault(parent, []).append(v.version_id)
-        graph.setdefault(v.version_id, [])
-    return graph
-
-
 # ── Historical restore helpers ──────────────────────────────────────────
 
 

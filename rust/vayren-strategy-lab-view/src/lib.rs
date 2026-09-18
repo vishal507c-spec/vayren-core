@@ -100,7 +100,6 @@ fn apply_state(ui: &LabHostWindow, state: &LabState) {
         timeframe: view.timeframe.into(),
         dates: view.dates.into(),
         capital: view.capital.into(),
-        cost: view.cost.into(),
         show_results: view.show_results,
         tab: view.tab as i32,
         summary_line: view.summary_line.into(),
@@ -1000,8 +999,8 @@ mod tests {
             r#"{"strategies":[{"name":"OBR","description":"","tags":[],"version":"1.0",
                "modified":"11 Sep 26","last_backtest":"—","favorite":true}],
                "selected_name":"OBR","mode":"buy","run":"ready","engine_wired":false,
-               "config":{"universe":"RELIANCE","timeframe":"15m","dates":"02 Jan → 11 Sep",
-               "capital":"₹10,00,000","cost":"0.02% / 0.03%"}}"#,
+                "config":{"universe":"RELIANCE","timeframe":"15m","dates":"02 Jan → 11 Sep",
+                "capital":"₹10,00,000"}}"#,
         )
         .unwrap();
         lab::apply_snapshot_json(&mut state, &value);

@@ -58,11 +58,6 @@ class EventLogPanel(QWidget):
         self._view.appendHtml(html)
         self._entries.append(f"[{stamp}] {level}: {message}")
 
-    def clear_log(self) -> None:
-        """Remove all entries."""
-        self._view.clear()
-        self._entries.clear()
-
     @staticmethod
     def _escape(text: str) -> str:
         return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")

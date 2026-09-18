@@ -10,6 +10,8 @@ import os
 from dataclasses import dataclass
 from enum import Enum
 
+from execution.native_execution import native_arm_transition
+
 
 class ExecutionMode(Enum):
     PAPER = "PAPER"
@@ -47,9 +49,11 @@ class ArmingError(ValueError):
 
 def arm_transition(current: LiveArm, target: LiveArm) -> LiveArm:
     """Validate one arming step; returns target or raises ArmingError."""
-    if target not in _ARM_TRANSITIONS[current]:
-        raise ArmingError(f"illegal arming transition {current.value} -> {target.value}")
-    return target
+    try:
+        val = native_arm_transition(current.value, target.value)
+        return LiveArm(val)
+    except ValueError as exc:
+        raise ArmingError(str(exc)) from exc
 
 
 @dataclass(frozen=True)

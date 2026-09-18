@@ -49,6 +49,15 @@ from app.lifecycle.lifecycle import AppLifecycle
 logger = getLogger(__name__)
 
 
+def _is_num(value: object) -> bool:
+    """True when ``value`` is usable as a float parameter."""
+    try:
+        float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
 def _history_domain() -> Any:
     """The UBL historical-data domain (lazy import keeps bootstrap light)."""
     from broker.capabilities import Domain
@@ -359,8 +368,7 @@ class Bootstrap:
         strategy_registry = StrategyRegistry()
 
         # Strategy Library is user-owned — do NOT auto-create OBR/SMA files.
-        # ``ensure_builtin_strategies`` is now a deprecated no-op kept only
-        # for backward compat; no seeding on VAYREN START.
+        # No seeding on VAYREN START.
 
         # BacktestRunner is Python-only: .py Strategy -> PythonStrategy -> Signal
         # Strategy source = the resolved library root (CLI/env/data_dir), never a
@@ -658,10 +666,21 @@ class Bootstrap:
                 environment = sel.environment.value
             except Exception:
                 environment = "paper"
+            # Per-broker redirect URL (the selected venue's dashboard must
+            # register exactly this); top-level snapshot value is the
+            # backward-compatible fallback.
+            callback_url = ""
+            if isinstance(record, dict) and record.get("callback_url"):
+                callback_url = str(record["callback_url"])
+            if not callback_url:
+                try:
+                    callback_url = str(snapshot.get("callback_url", "") or "")
+                except Exception:
+                    callback_url = ""
             return {
                 "selection": {"name": sel.name, "environment": environment},
                 "record": record,
-                "callback_url": str(snapshot.get("callback_url", "") or ""),
+                "callback_url": callback_url,
             }
 
         slint_system_host = SlintSystemHost(state_provider=_system_state_provider)
@@ -690,7 +709,23 @@ class Bootstrap:
             try:
                 from PySide6.QtWidgets import QApplication
 
-                url = str(broker_manager.snapshot().get("callback_url", "") or "")
+                url = ""
+                try:
+                    selected = selection_service.current_or_none()
+                    selected_name = selected.name if selected is not None else ""
+                    entries = broker_manager.snapshot().get("brokers", []) or []
+                    for entry in entries:
+                        if (
+                            isinstance(entry, dict)
+                            and entry.get("id") == selected_name
+                            and entry.get("callback_url")
+                        ):
+                            url = str(entry["callback_url"])
+                            break
+                    if not url:
+                        url = str(broker_manager.snapshot().get("callback_url", "") or "")
+                except Exception:
+                    url = ""
                 clipboard = QApplication.clipboard()
                 if clipboard is not None and url:
                     clipboard.setText(url)
@@ -965,13 +1000,11 @@ class Bootstrap:
                     # restore visibility
                     if not ind.visible:
                         widget.set_indicator_visible(ind.name, False)
-                    # restore settings if any (e.g., OBR params) — keep for future
+                    # restore edited parameters (merged over strategy defaults
+                    # by _run_strategy_plots — calculation logic untouched)
                     if ind.settings:
-                        # store settings on widget for later use (not affecting calculation)
                         with contextlib.suppress(Exception):
-                            if not hasattr(widget, "_indicator_settings"):
-                                widget._indicator_settings = {}  # type: ignore[attr-defined]
-                            widget._indicator_settings[ind.name] = dict(ind.settings)  # type: ignore[attr-defined]
+                            widget.set_indicator_settings(ind.name, dict(ind.settings))
         except Exception:
             pass
 
@@ -987,8 +1020,7 @@ class Bootstrap:
                         vis = widget.is_indicator_visible(rname)  # type: ignore[attr-defined]
                         settings: dict[str, Any] = {}
                         try:
-                            if hasattr(widget, "_indicator_settings"):
-                                settings = dict(widget._indicator_settings.get(rname, {}))  # type: ignore[attr-defined]
+                            settings = dict(widget.indicator_settings_for(rname))  # type: ignore[attr-defined]
                         except Exception:
                             settings = {}
                         inds.append(IndicatorState(name=rname, visible=vis, settings=settings))
@@ -1019,6 +1051,10 @@ class Bootstrap:
                 lambda *_a: _save_chart_session()  # type: ignore[attr-defined]
             )
             widget.visibility_panel.indicator_removed.connect(
+                lambda *_a: _save_chart_session()  # type: ignore[attr-defined]
+            )
+            # edited parameters persist too (settings save → session write)
+            widget.indicator_settings_changed.connect(
                 lambda *_a: _save_chart_session()  # type: ignore[attr-defined]
             )
         # ensure we save on close/crash via aboutToQuit
@@ -1392,6 +1428,13 @@ class Bootstrap:
         # Connect indicator_added signal to live plot runner (chart bars via widget._model)
         widget.indicator_added.connect(
             lambda name: self._run_strategy_plots(name, widget._model.bars if widget._model else ())
+        )
+        # Toolbar ⚙ save: re-run the strategy's live plots with the merged
+        # parameters so the chart updates immediately (calculation untouched).
+        widget.indicator_settings_changed.connect(
+            lambda name, _params: self._run_strategy_plots(
+                name, widget._model.bars if widget._model else ()
+            )
         )
         # Session-restore fix: indicators added BEFORE this connection
         # (via bootstrap init session restore) never fired indicator_added.
@@ -2187,6 +2230,19 @@ class Bootstrap:
                     existing = set(list_strategies(data_dir))
                     is_update = bool(current_id) and current_id in existing
 
+                    # Empty-source guard: never wipe an existing strategy.
+                    # This is exactly how a previously-saved OBR source can be
+                    # lost (open → clear buffer → Save); refuse and surface it.
+                    if is_update and not code.strip():
+                        event_log.add_entry(
+                            "ERROR",
+                            f"Refusing to save empty source over existing strategy: {current_id}",
+                        )
+                        lab_workspace.center_detail.show_compile_result(  # type: ignore[attr-defined]
+                            False, "Cannot save empty source over an existing strategy"
+                        )
+                        return
+
                     if is_update:
                         target_name = current_id
                     else:
@@ -2456,13 +2512,32 @@ class Bootstrap:
             except Exception:
                 pass
 
-            # new strategy = instant blank draft (no template injection)
+            # new strategy = a REAL, persisted strategy (never a vanishing
+            # in-memory draft). create_strategy rejects an existing name, so
+            # + NEW can never overwrite OBR or any other strategy.
             def _on_new_draft() -> None:
-                names = set(lab_workspace.left_nav.names())
+                from strategy.language.storage import DEFAULT_CODE, create_strategy, list_strategies
+
+                data_dir = _strategy_data_dir()
+                existing = set(list_strategies(data_dir))
                 base = "Untitled Strategy"
-                name = base if base not in names else f"{base} {len(names) + 1}"
-                lab_workspace.open_strategy(name, "")
-                event_log.add_entry("INFO", f"New strategy draft: {name}")
+                name = base
+                counter = 2
+                while name in existing:
+                    name = f"{base} {counter}"
+                    counter += 1
+                try:
+                    create_strategy(name, DEFAULT_CODE, data_dir)
+                except Exception as exc:  # noqa: BLE001
+                    event_log.add_entry("ERROR", f"Failed to create strategy: {exc}")
+                    lab_workspace.center_detail.show_compile_result(  # type: ignore[attr-defined]
+                        False, f"Create failed: {exc}"
+                    )
+                    return
+                lab_workspace.open_strategy(name, DEFAULT_CODE, {"version": "1.0"})
+                _refresh_my_strategies()
+                lab_workspace.left_nav.select_name(name)  # type: ignore[attr-defined]
+                event_log.add_entry("SUCCESS", f"New strategy created: {name}")
 
             lab_workspace.left_nav.new_strategy_requested.connect(_on_new_draft)
 
@@ -2878,10 +2953,19 @@ class Bootstrap:
                 _log.warning("_run_strategy_plots: no record for %s", strategy_name)
                 return
             compiled = compile_strategy(rec.code)
-            logic = compiled.create_logic(StrategyParameters(compiled.param_defaults))
+            # Indicator settings (toolbar ⚙) merge over the strategy's own
+            # declared defaults — the calculation logic is never modified, only
+            # its inputs. Unknown/absent keys fall back to strategy defaults.
+            merged = dict(compiled.param_defaults)
+            try:
+                stored = self._widget.indicator_settings_for(strategy_name)  # type: ignore[attr-defined]
+                merged.update({k: float(v) for k, v in stored.items() if _is_num(v)})
+            except Exception:
+                pass
+            logic = compiled.create_logic(StrategyParameters(merged))
             logic._owner_id = strategy_name  # type: ignore[attr-defined]
 
-            runtime = StrategyRuntime(logic, StrategyParameters(compiled.param_defaults))
+            runtime = StrategyRuntime(logic, StrategyParameters(merged))
             runtime.run(bars)
 
             raw = logic.get_chart_series_with_owner()  # type: ignore[attr-defined]

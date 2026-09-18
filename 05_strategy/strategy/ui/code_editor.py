@@ -65,6 +65,61 @@ HIGHLIGHT_FUNCTIONS = (
 )
 
 
+def _reindent_python(src: str) -> str:
+    """Re-derive indentation for Python source from its token stream.
+
+    Only the leading whitespace of each *logical* line is rewritten; every
+    token is preserved verbatim (strings, comments and code never change).
+    Continuation lines inside brackets keep their original indentation, and
+    any tokenization error returns the source untouched rather than risk
+    corrupting it.
+    """
+    import io
+    import tokenize as _tk
+
+    try:
+        tokens = list(_tk.generate_tokens(io.StringIO(src).readline))
+    except Exception:
+        return src
+
+    indent_of_row: dict[int, int] = {}
+    level = 0
+    paren_depth = 0
+    at_logical_start = True
+    for tok in tokens:
+        ttype, _tstr, (srow, _scol), _end, _line = tok
+        if ttype == _tk.INDENT:
+            level += 1
+            continue
+        if ttype == _tk.DEDENT:
+            level = max(0, level - 1)
+            continue
+        if ttype in (_tk.NEWLINE, _tk.NL):
+            if paren_depth == 0:
+                at_logical_start = True
+            continue
+        if ttype in (_tk.COMMENT, _tk.ENCODING, _tk.ENDMARKER):
+            continue
+        if _tstr in "([{":
+            paren_depth += 1
+        elif _tstr in ")]}":
+            paren_depth = max(0, paren_depth - 1)
+        if at_logical_start and paren_depth == 0:
+            indent_of_row.setdefault(srow, level)
+            at_logical_start = False
+
+    lines = src.split("\n")
+    for index, line in enumerate(lines):
+        row = index + 1
+        if row not in indent_of_row:
+            continue
+        stripped = line.lstrip()
+        if not stripped.strip():  # keep blank lines blank
+            continue
+        lines[index] = "    " * indent_of_row[row] + stripped
+    return "\n".join(lines)
+
+
 class StrategyHighlighter(QSyntaxHighlighter):
     def __init__(self, parent):
         super().__init__(parent)
@@ -294,3 +349,58 @@ class CodeEditor(QPlainTextEdit):
     def set_code(self, code: str):
         self.setPlainText(code)
         self.clear_error()
+
+    # ── source actions (used by the editor toolbar) ─────────────────────
+
+    def select_all(self) -> None:
+        """Select the complete source."""
+        self.selectAll()
+
+    def copy_all(self) -> str:
+        """Copy the COMPLETE source to the clipboard.
+
+        Never copies only the visible selection — the full document text is
+        placed on the clipboard so large sources transfer intact.
+        """
+        from PySide6.QtWidgets import QApplication
+
+        text = self.toPlainText()
+        clip = QApplication.clipboard()
+        if clip is not None:
+            clip.setText(text)
+        return text
+
+    def paste_source(self) -> None:
+        """Paste clipboard text at the cursor (complete source if selected)."""
+        self.paste()
+
+    def undo_edit(self) -> None:
+        """Undo the last edit (no-op when the stack is empty)."""
+        if self.document().isUndoAvailable():
+            self.undo()
+
+    def redo_edit(self) -> None:
+        """Redo the last undone edit (no-op when the stack is empty)."""
+        if self.document().isRedoAvailable():
+            self.redo()
+
+    def format_source(self) -> None:
+        """Re-indent the source from the Python token stream.
+
+        Only the leading whitespace of each logical line changes — every
+        token (strings, comments, code) is preserved verbatim. On any
+        tokenization failure the source is left untouched rather than
+        risk corrupting a strategy.
+        """
+
+        code = self.toPlainText()
+        if not code.strip():
+            return
+        reformatted = _reindent_python(code)
+        if reformatted == code:
+            return
+        cursor = self.textCursor()
+        cursor.beginEditBlock()
+        self.setPlainText(reformatted)
+        cursor.endEditBlock()
+        self.document().setModified(True)

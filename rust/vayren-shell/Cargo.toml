@@ -14,6 +14,7 @@ name = "vayren-shell"
 path = "src/main.rs"
 
 [dependencies]
+vayren-core = { path = "../vayren-core" }
 slint = "1.17"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

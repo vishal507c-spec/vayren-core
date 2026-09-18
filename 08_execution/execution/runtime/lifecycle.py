@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from execution.native_execution import native_lifecycle_transition_allowed
+
 
 class LifecycleState(Enum):
     CREATED = "CREATED"
@@ -66,8 +68,7 @@ class StrategyLifecycle:
     reason: str = ""
 
     def transition(self, target: LifecycleState, reason: str = "") -> None:
-        allowed = TRANSITIONS[self.state]
-        if target not in allowed:
+        if not native_lifecycle_transition_allowed(self.state.value, target.value):
             raise LifecycleError(f"illegal transition {self.state.value} -> {target.value}")
         self.state = target
         self.reason = reason

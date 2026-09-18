@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from execution.models.order import Fill
 from execution.models.position import AccountSnapshot, Position
+from execution.native_execution import native_ledger_apply_fill
 
 
 class PositionLedger:
@@ -20,34 +21,24 @@ class PositionLedger:
     def apply_fill(self, fill: Fill) -> Position:
         """Fold a fill into the ledger; returns the updated position."""
         pos = self._positions.get(fill.symbol, Position(symbol=fill.symbol))
-        direction = 1.0 if fill.side == "BUY" else -1.0
-        signed = direction * fill.fill_qty
-        new_qty = pos.quantity + signed
-        if pos.flat or (pos.quantity > 0) == (signed > 0):
-            total_cost = pos.avg_price * abs(pos.quantity) + fill.fill_price * fill.fill_qty
-            denom = abs(new_qty)
-            avg = total_cost / denom if denom > 0 else 0.0
-            updated = Position(
-                symbol=fill.symbol, quantity=new_qty, avg_price=avg, realized_pnl=pos.realized_pnl
-            )
-        else:
-            closing = min(abs(pos.quantity), fill.fill_qty)
-            pnl = (fill.fill_price - pos.avg_price) * closing * (1.0 if pos.quantity > 0 else -1.0)
-            pnl -= fill.commission * (closing / fill.fill_qty if fill.fill_qty else 0.0)
-            realized = pos.realized_pnl + pnl
-            self._realized[fill.symbol] = self._realized.get(fill.symbol, 0.0) + pnl
-            self._day_pnl += pnl
-            if abs(new_qty) > 0:
-                updated = Position(
-                    symbol=fill.symbol,
-                    quantity=new_qty,
-                    avg_price=fill.fill_price,
-                    realized_pnl=realized,
-                )
-            else:
-                updated = Position(
-                    symbol=fill.symbol, quantity=0.0, avg_price=0.0, realized_pnl=realized
-                )
+        new_qty, avg_price, realized_pnl, pnl_delta = native_ledger_apply_fill(
+            pos.quantity,
+            pos.avg_price,
+            pos.realized_pnl,
+            fill.side,
+            fill.fill_qty,
+            fill.fill_price,
+            fill.commission,
+        )
+        if pnl_delta != 0.0:
+            self._realized[fill.symbol] = self._realized.get(fill.symbol, 0.0) + pnl_delta
+            self._day_pnl += pnl_delta
+        updated = Position(
+            symbol=fill.symbol,
+            quantity=new_qty,
+            avg_price=avg_price,
+            realized_pnl=realized_pnl,
+        )
         if updated.flat:
             self._positions.pop(fill.symbol, None)
         else:
