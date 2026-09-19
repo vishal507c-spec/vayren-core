@@ -12,13 +12,15 @@ use crate::live::{self, ExecMode, Gate, GateStatus, LiveState, SymbolPick};
 use crate::portfolio::{self, PortfolioState};
 use crate::research_state::{self, ResearchState};
 use crate::view_model::{BrokerPanel, CapabilityStatus, Environment};
+use crate::broker_connection::{BrokerWorkspace, ConnectionState};
 use crate::viewport::ChartViewportZoom;
 use crate::{
-    AppWindow, BrokerCheckRow, CapabilityRowView, LabBoardCell, LabDetailMetric, LabHeader, LabKpi,
+    AppWindow, BrokerCheckRow, BrokerRowView, CapabilityRowView, CredentialFieldView,
+    LabBoardCell, LabDetailMetric, LabHeader, LabKpi,
     LabLibraryRow, LabMatrixRow, LabParam, LabPoint, LabRankRow, LabTradeRow, LiveBar, LiveCandle,
     LiveEventRow, LiveFill, LiveGate, LiveKv, LiveMarket, LiveOrder, LivePosition, LiveSetup,
     LiveStat, LiveSymbolRow, PortfolioAlloc, PortfolioFill, PortfolioGate, PortfolioKpi,
-    PortfolioOrder, PortfolioPosition, PortfolioRisk, ResearchCompareRow, ResearchConfigGroup,
+    PortfolioOrder, PortfolioPosition, PortfolioRisk, ProgressStepView, ResearchCompareRow, ResearchConfigGroup,
     ResearchEvidenceDim, ResearchEvidenceWhy, ResearchExperimentRow, ResearchField, ResearchKv,
     ResearchKvGroup, ResearchMetric, ResearchRobustRow, ResearchSignalRow, ResearchStrategyRow,
     ResearchTradeRow, ShellScreen,
@@ -189,6 +191,152 @@ pub fn apply(ui: &AppWindow, panel: &BrokerPanel) {
     ui.set_disconnect_visible(card.disconnect_visible);
     ui.set_disconnect_enabled(card.disconnect_enabled);
     ui.set_remove_visible(card.remove_visible);
+}
+
+/// Bind the broker CONNECTION workspace view-model to the Slint screen.
+/// Every displayed value comes from backend facts + the venue's existing
+/// credential schema — the screen never infers sessions or secrets.
+pub fn apply_connection(ui: &AppWindow, workspace: &BrokerWorkspace) {
+    ui.set_conn_brokers(
+        Rc::new(slint::VecModel::from(
+            workspace
+                .brokers
+                .iter()
+                .map(|b| BrokerRowView {
+                    id: b.id.clone().into(),
+                    display_name: b.display_name.clone().into(),
+                    mark: b.mark().into(),
+                    venue_subtitle: b.venue_subtitle.clone().into(),
+                    status_label: b.status_label().into(),
+                    status_tone: b.status_tone(),
+                    selected: b.selected,
+                    connected: b.connected,
+                })
+                .collect::<Vec<_>>(),
+        ))
+        .into(),
+    );
+    ui.set_conn_display_name(workspace.display_name.clone().into());
+    ui.set_conn_mark(
+        workspace
+            .display_name
+            .chars()
+            .next()
+            .map(|c| c.to_uppercase().to_string())
+            .unwrap_or_default()
+            .into(),
+    );
+    ui.set_conn_venue_subtitle(workspace.venue_subtitle.clone().into());
+    ui.set_conn_env_label(workspace.env_label.clone().into());
+    ui.set_conn_description(
+        crate::broker_connection::description_line(&workspace.display_name).into(),
+    );
+    let (pill_label, pill_tone) = workspace.pill();
+    ui.set_conn_pill_label(pill_label.into());
+    ui.set_conn_pill_tone(pill_tone);
+    ui.set_conn_status_message(workspace.status_message().into());
+    ui.set_conn_fields(
+        Rc::new(slint::VecModel::from(
+            workspace
+                .fields
+                .iter()
+                .map(|f| CredentialFieldView {
+                    key: f.key.clone().into(),
+                    label: f.label.clone().into(),
+                    placeholder: f.placeholder.clone().into(),
+                    secret: f.secret,
+                    required: f.required,
+                })
+                .collect::<Vec<_>>(),
+        ))
+        .into(),
+    );
+    ui.set_conn_progress(
+        Rc::new(slint::VecModel::from(
+            workspace
+                .progress()
+                .into_iter()
+                .map(|s| ProgressStepView {
+                    index: s.index,
+                    title: s.title.into(),
+                    subtitle: s.subtitle.into(),
+                    state: s.state,
+                })
+                .collect::<Vec<_>>(),
+        ))
+        .into(),
+    );
+    ui.set_conn_cta_label(workspace.cta().into());
+    ui.set_conn_cta_arrow(!matches!(
+        workspace.state,
+        ConnectionState::Authenticating
+            | ConnectionState::GettingToken
+            | ConnectionState::Verifying
+            | ConnectionState::Failed
+    ));
+    ui.set_conn_cta_enabled(workspace.can_connect);
+    ui.set_conn_form_enabled(workspace.form_enabled());
+    ui.set_conn_is_connected(workspace.state == ConnectionState::Connected);
+    ui.set_conn_is_failed(workspace.state == ConnectionState::Failed);
+    ui.set_conn_error_message(if workspace.state == ConnectionState::Failed {
+        workspace.status_message().into()
+    } else {
+        "".into()
+    });
+    ui.set_conn_disconnect_visible(workspace.can_disconnect);
+    ui.set_conn_disconnect_enabled(workspace.can_disconnect);
+    ui.set_conn_help_caption(
+        if workspace.display_name.trim().is_empty() {
+            "View setup guide.".into()
+        } else {
+            format!("View setup guide for {}.", workspace.display_name.trim()).into()
+        },
+    );
+}
+
+/// Representative backend-fed connection workspace (FYERS selected, not
+/// connected; Zerodha connected). Field shapes mirror the real venue
+/// schemas — placeholders only, never values. Real wiring replaces this
+/// with the manager snapshot.
+pub fn demo_connection_workspace() -> BrokerWorkspace {
+    let value = serde_json::json!({
+        "brokers": [
+            {"id": "zerodha", "display_name": "Zerodha",
+             "venue_subtitle": "Kite Connect", "status": "CONNECTED"},
+            {"id": "fyers", "display_name": "Fyers",
+             "venue_subtitle": "FYERS API v3", "status": "LOGIN_REQUIRED"},
+        ],
+        "selected_id": "fyers",
+        "display_name": "Fyers",
+        "venue_subtitle": "FYERS API v3",
+        "environment": "paper",
+        "status_raw": "LOGIN_REQUIRED",
+        "configured": false,
+        "can_login": false,
+        "can_disconnect": false,
+        "reason": "",
+        "credential_fields": [
+            {"key": "app_id", "label": "App ID",
+             "placeholder": "Enter FYERS App ID",
+             "secret": false, "required": true},
+            {"key": "secret", "label": "Secret",
+             "placeholder": "Enter FYERS Secret ID",
+             "secret": true, "required": true},
+            {"key": "client_id", "label": "Client ID",
+             "placeholder": "Enter your Client ID",
+             "secret": false, "required": false},
+            {"key": "totp_secret", "label": "TOTP Secret",
+             "placeholder": "Enter TOTP Secret",
+             "secret": true, "required": false},
+            {"key": "pin", "label": "PIN",
+             "placeholder": "Enter 4-digit PIN",
+             "secret": true, "required": false},
+        ],
+    });
+    let mut workspace = BrokerWorkspace::from_json(&value);
+    // Demo starts unconfigured: the CTA invites the one obvious action.
+    workspace.configured = false;
+    workspace
 }
 
 /// Switch the active screen (single shell state source).

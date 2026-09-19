@@ -44,6 +44,13 @@ class BrokerSpec:
     secret_field: str = "api_secret"
     redirect_uri_field: str = ""
     config_key_map: dict[str, str] = field(default_factory=dict)
+    # ── credential shape (universal auth; venue-owned, manager-opaque) ──
+    # ``credential_schema`` carries the venue's EXISTING credential field
+    # shapes as plain data (``{"key","label","secret","required"}`` per
+    # field) so management surfaces (SYSTEM → BROKERS form) render the
+    # venue's own fields with zero broker-name branching and zero concrete
+    # imports outside the venue's home chapter. Values never live here.
+    credential_schema: tuple[dict[str, object], ...] = ()
     # ── automatic authentication (Zerodha-experience parity) ──
     # Optional ``(config, session_store) -> (ok, message)`` hook the manager
     # runs on its worker thread when no live session exists (missing or

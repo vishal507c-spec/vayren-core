@@ -11,6 +11,7 @@ import { ResearchScreen, ResearchMetric, ResearchSignalRow, ResearchTradeRow, Re
 import { PortfolioScreen, PortfolioKpi, PortfolioGate, PortfolioPosition, PortfolioAlloc, PortfolioOrder, PortfolioFill, PortfolioRisk } from "portfolio.slint";
 import { LiveScreen, LiveBar, LiveSetup, LiveMarket, LiveSymbolRow, LiveGate, LiveKv, LiveStat, LivePosition, LiveOrder, LiveFill, LiveEventRow, LiveCandle, LiveTiers } from "live.slint";
 import { BrokerPanel, BrokerCheckRow } from "broker.slint";
+import { BrokerConnectionWorkspace, BrokerRowView, CredentialFieldView, ProgressStepView } from "broker_connection.slint";
 
 export enum ShellScreen {
     chart,
@@ -91,6 +92,13 @@ export component AppWindow inherits Window {
     callback broker-remove-requested();
     callback broker-config-saved(string, string);
     callback broker-copy-callback();
+    // Broker CONNECTION workspace actions (Slint reports intent only; the
+    // embed host dispatches to BrokerManager/selection service. Retry reuses
+    // the login intent, Manage reuses refresh, Disconnect is shared).
+    callback broker-select-requested(string);
+    callback broker-connect-requested(string, string, string, string, string, string);
+    callback broker-help-requested();
+    callback broker-add-requested();
 
     // Strategy Lab interactions (Slint reports; Rust view-model owns state).
     callback lab-library-picked(int);
@@ -212,6 +220,30 @@ export component AppWindow inherits Window {
     in-out property <bool> disconnect-visible: false;
     in-out property <bool> disconnect-enabled: false;
     in-out property <bool> remove-visible: false;
+    // Broker CONNECTION workspace (Rust `BrokerWorkspace`; render data only).
+    // The parity card properties above stay bound for compatibility but the
+    // broker screen renders this workspace (single connection purpose).
+    in-out property <[BrokerRowView]> conn-brokers;
+    in-out property <string> conn-display-name: "";
+    in-out property <string> conn-mark: "?";
+    in-out property <string> conn-venue-subtitle: "";
+    in-out property <string> conn-env-label: "PAPER";
+    in-out property <string> conn-description: "Connect your account to start trading.";
+    in-out property <string> conn-pill-label: "Not Connected";
+    in-out property <int> conn-pill-tone: 3;
+    in-out property <string> conn-status-message: "";
+    in-out property <[CredentialFieldView]> conn-fields;
+    in-out property <[ProgressStepView]> conn-progress;
+    in-out property <string> conn-cta-label: "Connect to Broker";
+    in-out property <bool> conn-cta-arrow: true;
+    in-out property <bool> conn-cta-enabled: false;
+    in-out property <bool> conn-form-enabled: true;
+    in-out property <bool> conn-is-connected: false;
+    in-out property <bool> conn-is-failed: false;
+    in-out property <string> conn-error-message: "";
+    in-out property <bool> conn-disconnect-visible: false;
+    in-out property <bool> conn-disconnect-enabled: false;
+    in-out property <string> conn-help-caption: "View setup guide.";
 
     // Chart viewport zoom (Rust-owned state; Slint only renders + reports
     // the Reset Zoom action).
@@ -561,52 +593,37 @@ export component AppWindow inherits Window {
                 if root.screen-pending: PendingCard {
                     card-title: root.screen-title;
                 }
-                if !root.screen-pending && root.active-screen == ShellScreen.broker: BrokerPanel {
-                    broker-name: root.broker-name;
-                    broker-id: root.broker-id;
-                    env-kind: root.env-kind;
-                    env-label: root.env-label;
-                    health-label: root.health-label;
-                    health-connected: root.health-connected;
-                    live-ready: root.live-ready;
-                    blockers: root.blockers;
-                    status-glyph: root.status-glyph;
-                    status-label: root.status-label;
-                    status-tone: root.status-tone;
-                    status-explanation: root.status-explanation;
-                    reason-line: root.reason-line;
-                    account-id: root.account-id;
-                    conn-label: root.conn-label;
-                    conn-tone: root.conn-tone;
-                    last-sync: root.last-sync;
-                    health-summary: root.health-summary;
-                    health-summary-tone: root.health-summary-tone;
-                    check-rows: root.check-rows;
-                    funds-line: root.funds-line;
-                    funds-sub: root.funds-sub;
-                    positions-line: root.positions-line;
-                    positions-sub: root.positions-sub;
-                    orders-line: root.orders-line;
-                    orders-sub: root.orders-sub;
-                    credentials-line: root.credentials-line;
-                    callback-display: root.callback-display;
-                    refresh-visible: root.refresh-visible;
-                    refresh-label: root.refresh-label;
-                    refresh-enabled: root.refresh-enabled;
-                    refresh-primary: root.refresh-primary;
-                    login-label: root.login-label;
-                    login-enabled: root.login-enabled;
-                    login-primary: root.login-primary;
-                    configure-label: root.configure-label;
-                    disconnect-visible: root.disconnect-visible;
-                    disconnect-enabled: root.disconnect-enabled;
-                    remove-visible: root.remove-visible;
-                    login-requested() => { root.broker-login-requested(); }
-                    refresh-requested() => { root.broker-refresh-requested(); }
+                if !root.screen-pending && root.active-screen == ShellScreen.broker: BrokerConnectionWorkspace {
+                    width: 100%;
+                    height: 100%;
+                    brokers: root.conn-brokers;
+                    broker-display-name: root.conn-display-name;
+                    logo-mark: root.conn-mark;
+                    venue-subtitle: root.conn-venue-subtitle;
+                    env-label: root.conn-env-label;
+                    description-line: root.conn-description;
+                    status-pill-label: root.conn-pill-label;
+                    status-pill-tone: root.conn-pill-tone;
+                    status-message: root.conn-status-message;
+                    fields: root.conn-fields;
+                    progress: root.conn-progress;
+                    cta-label: root.conn-cta-label;
+                    cta-arrow: root.conn-cta-arrow;
+                    cta-enabled: root.conn-cta-enabled;
+                    form-enabled: root.conn-form-enabled;
+                    is-connected: root.conn-is-connected;
+                    is-failed: root.conn-is-failed;
+                    error-message: root.conn-error-message;
+                    disconnect-visible: root.conn-disconnect-visible;
+                    disconnect-enabled: root.conn-disconnect-enabled;
+                    help-caption: root.conn-help-caption;
+                    broker-selected(id) => { root.broker-select-requested(id); }
+                    connect-requested(v0, v1, v2, v3, v4, v5) => { root.broker-connect-requested(v0, v1, v2, v3, v4, v5); }
+                    retry-requested() => { root.broker-login-requested(); }
                     disconnect-requested() => { root.broker-disconnect-requested(); }
-                    remove-requested() => { root.broker-remove-requested(); }
-                    config-saved(key, secret) => { root.broker-config-saved(key, secret); }
-                    copy-callback() => { root.broker-copy-callback(); }
+                    refresh-requested() => { root.broker-refresh-requested(); }
+                    help-requested() => { root.broker-help-requested(); }
+                    add-broker-requested() => { root.broker-add-requested(); }
                 }
                 if !root.screen-pending && root.active-screen == ShellScreen.portfolio: PortfolioScreen {
                     width: 100%;

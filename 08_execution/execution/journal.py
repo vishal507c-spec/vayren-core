@@ -82,21 +82,3 @@ def _pct(ordered: list[float], pct: float) -> float:
         return 0.0
     rank = min(len(ordered) - 1, max(0, int(pct / 100.0 * len(ordered))))
     return ordered[rank]
-
-
-@dataclass
-class StageTimer:
-    """Manual stage timer: mark named checkpoints, read segment durations."""
-
-    marks: list[tuple[str, float]] = field(default_factory=list)
-
-    def mark(self, stage: str, epoch_seconds: float) -> None:
-        self.marks.append((stage, float(epoch_seconds)))
-
-    def segments(self) -> dict[str, float]:
-        out: dict[str, float] = {}
-        for (first_stage, first_ts), (second_stage, second_ts) in zip(
-            self.marks, self.marks[1:], strict=False
-        ):
-            out[f"{first_stage}->{second_stage}"] = max(0.0, second_ts - first_ts)
-        return out

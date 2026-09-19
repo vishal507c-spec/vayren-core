@@ -7,14 +7,13 @@ from execution.market_data.normalizer import (
     StreamNormalizer,
     StreamStats,
 )
-from execution.market_data.provider import MarketDataError, MarketDataProvider, provider_supports
+from execution.market_data.provider import MarketDataError, MarketDataProvider
 from execution.market_data.replay import ReplayProvider, bars_to_candles
 from execution.market_data.sqlite_tail import SqliteTailProvider
 
 __all__ = [
     "MarketDataProvider",
     "MarketDataError",
-    "provider_supports",
     "ReplayProvider",
     "bars_to_candles",
     "BrokerFeedProvider",

@@ -7,6 +7,7 @@
 // restyle, or recompose content — compare against the `app.slint`
 // BrokerPanel instance block.
 import { BrokerPanel, BrokerCheckRow } from "../../vayren-shell/ui/broker.slint";
+import { BrokerConnectionWorkspace, BrokerRowView, CredentialFieldView, ProgressStepView } from "../../vayren-shell/ui/broker_connection.slint";
 import { VayrenPalette, VayrenDesign } from "../../vayren-shell/ui/palette.slint";
 import { ScrollView } from "std-widgets.slint";
 
@@ -84,6 +85,35 @@ export component SystemHostWindow inherits Window {
     callback remove-requested();
     callback config-saved(string, string);
     callback copy-callback();
+    // Connection workspace intents (retry reuses login, manage reuses
+    // refresh, disconnect is shared — same manager methods as before).
+    callback select-requested(string);
+    callback connect-requested(string, string, string, string, string, string);
+    callback help-requested();
+    callback add-requested();
+
+    // Connection workspace facts (Rust `BrokerWorkspace` projection).
+    in-out property <[BrokerRowView]> conn-brokers;
+    in-out property <string> conn-display-name: "";
+    in-out property <string> conn-mark: "?";
+    in-out property <string> conn-venue-subtitle: "";
+    in-out property <string> conn-env-label: "PAPER";
+    in-out property <string> conn-description: "Connect your account to start trading.";
+    in-out property <string> conn-pill-label: "Not Connected";
+    in-out property <int> conn-pill-tone: 3;
+    in-out property <string> conn-status-message: "";
+    in-out property <[CredentialFieldView]> conn-fields;
+    in-out property <[ProgressStepView]> conn-progress;
+    in-out property <string> conn-cta-label: "Connect to Broker";
+    in-out property <bool> conn-cta-arrow: true;
+    in-out property <bool> conn-cta-enabled: false;
+    in-out property <bool> conn-form-enabled: true;
+    in-out property <bool> conn-is-connected: false;
+    in-out property <bool> conn-is-failed: false;
+    in-out property <string> conn-error-message: "";
+    in-out property <bool> conn-disconnect-visible: false;
+    in-out property <bool> conn-disconnect-enabled: false;
+    in-out property <string> conn-help-caption: "View setup guide.";
 
     VerticalLayout {
         spacing: 0;
@@ -183,54 +213,37 @@ export component SystemHostWindow inherits Window {
             vertical-stretch: 1;
             viewport-width: root.width;
 
-            BrokerPanel {
+            BrokerConnectionWorkspace {
                 width: root.width;
                 height: max(self.preferred-height, root.height);
-                broker-name: root.broker-name;
-                broker-id: root.broker-id;
-                env-kind: root.env-kind;
-                env-label: root.env-label;
-                health-label: root.health-label;
-                health-connected: root.health-connected;
-                live-ready: root.live-ready;
-                blockers: root.blockers;
-                status-glyph: root.status-glyph;
-                status-label: root.status-label;
-                status-tone: root.status-tone;
-                status-explanation: root.status-explanation;
-                reason-line: root.reason-line;
-                account-id: root.account-id;
-                conn-label: root.conn-label;
-                conn-tone: root.conn-tone;
-                last-sync: root.last-sync;
-                health-summary: root.health-summary;
-                health-summary-tone: root.health-summary-tone;
-                check-rows: root.check-rows;
-                funds-line: root.funds-line;
-                funds-sub: root.funds-sub;
-                positions-line: root.positions-line;
-                positions-sub: root.positions-sub;
-                orders-line: root.orders-line;
-                orders-sub: root.orders-sub;
-                credentials-line: root.credentials-line;
-                callback-display: root.callback-display;
-                refresh-visible: root.refresh-visible;
-                refresh-label: root.refresh-label;
-                refresh-enabled: root.refresh-enabled;
-                refresh-primary: root.refresh-primary;
-                login-label: root.login-label;
-                login-enabled: root.login-enabled;
-                login-primary: root.login-primary;
-                configure-label: root.configure-label;
-                disconnect-visible: root.disconnect-visible;
-                disconnect-enabled: root.disconnect-enabled;
-                remove-visible: root.remove-visible;
-                login-requested() => { root.login-requested(); }
-                refresh-requested() => { root.refresh-requested(); }
+                brokers: root.conn-brokers;
+                broker-display-name: root.conn-display-name;
+                logo-mark: root.conn-mark;
+                venue-subtitle: root.conn-venue-subtitle;
+                env-label: root.conn-env-label;
+                description-line: root.conn-description;
+                status-pill-label: root.conn-pill-label;
+                status-pill-tone: root.conn-pill-tone;
+                status-message: root.conn-status-message;
+                fields: root.conn-fields;
+                progress: root.conn-progress;
+                cta-label: root.conn-cta-label;
+                cta-arrow: root.conn-cta-arrow;
+                cta-enabled: root.conn-cta-enabled;
+                form-enabled: root.conn-form-enabled;
+                is-connected: root.conn-is-connected;
+                is-failed: root.conn-is-failed;
+                error-message: root.conn-error-message;
+                disconnect-visible: root.conn-disconnect-visible;
+                disconnect-enabled: root.conn-disconnect-enabled;
+                help-caption: root.conn-help-caption;
+                broker-selected(id) => { root.select-requested(id); }
+                connect-requested(v0, v1, v2, v3, v4, v5) => { root.connect-requested(v0, v1, v2, v3, v4, v5); }
+                retry-requested() => { root.login-requested(); }
                 disconnect-requested() => { root.disconnect-requested(); }
-                remove-requested() => { root.remove-requested(); }
-                config-saved(k, s) => { root.config-saved(k, s); }
-                copy-callback() => { root.copy-callback(); }
+                refresh-requested() => { root.refresh-requested(); }
+                help-requested() => { root.help-requested(); }
+                add-broker-requested() => { root.add-requested(); }
             }
         }
     }

@@ -706,11 +706,7 @@ def apply_market_action(window: Any, action: str) -> None:
         elif action.startswith("dl:"):
             _apply_download_action(window, action)
     except Exception:  # noqa: BLE001 (a failed action must never break the pump)
-        logger.debug("slint market host: action failed: %s", action, exc_info=True)
-
-
-def _dl_parts(action: str) -> list[str]:
-    return action.split(":", 2)[2:] if action.count(":") >= 2 else []
+            logger.debug("slint market host: action failed: %s", action, exc_info=True)
 
 
 def _apply_download_action(window: Any, action: str) -> None:

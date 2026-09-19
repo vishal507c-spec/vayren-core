@@ -20,12 +20,19 @@ cdylib is unavailable the widget stays dark with one muted status line.
 
 Bridge snapshot schema (owned by the Python backend; the Rust side parses
 it defensively — missing/mistyped degrades to honest absence, see
-`BrokerPanel::from_json`): ``broker_id``, ``display_name``,
-``environment`` (paper/sandbox/live; anything else falls back to the
-PAPER default), ``health`` (a `HealthState` label; unknown stays UNKNOWN),
-``live_ready`` (backend verdict only), ``capabilities[{id,label,kind}]``
-(kind 0 = supported, 1 = not supported, 2 = not configured) and
-``blockers[...]`` (backend reason lines).
+`BrokerPanel::from_json` / `BrokerWorkspace::from_json`): ``broker_id``,
+``display_name``, ``environment`` (paper/sandbox/live; anything else falls
+back to the PAPER default), ``health`` (a `HealthState` label; unknown stays
+UNKNOWN), ``live_ready`` (backend verdict only), ``capabilities[{id,label,
+kind}]`` (kind 0 = supported, 1 = not supported, 2 = not configured) and
+``blockers[...]`` (backend reason lines), plus the connection-workspace
+facts: ``brokers[{id,display_name,venue_subtitle,status,selected}]`` (every
+bundled venue — the sidebar), ``selected_id``, ``status_raw`` (exact
+`BrokerStatus`), ``configured``/``can_login``/``can_disconnect`` (backend
+affordances), ``reason`` (secret-free backend line) and
+``credential_fields[{key,label,placeholder,secret,required}]`` (the venue's
+existing credential schema — shapes only, values never cross except once
+inside the connect action event).
 """
 
 from __future__ import annotations
@@ -167,6 +174,73 @@ def _check_rows(checks: Any) -> list[dict[str, Any]]:
     return rows
 
 
+def _broker_rows(entries: Any, selected_name: str) -> list[dict[str, Any]]:
+    """Map manager snapshot entries onto sidebar rows (identity + status).
+
+    Shapes only — no secrets, no balances. Unknown entries are skipped, so
+    one malformed broker never hides the rest.
+    """
+    rows: list[dict[str, Any]] = []
+    if not isinstance(entries, list):
+        return rows
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        broker_id = str(entry.get("id", "") or "")
+        if not broker_id:
+            continue
+        rows.append(
+            {
+                "id": broker_id,
+                "display_name": str(entry.get("name", "") or broker_id),
+                "venue_subtitle": str(entry.get("venue_subtitle", "") or ""),
+                "status": str(entry.get("status", "") or ""),
+                "selected": broker_id == selected_name,
+            }
+        )
+    return rows
+
+
+def _field_rows(fields: Any) -> list[dict[str, Any]]:
+    """Map a venue credential schema onto field shapes (never values).
+
+    Accepts the provider ``credential_fields`` shape (``key``/``label``/
+    ``secret``/``required``) or plain dicts with the same keys plus an
+    optional ``placeholder`` hint. Labels carry the truth; placeholders are
+    hints only.
+    """
+    rows: list[dict[str, Any]] = []
+    if not isinstance(fields, list):
+        return rows
+    for field in fields:
+        if isinstance(field, dict):
+            key = str(field.get("key", "") or "")
+            label = str(field.get("label", "") or key)
+            placeholder = str(field.get("placeholder", "") or "")
+            secret = bool(field.get("secret", False))
+            required = bool(field.get("required", False))
+        else:
+            key = str(getattr(field, "key", "") or "")
+            label = str(getattr(field, "label", "") or key)
+            placeholder = ""
+            secret = bool(getattr(field, "secret", False))
+            required = bool(getattr(field, "required", False))
+        if not key:
+            continue
+        if not placeholder:
+            placeholder = f"Enter {label}" if label else f"Enter {key}"
+        rows.append(
+            {
+                "key": key,
+                "label": label,
+                "placeholder": placeholder,
+                "secret": secret,
+                "required": required,
+            }
+        )
+    return rows
+
+
 def system_snapshot_dict(state: Any) -> dict[str, Any]:
     """Project the broker-manager selection onto the bridge snapshot schema.
 
@@ -198,9 +272,24 @@ def system_snapshot_dict(state: Any) -> dict[str, Any]:
     blockers = [reason] if reason and status not in ("CONNECTED", "LIVE_READY") else []
     raw_funds = record.get("funds")
     funds = raw_funds if isinstance(raw_funds, dict) else {}
+    display_name = str(record.get("name", "") or name or "NOT CONFIGURED")
+    # Sidebar: every bundled venue when the provider supplies the manager
+    # snapshot list, else the selected record alone (old providers keep
+    # rendering — one row, honestly selected).
+    brokers = _broker_rows(state.get("brokers"), name)
+    if not brokers:
+        brokers = [
+            {
+                "id": name,
+                "display_name": display_name,
+                "venue_subtitle": "",
+                "status": status,
+                "selected": True,
+            }
+        ]
     return {
         "broker_id": name,
-        "display_name": str(record.get("name", "") or name or "NOT CONFIGURED"),
+        "display_name": display_name,
         "environment": environment,
         "health": status,
         "status_raw": status,
@@ -221,6 +310,12 @@ def system_snapshot_dict(state: Any) -> dict[str, Any]:
         "can_refresh": bool(record.get("can_refresh")),
         "callback_url": callback_url,
         "blockers": blockers,
+        # Connection workspace facts (sidebar + schema; values never cross
+        # except once inside the connect action event).
+        "brokers": brokers,
+        "selected_id": name,
+        "reason": reason,
+        "credential_fields": _field_rows(state.get("credential_fields")),
     }
 
 
@@ -237,7 +332,10 @@ class SlintSystemHost(QWidget):
     Action intents accepted in Rust drain through these signals — the
     SAME contract the retained Qt `BrokersWorkspace` carried (broker_id
     resolved to the current selection; `configure_requested` carries the
-    one-time api_key/api_secret dict).
+    one-time api_key/api_secret dict; `connect_requested` carries the
+    one-time full credential dict which the manager validates through the
+    venue's own required-config shape; `broker_selected` carries the newly
+    picked venue id).
     """
 
     configure_requested = Signal(str, dict)
@@ -246,6 +344,10 @@ class SlintSystemHost(QWidget):
     disconnect_requested = Signal(str)
     remove_requested = Signal(str)
     copy_callback_requested = Signal(str)
+    broker_selected = Signal(str)
+    connect_requested = Signal(str, dict)
+    help_requested = Signal(str)
+    add_requested = Signal(str)
 
     def __init__(
         self,
@@ -409,6 +511,24 @@ class SlintSystemHost(QWidget):
                         "api_secret": str(event.get("api_secret", "") or ""),
                     },
                 )
+            elif action == "select":
+                target = str(event.get("broker_id", "") or "")
+                if target:
+                    self.broker_selected.emit(target)
+                else:
+                    logger.debug("slint system host: dropped select without a venue id")
+            elif action == "connect" and broker_id:
+                values = event.get("values")
+                clean = (
+                    {str(k): str(v or "") for k, v in values.items()}
+                    if isinstance(values, dict)
+                    else {}
+                )
+                self.connect_requested.emit(broker_id, clean)
+            elif action == "help":
+                self.help_requested.emit(broker_id)
+            elif action == "add":
+                self.add_requested.emit(broker_id)
             elif action == "copy_url":
                 self.copy_callback_requested.emit(broker_id)
             else:

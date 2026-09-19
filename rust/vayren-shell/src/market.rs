@@ -2382,7 +2382,10 @@ pub fn apply_snapshot_json(state: &mut MarketState, value: &serde_json::Value) {
             };
             set(&mut facts.regime_current, snap_str(ms, "regime_current"));
             set(&mut facts.regime_trend, snap_str(ms, "regime_trend"));
-            set(&mut facts.regime_volatility, snap_str(ms, "regime_volatility"));
+            set(
+                &mut facts.regime_volatility,
+                snap_str(ms, "regime_volatility"),
+            );
             set(&mut facts.regime_momentum, snap_str(ms, "regime_momentum"));
             set(&mut facts.provider, snap_str(ms, "provider"));
             set(&mut facts.latency, snap_str(ms, "latency"));

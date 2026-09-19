@@ -1,5 +1,5 @@
 {
-  "gate_exit": 0,
+  "gate_exit": 1,
   "integrity": {
     "orphaned_manifests": [],
     "python_authoritative": [
@@ -7,10 +7,20 @@
       "execution.session.lifecycle"
     ],
     "retention_missing": [],
-    "rust_unused": []
+    "rust_unused": [
+      "rust/vayren-core/src/backtest_directional.rs",
+      "rust/vayren-core/src/backtest_engine.rs",
+      "rust/vayren-core/src/chart_events.rs",
+      "rust/vayren-core/src/chart_math.rs",
+      "rust/vayren-core/src/data_events.rs",
+      "rust/vayren-core/src/download_engine.rs",
+      "rust/vayren-core/src/execution_events.rs",
+      "rust/vayren-core/src/market_events.rs",
+      "rust/vayren-core/src/risk_engine.rs"
+    ]
   },
   "safety": {
-    "gate_failures": 0,
+    "gate_failures": 4,
     "parity_coverage": "7/12",
     "shadow_coverage": "7/12"
   },
@@ -26,7 +36,7 @@
     "quarantined": 0,
     "rust_authoritative": 7,
     "shadow_validated": 7,
-    "stale_or_failed": 0,
+    "stale_or_failed": 4,
     "total_units": 12
   },
   "top_blockers": [

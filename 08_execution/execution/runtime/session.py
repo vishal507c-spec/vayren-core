@@ -50,6 +50,7 @@ from execution.models.contract import StrategyRuntimeContract
 from execution.models.intent import ExecutionIntent, StrategySignal, make_intent_id
 from execution.models.order import BrokerOrder, Fill, OrderPlan, OrderState
 from execution.modes import ExecutionMode, LiveArm, ModeGates, arm_transition
+from execution.native_execution import native_check_live_readiness_basic
 from execution.planner import ExecutionPreferences, OrderPlanner
 from execution.portfolio.ledger import PositionLedger
 from execution.portfolio.reconcile import ReconciliationState, reconcile_orders, reconcile_positions
@@ -132,24 +133,35 @@ def check_live_readiness(
     for required in contract.required_broker_capabilities:
         if required not in broker_capabilities:
             reasons.append(f"broker capability missing: {required}")
-    if warmup_bars_available < contract.warmup_bars:
-        reasons.append(
-            f"warmup shortfall: have {warmup_bars_available}, need {contract.warmup_bars}"
-        )
-    if not risk_policy_ok:
-        reasons.append("risk policy invalid")
-    if not account_ok:
-        reasons.append("account check failed")
-    if not clock_ok:
-        reasons.append("clock check failed")
-    if not reconcile_ok:
-        reasons.append("reconciliation mismatch unresolved")
-    if not persistence_ok:
-        reasons.append("persistence unavailable")
-    if not kill_ok:
-        reasons.append("kill switch engaged or unavailable")
-    if not observability_ok:
-        reasons.append("observability (journal) unavailable")
+    if not native_check_live_readiness_basic(
+        warmup_bars_available,
+        contract.warmup_bars,
+        risk_policy_ok,
+        account_ok,
+        clock_ok,
+        reconcile_ok,
+        persistence_ok,
+        kill_ok,
+        observability_ok,
+    ):
+        if warmup_bars_available < contract.warmup_bars:
+            reasons.append(
+                f"warmup shortfall: have {warmup_bars_available}, need {contract.warmup_bars}"
+            )
+        if not risk_policy_ok:
+            reasons.append("risk policy invalid")
+        if not account_ok:
+            reasons.append("account check failed")
+        if not clock_ok:
+            reasons.append("clock check failed")
+        if not reconcile_ok:
+            reasons.append("reconciliation mismatch unresolved")
+        if not persistence_ok:
+            reasons.append("persistence unavailable")
+        if not kill_ok:
+            reasons.append("kill switch engaged or unavailable")
+        if not observability_ok:
+            reasons.append("observability (journal) unavailable")
     return ReadinessReport(ready=not reasons, reasons=tuple(reasons))
 
 

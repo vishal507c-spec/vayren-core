@@ -1708,10 +1708,6 @@ class MetricsTiles(QWidget):
         super().resizeEvent(event)
         self.reflow(2 if 0 < self.width() < 620 else 4)
 
-    @staticmethod
-    def _value_style(color: str) -> str:
-        return t.metric(t.FS_METRIC_SM, color, 700)
-
     def set_status(self, state: str) -> None:
         """Update the run-state pill."""
         if state == getattr(self, "_state", None):
@@ -2360,10 +2356,6 @@ def _metric_values(result: StrategyResult | None) -> dict[str, float | None]:
         "Sharpe": m.sharpe_ratio,
         "Avg Trade": m.avg_trade,
     }
-
-
-def _is_higher_better(key: str) -> bool:
-    return key != "Max Drawdown"
 
 
 def _format_metric(key: str, value: float | None) -> str:

@@ -99,7 +99,17 @@
     "2026-09-17T02:22:31Z PARITY PASS: 12/12 passed",
     "2026-09-17T02:22:31Z SHADOW PASS: 60 comparisons, 0 mismatches",
     "2026-09-17T02:48:21Z PARITY PASS: 12/12 passed",
-    "2026-09-17T02:48:21Z SHADOW PASS: 60 comparisons, 0 mismatches"
+    "2026-09-17T02:48:21Z SHADOW PASS: 60 comparisons, 0 mismatches",
+    "2026-09-18T15:06:04Z PARITY PASS: 12/12 passed",
+    "2026-09-18T15:06:04Z SHADOW PASS: 60 comparisons, 0 mismatches",
+    "2026-09-18T15:20:50Z PARITY PASS: 12/12 passed",
+    "2026-09-18T15:20:50Z SHADOW PASS: 60 comparisons, 0 mismatches",
+    "2026-09-18T15:21:00Z PARITY PASS: 12/12 passed",
+    "2026-09-18T15:21:00Z SHADOW PASS: 60 comparisons, 0 mismatches",
+    "2026-09-18T15:41:55Z PARITY PASS: 12/12 passed",
+    "2026-09-18T15:41:55Z SHADOW PASS: 60 comparisons, 0 mismatches",
+    "2026-09-18T16:08:53Z PARITY PASS: 12/12 passed",
+    "2026-09-18T16:08:53Z SHADOW PASS: 60 comparisons, 0 mismatches"
   ],
   "integration": {
     "production_uses_rust": true,

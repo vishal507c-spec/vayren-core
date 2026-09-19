@@ -227,18 +227,17 @@ fn apply_state(ui: &MarketHostWindow, state: &MarketState) {
         r: view.trade_context.r.into(),
     });
     ui.set_market_status_open(view.market_status_open);
-    let status_rows =
-        |rows: Vec<(String, String, bool)>| -> slint::ModelRc<MarketStatusRow> {
-            model(
-                rows.into_iter()
-                    .map(|(key, value, muted)| MarketStatusRow {
-                        key: key.into(),
-                        value: value.into(),
-                        muted,
-                    })
-                    .collect(),
-            )
-        };
+    let status_rows = |rows: Vec<(String, String, bool)>| -> slint::ModelRc<MarketStatusRow> {
+        model(
+            rows.into_iter()
+                .map(|(key, value, muted)| MarketStatusRow {
+                    key: key.into(),
+                    value: value.into(),
+                    muted,
+                })
+                .collect(),
+        )
+    };
     ui.set_market_status_regime(status_rows(view.market_status_regime));
     ui.set_market_status_data(status_rows(view.market_status_data));
     set_dl(ui, &view.download);

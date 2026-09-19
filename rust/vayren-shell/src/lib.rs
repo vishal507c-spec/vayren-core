@@ -3,6 +3,7 @@
 //! component defined in `ui/app.slint`.
 
 pub mod chart_demo;
+pub mod broker_connection;
 pub mod lab;
 pub mod live;
 pub mod market;
@@ -37,3 +38,4 @@ pub mod live_harness_ui {
 }
 
 pub use view_model::{BrokerPanel, CapabilityRow, CapabilityStatus, Environment, HealthState};
+pub use broker_connection::{BrokerWorkspace, ConnectionState};

@@ -49,6 +49,25 @@ _LOGIN_JOB = "interactive-login"
 _HEALTH_JOB = "health-check"
 
 
+def _accepts_keyword(func: Any, name: str) -> bool:
+    """True when ``func`` declares ``name`` (or ``**kwargs``).
+
+    Lets the manager offer richer arguments to newer venue callables
+    while legacy ones (Zerodha) keep their exact historical call —
+    signature inspection only, never behavior inference.
+    """
+    import inspect
+
+    try:
+        parameters = inspect.signature(func).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD or parameter.name == name
+        for parameter in parameters
+    )
+
+
 class _Worker(QThread):
     """One serialized job queue for every network/SDK operation."""
 
@@ -190,6 +209,9 @@ class BrokerManager(QObject):
                     # must register exactly this). The top-level
                     # ``callback_url`` stays for backward compatibility.
                     "callback_url": spec.callback_url,
+                    # Venue credential shapes (plain render data from the
+                    # spec — the form renders these, values never cross).
+                    "credential_schema": [dict(row) for row in spec.credential_schema],
                 }
             )
         return {"brokers": brokers, "callback_url": self._callback_url()}
@@ -390,6 +412,10 @@ class BrokerManager(QObject):
             login_kwargs["redirect_uri"] = (
                 config.get(spec.redirect_uri_field, "") or spec.callback_url
             )
+        if _accepts_keyword(spec.interactive_login, "config"):
+            # Selenium-capable venues (FYERS) automate the full credential
+            # set; legacy callables (Zerodha) keep their exact old call.
+            login_kwargs["config"] = dict(config)
         ok, message = spec.interactive_login(
             spec.build_flow(),
             config[spec.key_field],

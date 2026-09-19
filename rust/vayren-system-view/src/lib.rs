@@ -44,6 +44,7 @@ use slint::platform::{
 use slint::{LogicalPosition, PhysicalSize, Rgb8Pixel, SharedString, VecModel};
 use vayren_shell::shell::env_kind;
 use vayren_shell::view_model::{BrokerPanel, Environment, HealthState};
+use vayren_shell::broker_connection::{BrokerWorkspace, ConnectionState};
 
 pub const ABI_VERSION: u32 = 2;
 const MIN_SCALE: f32 = 0.25;
@@ -86,6 +87,7 @@ pub struct SystemView {
     window: Rc<MinimalSoftwareWindow>,
     _ui: SystemHostWindow,
     panel: BrokerPanel,
+    field_keys: Rc<RefCell<Vec<String>>>,
     actions: Rc<RefCell<std::collections::VecDeque<String>>>,
     refresh_requested: Rc<Cell<bool>>,
     refresh_busy: Rc<Cell<bool>>,
@@ -166,14 +168,174 @@ fn apply_view(ui: &SystemHostWindow, panel: &BrokerPanel, refresh_busy: bool) {
     );
 }
 
+/// Project the CONNECTION workspace view-model onto the host window. Setter
+/// mapping mirrors `shell::apply_connection` 1:1 (same view-model,
+/// different bind target); if that function changes shape, THIS function
+/// must change with it. Returns the workspace field keys in render order so
+/// the action drain can zip connect values back onto schema keys.
+fn apply_connection_view(ui: &SystemHostWindow, workspace: &BrokerWorkspace) -> Vec<String> {
+    ui.set_conn_brokers(
+        Rc::new(VecModel::from(
+            workspace
+                .brokers
+                .iter()
+                .map(|b| BrokerRowView {
+                    id: b.id.clone().into(),
+                    display_name: b.display_name.clone().into(),
+                    mark: b.mark().into(),
+                    venue_subtitle: b.venue_subtitle.clone().into(),
+                    status_label: b.status_label().into(),
+                    status_tone: b.status_tone(),
+                    selected: b.selected,
+                    connected: b.connected,
+                })
+                .collect::<Vec<_>>(),
+        ))
+        .into(),
+    );
+    ui.set_conn_display_name(workspace.display_name.clone().into());
+    ui.set_conn_mark(
+        workspace
+            .display_name
+            .chars()
+            .next()
+            .map(|c| c.to_uppercase().to_string())
+            .unwrap_or_default()
+            .into(),
+    );
+    ui.set_conn_venue_subtitle(workspace.venue_subtitle.clone().into());
+    ui.set_conn_env_label(workspace.env_label.clone().into());
+    ui.set_conn_description(
+        vayren_shell::broker_connection::description_line(&workspace.display_name).into(),
+    );
+    let (pill_label, pill_tone) = workspace.pill();
+    ui.set_conn_pill_label(pill_label.into());
+    ui.set_conn_pill_tone(pill_tone);
+    ui.set_conn_status_message(workspace.status_message().into());
+    ui.set_conn_fields(
+        Rc::new(VecModel::from(
+            workspace
+                .fields
+                .iter()
+                .map(|f| CredentialFieldView {
+                    key: f.key.clone().into(),
+                    label: f.label.clone().into(),
+                    placeholder: f.placeholder.clone().into(),
+                    secret: f.secret,
+                    required: f.required,
+                })
+                .collect::<Vec<_>>(),
+        ))
+        .into(),
+    );
+    ui.set_conn_progress(
+        Rc::new(VecModel::from(
+            workspace
+                .progress()
+                .into_iter()
+                .map(|s| ProgressStepView {
+                    index: s.index,
+                    title: s.title.into(),
+                    subtitle: s.subtitle.into(),
+                    state: s.state,
+                })
+                .collect::<Vec<_>>(),
+        ))
+        .into(),
+    );
+    ui.set_conn_cta_label(workspace.cta().into());
+    ui.set_conn_cta_arrow(!matches!(
+        workspace.state,
+        ConnectionState::Authenticating
+            | ConnectionState::GettingToken
+            | ConnectionState::Verifying
+            | ConnectionState::Failed
+    ));
+    ui.set_conn_cta_enabled(workspace.can_connect);
+    ui.set_conn_form_enabled(workspace.form_enabled());
+    ui.set_conn_is_connected(workspace.state == ConnectionState::Connected);
+    ui.set_conn_is_failed(workspace.state == ConnectionState::Failed);
+    ui.set_conn_error_message(if workspace.state == ConnectionState::Failed {
+        workspace.status_message().into()
+    } else {
+        "".into()
+    });
+    ui.set_conn_disconnect_visible(workspace.can_disconnect);
+    ui.set_conn_disconnect_enabled(workspace.can_disconnect);
+    ui.set_conn_help_caption(
+        if workspace.display_name.trim().is_empty() {
+            "View setup guide.".into()
+        } else {
+            format!("View setup guide for {}.", workspace.display_name.trim()).into()
+        },
+    );
+    workspace.fields.iter().map(|f| f.key.clone()).collect()
+}
+
+/// Extract the collapsible ops-section facts (system-health grid + event
+/// log) from the bridge snapshot. Absent/mistyped keys degrade to empty —
+/// the Slint surface then shows its honest empty state (hidden sections).
+/// Accepted shape (all optional): `"health_rows": [{"label","value","tone"}]`,
+/// `"log_rows": [{"text","tone"}]` with tones on the shared 0–3 convention.
+fn parse_ops_extras(value: &serde_json::Value) -> (Vec<HealthRow>, Vec<LogRow>) {
+    let health = value
+        .get("health_rows")
+        .and_then(|v| v.as_array())
+        .map(|list| {
+            list.iter()
+                .filter_map(|row| {
+                    let label = row.get("label")?.as_str()?.to_string();
+                    Some(HealthRow {
+                        label: label.into(),
+                        value: row
+                            .get("value")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("—")
+                            .into(),
+                        tone: row.get("tone").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let logs = value
+        .get("log_rows")
+        .and_then(|v| v.as_array())
+        .map(|list| {
+            list.iter()
+                .filter_map(|row| {
+                    let text = row.get("text")?.as_str()?.to_string();
+                    Some(LogRow {
+                        text: text.into(),
+                        tone: row.get("tone").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    (health, logs)
+}
+
+/// Apply ops-section facts to the host window (empty keeps the retained
+/// "--"/empty projections the Slint side defaults to).
+fn apply_ops_extras(ui: &SystemHostWindow, health: Vec<HealthRow>, logs: Vec<LogRow>) {
+    ui.set_health_rows(Rc::new(VecModel::from(health)).into());
+    ui.set_log_rows(Rc::new(VecModel::from(logs)).into());
+}
+
 /// Wire the panel's action callbacks: Slint reports intent only; the host
 /// drains `actions` (`next_event`) and dispatches to the Python
 /// `BrokerManager` — the same signal contract the Qt cards carried.
+/// `field_keys` holds the workspace schema keys in render order so the
+/// connect intent can zip entered values back onto schema keys (values
+/// travel once, inside this event, exactly like the previous `configure`
+/// contract — snapshots never carry them).
 fn wire_view(
     ui: &SystemHostWindow,
     actions: Rc<RefCell<std::collections::VecDeque<String>>>,
     refresh: Rc<Cell<bool>>,
     busy: Rc<Cell<bool>>,
+    field_keys: Rc<RefCell<Vec<String>>>,
 ) {
     macro_rules! wire_action {
         ($register:ident, $payload:expr) => {{
@@ -210,6 +372,49 @@ fn wire_view(
     );
     wire_action!(on_remove_requested, serde_json::json!({"action": "remove"}));
     wire_action!(on_copy_callback, serde_json::json!({"action": "copy_url"}));
+    wire_action!(on_help_requested, serde_json::json!({"action": "help"}));
+    wire_action!(on_add_requested, serde_json::json!({"action": "add"}));
+    {
+        let queue = actions.clone();
+        let refresh_flag = refresh.clone();
+        ui.on_select_requested(move |id: slint::SharedString| {
+            let payload = serde_json::json!({
+                "action": "select",
+                "broker_id": id.as_str(),
+            });
+            if let Ok(text) = serde_json::to_string(&payload) {
+                queue.borrow_mut().push_back(text);
+            }
+            refresh_flag.set(true);
+        });
+    }
+    {
+        let queue = actions.clone();
+        let refresh_flag = refresh.clone();
+        let keys = field_keys.clone();
+        ui.on_connect_requested(
+            move |v0: slint::SharedString,
+                  v1: slint::SharedString,
+                  v2: slint::SharedString,
+                  v3: slint::SharedString,
+                  v4: slint::SharedString,
+                  v5: slint::SharedString| {
+                // Zip entered values back onto the schema keys captured at
+                // the last applied snapshot (values cross once, here).
+                let entered = [v0, v1, v2, v3, v4, v5];
+                let guard = keys.borrow();
+                let mut values = serde_json::Map::new();
+                for (key, val) in guard.iter().zip(entered.iter()) {
+                    values.insert(key.clone(), serde_json::Value::String(val.to_string()));
+                }
+                let payload = serde_json::json!({"action": "connect", "values": values});
+                if let Ok(text) = serde_json::to_string(&payload) {
+                    queue.borrow_mut().push_back(text);
+                }
+                refresh_flag.set(true);
+            },
+        );
+    }
     {
         let queue = actions.clone();
         let refresh_flag = refresh.clone();
@@ -256,10 +461,18 @@ impl SystemView {
             ..Default::default()
         };
         apply_view(&ui, &empty, false);
+        apply_connection_view(&ui, &BrokerWorkspace::from_json(&serde_json::Value::Null));
         let actions = Rc::new(RefCell::new(std::collections::VecDeque::new()));
         let refresh = Rc::new(Cell::new(false));
         let busy = Rc::new(Cell::new(false));
-        wire_view(&ui, actions.clone(), refresh.clone(), busy.clone());
+        let field_keys = Rc::new(RefCell::new(Vec::<String>::new()));
+        wire_view(
+            &ui,
+            actions.clone(),
+            refresh.clone(),
+            busy.clone(),
+            field_keys.clone(),
+        );
         // Ops-section toggles are view-local (Qt dock visibility parity):
         // no event leaves the view for them.
         {
@@ -282,6 +495,7 @@ impl SystemView {
             window,
             _ui: ui,
             panel: empty,
+            field_keys,
             actions,
             refresh_requested: refresh,
             refresh_busy: busy,
@@ -303,11 +517,16 @@ impl SystemView {
     }
 
     fn apply_geometry(&mut self) {
-        self.window
-            .set_size(PhysicalSize::new(self.width_px, self.height_px));
+        // Scale FIRST: `set_size(PhysicalSize)` converts to logical units
+        // with the window's CURRENT scale factor, so the factor must be
+        // current before the size lands (otherwise a HiDPI host lays out
+        // physical pixels as logical units — 1.5x oversize, right side
+        // clipped: pills/CTA/progress cut off).
         self.window.dispatch_event(WindowEvent::ScaleFactorChanged {
             scale_factor: self.scale_factor,
         });
+        self.window
+            .set_size(PhysicalSize::new(self.width_px, self.height_px));
         self.window.request_redraw();
     }
 
@@ -443,6 +662,10 @@ pub extern "C" fn vayren_system_view_set_snapshot(
         let panel = BrokerPanel::from_json(&value);
         view.refresh_busy.set(false);
         apply_view(&view._ui, &panel, view.refresh_busy.get());
+        // Connection workspace projection (same snapshot, workspace shape).
+        let workspace = BrokerWorkspace::from_json(&value);
+        let keys = apply_connection_view(&view._ui, &workspace);
+        *view.field_keys.borrow_mut() = keys;
         // Ops-section facts (system health grid + event log) from the same
         // snapshot — absent keys keep the retained "--"/empty projections.
         let (health_rows, log_rows): (Vec<HealthRow>, Vec<LogRow>) = parse_ops_extras(&value);
@@ -851,6 +1074,127 @@ mod tests {
         snapshot(view, CONNECTED);
         assert_eq!(vayren_system_view_ack_refresh(view), 0);
         assert_eq!(vayren_system_view_refresh_requested(view), 0);
+        vayren_system_view_destroy(view);
+    }
+
+    #[test]
+    fn connection_workspace_projects_broker_facts() {
+        let view = make_view();
+        snapshot(
+            view,
+            r#"{
+                "brokers": [
+                    {"id": "zerodha", "display_name": "Zerodha",
+                     "venue_subtitle": "Kite Connect", "status": "CONNECTED"},
+                    {"id": "fyers", "display_name": "Fyers",
+                     "venue_subtitle": "FYERS API v3", "status": "LOGIN_REQUIRED"}
+                ],
+                "selected_id": "fyers",
+                "display_name": "Fyers",
+                "venue_subtitle": "FYERS API v3",
+                "environment": "paper",
+                "status_raw": "LOGIN_REQUIRED",
+                "configured": true,
+                "can_login": true,
+                "can_disconnect": false,
+                "reason": "",
+                "credential_fields": [
+                    {"key": "app_id", "label": "App ID",
+                     "placeholder": "Enter FYERS App ID",
+                     "secret": false, "required": true},
+                    {"key": "secret", "label": "Secret ID",
+                     "placeholder": "Enter FYERS Secret ID",
+                     "secret": true, "required": true}
+                ],
+                "blockers": []
+            }"#,
+        );
+        with_view(view, |v| {
+            // Sidebar: both venues, FYERS selected, Zerodha connected.
+            assert_eq!(v._ui.get_conn_brokers().row_count(), 2);
+            assert_eq!(v._ui.get_conn_display_name(), "Fyers");
+            assert_eq!(v._ui.get_conn_venue_subtitle(), "FYERS API v3");
+            assert_eq!(v._ui.get_conn_env_label(), "PAPER");
+            // Status is explicit text (never color alone).
+            assert_eq!(v._ui.get_conn_pill_label(), "Not Connected");
+            assert_eq!(v._ui.get_conn_cta_label(), "Connect to Fyers");
+            assert!(v._ui.get_conn_cta_enabled());
+            assert!(v._ui.get_conn_form_enabled());
+            assert!(!v._ui.get_conn_is_connected());
+            assert!(!v._ui.get_conn_is_failed());
+            assert_eq!(v._ui.get_conn_fields().row_count(), 2);
+            assert_eq!(v._ui.get_conn_progress().row_count(), 5);
+            // Field keys captured for the connect drain.
+            assert_eq!(
+                *v.field_keys.borrow(),
+                vec!["app_id".to_string(), "secret".to_string()]
+            );
+        });
+        vayren_system_view_destroy(view);
+    }
+
+    #[test]
+    fn connection_actions_drain_with_schema_keys() {
+        let view = make_view();
+        snapshot(
+            view,
+            r#"{
+                "brokers": [{"id": "fyers", "display_name": "Fyers",
+                             "venue_subtitle": "FYERS API v3",
+                             "status": "LOGIN_REQUIRED", "selected": true}],
+                "selected_id": "fyers",
+                "display_name": "Fyers",
+                "venue_subtitle": "FYERS API v3",
+                "environment": "paper",
+                "status_raw": "LOGIN_REQUIRED",
+                "configured": false,
+                "can_login": false,
+                "credential_fields": [
+                    {"key": "app_id", "label": "App ID",
+                     "placeholder": "Enter App ID",
+                     "secret": false, "required": true},
+                    {"key": "secret", "label": "Secret",
+                     "placeholder": "Enter Secret",
+                     "secret": true, "required": true}
+                ],
+                "blockers": []
+            }"#,
+        );
+        with_view(view, |v| {
+            let weak = slint::ComponentHandle::as_weak(&v._ui);
+            let ui = weak.upgrade().unwrap();
+            ui.invoke_select_requested(slint::SharedString::from("zerodha"));
+            ui.invoke_connect_requested(
+                slint::SharedString::from("MYAPP"),
+                slint::SharedString::from("S3CR3T"),
+                slint::SharedString::from(""),
+                slint::SharedString::from(""),
+                slint::SharedString::from(""),
+                slint::SharedString::from(""),
+            );
+            ui.invoke_help_requested();
+            ui.invoke_add_requested();
+            drop(ui);
+        });
+        let mut buf = [0u8; 1024];
+        let mut seen = Vec::new();
+        loop {
+            let len = vayren_system_view_next_event(view, buf.as_mut_ptr(), buf.len());
+            if len <= 0 {
+                break;
+            }
+            let parsed: serde_json::Value = serde_json::from_slice(&buf[..len as usize]).unwrap();
+            seen.push(parsed.clone());
+        }
+        assert_eq!(seen.len(), 4);
+        assert_eq!(seen[0]["action"], "select");
+        assert_eq!(seen[0]["broker_id"], "zerodha");
+        assert_eq!(seen[1]["action"], "connect");
+        // Values zip back onto schema keys (never bare positional strings).
+        assert_eq!(seen[1]["values"]["app_id"], "MYAPP");
+        assert_eq!(seen[1]["values"]["secret"], "S3CR3T");
+        assert_eq!(seen[2]["action"], "help");
+        assert_eq!(seen[3]["action"], "add");
         vayren_system_view_destroy(view);
     }
 

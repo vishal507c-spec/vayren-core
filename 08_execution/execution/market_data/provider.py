@@ -7,7 +7,7 @@ behind this protocol; nothing here knows any broker SDK.
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Protocol
 
 from execution.events import MarketEvent
 
@@ -48,11 +48,3 @@ class MarketDataError(RuntimeError):
     def __init__(self, message: str, code: str = "PROVIDER_ERROR") -> None:
         super().__init__(message)
         self.code = code
-
-
-def provider_supports(provider: Any, capability: str) -> bool:
-    """True when the provider advertises a capability (duck-typed)."""
-    try:
-        return capability in tuple(provider.capabilities)
-    except Exception:
-        return False

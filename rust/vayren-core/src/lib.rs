@@ -14,20 +14,25 @@ pub mod backtest;
 pub mod backtest_directional;
 pub mod backtest_engine;
 pub mod backtest_events;
+pub mod backtest_runner;
+pub mod backtest_validation;
 pub mod chart_events;
 pub mod chart_math;
 pub mod chart_model;
 pub mod data_events;
 pub mod download;
+pub mod download_engine;
 pub mod event_bus;
 pub mod execution;
 pub mod execution_engine;
 pub mod execution_events;
 pub mod indicator;
 pub mod kill_switch;
+pub mod live_session;
 pub mod market;
 pub mod market_events;
 pub mod metrics;
+pub mod normalizer;
 pub mod order_state;
 pub mod registry;
 pub mod risk;
@@ -420,6 +425,38 @@ pub unsafe extern "C" fn vy_risk_kernel(
     result.unwrap_or(0)
 }
 
+// ── backtest form validation ──────────────────────────────────────────
+
+/// Evaluate backtest form checks. Returns the failure bitmask (bit i =
+/// `backtest_validation::MESSAGES[i]`); 0 = valid. Wrong-shape inputs fail
+/// closed to all-set (every message); panics are caught.
+#[no_mangle]
+pub extern "C" fn vy_backtest_validate_form(
+    symbol_ok: i32,
+    strategy_ok: i32,
+    timeframe_ok: i32,
+    dates_ordered: i32,
+    initial_capital: f64,
+    has_cap: i32,
+    max_position_size: f64,
+) -> u32 {
+    let result = std::panic::catch_unwind(|| {
+        backtest_validation::validate_form(
+            symbol_ok != 0,
+            strategy_ok != 0,
+            timeframe_ok != 0,
+            dates_ordered != 0,
+            initial_capital,
+            if has_cap != 0 {
+                Some(max_position_size)
+            } else {
+                None
+            },
+        )
+    });
+    result.unwrap_or(backtest_validation::ALL_BITS)
+}
+
 // ── execution core kernels ────────────────────────────────────────────────
 
 #[no_mangle]
@@ -541,9 +578,8 @@ pub unsafe extern "C" fn vy_exec_ledger_apply_fill(
         (new_qty, avg, pos_realized_pnl, 0.0)
     } else {
         let closing = pos_qty.abs().min(fill_qty);
-        let mut pnl = (fill_price - pos_avg_price)
-            * closing
-            * (if pos_qty > 0.0 { 1.0 } else { -1.0 });
+        let mut pnl =
+            (fill_price - pos_avg_price) * closing * (if pos_qty > 0.0 { 1.0 } else { -1.0 });
         if fill_qty != 0.0 {
             pnl -= commission * (closing / fill_qty);
         }
@@ -565,4 +601,227 @@ pub unsafe extern "C" fn vy_exec_ledger_apply_fill(
         *out_day_pnl_delta = day_pnl_delta;
     }
     0
+}
+
+#[no_mangle]
+pub extern "C" fn vy_exec_reconcile_funds(
+    local_equity: f64,
+    has_broker: i32,
+    broker_equity: f64,
+    tolerance: f64,
+) -> i32 {
+    let broker = if has_broker != 0 {
+        Some(broker_equity)
+    } else {
+        None
+    };
+    let report = execution_engine::reconcile_funds(local_equity, broker, tolerance, "");
+    if report.matched {
+        1
+    } else {
+        0
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn vy_exec_verdict_blocks_live(status_code: i32) -> i32 {
+    // 0 = SAFE, 1 = WARNING, 2 = BLOCKED
+    let v = match status_code {
+        0 => execution_engine::Verdict::Safe,
+        1 => execution_engine::Verdict::Warning,
+        _ => execution_engine::Verdict::Blocked,
+    };
+    if v.blocks_live() {
+        1
+    } else {
+        0
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn vy_exec_ledger_snapshot(
+    starting_capital: f64,
+    realized_sum: f64,
+    day_pnl: f64,
+    pos_count: i32,
+    pos_qtys: *const f64,
+    pos_avg_prices: *const f64,
+    pos_mark_prices: *const f64,
+    out_equity: *mut f64,
+    out_available_capital: *mut f64,
+    out_day_pnl: *mut f64,
+) -> i32 {
+    let count = if pos_count > 0 { pos_count as usize } else { 0 };
+    let qtys = slice(pos_qtys, count);
+    let avg_prices = slice(pos_avg_prices, count);
+    let mark_prices = slice(pos_mark_prices, count);
+
+    let mut unrealized = 0.0;
+    for i in 0..count {
+        let q = qtys[i];
+        let avg = avg_prices[i];
+        let mark = mark_prices[i];
+        if q > 0.0 {
+            unrealized += (mark - avg) * q;
+        } else if q < 0.0 {
+            unrealized += (avg - mark) * q.abs();
+        }
+    }
+
+    let equity = starting_capital + realized_sum + unrealized;
+    if !out_equity.is_null() {
+        *out_equity = equity;
+    }
+    if !out_available_capital.is_null() {
+        *out_available_capital = equity;
+    }
+    if !out_day_pnl.is_null() {
+        *out_day_pnl = day_pnl + unrealized;
+    }
+    0
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn vy_exec_paper_calculate_fill(
+    is_limit: i32,
+    has_limit: i32,
+    limit_price: f64,
+    is_buy: i32,
+    reference_price: f64,
+    slippage_pct: f64,
+    commission_pct: f64,
+    capital: f64,
+    remaining_qty: f64,
+    out_fill_price: *mut f64,
+    out_fill_qty: *mut f64,
+    out_notional: *mut f64,
+    out_commission: *mut f64,
+    out_new_capital: *mut f64,
+) -> i32 {
+    if reference_price <= 0.0 || remaining_qty <= 0.0 {
+        return -1;
+    }
+    let slip = reference_price * (slippage_pct / 100.0);
+    let fill_price = if is_limit != 0 && has_limit != 0 {
+        if is_buy != 0 {
+            limit_price.min(reference_price + slip)
+        } else {
+            limit_price.max(reference_price - slip)
+        }
+    } else if is_buy != 0 {
+        reference_price + slip
+    } else {
+        reference_price - slip
+    };
+
+    if fill_price <= 0.0 {
+        return -1;
+    }
+
+    let fill_qty = if is_buy != 0 {
+        let affordable = if fill_price > 0.0 {
+            capital / fill_price
+        } else {
+            0.0
+        };
+        remaining_qty.min(affordable)
+    } else {
+        remaining_qty
+    };
+
+    if fill_qty <= 0.0 {
+        return -1;
+    }
+
+    let notional = fill_price * fill_qty;
+    let commission = notional * (commission_pct / 100.0);
+    let new_capital = if is_buy != 0 {
+        capital - (notional + commission)
+    } else {
+        capital + (notional - commission)
+    };
+
+    if !out_fill_price.is_null() {
+        *out_fill_price = fill_price;
+    }
+    if !out_fill_qty.is_null() {
+        *out_fill_qty = fill_qty;
+    }
+    if !out_notional.is_null() {
+        *out_notional = notional;
+    }
+    if !out_commission.is_null() {
+        *out_commission = commission;
+    }
+    if !out_new_capital.is_null() {
+        *out_new_capital = new_capital;
+    }
+
+    0
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn vy_exec_order_apply_fill(
+    prev_qty: f64,
+    prev_avg: f64,
+    fill_qty: f64,
+    fill_price: f64,
+    out_new_qty: *mut f64,
+    out_new_avg: *mut f64,
+) -> i32 {
+    let new_qty = prev_qty + fill_qty;
+    let new_avg = if prev_qty <= 0.0 {
+        fill_price
+    } else if new_qty > 0.0 {
+        (prev_avg * prev_qty + fill_price * fill_qty) / new_qty
+    } else {
+        0.0
+    };
+    if !out_new_qty.is_null() {
+        *out_new_qty = new_qty;
+    }
+    if !out_new_avg.is_null() {
+        *out_new_avg = new_avg;
+    }
+    0
+}
+
+#[no_mangle]
+pub extern "C" fn vy_exec_check_live_readiness_basic(
+    warmup_have: i32,
+    warmup_need: i32,
+    risk_ok: i32,
+    account_ok: i32,
+    clock_ok: i32,
+    reconcile_ok: i32,
+    persistence_ok: i32,
+    kill_ok: i32,
+    observability_ok: i32,
+) -> i32 {
+    let mut ok = 1;
+    if warmup_have < warmup_need {
+        ok = 0;
+    }
+    if risk_ok == 0 {
+        ok = 0;
+    }
+    if account_ok == 0 {
+        ok = 0;
+    }
+    if clock_ok == 0 {
+        ok = 0;
+    }
+    if reconcile_ok == 0 {
+        ok = 0;
+    }
+    if persistence_ok == 0 {
+        ok = 0;
+    }
+    if kill_ok == 0 {
+        ok = 0;
+    }
+    if observability_ok == 0 {
+        ok = 0;
+    }
+    ok
 }

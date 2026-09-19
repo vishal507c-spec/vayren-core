@@ -12,6 +12,106 @@ from core.native.loader import load_vayren_core
 
 _lib = load_vayren_core()
 
+_lib.vy_exec_arm_transition.argtypes = [ctypes.c_int32, ctypes.c_int32]
+_lib.vy_exec_arm_transition.restype = ctypes.c_int32
+
+_lib.vy_exec_lifecycle_transition_allowed.argtypes = [ctypes.c_int32, ctypes.c_int32]
+_lib.vy_exec_lifecycle_transition_allowed.restype = ctypes.c_int32
+
+_lib.vy_exec_planner_plan.argtypes = [
+    ctypes.c_double,
+    ctypes.c_int32,
+    ctypes.c_double,
+    ctypes.c_int32,
+    ctypes.c_double,
+    ctypes.POINTER(ctypes.c_double),
+    ctypes.POINTER(ctypes.c_int32),
+    ctypes.POINTER(ctypes.c_int32),
+    ctypes.POINTER(ctypes.c_double),
+]
+_lib.vy_exec_planner_plan.restype = ctypes.c_int32
+
+_lib.vy_exec_ledger_apply_fill.argtypes = [
+    ctypes.c_double,
+    ctypes.c_double,
+    ctypes.c_double,
+    ctypes.c_int32,
+    ctypes.c_double,
+    ctypes.c_double,
+    ctypes.c_double,
+    ctypes.POINTER(ctypes.c_double),
+    ctypes.POINTER(ctypes.c_double),
+    ctypes.POINTER(ctypes.c_double),
+    ctypes.POINTER(ctypes.c_double),
+]
+_lib.vy_exec_ledger_apply_fill.restype = ctypes.c_int32
+
+_lib.vy_exec_reconcile_funds.argtypes = [
+    ctypes.c_double,
+    ctypes.c_int32,
+    ctypes.c_double,
+    ctypes.c_double,
+]
+_lib.vy_exec_reconcile_funds.restype = ctypes.c_int32
+
+_lib.vy_exec_verdict_blocks_live.argtypes = [ctypes.c_int32]
+_lib.vy_exec_verdict_blocks_live.restype = ctypes.c_int32
+
+_lib.vy_exec_ledger_snapshot.argtypes = [
+    ctypes.c_double,
+    ctypes.c_double,
+    ctypes.c_double,
+    ctypes.c_int32,
+    ctypes.POINTER(ctypes.c_double),
+    ctypes.POINTER(ctypes.c_double),
+    ctypes.POINTER(ctypes.c_double),
+    ctypes.POINTER(ctypes.c_double),
+    ctypes.POINTER(ctypes.c_double),
+    ctypes.POINTER(ctypes.c_double),
+]
+_lib.vy_exec_ledger_snapshot.restype = ctypes.c_int32
+
+_lib.vy_exec_paper_calculate_fill.argtypes = [
+    ctypes.c_int32,
+    ctypes.c_int32,
+    ctypes.c_double,
+    ctypes.c_int32,
+    ctypes.c_double,
+    ctypes.c_double,
+    ctypes.c_double,
+    ctypes.c_double,
+    ctypes.c_double,
+    ctypes.POINTER(ctypes.c_double),
+    ctypes.POINTER(ctypes.c_double),
+    ctypes.POINTER(ctypes.c_double),
+    ctypes.POINTER(ctypes.c_double),
+    ctypes.POINTER(ctypes.c_double),
+]
+_lib.vy_exec_paper_calculate_fill.restype = ctypes.c_int32
+
+_lib.vy_exec_order_apply_fill.argtypes = [
+    ctypes.c_double,
+    ctypes.c_double,
+    ctypes.c_double,
+    ctypes.c_double,
+    ctypes.POINTER(ctypes.c_double),
+    ctypes.POINTER(ctypes.c_double),
+]
+_lib.vy_exec_order_apply_fill.restype = ctypes.c_int32
+
+_lib.vy_exec_check_live_readiness_basic.argtypes = [
+    ctypes.c_int32,
+    ctypes.c_int32,
+    ctypes.c_int32,
+    ctypes.c_int32,
+    ctypes.c_int32,
+    ctypes.c_int32,
+    ctypes.c_int32,
+    ctypes.c_int32,
+    ctypes.c_int32,
+]
+_lib.vy_exec_check_live_readiness_basic.restype = ctypes.c_int32
+
 _ARM_CODE: dict[str, int] = {
     "DISARMED": 0,
     "ARMING": 1,
@@ -132,3 +232,165 @@ def native_ledger_apply_fill(
         float(out_realized_pnl.value),
         float(out_day_pnl_delta.value),
     )
+
+
+def native_reconcile_funds(
+    local_equity: float,
+    has_broker: bool,
+    broker_equity: float,
+    tolerance: float,
+) -> bool:
+    """Check fund reconciliation in the Rust kernel."""
+    res = int(
+        _lib.vy_exec_reconcile_funds(
+            float(local_equity),
+            1 if has_broker else 0,
+            float(broker_equity),
+            float(tolerance),
+        )
+    )
+    return res == 1
+
+
+def native_verdict_blocks_live(status_val: str) -> bool:
+    """Check whether a reconciliation verdict status blocks live trading via Rust authority."""
+    code = 0 if status_val == "SAFE" else (1 if status_val == "WARNING" else 2)
+    return bool(_lib.vy_exec_verdict_blocks_live(code))
+
+
+def native_ledger_snapshot(
+    starting_capital: float,
+    realized_sum: float,
+    day_pnl: float,
+    positions: list[tuple[float, float, float]],  # (qty, avg_price, mark_price)
+) -> tuple[float, float, float]:
+    """Calculate account snapshot values in the Rust kernel."""
+    count = len(positions)
+    if count == 0:
+        equity = starting_capital + realized_sum
+        return equity, equity, day_pnl
+
+    c_double_array = ctypes.c_double * count
+    qtys = c_double_array(*(p[0] for p in positions))
+    avg_prices = c_double_array(*(p[1] for p in positions))
+    mark_prices = c_double_array(*(p[2] for p in positions))
+
+    out_equity = ctypes.c_double()
+    out_available = ctypes.c_double()
+    out_day_pnl = ctypes.c_double()
+
+    _lib.vy_exec_ledger_snapshot(
+        float(starting_capital),
+        float(realized_sum),
+        float(day_pnl),
+        count,
+        qtys,
+        avg_prices,
+        mark_prices,
+        ctypes.byref(out_equity),
+        ctypes.byref(out_available),
+        ctypes.byref(out_day_pnl),
+    )
+    return (
+        float(out_equity.value),
+        float(out_available.value),
+        float(out_day_pnl.value),
+    )
+
+
+def native_paper_calculate_fill(
+    is_limit: bool,
+    has_limit: bool,
+    limit_price: float,
+    is_buy: bool,
+    reference_price: float,
+    slippage_pct: float,
+    commission_pct: float,
+    capital: float,
+    remaining_qty: float,
+) -> tuple[float, float, float, float, float] | None:
+    """Calculate fill economics for paper broker in Rust.
+
+    Returns (fill_price, fill_qty, notional, commission, new_capital) or None if unfillable.
+    """
+    out_fill_price = ctypes.c_double()
+    out_fill_qty = ctypes.c_double()
+    out_notional = ctypes.c_double()
+    out_commission = ctypes.c_double()
+    out_new_capital = ctypes.c_double()
+
+    rc = int(
+        _lib.vy_exec_paper_calculate_fill(
+            1 if is_limit else 0,
+            1 if has_limit else 0,
+            float(limit_price),
+            1 if is_buy else 0,
+            float(reference_price),
+            float(slippage_pct),
+            float(commission_pct),
+            float(capital),
+            float(remaining_qty),
+            ctypes.byref(out_fill_price),
+            ctypes.byref(out_fill_qty),
+            ctypes.byref(out_notional),
+            ctypes.byref(out_commission),
+            ctypes.byref(out_new_capital),
+        )
+    )
+    if rc != 0:
+        return None
+    return (
+        float(out_fill_price.value),
+        float(out_fill_qty.value),
+        float(out_notional.value),
+        float(out_commission.value),
+        float(out_new_capital.value),
+    )
+
+
+def native_order_apply_fill(
+    prev_qty: float,
+    prev_avg: float,
+    fill_qty: float,
+    fill_price: float,
+) -> tuple[float, float]:
+    """Fold a fill report into order filled_qty and avg_fill_price via Rust."""
+    out_qty = ctypes.c_double()
+    out_avg = ctypes.c_double()
+    _lib.vy_exec_order_apply_fill(
+        float(prev_qty),
+        float(prev_avg),
+        float(fill_qty),
+        float(fill_price),
+        ctypes.byref(out_qty),
+        ctypes.byref(out_avg),
+    )
+    return float(out_qty.value), float(out_avg.value)
+
+
+def native_check_live_readiness_basic(
+    warmup_have: int,
+    warmup_need: int,
+    risk_ok: bool,
+    account_ok: bool,
+    clock_ok: bool,
+    reconcile_ok: bool,
+    persistence_ok: bool,
+    kill_ok: bool,
+    observability_ok: bool,
+) -> bool:
+    """Evaluate basic live readiness gates in Rust."""
+    res = int(
+        _lib.vy_exec_check_live_readiness_basic(
+            int(warmup_have),
+            int(warmup_need),
+            1 if risk_ok else 0,
+            1 if account_ok else 0,
+            1 if clock_ok else 0,
+            1 if reconcile_ok else 0,
+            1 if persistence_ok else 0,
+            1 if kill_ok else 0,
+            1 if observability_ok else 0,
+        )
+    )
+    return res == 1

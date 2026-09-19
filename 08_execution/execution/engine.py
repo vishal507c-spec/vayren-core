@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Any
 
 from execution.models.order import TERMINAL_STATES, BrokerOrder, Fill, OrderState
+from execution.native_execution import native_order_apply_fill
 from execution.native_order_state import transition_allowed
 
 
@@ -86,11 +87,8 @@ class ExecutionEngine:
             raise IllegalTransitionError(f"fill for terminal order {stored.client_order_id}")
         prev_qty = stored.filled_qty
         prev_avg = stored.avg_fill_price or 0.0
-        new_qty = prev_qty + fill.fill_qty
-        new_avg = (
-            fill.fill_price
-            if prev_qty <= 0
-            else (prev_avg * prev_qty + fill.fill_price * fill.fill_qty) / new_qty
+        new_qty, new_avg = native_order_apply_fill(
+            prev_qty, prev_avg, fill.fill_qty, fill.fill_price
         )
         updated = BrokerOrder(
             client_order_id=stored.client_order_id,

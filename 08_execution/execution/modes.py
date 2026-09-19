@@ -34,15 +34,6 @@ class LiveArm(Enum):
     HALTED = "HALTED"
 
 
-_ARM_TRANSITIONS: dict[LiveArm, frozenset[LiveArm]] = {
-    LiveArm.DISARMED: frozenset({LiveArm.ARMING}),
-    LiveArm.ARMING: frozenset({LiveArm.ARMED, LiveArm.DISARMED}),
-    LiveArm.ARMED: frozenset({LiveArm.RUNNING, LiveArm.HALTED, LiveArm.DISARMED}),
-    LiveArm.RUNNING: frozenset({LiveArm.HALTED, LiveArm.DISARMED}),
-    LiveArm.HALTED: frozenset({LiveArm.DISARMED}),
-}
-
-
 class ArmingError(ValueError):
     """Illegal arming transition attempted."""
 

@@ -22,40 +22,6 @@ class LifecycleState(Enum):
     RECONCILING = "RECONCILING"
 
 
-TRANSITIONS: dict[LifecycleState, frozenset[LifecycleState]] = {
-    LifecycleState.CREATED: frozenset(
-        {LifecycleState.VALIDATING, LifecycleState.RECOVERING, LifecycleState.STOPPED}
-    ),
-    LifecycleState.VALIDATING: frozenset(
-        {LifecycleState.WARMING_UP, LifecycleState.ERROR, LifecycleState.STOPPED}
-    ),
-    LifecycleState.WARMING_UP: frozenset(
-        {LifecycleState.READY, LifecycleState.ERROR, LifecycleState.STOPPED}
-    ),
-    LifecycleState.READY: frozenset({LifecycleState.RUNNING, LifecycleState.STOPPED}),
-    LifecycleState.RUNNING: frozenset(
-        {LifecycleState.PAUSED, LifecycleState.STOPPING, LifecycleState.ERROR}
-    ),
-    LifecycleState.PAUSED: frozenset({LifecycleState.RUNNING, LifecycleState.STOPPING}),
-    LifecycleState.STOPPING: frozenset({LifecycleState.STOPPED, LifecycleState.ERROR}),
-    LifecycleState.STOPPED: frozenset({LifecycleState.RECOVERING}),
-    LifecycleState.ERROR: frozenset({LifecycleState.RECOVERING, LifecycleState.STOPPED}),
-    LifecycleState.RECOVERING: frozenset(
-        {
-            LifecycleState.VALIDATING,
-            LifecycleState.RECONCILING,
-            LifecycleState.ERROR,
-            LifecycleState.STOPPED,
-        }
-    ),
-    # FINAL §L: recovered sessions reconcile broker truth before validation.
-    # RECOVERING → VALIDATING stays legal (backward compatible fast path).
-    LifecycleState.RECONCILING: frozenset(
-        {LifecycleState.VALIDATING, LifecycleState.ERROR, LifecycleState.STOPPED}
-    ),
-}
-
-
 class LifecycleError(ValueError):
     """Illegal lifecycle transition attempted."""
 

@@ -53,6 +53,7 @@ fn main() -> Result<(), slint::PlatformError> {
     shell::wire_research(&ui, research_state.clone());
     shell::wire_live(&ui, live_state.clone());
     shell::apply(&ui, &shell::demo_snapshot());
+    shell::apply_connection(&ui, &shell::demo_connection_workspace());
     shell::apply_zoom(&ui, &zoom.borrow());
     shell::apply_lab(&ui, &lab_state.borrow());
     shell::apply_portfolio(&ui, &portfolio_state.borrow());

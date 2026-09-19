@@ -15,6 +15,7 @@ from enum import StrEnum
 from typing import Any
 
 from execution.models.position import Position
+from execution.native_execution import native_reconcile_funds, native_verdict_blocks_live
 
 
 class ReconcileStatus(StrEnum):
@@ -129,7 +130,7 @@ def reconcile_funds(
             ),
             checked_at=checked_at,
         )
-    if abs(float(local_equity) - broker_equity) > tolerance:
+    if not native_reconcile_funds(float(local_equity), True, broker_equity, float(tolerance)):
         return ReconciliationReport(
             matched=False,
             mismatches=(
@@ -157,7 +158,7 @@ class ReconciliationVerdict:
     @property
     def blocks_live(self) -> bool:
         """SAFE never blocks; WARNING and BLOCKED always block LIVE."""
-        return self.status is not ReconcileStatus.SAFE
+        return native_verdict_blocks_live(self.status.value)
 
     def journal_payload(self) -> dict[str, Any]:
         """JSON-safe payload for the RECONCILED journal entry."""

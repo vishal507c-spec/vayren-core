@@ -206,10 +206,10 @@ pub fn coverage_event(summary: &CoverageSummary) -> DownloadCoverage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event_bus::EventBus;
     use crate::download::{
         forward_sweep, parse_ts, validate_range, CandleSink, ChunkProgress, FetchResult, MemSink,
     };
+    use crate::event_bus::EventBus;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 

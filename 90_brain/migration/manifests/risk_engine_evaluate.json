@@ -222,7 +222,17 @@
     "2026-09-17T02:22:31Z PARITY PASS: 30/30 passed",
     "2026-09-17T02:22:31Z SHADOW PASS: 60 comparisons, 0 mismatches",
     "2026-09-17T02:48:21Z PARITY PASS: 30/30 passed",
-    "2026-09-17T02:48:21Z SHADOW PASS: 60 comparisons, 0 mismatches"
+    "2026-09-17T02:48:21Z SHADOW PASS: 60 comparisons, 0 mismatches",
+    "2026-09-18T15:06:04Z PARITY PASS: 30/30 passed",
+    "2026-09-18T15:06:04Z SHADOW PASS: 60 comparisons, 0 mismatches",
+    "2026-09-18T15:20:50Z PARITY PASS: 30/30 passed",
+    "2026-09-18T15:20:50Z SHADOW PASS: 60 comparisons, 0 mismatches",
+    "2026-09-18T15:21:00Z PARITY PASS: 30/30 passed",
+    "2026-09-18T15:21:00Z SHADOW PASS: 60 comparisons, 0 mismatches",
+    "2026-09-18T15:41:55Z PARITY PASS: 30/30 passed",
+    "2026-09-18T15:41:55Z SHADOW PASS: 60 comparisons, 0 mismatches",
+    "2026-09-18T16:08:53Z PARITY PASS: 30/30 passed",
+    "2026-09-18T16:08:53Z SHADOW PASS: 60 comparisons, 0 mismatches"
   ],
   "integration": {
     "production_uses_rust": true,
@@ -246,10 +256,10 @@
     "status": "PASS"
   },
   "source": "07_risk/risk/engine.py",
-  "source_hash": "b412ea1135d0b4e59d35177bda8f5d0506de3b0a3a26742c7252867ab4fe07f8",
+  "source_hash": "f44bd9574cf85c75ab2ad66cfcfec1de123a3b6725e8338766407366942ea66f",
   "state": "RUST_CANONICAL",
   "target": "rust/vayren-core/src/risk.rs",
-  "target_hash": "2755e8996af43ee8837c8a981263ffbc5917c136a605cb3151dc8fc2691231eb",
+  "target_hash": "1139bace2deb823ab4824a41640aff05d3f3f0edd2599abcaf29c1890bfad3a0",
   "unit": "risk.engine.evaluate",
   "version": 1
 }

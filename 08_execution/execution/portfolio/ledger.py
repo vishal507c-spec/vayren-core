@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from execution.models.order import Fill
 from execution.models.position import AccountSnapshot, Position
-from execution.native_execution import native_ledger_apply_fill
+from execution.native_execution import native_ledger_apply_fill, native_ledger_snapshot
 
 
 class PositionLedger:
@@ -54,14 +54,18 @@ class PositionLedger:
     def snapshot(self, marks: dict[str, float] | None = None) -> AccountSnapshot:
         """Account view: starting capital + realized + unrealized at marks."""
         marks = marks or {}
-        unrealized = sum(
-            p.unrealized(marks.get(p.symbol, p.avg_price)) for p in self._positions.values()
-        )
+        pos_tuples = [
+            (p.quantity, p.avg_price, marks.get(p.symbol, p.avg_price))
+            for p in self._positions.values()
+        ]
         realized = sum(self._realized.values())
-        equity = self._starting_capital + realized + unrealized
-        return AccountSnapshot(
-            equity=equity, available_capital=equity, day_pnl=self._day_pnl + unrealized
+        equity, available, day_pnl = native_ledger_snapshot(
+            self._starting_capital,
+            realized,
+            self._day_pnl,
+            pos_tuples,
         )
+        return AccountSnapshot(equity=equity, available_capital=available, day_pnl=day_pnl)
 
     def strategy_state_for(self, symbol: str) -> tuple[float, str | None, float | None]:
         """(signed qty, side, avg entry) for BarView position state."""

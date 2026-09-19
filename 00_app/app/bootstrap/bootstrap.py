@@ -645,6 +645,50 @@ class Bootstrap:
         # untouched; the in-window Slint viewport below renders status.
         from app.services.slint_system_host import SlintSystemHost
 
+        def _credential_schema_rows(record: Any, display_name: str) -> list:
+            """Venue credential shapes for the connection form.
+
+            Shapes come from the manager snapshot (the venue's EXISTING
+            provider schema via its spec) — this layer adds hint-only
+            placeholders and never branches on venue identity, imports no
+            venue transport, invents no fields and renames none. Values
+            never cross here.
+            """
+            raw = []
+            if isinstance(record, dict):
+                schema = record.get("credential_schema")
+                if isinstance(schema, (list, tuple)):
+                    raw = schema
+            upper = (display_name or "").upper()
+            rows = []
+            for field in raw:
+                if not isinstance(field, dict):
+                    continue
+                key = str(field.get("key", "") or "")
+                if not key:
+                    continue
+                label = str(field.get("label", "") or key)
+                if key == "pin":
+                    placeholder = "Enter 4-digit PIN"
+                elif key == "app_id" and upper:
+                    placeholder = f"Enter {upper} App ID"
+                elif key == "secret" and upper:
+                    placeholder = f"Enter {upper} Secret ID"
+                elif key == "client_id":
+                    placeholder = "Enter your Client ID"
+                else:
+                    placeholder = f"Enter {label}"
+                rows.append(
+                    {
+                        "key": key,
+                        "label": label,
+                        "placeholder": placeholder,
+                        "secret": bool(field.get("secret", False)),
+                        "required": bool(field.get("required", False)),
+                    }
+                )
+            return rows
+
         def _system_state_provider() -> dict:
             """Read-only SYSTEM snapshot: current selection + manager record."""
             try:
@@ -657,8 +701,9 @@ class Bootstrap:
                 snapshot = broker_manager.snapshot()
             except Exception:
                 snapshot = {}
+            entries = snapshot.get("brokers", []) if isinstance(snapshot, dict) else []
             record = None
-            for entry in snapshot.get("brokers", []) if isinstance(snapshot, dict) else []:
+            for entry in entries:
                 if isinstance(entry, dict) and entry.get("id") == sel.name:
                     record = entry
                     break
@@ -677,10 +722,17 @@ class Bootstrap:
                     callback_url = str(snapshot.get("callback_url", "") or "")
                 except Exception:
                     callback_url = ""
+            display_name = ""
+            if isinstance(record, dict):
+                display_name = str(record.get("name", "") or "")
             return {
                 "selection": {"name": sel.name, "environment": environment},
                 "record": record,
                 "callback_url": callback_url,
+                # Connection workspace facts: every venue for the sidebar +
+                # the selected venue's credential schema (shapes, no values).
+                "brokers": entries if isinstance(entries, list) else [],
+                "credential_fields": _credential_schema_rows(record, display_name),
             }
 
         slint_system_host = SlintSystemHost(state_provider=_system_state_provider)
@@ -704,6 +756,37 @@ class Bootstrap:
         slint_system_host.remove_requested.connect(
             lambda broker_id: broker_manager.remove(broker_id)
         )
+
+        # Connection workspace intents: single-point broker switching
+        # (authoritative selection service, fail-closed) and one-tap
+        # configure+login (the SAME manager methods, chained — validation,
+        # Selenium/browser flow, TOTP+PIN, vault and token handling stay in
+        # the manager, untouched here).
+        def _on_broker_selected(name: str) -> None:
+            try:
+                outcome = selection_service.select(name)
+            except Exception as exc:
+                logger.warning("broker selection rejected (%s): %s", name, exc)
+                return
+            logger.info(
+                "broker selected: %s (%s)", outcome.selection.name, outcome.selection.reason
+            )
+            with contextlib.suppress(Exception):
+                slint_system_host.refresh_now()
+
+        def _on_connect_requested(broker_id: str, values: dict) -> None:
+            try:
+                ok, message = broker_manager.configure(broker_id, dict(values))
+            except Exception as exc:
+                logger.warning("broker configure failed (%s): %s", broker_id, exc)
+                return
+            if not ok:
+                logger.warning("broker configure refused (%s): %s", broker_id, message)
+                return
+            broker_manager.start_login(broker_id)
+
+        slint_system_host.broker_selected.connect(_on_broker_selected)
+        slint_system_host.connect_requested.connect(_on_connect_requested)
 
         def _on_copy_callback(_broker_id: str) -> None:
             try:
@@ -733,6 +816,32 @@ class Bootstrap:
                 pass
 
         slint_system_host.copy_callback_requested.connect(_on_copy_callback)
+
+        def _on_help_requested(broker_id: str) -> None:
+            """Setup-guide affordance: copy the redirect URL the venue's app
+            dashboard must register (genuinely useful for setup) and note it
+            in the event log. No invented documentation URLs."""
+            _on_copy_callback(broker_id)
+            with contextlib.suppress(Exception):
+                panel = getattr(self, "_event_log", None)
+                if panel is not None:
+                    panel.add_entry(
+                        "INFO",
+                        "Broker: redirect URL copied — register it in the broker app dashboard",
+                    )
+
+        def _on_add_requested(_broker_id: str) -> None:
+            with contextlib.suppress(Exception):
+                panel = getattr(self, "_event_log", None)
+                if panel is not None:
+                    panel.add_entry(
+                        "INFO",
+                        "Broker: only the bundled venues (Zerodha, Fyers) "
+                        "are supported in this phase",
+                    )
+
+        slint_system_host.help_requested.connect(_on_help_requested)
+        slint_system_host.add_requested.connect(_on_add_requested)
 
         def _on_broker_message(text: str) -> None:
             panel = getattr(self, "_event_log", None)

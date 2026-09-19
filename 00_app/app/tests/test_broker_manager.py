@@ -591,3 +591,30 @@ def test_real_fyers_spec_is_auth_only_and_registry_clean(manager) -> None:
     assert "fyers-live" not in default_registry()
     mgr, _, _ = manager
     assert "fyers" in mgr.broker_ids()
+
+
+def test_login_passes_config_only_to_capable_callables() -> None:
+    """Newer venue callables may accept ``config``; legacy ones keep their exact call."""
+    from app.services.broker_manager import _accepts_keyword
+
+    def legacy(_flow: Any, _key: str, _secret: str, _store: Any) -> bool:
+        return True
+
+    def tolerant(_flow: Any, _key: str, _secret: str, _store: Any, **_kwargs: Any) -> bool:
+        return True
+
+    def modern(
+        _flow: Any, _key: str, _secret: str, _store: Any, config: dict | None = None
+    ) -> bool:
+        assert config is None or isinstance(config, dict)
+        return True
+
+    # Zerodha-shaped (strict positional): untouched historical call.
+    assert _accepts_keyword(legacy, "config") is False
+    assert _accepts_keyword(tolerant, "config") is True
+    assert _accepts_keyword(modern, "config") is True
+    assert _accepts_keyword(42, "config") is False
+    # The real Zerodha seam keeps its exact signature (no config param).
+    from data.provider.zerodha.live_auth import wait_for_login_token
+
+    assert _accepts_keyword(wait_for_login_token, "config") is False

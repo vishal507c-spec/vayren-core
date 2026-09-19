@@ -1,0 +1,672 @@
+// VAYREN broker CONNECTION workspace — the FINAL production broker screen.
+//
+// Presentation only: every displayed value is bound to properties fed by the
+// Rust `BrokerWorkspace` view-model (backend facts + venue credential
+// schemas, never UI inference, never secrets). The screen has ONE purpose:
+// BROKER → STATUS → CREDENTIALS → CONNECT → AUTHENTICATION → CONNECTED.
+//
+// Layout (reference-faithful, 8px grid, canonical tokens only):
+//   sidebar (brokers) │ main card (identity + credentials + progress)
+// No dashboards, charts, funds, positions, orders, P&L or market data live
+// here — whitespace is intentional. Circles use half-size radii (pill rule),
+// everything else uses VayrenDesign radii. No hex literals in this file.
+
+import { VayrenPalette, VayrenDesign } from "palette.slint";
+import { VBadge, VButton, VStatusDot, VBanner } from "components.slint";
+import { ScrollView } from "std-widgets.slint";
+
+export struct BrokerRowView {
+    id: string,
+    display_name: string,
+    mark: string,
+    venue_subtitle: string,
+    status_label: string,
+    status_tone: int,
+    selected: bool,
+    connected: bool,
+}
+
+export struct CredentialFieldView {
+    key: string,
+    label: string,
+    placeholder: string,
+    secret: bool,
+    required: bool,
+}
+
+export struct ProgressStepView {
+    index: int,
+    title: string,
+    subtitle: string,
+    state: int, // 0 pending, 1 active, 2 done, 3 failed
+}
+
+export component BrokerConnectionWorkspace inherits Rectangle {
+    // ── facts in (Rust `BrokerWorkspace` projection) ──
+    in property <[BrokerRowView]> brokers;
+    in property <string> broker-display-name: "";
+    in property <string> logo-mark: "?";
+    in property <string> venue-subtitle: "";
+    in property <string> env-label: "PAPER";
+    in property <string> description-line: "Connect your account to start trading.";
+    in property <string> status-pill-label: "Not Connected";
+    in property <int> status-pill-tone: 3;
+    in property <string> status-message: "";
+    in property <[CredentialFieldView]> fields;
+    in property <[ProgressStepView]> progress;
+    in property <string> cta-label: "Connect to Broker";
+    in property <bool> cta-arrow: true;
+    in property <bool> cta-enabled: false;
+    in property <bool> form-enabled: true;
+    in property <bool> is-connected: false;
+    in property <bool> is-failed: false;
+    in property <string> error-message: "";
+    in property <bool> disconnect-visible: false;
+    in property <bool> disconnect-enabled: false;
+    in property <string> help-caption: "View setup guide.";
+
+    // ── ephemeral field state (Slint-local; secrets cross once via connect) ──
+    in-out property <string> field-v0: "";
+    in-out property <string> field-v1: "";
+    in-out property <string> field-v2: "";
+    in-out property <string> field-v3: "";
+    in-out property <string> field-v4: "";
+    in-out property <string> field-v5: "";
+    in-out property <bool> field-show0: false;
+    in-out property <bool> field-show1: false;
+    in-out property <bool> field-show2: false;
+    in-out property <bool> field-show3: false;
+    in-out property <bool> field-show4: false;
+    in-out property <bool> field-show5: false;
+    in-out property <bool> show-error: true;
+
+    callback broker-selected(string);
+    callback connect-requested(string, string, string, string, string, string);
+    callback retry-requested();
+    callback disconnect-requested();
+    callback refresh-requested();
+    callback help-requested();
+    callback add-broker-requested();
+
+    function field-text(i: int) -> string {
+        return i == 0 ? root.field-v0 : i == 1 ? root.field-v1 : i == 2 ? root.field-v2
+            : i == 3 ? root.field-v3 : i == 4 ? root.field-v4 : root.field-v5;
+    }
+    function field-shown(i: int) -> bool {
+        return i == 0 ? root.field-show0 : i == 1 ? root.field-show1 : i == 2 ? root.field-show2
+            : i == 3 ? root.field-show3 : i == 4 ? root.field-show4 : root.field-show5;
+    }
+    function pill-color() -> color {
+        return root.status-pill-tone == 1 ? VayrenPalette.pos
+            : root.status-pill-tone == 2 ? VayrenPalette.amber
+            : root.status-pill-tone == 3 ? VayrenPalette.neg
+            : VayrenPalette.muted;
+    }
+    function step-ink(state: int) -> color {
+        return state == 2 ? VayrenPalette.pos
+            : state == 1 ? VayrenPalette.accent
+            : state == 3 ? VayrenPalette.neg
+            : VayrenPalette.faint;
+    }
+    function step-title-ink(state: int) -> color {
+        return state == 0 ? VayrenPalette.muted : VayrenPalette.text;
+    }
+
+    background: transparent;
+
+    HorizontalLayout {
+        spacing: VayrenDesign.sp-xl;
+        padding: VayrenDesign.sp-xl;
+
+        // ── LEFT: broker sidebar ──
+        VerticalLayout {
+            width: 208px;
+            spacing: VayrenDesign.sp-md;
+            alignment: start;
+
+            Text {
+                text: "BROKERS";
+                color: VayrenPalette.text;
+                font-size: VayrenDesign.fs-small;
+                font-weight: 700;
+            }
+            Text {
+                text: "Connect to trade";
+                color: VayrenPalette.muted;
+                font-size: VayrenDesign.fs-small;
+            }
+            Rectangle { height: VayrenDesign.sp-sm; background: transparent; }
+
+            for row in root.brokers: Rectangle {
+                height: 56px;
+                border-radius: VayrenDesign.radius-lg;
+                background: row.selected ? VayrenPalette.selected : VayrenPalette.surface;
+                border-width: 1px;
+                border-color: row.selected ? VayrenPalette.accent : VayrenPalette.hairline;
+
+                TouchArea {
+                    clicked => { root.broker-selected(row.id); }
+                }
+                HorizontalLayout {
+                    padding-left: VayrenDesign.sp-md;
+                    padding-right: VayrenDesign.sp-md;
+                    spacing: VayrenDesign.sp-md;
+
+                    Rectangle {
+                        width: 32px;
+                        height: 32px;
+                        border-radius: VayrenDesign.radius-sm;
+                        background: VayrenPalette.elevated;
+                        border-width: 1px;
+                        border-color: row.selected ? VayrenPalette.accent : VayrenPalette.hairline;
+                            VerticalLayout {
+                                alignment: center;
+                                Text {
+                                    // Broker initial (honest text mark — no fake logo asset).
+                                    text: row.mark;
+                                    color: row.selected ? VayrenPalette.accent : VayrenPalette.muted;
+                                    font-size: VayrenDesign.fs-title;
+                                    font-weight: 700;
+                                    horizontal-alignment: center;
+                                }
+                            }
+                    }
+                    VerticalLayout {
+                        spacing: 2px;
+                        alignment: center;
+                        horizontal-stretch: 1;
+                        Text {
+                            text: row.display-name;
+                            color: VayrenPalette.text;
+                            font-size: VayrenDesign.fs-small;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                        HorizontalLayout {
+                            spacing: VayrenDesign.sp-sm;
+                            VStatusDot {
+                                tone: row.status-tone;
+                            }
+                            Text {
+                                text: row.status-label;
+                                color: row.status-tone == 1 ? VayrenPalette.pos
+                                    : row.status-tone == 3 ? VayrenPalette.neg
+                                    : VayrenPalette.muted;
+                                font-size: VayrenDesign.fs-label;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                        }
+                    }
+                    Text {
+                        text: "›";
+                        color: VayrenPalette.faint;
+                        font-size: VayrenDesign.fs-body;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            Rectangle {
+                height: 44px;
+                border-radius: VayrenDesign.radius-lg;
+                background: transparent;
+                border-width: 1px;
+                border-color: VayrenPalette.hairline;
+                TouchArea {
+                    clicked => { root.add-broker-requested(); }
+                }
+                HorizontalLayout {
+                    padding-left: VayrenDesign.sp-md;
+                    spacing: VayrenDesign.sp-md;
+                    Text {
+                        text: "+";
+                        color: VayrenPalette.muted;
+                        font-size: VayrenDesign.fs-metric-sm;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: "Add Broker";
+                        color: VayrenPalette.muted;
+                        font-size: VayrenDesign.fs-small;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            Rectangle { vertical-stretch: 1; background: transparent; }
+
+            VerticalLayout {
+                spacing: 2px;
+                Text {
+                    text: "SIMPLE";
+                    color: VayrenPalette.faint;
+                    font-size: VayrenDesign.fs-label;
+                }
+                Text {
+                    text: "POWERFUL";
+                    color: VayrenPalette.faint;
+                    font-size: VayrenDesign.fs-label;
+                }
+                Text {
+                    text: "DISCIPLINED";
+                    color: VayrenPalette.faint;
+                    font-size: VayrenDesign.fs-label;
+                }
+            }
+        }
+
+        // ── MAIN: connection workspace card ──
+        ScrollView {
+            horizontal-stretch: 1;
+            viewport-width: self.width;
+
+            card := Rectangle {
+                width: parent.width;
+                background: VayrenPalette.surface;
+                border-width: 1px;
+                border-color: VayrenPalette.hairline;
+                border-radius: VayrenDesign.radius-lg;
+
+                VerticalLayout {
+                    padding: VayrenDesign.sp-xxl;
+                    spacing: VayrenDesign.sp-xl;
+                    alignment: start;
+
+                    // Header: identity + status + environment.
+                    HorizontalLayout {
+                        spacing: VayrenDesign.sp-xl;
+                        Rectangle {
+                            width: 48px;
+                            height: 48px;
+                            border-radius: VayrenDesign.radius-lg;
+                            background: VayrenPalette.elevated;
+                            border-width: 1px;
+                            border-color: VayrenPalette.hairline;
+                            VerticalLayout {
+                                alignment: center;
+                                Text {
+                                    text: root.logo-mark;
+                                    color: VayrenPalette.accent;
+                                    font-size: VayrenDesign.fs-hero;
+                                    font-weight: 700;
+                                    horizontal-alignment: center;
+                                }
+                            }
+                        }
+                        VerticalLayout {
+                            spacing: 2px;
+                            Text {
+                                text: root.broker-display-name;
+                                color: VayrenPalette.text;
+                                font-size: VayrenDesign.fs-title;
+                                font-weight: 700;
+                                vertical-alignment: center;
+                            }
+                            Text {
+                                text: root.venue-subtitle;
+                                color: VayrenPalette.muted;
+                                font-size: VayrenDesign.fs-small;
+                                vertical-alignment: center;
+                            }
+                        }
+                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                        // Trailing status cluster (nested so the row has no
+                        // bare rectangles to absorb free space: the cluster
+                        // keeps content width, the gap stays empty).
+                        HorizontalLayout {
+                            spacing: VayrenDesign.sp-md;
+                            Rectangle {
+                                height: 24px;
+                                horizontal-stretch: 0;
+                                border-radius: VayrenDesign.radius-lg;
+                                background: transparent;
+                                border-width: 1px;
+                                border-color: root.pill-color();
+                                HorizontalLayout {
+                                    padding-left: VayrenDesign.sp-md;
+                                    padding-right: VayrenDesign.sp-md;
+                                    spacing: VayrenDesign.sp-sm;
+                                    VStatusDot {
+                                        tone: root.status-pill-tone;
+                                    }
+                                    Text {
+                                        text: root.status-pill-label;
+                                        color: root.pill-color();
+                                        font-size: VayrenDesign.fs-label;
+                                        font-weight: 700;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                            Rectangle {
+                                height: 24px;
+                                horizontal-stretch: 0;
+                                border-radius: VayrenDesign.radius-lg;
+                                background: transparent;
+                                border-width: 1px;
+                                border-color: VayrenPalette.accent-dim;
+                                HorizontalLayout {
+                                    padding-left: VayrenDesign.sp-md;
+                                    padding-right: VayrenDesign.sp-md;
+                                    Text {
+                                        text: root.env-label;
+                                        color: VayrenPalette.accent;
+                                        font-size: VayrenDesign.fs-label;
+                                        font-weight: 700;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Text {
+                        text: root.description-line;
+                        color: VayrenPalette.muted;
+                        font-size: VayrenDesign.fs-table;
+                    }
+
+                    Rectangle { height: 1px; background: VayrenPalette.hairline; }
+
+                    HorizontalLayout {
+                        spacing: VayrenDesign.sp-3xl;
+
+                        // Credentials form.
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+                            spacing: VayrenDesign.sp-md;
+                            alignment: start;
+
+                            Text {
+                                text: "Enter Your Credentials";
+                                color: VayrenPalette.text;
+                                font-size: VayrenDesign.fs-body;
+                                font-weight: 700;
+                            }
+                            Text {
+                                text: "Your credentials are encrypted and stored securely.";
+                                color: VayrenPalette.muted;
+                                font-size: VayrenDesign.fs-small;
+                            }
+                            Rectangle { height: VayrenDesign.sp-sm; background: transparent; }
+
+                            for f[i] in root.fields: HorizontalLayout {
+                                height: 36px;
+                                spacing: VayrenDesign.sp-md;
+
+                                HorizontalLayout {
+                                    width: 108px;
+                                    Text {
+                                        text: f.label;
+                                        color: VayrenPalette.muted;
+                                        font-size: VayrenDesign.fs-small;
+                                        vertical-alignment: center;
+                                        overflow: elide;
+                                        horizontal-stretch: 1;
+                                    }
+                                    if f.required: Text {
+                                        text: "*";
+                                        color: VayrenPalette.neg;
+                                        font-size: VayrenDesign.fs-small;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                field-box := Rectangle {
+                                    horizontal-stretch: 1;
+                                    background: VayrenPalette.bg1;
+                                    border-width: 1px;
+                                    border-color: field-input.has-focus ? VayrenPalette.accent : VayrenPalette.hairline;
+                                    border-radius: VayrenDesign.radius;
+                                    HorizontalLayout {
+                                        padding-left: VayrenDesign.sp-md;
+                                        padding-right: VayrenDesign.sp-md;
+                                        spacing: VayrenDesign.sp-sm;
+                                        field-input := TextInput {
+                                            horizontal-stretch: 1;
+                                            text: root.field-text(i);
+                                            color: VayrenPalette.text;
+                                            font-size: VayrenDesign.fs-table;
+                                            single-line: true;
+                                            enabled: root.form-enabled;
+                                            input-type: f.secret && !root.field-shown(i) ? InputType.password : InputType.text;
+                                            vertical-alignment: center;
+                                            edited => {
+                                                if i == 0 { root.field-v0 = field-input.text; }
+                                                else if i == 1 { root.field-v1 = field-input.text; }
+                                                else if i == 2 { root.field-v2 = field-input.text; }
+                                                else if i == 3 { root.field-v3 = field-input.text; }
+                                                else if i == 4 { root.field-v4 = field-input.text; }
+                                                else { root.field-v5 = field-input.text; }
+                                            }
+                                        }
+                                        if f.secret: Text {
+                                            text: root.field-shown(i) ? "HIDE" : "SHOW";
+                                            color: VayrenPalette.faint;
+                                            font-size: VayrenDesign.fs-label;
+                                            font-weight: 700;
+                                            vertical-alignment: center;
+                                            TouchArea {
+                                                enabled: root.form-enabled;
+                                                clicked => {
+                                                    if i == 0 { root.field-show0 = !root.field-show0; }
+                                                    else if i == 1 { root.field-show1 = !root.field-show1; }
+                                                    else if i == 2 { root.field-show2 = !root.field-show2; }
+                                                    else if i == 3 { root.field-show3 = !root.field-show3; }
+                                                    else if i == 4 { root.field-show4 = !root.field-show4; }
+                                                    else { root.field-show5 = !root.field-show5; }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if root.field-text(i) == "": Text {
+                                        // Placeholder overlay (non-interactive:
+                                        // pointer events pass through to the
+                                        // input below; elided before SHOW).
+                                        x: 12px;
+                                        y: 0px;
+                                        width: field-box.width - (f.secret ? 84px : 24px);
+                                        height: 36px;
+                                        text: f.placeholder;
+                                        color: VayrenPalette.faint;
+                                        font-size: VayrenDesign.fs-table;
+                                        vertical-alignment: center;
+                                        overflow: elide;
+                                    }
+                                }
+                            }
+
+                            if root.is-failed && root.show-error: VBanner {
+                                message: root.error-message;
+                                tone: 3;
+                            }
+                            if root.is-failed && root.show-error: HorizontalLayout {
+                                spacing: VayrenDesign.sp-md;
+                                VButton {
+                                    label: "RETRY";
+                                    variant: 0;
+                                    clicked => {
+                                        root.show-error = true;
+                                        root.retry-requested();
+                                    }
+                                }
+                                VButton {
+                                    label: "EDIT CREDENTIALS";
+                                    variant: 2;
+                                    clicked => { root.show-error = false; }
+                                }
+                            }
+
+                            VButton {
+                                label: root.cta-arrow ? root.cta-label + "   →" : root.cta-label;
+                                variant: 0;
+                                enabled: root.cta-enabled;
+                                clicked => {
+                                    if root.is-failed {
+                                        root.retry-requested();
+                                    } else if root.is-connected {
+                                        root.refresh-requested();
+                                    } else {
+                                        root.connect-requested(root.field-v0, root.field-v1, root.field-v2, root.field-v3, root.field-v4, root.field-v5);
+                                    }
+                                }
+                            }
+                            if root.disconnect-visible: VButton {
+                                label: "DISCONNECT";
+                                variant: 2;
+                                enabled: root.disconnect-enabled;
+                                clicked => { root.disconnect-requested(); }
+                            }
+
+                            HorizontalLayout {
+                                alignment: center;
+                                spacing: VayrenDesign.sp-sm;
+                                Text {
+                                    text: "🔒";
+                                    color: VayrenPalette.muted;
+                                    font-size: VayrenDesign.fs-label;
+                                    vertical-alignment: center;
+                                }
+                                Text {
+                                    text: "Credentials are encrypted and stored securely in the OS vault.";
+                                    color: VayrenPalette.muted;
+                                    font-size: VayrenDesign.fs-label;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+
+                        Rectangle { width: 1px; background: VayrenPalette.hairline; }
+
+                        // Connection progress.
+                        VerticalLayout {
+                            width: 248px;
+                            spacing: VayrenDesign.sp-md;
+                            alignment: start;
+
+                            Text {
+                                text: "Connection Progress";
+                                color: VayrenPalette.text;
+                                font-size: VayrenDesign.fs-body;
+                                font-weight: 700;
+                            }
+                            Text {
+                                text: "Authentication happens automatically.";
+                                color: VayrenPalette.muted;
+                                font-size: VayrenDesign.fs-label;
+                                wrap: word-wrap;
+                            }
+                            Rectangle { height: VayrenDesign.sp-sm; background: transparent; }
+
+                            for s[si] in root.progress: VerticalLayout {
+                                spacing: 0;
+                                HorizontalLayout {
+                                    spacing: VayrenDesign.sp-md;
+                                    Rectangle {
+                                        width: 22px;
+                                        height: 22px;
+                                        border-radius: 11px;
+                                        background: transparent;
+                                        border-width: 1px;
+                                        border-color: root.step-ink(s.state);
+                                        VerticalLayout {
+                                            alignment: center;
+                                            Text {
+                                                text: s.state == 2 ? "✓" : s.state == 1 ? "●" : s.state == 3 ? "!" : s.index;
+                                                color: root.step-ink(s.state);
+                                                font-size: VayrenDesign.fs-label;
+                                                font-weight: 700;
+                                                horizontal-alignment: center;
+                                            }
+                                        }
+                                    }
+                                    VerticalLayout {
+                                        spacing: 1px;
+                                        alignment: center;
+                                        Text {
+                                            text: s.title;
+                                            color: root.step-title-ink(s.state);
+                                            font-size: VayrenDesign.fs-small;
+                                            font-weight: 700;
+                                        }
+                                        Text {
+                                            text: s.subtitle;
+                                            color: VayrenPalette.muted;
+                                            font-size: VayrenDesign.fs-label;
+                                        }
+                                    }
+                                }
+                                if si < root.progress.length - 1: Rectangle {
+                                    height: 14px;
+                                    background: transparent;
+                                    HorizontalLayout {
+                                        spacing: VayrenDesign.sp-md;
+                                        Rectangle {
+                                            width: 22px;
+                                            background: transparent;
+                                            VerticalLayout {
+                                                alignment: center;
+                                                Rectangle {
+                                                    width: 1px;
+                                                    height: 14px;
+                                                    background: s.state == 2 ? VayrenPalette.pos : VayrenPalette.hairline;
+                                                }
+                                            }
+                                        }
+                                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                                    }
+                                }
+                            }
+
+                            Rectangle { height: VayrenDesign.sp-md; background: transparent; }
+
+                            Rectangle {
+                                background: VayrenPalette.bg1;
+                                border-width: 1px;
+                                border-color: VayrenPalette.hairline;
+                                border-radius: VayrenDesign.radius;
+                                VerticalLayout {
+                                    padding: VayrenDesign.sp-md;
+                                    spacing: 2px;
+                                    HorizontalLayout {
+                                        spacing: VayrenDesign.sp-sm;
+                                        Text {
+                                            text: "ⓘ";
+                                            color: VayrenPalette.muted;
+                                            font-size: VayrenDesign.fs-small;
+                                            vertical-alignment: center;
+                                        }
+                                        Text {
+                                            text: "Need help?";
+                                            color: VayrenPalette.text;
+                                            font-size: VayrenDesign.fs-small;
+                                            font-weight: 700;
+                                            vertical-alignment: center;
+                                        }
+                                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                                        Text {
+                                            text: "↗";
+                                            color: VayrenPalette.faint;
+                                            font-size: VayrenDesign.fs-small;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                    Text {
+                                        text: root.help-caption;
+                                        color: VayrenPalette.muted;
+                                        font-size: VayrenDesign.fs-label;
+                                        wrap: word-wrap;
+                                    }
+                                }
+                                TouchArea {
+                                    clicked => { root.help-requested(); }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

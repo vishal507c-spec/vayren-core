@@ -731,6 +731,7 @@ impl Default for StrategyLifecycle {
 // ── check_live_readiness ──────────────────────────────────────────────────
 
 /// Strategy contract surface the 11 gates read (mirror fields used).
+#[derive(Debug, Clone, PartialEq)]
 pub struct ContractView {
     pub missing: Vec<String>,
     pub supports_live: bool,

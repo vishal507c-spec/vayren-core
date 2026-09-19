@@ -44,45 +44,45 @@
     },
     {
       "kind": "normal",
-      "rows": 62,
+      "rows": 56,
       "session": 33300,
-      "step": 60,
+      "step": 900,
       "tf": 604800
     },
     {
       "kind": "normal",
-      "rows": 37,
+      "rows": 42,
       "session": 33300,
       "step": 900,
-      "tf": 60
-    },
-    {
-      "kind": "normal",
-      "rows": 59,
-      "session": 33300,
-      "step": 900,
-      "tf": 7200
-    },
-    {
-      "kind": "normal",
-      "rows": 117,
-      "session": 33300,
-      "step": 60,
       "tf": 900
     },
     {
       "kind": "normal",
-      "rows": 111,
-      "session": 33300,
-      "step": 60,
-      "tf": 604800
+      "rows": 114,
+      "session": 0,
+      "step": 900,
+      "tf": 300
     },
     {
       "kind": "normal",
-      "rows": 82,
+      "rows": 74,
       "session": 0,
+      "step": 900,
+      "tf": 900
+    },
+    {
+      "kind": "normal",
+      "rows": 98,
+      "session": 33300,
+      "step": 900,
+      "tf": 86400
+    },
+    {
+      "kind": "normal",
+      "rows": 75,
+      "session": 33300,
       "step": 60,
-      "tf": 7200
+      "tf": 86400
     }
   ],
   "category": "aggregation",

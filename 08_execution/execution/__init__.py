@@ -69,7 +69,7 @@ from execution.events import (
     SignalGenerated,
     TradeEvent,
 )
-from execution.journal import ExecutionJournal, JournalEntry, LatencyTracker, StageTimer, utcnow_iso
+from execution.journal import ExecutionJournal, JournalEntry, LatencyTracker, utcnow_iso
 from execution.manifest import execution_manifest
 from execution.market_data import (
     BrokerFeedProvider,
@@ -81,7 +81,6 @@ from execution.market_data import (
     StreamNormalizer,
     StreamStats,
     bars_to_candles,
-    provider_supports,
 )
 from execution.ml_interfaces import (
     AnomalyModel,
@@ -179,7 +178,6 @@ __all__ = [
     "StrategyRuntimeContract",
     "MarketDataProvider",
     "MarketDataError",
-    "provider_supports",
     "ReplayProvider",
     "bars_to_candles",
     "BrokerFeedProvider",
@@ -272,7 +270,6 @@ __all__ = [
     "ExecutionJournal",
     "JournalEntry",
     "LatencyTracker",
-    "StageTimer",
     "utcnow_iso",
     "PredictionModel",
     "RegimeModel",

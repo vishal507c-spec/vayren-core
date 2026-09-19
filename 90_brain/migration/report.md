@@ -11,7 +11,7 @@
 - quarantined: 0
 - migrated: 0
 - blocked: 5
-- stale_or_failed: 0
+- stale_or_failed: 4
 
 ## Top Blockers
 
@@ -59,12 +59,12 @@
 
 - parity_coverage: 7/12
 - shadow_coverage: 7/12
-- gate_failures: 0
+- gate_failures: 4
 
 ## Integrity
 
 - orphaned_manifests: []
 - retention_missing: []
-- rust_unused: []
+- rust_unused: ['rust/vayren-core/src/backtest_directional.rs', 'rust/vayren-core/src/backtest_engine.rs', 'rust/vayren-core/src/chart_events.rs', 'rust/vayren-core/src/chart_math.rs', 'rust/vayren-core/src/data_events.rs', 'rust/vayren-core/src/download_engine.rs', 'rust/vayren-core/src/execution_events.rs', 'rust/vayren-core/src/market_events.rs', 'rust/vayren-core/src/risk_engine.rs']
 - python_authoritative: ['chart.viewport.math', 'execution.session.lifecycle']
 

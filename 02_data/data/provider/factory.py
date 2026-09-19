@@ -33,11 +33,11 @@ from data.provider.fyers.live_auth import (
 from data.provider.fyers.live_auth import (
     FyersAuthFlow,
     FyersSessionStore,
-    fyers_interactive_login,
 )
 from data.provider.fyers.live_auth import (
     default_redirect_url as fyers_redirect_url,
 )
+from data.provider.fyers.selenium_auth import fyers_selenium_interactive_login
 from data.provider.fyers.session_adapter import FyersSessionAdapter
 from data.provider.zerodha import ZerodhaProvider
 from data.settings import DownloadSettings
@@ -121,6 +121,28 @@ def _seed_fyers() -> None:
 _seed_fyers()
 
 
+def _schema_rows(fields: object) -> tuple[dict[str, object], ...]:
+    """Reduce a provider ``credential_fields`` tuple to spec plain data.
+
+    Home-chapter helper (concrete venue knowledge lives here): keeps only
+    the render shape (key/label/secret/required) — values never cross.
+    """
+    rows: list[dict[str, object]] = []
+    for field in fields or ():
+        key = str(getattr(field, "key", "") or "")
+        if not key:
+            continue
+        rows.append(
+            {
+                "key": key,
+                "label": str(getattr(field, "label", "") or key),
+                "secret": bool(getattr(field, "secret", False)),
+                "required": bool(getattr(field, "required", False)),
+            }
+        )
+    return tuple(rows)
+
+
 def zerodha_management_spec() -> BrokerSpec:
     """The bundled venue's SYSTEM → BROKERS management wiring.
 
@@ -158,6 +180,7 @@ def zerodha_management_spec() -> BrokerSpec:
         session_service=SESSION_SERVICE,
         required_config=("api_key", "api_secret"),
         masked_config=("api_key", "api_secret"),
+        credential_schema=_schema_rows(ZerodhaProvider.credential_fields),
         build_adapter=lambda api_key, token: ZerodhaTradingAdapter(
             api_key=api_key, access_token=token
         ),
@@ -200,17 +223,24 @@ def fyers_management_spec() -> BrokerSpec:
         return None
 
     def _auto_authenticate(config: dict[str, str], session_store: object) -> tuple[bool, str]:
-        """Startup/check-time automatic login (Zerodha-experience parity).
+        """Startup/check-time automatic login (Selenium-first).
 
         Runs on the manager's worker thread: valid stored session → True
         with one probe; missing/expired + complete auto-login triple →
-        the official TOTP+PIN flow; anything else → False with the exact
-        missing piece (the manager shows LOGIN_REQUIRED and the user can
-        still CONNECT through the interactive browser flow — capture
-        stays automatic either way).
+        Chrome drives FYERS' own login pages (TOTP + PIN, no copy/paste);
+        Chrome/driver missing on the host → the official API flow as a
+        fallback (logged); anything else → False with the exact reason
+        (the manager shows LOGIN_REQUIRED and the user can still CONNECT
+        through the button flow — capture stays automatic either way).
         """
+        import logging
+
         from data.provider.fyers.auto_auth import FyersAutoAuthEngine
         from data.provider.fyers.credentials import FyersCredentials
+        from data.provider.fyers.selenium_auth import (
+            BrowserUnavailableError,
+            FyersSeleniumAuthEngine,
+        )
 
         credentials = FyersCredentials(
             app_id=config.get("app_id", ""),
@@ -220,7 +250,11 @@ def fyers_management_spec() -> BrokerSpec:
             client_id=config.get("client_id", ""),
             totp_secret=config.get("totp_secret", ""),
         )
-        return FyersAutoAuthEngine(credentials).ensure_session(session_store)
+        try:
+            return FyersSeleniumAuthEngine(credentials).ensure_session(session_store)
+        except BrowserUnavailableError as exc:
+            logging.getLogger(__name__).info("FYERS Selenium unavailable (%s) — API fallback", exc)
+            return FyersAutoAuthEngine(credentials).ensure_session(session_store)
 
     return BrokerSpec(
         broker_id="fyers",
@@ -229,6 +263,7 @@ def fyers_management_spec() -> BrokerSpec:
         session_service=FYERS_SESSION_SERVICE,
         required_config=("app_id", "secret"),
         masked_config=("app_id", "secret"),
+        credential_schema=_schema_rows(FyersProvider.credential_fields),
         key_field="app_id",
         secret_field="secret",
         redirect_uri_field="redirect_uri",
@@ -239,7 +274,7 @@ def fyers_management_spec() -> BrokerSpec:
         build_session_store=lambda store, service: FyersSessionStore(store, service),
         venue_register=_register_session,
         venue_unregister=_unregister,
-        interactive_login=fyers_interactive_login,
+        interactive_login=fyers_selenium_interactive_login,
         auto_authenticate=_auto_authenticate,
         callback_port=FYERS_CALLBACK_PORT,
         callback_url=fyers_redirect_url(FYERS_CALLBACK_PORT),

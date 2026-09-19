@@ -14,6 +14,7 @@ from broker.funds import FundsSnapshot
 
 from execution.broker.adapter import BrokerCapabilities, BrokerError
 from execution.models.order import Fill, OrderPlan
+from execution.native_execution import native_paper_calculate_fill
 
 
 class PaperBroker:
@@ -156,32 +157,21 @@ class PaperBroker:
         if info is None or info["state"] not in ("SUBMITTED", "ACKNOWLEDGED", "PARTIALLY_FILLED"):
             return None
         plan: OrderPlan = info["plan"]
-        if reference_price <= 0:
-            return None
-        slip = reference_price * (self._slippage_pct / 100.0)
-        if plan.order_type == "LIMIT" and plan.limit_price is not None:
-            if plan.side == "BUY":
-                fill_price = min(plan.limit_price, reference_price + slip)
-            else:
-                fill_price = max(plan.limit_price, reference_price - slip)
-        else:
-            fill_price = reference_price + slip if plan.side == "BUY" else reference_price - slip
-        if fill_price <= 0:
-            return None
         remaining = plan.quantity - info["filled_qty"]
-        if plan.side == "BUY":
-            affordable = self._capital / fill_price if fill_price > 0 else 0.0
-            fill_qty = min(remaining, affordable)
-        else:
-            fill_qty = remaining
-        if fill_qty <= 0:
+        calc = native_paper_calculate_fill(
+            plan.order_type == "LIMIT",
+            plan.limit_price is not None,
+            plan.limit_price or 0.0,
+            plan.side == "BUY",
+            reference_price,
+            self._slippage_pct,
+            self._commission_pct,
+            self._capital,
+            remaining,
+        )
+        if calc is None:
             return None
-        notional = fill_price * fill_qty
-        commission = notional * (self._commission_pct / 100.0)
-        if plan.side == "BUY":
-            self._capital -= notional + commission
-        else:
-            self._capital += notional - commission
+        fill_price, fill_qty, _notional, commission, self._capital = calc
         fill = Fill(
             client_order_id=client_order_id,
             broker_order_id=info["broker_order_id"],
