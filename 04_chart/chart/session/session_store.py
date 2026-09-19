@@ -9,12 +9,11 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import tempfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
-
-from PySide6.QtCore import QStandardPaths
 
 
 @dataclass
@@ -35,23 +34,44 @@ class ChartSession:
     version: int = 1
 
 
-def _default_session_path() -> Path:
-    # Prefer AppDataLocation (platform standard, survives crash, reliable)
-    # Use VAYREN subfolder to be app-specific even without QCoreApplication org set
+def _app_data_dir() -> Path | None:
+    """Platform-standard writable app-data folder (Qt AppDataLocation parity).
+
+    Windows: ``%APPDATA%`` (Roaming). macOS: ``~/Library/Application Support``.
+    Posix: ``$XDG_CONFIG_HOME`` else ``~/.config``. Returns ``None`` when no
+    standard folder is resolvable so the caller degrades to a user folder.
+    """
+    system = platform.system()
+    if system == "Windows":
+        appdata = os.environ.get("APPDATA")
+        return Path(appdata) if appdata else None
+    if system == "Darwin":
+        try:
+            return Path.home() / "Library" / "Application Support"
+        except Exception:
+            return None
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    if xdg:
+        return Path(xdg)
     try:
-        base = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation)
-        if base:
-            # base may already be app-specific if org/app set, or generic Roaming
-            # Ensure VAYREN subfolder for reliability
-            base_path = Path(base)
-            # if base ends with generic Roaming without VAYREN, add VAYREN
-            if base_path.name.lower() not in ("vayren", "vayren-core"):
-                p = base_path / "VAYREN" / "session.json"
-            else:
-                p = base_path / "session.json"
-            return p
+        return Path.home() / ".config"
     except Exception:
-        pass
+        return None
+
+
+def _default_session_path() -> Path:
+    # Prefer the platform app-data folder (platform standard, survives crash,
+    # reliable). Use a VAYREN subfolder so the store is app-specific.
+    base = _app_data_dir()
+    if base is not None:
+        base_path = Path(base)
+        # base may already be app-specific, or generic (e.g. Roaming)
+        # Ensure the VAYREN subfolder for reliability
+        if base_path.name.lower() not in ("vayren", "vayren-core"):
+            p = base_path / "VAYREN" / "session.json"
+        else:
+            p = base_path / "session.json"
+        return p
     try:
         return Path.home() / ".vayren" / "session.json"
     except Exception:

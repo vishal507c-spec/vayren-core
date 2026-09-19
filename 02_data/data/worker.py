@@ -1,10 +1,11 @@
 """DownloadWorker — runs the download engine off the UI thread.
 
 The engine is strictly single-threaded (sequential API calls by design). This
-QThread owns the engine, processes download/coverage requests one at a time,
-and emits Qt signals carrying the bus event objects. Bootstrap connects those
-signals to ``EventBus.publish`` (delivering the events on the Qt thread) and
-the requests arrive here through bus subscriptions.
+worker thread owns the engine, processes download/coverage requests one at a
+time, and emits signals carrying the bus event objects. Bootstrap connects
+those signals to ``EventBus.publish`` (delivering the events on the main
+thread via the observable marshalling queue) and the requests arrive here
+through bus subscriptions.
 
 Only the worker thread touches the engine; ``cancel`` is just a flag set from
 the main thread and is honoured between chunks.
@@ -17,7 +18,7 @@ from collections import deque
 from datetime import datetime
 from typing import Any
 
-from PySide6.QtCore import QThread, Signal
+from core.observable import Signal, WorkerThread
 
 from data.events.cancel_download import CancelDownload
 from data.events.coverage_request import CoverageRequest
@@ -31,7 +32,7 @@ from data.events.download_started import DownloadStarted
 _DATE_FMT = "%Y-%m-%d"
 
 
-class DownloadWorker(QThread):
+class DownloadWorker(WorkerThread):
     """Event bridge between the bus and the download engine."""
 
     started = Signal(object)  # DownloadStarted
@@ -50,7 +51,7 @@ class DownloadWorker(QThread):
         self._busy = False
         self._lock = threading.Lock()
 
-    # ── bus request handlers (main thread) ───────────────────────────────────
+    # ── bus request handlers (main thread) ────────────────────────────────────
 
     def on_download_request(self, event: DownloadRequest) -> None:
         self._submit(("download", event))
@@ -65,7 +66,7 @@ class DownloadWorker(QThread):
         with self._lock:
             self._ops.append(op)
             self._wake.set()
-        if not self.isRunning():
+        if not self.is_running():
             self.start()
 
     @property
@@ -76,10 +77,10 @@ class DownloadWorker(QThread):
         """Stop the worker loop and join the thread (safe to call twice)."""
         self._stop = True
         self._wake.set()
-        if self.isRunning():
+        if self.is_running():
             self.wait(timeout_ms)
 
-    # ── thread body ──────────────────────────────────────────────────────────
+    # ── thread body ────────────────────────────────────────────────────
 
     def run(self) -> None:
         while not self._stop:
@@ -126,7 +127,7 @@ class DownloadWorker(QThread):
             return
         self.on_coverage(info)
 
-    # ── DownloadReporter implementation → Qt signals ─────────────────────────
+    # ── DownloadReporter implementation → worker signals ──────────────────
 
     def on_status(self, message: str) -> None:
         self.log.emit(message)

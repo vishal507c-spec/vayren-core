@@ -1,0 +1,254 @@
+"""Framework-free observers and host-pumped cross-thread marshalling.
+
+Stdlib replacement for the three PySide6 primitives the service layer used
+to keep work off the main thread. Qt stays a presentation dependency of the
+application host; services stay Qt-free through this module.
+
+* :class:`Signal` — drop-in for ``PySide6.QtCore.Signal``. Connection
+  semantics mirror Qt's default ``AutoConnection``: handlers run on the
+  emitting thread when that thread is the main thread; emissions from a
+  worker thread are queued and run on the main thread when the application
+  host pumps the queue. That marshalling is load-bearing:
+  :class:`~core.event_bus.event_bus.EventBus` is not reentrant and UI state
+  is main-thread-only — exactly the invariants Qt's queued connections gave.
+* :class:`WorkerThread` — drop-in for ``QThread``: subclass it, override
+  :meth:`run`, then ``start()`` / ``is_running()`` / ``wait(timeout_ms)``.
+* :class:`IntervalTimer` — drop-in for a repeating ``QTimer``: the tick is
+  scheduled off the main thread and always delivered on the main thread.
+
+The composition root drives the queue via :func:`pump_events`; tests call it
+directly.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import logging
+import queue
+import threading
+import weakref
+from collections.abc import Callable
+from typing import Any
+
+logger = logging.getLogger("core.observable")
+
+_MAIN_THREAD = threading.main_thread()
+_QUEUE: queue.SimpleQueue = queue.SimpleQueue()
+_BOUND_ATTR = "__vayren_observable_bound__"
+_FALLBACK_STORES: weakref.WeakKeyDictionary[Any, dict[str, Any]] = weakref.WeakKeyDictionary()
+
+
+def _is_main_thread() -> bool:
+    """True when called from the process main thread (Qt's GUI thread)."""
+    return threading.current_thread() is _MAIN_THREAD
+
+
+def _invoke(handlers: tuple[Callable[..., Any], ...], args: tuple[Any, ...]) -> None:
+    """Run handlers in order; one failing handler never stops the others
+    (the house rule: handler failure logs, the emitter survives)."""
+    for handler in handlers:
+        try:
+            handler(*args)
+        except Exception:  # noqa: BLE001
+            logger.exception("observable handler raised; continuing")
+
+
+def _bound_store(instance: Any) -> dict[str, Any]:
+    """Per-instance store for bound signals (instance ``__dict__`` when the
+    class allows attribute storage, a weak map otherwise)."""
+    try:
+        instance_dict = instance.__dict__
+    except Exception:  # pragma: no cover - __slots__ without the bound key
+        return _FALLBACK_STORES.setdefault(instance, {})
+    store = instance_dict.get(_BOUND_ATTR)
+    if store is None:
+        store = {}
+        instance_dict[_BOUND_ATTR] = store
+    return store
+
+
+class _BoundSignal:
+    """The per-instance handler list behind one :class:`Signal`."""
+
+    __slots__ = ("_handlers", "_lock")
+
+    def __init__(self) -> None:
+        self._handlers: list[Callable[..., Any]] = []
+        self._lock = threading.Lock()
+
+    def connect(self, handler: Callable[..., Any]) -> None:
+        """Subscribe ``handler``; duplicate connects are ignored (Qt rule)."""
+        if handler is None:
+            return
+        with self._lock:
+            if handler not in self._handlers:
+                self._handlers.append(handler)
+
+    def disconnect(self, handler: Callable[..., Any]) -> None:
+        """Unsubscribe ``handler``; unknown handlers are a no-op (Qt rule)."""
+        with self._lock, contextlib.suppress(ValueError):
+            self._handlers.remove(handler)
+
+    def emit(self, *args: Any) -> None:
+        """Deliver ``args`` to every connected handler (main-thread direct,
+        otherwise queued for the host pump)."""
+        with self._lock:
+            handlers = tuple(self._handlers)
+        if not handlers:
+            return
+        if _is_main_thread():
+            _invoke(handlers, args)
+        else:
+            _QUEUE.put((handlers, args))
+
+    @property
+    def connected(self) -> int:
+        with self._lock:
+            return len(self._handlers)
+
+
+class Signal:
+    """Class-level observable (descriptor) replacing ``PySide6.QtCore.Signal``.
+
+    Declare as a class attribute (``finished = Signal(str)``) and use it on
+    instances: ``self.finished.connect(handler)`` / ``self.finished.emit(x)``.
+    The constructor accepts PySide6-style type arguments for source
+    compatibility; they are not enforced (Python is dynamic, and Qt's own
+    type hints were advisory).
+    """
+
+    __slots__ = ("_types", "_key", "_name")
+
+    def __init__(self, *types: type) -> None:
+        self._types = tuple(types)
+        self._name = "signal"
+        self._key = f"signal_{id(self)}"
+
+    def __set_name__(self, owner: type, name: str) -> None:
+        self._name = f"{owner.__name__}.{name}"
+        self._key = f"signal:{owner.__qualname__}:{name}"
+
+    def __get__(self, instance: Any, owner: type | None = None) -> Any:
+        if instance is None:
+            return self
+        store = _bound_store(instance)
+        bound = store.get(self._key)
+        if bound is None:
+            bound = _BoundSignal()
+            store[self._key] = bound
+        return bound
+
+
+class WorkerThread:
+    """Drop-in replacement for ``PySide6.QtCore.QThread``.
+
+    Subclass and override :meth:`run` (the thread body), then drive it with
+    ``start()`` / ``is_running()`` / ``wait(timeout_ms)``. A finished thread
+    may be restarted with ``start()`` (QThread parity); a live one ignores a
+    second ``start()``. Threads are non-daemon and joined through
+    ``wait()``/``shutdown`` so in-flight SQLite writes always complete.
+    """
+
+    def __init__(self) -> None:
+        self._thread: threading.Thread | None = None
+
+    def run(self) -> None:
+        """Thread body — subclasses override this (never call it directly)."""
+        raise NotImplementedError("WorkerThread subclasses must override run()")
+
+    def start(self) -> None:
+        """Run this worker's body on a fresh thread (no-op while running)."""
+        existing = self._thread
+        if existing is not None and existing.is_alive():
+            return
+        self._thread = threading.Thread(
+            target=self._run_guard,
+            name=type(self).__name__,
+            daemon=False,
+        )
+        self._thread.start()
+
+    def _run_guard(self) -> None:
+        try:
+            self.run()
+        except Exception:  # noqa: BLE001 - a crashed worker logs, never silently dies
+            logger.exception("%s run() raised; thread ending", type(self).__name__)
+
+    def is_running(self) -> bool:
+        """True while the worker thread is alive (``QThread.isRunning``)."""
+        thread = self._thread
+        return thread is not None and thread.is_alive()
+
+    def wait(self, timeout_ms: int) -> bool:
+        """Join the worker thread; True when it finished within the timeout."""
+        thread = self._thread
+        if thread is None:
+            return True
+        thread.join(timeout_ms / 1000.0)
+        return not thread.is_alive()
+
+
+class IntervalTimer:
+    """Drop-in replacement for a repeating ``QTimer``.
+
+    ``on_tick`` is scheduled on a background thread and always *delivered*
+    on the main thread through the same marshalling queue as
+    :class:`Signal`, so tick handlers keep the main-thread invariants the
+    Qt timer gave (state mutation and snapshot reads never race).
+    """
+
+    def __init__(self, interval_ms: int, on_tick: Callable[[], None]) -> None:
+        self._interval_s = max(1, int(interval_ms)) / 1000.0
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        # A bound signal (the descriptor binds only on class-level access, and
+        # this timer owns the signal itself, so wire the bound object here).
+        self._fired = _BoundSignal()
+        self._fired.connect(on_tick)
+
+    def start(self) -> None:
+        """Begin ticking (no-op while already ticking)."""
+        if self._thread is not None and self._thread.is_alive():
+            return
+        self._stop.clear()
+        self._thread = threading.Thread(
+            target=self._loop,
+            name=f"IntervalTimer({self._interval_s * 1000:.0f}ms)",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        """Stop scheduling ticks (in-flight queued ticks still deliver)."""
+        self._stop.set()
+
+    def _loop(self) -> None:
+        while not self._stop.is_set():
+            if self._stop.wait(self._interval_s):
+                return
+            self._fired.emit()
+
+
+def pump_events(limit: int = 4096) -> int:
+    """Deliver queued cross-thread emissions on the main thread.
+
+    Called by the application host (its UI loop) and by tests. Returns the
+    number of emissions delivered. Off the main thread this is a no-op:
+    emissions must never be unwound on a worker thread.
+    """
+    if not _is_main_thread():
+        return 0
+    processed = 0
+    while processed < limit:
+        try:
+            handlers, args = _QUEUE.get_nowait()
+        except queue.Empty:
+            break
+        _invoke(handlers, args)
+        processed += 1
+    return processed
+
+
+def pending_events() -> int:
+    """Queued-but-undelivered cross-thread emissions (diagnostics/tests)."""
+    return _QUEUE.qsize()

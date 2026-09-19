@@ -19,7 +19,7 @@ from typing import Any
 import pytest
 from broker import BrokerStatus
 from broker.management import BrokerSpec
-from PySide6.QtCore import QCoreApplication
+from core.observable import pump_events
 
 from app.services.broker_manager import BrokerManager
 
@@ -137,8 +137,7 @@ def _spec(hooks: SpecHooks) -> BrokerSpec:
 
 
 @pytest.fixture()
-def manager(qt_app: Any, tmp_path: Any):  # noqa: ARG001 (Qt app must exist first)
-    QCoreApplication.instance()  # noqa: B018 — fixture ensures Qt app exists
+def manager(qt_app: Any, tmp_path: Any):  # noqa: ARG001 (shared Qt fixture; the manager itself is Qt-free)
     hooks = SpecHooks()
     store = FakeStore()
     mgr = BrokerManager(
@@ -172,13 +171,13 @@ class _FakeSessionStore:
 
 def _settle(mgr: BrokerManager) -> None:
     for _ in range(200):
-        if mgr._worker._jobs.empty() and not mgr._worker.isRunning():
+        if mgr._worker._jobs.empty() and not mgr._worker.is_running():
             break
-        QCoreApplication.processEvents()
+        pump_events()
         import time
 
         time.sleep(0.01)
-    QCoreApplication.processEvents()
+    pump_events()
 
 
 def test_unconfigured_state_and_exact_reason(manager) -> None:

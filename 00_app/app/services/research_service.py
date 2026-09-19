@@ -20,7 +20,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QThread, Signal
+from core.observable import Signal, WorkerThread
 
 
 @dataclass(frozen=True)
@@ -191,7 +191,7 @@ def validate_research_config(
     return errors
 
 
-class ResearchWorker(QThread):
+class ResearchWorker(WorkerThread):
     """Background execution for one research experiment (UI never blocks).
 
     The heavy run (data fetch, strategy execution, analysis) happens here;

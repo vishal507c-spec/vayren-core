@@ -22,9 +22,9 @@ from typing import Any
 
 from chart.events.chart_ready import ChartReady
 from core.event_bus.event_bus import EventBus
+from core.observable import Signal
 from market.events.load_symbol import LoadSymbol
 from market.events.timeframe_changed import TimeframeChanged
-from PySide6.QtCore import QObject, Signal
 
 logger = getLogger(__name__)
 
@@ -49,7 +49,7 @@ class TradeContext:
     exit_reason: str | None = None
 
 
-class TradeChartController(QObject):
+class TradeChartController:
     """Bridges Strategy Lab trade selection → chart workspace.
 
     Events are published via the existing EventBus; chart updates are applied
@@ -71,7 +71,6 @@ class TradeChartController(QObject):
         context_panel: Any | None = None,
         lab_workspace: Any | None = None,
     ) -> None:
-        super().__init__()
         self._bus = bus
         self._widget = widget
         self._window = window

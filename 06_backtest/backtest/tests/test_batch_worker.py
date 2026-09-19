@@ -1,13 +1,14 @@
 """Worker batch wiring — enqueue → stock-level progress → done, off UI thread.
 
 These tests drive the worker with ``max_workers=1`` (inline execution in
-the worker thread, no child processes): they prove the QThread queue,
+the worker thread, no child processes): they prove the worker queue,
 stock-level progress/done/failed signals and cancellation. The process
 pool itself is covered by ``test_batch_parity.py`` (spawn without Qt),
 which is how production combines them.
 
-Slots use direct connections and a ``threading.Event`` gate — no nested
-Qt event loop, so the test stays hermetic inside the full suite.
+Handlers gate on a ``threading.Event`` and the worker emits through the
+framework-free observable queue, so the test pumps it to the main thread
+(host pump path) — no nested UI event loop, the suite stays hermetic.
 """
 
 import os
@@ -17,22 +18,25 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import sqlite3
 import tempfile
 import threading
+import time
 from pathlib import Path
 
+from core.observable import pump_events
 from market.repository.symbol_repository import SymbolRepository
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication
 from strategy.language.storage import create_strategy
 
 from backtest.runner import BacktestRunner
 from backtest.worker import BacktestWorker, BatchEnqueued
 
 
-def _qt_app() -> QApplication:
-    inst = QApplication.instance()
-    if isinstance(inst, QApplication):
-        return inst
-    return QApplication([])
+def _wait_for(finished: threading.Event, timeout: float = 90.0) -> None:
+    """Wait for the gate while delivering the worker queued emissions onto
+    the main thread (what the application pump does in production)."""
+    deadline = time.time() + timeout
+    while not finished.is_set() and time.time() < deadline:
+        pump_events()
+        time.sleep(0.01)
+    pump_events()
 
 
 SMA_CODE = """from strategy.strategies.base import PythonStrategy
@@ -96,7 +100,6 @@ def _seed(tmp: Path) -> SymbolRepository:
 
 
 def test_worker_batch_progress_and_done():
-    _qt_app()
     with tempfile.TemporaryDirectory() as d:
         tmp = Path(d)
         repo = _seed(tmp)
@@ -107,13 +110,10 @@ def test_worker_batch_progress_and_done():
             progress: list = []
             done: list = []
             failed: list = []
-            worker.batch_progress.connect(progress.append, Qt.ConnectionType.DirectConnection)
-            worker.batch_done.connect(
-                lambda p: (done.append(p), finished.set()), Qt.ConnectionType.DirectConnection
-            )
+            worker.batch_progress.connect(progress.append)
+            worker.batch_done.connect(lambda p: (done.append(p), finished.set()))
             worker.batch_failed.connect(
                 lambda p: (failed.append(p), finished.set()),
-                Qt.ConnectionType.DirectConnection,
             )
             worker.enqueue_batch(
                 BatchEnqueued(
@@ -129,7 +129,8 @@ def test_worker_batch_progress_and_done():
                     max_workers=1,
                 )
             )
-            assert finished.wait(timeout=90), "batch did not finish"
+            _wait_for(finished)
+            assert finished.is_set(), "batch did not finish"
             assert not failed, failed
             assert len(done) == 1
             request_id, outcomes = done[0]
@@ -145,7 +146,6 @@ def test_worker_batch_progress_and_done():
 
 
 def test_worker_batch_unknown_strategy_fails():
-    _qt_app()
     with tempfile.TemporaryDirectory() as d:
         tmp = Path(d)
         repo = _seed(tmp)
@@ -155,9 +155,8 @@ def test_worker_batch_unknown_strategy_fails():
             failed: list = []
             worker.batch_failed.connect(
                 lambda p: (failed.append(p), finished.set()),
-                Qt.ConnectionType.DirectConnection,
             )
-            worker.batch_done.connect(lambda _p: finished.set(), Qt.ConnectionType.DirectConnection)
+            worker.batch_done.connect(lambda _p: finished.set())
             worker.enqueue_batch(
                 BatchEnqueued(
                     request_id="wb2",
@@ -172,7 +171,8 @@ def test_worker_batch_unknown_strategy_fails():
                     max_workers=1,
                 )
             )
-            assert finished.wait(timeout=90), "batch did not finish"
+            _wait_for(finished)
+            assert finished.is_set(), "batch did not finish"
             assert failed and failed[0][0] == "wb2"
         finally:
             worker.shutdown()
@@ -201,7 +201,6 @@ def test_batch_uses_repository_dir_for_market_data():
     from the repository dir — never ``<strategy library>/<SYMBOL>.db``.
     Drives ``_execute_batch`` synchronously (no threads/loop needed).
     """
-    _qt_app()
     with tempfile.TemporaryDirectory() as d:
         tmp = Path(d)
         market = tmp / "market"
@@ -217,8 +216,8 @@ def test_batch_uses_repository_dir_for_market_data():
         try:
             done: list = []
             failed: list = []
-            worker.batch_done.connect(done.append, Qt.ConnectionType.DirectConnection)
-            worker.batch_failed.connect(failed.append, Qt.ConnectionType.DirectConnection)
+            worker.batch_done.connect(done.append)
+            worker.batch_failed.connect(failed.append)
             worker._execute_batch(_make_job(rec.id, ("WAAA", "WBBB")))
             assert not failed, failed
             assert len(done) == 1
@@ -233,7 +232,6 @@ def test_batch_uses_repository_dir_for_market_data():
 
 def test_batch_missing_symbol_error_names_market_dir():
     """A genuinely missing database errors honestly under the market root."""
-    _qt_app()
     with tempfile.TemporaryDirectory() as d:
         tmp = Path(d)
         market = tmp / "market"
@@ -245,7 +243,7 @@ def test_batch_missing_symbol_error_names_market_dir():
         worker = BacktestWorker(runner)
         try:
             done: list = []
-            worker.batch_done.connect(done.append, Qt.ConnectionType.DirectConnection)
+            worker.batch_done.connect(done.append)
             worker._execute_batch(_make_job(rec.id, ("NOSUCHDB",)))
             assert len(done) == 1
             (_, outcomes) = done[0]

@@ -1,8 +1,8 @@
-"""DownloadWorker — the QThread bridge between bus and engine."""
+"""DownloadWorker — the worker-thread bridge between bus and engine."""
 
 from typing import cast
 
-from PySide6.QtWidgets import QApplication
+from core.observable import pump_events
 
 from data.downloader.engine import HistoricalDownloadEngine
 from data.events import (
@@ -33,16 +33,18 @@ def make_worker(tmp_path) -> tuple[DownloadWorker, FakeKite]:
 
 
 def _drain(worker: DownloadWorker, timeout_ms: int = 5000) -> None:
+    """Wait for the worker to finish its queue while delivering its
+    cross-thread emissions on the main thread (the host pump path)."""
     import time
 
     deadline = timeout_ms
     while deadline > 0:
-        QApplication.processEvents()
-        if not worker.isRunning():
+        pump_events()
+        if not worker.is_running():
             break
         time.sleep(0.01)
         deadline -= 10
-    QApplication.processEvents()
+    pump_events()
 
 
 def test_worker_download_emits_full_event_chain(tmp_path) -> None:
@@ -124,7 +126,7 @@ def test_worker_shutdown_is_idempotent(tmp_path) -> None:
     worker, _kite = make_worker(tmp_path)
     worker.shutdown()
     worker.shutdown()  # second call must not raise
-    assert not worker.isRunning()
+    assert not worker.is_running()
 
 
 def test_worker_sequences_two_downloads(tmp_path) -> None:

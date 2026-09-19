@@ -354,6 +354,13 @@
       "migration_target": "rust/vayren-core/src/core/",
       "migration_condition": "When the CORE slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
     },
+    "01_core/core/observable.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "domain": "CORE",
+      "reason": "Qt-free Signal/WorkerThread/IntervalTimer replacement for the PySide6 QtCore primitives the service layer used to keep work off the main thread (Qt stays a presentation-host dependency only). Pure stdlib event-dispatch glue (no numeric compute, no migrated authority) - same retention basis as event_bus.py.",
+      "migration_target": "rust/vayren-core/src/core/",
+      "migration_condition": "When the CORE slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+    },
     "01_core/core/registry/__init__.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "CORE",

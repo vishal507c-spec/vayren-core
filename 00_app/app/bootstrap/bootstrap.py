@@ -41,12 +41,18 @@ from market.loader.symbol_list_loader import SymbolListLoader
 from market.loader.timeframe_list_loader import TimeframeListLoader
 from market.manifest import market_manifest
 from market.repository.symbol_repository import SymbolRepository
-from PySide6.QtCore import QEvent, QObject, QRunnable, QThreadPool, Signal
+from PySide6.QtCore import QEvent, QObject, QRunnable, QThreadPool, QTimer, Signal
 from PySide6.QtWidgets import QApplication
 
 from app.lifecycle.lifecycle import AppLifecycle
 
 logger = getLogger(__name__)
+
+# The observable marshalling queue is drained on the UI thread at this
+# cadence (matches the native host viewport pumps). Worker emissions
+# (download/backtest/broker/research) land here instead of Qt's queued
+# connections, which the services no longer use.
+_SIGNAL_PUMP_MS = 20
 
 
 def _is_num(value: object) -> bool:
@@ -3156,6 +3162,7 @@ class Bootstrap:
 
     def start(self) -> None:
         """Show the main window and publish AppStarted; the flow continues event-driven."""
+        self._install_signal_pump()
         data_window: HistoricalDownloadPanel = self._services.get("data_window")
         data_engine: HistoricalDownloadEngine = self._services.get("data_engine")
         ready, reason = data_engine.provider_available()
@@ -3173,6 +3180,25 @@ class Bootstrap:
         self._services.get("chart_window").showMaximized()
         self._event_log.add_entry("INFO", "VAYREN started — Strategy Lab ready")
         self._bus.publish(AppStarted())
+
+    def _install_signal_pump(self) -> None:
+        """Drive the ``core.observable`` marshalling queue on the UI thread.
+
+        Worker threads emit through ``core.observable.Signal``, which queues
+        cross-thread emissions; this timer drains them on the main thread —
+        exactly where Qt's queued connections delivered them before. The
+        EventBus is not reentrant and UI state is main-thread-only, so that
+        thread affinity is load-bearing. Installed once per started app.
+        """
+        from core.observable import pump_events
+
+        if getattr(self, "_signal_pump", None) is not None:
+            return
+        pump = QTimer()
+        pump.setInterval(_SIGNAL_PUMP_MS)
+        pump.timeout.connect(pump_events)
+        pump.start()
+        self._signal_pump = pump
 
     def stop(self) -> None:
         """Shut down every worker thread this Bootstrap owns and stop the bus.
@@ -3232,6 +3258,11 @@ class Bootstrap:
                 app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         if stopped:
             logger.info("Bootstrap stopped; workers shut down: %s", ", ".join(stopped))
+        pump = getattr(self, "_signal_pump", None)
+        if pump is not None:
+            with contextlib.suppress(Exception):
+                pump.stop()
+            self._signal_pump = None
 
     def _release_widget_references(self) -> None:
         """Drop strong references to widgets so their trees can be reclaimed.

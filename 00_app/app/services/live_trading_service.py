@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from core.observable import IntervalTimer, Signal
 from execution import (
     ExecutionMode,
     LiveSession,
@@ -39,7 +40,6 @@ from execution import (
 )
 from execution.modes import LiveArm
 from market import Bar, SymbolRepository
-from PySide6.QtCore import QObject, QTimer, Signal
 from risk import RiskPolicy
 from strategy import StrategyDefinition, StrategyParameters
 from strategy.language.compiler import compile_strategy
@@ -110,7 +110,7 @@ def _utcnow_iso() -> str:
     return datetime.datetime.now(datetime.UTC).isoformat()
 
 
-class LiveTradingService(QObject):
+class LiveTradingService:
     """Owns UI-driven sessions. Pure composition — no strategy math here."""
 
     state_changed = Signal()
@@ -121,9 +121,7 @@ class LiveTradingService(QObject):
         strategy_dir: str | Path | None = None,
         selection_service: Any | None = None,
         broker_manager: Any | None = None,
-        parent: Any | None = None,
     ) -> None:
-        super().__init__(parent)
         self._data_dir = Path(data_dir)
         self._strategy_dir = Path(strategy_dir) if strategy_dir else Path(DEFAULT_STRATEGY_DIR)
         self._selection = selection_service
@@ -151,9 +149,7 @@ class LiveTradingService(QObject):
         self._chart_cache: tuple[Bar, ...] | None = None
         self._compiled_cache: dict[str, tuple[str, Any]] = {}
         self._tick_count = 0
-        self._timer = QTimer(self)
-        self._timer.setInterval(_TICK_MS)
-        self._timer.timeout.connect(self.tick)
+        self._timer = IntervalTimer(_TICK_MS, self.tick)
         self._restore_config()
 
     # ── catalog (Strategy Lab store + watchlist universe, never copied) ──
@@ -438,7 +434,7 @@ class LiveTradingService(QObject):
         self.state_changed.emit()
 
     def tick(self) -> None:
-        """One polling step across sessions (QTimer; never raises).
+        """One polling step across sessions (timer-driven; never raises).
 
         Marks are refreshed from the session's own provider (no extra DB
         reads); the activity drain and persistence stay on their own

@@ -20,7 +20,7 @@ from typing import Any
 
 from backtest.events import BacktestCompleted, BacktestFailed, BacktestStarted
 from backtest.models.result import BacktestResult, StrategyResult
-from PySide6.QtCore import QObject, Signal
+from core.observable import Signal
 
 logger = getLogger(__name__)
 
@@ -98,7 +98,7 @@ def merge_results(
     return merged, bars_by_symbol
 
 
-class MultiSymbolBacktestCoordinator(QObject):
+class MultiSymbolBacktestCoordinator:
     """Runs one strategy over selected symbols as a single bounded batch.
 
     Bootstrap owns the only instance and injects the background worker:
@@ -117,7 +117,6 @@ class MultiSymbolBacktestCoordinator(QObject):
     batch_failed = Signal(str)  # reason
 
     def __init__(self, bus: Any, worker: Any | None = None) -> None:
-        super().__init__()
         self._bus = bus
         self._worker = worker
         self._request: BatchRequest | None = None

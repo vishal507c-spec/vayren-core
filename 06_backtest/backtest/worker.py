@@ -6,7 +6,7 @@ import threading
 from collections import deque
 from dataclasses import dataclass
 
-from PySide6.QtCore import QThread, Signal
+from core.observable import Signal, WorkerThread
 
 from backtest.events.backtest_events import (
     BacktestCompleted,
@@ -34,12 +34,13 @@ class BatchEnqueued:
     max_workers: int = 0  # 0 = derive from the machine
 
 
-class BacktestWorker(QThread):
-    """QThread bridge for the backtest runner, mirroring DownloadWorker.
+class BacktestWorker(WorkerThread):
+    """Worker-thread bridge for the backtest runner, mirroring DownloadWorker.
 
     Bus request handlers enqueue work on the main thread; the thread body
     drains the queue running each request through the runner and emitting
-    Qt signals that bootstrap bridges to ``bus.publish``. Only the worker
+    signals that bootstrap bridges to ``bus.publish`` (delivered on the main
+    thread through the observable marshalling queue). Only the worker
     thread touches the runner and repository I/O.
     """
 
@@ -67,7 +68,7 @@ class BacktestWorker(QThread):
         with self._lock:
             self._queue.append(event)
             self._wake.set()
-        if not self.isRunning():
+        if not self.is_running():
             self.start()
 
     def enqueue_batch(self, job: BatchEnqueued) -> None:
@@ -75,7 +76,7 @@ class BacktestWorker(QThread):
         with self._lock:
             self._batch_queue.append(job)
             self._wake.set()
-        if not self.isRunning():
+        if not self.is_running():
             self.start()
 
     def cancel_batch(self) -> None:
@@ -95,7 +96,7 @@ class BacktestWorker(QThread):
         self._stop = True
         self._batch_cancel.set()
         self._wake.set()
-        if self.isRunning():
+        if self.is_running():
             self.wait(timeout_ms)
 
     def run(self) -> None:

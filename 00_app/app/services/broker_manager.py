@@ -22,8 +22,8 @@ SYSTEM → BROKERS owns everything here; LIVE only *consumes*:
 
 Threading: ALL network/SDK work runs on one background worker thread
 (job queue — no duplicate workers, no overlapping flows). UI updates
-arrive exclusively through Qt signals. No blocking call ever runs on the
-UI thread.
+arrive exclusively through the observable signals. No blocking call ever
+runs on the UI thread.
 
 This module is STRATEGY-agnostic and BROKER-generic: every concrete
 wiring comes from a :class:`~broker.management.BrokerSpec` supplied by
@@ -41,7 +41,7 @@ from typing import Any
 
 from broker import BrokerStatus
 from broker.management import BrokerSpec
-from PySide6.QtCore import QObject, QThread, Signal
+from core.observable import Signal, WorkerThread
 
 CALLBACK_PORT = 9474
 _SESSION_JOB = "session-check"
@@ -68,11 +68,11 @@ def _accepts_keyword(func: Any, name: str) -> bool:
     )
 
 
-class _Worker(QThread):
+class _Worker(WorkerThread):
     """One serialized job queue for every network/SDK operation."""
 
-    def __init__(self, on_job: Callable[[str, str], None], parent: QObject | None = None) -> None:
-        super().__init__(parent)
+    def __init__(self, on_job: Callable[[str, str], None]) -> None:
+        super().__init__()
         import queue
 
         self._jobs: queue.Queue[tuple[str, str]] = queue.Queue()
@@ -103,7 +103,7 @@ class _Worker(QThread):
                     self._on_job("__error__", broker_id)
 
 
-class BrokerManager(QObject):
+class BrokerManager:
     """Owns broker configuration/auth/state. UI reads snapshots only."""
 
     state_changed = Signal(str)  # broker_id
@@ -116,9 +116,7 @@ class BrokerManager(QObject):
         session_store_factory: Callable[[Any, str], Any] | None = None,
         browser_opener: Callable[[str], None] | None = None,
         specs: dict[str, BrokerSpec] | None = None,
-        parent: QObject | None = None,
     ) -> None:
-        super().__init__(parent)
         from data.provider.credentials_store import default_store
 
         self._data_dir = Path(data_dir)
@@ -133,7 +131,7 @@ class BrokerManager(QObject):
         self._states: dict[str, dict[str, Any]] = {}
         for broker_id, spec in self._specs.items():
             self._states[broker_id] = self._fresh_state(spec)
-        self._worker = _Worker(self._run_job, self)
+        self._worker = _Worker(self._run_job)
         self._worker.start()
         self._stopping = False
 
@@ -268,7 +266,7 @@ class BrokerManager(QObject):
     def disconnect_broker(self, broker_id: str) -> tuple[bool, str]:
         """Clear the session, keep the configuration, stop the venue.
 
-        Named ``disconnect_broker`` (not ``disconnect``) because QObject
+        Named ``disconnect_broker`` (not ``disconnect``) because this manager
         already owns a signal-disconnect method with another signature.
         """
         spec = self._specs.get(broker_id)
