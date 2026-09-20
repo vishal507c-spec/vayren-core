@@ -4,7 +4,7 @@
 
 [project]
 name = "vayren-core"
-version = "1.18.0"
+version = "1.19.0"
 description = "Event-driven desktop charting platform"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -12,9 +12,9 @@ authors = [{ name = "Vayren" }]
 readme = "README.md"
 
 # ── Runtime Dependencies ──────────────────────────────────────
-dependencies = [
-    "PySide6>=6.7",
-]
+# Native-only: the UI shell is a Rust binary; the headless Python backend
+# needs only the stdlib plus the optional domain extras below.
+dependencies = []
 
 # ── Development Dependencies ───────────────────────────────────
 [project.optional-dependencies]
@@ -34,9 +34,6 @@ data = [
     "chromedriver-autoinstaller>=0.4",
 ]
 
-[project.scripts]
-vayren = "app:main"
-
 # ══════════════════════════════════════════════════════════════════════════════
 # TOOL CONFIGURATION
 # ══════════════════════════════════════════════════════════════════════════════
@@ -48,9 +45,7 @@ line-length = 100
 indent-width = 4
 # 90_brain = docs; 99_archive = legacy reference snapshot (not shipped,
 # not tested, not validated — every other tool already ignores it).
-# scripts/migration/agent/oracles = frozen verification oracles (byte-stable
-# evidence; never linted/formatted/edited — parity pins their semantics).
-extend-exclude = ["90_brain", "99_archive", "scripts/migration/agent/oracles"]
+extend-exclude = ["90_brain", "99_archive"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "ARG", "C4", "T10"]
@@ -61,9 +56,6 @@ indent-style = "space"
 line-ending = "auto"
 
 [tool.ruff.lint.per-file-ignores]
-"04_chart/chart/widgets/*.py" = ["N802"]  # Qt event handlers are camelCase by framework convention
-"02_data/data/ui/*.py" = ["N802"]  # Qt signal handlers are camelCase by framework convention
-"00_app/app/ui/strategy_lab_workspace.py" = ["E501", "SIM105", "N814", "C420"]
 # E501: long lines here are embedded Python-strategy source payloads inside
 # triple-quoted strings (exec'd verbatim; rewrapping would change strategy
 # source bytes/hashes). Same tradeoff as strategy_lab_workspace above.
@@ -82,7 +74,6 @@ include = [
     "01_core/core",
     "02_data/data",
     "03_market/market",
-    "04_chart/chart",
     "05_strategy/strategy",
     "06_backtest/backtest",
     "07_risk/risk",
@@ -90,7 +81,6 @@ include = [
     "09_broker/broker",
     "scripts",
 ]
-exclude = ["scripts/migration/agent/oracles"]
 extraPaths = [
     "02_data",
     "scripts/forensics",
@@ -105,7 +95,6 @@ testpaths = [
     "01_core/core/tests",
     "02_data/data/tests",
     "03_market/market/tests",
-    "04_chart/chart/tests",
     "05_strategy/strategy/tests",
     "05_strategy/strategy/research/tests",
     "06_backtest/backtest/tests",
@@ -113,8 +102,6 @@ testpaths = [
     "08_execution/execution/tests",
     "09_broker/broker/tests",
     "scripts/forensics/tests",
-    "scripts/migration/tests",
-    "scripts/migration/agent/tests",
     "scripts/tests",
 ]
 addopts = "-v --tb=short"
@@ -126,7 +113,6 @@ source = [
     "01_core/core",
     "02_data/data",
     "03_market/market",
-    "04_chart/chart",
     "05_strategy/strategy",
     "06_backtest/backtest",
     "07_risk/risk",
@@ -147,7 +133,6 @@ packages = [
     "01_core/core",
     "02_data/data",
     "03_market/market",
-    "04_chart/chart",
     "05_strategy/strategy",
     "06_backtest/backtest",
     "07_risk/risk",

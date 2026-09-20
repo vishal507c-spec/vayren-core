@@ -61,7 +61,7 @@ from .experiment import (
 )
 from .fingerprint import fingerprint_config, fingerprint_result, short_fingerprint
 from .governance import Decision, create_decision, list_decisions, load_decision, save_decision
-from .intelligence import CandidateHypothesis, IntelligenceRun, ResearchIntelligence
+from .intelligence import CandidateHypothesis, IntelligenceRun
 from .lineage import LineageEdge, LineageGraph, LineageNode, load_lineage, save_lineage
 from .report import build_report, conclude
 from .robustness import RobustnessResult, run_parameter_sensitivity, run_robustness
@@ -137,7 +137,6 @@ __all__ = [
     "save_run_artifacts",
     "CandidateHypothesis",
     "IntelligenceRun",
-    "ResearchIntelligence",
     "RobustnessResult",
     "run_parameter_sensitivity",
     "run_robustness",

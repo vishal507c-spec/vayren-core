@@ -1,20 +1,20 @@
 """Framework-free observers and host-pumped cross-thread marshalling.
 
-Stdlib replacement for the three PySide6 primitives the service layer used
-to keep work off the main thread. Qt stays a presentation dependency of the
-application host; services stay Qt-free through this module.
+Stdlib replacement for the three legacy UI-toolkit primitives the service
+layer used to keep work off the main thread. The native host owns
+presentation; services stay toolkit-free through this module.
 
-* :class:`Signal` — drop-in for ``PySide6.QtCore.Signal``. Connection
-  semantics mirror Qt's default ``AutoConnection``: handlers run on the
-  emitting thread when that thread is the main thread; emissions from a
-  worker thread are queued and run on the main thread when the application
-  host pumps the queue. That marshalling is load-bearing:
+* :class:`Signal` — observable with queued cross-thread delivery.
+  Connection semantics mirror the legacy default (auto connection): handlers
+  run on the emitting thread when that thread is the main thread; emissions
+  from a worker thread are queued and run on the main thread when the
+  application host pumps the queue. That marshalling is load-bearing:
   :class:`~core.event_bus.event_bus.EventBus` is not reentrant and UI state
-  is main-thread-only — exactly the invariants Qt's queued connections gave.
-* :class:`WorkerThread` — drop-in for ``QThread``: subclass it, override
+  is main-thread-only — exactly the invariants queued connections gave.
+* :class:`WorkerThread` — thread primitive: subclass it, override
   :meth:`run`, then ``start()`` / ``is_running()`` / ``wait(timeout_ms)``.
-* :class:`IntervalTimer` — drop-in for a repeating ``QTimer``: the tick is
-  scheduled off the main thread and always delivered on the main thread.
+* :class:`IntervalTimer` — repeating timer: the tick is scheduled off the
+  main thread and always delivered on the main thread.
 
 The composition root drives the queue via :func:`pump_events`; tests call it
 directly.
@@ -39,7 +39,7 @@ _FALLBACK_STORES: weakref.WeakKeyDictionary[Any, dict[str, Any]] = weakref.WeakK
 
 
 def _is_main_thread() -> bool:
-    """True when called from the process main thread (Qt's GUI thread)."""
+    """True when called from the process main thread (the UI thread)."""
     return threading.current_thread() is _MAIN_THREAD
 
 
@@ -77,7 +77,7 @@ class _BoundSignal:
         self._lock = threading.Lock()
 
     def connect(self, handler: Callable[..., Any]) -> None:
-        """Subscribe ``handler``; duplicate connects are ignored (Qt rule)."""
+        """Subscribe ``handler``; duplicate connects are ignored."""
         if handler is None:
             return
         with self._lock:
@@ -85,7 +85,7 @@ class _BoundSignal:
                 self._handlers.append(handler)
 
     def disconnect(self, handler: Callable[..., Any]) -> None:
-        """Unsubscribe ``handler``; unknown handlers are a no-op (Qt rule)."""
+        """Unsubscribe ``handler``; unknown handlers are a no-op."""
         with self._lock, contextlib.suppress(ValueError):
             self._handlers.remove(handler)
 
@@ -108,12 +108,12 @@ class _BoundSignal:
 
 
 class Signal:
-    """Class-level observable (descriptor) replacing ``PySide6.QtCore.Signal``.
+    """Class-level observable (descriptor) with connect/emit semantics.
 
     Declare as a class attribute (``finished = Signal(str)``) and use it on
     instances: ``self.finished.connect(handler)`` / ``self.finished.emit(x)``.
-    The constructor accepts PySide6-style type arguments for source
-    compatibility; they are not enforced (Python is dynamic, and Qt's own
+    The constructor accepts optional type arguments for source compatibility;
+    they are not enforced (Python is dynamic, and the legacy toolkit's own
     type hints were advisory).
     """
 
@@ -140,12 +140,12 @@ class Signal:
 
 
 class WorkerThread:
-    """Drop-in replacement for ``PySide6.QtCore.QThread``.
+    """Managed worker thread with restart semantics.
 
     Subclass and override :meth:`run` (the thread body), then drive it with
     ``start()`` / ``is_running()`` / ``wait(timeout_ms)``. A finished thread
-    may be restarted with ``start()`` (QThread parity); a live one ignores a
-    second ``start()``. Threads are non-daemon and joined through
+    may be restarted with ``start()``; a live one ignores a second
+    ``start()``. Threads are non-daemon and joined through
     ``wait()``/``shutdown`` so in-flight SQLite writes always complete.
     """
 
@@ -175,7 +175,7 @@ class WorkerThread:
             logger.exception("%s run() raised; thread ending", type(self).__name__)
 
     def is_running(self) -> bool:
-        """True while the worker thread is alive (``QThread.isRunning``)."""
+        """True while the worker thread is alive."""
         thread = self._thread
         return thread is not None and thread.is_alive()
 
@@ -189,12 +189,12 @@ class WorkerThread:
 
 
 class IntervalTimer:
-    """Drop-in replacement for a repeating ``QTimer``.
+    """Repeating timer with main-thread delivery.
 
     ``on_tick`` is scheduled on a background thread and always *delivered*
     on the main thread through the same marshalling queue as
-    :class:`Signal`, so tick handlers keep the main-thread invariants the
-    Qt timer gave (state mutation and snapshot reads never race).
+    :class:`Signal`, so tick handlers keep the main-thread invariants
+    (state mutation and snapshot reads never race).
     """
 
     def __init__(self, interval_ms: int, on_tick: Callable[[], None]) -> None:

@@ -1,8 +1,6 @@
 """Backtest runner end-to-end with VM-only path (.vstrat → IR → VM)."""
 
-import os
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import sqlite3
 import tempfile

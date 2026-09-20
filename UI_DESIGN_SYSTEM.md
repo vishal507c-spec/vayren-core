@@ -1,14 +1,12 @@
 # VAYREN — PERMANENT GLOBAL UI DESIGN SYSTEM
 
-**Status:** Authoritative. Single source of truth for ALL VayREN UI — current
-and future, Qt retained shell and Rust+Slint target alike.
+**Status:** Authoritative. Single source of truth for ALL VayREN UI — the
+native Rust+Slint shell.
 **Owns:** Visual language, tokens, components, navigation, responsive/DPI
 behavior, states, tables, charts, numbers, accessibility, keyboard,
 animation, reuse rules.
-**Not owns:** Language ownership → `ARCHITECTURE_CONSTITUTION.md` (new native
-UI is ALWAYS Rust+Slint; the Qt shell is retained only, converging to these
-tokens until its migration slice arrives); module APIs/events →
-`90_brain/`.
+**Not owns:** Language ownership → `ARCHITECTURE_CONSTITUTION.md` (UI is
+ALWAYS Rust+Slint); module APIs/events → `90_brain/`.
 **When to read:** BEFORE touching any UI file, before adding any widget,
 before inventing any style. No exceptions.
 **Rule §0 — NO ONE-OFF UI:** a screen must never invent its own visual
@@ -51,9 +49,9 @@ Decorative UI must never compete with data.
 
 ## 3. Canonical tokens (single values, both frameworks)
 
-These values are canonical. Qt (`00_app/app/ui/lab_theme.py`) and Slint
-(`rust/vayren-shell/ui/design.slint`, palette) implement THE SAME numbers —
-a framework file that disagrees with this table is wrong.
+These values are canonical. Slint (`rust/vayren-shell/ui/palette.slint`,
+`components.slint`) implements THE SAME numbers — a screen file that
+disagrees with this table is wrong.
 
 ### 3.1 Color
 
@@ -130,11 +128,11 @@ Table row height `ROW_HEIGHT 22` (ranking viewports may pin 26 — see
 
 ## 4. Layout system
 
-- Native layouts only (Qt layouts / Slint layouts). **No fixed-pixel
-  coordinates for major architecture.** Size policies + stretch factors +
-  min/max constraints own the geometry.
-- Shell order (both frameworks): **nav rail → context → content**.
-  Qt chart shell: tools rail (40) | panel | chart container. Slint shell:
+- Native layouts only (Slint layouts). **No fixed-pixel
+  coordinates for major architecture.** Stretch factors + min/max
+  constraints own the geometry.
+- Shell order: **nav rail → context → content**.
+  Chart screen: tools rail (40) | panel | chart container. Shell:
   104px nav rail | content column | 24px status bar.
 - Content column: page header → context bar → scrollable page. Pages that
   can overflow use ONE page-level scroll container — children never squeeze
@@ -158,8 +156,8 @@ uniform stretching.
 
 DPI: logical/device-independent layout only. Never hardcode dimensions from
 the developer's monitor; never assume physical == logical pixels. All
-controls scale with the OS. Qt: layout-driven geometry + `WA_StyledBackground`
-where QSS backgrounds are required; Slint: `px` units are logical by design.
+controls scale with the OS. Slint: `px` units are logical by design;
+layout-driven geometry everywhere.
 
 Resize stability: maximum → medium → small → minimum-usable window must
 transition gracefully. No layout explosions, no disappearing widgets, no
@@ -246,11 +244,11 @@ Positive/negative/neutral semantics are identical on every screen.
 
 ## 11. Navigation, keyboard, accessibility
 
-One navigation grammar: permanent rail (chart shell: 40px tool rail;
-Slint: 104px rail; workspaces: tab bar), clear active state (accent),
-logical order, Alt+1..7 shortcuts in the Slint shell, full keyboard
-reachability in Qt (visible focus, sane tab order, Esc closes
-menus/dialogs, `Alt+R` resets chart view). Readable contrast on every
+One navigation grammar: permanent rail (chart screen: 40px tool rail;
+104px nav rail; workspaces: tab bar), clear active state (accent),
+logical order, Alt+1..7 shortcuts, full keyboard reachability (visible
+focus, sane tab order, Esc closes menus/dialogs, `Alt+R` resets chart
+view). Readable contrast on every
 text/background pair; text scales with OS settings; hit areas ≥ 22px for
 row actions, ≥ 28px for rail buttons; every icon button has text tooltip +
 accessible label. Density and accessibility coexist — if they conflict,
@@ -275,17 +273,17 @@ behavior — across the §5 matrix.
 
 - **Lab vertical-split squeeze (2026-09-12):** a vertical splitter crammed
   ~1000px+ of content minimums into 644–824px viewports → overlap +
-  clipping. Fix pattern: page-level `QScrollArea`, content flows and
+  clipping. Fix pattern: page-level scroll container, content flows and
   scrolls instead of squeezing. Any new page with stacked sections follows
   this pattern.
 - **Stale-result masquerade (2026-09-12):** unguarded run entries emitted
   runs with no open strategy. Fix pattern: context guards + ownership
   fingerprints (§7). Every results surface keeps them.
-- **QSS palette resolution:** QSS `palette()` roles resolve from the
-  APPLICATION palette — set it once at startup; plain QWidgets need
-  `WA_StyledBackground` for painted backgrounds.
-- **Trailing stretch:** a `QVBoxLayout` without a trailing stretch spreads
-  slack between items — end every vertical stack with `addStretch(1)`.
+- **Palette resolution:** palette roles resolve from the APPLICATION
+  palette — set it once at startup; plain surfaces need explicit
+  backgrounds for painted regions.
+- **Trailing stretch:** a vertical layout without a trailing stretch spreads
+  slack between items — end every vertical stack with a stretch element.
 
 ## 14. Consistency audit (definition of done)
 
@@ -302,7 +300,6 @@ modifying UI ② follow it ③ search for reusable components first
 ⑥ preserve DPI independence ⑦ preserve accessibility ⑧ preserve existing
 state/ownership logic ⑨ run the actual app after meaningful UI change
 ⑩ verify rendered UI (≥2 sizes) ⑪ document any genuinely new global
-pattern HERE. No screen is ever an isolated design project. New native UI
-goes to Rust+Slint per the Constitution; retained-Qt edits converge to
-these tokens within already-retained files (new Qt UI files need a
-per-file retention entry — validator hard-fails otherwise).
+pattern HERE. No screen is ever an isolated design project. All UI goes
+to Rust+Slint per the Constitution; new UI files without a language
+retention entry hard-fail the validator.

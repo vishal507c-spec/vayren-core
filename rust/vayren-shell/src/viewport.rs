@@ -5,7 +5,7 @@
 //! This is the first migrated slice of the chart workspace: the zoom level
 //! owned centrally in Rust. The Slint chart toolbar reports the Reset Zoom
 //! action here; the canvas itself still lives in the Python application
-//! (Qt shell) until its own migration slice lands.
+//! (legacy shell) until its own migration slice lands.
 
 /// Zoom level showing the full loaded window (100%).
 pub const DEFAULT_LEVEL: f64 = 1.0;

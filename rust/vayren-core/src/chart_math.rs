@@ -1,7 +1,7 @@
 //! Chart coordinate mapping — bar index → x, price → y.
 //!
 //! Pure numeric viewport math extracted from 04_chart/chart/renderer.py.
-//! The full `ChartViewport` stays in Python (Qt-bound), but the hot-path
+//! The full `ChartViewport` stays in Python (legacy-bound), but the hot-path
 //! coordinate transforms can run in Rust for overlay painters and indicators
 //! that need to map thousands of points per frame.
 

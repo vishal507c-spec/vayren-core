@@ -10,7 +10,7 @@ Checks:
      migration_target + migration_condition. Class-level "classes" text and
      baseline membership grant NO exemption -> HARD FAIL otherwise.
   3. New Python files in Rust-owned domains without retention -> HARD FAIL.
-  4. New Qt UI surfaces without per-file retention -> HARD FAIL.
+   4. New Python UI surfaces without per-file retention -> HARD FAIL.
   5. Migrated authorities must not reappear in Python (AST checks).
   6. Retention entries must have valid states (not blanket exemptions).
   7. Rust workspace integrity.
@@ -47,7 +47,7 @@ VALID_RETENTION_STATES = {
     "EXEMPT_WITH_JUSTIFICATION",
 }
 
-QT_SURFACE_DIRS = (
+NATIVE_UI_DIRS = (
     "04_chart/chart/widgets/",
     "04_chart/chart/windows/",
     "04_chart/chart/renderer/",
@@ -170,7 +170,7 @@ def main() -> int:
     # retention_data["files"] with a valid state, or the validator FAILS.
     # Baseline (language_baseline.json) is historical reference only and is
     # NEVER consulted here: baseline membership grants no exemption.
-    qt_allowlist: set[str] = set(retention_data.get("qt_workspace_allowlist", {}).keys())
+    native_allowlist: set[str] = set(retention_data.get("native_workspace_allowlist", {}).keys())
 
     for rel in current:
         if rel in migrated_files:
@@ -215,11 +215,11 @@ def main() -> int:
                             )
                 continue
 
-            if any(rel.startswith(prefix) for prefix in QT_SURFACE_DIRS):
-                if rel in qt_allowlist:
+            if any(rel.startswith(prefix) for prefix in NATIVE_UI_DIRS):
+                if rel in native_allowlist:
                     continue
                 errors.append(
-                    f"NEW QT UI SURFACE IN WRONG LANGUAGE: {rel}. "
+                    f"NEW PYTHON UI SURFACE IN WRONG LANGUAGE: {rel}. "
                     f"Domain {domain} requires {req_lang} (Rust+Slint). "
                     f"Add to language_retention.json with TEMPORARILY_RETAINED or migrate."
                 )

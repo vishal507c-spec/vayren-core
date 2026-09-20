@@ -1,7 +1,7 @@
 """DownloadReporter — the observation boundary between engine and UI.
 
-The engine never prints, never touches Qt and never knows about the bus. It
-reports real progress through this protocol; the worker maps the calls to Qt
+The engine never prints and never knows about the bus. It reports real
+progress through this protocol; the worker maps the calls to observable
 signals, the UI maps them to the status view, and tests use a recorder. A
 missing method is fine (duck typing) — the default implementation is a no-op.
 """

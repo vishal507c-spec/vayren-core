@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .analysis import ResearchAnalysis, analyze_dataset
+from .analysis import ResearchAnalysis
 from .dataset import ResearchDataset
 from .discovery import Discovery, create_discovery
 from .experiment import Experiment, create_experiment
@@ -14,9 +14,6 @@ from .validation import ValidationResult, validate_experiment
 
 class ResearchEngine:
     """Generic Research Engine — operates on immutable histories."""
-
-    def analyze(self, dataset: ResearchDataset) -> ResearchAnalysis:
-        return analyze_dataset(dataset)
 
     def run_experiment(
         self,

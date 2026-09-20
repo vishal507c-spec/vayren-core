@@ -1,14 +1,9 @@
 """Shared fixtures for data domain tests."""
 
-import os
+from datetime import datetime
 from typing import Any
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-
-from datetime import datetime
-
 import pytest
-from PySide6.QtWidgets import QApplication
 
 from data.settings import DownloadSettings
 
@@ -43,19 +38,6 @@ def make_settings(data_dir, **overrides: Any) -> DownloadSettings:
 @pytest.fixture
 def settings(tmp_path) -> DownloadSettings:
     return make_settings(tmp_path)
-
-
-@pytest.fixture(autouse=True)
-def qt_app() -> QApplication:
-    """Process-wide QApplication (offscreen), created once.
-
-    Autouse: Qt widget tests need the app instance even when the test
-    function itself does not reference it.
-    """
-    instance = QApplication.instance()
-    if isinstance(instance, QApplication):
-        return instance
-    return QApplication([])
 
 
 def candle(dt: datetime, price: float = 100.0) -> dict:

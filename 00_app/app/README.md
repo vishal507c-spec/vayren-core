@@ -1,25 +1,25 @@
 # App — Manager (00_app)
 
-`00_app/app/` — application ka **entry point**. Bus + services + wiring ka single owner.
+`00_app/app/` — application ka **composition package**. Production entry
+Rust + Slint shell hai (`make dev` → `scripts/launch_native.py` → the
+`vayren-shell` binary), served by headless Python backend (`app/headless.py`).
 
 ## Andar Kya Hai
 | Cheez | Kaam |
 |---|---|
-| `App` | Entry: args → logging → QApplication → bootstrap → Qt loop |
-| `Bootstrap` | Bus + services + `ComponentRegistry`/`SystemModel` banata hai; **subscriptions sirf yahan**; `start()` = window show + `AppStarted` |
-| `AppLifecycle` | `AppStarted` → `ListSymbols`; `WindowRendered` → terminal |
+| `headless.py` | Headless backend: stdin/stdout par newline-delimited JSON (ready/symbols/market/system/portfolio/live/research/lab/shutdown) |
+| `services/` | Composition services — broker manager/selection, live trading, research (stdlib observable, koi UI toolkit nahi) |
 
 ## Wiring — Single Source
-Subscriptions sirf `00_app/app/bootstrap/bootstrap.py` mein. Poora event wiring (19 events) `90_brain/event_catalog.md` mein authoritative hai. Yahan duplicative list nahi — `Bootstrap` hi composition root hai.
+Har screen ka snapshot backend se aata hai; Rust shell `MarketState`/`BrokerWorkspace`/`LiveState`/`ResearchState`/`LabState`/`PortfolioState` me ingest karke Slint par project karta hai. Python business logic kabhi paint nahi karta.
 
-Event flow: `AppStarted → ListSymbols → SymbolsListed → QuotesLoaded → LoadSymbol/TimeframeChanged → DataLoaded → ChartReady → WindowRendered` (sync bus, Qt loop se pehle complete).
+Event flow: backend snapshot → bridge JSON → Rust state → Slint projection (sync, fail-closed).
 
 ## Example
 ```bash
-python -m app --data-dir D:\ZerodhaTradingData --limit 5000
-VAYREN_DATA_DIR=D:\ZerodhaTradingData python -m app
-vayren  # console script
+make dev -- --symbol RELIANCE --timeframe 15m --limit 200 --screen chart
+VAYREN_DATA_DIR=D:\ZerodhaTradingData make dev
 ```
 
 ## Ye Kya Nahi Karega
-Business logic / SQL / painting — sab respective modules mein. Yahan sirf wire + lifecycle.
+Business logic / SQL / painting — sab respective modules mein. Yahan sirf composition + IPC protocol.

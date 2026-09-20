@@ -3,7 +3,7 @@ name = "vayren-system-view"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Embeddable native System view (Rust + Slint software renderer, C ABI for the Qt host)"
+description = "Embeddable native System view (Rust + Slint software renderer, C ABI for the embed host)"
 
 [lib]
 name = "vayren_system_view"

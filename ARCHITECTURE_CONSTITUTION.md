@@ -18,14 +18,17 @@ This document is intentionally minimal during the migration phase.
 
 ```text
 VAYREN MIGRATION
-STATUS: ACTIVE
+STATUS: COMPLETE
 
-PRIORITY: MIGRATION COMPLETION
+PRIORITY: NATIVE OPERATION
 ```
 
-The migration is currently **NOT COMPLETE**.
+The migration is **COMPLETE** (zero-legacy audit passed: the production
+application is Rust + Slint served by a headless Python backend; no legacy
+UI toolkit remains in source, dependencies, tests, scripts or docs).
 
-Therefore, VAYREN remains in **MIGRATION MODE**.
+Therefore, VAYREN operates in **NATIVE MODE**. The migration-mode rules
+below are retained as history; §11 target ownership now applies directly.
 
 ---
 
@@ -474,8 +477,8 @@ CURRENT APPROVED MIGRATION
 **Current state:**
 
 ```text
-MIGRATION_ACTIVE = TRUE
-MIGRATION_COMPLETE = FALSE
+MIGRATION_ACTIVE = FALSE
+MIGRATION_COMPLETE = TRUE
 ```
 
-**Until `MIGRATION_COMPLETE = TRUE`, the current approved migration remains the primary architectural priority.**
+**`MIGRATION_COMPLETE = TRUE`: the target ownership (§11–§12) is the active architectural authority.**

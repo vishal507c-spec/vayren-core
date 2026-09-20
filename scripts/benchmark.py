@@ -102,7 +102,7 @@ def cmd_gate(samples: int) -> int:
             elapsed, rc, output = _run_step(cmd)
             timings.append(elapsed)
             if name == "pytest":
-                # Known pre-existing flake: the Qt suite can abort at teardown
+                # Known pre-existing flake: the legacy suite could abort at teardown
                 # (Windows abort, e.g. rc=-1073740791) AFTER all tests passed.
                 # Report that distinctly — never as a pass, never as a test
                 # failure. See development log for the clean-HEAD proof.
@@ -722,7 +722,7 @@ def cmd_scoreboard() -> int:
         "## Validation replays (BEFORE → AFTER, same commands)",
         "",
         "BEFORE = task record validation_s (flake era: includes abort-retry cost).",
-        "AFTER = median of replay validation_s (current workflow, Qt fix live).",
+        "AFTER = median of replay validation_s (current workflow, native fix live).",
         "End-to-end task speedup is NOT MEASURED: re-executing completed",
         "implementation work would be contaminated theater (solution known),",
         "so wall-clock BEFORE/AFTER pairs do not exist. Validation speedup —",

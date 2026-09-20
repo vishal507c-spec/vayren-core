@@ -3,7 +3,7 @@
 //! Payload names, fields and command/fact roles mirror the Python frozen
 //! dataclasses exactly (see `90_brain/event_catalog.md` §2). Dates cross as
 //! `"YYYY-MM-DD"` / `"YYYY-MM-DD HH:MM:SS"` strings, states as `DLState.name()`
-//! spellings — the same shapes the Qt worker emits today.
+//! spellings — the same shapes the legacy worker emits today.
 //!
 //! The production Python worker stays the authority; constructor functions
 //! below mirror its reporter → event mapping (`worker.py`) so future
@@ -322,7 +322,7 @@ mod tests {
     #[test]
     fn sweep_drives_progress_events_on_the_bus() {
         // End-to-end slice: validate range → sweep → per-chunk facts on the
-        // Rust EventBus, mirroring worker → engine → Qt-signal → bus.publish.
+        // Rust EventBus, mirroring worker → engine → legacy-signal → bus.publish.
         let bus = EventBus::new();
         let chunks = Arc::new(AtomicUsize::new(0));
         let counter = Arc::clone(&chunks);

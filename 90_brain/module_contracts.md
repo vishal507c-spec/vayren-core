@@ -89,31 +89,31 @@ AI agents must read the relevant module contract before modifying that module.
 
 ### 5.1 Module: `00_app` — Manager
 
-**Responsibility:** Composition root. Parses args, configures logging, creates bus/registries, wires every subscription, hosts windows, runs Qt loop.
+**Responsibility:** Native composition package. Owns the headless backend (`app/headless.py`) and the composition services (`app/services/`); the production window is the Rust + Slint shell.
 
-**Public API** (`app/__init__.py`):
+**Public API** (`app/headless.py` + `scripts/launch_native.py`):
 | Export | Contract |
 |---|---|
-| `App.main(argv)` / `main(argv)` | Entry: `parse_args` → `configure_logging` → `QApplication` → `Bootstrap(...).start()` → `qt_app.exec()` |
-| `DEFAULT_DATA_DIR` (`D:\ZerodhaTradingData`) | Default `<data_dir>` if neither `--data-dir` nor `VAYREN_DATA_DIR` set |
-| `DEFAULT_LIMIT = None` | Default candles limit |
+| `make dev` | `launch_native.py` → `vayren-shell` binary → backend spawn → snapshots → Slint loop |
+| `app.headless` | JSON protocol over stdio: `ready`/`symbols_listed`/`market_snapshot`/`system_snapshot`/`portfolio_snapshot`/`live_snapshot`/`research_snapshot`/`lab_snapshot`/`error` |
+| `DEFAULT_DATA_DIR` / strategy dir | Env → legacy folder → per-user folder precedence (same family as the old CLI) |
 
-**Consumes:** `core` (EventBus, logging, registries, SystemModel), `data` (data_manifest, DownloadWorker, settings, credentials), `market` (SymbolRepository, loaders, manifests), `chart` (ChartEngine, widgets, windows, manifests), `strategy` (StrategyRegistry, Lab UI), `backtest` (BacktestRunner/Worker), `execution` (PaperService for `--paper`; headless, no QApplication; `LiveSession`/`SqliteTailProvider`/brokers/gates for the LIVE tab via `LiveTradingService`).
+**Consumes:** `core` (logging, registries, contracts), `data` (provider factory, settings, credentials), `market` (`SymbolRepository` only), `strategy` (storage, compiler, research), `backtest` (histories), `execution` (`LiveTradingService`), `risk`, `broker` (selection, manager).
 
-**Produces:** `Bootstrap` with properties `bus: EventBus`, `services: Registry` (name lookup, unchanged), `components: ComponentRegistry` (capability lookup), `system_model: SystemModel`. Emits `AppStarted` on `start()`. Hosts the native Slint LIVE viewport (LIVE tab): pure view over an injected state dict + arm/halt callbacks, never bus/SQL/broker. Session-setup panel (strategy/symbols/timeframe/quantity selectors from the Lab store + watchlist, START/STOP, exact start blockers, session status) emits Qt signals only; `LiveTradingService` (app service, one `LiveSession` per symbol over `SqliteTailProvider`, same compiled record Lab uses, PAPER default, LIVE needs explicit confirm + arm, STOP halts ticks immediately, config/checkpoints persisted under `<data_dir>/live`, never auto-starts) is wired in `Bootstrap` with Lab→LIVE handoff (strategy select + run config mirror). Hosts `ResearchWorkspace` (RESEARCH tab): pure view over `ResearchService` (datasets from backtest histories, experiments, real analysis); research computation stays in `strategy.research` (Python). Portfolio is native Slint only (`rust/vayren-shell/ui/portfolio.slint` + `src/portfolio.rs`, constitution §3), hosted inside the Qt main window by the `SlintPortfolioHost` viewport (`00_app/app/services/slint_portfolio_host.py`: blits RGB frames from the `vayren-portfolio-view` cdylib, forwards input, feeds provider snapshots — zero Qt Portfolio presentation). The Qt shell never constructs or mounts `PortfolioWorkspace` (PORTFOLIO nav routes to `ChartWindow.show_slint_portfolio`, which shows the host widget in the existing stack). The legacy Qt `PortfolioWorkspace` was deleted (never constructed in production; the Slint viewport is canonical); backend portfolio state/ledger are untouched and still feed LIVE. LIVE presentation is rebuilt natively in `rust/vayren-shell/ui/live.slint` + `src/live.rs` (responsive execution workstation: command/safety bar, docked-or-drawer inspector, content-derived breakpoints, state-driven recomposition; `shell::apply_live`/`wire_live`; gates/mode/arm verdicts mirror `execution.broker.gates` + `execution.modes` semantics and are backend-fed only); the Qt `LiveWorkspace` tab was unmounted from production and the file later deleted (with its direct-widget tests) and LIVE now routes to the in-window Slint viewport (`rust/vayren-live-view` cdylib + `app.services.slint_live_host`, action intents dispatched to the same live_service handlers). SYSTEM routes to the in-window Slint broker-status viewport (`rust/vayren-system-view` cdylib + `app.services.slint_system_host`, `BrokerPanel` (in `ui/broker.slint`, shared by shell + host) now at FULL parity with the retired Qt cards — status hero, health grid, metrics, credential state, REFRESH/CONNECT/DISCONNECT/REMOVE(inline confirm)/CONFIGURE form/CALLBACK copy — action intents drain through `vayren_system_view_next_event` to the SAME `BrokerManager` methods; Qt `BrokersWorkspace` unmounted and deleted, `BrokerManager` backend untouched). Shared `app.ui.ui_kit` widgets (Section/Badge/KVBlock/GateRow/tables) keep all screens consistent.
+**Produces:** backend snapshots consumed by `vayren-shell`: market (watchlist + bars), system (brokers + selection), portfolio (positions/orders/fills), live (session + gates), research (strategies + experiments), lab (library + config). `LiveTradingService` (one `LiveSession` per symbol over `SqliteTailProvider`, PAPER default, config/checkpoints under `<data_dir>/live`, never auto-starts). `ResearchService` over `strategy.research` (Python). Portfolio/Live/Research/Lab/System screens are native Slint (`rust/vayren-shell/ui/*.slint` + `src/*.rs`); backend state feeds them through `python_bridge.rs`, never bus/SQL/broker handles.
 
 **Dependencies:** See §4.
 
 **Forbidden:** Business logic, SQL, painting. No domain logic here.
 
 **Invariants:**
-- INVARIANT: Only `Bootstrap` calls `subscribe`. INVARIANT: Importing `app` must not start the app (no side-effects at import).
+- INVARIANT: Importing `app` must not start the app (no side-effects at import). The backend speaks JSON only.
 
-**Implementation note:** `_build_architecture()` registers `market_manifest()` + `chart_manifest()` (live instances as providers) and builds `SystemModel` once at startup (~0.13 ms, ~2% of startup). No plugin scanning, no reflection.
+**Implementation note:** the launcher resolves paths and picks the binary; the shell builds each view-model once from its snapshot at startup. No plugin scanning, no reflection.
 
-**AI modification:** Add a module → add import + service + subscription line in `Bootstrap`. Do not move wiring elsewhere.
+**AI modification:** Add a screen → add a backend snapshot command + a Rust state + its Slint projection. Do not add UI frameworks.
 
-**Validation:** `scripts/validate_imports.py` enforces app→allowed; `scripts/validate_structure.py` checks `00_app/app/{__init__,bootstrap,lifecycle,tests}` exist.
+**Validation:** `scripts/validate_imports.py` enforces app→allowed; `scripts/validate_structure.py` checks `00_app/app/{__init__,headless,tests}` exist.
 
 ---
 
@@ -179,7 +179,7 @@ WAL, `V9/V9.1` migrations.
 
 **Provider boundary** (`data/provider/contract.py`): `Provider` protocol `available()`, `symbols()`, `fetch_candles(symbol, interval, start, end)`, `new_session()`, `renew()`; sentinels `TOKEN_EXPIRED`/`RATE_LIMITED`; `ProviderError(message, code)` 7 codes (`AUTHENTICATION_FAILED` …). `ZerodhaProvider` in `data/provider/zerodha/adapter.py` is the history-only Kite venue. `FyersProvider` in `data/provider/fyers/adapter.py` is the FYERS venue (own credential schema `app_id`/`secret`/`client_id`/`totp_secret`/`pin`/`redirect_uri`, official API v3 OAuth in `fyers/live_auth.py`, fully automatic TOTP+PIN login in `fyers/auto_auth.py` mirroring the Zerodha auto-auth engine, read-only session in `fyers/session_adapter.py` — no order placement exists; history stays fail-closed `PROVIDER_UNAVAILABLE` in this phase). M7: the `register_provider` shim is retired — venues register directly in the single UBL `BrokerRegistry`; `build_provider(settings)` is retained only as a compatibility delegate while the composition root resolves the selected broker's historical face straight from the registry. `DownloadSettings.provider` is derived state (INVARIANT: always equals `BrokerSelection.name`; the ONLY product write path is `Bootstrap`). `store → env → Not Configured` credential priority via `ProviderCredentialsManager`.
 
-**Implementation note:** `HistoricalDownloadEngine(provider, ...)` requires provider (None→TypeError). `forward_sweep(fetch_chunk)` uses 200-day chunks + jitter. `DownloadWorker(QThread)` bridges bus requests ↔ engine signals; bootstrap bridges signals → `bus.publish`.
+**Implementation note:** `HistoricalDownloadEngine(provider, ...)` requires provider (None→TypeError). `forward_sweep(fetch_chunk)` uses 200-day chunks + jitter. `DownloadWorker` (stdlib thread) drives the engine off the main thread; progress arrives via observable signals.
 
 **Performance constraints:** `get_quotes` not here; download is I/O-bound, not per-candle hot path.
 
@@ -220,33 +220,30 @@ WAL, `V9/V9.1` migrations.
 
 ---
 
-### 5.5 Module: `04_chart` — Presentation
+### 5.5 Presentation — Rust + Slint chart (`rust/vayren-shell`)
 
-**Responsibility:** Model → render → viewport → window. Stateless painting, viewport math, watchlist/tools.
+**Responsibility:** Snapshot → state → projection → screen. Pure view-models, viewport math, watchlist/tools/download console.
 
-**Public API** (`chart/__init__.py`):
-`ChartModel`, `CrosshairValue`, `infer_timeframe`, `ChartEngine`, `CandleRenderer`, `CrosshairRenderer`, `LabelRenderer`, `OverlayRenderer`, `TimeAxisRenderer`, `CandleChartWidget`, `IndicatorVisibilityPanel`, `SymbolListWidget`, `TimeframeToolbar`, `ChartToolsToolbar`, `WatchlistWidget`, `ChartWindow`, `chart_manifest`, events `ChartReady`, `WindowRendered`
+**Public API** (`vayren_shell::market` + `ui/market.slint`):
+`MarketState` (`set_bars`, `interact`, `apply_snapshot_json`), `MarketBar`, `WatchEntry`, `MarketView` (`project`), `MarketScreen` bindings, `shell::apply_market`/`wire_market`.
 
-**Universal plot pipeline** (`chart/renderer/plot_renderer.py`, internal path — same pattern as the existing `PlotOverlay` import in `bootstrap.py`):
-`PlotStore` (Qt-free: `ingest`/`ingest_batch` atomic frames, `update`/`remove`/`remove_strategy`, `query_visible(first, last, ...)` indexed viewport query, `consume_dirty`, `stats` measured telemetry), `PlotOverlay.ingest_plot_events/update_plot/remove_plot/total_plot_count/visible_plot_count/plot_stats/consume_plot_dirty`. The renderer consumes generic `PlotEvent` shapes (10 plot types, 9 marker types, text None default, exact logical coordinates) via duck-typing — no runtime `chart → strategy` import. New marker styles (`marker_circle/marker_circle_x/marker_diamond/marker_triangle_up/marker_triangle_down/marker_dot`) + glyph-only `"kind|none"`; legacy styles/paths byte-identical.
+**Consumes:** backend market snapshots (watchlist + bars + timeframes).
 
-**Consumes:** `core`, `market` (`Bar` only).
+**Produces:** projected Slint chart (candles, axes, markers, header, status strip).
 
-**Produces:** `ChartReady`/`WindowRendered`; capability `chart.render` (consumes `data.query.candles`).
-
-**Forbidden:** `data`, `app`, `strategy`, `backtest`, `market.database`. INVARIANT: Widgets never touch `EventBus`/SQL.
+**Forbidden:** business logic in screens; bus/SQL handles in the view layer.
 
 **Invariants:**
-- `ChartModel(symbol, bars: tuple[Bar,...] ascending, timeframe?, exchange?)` frozen; `ChartEngine.on_data_loaded` sorts then `ChartReady`.
-- Renderers stateless QPainter: `CandleRenderer` (wicks/bodies/volume), `TimeAxisRenderer` (calendar ladder, ≥96 px spacing), `CrosshairRenderer` (1 px), `OverlayRenderer` (header strip two-tone: `SYMBOL_TEXT` bright + meta muted; crosshair-following price/time pills). No state, no events.
-- `CandleChartWidget.set_model(model)` only. Wheel=zoom (cursor anchor), drag=2D pan (time+price), price-strip drag=vertical scale, reset=latest 150 bars (`INITIAL_BARS`). Pixmap cache keyed by `(model id, first, last, price range, volume_max, size)` — crosshair moves are blits.
-- `ChartWindow` splitter `[tools|watchlist|download|chart/container]`; tool rail `TOOLBAR_WIDTH=40` with exactly 2 nav buttons (watchlist + download); `_active_panel` single state.
+- `MarketState` holds ascending bars; `set_bars` anchors the latest readable window; viewport math is pure and headless-tested.
+- Renderers are pure projections: candles (wicks/bodies/volume), time axis (calendar ladder), crosshair (1 px), header strip (symbol + meta + price/time pills). No state, no events.
+- Interactions report to Rust (`interact`): wheel=zoom (cursor anchor), drag=2D pan (time+price), price-strip drag=vertical scale, symbol/timeframe refetch through the bridge.
+- Download console state (`market_download.rs`) is local-optimistic; backend wires stay queued.
 
-**Theme contract** (`chart/theme.py`): `APP_PALETTE` (Window `#101418`, AlternateBase `#161c26`, Highlight teal `#26a69a`) + `APP_STYLE` palette-only QSS. `QApplication.setPalette(APP_PALETTE)` required; `WA_StyledBackground` needed for plain-QWidget QSS.
+**Theme contract** (`ui/palette.slint` + `ui/components.slint`): `VayrenPalette` (bg `#101418`, surface, hairline, text/muted, teal accent) + `VayrenDesign` spacing/type scale. Slint logical pixels throughout.
 
-**AI modification:** New visual → new renderer method + widget wiring; do not add business logic to widgets.
+**AI modification:** New visual → new projection field + screen binding; do not add business logic to screens.
 
-**Validation:** `chart/tests` (185) + structure check for `manifest.py`, `widgets/tools_toolbar.py`.
+**Validation:** `cargo test -p vayren-shell` (market/viewport/render suites) + `shell::tests::ui_bindings_and_navigation`.
 
 ---
 
@@ -285,7 +282,7 @@ plus the universal plot contract (`strategy/models/plot_event.py`): `PlotEvent`,
 `BacktestRunner`, `run_variant_backtest`, `BacktestWorker`, `BatchEnqueued`, `BacktestConfig`, `BacktestResult`, `StrategyResult`, `TradeRecord`, `EquityPoint`, `PerformanceMetrics`, `RunBacktest`, `BacktestStarted`, `BacktestProgress`, `BacktestCompleted`, `BacktestFailed`, `backtest_manifest`, `validate_backtest_form`
 `BatchSpec` / `SymbolBatchResult` / `run_symbol_batch` / `default_batch_workers` / `execute_bars`: bounded parallel multi-symbol batch (one strategy × N symbols; compile-once per worker, shared `execute_bars` core with the single path, deterministic symbol order, per-symbol error isolation, stock-level progress, `include_plots=False` default for bulk ranking).
 `derive_symbol_results(base, symbols)`: single-pass grouped equivalent of per-symbol `derive_symbol_result` (identical math, used by stock ranking).
-`BacktestWorker` batch queue: `enqueue_batch(BatchEnqueued)` / `cancel_batch()` + `batch_progress` / `batch_done` / `batch_failed` Qt signals (payloads are plain tuples, not bus events — only the final merged `BacktestCompleted` travels the bus).
+`BacktestWorker` batch queue: `enqueue_batch(BatchEnqueued)` / `cancel_batch()` + `batch_progress` / `batch_done` / `batch_failed` observable signals (payloads are plain tuples, not bus events — only the final merged `BacktestCompleted` travels the bus).
 `StrategyResult.chart_plots: tuple[Any, ...]` (defaulted): universal strategy-owned plot events (same contract live/backtest/replay), forwarded from `logic.get_plot_events()`; directional/symbol derivations preserve it alongside `chart_series`.
 `StrategyResult.muted_bars: tuple[int, ...]` (defaulted, generic ints): strategy-declared visually silent bars from `logic.get_muted_signal_bars()` (`PythonStrategy.mute_signal_bar`), consumed by `TradeOverlay` coverage alongside marker bars; directional derivations preserve it. Trading data is never affected.
 

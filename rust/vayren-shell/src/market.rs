@@ -2,7 +2,7 @@
 //! (constitution §3 / UI_DESIGN_SYSTEM.md: Rust owns view-model +
 //! interaction state; Slint renders bound properties only).
 //!
-//! This module mirrors the ORIGINAL Qt Market surface exactly: the watchlist
+//! This module mirrors the ORIGINAL legacy Market surface exactly: the watchlist
 //! panel (switch/add/remove/reset/filter/sort), the timeframe row with the
 //! canonical visible order + overflow dropdown, the INDICATORS popup
 //! (search · categories · strategies), the floating indicator visibility bar,
@@ -39,7 +39,7 @@ pub struct WatchEntry {
 }
 
 /// A dynamically ADDED indicator (floating visibility bar row). Mirrors the
-/// Qt `indicator_visibility` dict: only added names appear; each has a
+/// legacy `indicator_visibility` dict: only added names appear; each has a
 /// visible flag (crossed eye hides rendering, name stays).
 #[derive(Debug, Clone, PartialEq)]
 pub struct IndicatorEntry {
@@ -68,7 +68,7 @@ pub struct PlotSeries {
     pub owner: String,
     pub title: String,
     pub points: Vec<(usize, f64)>,
-    /// Ray extension (Qt `_parse_extend` vocabulary): "" none, "session"
+    /// Ray extension (legacy `_parse_extend` vocabulary): "" none, "session"
     /// (also "right"/"extend"/"horizontal") = horizontal rays.
     pub extend: String,
     /// Ray cap in bars (-1 = unbounded session ray).
@@ -79,7 +79,7 @@ pub struct PlotSeries {
 /// Positions are tail-relative chart slots resolved backend-side through
 /// chart timestamps (replay indices are window-relative and must never
 /// index chart bars); -1 = not placeable and never renders. Covered flags
-/// evaluate backend-side in replay basis — the exact Qt rule.
+/// evaluate backend-side in replay basis — the exact legacy rule.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TradeMarker {
     pub side: String,
@@ -132,7 +132,7 @@ pub struct StrategyRay {
     pub order: i32,
 }
 
-/// Qt `_PLOT_COLORS` rotation as Slint color codes
+/// legacy `_PLOT_COLORS` rotation as Slint color codes
 /// (0 accent, 1 warn/amber, 2 pos, 3 neg, 4 blue, 5 purple, 6 orange).
 fn plot_color_code(position: usize) -> i32 {
     [2, 3, 1, 4, 5, 2, 6][position % 7]
@@ -144,7 +144,7 @@ fn store_color_code(layer: i32, order: i32) -> i32 {
     plot_color_code(position)
 }
 
-/// Trade context strip facts (labels the retained Qt panel already renders;
+/// Trade context strip facts (labels the retained legacy panel already renders;
 /// the native strip shows the same strings, never re-derived).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct TradeContext {
@@ -157,7 +157,7 @@ pub struct TradeContext {
 }
 
 /// Data-availability state of the chart region — exactly the three honest
-/// messages the Qt widget paints (`paintEvent`).
+/// messages the legacy widget paints (`paintEvent`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MarketStatus {
     /// Model not present yet ("Loading chart…").
@@ -185,13 +185,13 @@ pub enum MarketAction {
     /// Pointer moved over the canvas (fractions of the plot rect).
     HoverMoved(f32, f32),
     HoverLeft,
-    /// Wheel over the canvas: zoom anchored at x fraction (Qt ZOOM_STEP).
+    /// Wheel over the canvas: zoom anchored at x fraction (legacy ZOOM_STEP).
     WheelZoom(f32, f32),
     /// Horizontal wheel: pan by a plot-width fraction.
     WheelPanX(f32),
     /// Left-drag started (plot fractions).
     DragStart(f32, f32),
-    /// Left-drag moved (plot fractions) — pans time + price like Qt.
+    /// Left-drag moved (plot fractions) — pans time + price like legacy.
     DragMove(f32, f32),
     /// Left-drag released — re-engages follow when at the right edge.
     DragEnd,
@@ -199,7 +199,7 @@ pub enum MarketAction {
     PriceZoom(f32, f32),
     /// Price-strip drag: vertical scaling anchored at the press point.
     /// `notches` is the pointer delta since press in wheel-notches
-    /// (Qt `_drag_price_from`: `PRICE_ZOOM_STEP ** (delta_y / 120)` applied
+    /// (legacy `_drag_price_from`: `PRICE_ZOOM_STEP ** (delta_y / 120)` applied
     /// to the live range around the anchor pixel); `anchor_frac` is the
     /// press y fraction (constant for the gesture).
     PriceDrag(f32, f32),
@@ -247,14 +247,14 @@ pub enum MarketAction {
 pub const MIN_VISIBLE_BARS: usize = 10;
 pub const MAX_VISIBLE_BARS: usize = 1800;
 pub const INITIAL_BARS: usize = 1400;
-/// One candle's full horizontal budget in px (Qt `MIN_CANDLE_SLOT`).
+/// One candle's full horizontal budget in px (legacy `MIN_CANDLE_SLOT`).
 pub const MIN_CANDLE_SLOT_PX: f32 = 1.0;
 pub const RIGHT_MARGIN_FRACTION: f64 = 0.15;
 pub const PRICE_EDGE_MARGIN: f64 = 0.05;
 pub const ZOOM_STEP: f64 = 1.25;
 pub const PRICE_ZOOM_STEP: f64 = 1.25;
 
-/// Canonical visible timeframe order (Qt `TimeframeToolbar._VISIBLE_ORDER`);
+/// Canonical visible timeframe order (legacy `TimeframeToolbar._VISIBLE_ORDER`);
 /// timeframes outside it fall into the overflow dropdown.
 pub const TIMEFRAME_VISIBLE_ORDER: [&str; 7] = ["5m", "15m", "30m", "45m", "1h", "2h", "4h"];
 
@@ -301,12 +301,12 @@ pub struct MarketHover {
     pub price: f64,
 }
 
-/// Market-status panel facts — the native port of Qt `MarketStatusPanel`.
+/// Market-status panel facts — the native port of legacy `MarketStatusPanel`.
 /// Honest-unknown semantics preserved exactly: every value defaults to "--"
 /// and `--` renders muted (never zero-filled, never invented).
 #[derive(Debug, Clone, PartialEq)]
 pub struct MarketStatusFacts {
-    /// Collapsed by default (Qt dock starts hidden; the app toggles it).
+    /// Collapsed by default (legacy dock starts hidden; the app toggles it).
     pub open: bool,
     pub regime_current: String,
     pub regime_trend: String,
@@ -349,7 +349,7 @@ pub struct MarketState {
     pub bars: Vec<MarketBar>,
     pub status: MarketStatus,
     pub exchange: String,
-    /// Visible window: first bar index + count (Qt `_first`/`_last`).
+    /// Visible window: first bar index + count (legacy `_first`/`_last`).
     pub first: usize,
     pub count: usize,
     pub follow_latest: bool,
@@ -381,11 +381,11 @@ pub struct MarketState {
     pub strategy_rays: Vec<StrategyRay>,
     pub trade_context: TradeContext,
     /// Density cap in candles for the current plot width (screen reports it;
-    /// Qt computes it from its live geometry — same information source).
+    /// legacy computes it from its live geometry — same information source).
     pub width_cap: usize,
-    /// Historical-Download console (native port of the retained Qt panel).
+    /// Historical-Download console (native port of the retained legacy panel).
     pub download: DownloadState,
-    /// Market-status panel (regime + data-status grid; Qt
+    /// Market-status panel (regime + data-status grid; legacy
     /// `MarketStatusPanel` parity).
     pub market_status: MarketStatusFacts,
     /// Queued backend intents for the embedded host to drain (mirrors
@@ -440,13 +440,13 @@ impl Default for MarketState {
 }
 
 impl MarketState {
-    /// Maximum candles readable at the current plot width (Qt
+    /// Maximum candles readable at the current plot width (legacy
     /// `max_visible_bars`): density cap bounded by the hard 1800 limit.
     pub fn max_visible_bars(&self) -> usize {
         self.width_cap.max(MIN_VISIBLE_BARS).min(MAX_VISIBLE_BARS)
     }
 
-    /// Qt `_anchor_first`: latest bar sits `RIGHT_MARGIN_FRACTION` from the
+    /// legacy `_anchor_first`: latest bar sits `RIGHT_MARGIN_FRACTION` from the
     /// right edge (empty space to its right).
     fn anchor_first(&self, total: usize, count: usize) -> usize {
         if total == 0 {
@@ -486,7 +486,7 @@ impl MarketState {
         self.count
     }
 
-    /// Ingest a backend bar snapshot. Mirrors Qt `set_model`: a fresh
+    /// Ingest a backend bar snapshot. Mirrors legacy `set_model`: a fresh
     /// lifecycle opens at the latest readable window; the same series
     /// re-anchors while following, else shifts so the same bars stay put.
     pub fn set_bars(
@@ -568,7 +568,7 @@ impl MarketState {
         &self.bars[first..last]
     }
 
-    /// Effective vertical price range (Qt `_price_range`): manual override
+    /// Effective vertical price range (legacy `_price_range`): manual override
     /// or auto-fit with the small edge margins.
     pub fn price_range(&self) -> (f64, f64) {
         if let Some((low, high)) = self.price_manual {
@@ -682,12 +682,12 @@ impl MarketState {
                     self.hover = None;
                     return true;
                 }
-                // Qt _snap_crosshair: slot math over the LOGICAL window
+                // legacy _snap_crosshair: slot math over the LOGICAL window
                 // (`_window_size()`), not the data-clamped slice — the right
                 // margin's empty slots still snap to their candle.
                 let count = self.window_size().max(1);
                 let rel = round_py(f64::from(x_frac) * count as f64 - 0.5).max(0.0) as usize;
-                // Qt clamps the snapped bar into [first, last-1].
+                // legacy clamps the snapped bar into [first, last-1].
                 let last = (self.first + self.count).min(self.bars.len());
                 let idx = rel
                     .min(count.saturating_sub(1))
@@ -712,7 +712,7 @@ impl MarketState {
                     return true;
                 }
                 // Inverted wheel direction: wheel UP zooms OUT, wheel DOWN
-                // zooms IN (deliberate divergence from Qt _zoom_at_px, which
+                // zooms IN (deliberate divergence from legacy _zoom_at_px, which
                 // uses ZOOM_STEP ** -steps). Step size and cursor anchor are
                 // unchanged.
                 let scale = ZOOM_STEP.powf(f64::from(steps));
@@ -822,7 +822,7 @@ impl MarketState {
                 if span <= 0.0 {
                     return true;
                 }
-                // Qt _drag_price_from -> _zoom_price_at(anchor_y, factor):
+                // legacy _drag_price_from -> _zoom_price_at(anchor_y, factor):
                 // the live range zooms around the fixed press point, so the
                 // price under the press cursor stays under it.
                 let factor = PRICE_ZOOM_STEP.powf(f64::from(notches));
@@ -948,7 +948,7 @@ impl MarketState {
     }
 
     fn refresh_crosshair(&mut self) {
-        // Qt re-snaps at the stored pixel after viewport changes; the native
+        // legacy re-snaps at the stored pixel after viewport changes; the native
         // screen re-reports on the next pointer move, so clearing is honest.
         self.hover = None;
     }
@@ -978,7 +978,7 @@ impl MarketState {
     }
 
     /// Slint-reported interaction: apply optimistically, then queue the wire
-    /// string for the Qt host when the action names backend behavior.
+    /// string for the legacy host when the action names backend behavior.
     /// Returns false when the action names something unknown.
     pub fn interact(&mut self, wire: &str, action: MarketAction) -> bool {
         let backend_owned = matches!(
@@ -1008,7 +1008,7 @@ impl MarketState {
     }
 
     /// Apply a Historical-Download console action; when it names backend
-    /// behavior the returned wire is queued for the Qt host to replay on the
+    /// behavior the returned wire is queued for the legacy host to replay on the
     /// retained panel/manager. Pure view moves (calendar paging, filter, chip
     /// toggles handled locally) produce no wire.
     pub fn interact_download(&mut self, action: DownloadAction) {
@@ -1020,7 +1020,7 @@ impl MarketState {
     }
 
     /// Filtered + sorted watchlist rows (filter matches symbol substring,
-    /// case-insensitive; sort by symbol per direction — Qt `_refresh_list`).
+    /// case-insensitive; sort by symbol per direction — legacy `_refresh_list`).
     pub fn listed_symbols(&self) -> Vec<&WatchEntry> {
         let needle = self.filter.to_lowercase();
         let mut rows: Vec<&WatchEntry> = self
@@ -1044,7 +1044,7 @@ impl MarketState {
     }
 }
 
-/// Round half to even — Python `round()` semantics. The legacy Qt widget
+/// Round half to even — Python `round()` semantics. The legacy widget
 /// computes every viewport index with Python `round`, so an exact .5 must
 /// settle on the even neighbor rather than away from zero (Rust's
 /// `f64::round`), otherwise pan/zoom anchors drift off-by-one from the old
@@ -1069,7 +1069,7 @@ fn round_py(value: f64) -> f64 {
     }
 }
 
-/// Qt name normalization: "Volume" renders as "Vol".
+/// legacy name normalization: "Volume" renders as "Vol".
 pub fn normalize_indicator_name(name: &str) -> String {
     if name.eq_ignore_ascii_case("volume") {
         "Vol".to_string()
@@ -1131,7 +1131,7 @@ pub fn fmt_int(value: f64) -> String {
     format!("{}{}", if negative { "-" } else { "" }, grouped)
 }
 
-/// Compact volume label exactly like the Qt chart
+/// Compact volume label exactly like the legacy chart
 /// (`950`, `8.02 K`, `1.25 M`, `2.50 B`).
 pub fn fmt_volume(value: f64) -> String {
     if !value.is_finite() {
@@ -1249,7 +1249,7 @@ pub struct PlotSegment {
     pub wide: bool,
 }
 
-/// One marker glyph, normalized to the plot rect (mirrors the Qt painter:
+/// One marker glyph, normalized to the plot rect (mirrors the legacy painter:
 /// tip-anchored triangles, pills above/below, solid vs dark pill fills).
 #[derive(Debug, Clone, PartialEq)]
 pub struct MarkerGlyph {
@@ -1269,11 +1269,11 @@ pub struct MarkerGlyph {
     pub pill_solid: bool,
     /// 0 tip at anchor (strategy), 1 tip above (trade entry), 2 tip below.
     pub tip: i32,
-    /// Pre-measured pill width, Qt fallback formula (len*6+6).
+    /// Pre-measured pill width, legacy fallback formula (len*6+6).
     pub pill_w: f32,
 }
 
-/// Qt pill measure fallback (`len(text) * 6.0 + 6.0`) — deterministic,
+/// legacy pill measure fallback (`len(text) * 6.0 + 6.0`) — deterministic,
 /// font-independent, byte-honest for ASCII labels.
 fn pill_w(text: &str) -> f32 {
     text.len() as f32 * 6.0 + 6.0
@@ -1325,8 +1325,8 @@ pub struct MarketView {
     pub active_label: String,
     pub trade_context: TradeContext,
     pub download: DownloadView,
-    /// Market-status strip (Qt `MarketStatusPanel` parity): open flag +
-    /// (key, value, muted) rows in the Qt grid order.
+    /// Market-status strip (legacy `MarketStatusPanel` parity): open flag +
+    /// (key, value, muted) rows in the legacy grid order.
     pub market_status_open: bool,
     /// "MARKET REGIME" section rows.
     pub market_status_regime: Vec<(String, String, bool)>,
@@ -1347,7 +1347,7 @@ fn last_change(bars: &[MarketBar]) -> (String, Tone) {
     (fmt_signed_pct(Some(pct)), tone_of_change(Some(pct)))
 }
 
-/// Western-grouped 2-decimals (Qt `f"{price:,.2f}"` in focused labels).
+/// Western-grouped 2-decimals (legacy `f"{price:,.2f}"` in focused labels).
 fn western2(value: f64) -> String {
     let sign = if value < 0.0 { "-" } else { "" };
     let abs = value.abs();
@@ -1527,7 +1527,7 @@ pub fn project(state: &MarketState) -> MarketView {
     }
 
     /// Horizontal ray emitter shared by extend series and store RAY records
-    /// (Qt paint_overlay ray algorithm, same inputs): each origin extends to
+    /// (legacy paint_overlay ray algorithm, same inputs): each origin extends to
     /// the next origin (or horizon), capped, clipped to the viewport. A
     /// single-bar ray becomes a one-slot tick.
     #[allow(clippy::too_many_arguments)]
@@ -1573,7 +1573,7 @@ pub fn project(state: &MarketState) -> MarketView {
         });
     }
     // Overlay series -> segments. Dense series connect diagonally; sparse
-    // series with ray extension draw horizontal rays (Qt paint_overlay
+    // series with ray extension draw horizontal rays (legacy paint_overlay
     // algorithm, same inputs). Gaps break the line either way.
     let mut plot_segments: Vec<PlotSegment> = Vec::new();
     if has_data {
@@ -1653,7 +1653,7 @@ pub fn project(state: &MarketState) -> MarketView {
             }
         }
     }
-    // Trade overlay (Qt `TradeOverlay.paint_overlay` semantics, same inputs):
+    // Trade overlay (legacy `TradeOverlay.paint_overlay` semantics, same inputs):
     // dashed win/loss connection entry->exit always paints; entry marker
     // (up triangle, teal, BUY pill above) and exit marker (down triangle,
     // win-colored, SELL pill below) paint unless the backend-flagged covered
@@ -1677,7 +1677,7 @@ pub fn project(state: &MarketState) -> MarketView {
             ))
         };
         let mut dashed = |x1: f32, y1: f32, x2: f32, y2: f32, color: i32, wide: bool| {
-            // Qt DashLine ~4px on/off at 1px width; view-space chunks match
+            // legacy DashLine ~4px on/off at 1px width; view-space chunks match
             // it at typical plot widths without any screen metrics.
             let dx = x2 - x1;
             let dy = y2 - y1;
@@ -1748,7 +1748,7 @@ pub fn project(state: &MarketState) -> MarketView {
             }
         }
         // Focused trade: solid connection + direction-aware price labels +
-        // short chevron for SHORT (Qt focused-mode math, same constants).
+        // short chevron for SHORT (legacy focused-mode math, same constants).
         if let Some(focus) = &state.focused {
             let long = is_long(&focus.side);
             if let (Some((x1, y1)), Some((x2, y2))) = (
@@ -1851,7 +1851,7 @@ pub fn project(state: &MarketState) -> MarketView {
             }
             let x = (((sm.bar as usize) - state.first) as f64 + 0.5) as f32 / count as f32;
             let y = norm(sm.price);
-            // Glyph colors are fixed per kind (Qt `_marker_color`); only
+            // Glyph colors are fixed per kind (legacy `_marker_color`); only
             // line/ray spans use the layer rotation.
             let (kind, color, below) = match sm.kind.as_str() {
                 "DOWN_ARROW" => (1, 3, false),
@@ -2025,7 +2025,7 @@ pub fn project(state: &MarketState) -> MarketView {
     }
 }
 
-/// Qt grid split: MARKET REGIME (4 rows) + DATA STATUS (4 rows).
+/// legacy grid split: MARKET REGIME (4 rows) + DATA STATUS (4 rows).
 /// `"--"` renders muted — the honest-unknown styling rule (never zero-filled).
 fn market_status_rows(
     facts: &MarketStatusFacts,
@@ -2238,7 +2238,7 @@ pub fn apply_snapshot_json(state: &mut MarketState, value: &serde_json::Value) {
     }
     // Trade markers: chart positions resolved backend-side through chart
     // timestamps (replay indices never index chart bars) + covered flags
-    // evaluated backend-side in replay basis (exact Qt rule).
+    // evaluated backend-side in replay basis (exact legacy rule).
     if let Some(rows) = value.get("trades").and_then(|v| v.as_array()) {
         state.trade_markers = rows
             .iter()
@@ -2349,7 +2349,7 @@ pub fn apply_snapshot_json(state: &mut MarketState, value: &serde_json::Value) {
             })
             .collect();
     }
-    // Trade context strip facts (pre-formatted labels from the retained Qt
+    // Trade context strip facts (pre-formatted labels from the retained legacy
     // panel — the bridge carries them verbatim).
     if let Some(ctx) = value.get("trade_context") {
         if ctx.is_object() {
@@ -2370,7 +2370,7 @@ pub fn apply_snapshot_json(state: &mut MarketState, value: &serde_json::Value) {
             mdownload::apply_download_snapshot(&mut state.download, dl);
         }
     }
-    // Market status (Qt `MarketStatusPanel` read-only projection; the
+    // Market status (legacy `MarketStatusPanel` read-only projection; the
     // panel's `open` state is view-local and never overwritten here).
     if let Some(ms) = value.get("market_status") {
         if ms.is_object() {
@@ -2413,7 +2413,7 @@ mod tests {
     }
 
     #[test]
-    fn initial_window_matches_qt_anchor() {
+    fn initial_window_matches_legacy_anchor() {
         let mut st = MarketState::default();
         st.set_bars("TEST", "15m", "NSE", bars(INITIAL_BARS + 500));
         assert_eq!(st.status, MarketStatus::Ready);
@@ -2482,7 +2482,7 @@ mod tests {
         let slots = st.count;
         assert_eq!(st.first, st.max_first());
         // One long gesture: the pointer leaves the plot, the chart still owns
-        // the drag (same as the Qt widget's mouse grab).
+        // the drag (same as the legacy widget's mouse grab).
         assert!(st.apply(MarketAction::DragStart(0.95, 0.5)));
         assert!(st.apply(MarketAction::DragMove(-1.5, 0.5)));
         assert!(st.apply(MarketAction::DragEnd));
@@ -2543,7 +2543,7 @@ mod tests {
     /// real empty space.
     #[test]
     fn candles_keep_slot_width_at_the_data_end() {
-        let st = golden_state(); // 3000 bars, Qt 1200px plot width
+        let st = golden_state(); // 3000 bars, legacy 1200px plot width
         let view = project(&st);
         assert_eq!(view.plot_slots, 1200);
         assert_eq!(view.candles.len(), 1020);
@@ -2934,11 +2934,11 @@ mod tests {
         assert_eq!(st.pending_actions.len(), 1); // filter is view-local
     }
 
-    // ── Golden parity vs the legacy Qt CandleChartWidget ───────────────
+    // ── Golden parity vs the legacy CandleChartWidget ───────────────
     // Bars, widget size and the input sequence are byte-identical to the
-    // Python golden probe (`Temp/opencode/parity_qt.py`): a 1200x700 widget
+    // Python golden probe (`Temp/opencode/parity_legacy.py`): a 1200x700 widget
     // (chart rect 1200x571 → density cap 1200) over a 3000-bar closed-form
-    // series. Every expected value below was produced by the REAL Qt widget
+    // series. Every expected value below was produced by the REAL legacy widget
     // on the same inputs — drift here means a behavioral parity gap.
 
     fn golden_bars(n: usize) -> Vec<MarketBar> {
@@ -2958,32 +2958,32 @@ mod tests {
             .collect()
     }
 
-    const QT_CHART_W: usize = 1200;
-    const QT_CHART_H: usize = 571;
+    const GOLD_CHART_W: usize = 1200;
+    const GOLD_CHART_H: usize = 571;
 
     fn golden_state() -> MarketState {
         let mut st = MarketState::default();
-        st.width_cap = QT_CHART_W; // Qt max_visible_bars at 1200px width
+        st.width_cap = GOLD_CHART_W; // legacy max_visible_bars at 1200px width
         st.set_bars("PAR", "15m", "NSE", golden_bars(3000));
         st
     }
 
-    /// Qt `_price_from_y` fraction for a pointer pixel: the chart rect spans
+    /// legacy `_price_from_y` fraction for a pointer pixel: the chart rect spans
     /// y 0..=570 (height 571), so fraction = (bottom - py) / (bottom - top).
-    fn qt_price_frac(py: f64) -> f64 {
-        (QT_CHART_H as f64 - 1.0 - py) / (QT_CHART_H as f64 - 1.0)
+    fn gold_price_frac(py: f64) -> f64 {
+        (GOLD_CHART_H as f64 - 1.0 - py) / (GOLD_CHART_H as f64 - 1.0)
     }
 
-    /// Qt `_zoom_price_at` fraction: divides by the rect height (571), not
+    /// legacy `_zoom_price_at` fraction: divides by the rect height (571), not
     /// bottom-top — the legacy's own convention, mirrored exactly.
-    fn qt_zoom_frac(py: f64) -> f64 {
-        (QT_CHART_H as f64 - 1.0 - py) / QT_CHART_H as f64
+    fn gold_zoom_frac(py: f64) -> f64 {
+        (GOLD_CHART_H as f64 - 1.0 - py) / GOLD_CHART_H as f64
     }
 
     #[test]
-    fn golden_initial_window_matches_qt() {
+    fn golden_initial_window_matches_golden() {
         let st = golden_state();
-        // Qt: first 1980, logical count 1200 (visible 1020 — clamped by the
+        // legacy: first 1980, logical count 1200 (visible 1020 — clamped by the
         // data end), follow-latest on, price span over the visible window.
         assert_eq!(st.first, 1980);
         assert_eq!(st.count, 1200);
@@ -2995,11 +2995,11 @@ mod tests {
     }
 
     #[test]
-    fn golden_crosshair_snap_matches_qt() {
+    fn golden_crosshair_snap_matches_golden() {
         let mut st = golden_state();
-        // Qt pointer (600, 300): fraction 0.5; snap lands on bar 2580 and
-        // the price tracks the pointer y (Qt _price_from_y fraction).
-        let fy = 1.0 - qt_price_frac(300.0);
+        // legacy pointer (600, 300): fraction 0.5; snap lands on bar 2580 and
+        // the price tracks the pointer y (legacy _price_from_y fraction).
+        let fy = 1.0 - gold_price_frac(300.0);
         assert!(st.apply(MarketAction::HoverMoved(0.5, fy as f32)));
         let hover = st.hover.expect("hover snapped");
         assert_eq!(hover.index, 2580);
@@ -3016,7 +3016,7 @@ mod tests {
     }
 
     #[test]
-    fn golden_zoom_pan_reset_match_qt() {
+    fn golden_zoom_pan_reset_match_golden() {
         let mut st = golden_state();
         // Zoom-in x3 at fx=0.5 (inverted wheel: steps=-1): already at the
         // density cap, nothing changes (zoom-in cannot over-compress).
@@ -3042,19 +3042,19 @@ mod tests {
         assert_eq!((st.first, st.count), (1222, 315));
         let (lo, hi) = st.price_range();
         assert!((lo - 1006.386).abs() < 5e-4 && (hi - 1025.174).abs() < 5e-4);
-        // Qt reset → the fresh-chart viewport.
+        // legacy reset → the fresh-chart viewport.
         assert!(st.apply(MarketAction::ResetView));
         assert_eq!((st.first, st.count), (1980, 1200));
         assert!(st.follow_latest);
     }
 
     #[test]
-    fn golden_drag_pan_2d_and_price_scale_match_qt() {
+    fn golden_drag_pan_2d_and_price_scale_match_golden() {
         let mut st = golden_state();
-        // Qt left-drag (600,300) → (720,360): time shifts -120 bars and the
+        // legacy left-drag (600,300) → (720,360): time shifts -120 bars and the
         // price range shifts by span/height * 60px.
-        let y0 = 300.0 / QT_CHART_H as f64;
-        let y1 = 360.0 / QT_CHART_H as f64;
+        let y0 = 300.0 / GOLD_CHART_H as f64;
+        let y1 = 360.0 / GOLD_CHART_H as f64;
         assert!(st.apply(MarketAction::DragStart(0.5, y0 as f32)));
         assert!(st.apply(MarketAction::DragMove(0.6, y1 as f32)));
         assert_eq!(st.first, 1860);
@@ -3063,14 +3063,14 @@ mod tests {
         assert!((lo - 1016.421295).abs() < 5e-4, "drag price low {lo}");
         assert!((hi - 1042.942295).abs() < 5e-4, "drag price high {hi}");
         assert!(st.apply(MarketAction::DragEnd));
-        // Qt price-strip wheel zoom at the anchor y=200 (dy=-120): zooms the
-        // live range around that pixel (factor 1.25, Qt _zoom_price_at).
-        let anchor = 1.0 - qt_zoom_frac(200.0);
+        // legacy price-strip wheel zoom at the anchor y=200 (dy=-120): zooms the
+        // live range around that pixel (factor 1.25, legacy _zoom_price_at).
+        let anchor = 1.0 - gold_zoom_frac(200.0);
         assert!(st.apply(MarketAction::PriceZoom(-1.0, anchor as f32)));
         let (lo, hi) = st.price_range();
         assert!((lo - 1012.124986).abs() < 5e-4, "price zoom low {lo}");
         assert!((hi - 1045.276236).abs() < 5e-4, "price zoom high {hi}");
-        // Qt price double-click reset (auto-fit over the current window).
+        // legacy price double-click reset (auto-fit over the current window).
         assert!(st.apply(MarketAction::PriceReset));
         let (lo, hi) = st.price_range();
         assert!((lo - 1012.3745).abs() < 5e-4 && (hi - 1040.2155).abs() < 5e-4);
@@ -3080,8 +3080,8 @@ mod tests {
         // candles keep moving left past the anchor; released there the view
         // stays exactly where the user left it, so follow-latest does NOT
         // re-engage (no snap-back).
-        let x0 = 1100.0 / QT_CHART_W as f64;
-        let x1 = 100.0 / QT_CHART_W as f64;
+        let x0 = 1100.0 / GOLD_CHART_W as f64;
+        let x1 = 100.0 / GOLD_CHART_W as f64;
         assert!(st.apply(MarketAction::DragStart(x0 as f32, y0 as f32)));
         assert!(st.apply(MarketAction::DragMove(x1 as f32, y0 as f32)));
         assert!(st.apply(MarketAction::DragEnd));
@@ -3097,10 +3097,10 @@ mod tests {
 
     #[test]
     fn golden_price_strip_drag_anchors_at_press() {
-        // Qt _drag_price_from: factor = PRICE_ZOOM_STEP ** (delta_y/120),
+        // legacy _drag_price_from: factor = PRICE_ZOOM_STEP ** (delta_y/120),
         // applied to the LIVE range around the press point.
         let mut st = golden_state();
-        let anchor = 1.0 - qt_zoom_frac(200.0);
+        let anchor = 1.0 - gold_zoom_frac(200.0);
         // Press at y=200, drag to y=260 (+60px = +0.5 notches): factor
         // 1.25^0.5 expands the range around the press price.
         assert!(st.apply(MarketAction::PriceDrag(0.5, anchor as f32)));
@@ -3160,7 +3160,7 @@ mod tests {
         }
     }
 
-    // ── market status panel (Qt MarketStatusPanel parity) ────────────────
+    // ── market status panel (legacy MarketStatusPanel parity) ────────────────
 
     #[test]
     fn market_status_defaults_to_honest_unknown() {
@@ -3168,7 +3168,7 @@ mod tests {
         assert!(!state.market_status.open);
         let view = project(&state);
         assert!(!view.market_status_open);
-        // Exact Qt grid: 4 regime rows then 4 data rows, all "--", all muted.
+        // Exact legacy grid: 4 regime rows then 4 data rows, all "--", all muted.
         let regime_keys: Vec<&str> = view
             .market_status_regime
             .iter()

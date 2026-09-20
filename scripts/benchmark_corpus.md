@@ -56,12 +56,12 @@ recorded worktree. Future samples pin their own HEAD.
 
 - Objective: case-insensitive substring filter box above the watchlist stock
   list; filters rows only, never mutates watchlist membership, selection, or
-  quotes; follows `chart/theme.py` palette-only QSS (no hardcoded colors).
+  quotes; follows `chart/theme.py` palette-only stylesheet (no hardcoded colors).
 - Starting state: clean worktree at main HEAD.
 - Success criteria: typing filters to matching symbols; clearing restores
   full list with selection intact; geometry unchanged at 1280×760.
 - Required validation: `04_chart` tests + app tests + `ruff` + validators.
-- Risk: MEDIUM (Qt layout behavior).
+- Risk: MEDIUM (legacy layout behavior).
 
 ### 4. BENCH-BUGFIX-01 — bugfix (DeprecationWarning)
 
@@ -153,5 +153,5 @@ All 10 specs executed 2026-09-05 (see `scripts/benchmark_runs.jsonl`):
   implemented + impact-validated + recorded with wall-clock.
 - BENCH-MIGRATE-01: OBSOLETE (objective already satisfied — verified, not
   executed as migration).
-- AEOS-QT-FIX (bugfix, investigation): live-QThread teardown root cause
+- AEOS-LEGACY-FIX (bugfix, investigation): live-thread primitive teardown root cause
   established by probes; autouse fixture fix; full suite RC=0, 25/25.

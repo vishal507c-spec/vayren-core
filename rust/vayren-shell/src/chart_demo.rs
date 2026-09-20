@@ -1,6 +1,6 @@
-//! Chart view demo — proof of concept for Qt → Slint chart migration.
+//! Chart view demo — proof of concept for legacy → Slint chart migration.
 //!
-//! Full 6,578 LOC Qt renderer/widget/window port is separate multi-week effort.
+//! Full 6,578 LOC legacy renderer/widget/window port is separate multi-week effort.
 //! This demonstrates Rust+Slint architecture for the target state.
 
 /// Candle data matching Slint CandleData struct.
@@ -42,12 +42,12 @@ pub fn sample_candles(_symbol: &str, count: usize) -> Vec<CandleData> {
 }
 
 /// Architecture demo: EventBus → Rust state → Slint bindings.
-/// Full Qt→Slint chart wiring happens when renderer port completes.
+/// Full legacy→Slint chart wiring happens when renderer port completes.
 pub fn chart_architecture_note() -> &'static str {
-    "Chart migration path: Qt (04_chart) → Rust core + Slint UI\n\
+    "Chart migration path: legacy Python renderer → Rust core + Slint UI\n\
      - EventBus: already migrated (vayren-core::event_bus)\n\
      - Bar model: migrated (vayren-core::market::Bar)\n\
-     - Renderer: 6,578 LOC QPainter → Slint canvas (in progress)\n\
+     - Renderer: 6,578 LOC legacy painter → Slint canvas (in progress)\n\
      - Integration: LoadSymbol event → market loader → DataLoaded → chart update"
 }
 

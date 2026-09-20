@@ -47,7 +47,7 @@ impl LabMode {
     }
 }
 
-/// Run lifecycle state (mirrors the Qt vocabulary; no-strategy is derived,
+/// Run lifecycle state (mirrors the legacy vocabulary; no-strategy is derived,
 /// never stored alongside a selection).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RunState {
@@ -170,14 +170,14 @@ pub struct RankRow {
     pub sharpe: String,
     pub pnl_tone: Tone,
     pub pf_tone: Tone,
-    /// Qt dims rows with no valid result ("— = no valid result").
+    /// legacy dims rows with no valid result ("— = no valid result").
     pub unranked: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TradeRow {
     pub no: String,
-    /// Absolute index into the engine trade list (Qt blotter UserRole id —
+    /// Absolute index into the engine trade list (legacy blotter UserRole id —
     /// survives side filtering, unlike the visible row number).
     pub abs_index: i32,
     pub symbol: String,
@@ -208,7 +208,7 @@ pub struct DetailMetric {
     pub value: String,
 }
 
-/// Selected-stock drill-down (the Qt detail panel's own rendered facts).
+/// Selected-stock drill-down (the legacy detail panel's own rendered facts).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct DetailView {
     pub symbol: String,
@@ -243,7 +243,7 @@ pub struct MatrixRow {
     pub winner: i32,
 }
 
-/// COMPARE page (the hidden Qt compare view's fed facts, echoed verbatim
+/// COMPARE page (the hidden legacy compare view's fed facts, echoed verbatim
 /// except the per-stock board, whose best-cell bold follows the board's own
 /// unique-best rule on backend numbers).
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -261,7 +261,7 @@ pub struct CompareView {
     pub board_symbols: Vec<String>,
     pub board_trades: Vec<String>,
     pub ranking: Vec<RankRow>,
-    /// Jointly normalized dual curves (shared scale, like the Qt view).
+    /// Jointly normalized dual curves (shared scale, like the legacy view).
     pub equity_buy: Vec<(f32, f32)>,
     pub equity_sell: Vec<(f32, f32)>,
     pub drawdown_buy: Vec<(f32, f32)>,
@@ -305,7 +305,7 @@ pub struct LabState {
     /// applies them optimistically too, so the UI reacts instantly while the
     /// backend remains the single owner of business behavior.
     pub pending_actions: Vec<String>,
-    /// Verdict pill facts from the backend interpretation layer (Qt parity:
+    /// Verdict pill facts from the backend interpretation layer (legacy parity:
     /// verdict + note + colour). Empty when nothing has been interpreted.
     pub verdict_label: String,
     pub verdict_note: String,
@@ -314,7 +314,7 @@ pub struct LabState {
     /// Batch progress line (e.g. "✓ 123 / 527 · 23%"); empty when idle.
     pub progress_label: String,
     /// Editor working copy + last backend echo (dirty = they differ, same as
-    /// Qt's `_dirty` flag; snapshots adopt the echo, never local edits).
+    /// legacy's `_dirty` flag; snapshots adopt the echo, never local edits).
     pub code: String,
     pub synced_code: String,
     /// Backend-owned parameter specs + current values.
@@ -327,7 +327,7 @@ pub struct LabState {
     pub cfg_dates_end: String,
     pub cfg_capital: String,
     pub config_error: String,
-    /// Ranking criterion dropdown (Qt box order echoed verbatim).
+    /// Ranking criterion dropdown (legacy box order echoed verbatim).
     pub rankby_labels: Vec<String>,
     pub rankby_current: i32,
     pub rank_search: String,
@@ -361,10 +361,10 @@ pub struct LabState {
 }
 
 pub const LAB_TABS: [&str; 5] = ["EDITOR", "PERFORMANCE", "TRADES", "EQUITY", "DRAWDOWN"];
-/// Qt result-stack page per native tab (EDITOR has no page — the Qt center
+/// legacy result-stack page per native tab (EDITOR has no page — the legacy center
 /// column is always live).
-pub const TAB_QT_PAGE: [i32; 5] = [-1, 0, 1, 2, 3];
-/// Native ranking header per Qt criterion-box index (box order == spec
+pub const TAB_RESULT_PAGE: [i32; 5] = [-1, 0, 1, 2, 3];
+/// Native ranking header per legacy criterion-box index (box order == spec
 /// order, verified against `_SORT_OPTIONS`).
 pub const RANKBY_HEADER: [usize; 7] = [2, 3, 4, 5, 6, 7, 8];
 pub const RANK_HEADERS: [&str; 9] = [
@@ -407,9 +407,9 @@ impl LabState {
     pub fn interaction_tab(&mut self, tab: usize) {
         if tab != self.tab && tab < LAB_TABS.len() {
             self.set_tab(tab);
-            // EDITOR is view-local (the Qt center column is always live);
-            // result tabs drive the Qt result stack page.
-            let page = TAB_QT_PAGE[tab];
+            // EDITOR is view-local (the legacy center column is always live);
+            // result tabs drive the legacy result stack page.
+            let page = TAB_RESULT_PAGE[tab];
             if page >= 0 {
                 self.queue_action(format!("tab:{page}"));
             }
@@ -444,7 +444,7 @@ impl LabState {
         }
     }
 
-    /// Editor typing is view-local (Qt only recompiles on open/save, never
+    /// Editor typing is view-local (legacy only recompiles on open/save, never
     /// per keystroke); Save/Compile carry the buffer to the backend.
     pub fn interaction_codeedit(&mut self, text: &str) {
         self.code = text.to_string();
@@ -488,8 +488,8 @@ impl LabState {
     }
 
     pub fn interaction_rankby(&mut self, label: &str) {
-        // The Slint ComboBox reports the selected label (Qt box order is
-        // echoed verbatim, so the position is the Qt box index).
+        // The Slint ComboBox reports the selected label (legacy box order is
+        // echoed verbatim, so the position is the legacy box index).
         if let Some(index) = self.rankby_labels.iter().position(|l| l == label) {
             self.queue_action(format!("rankby:{index}"));
         }
@@ -500,7 +500,7 @@ impl LabState {
     }
 
     pub fn interaction_trade_pick(&mut self, index: i32) {
-        // Qt click = highlight the row AND focus the trade downstream.
+        // legacy click = highlight the row AND focus the trade downstream.
         self.queue_action(format!("tradesel:{index}"));
         self.queue_action(format!("tradefocus:{index}"));
     }
@@ -573,7 +573,7 @@ impl LabState {
         self.queue_action(format!("symbols:{csv}"));
     }
 
-    /// Visible universe rows under the current search (Qt popup rule:
+    /// Visible universe rows under the current search (legacy popup rule:
     /// case-insensitive substring; filtering never loses draft state).
     pub fn sym_visible(&self) -> Vec<String> {
         let needle = self.sym_search.trim().to_lowercase();
@@ -849,11 +849,11 @@ pub struct LabView {
 
 /// Ranking rows displayed before the presentation cap (the label always
 /// states the true analyzed count — the cap is a viewport policy, same as
-/// the Qt blotter precedent).
+/// the legacy blotter precedent).
 pub const RANKING_VIEW_CAP: usize = 50;
 
 fn placeholder_kpis() -> Vec<KpiView> {
-    // Qt MetricsTiles keys (no SORTINO — the tile grid never had one) and
+    // legacy MetricsTiles keys (no SORTINO — the tile grid never had one) and
     // the tile missing glyph ("--").
     [
         "NET P&L",
@@ -875,7 +875,7 @@ fn placeholder_kpis() -> Vec<KpiView> {
     .collect()
 }
 
-/// Qt `t.semantic`: positive → Positive, negative → Negative, zero →
+/// legacy `t.semantic`: positive → Positive, negative → Negative, zero →
 /// Neutral, missing → Muted.
 fn semantic_tone(value: Option<f64>) -> Tone {
     match value {
@@ -886,7 +886,7 @@ fn semantic_tone(value: Option<f64>) -> Tone {
     }
 }
 
-/// Qt `_compare_cell` (board cells): kind-formatted backend numbers.
+/// legacy `_compare_cell` (board cells): kind-formatted backend numbers.
 fn compare_cell(kind: &str, value: Option<f64>) -> String {
     match value {
         None => "--".to_string(),
@@ -993,7 +993,7 @@ pub fn project(state: &LabState) -> LabView {
     } else {
         Vec::new()
     };
-    // Qt scope vocabulary ("3 stocks analyzed"), counted from the echoed
+    // legacy scope vocabulary ("3 stocks analyzed"), counted from the echoed
     // universe CSV — the same count the config toolbar shows.
     let universe_count = state
         .cfg_universe_csv
@@ -1014,7 +1014,7 @@ pub fn project(state: &LabState) -> LabView {
         String::new()
     };
 
-    // Criterion arrow on the active header (Qt appends ▼/▲ to the sorted
+    // Criterion arrow on the active header (legacy appends ▼/▲ to the sorted
     // column; box order == RANKBY_HEADER order).
     let mut rank_heads: Vec<String> = RANK_HEADERS.iter().map(|s| s.to_string()).collect();
     if show_results
@@ -1162,7 +1162,7 @@ pub fn project(state: &LabState) -> LabView {
         equity: d.equity,
     });
 
-    // Symbol selector projection (Qt popup vocabulary verbatim).
+    // Symbol selector projection (legacy popup vocabulary verbatim).
     let sym_total = state.universe_symbols.len();
     let sym_applied = state.universe_selected.len();
     let sym_button_line = if sym_applied == 0 {
@@ -1511,14 +1511,14 @@ mod tests {
     }
 
     #[test]
-    fn editor_tab_is_local_but_result_tabs_reach_qt_pages() {
+    fn editor_tab_is_local_but_result_tabs_reach_result_pages() {
         let mut st = state_with_obr();
         st.interaction_tab(0);
         assert_eq!(st.tab, 0);
         assert!(st.pending_actions.is_empty());
         st.interaction_tab(2);
         assert_eq!(st.tab, 2);
-        // Native TRADES (2) → Qt result-stack page 1.
+        // Native TRADES (2) → legacy result-stack page 1.
         assert_eq!(st.pending_actions, vec!["tab:1".to_string()]);
     }
 
@@ -1539,7 +1539,7 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_adopts_backend_echo_and_formats_like_qt() {
+    fn snapshot_adopts_backend_echo_and_formats_like_legacy() {
         let mut st = state_with_obr();
         st.select(0);
         st.interaction_codeedit("local unsaved edit");
@@ -1565,29 +1565,29 @@ mod tests {
         )
         .unwrap();
         apply_snapshot_json(&mut st, &value);
-        // Backend echo wins; dirty clears (same as Qt open_buffer).
+        // Backend echo wins; dirty clears (same as legacy open_buffer).
         assert_eq!(st.code, "backend code");
         assert!(!project(&st).dirty);
         let view = project(&st);
         assert!(view.show_results);
-        // Qt MetricsTiles formats: grouped ₹, 1-decimal win rate, "--" none.
+        // legacy MetricsTiles formats: grouped ₹, 1-decimal win rate, "--" none.
         assert_eq!(view.kpis[0].value, "₹1,85,236.40");
         assert_eq!(view.kpis[2].value, "52.1%");
         assert_eq!(view.kpis.len(), 8);
-        // Qt _fill_row formats.
+        // legacy _fill_row formats.
         assert_eq!(view.ranking[0].pnl, "₹1,85,236.40");
         assert_eq!(view.ranking[0].ret, "+18.50%");
         // Criterion arrow follows the echoed box index (Return % → head 3).
         assert!(view.rank_heads[3].ends_with(" ▲"));
         assert!(!view.rank_heads[2].contains('▼'));
-        // Qt _format_row formats: western P&L, plain R, bars, reason.
+        // legacy _format_row formats: western P&L, plain R, bars, reason.
         assert_eq!(view.trades[0].pnl, "+11,230.40");
         assert_eq!(view.trades[0].entry_px, "2801.10");
         assert_eq!(view.trades[0].r, "0.42");
         assert_eq!(view.trades[0].bars, "5");
         assert_eq!(view.trades[0].reason, "TARGET");
         assert_eq!(view.trades[0].abs_index, 0);
-        // Qt scope vocabulary from the echoed universe.
+        // legacy scope vocabulary from the echoed universe.
         assert_eq!(view.ranking_count, "2 stocks analyzed");
     }
 
@@ -1651,7 +1651,7 @@ mod tests {
         st.interaction_symtoggle("TCS");
         st.interaction_symtoggle("RELIANCE");
         assert_eq!(st.sym_draft, vec!["TCS".to_string()]);
-        // Search filters (Qt substring rule), selection survives filtering.
+        // Search filters (legacy substring rule), selection survives filtering.
         st.interaction_symsearch("inf");
         let view = project(&st);
         assert_eq!(view.sym_visible, vec!["INFY".to_string()]);
@@ -1701,7 +1701,7 @@ fn opt_i64(value: &serde_json::Value, key: &str) -> Option<i64> {
 }
 
 fn plain(value: Option<f64>) -> (String, Tone) {
-    // Qt tile vocabulary: missing is "--".
+    // legacy tile vocabulary: missing is "--".
     match value {
         None => ("--".to_string(), Tone::Muted),
         Some(v) => (format!("{v:.2}"), Tone::Neutral),
@@ -1709,7 +1709,7 @@ fn plain(value: Option<f64>) -> (String, Tone) {
 }
 
 /// Indian-grouping money body, e.g. 1234567.8 → "12,34,567.80" (mirrors the
-/// Qt `_inr` helper exactly: last group of 3, then groups of 2).
+/// legacy `_inr` helper exactly: last group of 3, then groups of 2).
 fn inr_body(abs_value: f64) -> String {
     let rounded = (abs_value * 100.0).round() / 100.0;
     let whole = rounded.trunc() as i64;
@@ -1731,7 +1731,7 @@ fn inr_body(abs_value: f64) -> String {
     format!("{digits}.{frac:02}")
 }
 
-/// Qt `_signed_inr`: sign before ₹, Indian grouping, no plus for positives.
+/// legacy `_signed_inr`: sign before ₹, Indian grouping, no plus for positives.
 fn inr_signed(value: Option<f64>) -> String {
     match value {
         None => "--".to_string(),
@@ -1739,7 +1739,7 @@ fn inr_signed(value: Option<f64>) -> String {
     }
 }
 
-/// Western-grouped signed 2-decimals (Qt blotter P&L: `f"{pnl:+,.2f}"`).
+/// Western-grouped signed 2-decimals (legacy blotter P&L: `f"{pnl:+,.2f}"`).
 fn western_signed2(value: f64) -> String {
     let sign = if value < 0.0 { "-" } else { "+" };
     let abs = value.abs();
@@ -1871,7 +1871,7 @@ pub fn apply_snapshot_json(state: &mut LabState, value: &serde_json::Value) {
     state.progress_label = opt_str(value, "progress");
     apply_parity_keys(state, value);
 }
-/// Qt MetricsTiles formats (8 tiles, tile missing glyph "--").
+/// legacy MetricsTiles formats (8 tiles, tile missing glyph "--").
 fn parse_kpis(metrics: &serde_json::Value) -> Vec<Kpi> {
     let mut kpis: Vec<Kpi> = Vec::new();
     let mut push = |label: &str, value: String, tone: Tone, emphasized: bool| {
@@ -1884,7 +1884,7 @@ fn parse_kpis(metrics: &serde_json::Value) -> Vec<Kpi> {
     };
     let total_trades = opt_i64(metrics, "total_trades");
     let net_raw = opt_f64(metrics, "net_profit");
-    // Qt: "--" when nothing traded; colour follows `net_profit >= 0`.
+    // legacy: "--" when nothing traded; colour follows `net_profit >= 0`.
     push(
         "NET P&L",
         if total_trades.unwrap_or(0) == 0 {
@@ -1950,7 +1950,7 @@ fn parse_kpis(metrics: &serde_json::Value) -> Vec<Kpi> {
     kpis
 }
 
-/// Qt `_fill_row` formats (table missing glyph is the em-dash here).
+/// legacy `_fill_row` formats (table missing glyph is the em-dash here).
 fn parse_rank_row(r: &serde_json::Value) -> RankRow {
     let net = opt_f64(r, "net_profit");
     let ret = opt_f64(r, "return_pct");
@@ -2000,7 +2000,7 @@ fn parse_rank_row(r: &serde_json::Value) -> RankRow {
     }
 }
 
-/// Qt `_format_row` formats (11 blotter columns, verbatim order).
+/// legacy `_format_row` formats (11 blotter columns, verbatim order).
 fn parse_trade_row(i: usize, t: &serde_json::Value) -> TradeRow {
     let pnl = opt_f64(t, "pnl");
     TradeRow {
@@ -2030,7 +2030,7 @@ fn parse_trade_row(i: usize, t: &serde_json::Value) -> TradeRow {
             .map(|v| v.to_string())
             .unwrap_or_else(|| "--".to_string()),
         reason: opt_str(t, "reason"),
-        // Qt colours by the engine's own `winning` flag (pnl > 0).
+        // legacy colours by the engine's own `winning` flag (pnl > 0).
         pnl_tone: if t.get("winning").and_then(|v| v.as_bool()).unwrap_or(false) {
             Tone::Positive
         } else {
@@ -2098,7 +2098,7 @@ fn block_to_results(block: &serde_json::Value) -> LabResults {
 }
 
 /// Joint min/max normalization for the dual BUY/SELL overlay (shared scale,
-/// like the Qt dual view) — returns (buy, sell) view points.
+/// like the legacy dual view) — returns (buy, sell) view points.
 fn joint_normalized(buy: &[(f64, f64)], sell: &[(f64, f64)]) -> (Vec<(f32, f32)>, Vec<(f32, f32)>) {
     let all: Vec<f64> = buy
         .iter()

@@ -11,15 +11,15 @@ import { BrokerConnectionWorkspace, BrokerRowView, CredentialFieldView, Progress
 import { VayrenPalette, VayrenDesign } from "../../vayren-shell/ui/palette.slint";
 import { ScrollView } from "std-widgets.slint";
 
-// One system-health grid row (Qt `SystemHealthPanel` parity): key + value,
-// tone follows the Qt stylesheet rule (ok=pos, bad=neg, "--"=muted).
+// One system-health grid row (legacy `SystemHealthPanel` parity): key + value,
+// tone follows the legacy stylesheet rule (ok=pos, bad=neg, "--"=muted).
 export struct HealthRow {
     label: string,
     value: string,
     tone: int,
 }
 
-// One event-log line (Qt `EventLogPanel` parity): level-tagged text.
+// One event-log line (legacy `EventLogPanel` parity): level-tagged text.
 export struct LogRow {
     text: string,
     tone: int,
@@ -70,8 +70,8 @@ export component SystemHostWindow inherits Window {
     in-out property <bool> disconnect-enabled: false;
     in-out property <bool> remove-visible: false;
 
-    // System-health grid + event log (Qt `SystemHealthPanel`/`EventLogPanel`
-    // parity). Templates/hidden defaults mirror the Qt docks (hidden).
+    // System-health grid + event log (legacy `SystemHealthPanel`/`EventLogPanel`
+    // parity). Templates/hidden defaults mirror the legacy docks (hidden).
     in-out property <bool> health-open: false;
     in-out property <bool> log-open: false;
     in-out property <[HealthRow]> health-rows;
@@ -118,7 +118,7 @@ export component SystemHostWindow inherits Window {
     VerticalLayout {
         spacing: 0;
 
-        // ── collapsible ops sections (Qt dock toggles, native home here) ──
+        // ── collapsible ops sections (legacy dock toggles, native home here) ──
         Rectangle {
             height: 24px;
             background: VayrenPalette.surface;

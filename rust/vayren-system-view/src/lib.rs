@@ -1,4 +1,4 @@
-//! Embeddable native System view — offscreen Slint host for the Qt shell.
+//! Embeddable native System view — offscreen Slint host for the legacy shell.
 //!
 //! Architecture (constitution §3: Rust+Slint owns ALL native UI state and
 //! presentation) — the proven `vayren-portfolio-view` / `vayren-live-view`
@@ -7,7 +7,7 @@
 //! so this crate only feeds backend snapshots and paints pixels.
 //!
 //! ```text
-//! Qt main window (one process, GUI thread)
+//! legacy main window (one process, GUI thread)
 //!   │  SlintSystemHost (dumb viewport: blits pixels, forwards events,
 //!   │    pushes broker snapshots)
 //!   │  C ABI below (plain integers, UTF-8 JSON, RGB bytes — no objects)
@@ -21,9 +21,9 @@
 //! ```
 //!
 //! Threading: every C ABI function must be called on the SAME thread that
-//! created the view (Slint handles are `!Send`). The Qt host calls from its
+//! created the view (Slint handles are `!Send`). The legacy host calls from its
 //! GUI thread only; violations return an error code, never UB. No threads
-//! are spawned here; no Qt headers are needed to build this crate.
+//! are spawned here; no legacy headers are needed to build this crate.
 //!
 //! Error codes (negative = failure, each function documents its own set):
 //! `-1` null view handle · `-2` null pointer · `-3` invalid UTF-8 ·
@@ -110,7 +110,7 @@ fn apply_view(ui: &SystemHostWindow, panel: &BrokerPanel, refresh_busy: bool) {
     ui.set_live_ready(panel.live_ready());
     // Parity card projection (same `project_card` the shell binds).
     // `refresh_busy` is the transient SYNCING feedback (cleared by the
-    // next applied snapshot, same contract as Qt).
+    // next applied snapshot, same contract as legacy).
     let card = panel.project_card(refresh_busy);
     ui.set_status_glyph(card.status_glyph.into());
     ui.set_status_label(card.status_label.into());
@@ -325,7 +325,7 @@ fn apply_ops_extras(ui: &SystemHostWindow, health: Vec<HealthRow>, logs: Vec<Log
 
 /// Wire the panel's action callbacks: Slint reports intent only; the host
 /// drains `actions` (`next_event`) and dispatches to the Python
-/// `BrokerManager` — the same signal contract the Qt cards carried.
+/// `BrokerManager` — the same signal contract the legacy cards carried.
 /// `field_keys` holds the workspace schema keys in render order so the
 /// connect intent can zip entered values back onto schema keys (values
 /// travel once, inside this event, exactly like the previous `configure`
@@ -350,7 +350,7 @@ fn wire_view(
         }};
     }
     // REFRESH also starts the transient SYNCING indicator (cleared by the
-    // next applied snapshot — the Qt busy-timer replaced by data flow).
+    // next applied snapshot — the legacy busy-timer replaced by data flow).
     {
         let queue = actions.clone();
         let refresh_flag = refresh.clone();
@@ -421,7 +421,7 @@ fn wire_view(
         ui.on_config_saved(
             move |key: slint::SharedString, secret: slint::SharedString| {
                 // The secret crosses the FFI boundary exactly once, in this
-                // event payload (the Qt `configure_requested` contract).
+                // event payload (the legacy `configure_requested` contract).
                 let payload = serde_json::json!({
                     "action": "configure",
                     "api_key": key.as_str(),
@@ -473,7 +473,7 @@ impl SystemView {
             busy.clone(),
             field_keys.clone(),
         );
-        // Ops-section toggles are view-local (Qt dock visibility parity):
+        // Ops-section toggles are view-local (legacy dock visibility parity):
         // no event leaves the view for them.
         {
             let weak = ui.as_weak();
@@ -778,7 +778,7 @@ fn pointer_event(
     })
 }
 
-/// Pointer moved (logical units, Qt logical coordinates map 1:1).
+/// Pointer moved (logical units, legacy logical coordinates map 1:1).
 #[no_mangle]
 pub extern "C" fn vayren_system_view_pointer_move(
     view: *mut SystemView,
@@ -1049,7 +1049,7 @@ mod tests {
             seen,
             vec!["login", "refresh", "configure", "remove", "copy_url"]
         );
-        // The configure event carries the secret once, as the Qt contract did.
+        // The configure event carries the secret once, as the legacy contract did.
         with_view(view, |v| {
             v.actions.borrow_mut().clear();
             let weak = slint::ComponentHandle::as_weak(&v._ui);

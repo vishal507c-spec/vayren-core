@@ -21,16 +21,16 @@
 |---|---|---|---|---|---|---|---|---|---|
 | AEOS-PYRIGHT-01 | refactor | NOT MEASURED | NOT MEASURED | 10f +265/-50 | 911 | 0 | 2 | pass | 22 pyright errors to 0 across chart/strategy/backtest; 1 genuine TradeRecord serialization bug fixed + 4 roundtrip tests; repairs: test future-import NameError, evolution duplicate-import F401; wall NOT MEASURED; validation anchors: targeted 102 tests 4.79s, full suites 72.29s/56.87s/74.20s, pyright ~19s |
 | BENCH-TEST-01 | test | NOT MEASURED | NOT MEASURED | 3f +95/-0 | 3 | 2 | 2 | pass | gate-coverage regression test; red state demonstrated first (2 failing runs pre-wiring), green after; failures counted are the intentional red proofs; repairs: PARTS AST shape, win path separators; wall NOT MEASURED; targeted validation 0.38s |
-| BENCH-BUGFIX-01 | bugfix | 228.90s | 26.10s | 1f +1/-1 | 103 | 0 | 1 | pass | setTextAlignment int() cast removed; warning gone, alignment identical; first validation attempt hit known Qt teardown abort post-pass, re-run confirmed 103 green |
+| BENCH-BUGFIX-01 | bugfix | 228.90s | 26.10s | 1f +1/-1 | 103 | 0 | 1 | pass | setTextAlignment int() cast removed; warning gone, alignment identical; first validation attempt hit known legacy teardown abort post-pass, re-run confirmed 103 green |
 | BENCH-MICRO-01 | micro | 384.40s | 6.50s | 1f +46/-5 | 20 | 0 | 1 | pass | error lines now file:line: stmt, proven with synthetic violation probe; pyright found lineno-attr error on first validation, fixed via Iterator[ast.stmt]; lines cumulative vs HEAD incl prior gate work |
-| BENCH-STRATEGY-01 | strategy | 381.90s | 54.50s | 2f +92/-6 | 185 | 0 | 1 | pass | min_volume param default 0 (parity proven), skip keeps history+prev; first validation hit Qt teardown abort, rerun 185 green; pyright caught Bar.volume int, fixed; lines cumulative vs HEAD |
-| BENCH-BACKTEST-01 | backtest | 1843.80s | 53.50s | 4f +42/-0 | 186 | 0 | 1 | pass | max_position_size None-default (all existing constructions unaffected); form+config+label-only validation; first validation hit Qt teardown abort, rerun 186 green; full pyright 0 |
-| BENCH-SMALL-01 | small | 1281.70s | 85.50s | 3f +60/-0 | 82 | 0 | 1 | pass | vayren --describe prints SystemModel snapshot render, exit 0, no event loop; output pinned equal to live snapshot; first validation hit Qt teardown abort, rerun 82 green; ruff ARG001 on qt_app fixtures fixed with asserts |
-| BENCH-UI-01 | ui | 960.40s | 73.20s | 2f +64/-0 | 270 | 0 | 0 | pass | filter box filters display via setRowHidden, membership/selection/quotes untouched; first validation hit Qt teardown abort, rerun 270 green; no code repairs needed |
-| BENCH-REFACTOR-01 | refactor | 1027.80s | 44.20s | 14f +147/-49 | 189 | 0 | 0 | pass | 14 files internal-path to public-surface imports (market/core/strategy names already exported); test files + non-exported names (BacktestForm, language.storage, ResearchDataset, lineage) left for ARCH-01; first validation hit Qt teardown abort, rerun 189 green; lines cumulative vs HEAD |
-| BENCH-ARCH-01 | architecture | 538.00s | 67.00s | 5f +96/-16 | 189 | 0 | 0 | pass | BacktestForm+ResearchDataset exported from strategy public surface; loader/lineage internal imports documented as accepted exceptions in contracts; first validation hit Qt teardown abort, rerun 189 green; lines cumulative vs HEAD |
+| BENCH-STRATEGY-01 | strategy | 381.90s | 54.50s | 2f +92/-6 | 185 | 0 | 1 | pass | min_volume param default 0 (parity proven), skip keeps history+prev; first validation hit legacy teardown abort, rerun 185 green; pyright caught Bar.volume int, fixed; lines cumulative vs HEAD |
+| BENCH-BACKTEST-01 | backtest | 1843.80s | 53.50s | 4f +42/-0 | 186 | 0 | 1 | pass | max_position_size None-default (all existing constructions unaffected); form+config+label-only validation; first validation hit legacy teardown abort, rerun 186 green; full pyright 0 |
+| BENCH-SMALL-01 | small | 1281.70s | 85.50s | 3f +60/-0 | 82 | 0 | 1 | pass | vayren --describe prints SystemModel snapshot render, exit 0, no event loop; output pinned equal to live snapshot; first validation hit legacy teardown abort, rerun 82 green; ruff ARG001 on app fixtures fixed with asserts |
+| BENCH-UI-01 | ui | 960.40s | 73.20s | 2f +64/-0 | 270 | 0 | 0 | pass | filter box filters display via setRowHidden, membership/selection/quotes untouched; first validation hit legacy teardown abort, rerun 270 green; no code repairs needed |
+| BENCH-REFACTOR-01 | refactor | 1027.80s | 44.20s | 14f +147/-49 | 189 | 0 | 0 | pass | 14 files internal-path to public-surface imports (market/core/strategy names already exported); test files + non-exported names (BacktestForm, language.storage, ResearchDataset, lineage) left for ARCH-01; first validation hit legacy teardown abort, rerun 189 green; lines cumulative vs HEAD |
+| BENCH-ARCH-01 | architecture | 538.00s | 67.00s | 5f +96/-16 | 189 | 0 | 0 | pass | BacktestForm+ResearchDataset exported from strategy public surface; loader/lineage internal imports documented as accepted exceptions in contracts; first validation hit legacy teardown abort, rerun 189 green; lines cumulative vs HEAD |
 | BENCH-MIGRATE-01 | migration | 233.20s | 3.40s | 1f +9/-12 | 21 | 0 | 0 | pass | NOT MEASURED as migration: objective already satisfied (KITE_INTERVAL_IDS in zerodha adapter, settings canonical-only); verified boundary instead, 21 green; corpus spec marked OBSOLETE; 1 file = corpus spec update |
-| AEOS-QT-FIX | bugfix | NOT MEASURED | 456.50s | 1f +29/-0 | 925 | 0 | 1 | pass | ROOT CAUSE ESTABLISHED via Temp probes: live QThread workers (BacktestWorker running) at interpreter exit abort the process; bisection isolated test_smoke+test_runtime_integration; gc-scan autouse fixture joins workers; full suite RC=0 first time, run_tests 25/25 (was 23/24); investigation probes: A abort, B clean, B1 workers-only clean, B2 windows-only abort, C1 gc finds workers |
+| AEOS-LEGACY-FIX | bugfix | NOT MEASURED | 456.50s | 1f +29/-0 | 925 | 0 | 1 | pass | ROOT CAUSE ESTABLISHED via Temp probes: live thread primitive workers (BacktestWorker running) at interpreter exit abort the process; bisection isolated test_smoke+test_runtime_integration; gc-scan autouse fixture joins workers; full suite RC=0 first time, run_tests 25/25 (was 23/24); investigation probes: A abort, B clean, B1 workers-only clean, B2 windows-only abort, C1 gc finds workers |
 
 ## Agent-work breakdown (phase durations + operation counts)
 
@@ -52,7 +52,7 @@ UNKNOWN = wall − measured parts (thinking, tool roundtrips, reads).
 | BENCH-REFACTOR-01 | 1027.80s | NOT MEASURED | NOT MEASURED | NOT MEASURED | NOT MEASURED | NOT MEASURED | 44.20s | NOT MEASURED | 983.60s | 0/9/20/3/1/4 |
 | BENCH-ARCH-01 | 538.00s | NOT MEASURED | NOT MEASURED | NOT MEASURED | NOT MEASURED | NOT MEASURED | 67.00s | NOT MEASURED | 471.00s | 2/2/7/4/1/4 |
 | BENCH-MIGRATE-01 | 233.20s | NOT MEASURED | NOT MEASURED | NOT MEASURED | NOT MEASURED | NOT MEASURED | 3.40s | NOT MEASURED | 229.80s | ? |
-| AEOS-QT-FIX | NOT MEASURED | NOT MEASURED | NOT MEASURED | NOT MEASURED | NOT MEASURED | NOT MEASURED | 456.50s | NOT MEASURED | NOT MEASURED | ? |
+| AEOS-LEGACY-FIX | NOT MEASURED | NOT MEASURED | NOT MEASURED | NOT MEASURED | NOT MEASURED | NOT MEASURED | 456.50s | NOT MEASURED | NOT MEASURED | ? |
 
 ## Optimizations (BASELINE vs CURRENT)
 
@@ -69,7 +69,7 @@ end-to-end task speedup (needs wall-clock BEFORE/AFTER per task).
 ## Validation replays (BEFORE → AFTER, same commands)
 
 BEFORE = task record validation_s (flake era: includes abort-retry cost).
-AFTER = median of replay validation_s (current workflow, Qt fix live).
+AFTER = median of replay validation_s (current workflow, legacy fix live).
 End-to-end task speedup is NOT MEASURED: re-executing completed
 implementation work would be contaminated theater (solution known),
 so wall-clock BEFORE/AFTER pairs do not exist. Validation speedup —
@@ -88,7 +88,7 @@ the realizable, identical-workload comparison — is measured below.
 | BENCH-REFACTOR-01 | 44.2s | 42.9s | 1.03x | 1.3s | 3 | pass |
 | BENCH-ARCH-01 | 67.0s | 43.2s | 1.55x | 23.8s | 3 | pass |
 | BENCH-MIGRATE-01 | 3.4s | 1.5s | 2.27x | 1.9s | 3 | pass |
-| AEOS-QT-FIX | 456.5s | 148.6s | 3.07x | 307.9s | 1 | pass |
+| AEOS-LEGACY-FIX | 456.5s | 148.6s | 3.07x | 307.9s | 1 | pass |
 
 ## Aggregate (validation speedup only)
 

@@ -17,10 +17,6 @@ library exactly like production ``load_strategy_record``:
 
 from __future__ import annotations
 
-import os
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-
 import datetime
 import sqlite3
 import tempfile

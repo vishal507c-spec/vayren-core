@@ -641,7 +641,7 @@ impl ResearchState {
         true
     }
 
-    // ── host bridge (Qt embed: intents out, backend facts in) ──────────────
+    // ── host bridge (legacy embed: intents out, backend facts in) ──────────────
 
     pub fn push_host_action(&mut self, payload: Value) {
         self.host_actions.push_back(payload.to_string());

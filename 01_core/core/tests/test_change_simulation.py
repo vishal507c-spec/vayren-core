@@ -6,17 +6,17 @@ from core.contracts.capability import CapabilityId
 from core.system.change_impact import RiskLevel
 from core.system.system_model import SystemModel
 from core.system.workflow import Workflow, WorkflowRegistry, WorkflowStep
-from core.tests.test_component_poc import build_system
+from core.tests.helpers import build_system
 
 
 def make_system() -> SystemModel:
     workflows = WorkflowRegistry()
     workflows.register(
         Workflow(
-            id="chart_pipeline",
+            id="data_pipeline",
             steps=(
                 WorkflowStep(id="load", capability=CapabilityId("data.query.candles")),
-                WorkflowStep(id="render", capability=CapabilityId("chart.render")),
+                WorkflowStep(id="ingest", capability=CapabilityId("historical_data.download")),
             ),
         )
     )
@@ -34,16 +34,20 @@ def make_plan(**overrides: object) -> Plan:
     return Plan(**fields)
 
 
-def test_market_change_reaches_chart() -> None:
+def test_market_change_reaches_pipeline() -> None:
     simulation = simulate_plan(make_system(), make_plan())
-    assert simulation.affected_components == ("chart", "market")
-    assert "data.query.candles" in simulation.affected_capabilities
-    assert "chart.render" in simulation.affected_capabilities
+    assert simulation.affected_components == ("market",)
+    assert simulation.affected_capabilities == (
+        "data.query.candles",
+        "data.query.quotes",
+        "data.query.timeframes",
+        "data.transform.aggregate",
+    )
 
 
 def test_workflow_impact_is_reported() -> None:
     simulation = simulate_plan(make_system(), make_plan())
-    assert simulation.affected_workflows == ("chart_pipeline",)
+    assert simulation.affected_workflows == ("data_pipeline",)
 
 
 def test_risk_aggregates_to_highest() -> None:
@@ -76,8 +80,7 @@ def test_new_component_affects_nothing() -> None:
 
 def test_required_tests_cover_every_affected_component() -> None:
     simulation = simulate_plan(make_system(), make_plan())
-    assert "regression:chart" in simulation.required_tests
-    assert "regression:market" in simulation.required_tests
+    assert simulation.required_tests == ("regression:market",)
 
 
 def test_plan_tests_are_included() -> None:

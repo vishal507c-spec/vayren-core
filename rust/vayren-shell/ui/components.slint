@@ -151,7 +151,7 @@ export component VCell inherits Rectangle {
     in property <int> tone: 1; // shared tone convention
     in property <bool> head: false;
     // Dimmed rows (e.g. ranking rows with no valid result — the row stays
-    // legible but steps back, same as the Qt muted-row treatment).
+    // legible but steps back, same as the legacy muted-row treatment).
     in property <bool> dim: false;
 
     pure function ink() -> color {

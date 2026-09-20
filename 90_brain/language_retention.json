@@ -8,13 +8,13 @@
     "RISK": "RiskEngine is fail-closed orchestration (~0.017ms/req). Port splits safety-critical strings across FFI.",
     "EXECUTION": "Session/planner/broker-venue orchestration. Lifecycle table migrated. Full port = product-scale.",
     "BACKTEST": "Runner/worker orchestrate Python strategies (must stay Python). Metrics kernels migrated.",
-    "NATIVE_UI": "Qt shell is working product UI. Slint rewrite in one pass destroys behavior (Â§4/Â§11). New surfaces MUST be Rust+Slint."
+    "NATIVE_UI": "Native UI is Rust+Slint only (rust/vayren-shell). The legacy Python UI was removed in the native migration; no Python UI surfaces remain."
   },
   "files": {
     "08_execution/execution/runtime/lifecycle.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "EXECUTION",
-      "reason": "LifecycleState machine is session orchestration vocabulary (string reasons, Qt-adjacent). Order-state authority migrated to Rust.",
+      "reason": "LifecycleState machine is session orchestration vocabulary (string reasons, legacy UI-adjacent). Order-state authority migrated to Rust.",
       "migration_target": "rust/vayren-core/src/",
       "migration_condition": "When LiveSession ported to Rust or FFI bridge covers full lifecycle"
     },
@@ -52,209 +52,6 @@
       "reason": "Venue activation glue. No transport math.",
       "migration_target": "N/A",
       "migration_condition": "Never"
-    },
-    "00_app/app/ui/__init__.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When Slint shell supports this component"
-    },
-    "00_app/app/ui/event_log_panel.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When Slint shell supports this component"
-    },
-    "00_app/app/ui/lab_theme.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When Slint shell supports this component"
-    },
-    "00_app/app/ui/market_status_panel.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When Slint shell supports this component"
-    },
-    "00_app/app/ui/research_workspace.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When Slint shell supports this component"
-    },
-    "00_app/app/ui/stock_ranking.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When Slint shell supports this component"
-    },
-    "00_app/app/ui/strategy_lab_workspace.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When Slint shell supports this component"
-    },
-    "00_app/app/ui/system_health_panel.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When Slint shell supports this component"
-    },
-    "00_app/app/ui/top_nav_bar.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When Slint shell supports this component"
-    },
-    "00_app/app/ui/trade_context_panel.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When Slint shell supports this component"
-    },
-    "00_app/app/ui/ui_kit.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When Slint shell supports this component"
-    },
-    "00_app/app/ui/watchlist_multiselect.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When Slint shell supports this component"
-    },
-    "04_chart/chart/renderer/__init__.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When Slint shell supports this component"
-    },
-    "04_chart/chart/renderer/candle_renderer.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When Slint shell supports this component"
-    },
-    "04_chart/chart/renderer/crosshair_renderer.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When Slint shell supports this component"
-    },
-    "04_chart/chart/renderer/label_renderer.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When Slint shell supports this component"
-    },
-    "04_chart/chart/renderer/overlay_renderer.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When Slint shell supports this component"
-    },
-    "04_chart/chart/renderer/plot_renderer.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When Slint shell supports this component"
-    },
-    "04_chart/chart/renderer/time_axis_renderer.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When Slint shell supports this component"
-    },
-    "04_chart/chart/widgets/__init__.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When Slint shell supports this component"
-    },
-    "04_chart/chart/widgets/candle_chart_widget.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When Slint shell supports this component"
-    },
-    "04_chart/chart/widgets/indicator_visibility_panel.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When Slint shell supports this component"
-    },
-    "04_chart/chart/widgets/indicators_toolbar.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When Slint shell supports this component"
-    },
-    "04_chart/chart/widgets/symbol_list_widget.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When Slint shell supports this component"
-    },
-    "04_chart/chart/widgets/timeframe_toolbar.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When Slint shell supports this component"
-    },
-    "04_chart/chart/widgets/tools_toolbar.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When Slint shell supports this component"
-    },
-    "04_chart/chart/widgets/watchlist_widget.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When Slint shell supports this component"
-    },
-    "04_chart/chart/windows/__init__.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When Slint shell supports this component"
-    },
-    "04_chart/chart/windows/chart_window.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When Slint shell supports this component"
     },
     "01_core/core/__init__.py": {
       "state": "TEMPORARILY_RETAINED",
@@ -357,7 +154,7 @@
     "01_core/core/observable.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "CORE",
-      "reason": "Qt-free Signal/WorkerThread/IntervalTimer replacement for the PySide6 QtCore primitives the service layer used to keep work off the main thread (Qt stays a presentation-host dependency only). Pure stdlib event-dispatch glue (no numeric compute, no migrated authority) - same retention basis as event_bus.py.",
+      "reason": "Stdlib Signal/WorkerThread/IntervalTimer replacing the legacy toolkit primitives the service layer used to keep work off the main thread. Pure stdlib event-dispatch glue (no numeric compute, no migrated authority) - same retention basis as event_bus.py.",
       "migration_target": "rust/vayren-core/src/core/",
       "migration_condition": "When the CORE slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
     },
@@ -830,111 +627,6 @@
       "migration_target": "rust/vayren-core/src/market/",
       "migration_condition": "When the MARKET_DATA slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
     },
-    "04_chart/chart/__init__.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "PRESENTATION_MODEL",
-      "reason": "ChartModel/viewport Qt-paint-coupled presentation state. Numeric/viewport kernels are future Rust slices; extracting now is a UI rewrite in disguise. File role: package re-export surface (no logic)",
-      "migration_target": "rust/vayren-shell/ or rust/vayren-core/src/chart/",
-      "migration_condition": "When the PRESENTATION_MODEL slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
-    },
-    "04_chart/chart/engine/__init__.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "PRESENTATION_MODEL",
-      "reason": "ChartModel/viewport Qt-paint-coupled presentation state. Numeric/viewport kernels are future Rust slices; extracting now is a UI rewrite in disguise. File role: package re-export surface (no logic)",
-      "migration_target": "rust/vayren-shell/ or rust/vayren-core/src/chart/",
-      "migration_condition": "When the PRESENTATION_MODEL slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
-    },
-    "04_chart/chart/engine/chart_engine.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "PRESENTATION_MODEL",
-      "reason": "Chart assembly orchestration (bus-coupled driver). Pure assembly/timeframe kernels twinned in Rust (chart_model::build_model + chart_events::handle_data_loaded, parity-tested); Python stays production authority. File role: orchestration driver (wires migrated kernels, holds no migrated math)",
-      "migration_target": "rust/vayren-shell/ or rust/vayren-core/src/chart/",
-      "migration_condition": "When the PRESENTATION_MODEL slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
-    },
-    "04_chart/chart/events/__init__.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "PRESENTATION_MODEL",
-      "reason": "ChartModel/viewport Qt-paint-coupled presentation state. Numeric/viewport kernels are future Rust slices; extracting now is a UI rewrite in disguise. File role: package re-export surface (no logic)",
-      "migration_target": "rust/vayren-shell/ or rust/vayren-core/src/chart/",
-      "migration_condition": "When the PRESENTATION_MODEL slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
-    },
-    "04_chart/chart/events/chart_ready.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "PRESENTATION_MODEL",
-      "reason": "ChartReady shape twinned in Rust (chart_events::ChartReady + bus test); Python frozen dataclass stays bus authority. File role: frozen event dataclass payloads (bus vocabulary, no behavior)",
-      "migration_target": "rust/vayren-shell/ or rust/vayren-core/src/chart/",
-      "migration_condition": "When the PRESENTATION_MODEL slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
-    },
-    "04_chart/chart/events/window_rendered.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "PRESENTATION_MODEL",
-      "reason": "WindowRendered shape twinned in Rust (chart_events::WindowRendered + bus test); Python frozen dataclass stays bus authority. File role: frozen event dataclass payloads (bus vocabulary, no behavior)",
-      "migration_target": "rust/vayren-shell/ or rust/vayren-core/src/chart/",
-      "migration_condition": "When the PRESENTATION_MODEL slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
-    },
-    "04_chart/chart/manifest.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "PRESENTATION_MODEL",
-      "reason": "ChartModel/viewport Qt-paint-coupled presentation state. Numeric/viewport kernels are future Rust slices; extracting now is a UI rewrite in disguise. File role: production component manifest (composition metadata)",
-      "migration_target": "rust/vayren-shell/ or rust/vayren-core/src/chart/",
-      "migration_condition": "When the PRESENTATION_MODEL slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
-    },
-    "04_chart/chart/models/__init__.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "PRESENTATION_MODEL",
-      "reason": "ChartModel/viewport Qt-paint-coupled presentation state. Numeric/viewport kernels are future Rust slices; extracting now is a UI rewrite in disguise. File role: package re-export surface (no logic)",
-      "migration_target": "rust/vayren-shell/ or rust/vayren-core/src/chart/",
-      "migration_condition": "When the PRESENTATION_MODEL slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
-    },
-    "04_chart/chart/models/chart_model.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "PRESENTATION_MODEL",
-      "reason": "ChartModel shape twinned in Rust (chart_model::ChartModel over market::Bar, stable-sort pinned); Python frozen dataclass stays bus authority. File role: frozen dataclass vocabulary (data holders, no algorithms)",
-      "migration_target": "rust/vayren-shell/ or rust/vayren-core/src/chart/",
-      "migration_condition": "When the PRESENTATION_MODEL slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
-    },
-    "04_chart/chart/models/chart_viewport.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "PRESENTATION_MODEL",
-      "reason": "ChartModel/viewport Qt-paint-coupled presentation state. Numeric/viewport kernels are future Rust slices; extracting now is a UI rewrite in disguise. File role: frozen dataclass vocabulary (data holders, no algorithms)",
-      "migration_target": "rust/vayren-shell/ or rust/vayren-core/src/chart/",
-      "migration_condition": "When the PRESENTATION_MODEL slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
-    },
-    "04_chart/chart/models/crosshair_value.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "PRESENTATION_MODEL",
-      "reason": "ChartModel/viewport Qt-paint-coupled presentation state. Numeric/viewport kernels are future Rust slices; extracting now is a UI rewrite in disguise. File role: frozen dataclass vocabulary (data holders, no algorithms)",
-      "migration_target": "rust/vayren-shell/ or rust/vayren-core/src/chart/",
-      "migration_condition": "When the PRESENTATION_MODEL slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
-    },
-    "04_chart/chart/models/timeframe.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "PRESENTATION_MODEL",
-      "reason": "Timeframe-inference kernel twinned in Rust (chart_model: ladder/format/parse/gaps/mode + 14 parity tests, live-Python vectors); Python stays production authority. File role: pure-function helper (no Qt, no SQL, no events)",
-      "migration_target": "rust/vayren-shell/ or rust/vayren-core/src/chart/",
-      "migration_condition": "When the PRESENTATION_MODEL slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
-    },
-    "04_chart/chart/session/__init__.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "PRESENTATION_MODEL",
-      "reason": "ChartModel/viewport Qt-paint-coupled presentation state. Numeric/viewport kernels are future Rust slices; extracting now is a UI rewrite in disguise. File role: package re-export surface (no logic)",
-      "migration_target": "rust/vayren-shell/ or rust/vayren-core/src/chart/",
-      "migration_condition": "When the PRESENTATION_MODEL slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
-    },
-    "04_chart/chart/session/session_store.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "PRESENTATION_MODEL",
-      "reason": "ChartModel/viewport Qt-paint-coupled presentation state. Numeric/viewport kernels are future Rust slices; extracting now is a UI rewrite in disguise. File role: orchestration glue (no migrated authority)",
-      "migration_target": "rust/vayren-shell/ or rust/vayren-core/src/chart/",
-      "migration_condition": "When the PRESENTATION_MODEL slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
-    },
-    "04_chart/chart/theme.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "PRESENTATION_MODEL",
-      "reason": "ChartModel/viewport Qt-paint-coupled presentation state. Numeric/viewport kernels are future Rust slices; extracting now is a UI rewrite in disguise. File role: orchestration glue (no migrated authority)",
-      "migration_target": "rust/vayren-shell/ or rust/vayren-core/src/chart/",
-      "migration_condition": "When the PRESENTATION_MODEL slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
-    },
     "06_backtest/backtest/__init__.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "BACKTEST",
@@ -1306,97 +998,6 @@
       "migration_target": "rust/vayren-core/src/execution/",
       "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
     },
-    "00_app/app/ui/brokers_workspace.py": {
-      "state": "MIGRATED",
-      "domain": "NATIVE_UI",
-      "reason": "Removed: legacy Qt brokers workspace was never constructed in production (native Slint system viewport is the production surface); deleted with its direct-widget tests.",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "MIGRATED (2026-09-17) - file deleted, Slint system viewport is canonical"
-    },
-    "02_data/data/ui/__init__.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it. New surfaces MUST be Rust+Slint in rust/vayren-shell. File role: package re-export surface (no logic)",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When the NATIVE_UI slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
-    },
-    "02_data/data/ui/credentials_dialog.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it. New surfaces MUST be Rust+Slint in rust/vayren-shell. File role: orchestration glue (no migrated authority)",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When the NATIVE_UI slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
-    },
-    "02_data/data/ui/download_panel.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it. New surfaces MUST be Rust+Slint in rust/vayren-shell. File role: orchestration glue (no migrated authority)",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When the NATIVE_UI slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
-    },
-    "02_data/data/ui/historical_panel.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it. New surfaces MUST be Rust+Slint in rust/vayren-shell. File role: orchestration glue (no migrated authority)",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When the NATIVE_UI slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
-    },
-    "02_data/data/ui/log_view.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it. New surfaces MUST be Rust+Slint in rust/vayren-shell. File role: orchestration glue (no migrated authority)",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When the NATIVE_UI slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
-    },
-    "02_data/data/ui/section_label.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it. New surfaces MUST be Rust+Slint in rust/vayren-shell. File role: orchestration glue (no migrated authority)",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When the NATIVE_UI slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
-    },
-    "02_data/data/ui/status_view.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it. New surfaces MUST be Rust+Slint in rust/vayren-shell. File role: orchestration glue (no migrated authority)",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When the NATIVE_UI slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
-    },
-    "02_data/data/ui/stock_checklist.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it. New surfaces MUST be Rust+Slint in rust/vayren-shell. File role: orchestration glue (no migrated authority)",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When the NATIVE_UI slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
-    },
-    "06_backtest/backtest/ui/__init__.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it. New surfaces MUST be Rust+Slint in rust/vayren-shell. File role: package re-export surface (no logic)",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When the NATIVE_UI slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
-    },
-    "06_backtest/backtest/ui/analytics_views.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it. New surfaces MUST be Rust+Slint in rust/vayren-shell. File role: orchestration glue (no migrated authority)",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When the NATIVE_UI slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
-    },
-    "06_backtest/backtest/ui/overlay.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it. New surfaces MUST be Rust+Slint in rust/vayren-shell. File role: orchestration glue (no migrated authority)",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When the NATIVE_UI slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
-    },
-    "06_backtest/backtest/ui/performance_panel.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Existing Qt UI surface retained until Slint migration covers it. New surfaces MUST be Rust+Slint in rust/vayren-shell. File role: orchestration glue (no migrated authority)",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When the NATIVE_UI slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
-    },
     "08_execution/execution/broker/__init__.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "EXECUTION",
@@ -1474,13 +1075,6 @@
       "migration_target": "rust/vayren-core/src/risk.rs",
       "migration_condition": "Kernel proven; bridge retained as the FFI projection (same pattern as native_metrics/native_aggregate)."
     },
-    "04_chart/chart/widgets/indicator_settings_dialog.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "NATIVE_UI",
-      "reason": "Retained-Qt fallback toolbar's settings surface (no-stack Qt chart mode). Canonical settings surface for this feature is the native Slint IndicatorSettingsPopup (rust/vayren-shell/ui/market.slint); this dialog shares its spec table (param_rows_for) so both stay identical.",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When the retained Qt chart fallback is removed"
-    },
     "08_execution/execution/native_execution.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "EXECUTION",
@@ -1493,19 +1087,5 @@
     "08_execution/execution/models/order.py": "TRANSITIONS/TERMINAL_STATES -> Rust order_state; enum/models stay as boundary vocabulary",
     "06_backtest/backtest/engine/metrics.py": "drawdown/equity/sharpe math -> Rust metrics kernels",
     "03_market/market/timeframe/aggregate.py": "bucketing/accumulation + mode -> Rust aggregate/stats kernels"
-  },
-  "qt_workspace_allowlist": {
-    "00_app/app/ui/research_workspace.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "reason": "Research workspace in retained Qt shell. Pure view over Python research engine.",
-      "migration_target": "rust/vayren-shell/",
-      "migration_condition": "When Slint shell supports research screen"
-    },
-    "00_app/app/services/research_service.py": {
-      "state": "EXEMPT_WITH_JUSTIFICATION",
-      "reason": "Composition service behind Research workspace. Research stays Python per constitution section 2.",
-      "migration_target": "N/A - Python-owned",
-      "migration_condition": "Never"
-    }
   }
 }

@@ -5,7 +5,7 @@
 // Rust `BrokerPanel::project_card` (backend facts, never UI inference).
 // Action affordances report intent through callbacks; the embed host
 // dispatches them to the Python BrokerManager (the same signal contract the
-// retained Qt cards carried). Lives in its own file so BOTH the application
+// retained legacy cards carried). Lives in its own file so BOTH the application
 // shell (`app.slint`) and the embed host (`vayren-system-view`) instantiate
 // this one component — no second broker UI.
 
@@ -21,7 +21,7 @@ export struct BrokerCheckRow {
 }
 
 export component BrokerPanel inherits Rectangle {
-// Parity surface (Qt BrokersWorkspace card rules): identity + status +
+// Parity surface (legacy BrokersWorkspace card rules): identity + status +
 // hero stats + health grid + metrics + action bar + credentials form +
 // integration details. Facts arrive via in-properties (Rust
 // `project_card`); `show-config-form` / field text / `confirm-remove`

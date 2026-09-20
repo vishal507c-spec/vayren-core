@@ -3,7 +3,7 @@
 These tests drive the worker with ``max_workers=1`` (inline execution in
 the worker thread, no child processes): they prove the worker queue,
 stock-level progress/done/failed signals and cancellation. The process
-pool itself is covered by ``test_batch_parity.py`` (spawn without Qt),
+pool itself is covered by ``test_batch_parity.py`` (plain spawn, no toolkit),
 which is how production combines them.
 
 Handlers gate on a ``threading.Event`` and the worker emits through the
@@ -11,9 +11,7 @@ framework-free observable queue, so the test pumps it to the main thread
 (host pump path) — no nested UI event loop, the suite stays hermetic.
 """
 
-import os
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import sqlite3
 import tempfile

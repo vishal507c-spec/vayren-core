@@ -13,7 +13,7 @@ from core.system.change_impact import (
 )
 from core.system.system_model import SystemModel
 from core.system.workflow import Workflow, WorkflowRegistry, WorkflowStep
-from core.tests.test_component_poc import build_system
+from core.tests.helpers import build_system
 
 
 def make_manifest(
@@ -32,8 +32,8 @@ def make_system() -> SystemModel:
     workflows = WorkflowRegistry()
     workflows.register(
         Workflow(
-            id="chart_pipeline",
-            description="load candles, render chart",
+            id="data_pipeline",
+            description="load candles, download history",
             steps=(
                 WorkflowStep(
                     id="load",
@@ -41,9 +41,9 @@ def make_system() -> SystemModel:
                     outputs=("candles",),
                 ),
                 WorkflowStep(
-                    id="render",
-                    capability=CapabilityId("chart.render"),
-                    outputs=("model",),
+                    id="ingest",
+                    capability=CapabilityId("historical_data.download"),
+                    outputs=("new_rows",),
                 ),
             ),
         )
@@ -66,10 +66,10 @@ def probe_system() -> SystemModel:
 
 
 def test_component_used_by_workflow_is_high_risk() -> None:
-    impact = analyze_component_change("chart", make_system())
+    impact = analyze_component_change("historical_data", make_system())
     assert impact.risk is RiskLevel.HIGH
-    assert impact.affected_workflows == ("chart_pipeline",)
-    assert "used by workflows: chart_pipeline" in impact.reasons
+    assert impact.affected_workflows == ("data_pipeline",)
+    assert "used by workflows: data_pipeline" in impact.reasons
 
 
 def test_component_with_indirect_dependents_is_high_risk() -> None:
@@ -84,11 +84,14 @@ def test_component_with_indirect_dependents_is_high_risk() -> None:
 
 
 def test_component_with_direct_dependents_only_is_medium_risk() -> None:
-    impact = analyze_component_change("market", SystemModel(build_system()))
+    registry = ComponentRegistry()
+    registry.register(make_manifest("store"), implementations={})
+    registry.register(make_manifest("cache", ("store",)), implementations={})
+    impact = analyze_component_change("store", SystemModel(registry))
     assert impact.risk is RiskLevel.MEDIUM
-    assert impact.direct_dependents == ("chart",)
+    assert impact.direct_dependents == ("cache",)
     assert impact.indirect_dependents == ()
-    assert "direct dependents: chart" in impact.reasons
+    assert "direct dependents: cache" in impact.reasons
 
 
 def test_unused_component_is_low_risk() -> None:
@@ -100,13 +103,23 @@ def test_unused_component_is_low_risk() -> None:
 def test_capability_used_by_workflow_is_high_risk() -> None:
     impact = analyze_capability_change("data.query.candles", make_system())
     assert impact.risk is RiskLevel.HIGH
-    assert impact.affected_workflows == ("chart_pipeline",)
+    assert impact.affected_workflows == ("data_pipeline",)
 
 
 def test_capability_with_consumers_only_is_medium_risk() -> None:
-    impact = analyze_capability_change("data.query.candles", SystemModel(build_system()))
+    registry = build_system()
+    registry.register(
+        ComponentManifest(
+            identity=ComponentId("audit"),
+            version=ComponentVersion.parse("1.0.0"),
+            type="service",
+            capabilities_consumed=(CapabilityId("data.query.candles"),),
+        ),
+        implementations={},
+    )
+    impact = analyze_capability_change("data.query.candles", SystemModel(registry))
     assert impact.risk is RiskLevel.MEDIUM
-    assert impact.affected_consumers == ("chart",)
+    assert impact.affected_consumers == ("audit",)
 
 
 def test_capability_without_consumers_is_low_risk() -> None:
@@ -122,13 +135,13 @@ def test_unknown_capability_is_low_risk() -> None:
 
 
 def test_workflow_change_is_low_risk() -> None:
-    impact = analyze_workflow_change("chart_pipeline", make_system())
+    impact = analyze_workflow_change("data_pipeline", make_system())
     assert impact.risk is RiskLevel.LOW
-    assert impact.affected_workflows == ("chart_pipeline",)
+    assert impact.affected_workflows == ("data_pipeline",)
 
 
 def test_analyze_change_dispatch() -> None:
     system = make_system()
     assert analyze_change("data.query.candles", system).target == "capability:data.query.candles"
-    assert analyze_change("chart_pipeline", system).target == "workflow:chart_pipeline"
-    assert analyze_change("chart", system).target == "component:chart"
+    assert analyze_change("data_pipeline", system).target == "workflow:data_pipeline"
+    assert analyze_change("historical_data", system).target == "component:historical_data"

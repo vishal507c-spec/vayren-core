@@ -1,11 +1,11 @@
-//! Embeddable native Live view — offscreen Slint host for the Qt shell.
+//! Embeddable native Live view — offscreen Slint host for the legacy shell.
 //!
 //! Architecture (constitution §3: Rust+Slint owns ALL native UI state and
 //! presentation) — the proven `vayren-portfolio-view` mechanism reused for
 //! LIVE, with one addition this surface needs: an ACTION OUT channel.
 //!
 //! ```text
-//! Qt main window (one process, GUI thread)
+//! legacy main window (one process, GUI thread)
 //!   │  SlintLiveHost (dumb viewport: blits pixels, forwards events,
 //!   │    pushes _live_state_provider snapshots, drains action events)
 //!   │  C ABI below (plain integers, UTF-8 JSON, RGB bytes — no objects)
@@ -25,9 +25,9 @@
 //! backend snapshot confirms them — the UI never pre-applies RUNNING/HALTED.
 //!
 //! Threading: every C ABI function must be called on the SAME thread that
-//! created the view (Slint handles are `!Send`). The Qt host calls from its
+//! created the view (Slint handles are `!Send`). The legacy host calls from its
 //! GUI thread only; violations return an error code, never UB. No threads
-//! are spawned here; no Qt headers are needed to build this crate.
+//! are spawned here; no legacy headers are needed to build this crate.
 //!
 //! Error codes (negative = failure, each function documents its own set):
 //! `-1` null view handle · `-2` null pointer · `-3` invalid UTF-8 ·
@@ -354,7 +354,7 @@ fn wire_view(ui: &LiveHostWindow, state: Rc<RefCell<LiveState>>, refresh: Rc<Cel
     wire_unit!(on_halt_requested, LiveState::halt);
     wire_unit!(on_confirm_requested, LiveState::confirm_live);
     wire_unit!(on_inspector_toggled, LiveState::toggle_inspector);
-    // CONFIGURE BROKER is navigation intent — the Qt host routes it to the
+    // CONFIGURE BROKER is navigation intent — the legacy host routes it to the
     // BROKERS workspace; no broker logic lives in this surface.
     {
         let strong = state.clone();
@@ -638,7 +638,7 @@ fn pointer_event(
     })
 }
 
-/// Pointer moved (logical units, Qt logical coordinates map 1:1).
+/// Pointer moved (logical units, legacy logical coordinates map 1:1).
 #[no_mangle]
 pub extern "C" fn vayren_live_view_pointer_move(
     view: *mut LiveView,

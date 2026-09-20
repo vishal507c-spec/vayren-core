@@ -408,11 +408,9 @@ def test_m8_no_credentials_in_selection_or_ui_text() -> None:
         if secret_word == "token":
             continue  # 'token' is substring noise; schema-key check below is exact
         assert secret_word not in blob, f"secret in selection: {secret_word}"
-    status_src = (ROOT / "02_data" / "data" / "ui" / "status_view.py").read_text(encoding="utf-8")
-    # The panel may document env var NAMES as setup help; it must never READ
-    # secret values (no env access, no store resolution, no value plumbing).
-    for value_pattern in ("os.environ", "getenv", ".resolve(", "credential_store"):
-        assert value_pattern not in status_src, f"secret value access in UI text: {value_pattern}"
+    # The legacy status panel half of this check died with the native
+    # migration (SLICE 6d): no Python UI text remains that could read values.
+    # The native Slint screens receive credential shapes only (no values).
 
 
 def test_m8_unsupported_capability_fails_closed_at_face() -> None:

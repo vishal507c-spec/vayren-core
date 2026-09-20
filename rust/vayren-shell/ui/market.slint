@@ -1,7 +1,7 @@
 // VAYREN Market — native Slint workstation surface (constitution §3,
 // UI_DESIGN_SYSTEM.md). Rust `market.rs` owns ALL state; this screen renders
 // bound properties and reports interactions. The feature surface mirrors the
-// ORIGINAL Qt Market exactly: watchlist (switch/add/remove/filter/sort +
+// ORIGINAL legacy Market exactly: watchlist (switch/add/remove/filter/sort +
 // reset), timeframe row (canonical order + overflow), INDICATORS popup
 // (search · categories · strategies), floating indicator toolbar
 // (eye · settings · delete — three actions only), indicator settings panel,
@@ -13,9 +13,9 @@
 // Layout contract (never fixed page geometry): regions size by stretch +
 // content minima; the chart gets priority space. Wide/medium host flags only
 // gate the watchlist auto-hide at very small widths — the rail toggle is the
-// primary control, exactly like the Qt tools rail. Chart geometry is
+// primary control, exactly like the legacy tools rail. Chart geometry is
 // data-driven: candle/axis positions derive from normalized model fractions
-// (never screenshot coordinates, never DPI math). Honest states render the Qt
+// (never screenshot coordinates, never DPI math). Honest states render the legacy
 // widget's centered messages. Tokens only.
 
 import { VayrenPalette, VayrenDesign } from "palette.slint";
@@ -67,7 +67,7 @@ export struct MarketIndicator {
     visible: bool,
 }
 
-// One market-status row (Qt `MarketStatusPanel` grid parity): key + value
+// One market-status row (legacy `MarketStatusPanel` grid parity): key + value
 // where `muted = true` renders the honest-unknown `--` state.
 export struct MarketStatusRow {
     key: string,
@@ -121,7 +121,7 @@ export struct MarketMarker {
     // 0 tip at anchor (strategy), 1 tip above anchor (trade entry),
     // 2 tip below anchor (trade exit).
     tip: int,
-    // Pre-measured pill width (Rust, Qt fallback formula).
+    // Pre-measured pill width (Rust, legacy fallback formula).
     pill-w: float,
 }
 
@@ -467,7 +467,7 @@ component OverlaySeg inherits Rectangle {
     }
 }
 
-// Trade/strategy marker glyph + optional label pill (Qt overlay parity:
+// Trade/strategy marker glyph + optional label pill (legacy overlay parity:
 // tip-anchored triangles, exact pill placement, two pill fills).
 component MarkerGlyph inherits Rectangle {
     in property <float> gx;
@@ -480,7 +480,7 @@ component MarkerGlyph inherits Rectangle {
     in property <int> tip;
     in property <length> plot-w;
     in property <length> grid-h;
-    // Pill width comes pre-measured from Rust (Qt fallback formula).
+    // Pill width comes pre-measured from Rust (legacy fallback formula).
     in property <length> pill-w;
 
     property <length> ax: gx * plot-w;
@@ -608,7 +608,7 @@ component MarkerGlyph inherits Rectangle {
         border-radius: 2px;
         background: ink;
     }
-    // label pill (fixed above/below offsets, Qt reference gaps)
+    // label pill (fixed above/below offsets, legacy reference gaps)
     if pill > 0: Rectangle {
         x: ax - pill-w / 2;
         y: pill == 1 ? ay - 9px - pill-h : ay + 9px;
@@ -801,7 +801,7 @@ component IndicatorSettingsPopup inherits Rectangle {
     }
 }
 
-// ── Historical-Download console (native dock over the retained Qt panel) ──
+// ── Historical-Download console (native dock over the retained legacy panel) ──
 
 component DlSection inherits Rectangle {
     in property <string> label;
@@ -1124,7 +1124,7 @@ component CredentialsModal inherits Rectangle {
             }
         }
     }
-    // Clear-confirmation sub-dialog (native; Qt used a QMessageBox).
+    // Clear-confirmation sub-dialog (native; legacy used a message box).
     if root.confirm: Rectangle {
         width: 320px;
         height: 140px;
@@ -1638,8 +1638,8 @@ export component MarketScreen inherits Rectangle {
     in property <[MarketSettingsRow]> settings-rows;
     in property <string> active-label;
     in property <MarketTradeContext> trade-context;
-    // Market-status strip (Qt `MarketStatusPanel` parity): collapsed by
-    // default (the Qt dock starts hidden), rows render honest "--" values.
+    // Market-status strip (legacy `MarketStatusPanel` parity): collapsed by
+    // default (the legacy dock starts hidden), rows render honest "--" values.
     in property <bool> market-status-open: false;
     in property <[MarketStatusRow]> market-status-regime;
     in property <[MarketStatusRow]> market-status-data;
@@ -1754,7 +1754,7 @@ export component MarketScreen inherits Rectangle {
     property <length> popup-x: 0px;
     property <bool> dragging: false;
     property <bool> price-dragging: false;
-    // Price-strip drag anchor (press y fraction) — Qt zooms around the
+    // Price-strip drag anchor (press y fraction) — legacy zooms around the
     // press pixel, so the delta is measured from it, not the live cursor.
     property <float> price-anchor-fy: 0.5;
     // Canvas fractions cached as plain floats (the returning scroll-event
@@ -1780,7 +1780,7 @@ export component MarketScreen inherits Rectangle {
         HorizontalLayout {
             spacing: 0;
 
-            // ── tools rail (Qt: exactly the watchlist toggle) ──
+            // ── tools rail (legacy: exactly the watchlist toggle) ──
             Rectangle {
                 width: 40px;
                 background: VayrenPalette.surface;
@@ -2037,7 +2037,7 @@ export component MarketScreen inherits Rectangle {
                         }
                     }
 
-            // ── market-status strip (Qt MarketStatusPanel parity) ──
+            // ── market-status strip (legacy MarketStatusPanel parity) ──
             if root.market-status-open: Rectangle {
                 background: VayrenPalette.surface;
                 VerticalLayout {
@@ -2051,7 +2051,7 @@ export component MarketScreen inherits Rectangle {
                     }
                     HorizontalLayout {
                         spacing: VayrenDesign.sp-xl;
-                        // Qt "MARKET REGIME" section.
+                        // legacy "MARKET REGIME" section.
                         VerticalLayout {
                             horizontal-stretch: 1;
                             spacing: VayrenDesign.sp-xs;
@@ -2072,7 +2072,7 @@ export component MarketScreen inherits Rectangle {
                                 }
                             }
                         }
-                        // Qt "DATA STATUS" section.
+                        // legacy "DATA STATUS" section.
                         VerticalLayout {
                             horizontal-stretch: 1;
                             spacing: VayrenDesign.sp-xs;
@@ -2296,7 +2296,7 @@ export component MarketScreen inherits Rectangle {
                                         // one event stream.
                                         // Y fractions are measured against the
                                         // PRICE GRID height (plot.grid-h), never
-                                        // the full plot height: the legacy Qt
+                                        // the full plot height: the legacy
                                         // chart maps price/crosshair only inside
                                         // its chart rect (volume strip excluded),
                                         // and every Slint candle/overlay/crosshair
@@ -2312,7 +2312,7 @@ export component MarketScreen inherits Rectangle {
                                         if root.dragging {
                                             root.drag-move(fx, fy);
                                         } else if root.price-dragging {
-                                            // Qt _drag_price_from: delta from the
+                                            // legacy _drag_price_from: delta from the
                                             // press point, in wheel notches.
                                             root.price-drag((fy - root.price-anchor-fy) * root.plot-h-px / 120.0, root.price-anchor-fy);
                                         } else {
@@ -2351,9 +2351,9 @@ export component MarketScreen inherits Rectangle {
                                         // (UP = positive): ScrollView regions
                                         // consume it natively. Only time-zoom
                                         // negates, keeping the WheelZoom
-                                        // steps<0 = zoom-in contract (Qt: UP
+                                        // steps<0 = zoom-in contract (legacy: UP
                                         // zooms IN); price-zoom already matches
-                                        // Qt inside its Rust kernel.
+                                        // legacy inside its Rust kernel.
                                         let steps = (ev.delta-y / 1px) / 120.0;
                                         if self.mouse-x > plot.width - root.price-strip {
                                             root.price-zoom(steps, root.px-fy);
@@ -2404,7 +2404,7 @@ export component MarketScreen inherits Rectangle {
                                 close => { root.settings-popup(false, ""); }
                             }
 
-                            // honest state message (Qt centered subtle text)
+                            // honest state message (legacy centered subtle text)
                             if !root.has-data: VerticalLayout {
                                 alignment: center;
                                 Text {
@@ -2581,7 +2581,7 @@ export component MarketScreen inherits Rectangle {
         }
     }
 
-    // keyboard: Alt+R reset, ←/→ trade nav, Esc close (window-scoped in Qt).
+    // keyboard: Alt+R reset, ←/→ trade nav, Esc close (window-scoped in legacy).
     forward-focus: ks;
     ks := FocusScope {
         key-pressed(ev) => {

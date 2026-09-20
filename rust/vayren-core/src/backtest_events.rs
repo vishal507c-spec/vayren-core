@@ -1,7 +1,7 @@
 //! BACKTEST event contracts — Rust equivalents of
 //! `06_backtest/backtest/events/backtest_events.py`.
 //!
-//! Names, fields and defaults mirror the Python frozen dataclasses. The Qt
+//! Names, fields and defaults mirror the Python frozen dataclasses. The legacy
 //! `BacktestWorker` stays the production bridge; these types let future
 //! pure-Rust consumers speak the same bus language via
 //! `crate::event_bus::EventBus`.

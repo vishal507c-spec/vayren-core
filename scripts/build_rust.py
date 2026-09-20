@@ -2,10 +2,10 @@
 
 Builds the `vayren-core` cdylib (release) consumed by the Python boundary
 via ctypes, the `vayren-portfolio-view` cdylib (release) hosting the native
-Slint Portfolio screen inside the Qt window, builds the `vayren-shell`
-native UI binary, and verifies the ABI handshake. Also runs `cargo test`
-for the whole workspace with `--test`. Fail-closed: any cargo failure
-exits nonzero with the log tail.
+Slint Portfolio screen, builds the `vayren-shell` native UI binary, and
+verifies the ABI handshake. Also runs `cargo test` for the whole workspace
+with `--test`. Fail-closed: any cargo failure exits nonzero with the log
+tail.
 """
 
 from __future__ import annotations

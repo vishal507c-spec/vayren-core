@@ -7,23 +7,27 @@
 //! to Slint properties: every displayed value comes from backend facts,
 //! never from UI inference.
 
+use crate::broker_connection::{BrokerWorkspace, ConnectionState};
 use crate::lab::{self, LabMode, LabState, LibFilter, RunState};
 use crate::live::{self, ExecMode, Gate, GateStatus, LiveState, SymbolPick};
+use crate::market;
+use crate::market_download as mdownload;
 use crate::portfolio::{self, PortfolioState};
 use crate::research_state::{self, ResearchState};
 use crate::view_model::{BrokerPanel, CapabilityStatus, Environment};
-use crate::broker_connection::{BrokerWorkspace, ConnectionState};
 use crate::viewport::ChartViewportZoom;
 use crate::{
-    AppWindow, BrokerCheckRow, BrokerRowView, CapabilityRowView, CredentialFieldView,
-    LabBoardCell, LabDetailMetric, LabHeader, LabKpi,
+    AppWindow, BrokerCheckRow, BrokerRowView, CapabilityRowView, CredentialFieldView, DlCalDay,
+    DlCredField, DlPlan, DlStatus, DlStock, LabBoardCell, LabDetailMetric, LabHeader, LabKpi,
     LabLibraryRow, LabMatrixRow, LabParam, LabPoint, LabRankRow, LabTradeRow, LiveBar, LiveCandle,
     LiveEventRow, LiveFill, LiveGate, LiveKv, LiveMarket, LiveOrder, LivePosition, LiveSetup,
-    LiveStat, LiveSymbolRow, PortfolioAlloc, PortfolioFill, PortfolioGate, PortfolioKpi,
-    PortfolioOrder, PortfolioPosition, PortfolioRisk, ProgressStepView, ResearchCompareRow, ResearchConfigGroup,
-    ResearchEvidenceDim, ResearchEvidenceWhy, ResearchExperimentRow, ResearchField, ResearchKv,
-    ResearchKvGroup, ResearchMetric, ResearchRobustRow, ResearchSignalRow, ResearchStrategyRow,
-    ResearchTradeRow, ShellScreen,
+    LiveStat, LiveSymbolRow, MarketCandle, MarketIndicator, MarketMarker, MarketPlotSeg,
+    MarketPopupRow, MarketSettingsRow, MarketStatusRow, MarketTick, MarketTimeframe,
+    MarketTradeContext, MarketWatchRow, PortfolioAlloc, PortfolioFill, PortfolioGate, PortfolioKpi,
+    PortfolioOrder, PortfolioPosition, PortfolioRisk, ProgressStepView, ResearchCompareRow,
+    ResearchConfigGroup, ResearchEvidenceDim, ResearchEvidenceWhy, ResearchExperimentRow,
+    ResearchField, ResearchKv, ResearchKvGroup, ResearchMetric, ResearchRobustRow,
+    ResearchSignalRow, ResearchStrategyRow, ResearchTradeRow, ShellScreen,
 };
 use slint::ComponentHandle;
 #[cfg(test)]
@@ -54,6 +58,7 @@ pub fn screen_pending(screen: ShellScreen) -> bool {
             | ShellScreen::Portfolio
             | ShellScreen::Research
             | ShellScreen::Live
+            | ShellScreen::Chart
     )
 }
 
@@ -285,13 +290,723 @@ pub fn apply_connection(ui: &AppWindow, workspace: &BrokerWorkspace) {
     });
     ui.set_conn_disconnect_visible(workspace.can_disconnect);
     ui.set_conn_disconnect_enabled(workspace.can_disconnect);
-    ui.set_conn_help_caption(
-        if workspace.display_name.trim().is_empty() {
-            "View setup guide.".into()
-        } else {
-            format!("View setup guide for {}.", workspace.display_name.trim()).into()
-        },
+    ui.set_conn_help_caption(if workspace.display_name.trim().is_empty() {
+        "View setup guide.".into()
+    } else {
+        format!("View setup guide for {}.", workspace.display_name.trim()).into()
+    });
+}
+
+fn market_model<T: Clone + 'static>(rows: Vec<T>) -> slint::ModelRc<T> {
+    Rc::new(slint::VecModel::from(rows)).into()
+}
+
+/// Project the native Market state onto the standalone chart screen.
+///
+/// Mirrors the embed-view binding one-to-one (same projection, different
+/// bind target): every rendered value comes from `MarketState`.
+pub fn apply_market(ui: &AppWindow, state: &market::MarketState) {
+    let view = market::project(state);
+    ui.set_market_panel_visible(view.panel_visible);
+    ui.set_market_symbol_title(view.symbol_title.into());
+    ui.set_market_timeframe_label(view.timeframe_label.into());
+    ui.set_market_exchange_label(view.exchange_label.into());
+    ui.set_market_status_message(view.status_message.into());
+    ui.set_market_has_data(view.has_data);
+    ui.set_market_header_ohlc(view.header_ohlc.into());
+    ui.set_market_watch_rows(market_model(
+        view.watch_rows
+            .into_iter()
+            .map(|w| MarketWatchRow {
+                symbol: w.symbol.into(),
+                price: w.price.into(),
+                change: w.change.into(),
+                tone: w.tone.cell(),
+                selected: w.selected,
+            })
+            .collect(),
+    ));
+    ui.set_market_watchlists(market_model(
+        view.watchlists
+            .into_iter()
+            .map(slint::SharedString::from)
+            .collect::<Vec<_>>(),
+    ));
+    ui.set_market_watchlist_name(view.watchlist_name.into());
+    ui.set_market_filter(view.filter.into());
+    ui.set_market_sort_ascending(view.sort_ascending);
+    let tf = |rows: Vec<market::TimeframeRow>| {
+        market_model(
+            rows.into_iter()
+                .map(|t| MarketTimeframe {
+                    label: t.label.into(),
+                    selected: t.selected,
+                })
+                .collect(),
+        )
+    };
+    ui.set_market_timeframes_visible(tf(view.timeframes_visible));
+    ui.set_market_timeframes_overflow(tf(view.timeframes_overflow));
+    ui.set_market_plot_slots(view.plot_slots);
+    ui.set_market_candles(market_model(
+        view.candles
+            .into_iter()
+            .map(|c| MarketCandle {
+                x: c.x,
+                o: c.open,
+                h: c.high,
+                l: c.low,
+                c: c.close,
+                vol: c.volume,
+                top: c.top,
+                body: c.body,
+                tone: c.tone.cell(),
+            })
+            .collect(),
+    ));
+    let ticks = |rows: Vec<market::AxisTick>| {
+        market_model(
+            rows.into_iter()
+                .map(|t| MarketTick {
+                    pos: t.pos,
+                    label: t.label.into(),
+                })
+                .collect(),
+        )
+    };
+    ui.set_market_price_ticks(ticks(view.price_ticks));
+    ui.set_market_time_ticks(ticks(view.time_ticks));
+    ui.set_market_plot_segments(market_model(
+        view.plot_segments
+            .into_iter()
+            .map(|s| MarketPlotSeg {
+                x1: s.x1,
+                y1: s.y1,
+                x2: s.x2,
+                y2: s.y2,
+                color: s.color,
+                wide: s.wide,
+            })
+            .collect(),
+    ));
+    ui.set_market_markers(market_model(
+        view.markers
+            .into_iter()
+            .map(|m| MarketMarker {
+                x: m.x,
+                y: m.y,
+                kind: m.kind,
+                color: m.color,
+                label: m.label.into(),
+                pill: m.pill,
+                pill_solid: m.pill_solid,
+                tip: m.tip,
+                pill_w: m.pill_w,
+            })
+            .collect(),
+    ));
+    ui.set_market_hover_x(view.hover_x);
+    ui.set_market_hover_y(view.hover_y);
+    ui.set_market_hover_price(view.hover_price.into());
+    ui.set_market_hover_time(view.hover_time.into());
+    ui.set_market_hover_volume(view.hover_volume.into());
+    ui.set_market_hover_bull(view.hover_bull);
+    ui.set_market_has_hover(view.has_hover);
+    ui.set_market_indicator_rows(market_model(
+        view.indicator_rows
+            .into_iter()
+            .map(|i| MarketIndicator {
+                name: i.name.into(),
+                visible: i.visible,
+            })
+            .collect(),
+    ));
+    ui.set_market_popup_open(view.popup_open);
+    ui.set_market_popup_query(view.popup_query.into());
+    ui.set_market_popup_category(view.popup_category.into());
+    ui.set_market_popup_rows(market_model(
+        view.popup_rows
+            .into_iter()
+            .map(|r| MarketPopupRow {
+                kind: r.kind.into(),
+                label: r.label.into(),
+                name: r.name.into(),
+                category: r.category.into(),
+            })
+            .collect(),
+    ));
+    ui.set_market_settings_open(view.settings_open);
+    ui.set_market_settings_name(view.settings_name.into());
+    ui.set_market_settings_rows(market_model(
+        view.settings_rows
+            .into_iter()
+            .map(|r| MarketSettingsRow {
+                key: r.key.into(),
+                label: r.label.into(),
+                value: r.value as f32,
+                min: r.min as f32,
+                max: r.max as f32,
+                step: r.step as f32,
+                decimals: r.decimals,
+            })
+            .collect(),
+    ));
+    ui.set_market_active_label(view.active_label.into());
+    ui.set_market_trade_context(MarketTradeContext {
+        visible: view.trade_context.visible,
+        trade: view.trade_context.trade.into(),
+        symbol_side: view.trade_context.symbol_side.into(),
+        time: view.trade_context.time.into(),
+        pnl: view.trade_context.pnl.into(),
+        r: view.trade_context.r.into(),
+    });
+    ui.set_market_status_open(view.market_status_open);
+    let status_rows = |rows: Vec<(String, String, bool)>| -> slint::ModelRc<MarketStatusRow> {
+        market_model(
+            rows.into_iter()
+                .map(|(key, value, muted)| MarketStatusRow {
+                    key: key.into(),
+                    value: value.into(),
+                    muted,
+                })
+                .collect(),
+        )
+    };
+    ui.set_market_status_regime(status_rows(view.market_status_regime));
+    ui.set_market_status_data(status_rows(view.market_status_data));
+    let dl = mdownload::project_download(&state.download);
+    ui.set_market_dl_open(dl.open);
+    ui.set_market_dl_busy(dl.busy);
+    ui.set_market_dl_interval_index(dl.interval_index as i32);
+    ui.set_market_dl_interval_label(dl.interval_label.clone().into());
+    ui.set_market_dl_interval_items(market_model(
+        dl.interval_items
+            .iter()
+            .map(|s| slint::SharedString::from(s.clone()))
+            .collect(),
+    ));
+    ui.set_market_dl_selected_text(dl.selected_text.clone().into());
+    ui.set_market_dl_progress_text(dl.progress_text.clone().into());
+    ui.set_market_dl_stock_rows(market_model(
+        dl.stock_rows
+            .iter()
+            .map(|s| DlStock {
+                symbol: s.symbol.clone().into(),
+                selected: s.selected,
+            })
+            .collect(),
+    ));
+    ui.set_market_dl_chips(market_model(
+        dl.chips
+            .iter()
+            .map(|s| slint::SharedString::from(s.clone()))
+            .collect(),
+    ));
+    ui.set_market_dl_chips_note(dl.chips_note.clone().into());
+    ui.set_market_dl_filter(dl.filter.clone().into());
+    ui.set_market_dl_from_display(dl.from_display.clone().into());
+    ui.set_market_dl_to_display(dl.to_display.clone().into());
+    ui.set_market_dl_plan(DlPlan {
+        stocks: dl.plan.stocks.clone().into(),
+        interval: dl.plan.interval.clone().into(),
+        range: dl.plan.range.clone().into(),
+        days: dl.plan.days.clone().into(),
+        rows: dl.plan.rows.clone().into(),
+        error: dl.plan.error.clone().into(),
+    });
+    let dl_status = &dl.status;
+    ui.set_market_dl_status(DlStatus {
+        mode: dl_status.mode.clone().into(),
+        status: dl_status.status.clone().into(),
+        symbol: dl_status.symbol.clone().into(),
+        interval: dl_status.interval.clone().into(),
+        range: dl_status.range.clone().into(),
+        chunk: dl_status.chunk.clone().into(),
+        rows: dl_status.rows.clone().into(),
+        coverage: dl_status.coverage.clone().into(),
+        progress_pct: dl_status.progress_pct,
+        progress_note: dl_status.progress_note.clone().into(),
+        perf_rows: dl_status.perf_rows.clone().into(),
+        perf_elapsed: dl_status.perf_elapsed.clone().into(),
+        perf_eta: dl_status.perf_eta.clone().into(),
+        perf_size: dl_status.perf_size.clone().into(),
+        complete_status: dl_status.complete_status.clone().into(),
+        complete_rows: dl_status.complete_rows.clone().into(),
+        complete_coverage: dl_status.complete_coverage.clone().into(),
+        complete_duration: dl_status.complete_duration.clone().into(),
+        complete_size: dl_status.complete_size.clone().into(),
+        error_line: dl_status.error_line.clone().into(),
+        error_detail: dl_status.error_detail.clone().into(),
+        error_details_shown: dl_status.error_details_shown,
+        cov_symbol: dl_status.cov_symbol.clone().into(),
+        cov_interval: dl_status.cov_interval.clone().into(),
+        cov_range: dl_status.cov_range.clone().into(),
+        cov_coverage: dl_status.cov_coverage.clone().into(),
+        cov_rows: dl_status.cov_rows.clone().into(),
+        provider_name: dl_status.provider_name.clone().into(),
+        provider_status: dl_status.provider_status.clone().into(),
+        provider_label: dl_status.provider_label.clone().into(),
+        provider_detail: dl_status.provider_detail.clone().into(),
+        configure_visible: dl_status.configure_visible,
+        advanced_visible: dl_status.advanced_visible,
+        advanced_open: dl_status.advanced_open,
+        env_visible: dl_status.env_visible,
+        broker_caps: dl_status.broker_caps.clone().into(),
+        broker_error: dl_status.broker_error.clone().into(),
+    });
+    ui.set_market_dl_brokers(market_model(
+        dl.brokers
+            .iter()
+            .map(|s| slint::SharedString::from(s.clone()))
+            .collect(),
+    ));
+    ui.set_market_dl_broker_index(dl.broker_index as i32);
+    ui.set_market_dl_log(market_model(
+        dl.log
+            .iter()
+            .map(|s| slint::SharedString::from(s.clone()))
+            .collect(),
+    ));
+    ui.set_market_dl_log_expanded(dl.log_expanded);
+    ui.set_market_dl_cal_open(dl.cal_open);
+    ui.set_market_dl_cal_title(dl.cal_title.clone().into());
+    ui.set_market_dl_cal_days(market_model(
+        dl.cal_days
+            .iter()
+            .map(|c| DlCalDay {
+                day: c.day,
+                label: c.label.clone().into(),
+                x: c.x,
+                y: c.y,
+            })
+            .collect(),
+    ));
+    ui.set_market_dl_weekdays(market_model(
+        dl.weekday_labels
+            .iter()
+            .map(|s| slint::SharedString::from(s.clone()))
+            .collect(),
+    ));
+    ui.set_market_dl_cred_open(dl.cred_open);
+    ui.set_market_dl_cred_fields(market_model(
+        dl.cred_fields
+            .iter()
+            .map(|f| DlCredField {
+                key: f.key.clone().into(),
+                label: f.label.clone().into(),
+                secret: f.secret,
+                value: f.value.clone().into(),
+                revealed: f.revealed,
+            })
+            .collect(),
+    ));
+    ui.set_market_dl_cred_has_stored(dl.cred_has_stored);
+    ui.set_market_dl_cred_status(dl.cred_status.clone().into());
+    ui.set_market_dl_confirm_clear(dl.confirm_clear);
+}
+
+/// Wire the Market chart interactions: Slint reports, Rust mutates centrally,
+/// the screen re-projects. Symbol/timeframe refetch through `fetch` (bridge
+/// snapshot, same bars the startup path loads). Backend-owned wires stay
+/// queued on the state (bounded at 64, replayed by a future engine bridge) —
+/// the legacy host drain is gone, nothing is dropped silently.
+pub fn wire_market(
+    ui: &AppWindow,
+    state: Rc<RefCell<market::MarketState>>,
+    fetch: Rc<dyn Fn(Option<String>, Option<String>) -> Option<serde_json::Value>>,
+) {
+    fn refresh(ui: &AppWindow, state: &Rc<RefCell<market::MarketState>>) {
+        apply_market(ui, &state.borrow());
+    }
+    macro_rules! act {
+        ($cb:ident, $wire:expr, $action:expr) => {{
+            let strong = state.clone();
+            let weak = ui.as_weak();
+            ui.$cb(move || {
+                let Some(ui) = weak.upgrade() else { return };
+                strong.borrow_mut().interact($wire, $action);
+                refresh(&ui, &strong);
+            });
+        }};
+    }
+    macro_rules! act_str {
+        ($cb:ident, $make:expr) => {{
+            let strong = state.clone();
+            let weak = ui.as_weak();
+            ui.$cb(move |text: slint::SharedString| {
+                let Some(ui) = weak.upgrade() else { return };
+                let (wire, action) = $make(text.to_string());
+                strong.borrow_mut().interact(&wire, action);
+                refresh(&ui, &strong);
+            });
+        }};
+    }
+    macro_rules! act_bool {
+        ($cb:ident, $make:expr) => {{
+            let strong = state.clone();
+            let weak = ui.as_weak();
+            ui.$cb(move |open: bool| {
+                let Some(ui) = weak.upgrade() else { return };
+                let (wire, action) = $make(open);
+                strong.borrow_mut().interact(&wire, action);
+                refresh(&ui, &strong);
+            });
+        }};
+    }
+    macro_rules! act_f2 {
+        ($cb:ident, $make:expr) => {{
+            let strong = state.clone();
+            let weak = ui.as_weak();
+            ui.$cb(move |a: f32, b: f32| {
+                let Some(ui) = weak.upgrade() else { return };
+                let (wire, action) = $make(a, b);
+                strong.borrow_mut().interact(&wire, action);
+                refresh(&ui, &strong);
+            });
+        }};
+    }
+    act!(
+        on_market_panel_toggle,
+        "panel",
+        market::MarketAction::PanelToggle
     );
+    act!(on_market_sort_asc, "sort", market::MarketAction::SortAsc);
+    act!(on_market_sort_desc, "sort", market::MarketAction::SortDesc);
+    act!(
+        on_market_add_watchlist,
+        "watchlist:add",
+        market::MarketAction::AddWatchlist
+    );
+    act!(
+        on_market_remove_watchlist,
+        "watchlist:remove",
+        market::MarketAction::RemoveWatchlist
+    );
+    act!(
+        on_market_reset_view,
+        "reset",
+        market::MarketAction::ResetView
+    );
+    act!(on_market_hover_left, "", market::MarketAction::HoverLeft);
+    act!(on_market_drag_end, "", market::MarketAction::DragEnd);
+    act!(
+        on_market_price_drag_end,
+        "",
+        market::MarketAction::PriceDragEnd
+    );
+    act!(on_market_price_reset, "", market::MarketAction::PriceReset);
+    act!(
+        on_market_trade_prev,
+        "trade:prev",
+        market::MarketAction::TradePrev
+    );
+    act!(
+        on_market_trade_next,
+        "trade:next",
+        market::MarketAction::TradeNext
+    );
+    act!(
+        on_market_trade_open,
+        "trade:open",
+        market::MarketAction::TradeOpen
+    );
+    act!(
+        on_market_status_toggle,
+        "",
+        market::MarketAction::ToggleStatus
+    );
+    act_str!(on_market_filter_changed, |s| (
+        String::new(),
+        market::MarketAction::SetFilter(s)
+    ));
+    act_str!(on_market_select_watchlist, |s| (
+        format!("watchlist:select:{s}"),
+        market::MarketAction::SelectWatchlist(s)
+    ));
+    act_str!(on_market_add_indicator, |s| (
+        format!("indicator:add:{s}"),
+        market::MarketAction::AddIndicator(s)
+    ));
+    act_str!(on_market_toggle_indicator_visible, |s| (
+        format!("indicator:vis:{s}"),
+        market::MarketAction::ToggleIndicatorVisible(s)
+    ));
+    act_str!(on_market_remove_indicator, |s| (
+        format!("indicator:rm:{s}"),
+        market::MarketAction::RemoveIndicator(s)
+    ));
+    act_str!(on_market_indicator_query, |s| (
+        String::new(),
+        market::MarketAction::IndicatorQuery(s)
+    ));
+    act_str!(on_market_indicator_category, |s| (
+        String::new(),
+        market::MarketAction::IndicatorCategory(s)
+    ));
+    act_bool!(on_market_indicator_popup, |open| (
+        String::new(),
+        market::MarketAction::IndicatorPopup(open)
+    ));
+    act_f2!(on_market_hover_moved, |x, y| (
+        String::new(),
+        market::MarketAction::HoverMoved(x, y)
+    ));
+    act_f2!(on_market_wheel_zoom, |x, steps| (
+        String::new(),
+        market::MarketAction::WheelZoom(x, steps)
+    ));
+    act_f2!(on_market_drag_start, |x, y| (
+        String::new(),
+        market::MarketAction::DragStart(x, y)
+    ));
+    act_f2!(on_market_drag_move, |x, y| (
+        String::new(),
+        market::MarketAction::DragMove(x, y)
+    ));
+    // Symbol/timeframe go through the bridge (real bars), not just the
+    // optimistic local apply — the snapshot overwrites consistently.
+    {
+        let strong = state.clone();
+        let weak = ui.as_weak();
+        let fetch = fetch.clone();
+        ui.on_market_symbol_selected(move |name: slint::SharedString| {
+            let Some(ui) = weak.upgrade() else { return };
+            let timeframe = strong.borrow().timeframe.clone();
+            if let Some(data) = fetch(Some(name.to_string()), Some(timeframe)) {
+                market::apply_snapshot_json(&mut strong.borrow_mut(), &data);
+            }
+            refresh(&ui, &strong);
+        });
+    }
+    {
+        let strong = state.clone();
+        let weak = ui.as_weak();
+        let fetch = fetch.clone();
+        ui.on_market_timeframe_picked(move |timeframe: slint::SharedString| {
+            let Some(ui) = weak.upgrade() else { return };
+            let symbol = strong.borrow().selected_symbol.clone();
+            if let Some(data) = fetch(Some(symbol), Some(timeframe.to_string())) {
+                market::apply_snapshot_json(&mut strong.borrow_mut(), &data);
+            }
+            refresh(&ui, &strong);
+        });
+    }
+    {
+        let strong = state.clone();
+        let weak = ui.as_weak();
+        ui.on_market_wheel_pan(move |frac: f32| {
+            let Some(ui) = weak.upgrade() else { return };
+            strong
+                .borrow_mut()
+                .interact("", market::MarketAction::WheelPanX(frac));
+            refresh(&ui, &strong);
+        });
+    }
+    {
+        let strong = state.clone();
+        let weak = ui.as_weak();
+        ui.on_market_price_zoom(move |steps: f32, y: f32| {
+            let Some(ui) = weak.upgrade() else { return };
+            strong
+                .borrow_mut()
+                .interact("", market::MarketAction::PriceZoom(steps, y));
+            refresh(&ui, &strong);
+        });
+    }
+    {
+        let strong = state.clone();
+        let weak = ui.as_weak();
+        ui.on_market_price_drag(move |notches: f32, anchor: f32| {
+            let Some(ui) = weak.upgrade() else { return };
+            strong
+                .borrow_mut()
+                .interact("", market::MarketAction::PriceDrag(notches, anchor));
+            refresh(&ui, &strong);
+        });
+    }
+    {
+        let strong = state.clone();
+        let weak = ui.as_weak();
+        ui.on_market_settings_popup(move |open: bool, name: slint::SharedString| {
+            let Some(ui) = weak.upgrade() else { return };
+            strong.borrow_mut().interact(
+                "",
+                market::MarketAction::SettingsPopup(open, name.to_string()),
+            );
+            refresh(&ui, &strong);
+        });
+    }
+    {
+        let strong = state.clone();
+        let weak = ui.as_weak();
+        ui.on_market_settings_edit(move |key: slint::SharedString, value: f32| {
+            let Some(ui) = weak.upgrade() else { return };
+            strong.borrow_mut().interact(
+                "",
+                market::MarketAction::SettingsEdit(key.to_string(), value as f64),
+            );
+            refresh(&ui, &strong);
+        });
+    }
+    {
+        let strong = state.clone();
+        let weak = ui.as_weak();
+        ui.on_market_settings_save(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let payload = strong.borrow().settings_payload();
+            if let Some((name, json)) = payload {
+                strong.borrow_mut().interact(
+                    &format!("indicator:params:{name}:{json}"),
+                    market::MarketAction::ApplyIndicatorSettings(name, json),
+                );
+                refresh(&ui, &strong);
+            }
+        });
+    }
+    {
+        let strong = state.clone();
+        let weak = ui.as_weak();
+        ui.on_market_settings_reset(move || {
+            let name = strong.borrow().settings_name.clone();
+            if name.is_empty() {
+                return;
+            }
+            let Some(ui) = weak.upgrade() else { return };
+            strong.borrow_mut().interact(
+                &format!("indicator:clear-params:{name}"),
+                market::MarketAction::ResetIndicatorSettings(name),
+            );
+            refresh(&ui, &strong);
+        });
+    }
+    // Download console: local optimistic apply; backend wires stay queued.
+    macro_rules! dl_act {
+        ($cb:ident, $action:expr) => {{
+            let strong = state.clone();
+            let weak = ui.as_weak();
+            ui.$cb(move || {
+                let Some(ui) = weak.upgrade() else { return };
+                strong.borrow_mut().interact_download($action);
+                refresh(&ui, &strong);
+            });
+        }};
+    }
+    macro_rules! dl_str {
+        ($cb:ident, $make:expr) => {{
+            let strong = state.clone();
+            let weak = ui.as_weak();
+            ui.$cb(move |v: slint::SharedString| {
+                let Some(ui) = weak.upgrade() else { return };
+                strong.borrow_mut().interact_download($make(v.to_string()));
+                refresh(&ui, &strong);
+            });
+        }};
+    }
+    dl_act!(on_market_dl_toggle, mdownload::DownloadAction::Toggle);
+    dl_act!(
+        on_market_dl_select_all,
+        mdownload::DownloadAction::SelectAll
+    );
+    dl_act!(on_market_dl_clear_all, mdownload::DownloadAction::ClearAll);
+    dl_act!(on_market_dl_close_cal, mdownload::DownloadAction::CloseCal);
+    dl_act!(
+        on_market_dl_cal_prev,
+        mdownload::DownloadAction::CalPrevMonth
+    );
+    dl_act!(
+        on_market_dl_cal_next,
+        mdownload::DownloadAction::CalNextMonth
+    );
+    dl_act!(on_market_dl_download, mdownload::DownloadAction::Download);
+    dl_act!(
+        on_market_dl_coverage,
+        mdownload::DownloadAction::CheckCoverage
+    );
+    dl_act!(on_market_dl_cancel, mdownload::DownloadAction::Cancel);
+    dl_act!(on_market_dl_retry, mdownload::DownloadAction::Retry);
+    dl_act!(
+        on_market_dl_view_coverage,
+        mdownload::DownloadAction::ViewCoverage
+    );
+    dl_act!(
+        on_market_dl_error_details,
+        mdownload::DownloadAction::ToggleErrorDetails
+    );
+    dl_act!(
+        on_market_dl_advanced,
+        mdownload::DownloadAction::ToggleAdvanced
+    );
+    dl_act!(
+        on_market_dl_log_toggle,
+        mdownload::DownloadAction::ToggleLog
+    );
+    dl_act!(on_market_dl_log_clear, mdownload::DownloadAction::ClearLog);
+    dl_act!(
+        on_market_dl_open_creds,
+        mdownload::DownloadAction::OpenCreds
+    );
+    dl_act!(
+        on_market_dl_close_creds,
+        mdownload::DownloadAction::CloseCreds
+    );
+    dl_act!(on_market_dl_cred_test, mdownload::DownloadAction::CredTest);
+    dl_act!(on_market_dl_cred_save, mdownload::DownloadAction::CredSave);
+    dl_act!(
+        on_market_dl_cred_clear,
+        mdownload::DownloadAction::CredClear
+    );
+    dl_str!(on_market_dl_interval, mdownload::DownloadAction::Interval);
+    dl_str!(
+        on_market_dl_toggle_symbol,
+        mdownload::DownloadAction::ToggleSymbol
+    );
+    dl_str!(
+        on_market_dl_filter_changed,
+        mdownload::DownloadAction::SetFilter
+    );
+    dl_str!(on_market_dl_open_cal, mdownload::DownloadAction::OpenCal);
+    dl_str!(on_market_dl_quick, mdownload::DownloadAction::QuickRange);
+    dl_str!(on_market_dl_broker, mdownload::DownloadAction::Broker);
+    dl_str!(
+        on_market_dl_cred_reveal,
+        mdownload::DownloadAction::CredReveal
+    );
+    {
+        let strong = state.clone();
+        let weak = ui.as_weak();
+        ui.on_market_dl_pick_day(move |d: i32| {
+            let Some(ui) = weak.upgrade() else { return };
+            strong
+                .borrow_mut()
+                .interact_download(mdownload::DownloadAction::PickDay(d));
+            refresh(&ui, &strong);
+        });
+    }
+    {
+        let strong = state.clone();
+        let weak = ui.as_weak();
+        ui.on_market_dl_cred_confirm(move |yes: bool| {
+            let Some(ui) = weak.upgrade() else { return };
+            strong
+                .borrow_mut()
+                .interact_download(mdownload::DownloadAction::CredConfirmClear(yes));
+            refresh(&ui, &strong);
+        });
+    }
+    {
+        let strong = state.clone();
+        let weak = ui.as_weak();
+        ui.on_market_dl_cred_field(move |k: slint::SharedString, v: slint::SharedString| {
+            let Some(ui) = weak.upgrade() else { return };
+            strong
+                .borrow_mut()
+                .interact_download(mdownload::DownloadAction::CredField(
+                    k.to_string(),
+                    v.to_string(),
+                ));
+            refresh(&ui, &strong);
+        });
+    }
 }
 
 /// Representative backend-fed connection workspace (FYERS selected, not
@@ -2392,7 +3107,7 @@ mod tests {
         assert_eq!(ui.get_lab_library().row_count(), 1);
         ui.invoke_lab_search_changed("".into());
 
-        // KPI placeholders use the Qt tile vocabulary ("--", 8 tiles —
+        // KPI placeholders use the legacy tile vocabulary ("--", 8 tiles —
         // no SORTINO tile ever existed), never fabricated numbers.
         let kpis = ui.get_lab_kpis();
         assert_eq!(kpis.row_count(), 8);

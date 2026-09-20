@@ -1,10 +1,10 @@
-//! Embeddable native Strategy Lab view — offscreen Slint host for the Qt shell.
+//! Embeddable native Strategy Lab view — offscreen Slint host for the legacy shell.
 //!
 //! Architecture (constitution §3: Rust+Slint owns ALL native UI state and
 //! presentation) mirrors `vayren-portfolio-view` 1:1:
 //!
 //! ```text
-//! Qt main window (SAME process, Qt GUI thread only)
+//! legacy main window (SAME process, legacy GUI thread only)
 //!   │  SlintStrategyLabHost (dumb viewport: blits pixels, forwards events)
 //!   │  C ABI below (plain integers, UTF-8 JSON, RGB bytes — no objects)
 //!   ▼
@@ -16,7 +16,7 @@
 //! ```
 //!
 //! Interaction: Slint callbacks route through `LabState::interaction_*` (the
-//! view reacts optimistically) and queue a pending action; the Qt host drains
+//! view reacts optimistically) and queue a pending action; the legacy host drains
 //! actions via `vayren_strategy_lab_view_next_action` and forwards them to the
 //! Python backend, whose next snapshot echoes the authoritative result.
 //!
@@ -871,13 +871,13 @@ pub extern "C" fn vayren_strategy_lab_view_scroll(
     })
 }
 
-/// Control-key grammar from the Qt host (`KEY+<qt code>`, `CTRL+<qt code>`).
+/// Control-key grammar from the legacy host (`KEY+<legacy code>`, `CTRL+<legacy code>`).
 /// Arrows step the real blotter selection, Enter re-focuses it, Ctrl+S saves
-/// with the working buffer, Ctrl+Return runs — the Qt `eventFilter`/
+/// with the working buffer, Ctrl+Return runs — the legacy `eventFilter`/
 /// shortcut semantics, executed on the backend via the action queue.
 fn handle_control_key(view: &LabView, payload: &str) -> bool {
     let (action, save_with_buffer) = match payload {
-        // Qt.Key_Up / Key_Down / Key_Return+Enter (blotter eventFilter codes).
+        // legacy.Key_Up / Key_Down / Key_Return+Enter (blotter eventFilter codes).
         "KEY+16777235" => ("tradeup".to_string(), false),
         "KEY+16777237" => ("tradedown".to_string(), false),
         "KEY+16777220" | "KEY+16777221" => ("tradeenter".to_string(), false),

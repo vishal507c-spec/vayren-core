@@ -1,10 +1,10 @@
-//! Embeddable native Portfolio view — offscreen Slint host for the Qt shell.
+//! Embeddable native Portfolio view — offscreen Slint host for the legacy shell.
 //!
 //! Architecture (constitution §3: Rust+Slint owns ALL native UI state and
 //! presentation):
 //!
 //! ```text
-//! Qt (separate process? NO — same process, Qt main thread only)
+//! legacy (separate process? NO — same process, legacy main thread only)
 //!   │  SlintPortfolioHost (dumb viewport: blits pixels, forwards events)
 //!   │  C ABI below (plain integers, UTF-8 JSON, RGB bytes — no objects)
 //!   ▼
@@ -16,9 +16,9 @@
 //! ```
 //!
 //! Threading: every C ABI function must be called on the SAME thread that
-//! created the view (Slint handles are `!Send`). The Qt host calls from its
+//! created the view (Slint handles are `!Send`). The legacy host calls from its
 //! GUI thread only; violations return an error code, never UB. No threads
-//! are spawned here; no Qt headers are needed to build this crate.
+//! are spawned here; no legacy headers are needed to build this crate.
 //!
 //! Error codes (negative = failure, each function documents its own set):
 //! `-1` null view handle · `-2` null pointer · `-3` invalid UTF-8 ·
@@ -524,7 +524,7 @@ fn pointer_event(
     })
 }
 
-/// Pointer moved (logical units, Qt logical coordinates map 1:1).
+/// Pointer moved (logical units, legacy logical coordinates map 1:1).
 #[no_mangle]
 pub extern "C" fn vayren_portfolio_view_pointer_move(
     view: *mut PortfolioView,

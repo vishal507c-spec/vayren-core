@@ -1,5 +1,5 @@
-// Basic chart view component — proof of concept for Qt → Slint migration.
-// Full 6,578 LOC Qt renderer/widget/window port is separate effort per constitution.
+// Basic chart view component — proof of concept for legacy → Slint migration.
+// Full 6,578 LOC legacy renderer/widget/window port is separate effort per constitution.
 
 import { VerticalBox, HorizontalBox, Button } from "std-widgets.slint";
 
@@ -63,7 +63,7 @@ export component ChartView inherits Rectangle {
             border-radius: 8px;
             
             Text {
-                text: "Chart rendering area\n(Full QPainter → Slint port in progress)";
+                text: "Chart rendering area\n(Full legacy-painter → Slint port in progress)";
                 color: #606060;
                 font-size: 14px;
                 horizontal-alignment: center;

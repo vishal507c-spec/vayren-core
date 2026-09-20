@@ -54,9 +54,9 @@
       "required_language": "RUST_SLINT",
       "directory_prefixes": ["04_chart/chart/widgets/", "04_chart/chart/windows/", "04_chart/chart/renderer/", "00_app/app/ui/", "02_data/data/ui/", "06_backtest/backtest/ui/"],
       "excluded_subpaths": [],
-      "description": "All native UI surfaces (chart, app shell, download console, backtest panels). Existing Qt/Python UI retained under TEMPORARILY_RETAINED. New UI MUST be Rust+Slint.",
+      "description": "All native UI surfaces (chart, app shell, download console, backtest panels) are Rust+Slint only. No Python UI remains.",
       "allow_python_glue": false,
-      "python_glue_scope": "NONE - new UI goes to rust/vayren-shell. Existing Qt retained only via per-file retention entries."
+      "python_glue_scope": "NONE - all UI lives in rust/vayren-shell."
     },
     {
       "id": "RUST_CORE",
@@ -134,9 +134,9 @@
       "required_language": "RUST",
       "directory_prefixes": ["04_chart/chart/"],
       "excluded_subpaths": ["04_chart/chart/tests/", "04_chart/chart/widgets/", "04_chart/chart/windows/", "04_chart/chart/renderer/"],
-      "description": "ChartModel, viewport math, chart engine, session/theme/presentation state. Qt-paint-coupled today; numeric/viewport kernels are future Rust slices.",
+      "description": "Chart presentation state now lives in rust/vayren-shell (MarketState projection). No Python presentation remains; numeric kernels stay Rust.",
       "allow_python_glue": true,
-      "python_glue_scope": "Qt-coupled presentation state and event payloads - NOT viewport math kernels when extracted"
+      "python_glue_scope": "No Python presentation state remains"
     },
     {
       "id": "PYTHON_RESEARCH",

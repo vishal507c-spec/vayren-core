@@ -85,7 +85,7 @@ def test_no_alias_ids_in_product_code() -> None:
     display_label_sites = {
         "00_app/app/bootstrap/bootstrap.py",
         "02_data/data/ui/status_view.py",
-        # Slint MARKET bridge mirrors the pinned Qt provider-card text (display only).
+        # The native market view mirrors the pinned provider-card text (display only).
         "00_app/app/services/slint_market_host.py",
     }
     offenders = []

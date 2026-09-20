@@ -15,7 +15,7 @@
 //! | `models.py` (`DLState`)                | `DLState::name`                             |
 //!
 //! Stays Python: SQLite IO, file locking (`lock.py`), provider SDKs/auth,
-//! the Qt worker thread, settings/credentials, UI, jitter sleeps (timing,
+//! the legacy worker thread, settings/credentials, UI, jitter sleeps (timing,
 //! not observable behavior). Timestamps cross this boundary as normalized
 //! `"YYYY-MM-DD HH:MM:SS"` strings (lexicographic order == chronological).
 //! `Ts` is seconds since the Unix epoch; civil-date math uses integer

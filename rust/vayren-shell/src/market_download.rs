@@ -2,13 +2,13 @@
 //! of `02_data`'s `HistoricalDownloadPanel` (DownloadPanel + StatusView +
 //! LogPanel) + `ProviderCredentialsDialog`. It owns ONLY presentation + the
 //! calendar/credential modal interaction state. Every user action maps to an
-//! existing public method/signal on the retained Qt panel or the provider
+//! existing public method/signal on the retained legacy panel or the provider
 //! manager (see `slint_market_host.py`), so no download logic, validation,
 //! engine, progress math, plan estimate or credential handling is duplicated
 //! in Rust — this mirrors the Strategy Lab projection contract exactly.
 //!
 //! All financial/provider facts arrive from the backend bridge; missing
-//! pieces degrade to honest absence (never invented). Formatting that the Qt
+//! pieces degrade to honest absence (never invented). Formatting that the legacy
 //! panel already performs (plan text, coverage text, status labels, clock,
 //! byte sizes) is passed through verbatim so the native console reads the same.
 
@@ -87,7 +87,7 @@ pub struct BrokerChoice {
     pub display: String,
 }
 
-/// Full download-console state. `pending` wires are drained by the Qt host to
+/// Full download-console state. `pending` wires are drained by the legacy host to
 /// the retained panel/manager (never applied here beyond optimistic UI fields).
 #[derive(Debug, Clone, PartialEq)]
 pub struct DownloadState {
@@ -212,7 +212,7 @@ impl DownloadState {
     /// reach the retained backend. Returns `None` for pure view-local moves.
     /// Compact JSON map of the current credential field values, embedded in
     /// the test/save wire so the host can call the SAME manager methods the
-    /// Qt dialog used (no engine, no duplicate validation).
+    /// legacy dialog used (no engine, no duplicate validation).
     fn cred_payload(&self) -> String {
         let map: serde_json::Map<String, serde_json::Value> = self
             .cred_fields
@@ -585,7 +585,7 @@ fn dl_list(v: &serde_json::Value, key: &str) -> Vec<String> {
 
 /// Merge the `download` object from the bridge snapshot into `state`,
 /// PRESERVING all view-local fields (open toggle, calendar, modal, filter,
-/// optimistic selection) — the backend facts overwrite only what Qt owns.
+/// optimistic selection) — the backend facts overwrite only what legacy owns.
 pub fn apply_download_snapshot(state: &mut DownloadState, value: &serde_json::Value) {
     state.busy = dl_bool(value, "busy");
     state.interval_items = dl_list(value, "interval_items");

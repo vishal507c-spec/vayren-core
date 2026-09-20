@@ -87,8 +87,8 @@ pub struct BrokerPanel {
     /// Explicit backend gate verdict — the ONLY source of LIVE readiness.
     pub live_gates_ready: bool,
     pub blockers: Vec<String>,
-    // ── parity facts (Qt BrokersWorkspace surface, backend-owned) ──
-    /// Exact `BrokerStatus` string (button rules key on it, as in Qt).
+    // ── parity facts (legacy BrokersWorkspace surface, backend-owned) ──
+    /// Exact `BrokerStatus` string (button rules key on it, as in legacy).
     pub status_raw: String,
     /// Raw check id → value pairs (the 6-cell health grid source).
     pub checks_raw: Vec<(String, String)>,
@@ -103,7 +103,7 @@ pub struct BrokerPanel {
     pub api_key_masked: String,
     /// Saved configuration exists (controls visibility of management UI).
     pub configured: bool,
-    /// Backend action affordances (Qt `can_login/can_disconnect/can_refresh`).
+    /// Backend action affordances (legacy `can_login/can_disconnect/can_refresh`).
     pub can_login: bool,
     pub can_disconnect: bool,
     pub can_refresh: bool,
@@ -151,7 +151,7 @@ impl BrokerPanel {
         self.environment == Environment::Live && self.live_gates_ready
     }
 
-    /// Build from the Qt host's bridge JSON (the `system_snapshot_dict`
+    /// Build from the legacy host's bridge JSON (the `system_snapshot_dict`
     /// schema: single selected broker, flat facts). Defensive: missing or
     /// mistyped keys degrade to honest absence — never invented state.
     /// Unknown environment strings fall back to the PAPER default (the app
@@ -302,12 +302,12 @@ impl fmt::Display for BrokerPanel {
     }
 }
 
-// ── parity projection (Qt BrokersWorkspace card rules, display only) ───────
+// ── parity projection (legacy BrokersWorkspace card rules, display only) ───────
 // Mirrors `_STATUS_META`, `_CHECK_ROWS`, `render_card` button/state rules
 // and `_format_inr` exactly. No backend logic: every branch reads backend
 // facts. Shared badge tones: 0 muted, 1 ok, 2 warn, 3 bad.
 
-/// Fixed capability grid rows (Qt `_CHECK_ROWS` order).
+/// Fixed capability grid rows (legacy `_CHECK_ROWS` order).
 pub const CHECK_ROWS: [(&str, &str); 6] = [
     ("connection", "CONNECTION"),
     ("account", "ACCOUNT"),
@@ -400,7 +400,7 @@ fn value_text(v: &serde_json::Value) -> String {
     }
 }
 
-/// Compact rupee rendering (Qt `_format_inr`): grouped, 0dp, never zero.
+/// Compact rupee rendering (legacy `_format_inr`): grouped, 0dp, never zero.
 fn inr(value: f64) -> String {
     let negative = value < 0.0;
     let digits = format!("{:.0}", value.abs());
@@ -463,7 +463,7 @@ pub struct CheckCell {
 impl BrokerPanel {
     /// Project backend facts onto display strings + control states.
     /// `refresh_busy` is the transient SYNCING feedback (set on the refresh
-    /// intent, cleared by the next applied snapshot — same contract as Qt).
+    /// intent, cleared by the next applied snapshot — same contract as legacy).
     pub fn project_card(&self, refresh_busy: bool) -> BrokerCardView {
         let status = self.status_raw.as_str();
         let (glyph, label, explanation, tone) = status_meta(status);
@@ -729,7 +729,7 @@ mod tests {
     }
 
     #[test]
-    fn card_status_meta_matches_qt_vocabulary() {
+    fn card_status_meta_matches_legacy_vocabulary() {
         let view = card("CONNECTED").project_card(false);
         assert_eq!(view.status_glyph, "●");
         assert_eq!(view.status_label, "CONNECTED");

@@ -17,30 +17,10 @@ def calc_rsi(closes: deque[float], period: int = 14) -> float:
     return 100 - (100 / (1 + rs))
 
 
-def calc_atr(
-    highs: deque[float], lows: deque[float], _closes: deque[float], period: int = 14
-) -> float:
-    if len(highs) < period:
-        return (highs[-1] - lows[-1]) if highs and lows else 0.0
-    trs = [highs[i] - lows[i] for i in range(-period, 0)]
-    return sum(trs) / period if trs else 0.0
-
-
 def calc_sma(closes: deque[float], period: int = 14) -> float:
     if len(closes) < period:
         return closes[-1] if closes else 0.0
     return sum(list(closes)[-period:]) / period
-
-
-def calc_ema(closes: deque[float], period: int = 14) -> float:
-    if len(closes) < period:
-        return closes[-1] if closes else 0.0
-    vals = list(closes)[-period:]
-    k = 2 / (period + 1)
-    ema = vals[0]
-    for v in vals[1:]:
-        ema = v * k + ema * (1 - k)
-    return ema
 
 
 def calc_range(highs: deque[float], lows: deque[float], period: int = 14) -> float:

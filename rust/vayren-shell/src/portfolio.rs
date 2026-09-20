@@ -6,8 +6,8 @@
 //! facts (broker/account, funds, positions, orders/fills, performance,
 //! risk). This module never computes financial truth: every number arrives in
 //! [`PortfolioSnapshot`] from the backend bridge (the same workspace-state
-//! shape the retained Qt `PortfolioWorkspace` consumes). Formatting here is
-//! display-only and mirrors the Qt `ui_kit` conventions exactly:
+//! shape the retained legacy `PortfolioWorkspace` consumes). Formatting here is
+//! display-only and mirrors the legacy `ui_kit` conventions exactly:
 //! signed 2dp money, `N/A` / `Unavailable` for missing data — never
 //! zero-filled, never invented.
 //!
@@ -53,7 +53,7 @@ pub struct BrokerFacts {
 }
 
 /// Backend-fed position facts (single `position` record or one `positions`
-/// list entry — same shape the Qt workspace consumes).
+/// list entry — same shape the legacy workspace consumes).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct PositionFacts {
     pub symbol: String,
@@ -95,7 +95,7 @@ pub struct FillFacts {
 }
 
 /// Immutable backend snapshot feeding one portfolio projection. Mirrors the
-/// retained Qt workspace state-dict keys (`broker`, `funds`, `position` /
+/// retained legacy workspace state-dict keys (`broker`, `funds`, `position` /
 /// `positions`, `orders`, `fills`, `pnl`, `risk`, `reconciliation`, `kill`,
 /// `lifecycle`, `mode`, `risk_metrics`).
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -147,7 +147,7 @@ impl PortfolioState {
     }
 }
 
-// ── display formatting (mirrors Qt ui_kit / portfolio_workspace) ────────────
+// ── display formatting (mirrors legacy ui_kit / portfolio_workspace) ────────────
 
 fn with_commas(int_part: &str, negative: bool) -> String {
     let digits: Vec<char> = int_part.chars().collect();
@@ -194,7 +194,7 @@ pub fn format_money(value: f64) -> String {
     format!("{value:+.2}")
 }
 
-/// Signed 2dp percent (`+1.00%`), mirroring the Qt `_fmt_pct`.
+/// Signed 2dp percent (`+1.00%`), mirroring the legacy `_fmt_pct`.
 pub fn format_pct(value: f64) -> String {
     format!("{value:+.2}%")
 }
@@ -213,7 +213,7 @@ fn tone_of(value: Option<f64>) -> Tone {
     }
 }
 
-// ── backend-shape helpers (mirror the Qt workspace derivations) ─────────────
+// ── backend-shape helpers (mirror the legacy workspace derivations) ─────────────
 
 /// Mirrors `PortfolioWorkspace._is_configured`.
 pub fn is_configured(snapshot: &PortfolioSnapshot) -> bool {
@@ -496,7 +496,7 @@ pub struct DetailView {
 
 /// Allocation rows rendered before the presentation cap (the label always
 /// carries the true percentage — the cap is a viewport policy, same as the
-/// Lab ranking precedent and the Qt top-8 rule).
+/// Lab ranking precedent and the legacy top-8 rule).
 pub const ALLOCATION_VIEW_CAP: usize = 8;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1056,7 +1056,7 @@ pub fn demo_unconfigured_snapshot() -> PortfolioSnapshot {
     }
 }
 
-/// Representative FUNDED snapshot mirroring the retained Qt workspace test
+/// Representative FUNDED snapshot mirroring the retained legacy workspace test
 /// state (paper account, one TEST position, one order + fill). Used for
 /// render-matrix verification — never shipped as product data.
 pub fn demo_configured_snapshot() -> PortfolioSnapshot {

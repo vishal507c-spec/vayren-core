@@ -17,7 +17,7 @@ from core.ai.plan_validator import PlanValidator, Policy
 from core.contracts.capability import CapabilityId
 from core.system.change_impact import RiskLevel
 from core.system.system_model import SystemModel
-from core.tests.test_component_poc import build_system
+from core.tests.helpers import build_system
 
 
 def system() -> SystemModel:

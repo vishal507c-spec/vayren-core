@@ -37,9 +37,6 @@ class PythonStrategy(StrategyLogic):
         self._pending_sl: float | None = None
         self._pending_tp: float | None = None
         self._pending_time_exit: str | None = None
-        self._current_day: str | None = None
-        self._prev_day_close: float = 0.0
-        self._is_new_day: bool = False
         # Chart plot series — title -> {bar_index: value}
         self._plot_series: dict[str, dict[int, float]] = {}
         self._plot_meta: dict[str, dict[str, str]] = {}
@@ -57,22 +54,6 @@ class PythonStrategy(StrategyLogic):
 
     def on_bar(self, view: BarView) -> Signal | None:
         bar = view.bar
-        # Update day tracking
-        try:
-            cur_day = str(bar.timestamp)[:10]
-        except Exception:
-            cur_day = ""
-        is_new = self._current_day is None or cur_day != self._current_day
-        if is_new and self._current_day is not None and self.closes:
-            try:
-                self._prev_day_close = float(self.closes[-1])
-            except Exception:
-                self._prev_day_close = 0.0
-        elif self._current_day is None:
-            self._prev_day_close = 0.0
-        self._is_new_day = bool(is_new)
-        if is_new:
-            self._current_day = cur_day
         self.closes.append(bar.close)
         self.highs.append(bar.high)
         self.lows.append(bar.low)
@@ -134,18 +115,6 @@ class PythonStrategy(StrategyLogic):
     def time_exit(self, time_str: str) -> None:
         self._pending_time_exit = str(time_str)
 
-    def is_new_day(self) -> bool:
-        return self._is_new_day
-
-    def prev_day_close(self) -> float:
-        return float(self._prev_day_close)
-
-    def after_time(self, time_str: str, view: BarView) -> bool:
-        try:
-            return str(view.bar.timestamp)[11:16] >= str(time_str)
-        except Exception:
-            return False
-
     def set_owner_id(self, owner_id: str) -> None:
         """Set the strategy identity used as ``source_strategy`` on plots."""
         with suppress(Exception):
@@ -156,14 +125,6 @@ class PythonStrategy(StrategyLogic):
         if owner:
             return owner
         return type(self).__name__
-
-    def _current_symbol(self) -> str:
-        try:
-            bar = self.closes  # noqa: B018 — touch to keep ordering obvious
-            _ = bar
-        except Exception:
-            pass
-        return ""
 
     def _next_plot_id(self, base: str, bar: int) -> str:
         key = f"{base}@{bar}"

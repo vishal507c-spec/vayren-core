@@ -3,7 +3,7 @@ name = "vayren-strategy-lab-view"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Embeddable native Strategy Lab view (Rust + Slint software renderer, C ABI for the Qt host)"
+description = "Embeddable native Strategy Lab view (Rust + Slint software renderer, C ABI for the embed host)"
 
 [lib]
 name = "vayren_strategy_lab_view"

@@ -86,10 +86,6 @@ class LineageGraph:
         """What did this produce?"""
         return list(self._forward.get((node_type, node_id), []))
 
-    def backward(self, node_type: str, node_id: str) -> list[tuple[str, str]]:
-        """Where did this come from?"""
-        return list(self._backward.get((node_type, node_id), []))
-
     def trace_forward(self, node_type: str, node_id: str) -> list[tuple[str, str]]:
         """All descendants (BFS)."""
         visited: set[tuple[str, str]] = set()

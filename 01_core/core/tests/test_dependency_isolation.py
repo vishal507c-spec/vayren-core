@@ -5,6 +5,7 @@ itself: no chapters, no UI framework, no third-party SDKs.
 """
 
 import ast
+import sys
 from pathlib import Path
 
 import pytest
@@ -16,7 +17,7 @@ from core.registry.component_registry import ComponentRegistry
 
 CORE_DIR = Path(__file__).resolve().parents[2] / "core"
 
-BANNED_TOP_LEVELS = {"app", "market", "chart", "PySide6", "httpx", "requests", "numpy", "pandas"}
+ALLOWED_TOP_LEVELS = frozenset({"core"}) | set(sys.stdlib_module_names)
 
 FOUNDATION_MODULES = [
     "ai/__init__.py",
@@ -54,8 +55,8 @@ def test_foundation_module_imports_only_stdlib_and_core(relative: str) -> None:
                 top_levels.add(alias.name.split(".")[0])
         elif isinstance(node, ast.ImportFrom) and node.module:
             top_levels.add(node.module.split(".")[0])
-    banned = top_levels & BANNED_TOP_LEVELS
-    assert banned == set(), f"{relative} imports banned top-level packages: {banned}"
+    foreign = {top for top in top_levels if top not in ALLOWED_TOP_LEVELS}
+    assert foreign == set(), f"{relative} imports non-stdlib, non-core packages: {foreign}"
 
 
 def test_kernel_operates_with_plain_objects() -> None:

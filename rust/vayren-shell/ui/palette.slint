@@ -1,6 +1,6 @@
 // VAYREN canonical UI tokens — single source of truth for the native shell.
 //
-// Implements UI_DESIGN_SYSTEM.md §3. Values are canonical: the Qt retained
+// Implements UI_DESIGN_SYSTEM.md §3. Values are canonical: the legacy retained
 // shell (lab_theme.py) implements THE SAME numbers. A value here that
 // disagrees with UI_DESIGN_SYSTEM.md §3 is wrong — fix it here, never add a
 // second literal at a use site. No component may hardcode colors, type
@@ -35,7 +35,7 @@ export global VayrenPalette {
     out property <color> neg-dim: #4A2027;
     out property <color> amber: #DDAA45;
     out property <color> warn-dim: #4A3C18;
-    // Strategy-marker parity tokens (Qt PlotOverlay glyph colors — the
+    // Strategy-marker parity tokens (legacy PlotOverlay glyph colors — the
     // reference chart paints EOD blue / diamond purple; no palette hue
     // matches, so they land here explicitly instead of as screen literals).
     out property <color> strat-blue: #42A5F5;

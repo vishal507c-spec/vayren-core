@@ -8,17 +8,17 @@ from core.ai.sandbox import Sandbox, SandboxDeployment, SandboxError, SandboxSta
 from core.contracts.capability import CapabilityId
 from core.system.system_model import SystemModel
 from core.system.workflow import Workflow, WorkflowRegistry, WorkflowStep
-from core.tests.test_component_poc import build_system
+from core.tests.helpers import build_system
 
 
 def make_system() -> SystemModel:
     workflows = WorkflowRegistry()
     workflows.register(
         Workflow(
-            id="chart_pipeline",
+            id="data_pipeline",
             steps=(
                 WorkflowStep(id="load", capability=CapabilityId("data.query.candles")),
-                WorkflowStep(id="render", capability=CapabilityId("chart.render")),
+                WorkflowStep(id="ingest", capability=CapabilityId("historical_data.download")),
             ),
         )
     )

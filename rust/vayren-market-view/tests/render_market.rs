@@ -149,7 +149,7 @@ fn diff_frac(a: &[u8], b: &[u8]) -> f64 {
 
 /// Pointer input parity: hover (crosshair), horizontal-wheel pan and
 /// left-drag pan must each repaint a visibly different frame through the
-/// same C ABI the Qt host uses (pointer_move/scroll/press/release).
+/// same C ABI the legacy host uses (pointer_move/scroll/press/release).
 #[test]
 fn market_pointer_inputs_repaint() {
     let (w, h) = (1280u32, 720u32);
@@ -243,7 +243,7 @@ fn tone_pixels(out: &[u8], w: u32, h: u32, fx0: f32, fx1: f32, fy0: f32, fy1: f3
     hits
 }
 
-/// One-side free pan through the REAL C ABI (the path the Qt host drives):
+/// One-side free pan through the REAL C ABI (the path the legacy host drives):
 /// dragging the candles left must park the newest candle on the LEFT of the
 /// plot with a large, genuinely empty region to its right — and the next
 /// identical backend snapshot must leave the view parked (no snap-back).
@@ -632,7 +632,7 @@ fn market_indicator_toolbar_buttons_queue_wires() {
 
 /// Trade overlay parity pixels: teal BUY triangle, red SELL triangle and
 /// blue EOD marker must all paint from real bridge facts (no red-circle
-/// spam: every marker carries its Qt-mapped glyph, pill and color).
+/// spam: every marker carries its legacy-mapped glyph, pill and color).
 #[test]
 fn market_trade_overlay_paints_parity_markers() {
     let bars = 160;

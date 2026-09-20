@@ -1,12 +1,24 @@
-# Vayren — Desktop Charting Platform
+# Vayren — Native Trading Platform
 
-Vayren is a desktop charting platform whose current job is ONLY to display candlestick charts from SQLite candle data.
-Current release: v1.8.0.
+Vayren is a native desktop trading platform: Rust + Slint UI served by a
+headless Python backend over newline-delimited JSON.
 
-Flow: App → EventBus → Data → SQLite → Chart.
+```
+Rust + Slint shell (vayren-shell)
+        ↕  JSON over stdin/stdout
+Headless Python backend (app.headless)
+```
 
-Vayren currently owns ONLY chart display and the minimum infrastructure required to load and render candles.
-It must NOT contain indicators, strategies, trading logic, broker/execution, portfolio, scanner, replay, backtest, drawings, or other future features.
-Rule: every new feature belongs to its own future module; never expand an existing module to absorb unrelated features.
-Authoritative architecture/rules/contracts are in AGENTS.md, ARCHITECTURE_CONSTITUTION.md, and 90_brain/.
-AI: read those authoritative files before making architectural/code decisions; do not infer or invent rules from this README.
+Flow: shell → backend snapshot (symbols, market, system, portfolio, live,
+research, lab) → Rust state → Slint projection.
+
+- UI: Rust + Slint only (`rust/vayren-shell`). No other UI framework.
+- Backend: Python owns market data, strategies, backtest, risk, execution,
+  broker SDKs, research (`00_app`–`09_broker`, headless, stdlib threading).
+- Launch: `make dev` (debug) — data from `VAYREN_DATA_DIR`, strategies
+  from `VAYREN_STRATEGIES`.
+
+Authoritative architecture/rules/contracts are in AGENTS.md,
+ARCHITECTURE_CONSTITUTION.md, and 90_brain/.
+AI: read those authoritative files before making architectural/code
+decisions; do not infer or invent rules from this README.

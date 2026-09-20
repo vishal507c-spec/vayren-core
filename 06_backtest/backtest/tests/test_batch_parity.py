@@ -5,9 +5,7 @@ inline and pooled): same candles, same bars, same trades, same equity,
 same metrics, same visuals. Only scheduling may differ.
 """
 
-import os
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import sqlite3
 import tempfile

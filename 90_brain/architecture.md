@@ -80,17 +80,17 @@ repository (rows → Bar/SymbolQuote)
     ↓
 loader    (Event → repository → Event)
     ↓
-engine    (Event → ChartModel)
+bridge    (repository → JSON snapshot over stdio)
     ↓
-renderer  (stateless QPainter: grid, candles, volume, axes)
+state     (Rust view-model: MarketState, watchlist, viewport, indicators)
     ↓
-widgets   (viewport: zoom/pan/crosshair, watchlist, tools rail)
+project   (pure state → Slint render view: candles, axes, markers)
     ↓
-windows   (host: splitter, title, WindowRendered)
+screen    (Slint: chart, tools rail, status strip)
 ```
 
 - One layer = one responsibility. Skipping a layer is forbidden.
-- `database` never emits events; `widgets` never touch bus/SQL.
+- `database` never emits events; Slint screens never touch bus/SQL.
 
 ### 4.2 Core internals
 
@@ -110,46 +110,35 @@ ai/         (Intent → Plan → Validator → Simulation → Sandbox — determ
 ### 4.3 Runtime composition (single root)
 
 ```
-Bootstrap (00_app/app/bootstrap/bootstrap.py)
-  ├── EventBus + services Registry (name lookup, unchanged)
-  ├── subscriptions (ONLY place subscribe is called)
-  └── _build_architecture() — once at startup
-        ├── market_manifest() → ComponentRegistry (live SymbolRepository)
-        ├── chart_manifest()  → ComponentRegistry (live ChartEngine)
-        ├── data_manifest() , strategy_manifest(), backtest_manifest()
-        └── SystemModel(registry) → components / system_model
+launch_native.py (scripts/launch_native.py)
+  ├── resolves repo root, data/strategy dirs, picks the binary
+  └── vayren-shell (Rust + Slint production entry)
+        ├── spawns app.headless (JSON over stdio)
+        ├── snapshots → MarketState/BrokerWorkspace/LiveState/ResearchState/LabState/PortfolioState
+        └── projects each state onto its Slint screen
 ```
 
-- Single runtime: same bus, same bootstrap, same hot paths.
-- Capability lookup `components.providers("data.query.candles")` coexists with legacy `services.get("symbol_repository")`.
-- Explicit registration — no scanner, no reflection. `SystemModel` built once at startup (not per-event).
+- Single runtime: one backend process, one native window, same hot paths.
+- Explicit construction — no scanner, no reflection. Snapshots load once at startup (not per-frame).
 
 ---
 
 ## 5. Runtime Flow
 
 ```
-App.main() → parse_args + configure_logging + QApplication
+make dev → launch_native.py → vayren-shell binary
     ↓
-Bootstrap(data_dir, limit)  // builds bus, repos, loaders, engine, widgets
+backend spawn (app.headless: ready + list_symbols)
     ↓
-Bootstrap.start() → AppStarted (bus)
+market snapshot → MarketState (watchlist + bars, viewport anchored)
     ↓
-AppLifecycle.on_app_started → ListSymbols
+lab/portfolio/research/live/system snapshots → native states
     ↓
-SymbolListLoader → SymbolsListed → QuoteLoader → QuotesLoaded (watchlist)
-    ↓
-(user click) LoadSymbol / TimeframeChanged → MarketDataLoader → DataLoaded
-    ↓
-ChartEngine.on_data_loaded → ChartReady
-    ↓
-ChartWindow.on_chart_ready → widget.set_model → WindowRendered
-    ↓
-Qt event loop
+Slint event loop (screens project state; interactions report to Rust)
 ```
 
-- **Synchronous bus:** the entire chain completes in one `publish` before Qt loop starts.
-- `limit: int | None = None` = full history (no `LIMIT NULL` bind). `DataLoaded` is the chart's only data source.
+- **Fail-closed bridge:** every snapshot is validated before it reaches Rust state; backend errors never touch the UI.
+- `limit: int | None = None` = full history (no `LIMIT NULL` bind). The market snapshot is the chart's only data source.
 
 ---
 
@@ -175,7 +164,7 @@ Qt event loop
 |---|---|
 | `scripts/validate_imports.py` (AST) | Dependency graph §3; forbids internal/relative/star imports; runtime imports only (`if TYPE_CHECKING:` exempt) |
 | `scripts/validate_structure.py` | Required layout: `__init__.py`, `README.md`, `manifest.py`, `models/`, `database/`/`renderer/` etc. per domain (7 domains: app/core/data/market/chart/strategy/backtest) |
-| `scripts/validate_language_ownership.py` (AST) | Constitutional language ownership: no new Python in Rust-owned domains, no new Qt UI surfaces, no reintroduced authorities, frozen baseline, Rust crate hygiene |
+| `scripts/validate_language_ownership.py` (AST) | Constitutional language ownership: no new Python in Rust-owned domains, no new Python UI surfaces, no reintroduced authorities, Rust crate hygiene |
 | `scripts/build_rust.py` | Builds the `vayren-core` cdylib + handshake; required before any Python test run (`make check`/`run_tests.py`/CI build it first) |
 | `make check` | `rust` + `ruff format --check` + `ruff check` + `pyright` + `pytest` + validators — must pass before merge |
 

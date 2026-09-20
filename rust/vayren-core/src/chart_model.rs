@@ -19,7 +19,7 @@
 //!   "1D" here instead of parsing.
 //!
 //! No FFI in this slice (same rationale as the risk/execution engines):
-//! timestamps cross as strings and the consumers (`ChartEngine`, Qt widgets)
+//! timestamps cross as strings and the consumers (`ChartEngine`, legacy widgets)
 //! stay Python-bound, so a C string-vector ABI would add failure modes for
 //! zero measured need. The kernels are exercised via in-process unit tests
 //! against live-Python parity vectors.

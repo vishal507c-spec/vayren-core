@@ -391,7 +391,7 @@ pub struct LiveState {
     /// every mutating control stays honestly inert, same contract as the
     /// Strategy Lab RUN gate).
     pub bridge_wired: bool,
-    /// Host-embedded mode: the Qt shell's Slint viewport feeds real backend
+    /// Host-embedded mode: the legacy shell's Slint viewport feeds real backend
     /// facts via [`LiveState::apply_snapshot`]. Runtime fields (session,
     /// kill, halt/arm verdicts, setup config) are then BACKEND facts and UI
     /// actions only report intent outward — the model never pre-applies a
@@ -517,7 +517,7 @@ impl LiveState {
     /// Setup + venue validation, mirroring the service `validate()` order.
     /// An unconnected bridge always blocks (no fake enabled states). In host
     /// mode the backend's verdict is authoritative when present (same
-    /// contract the Qt workspace consumed: `start_blockers` from the
+    /// contract the legacy workspace consumed: `start_blockers` from the
     /// service, `status_reason` shown beside them).
     pub fn start_blockers(&self) -> Vec<String> {
         if self.host_mode {
@@ -634,7 +634,7 @@ impl LiveState {
         }
     }
 
-    /// The setup payload mirrors the Qt workspace's `setup_changed` dict:
+    /// The setup payload mirrors the legacy workspace's `setup_changed` dict:
     /// the full current selection, emitted after every accepted edit.
     fn push_setup_action(&mut self) {
         if !self.host_mode {
@@ -841,11 +841,11 @@ impl LiveState {
         self.event_type_filter = kind.to_string();
     }
 
-    // ── host bridge ingest (the Qt app's live-state provider → here) ─────
+    // ── host bridge ingest (the legacy app's live-state provider → here) ─────
 
     /// Apply one backend snapshot from the real live-state provider
     /// (`bootstrap._live_state_provider` schema — the SAME dict the retained
-    /// Qt workspace consumed). Defensive: missing/mistyped keys degrade to
+    /// legacy workspace consumed). Defensive: missing/mistyped keys degrade to
     /// honest absence, never invented facts. Numbers arrive raw; ALL
     /// formatting/derivation happens here. Sets `host_mode` + `bridge_wired`.
     pub fn apply_snapshot(&mut self, v: &serde_json::Value) {
@@ -2459,7 +2459,7 @@ mod tests {
         assert_eq!(action["action"], "start");
         assert_eq!(action["confirmed"], false);
         assert!(st.take_action().is_none());
-        // Setup edits forward the full Qt-shaped setup payload.
+        // Setup edits forward the full legacy-shaped setup payload.
         st.toggle_symbol(1);
         let action: serde_json::Value = serde_json::from_str(&st.take_action().unwrap()).unwrap();
         assert_eq!(action["action"], "setup");
@@ -2491,7 +2491,7 @@ mod tests {
         assert!(!st.can_start());
         let view = project(&st);
         assert_eq!(view.bar.exec_label, "● ENABLED");
-        // status_reason surfaces as its own visible line (Qt parity).
+        // status_reason surfaces as its own visible line (legacy parity).
         assert!(view
             .setup
             .blockers

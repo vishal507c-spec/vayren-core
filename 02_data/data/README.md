@@ -20,7 +20,7 @@ Requests: `DownloadRequest`, `CoverageRequest`, `CancelDownload` → Facts: `Dow
 - Credentials: `VAYREN_ZERODHA_*` env at auth time + `ProviderCredentialsManager` (Windows Credential Manager / file fallback); never in events/logs/UI.
 
 ## Wiring
-`DownloadWorker(QThread)` owns engine → Qt signals → `Bootstrap` bridges to `EventBus`. UI `data/ui/HistoricalDownloadPanel` (embedded side panel, not window) sirf bus se baat karta hai.
+`DownloadWorker` (stdlib `WorkerThread`) engine ko off-main-thread chalata hai; progress observable signals par aata hai. Native download console (`market_download.rs` + `market.slint`) backend intents se judta hai.
 
 ## Import
 `data` → `core` only.

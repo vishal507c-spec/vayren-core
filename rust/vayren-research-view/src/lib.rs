@@ -1,4 +1,4 @@
-//! Embeddable native Research view — offscreen Slint host for the Qt shell.
+//! Embeddable native Research view — offscreen Slint host for the legacy shell.
 //!
 //! Architecture (constitution §3: Rust+Slint owns ALL native UI state and
 //! presentation) — the proven `vayren-live-view` mechanism reused for
@@ -7,7 +7,7 @@
 //! snapshots, and dispatches queued UI intents back to the engine:
 //!
 //! ```text
-//! Qt main window ── SlintResearchHost (viewport) ── C ABI ── THIS crate
+//! legacy main window ── SlintResearchHost (viewport) ── C ABI ── THIS crate
 //!   state: vayren_shell::research_state::ResearchState (single owner — the
 //!   SAME view-model the native shell binds); ui/research_host.slint hosts
 //!   the EXISTING verified ResearchScreen with zero visual delta.

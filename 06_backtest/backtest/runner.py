@@ -255,7 +255,7 @@ class BacktestRunner:
     """End-to-end backtest for one request (multiple strategies isolated).
 
     No thread, no bus. The :class:`BacktestWorker` calls :meth:`run` off the
-    UI thread and bridges results via Qt signals. Market data is reused
+    UI thread and bridges results via observable signals. Market data is reused
     through the given :class:`SymbolRepository`.
 
     Execution is Python-only: Python Strategy source → PythonStrategy. No DSL, no IR, no VM.

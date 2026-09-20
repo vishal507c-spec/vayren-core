@@ -22,7 +22,7 @@
 //! Seams (Python-owned, injected): strategy compile/records/registry (Python
 //! strategies §2), repository fetch (SQLite IO), process pool + workers
 //! (processes stay Python), research datasets (strategy-owned), wall clock.
-//! `BacktestWorker` (Qt thread) stays Python.
+//! `BacktestWorker` (legacy thread) stays Python.
 //!
 //! Deliberate narrowings, all documented at the item:
 //! - `raise` → `Err(String)` / `None` with identical messages (no exceptions).

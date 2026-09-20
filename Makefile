@@ -15,12 +15,7 @@ setup:
 # ── Development ────────────────────────────────────────────────
 
 dev:
-	python -m app
-
-# ── Packaging ──────────────────────────────────────────────────
-
-exe:
-	.venv\Scripts\pyinstaller scripts\assets\vayren.spec --noconfirm --distpath build\dist --workpath build\work
+	python scripts/launch_native.py
 
 # ── Quality ────────────────────────────────────────────────────
 
@@ -28,7 +23,7 @@ test:
 	pytest
 
 test-coverage:
-	pytest --cov=app --cov=core --cov=market --cov=chart --cov=data --cov=strategy --cov=backtest --cov=risk --cov=execution --cov-report=term --cov-report=html
+	pytest --cov=app --cov=core --cov=market --cov=data --cov=strategy --cov=backtest --cov=risk --cov=execution --cov-report=term --cov-report=html
 
 lint:
 	ruff check .
@@ -52,9 +47,6 @@ validate-imports:
 validate-language:
 	python scripts/validate_language_ownership.py
 
-validate-migration:
-	python scripts/migration/__main__.py verify
-
 validate-architecture:
 	python scripts/validate_architecture_gate.py
 
@@ -66,7 +58,7 @@ rust:
 
 # ── Full Check ─────────────────────────────────────────────────
 
-check: rust lint typecheck test validate-structure validate-imports validate-language validate-migration validate-architecture
+check: rust lint typecheck test validate-structure validate-imports validate-language validate-architecture
 
 # ── Release (mechanics only; run `make check` first, CI validates on push) ─
 

@@ -5,7 +5,7 @@ import pytest
 from core.contracts.capability import CapabilityId
 from core.system.system_model import SystemModel
 from core.system.workflow import Workflow, WorkflowRegistry, WorkflowStep
-from core.tests.test_component_poc import build_system
+from core.tests.helpers import build_system
 
 
 def make_system(with_workflows: bool = True) -> SystemModel:
@@ -14,10 +14,10 @@ def make_system(with_workflows: bool = True) -> SystemModel:
         workflows = WorkflowRegistry()
         workflows.register(
             Workflow(
-                id="chart_pipeline",
+                id="data_pipeline",
                 steps=(
                     WorkflowStep(id="load", capability=CapabilityId("data.query.candles")),
-                    WorkflowStep(id="render", capability=CapabilityId("chart.render")),
+                    WorkflowStep(id="ingest", capability=CapabilityId("historical_data.download")),
                 ),
             )
         )
@@ -26,10 +26,13 @@ def make_system(with_workflows: bool = True) -> SystemModel:
 
 def test_manifests_and_components() -> None:
     system = make_system()
-    assert [manifest.identity.name for manifest in system.components()] == ["chart", "market"]
+    assert [manifest.identity.name for manifest in system.components()] == [
+        "historical_data",
+        "market",
+    ]
     assert system.has_component("market")
     assert not system.has_component("missing")
-    assert system.find_component("chart").type == "presentation"
+    assert system.find_component("historical_data").type == "ingest"
 
 
 def test_find_component_raises_key_error() -> None:
@@ -40,11 +43,13 @@ def test_find_component_raises_key_error() -> None:
 def test_capabilities_query() -> None:
     system = make_system()
     assert [str(capability) for capability in system.capabilities()] == [
-        "chart.render",
         "data.query.candles",
         "data.query.quotes",
         "data.query.timeframes",
         "data.transform.aggregate",
+        "historical_data.coverage",
+        "historical_data.download",
+        "historical_data.status",
     ]
     found = [str(capability) for capability in system.find_capability("data.query")]
     assert found == ["data.query.candles", "data.query.quotes", "data.query.timeframes"]
@@ -62,19 +67,19 @@ def test_find_implementations_returns_objects() -> None:
 
 def test_dependency_queries() -> None:
     system = make_system()
-    assert system.find_dependents("market") == ("chart",)
-    assert system.find_dependencies("chart") == ("core", "market")
-    assert system.find_consumers("data.query.candles") == ("chart",)
-    assert system.find_consumers("chart.render") == ()
+    assert system.find_dependents("market") == ()
+    assert system.find_dependencies("historical_data") == ("core",)
+    assert system.find_consumers("data.query.candles") == ()
+    assert system.find_consumers("historical_data.download") == ()
 
 
 def test_workflow_queries() -> None:
     system = make_system()
-    assert [workflow.id for workflow in system.find_workflows()] == ["chart_pipeline"]
+    assert [workflow.id for workflow in system.find_workflows()] == ["data_pipeline"]
     by_capability = [workflow.id for workflow in system.find_workflows("data.query.candles")]
-    assert by_capability == ["chart_pipeline"]
-    by_render = [workflow.id for workflow in system.find_workflows("chart.render")]
-    assert by_render == ["chart_pipeline"]
+    assert by_capability == ["data_pipeline"]
+    by_ingest = [workflow.id for workflow in system.find_workflows("historical_data.download")]
+    assert by_ingest == ["data_pipeline"]
 
 
 def test_workflow_queries_without_workflows() -> None:
@@ -84,7 +89,7 @@ def test_workflow_queries_without_workflows() -> None:
 
 def test_analyze_change_and_snapshot() -> None:
     system = make_system()
-    impact = system.analyze_change("chart")
-    assert impact.target == "component:chart"
+    impact = system.analyze_change("historical_data")
+    assert impact.target == "component:historical_data"
     snapshot = system.snapshot()
     assert len(snapshot.components) == 2

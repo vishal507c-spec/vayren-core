@@ -1,4 +1,4 @@
-"""Observable primitives — Qt-free Signal/WorkerThread/IntervalTimer parity."""
+"""Observable primitives — native Signal/WorkerThread/IntervalTimer parity."""
 
 from __future__ import annotations
 
@@ -206,7 +206,7 @@ def test_worker_thread_restart_after_finish() -> None:
     worker.start()
     assert worker.wait(5000)
     assert worker.ticks == 5
-    worker.start()  # finished thread may restart (QThread parity)
+    worker.start()  # a finished thread may restart; a live one ignores start
     assert worker.wait(5000)
     assert worker.ticks == 10
 

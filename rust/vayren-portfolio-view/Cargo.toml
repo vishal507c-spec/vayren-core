@@ -3,7 +3,7 @@ name = "vayren-portfolio-view"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Embeddable native Portfolio view (Rust + Slint software renderer, C ABI for the Qt host)"
+description = "Embeddable native Portfolio view (Rust + Slint software renderer, C ABI for the embed host)"
 
 [lib]
 name = "vayren_portfolio_view"

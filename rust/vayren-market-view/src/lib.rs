@@ -1,12 +1,12 @@
-//! Embeddable native Market view — offscreen Slint host for the Qt shell.
+//! Embeddable native Market view — offscreen Slint host for the legacy shell.
 //!
 //! Architecture (constitution §3) mirrors `vayren-strategy-lab-view` 1:1: the
-//! Qt main window owns a `SlintMarketHost` viewport that blits this crate's
+//! legacy main window owns a `SlintMarketHost` viewport that blits this crate's
 //! frames; all view-model state lives in `vayren_shell::market`, and
 //! `ui/market_host.slint` is a pure pass-through of the verified
 //! `vayren-shell/ui/market.slint`. Interactions route through
 //! `MarketState::interact` (optimistic local apply; backend-affecting actions
-//! also queue a wire string the Qt host drains and replays through the SAME
+//! also queue a wire string the legacy host drains and replays through the SAME
 //! signals a user click emits).
 //!
 //! Threading: every C ABI function must run on the creating thread; violations
@@ -513,7 +513,7 @@ fn wire_view(ui: &MarketHostWindow, state: Rc<RefCell<MarketState>>) {
     bind!(on_trade_prev, "trade:prev", MarketAction::TradePrev);
     bind!(on_trade_next, "trade:next", MarketAction::TradeNext);
     bind!(on_trade_open, "trade:open", MarketAction::TradeOpen);
-    // View-local market-status strip toggle (Qt MarketStatusPanel parity;
+    // View-local market-status strip toggle (legacy MarketStatusPanel parity;
     // no backend wire — same track as PanelToggle).
     bind!(on_status_toggle, "", MarketAction::ToggleStatus);
 
@@ -557,7 +557,7 @@ fn wire_view(ui: &MarketHostWindow, state: Rc<RefCell<MarketState>>) {
     ));
     // ⚙ action — the native settings panel: open/close is view-local state,
     // SAVE/RESET commit to the backend through the same wire namespace the
-    // retained Qt toolbar reaches.
+    // retained legacy toolbar reaches.
     {
         let strong = state.clone();
         let weak = ui.as_weak();

@@ -75,7 +75,7 @@ def test_ai_cannot_bypass_policies_end_to_end() -> None:
     from core.ai.plan_validator import PlanValidator, Policy
     from core.ai.sandbox import Sandbox, SandboxError
     from core.system.system_model import SystemModel
-    from core.tests.test_component_poc import build_system
+    from core.tests.helpers import build_system
 
     boundary = AiBoundary()
     with pytest.raises(BoundaryViolation):

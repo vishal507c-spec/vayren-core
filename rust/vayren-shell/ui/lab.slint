@@ -723,7 +723,7 @@ export component StrategyLabScreen inherits Rectangle {
                 }
             }
 
-            // Backtest configuration — the Qt 4-column grid (UNIVERSE →
+            // Backtest configuration — the legacy 4-column grid (UNIVERSE →
             // TIMEFRAME → DATE RANGE → CAPITAL) with the same editors: text
             // entry commits on Enter, timeframe is a combo box, the panel's
             // inline error echoes verbatim.
@@ -1012,7 +1012,7 @@ export component StrategyLabScreen inherits Rectangle {
                         detail: root.lab.empty-reason;
                     }
 
-                    // EDITOR: strategy code + parameters (the Qt center
+                    // EDITOR: strategy code + parameters (the legacy center
                     // column — always live, tab 0 never touches the backend).
                     if root.lab.has-strategy && root.lab.tab == 0: Rectangle {
                         VerticalLayout {
@@ -1516,7 +1516,7 @@ export component StrategyLabScreen inherits Rectangle {
                         }
                     }
 
-                    // TRADES: dense 11-column blotter (Qt order verbatim) with
+                    // TRADES: dense 11-column blotter (legacy order verbatim) with
                     // the same text filter; in COMPARE the side segment
                     // filters the full trade list and the summary echoes.
                     if root.lab.show-results && root.lab.tab == 2: Rectangle {
@@ -1642,7 +1642,7 @@ export component StrategyLabScreen inherits Rectangle {
 
                     // EQUITY + DRAWDOWN: single mode shows both charts;
                     // COMPARE overlays BUY (teal) and SELL (red) on one
-                    // shared scale, like the Qt dual view.
+                    // shared scale, like the legacy dual view.
                     if root.lab.show-results && (root.lab.tab == 3 || root.lab.tab == 4): Rectangle {
                         if !root.lab.is-compare: HorizontalLayout {
                             padding: VayrenDesign.sp-lg;
@@ -1707,7 +1707,7 @@ export component StrategyLabScreen inherits Rectangle {
             }
         }
             // Symbol selector dropdown (Market Watchlist universe, live
-            // toggles like the Qt popup — no apply/cancel split there).
+            // toggles like the legacy popup — no apply/cancel split there).
             // Direct child of the workspace column (NOT the vertical flow),
             // so absolute placement paints above KPI/tabs/content.
             if root.lab.sym-open: Rectangle {

@@ -1,21 +1,13 @@
 """Suite-partitioned pytest driver.
 
-Each entry runs in its OWN fresh interpreter. Cross-suite heap poisoning
-(leaked PySide6/shiboken objects from one suite being collected inside
-another — observed as Windows access violations under pymalloc) becomes
-structurally impossible: every interpreter starts clean and exits before
-the next one begins.
-
-The chart domain is expanded PER TEST FILE — its render/pixmap-heavy tests
-are the most GC-sensitive, and file-level isolation makes even that
-partition deterministic.
+Each entry runs in its OWN fresh interpreter for suite isolation: every
+interpreter starts clean and exits before the next one begins.
 
 Stdlib only. Exit code 0 iff every partition passed.
 """
 
 from __future__ import annotations
 
-import glob
 import os
 import subprocess
 import sys
@@ -26,7 +18,6 @@ PARTS = (
     "01_core/core/tests",
     "02_data/data/tests",
     "03_market/market/tests",
-    *sorted(glob.glob("04_chart/chart/tests/test_*.py")),
     "05_strategy/strategy/tests",
     "05_strategy/strategy/research/tests",
     "06_backtest/backtest/tests",
@@ -34,17 +25,12 @@ PARTS = (
     "08_execution/execution/tests",
     "09_broker/broker/tests",
     "scripts/forensics/tests",
-    "scripts/migration/tests",
-    "scripts/migration/agent/tests",
     "scripts/tests",
 )
 
 
 def main() -> int:
     env = os.environ.copy()
-    env.setdefault("QT_QPA_PLATFORM", "offscreen")
-    # pymalloc + shiboken interplay is the AV source; plain malloc is stable.
-    env.setdefault("PYTHONMALLOC", "malloc")
 
     # The Rust kernels back execution/backtest/market tests: ensure the
     # cdylib exists before any partition imports the bridge (fail-closed).
