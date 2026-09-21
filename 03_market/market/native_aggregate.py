@@ -1,4 +1,4 @@
-"""Rust-backed timeframe aggregation kernel (constitution §1: Market/Data
+"""Rust-backed timeframe aggregation kernel (AI_ENTRY.md §1: Market/Data
 processing / Numerical calculations / Performance-critical).
 
 Bucket grouping and single-pass OHLCV accumulation live in Rust

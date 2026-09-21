@@ -1,4 +1,4 @@
-"""Rust-backed backtest numeric kernels (constitution §1: Backtesting /
+"""Rust-backed backtest numeric kernels (AI_ENTRY.md §1: Backtesting /
 Numerical calculations / Performance-critical).
 
 The math lives in Rust (`rust/vayren-core`, `metrics` and `backtest_engine`

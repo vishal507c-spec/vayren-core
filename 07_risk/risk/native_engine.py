@@ -5,7 +5,7 @@ named gates, their order, their verdicts, every reason string and the
 duplicate-intent memory. This module only marshals a policy and a request
 across the boundary and re-materialises the JSON decision document as the
 frozen value objects callers already expect — no risk rule is evaluated here
-(constitution §8, migration §14).
+(AI_ENTRY.md §1).
 """
 
 from __future__ import annotations

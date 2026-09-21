@@ -1,4 +1,4 @@
-"""Rust-backed order lifecycle authority (constitution §1: Execution/Core).
+"""Rust-backed order lifecycle authority (AI_ENTRY.md §1: Execution/Core).
 
 The transition TABLE and terminal set live ONLY in Rust
 (`rust/vayren-core`, `order_state` module). This bridge holds no table and

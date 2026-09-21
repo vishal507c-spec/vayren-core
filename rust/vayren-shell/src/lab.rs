@@ -1,6 +1,6 @@
 //! Strategy Lab native view-model — pure, headless-testable UI state
-//! (constitution §3 / UI_DESIGN_SYSTEM.md §12: Rust owns view-model +
-//! interaction state; Slint renders bound properties only).
+//! (AI_ENTRY.md §1: Rust owns view-model + interaction state; Slint renders
+//! bound properties only).
 //!
 //! This is the presentation-side model of the Strategy Lab workstation. It
 //! never computes financial results: every value arrives via

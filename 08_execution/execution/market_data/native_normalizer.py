@@ -5,7 +5,7 @@ delivery order, staleness thresholds and every counter live in
 ``rust/vayren-core/src/normalizer.rs``. This module only marshals a symbol, a
 sequence number and an opaque token across and re-reads the kernel's verdict
 document; market event objects never cross the boundary and no stream policy
-is evaluated here (constitution §1, migration §15).
+is evaluated here (AI_ENTRY.md §1).
 """
 
 from __future__ import annotations

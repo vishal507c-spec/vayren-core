@@ -1,6 +1,6 @@
 //! Embeddable native Market view — offscreen Slint host for the legacy shell.
 //!
-//! Architecture (constitution §3) mirrors `vayren-strategy-lab-view` 1:1: the
+//! Architecture (AI_ENTRY.md §1) mirrors `vayren-strategy-lab-view` 1:1: the
 //! legacy main window owns a `SlintMarketHost` viewport that blits this crate's
 //! frames; all view-model state lives in `vayren_shell::market`, and
 //! `ui/market_host.slint` is a pure pass-through of the verified

@@ -1,4 +1,4 @@
-"""Rust-backed backtest form checks (constitution §1: Backtesting).
+"""Rust-backed backtest form checks (AI_ENTRY.md §1: Backtesting).
 
 The decision lives in Rust (`rust/vayren-core`, `backtest_validation`
 module); this module marshals the form across the boundary. String/set

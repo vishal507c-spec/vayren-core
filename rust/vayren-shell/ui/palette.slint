@@ -1,9 +1,7 @@
 // VAYREN canonical UI tokens — single source of truth for the native shell.
 //
-// Implements UI_DESIGN_SYSTEM.md §3. Values are canonical: the legacy retained
-// shell (lab_theme.py) implements THE SAME numbers. A value here that
-// disagrees with UI_DESIGN_SYSTEM.md §3 is wrong — fix it here, never add a
-// second literal at a use site. No component may hardcode colors, type
+// Values are canonical: a use site that disagrees is wrong — fix it here,
+// never add a second literal. No component may hardcode colors, type
 // sizes, spacing, or radii outside VayrenPalette / VayrenDesign.
 
 export global VayrenPalette {

@@ -1,5 +1,5 @@
-//! Technical indicator kernels — Rust-owned numeric authority (constitution
-//! §1: Market/Data processing / Numerical calculations / Performance-critical).
+//! Technical indicator kernels — Rust-owned numeric authority (AI_ENTRY.md §1:
+//! Market/Data processing / Numerical calculations / Performance-critical).
 //!
 //! Pure math: indicators accept price slices, return computed values. NaN/Inf
 //! inputs fail safe (return None or NaN-free output). No market orchestration,

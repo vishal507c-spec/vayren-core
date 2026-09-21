@@ -1,5 +1,5 @@
 //! Shell state + projection logic — pure, headless-testable native UI state
-//! (constitution §3: Rust owns UI state/interaction logic; Slint only
+//! (AI_ENTRY.md §1: Rust owns UI state/interaction logic; Slint only
 //! renders bound properties).
 //!
 //! The shell owns the active screen centrally (single state source, mission

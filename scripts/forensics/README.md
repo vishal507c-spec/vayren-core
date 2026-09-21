@@ -146,7 +146,7 @@ interval, open tasks close at analysis time, start/end events carry exact
 timestamps, sessions open/close at real agent-turn boundaries, a closed
 task's report auto-prints when the next turn starts, file writes are
 auto-captured as CODE_GENERATION with the file mtime, and old-format traces
-still analyze. `conftest.py` adds `scripts/` and `scripts/forensics/` to
+still analyze. `scripts/forensics/tests/conftest.py` adds `scripts/` and `scripts/forensics/` to
 `sys.path` (flat sibling imports match `python scripts/forensics/__main__.py`).
 
 ## Not measured exactly (by design)

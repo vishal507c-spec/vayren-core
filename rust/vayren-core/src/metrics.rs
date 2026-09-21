@@ -1,4 +1,4 @@
-//! Backtest numeric kernels — the Rust-owned authority (constitution §1:
+//! Backtest numeric kernels — the Rust-owned authority (AI_ENTRY.md §1:
 //! Backtesting / Numerical calculations / Performance-critical).
 //!
 //! These functions reproduce the exact IEEE-754 double semantics of the

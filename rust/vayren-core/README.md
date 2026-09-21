@@ -1,7 +1,7 @@
 # vayren-core — Rust-owned kernels
 
 Single authoritative implementation of VAYREN's Rust-owned numeric and
-lifecycle logic (ARCHITECTURE_CONSTITUTION.md §1: Core/Performance,
+lifecycle logic (AI_ENTRY.md §1: Core, Performance,
 Market/Data, Execution, Backtest). Zero dependencies (std only).
 
 ## Modules

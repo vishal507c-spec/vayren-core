@@ -19,6 +19,6 @@ research, lab) → Rust state → Slint projection.
   from `VAYREN_STRATEGIES`.
 
 Authoritative architecture/rules/contracts are in AGENTS.md,
-ARCHITECTURE_CONSTITUTION.md, and 90_brain/.
+AI_ENTRY.md, and 90_brain/.
 AI: read those authoritative files before making architectural/code
 decisions; do not infer or invent rules from this README.

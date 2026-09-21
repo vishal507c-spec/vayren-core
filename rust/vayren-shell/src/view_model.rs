@@ -1,5 +1,5 @@
 //! Broker panel view-model — pure, headless-testable native UI state
-//! (constitution §3: Rust+Slint owns UI state/interaction logic).
+//! (AI_ENTRY.md §1: Rust+Slint owns UI state/interaction logic).
 //!
 //! The model is a read-only projection of backend facts. It NEVER invents
 //! CONNECTED / AUTHENTICATED / LIVE-READY: connection is derived only from a

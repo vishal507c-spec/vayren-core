@@ -1,6 +1,6 @@
 //! Live execution workspace native view-model — pure, headless-testable UI
-//! state (constitution §3 / UI_DESIGN_SYSTEM.md §12: Rust owns view-model +
-//! interaction state; Slint renders bound properties only).
+//! state (AI_ENTRY.md §1: Rust owns view-model + interaction state; Slint
+//! renders bound properties only).
 //!
 //! This is the presentation-side model of the LIVE workstation. It mirrors
 //! the authoritative backend contracts without duplicating their machinery:
@@ -130,7 +130,7 @@ impl GateStatus {
     }
 }
 
-/// Market-data state for the chart region (UI_DESIGN_SYSTEM.md §7 states).
+/// Market-data state for the chart region (NoData/Loading/Ready/Stale/Error lifecycle).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DataState {
     #[default]

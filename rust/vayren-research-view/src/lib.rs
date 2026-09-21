@@ -1,6 +1,6 @@
 //! Embeddable native Research view — offscreen Slint host for the legacy shell.
 //!
-//! Architecture (constitution §3: Rust+Slint owns ALL native UI state and
+//! Architecture (AI_ENTRY.md §1: Rust+Slint owns ALL native UI state and
 //! presentation) — the proven `vayren-live-view` mechanism reused for
 //! RESEARCH. The Python host (app.services.slint_research_host) blits these
 //! pixels into the main VAYREN window, forwards input, pushes ResearchService

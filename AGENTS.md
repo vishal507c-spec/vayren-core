@@ -2,10 +2,9 @@
 
 > **AI-FIRST:** `AI_ENTRY.md → module → code` (startup: entry + current `90_brain/ai_memory.md` only).
 > Full rules live below; canonical docs are linked from the entry — read a doc only when the entry routes you there.
-> History (`90_brain/ai_history.md`) is never active context.
 
-**Owns:** AI workflow, coding standards, naming, forbidden, validation. **Not owns:** Language ownership → `ARCHITECTURE_CONSTITUTION.md`; detailed boundaries/events/contracts/state → `90_brain/architecture.md`, `module_contracts.md`, `event_catalog.md`, `ai_memory.md`.
-**When to read:** ALWAYS first, before any code change. **Related:** `ARCHITECTURE_CONSTITUTION.md` (languages), `90_brain/` (contracts/state).
+**Owns:** AI workflow, coding standards, naming, forbidden, validation. **Not owns:** Language ownership → `AI_ENTRY.md` §1 (machine: `90_brain/ownership_policy.json`); detailed boundaries/events/contracts/state → `90_brain/architecture.md`, `module_contracts.md`, `event_catalog.md`, `ai_memory.md`.
+**When to read:** ALWAYS first, before any code change. **Related:** `AI_ENTRY.md` (entry + language map), `90_brain/` (contracts/state).
 
 ## Pehle Padho, Phir Code Karo
 
@@ -13,13 +12,13 @@ Ye repository ka **Brain** `90_brain/` folder mein hai. AI agent ko code chhune 
 
 | File | Isme kya hai |
 |---|---|
-| `../ARCHITECTURE_CONSTITUTION.md` (repo root) | **SABSE UPAR** — Rust/Python/Slint ownership, migration rules (har decision par lagega) |
+| `AI_ENTRY.md` §1 (repo root) | **SABSE UPAR** — Rust/Python/Slint ownership, fixed rules (har decision par lagega) |
 | `architecture.md` | Module map, layers, event flow, future modules |
 | `event_catalog.md` | Events + owner + payload |
 | `module_contracts.md` | Har module ka public API + SQLite schema |
 | `ai_memory.md` | Abhi kya state hai, kya baaki hai |
 
-> `ARCHITECTURE_CONSTITUTION.md` language ownership ka single source hai — Rust→Core/Perf, Python→Strategy/AI, Rust+Slint→UI. Naya code wahi se decide karo. Constitution duplicate mat karo, reference karo.
+> `AI_ENTRY.md` §1 language ownership ka single source hai — Rust→Core/Perf, Python→Strategy/AI, Rust+Slint→UI. Naya code wahi se decide karo. Ownership duplicate mat karo, reference karo.
 >
 > **FAST PATH (default):** `AI_ENTRY.md` se route mil jaye to poora `90_brain/` har task par mat padho — entry jahan bheje (module + contract + policy), wahi padho. Neeche wali table full-reference list hai, har-task checklist nahi.
 
@@ -42,7 +41,7 @@ Numbered chapters = **development story order** (numbers organizational hain, st
 08_execution/ execution/ AI-adjacent logic + bridges (Rust owns core)  depends on: — (via FFI)
 09_broker/ broker/ registry, selection, vocab (UBL)            depends on: stdlib only
 rust/     kernels (vayren-core, std-only) + Slint shell       depends on: std / Slint
-90_brain/  (docs) knowledge — ai_memory.md active, ai_history.md archive (never active)
+90_brain/  (docs) knowledge — ai_memory.md active, current state only
 ```
 
 Aage ke modules usi order mein: `05_strategy, 06_backtest, 07_risk, 08_execution, 09_portfolio` (phir `10_scanner, 11_indicator, 12_drawing, 13_replay, 14_workspace, 15_plugin`).
@@ -126,8 +125,8 @@ TODO/FIXME / dead code / mock logic / sample trading logic  ❌
 ## Workflow
 
 ```
-□ 90_brain/ padho (architecture, event_catalog, module_contracts, ai_memory) + ARCHITECTURE_CONSTITUTION.md
-□ Feature ka target language/module decide karo (CONSTITUTION §9) → naya code target mein; directly related legacy slice usi feature mein migrate (CONSTITUTION §5, §17)
+□ 90_brain/ padho (architecture, event_catalog, module_contracts, ai_memory) + AI_ENTRY.md §1 (ownership)
+□ Feature ka target language/module decide karo (AI_ENTRY.md §1) → naya code target mein; directly related legacy slice usi feature mein migrate (AI_ENTRY.md §1 fixed rules)
 □ Module contracts ke hisaab se implement karo
 □ Coding-time forensics: `python scripts/forensics/__main__.py mark --phase PHASE --action ...` evidence do,
   `run --phase PHASE -- <cmd>` lambi commands wrap karo; task ka session apne aap open/close hota hai
@@ -138,7 +137,7 @@ TODO/FIXME / dead code / mock logic / sample trading logic  ❌
 □ 90_brain/ai_memory.md update karo
 ```
 
-## Language & Migration — Constitution Reference (Invisible Feature-Driven)
+## Language & Migration — Ownership Reference (Invisible Feature-Driven)
 
 **Naya code banate waqt pucho:**
 ```
@@ -147,7 +146,7 @@ TODO/FIXME / dead code / mock logic / sample trading logic  ❌
 → Strategy/AI/Research → Python
 → Native UI → Rust+Slint
 ```
-**Core rule (per `ARCHITECTURE_CONSTITUTION.md` §5, §13, §17):**
+**Core rule (per `AI_ENTRY.md` §1 fixed rules + language map):**
 ```
 NEW FEATURE → target language mein implement
   → directly related legacy slice identify karo
@@ -157,7 +156,7 @@ NEW FEATURE → target language mein implement
 - **Invisible:** Feature request hi migration ka context hai — 5 sawal (legacy hai? safely move? directly related? scope bina badhaye? behavior preserve?) → YES toh migrate karo.
 - **Unrelated mat chhuno:** Sirf feature se directly required/blocking/adjacent code. Koi repo-wide rewrite nahi.
 - **No migration debt:** Naya feature kabhi legacy mein mat banao jab target already defined hai.
-- No big-bang, no new language bina approval. Detail: `CONSTITUTION` §5, §8, §13, §14.
+- No big-bang, no new language bina approval. Detail: `AI_ENTRY.md` §1 (fixed rules + language map).
 
 ## Language Enforcement — Machine-Checked (NO silent skip)
 
@@ -170,7 +169,7 @@ Migration rules sirf instructions nahi — `make check` / CI mein **hard gate** 
 - **Feature flow:** Rust-owned file ko touch karo → usi feature mein related slice migrate karo → retention entry update karo → `validate_language_ownership.py` PASS hona chahiye. Sirf tests pass hona enough nahi.
 - **"Smallest useful slice" = minimum migration scope, migration skip karne ka excuse nahi.** Slice bada lage toh scope feature tak limited rakho, lekin Python mein naya wrong-language code mat likho — validator fail karega.
 
-## Commit Style (from CONTRIBUTING, consolidated)
+## Commit Style
 
 Conventional commits, ek commit = ek kaam: `feat:` / `fix:` / `docs:` / `refactor:` / `test:` / `chore:`
 ```

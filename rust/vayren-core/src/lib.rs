@@ -3,7 +3,7 @@
 //! The Python layer (execution/backtest/market) consumes these symbols via
 //! `ctypes`. This is the single authoritative implementation of the order
 //! lifecycle table, backtest numeric kernels and timeframe aggregation; the
-//! Python side holds no duplicate logic (constitution §1, migration §12).
+//! Python side holds no duplicate logic (AI_ENTRY.md §1).
 //!
 //! ABI rules: fixed-width integers, `f64` doubles, caller-allocated buffers,
 //! no panics across the boundary (every entry point is guarded), unknown

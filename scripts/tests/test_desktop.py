@@ -25,10 +25,7 @@ EXPECTED_BINARY = ROOT / "rust" / "target" / "debug" / "vayren-shell.exe"
 ACTIVE_DOCS = [
     "AI_ENTRY.md",
     "AGENTS.md",
-    "ARCHITECTURE_CONSTITUTION.md",
     "README.md",
-    "CONTRIBUTING.md",
-    "UI_DESIGN_SYSTEM.md",
     "90_brain/architecture.md",
     "90_brain/event_catalog.md",
     "90_brain/module_contracts.md",
@@ -122,10 +119,13 @@ def test_no_stale_deleted_refs_in_active_docs() -> None:
 def test_retention_ledger_healthy() -> None:
     retention_path = ROOT / "90_brain" / "language_retention.json"
     retention = json.loads(retention_path.read_text(encoding="utf-8"))
-    assert set(retention.keys()) >= {"files", "migrated"}
+    # Compact schema lock: only live per-file entries (no history objects).
+    assert "migrated" not in retention, "migrated ledger must stay removed"
+    assert "classes" not in retention, "class-level docs must stay removed"
+    assert set(retention.keys()) >= {"files"}
     for path, entry in retention["files"].items():
         state = entry.get("state", "") if isinstance(entry, dict) else ""
         if state in ("TEMPORARILY_RETAINED", "EXEMPT_WITH_JUSTIFICATION", "MIGRATION_REQUIRED"):
             assert (ROOT / path).is_file(), f"retained file missing: {path}"
-    for path in retention["migrated"]:
-        assert not (ROOT / path).exists(), f"migrated record points at a live file: {path}"
+            for field in ("reason", "migration_target", "migration_condition"):
+                assert entry.get(field), f"{path}: missing '{field}'"

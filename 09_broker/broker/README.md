@@ -1,7 +1,7 @@
 # Broker — Unified Broker Layer (FINAL production architecture)
 
-One coordination boundary between VAYREN and any venue. Design source of
-truth: `90_brain/broker_layer_design.md` (Phase 19, approved).
+One coordination boundary between VAYREN and any venue. Current truth: this
+package + `90_brain/module_contracts.md` §5.10.
 
 ## Layout
 

@@ -1,4 +1,4 @@
-"""Rust-backed backtest runner kernels bridge (constitution §1: Backtesting).
+"""Rust-backed backtest runner kernels bridge (AI_ENTRY.md §1: Backtesting).
 
 The aggregation-window margin rule and the bounded worker-count rule live in
 ``rust/vayren-core/src/backtest_runner.rs`` and reach Python only through

@@ -1,5 +1,5 @@
 //! Broker CONNECTION workspace view-model — pure, headless-testable native UI
-//! state (constitution §3: Rust+Slint owns UI state/interaction logic; Slint
+//! state (AI_ENTRY.md §1: Rust+Slint owns UI state/interaction logic; Slint
 //! only renders bound properties).
 //!
 //! This is the connection-focused projection of backend facts for the SYSTEM

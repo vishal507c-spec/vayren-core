@@ -1,4 +1,4 @@
-//! Timeframe aggregation kernel — the Rust-owned authority (constitution §1:
+//! Timeframe aggregation kernel — the Rust-owned authority (AI_ENTRY.md §1:
 //! Market/Data processing / Numerical calculations / Performance-critical).
 //!
 //! Python parses timestamps into `(day_ordinal, seconds_of_day)` and formats

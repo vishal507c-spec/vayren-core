@@ -4,7 +4,7 @@ The latch table, level vocabulary, timestamps, the reload rule and the
 serialized document shape live in `rust/vayren-core/src/kill_switch.rs`.
 This module only marshals UTF-8 strings/buffers across the boundary and maps
 kernel rejections onto the exception types Python callers already expect —
-no kill-switch policy lives here (constitution §8, migration §15).
+no kill-switch policy lives here (AI_ENTRY.md §1).
 """
 
 from __future__ import annotations

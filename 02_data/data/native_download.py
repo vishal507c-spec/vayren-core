@@ -1,4 +1,4 @@
-"""Rust-backed download kernel bridge (constitution §1: Data).
+"""Rust-backed download kernel bridge (AI_ENTRY.md §1: Data).
 
 The trading-day vocabulary, the market-hours window, the target window, the
 coverage percent, the scanner verdict, the stored ``candle_time`` shape, the

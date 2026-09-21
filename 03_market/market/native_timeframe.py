@@ -1,4 +1,4 @@
-"""Rust-backed timeframe ladder bridge (constitution §1: Market/Data).
+"""Rust-backed timeframe ladder bridge (AI_ENTRY.md §1: Market/Data).
 
 The ladder, its label grammar, the aggregation-availability rule and the
 higher-timeframe query plan (plain-vs-aggregate fallback, base-row over-fetch

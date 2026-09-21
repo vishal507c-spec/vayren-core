@@ -1,4 +1,4 @@
-"""Rust-backed risk session and clock gates (constitution §1: Risk /
+"""Rust-backed risk session and clock gates (AI_ENTRY.md §1: Risk /
 Performance-critical decision kernels).
 
 The `HH:MM` window comparison and the ISO-timestamp/clock-skew rule live in

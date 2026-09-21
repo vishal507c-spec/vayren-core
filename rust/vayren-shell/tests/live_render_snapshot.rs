@@ -152,7 +152,7 @@ fn live_screen_renders_structurally_at_every_viewport_tier() {
     // The halt adds a quiet banner strip right under the command bar
     // (rows 36..70): its surface panel + 3px semantic left edge fill a band
     // the running frame leaves empty. (Global Banner = left-edge, never a
-    // full-bleed block — see UI_DESIGN_SYSTEM §6.)
+    // full-bleed block.)
     let strip_fill = |buffer: &SharedPixelBuffer<slint::Rgb8Pixel>| {
         let size = buffer.size();
         let w = size.width as usize;

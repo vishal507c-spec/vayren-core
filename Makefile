@@ -62,7 +62,7 @@ validate-authority:
 context-check:
 	python scripts/context.py --check
 
-# ── Rust (constitution §8: Rust owns core/perf kernels) ─────────
+# ── Rust (AI_ENTRY.md §1: Rust owns core/perf kernels) ─────────
 
 rust:
 	python scripts/build_rust.py --test

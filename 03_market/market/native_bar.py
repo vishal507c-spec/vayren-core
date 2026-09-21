@@ -1,4 +1,4 @@
-"""Rust-backed candle metric bridge (constitution §1: Market/Data).
+"""Rust-backed candle metric bridge (AI_ENTRY.md §1: Market/Data).
 
 The intraday-change rule lives in Rust (``rust/vayren-core``, ``market``
 module); ``Bar::return_pct`` and the ``vy_bar_return_pct`` export share that

@@ -1,4 +1,4 @@
-"""Rust-backed broker-boundary policy authority (constitution §1: Execution).
+"""Rust-backed broker-boundary policy authority (AI_ENTRY.md §1: Execution).
 
 The rules that decide *whether* the system may act against a venue — retry
 classification, quota, clock drift, budget validity, live-gate verdicts, the

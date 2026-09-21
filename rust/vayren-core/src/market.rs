@@ -1,7 +1,7 @@
 //! Market data types — Bar (OHLCV), symbols, timeframes.
 //!
 //! Core domain models for market data. Database/repository orchestration
-//! stays Python per constitution §1 retention policy (SQL IO boundary).
+//! stays Python per AI_ENTRY.md §1 retention policy (SQL IO boundary).
 
 use std::fmt;
 

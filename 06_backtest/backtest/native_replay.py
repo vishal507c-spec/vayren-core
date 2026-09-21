@@ -1,4 +1,4 @@
-"""Rust-backed backtest replay window (constitution §1: Backtesting).
+"""Rust-backed backtest replay window (AI_ENTRY.md §1: Backtesting).
 
 Which bars a `[start, end]` date range keeps is decided by
 `rust/vayren-core/src/backtest_engine.rs::slice_indices`. This module only

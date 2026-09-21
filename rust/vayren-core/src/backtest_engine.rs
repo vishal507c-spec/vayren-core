@@ -8,7 +8,7 @@
 //! leftover position → close at final bar ("END")
 //! ```
 //!
-//! The strategy itself stays Python per constitution §2 (Python owns
+//! The strategy itself stays Python per AI_ENTRY.md §1 (Python owns
 //! Strategy/AI), so the per-bar signal comes from an injected
 //! [`SignalSource`] — scripted in tests, strategy-driven in future Rust
 //! consumers. The Python `execute_bars` remains the production path; this

@@ -1,5 +1,5 @@
 {
-  "_note": "Machine-readable language ownership policy. Authoritative source for validate_language_ownership.py. Derived from ARCHITECTURE_CONSTITUTION.md §1-§3, §8. Every Python file is classified by directory path → domain → required language. Files in Rust-owned domains implemented in Python require explicit retention entry or must migrate.",
+  "_note": "Machine-readable language ownership policy. Authoritative source for validate_language_ownership.py. Human-readable mirror: AI_ENTRY.md section 1 (fixed ownership rules + language map). Every Python file is classified by directory path → domain → required language. Files in Rust-owned domains implemented in Python require explicit retention entry or must migrate.",
   "version": 3,
   "_ordering_note": "Rules are evaluated FIRST-MATCH in array order. Specific paths (ai/, provider/, adaptive/) MUST precede their general parent rules. Do not reorder without updating the validator.",
   "languages": {
@@ -14,9 +14,9 @@
       "required_language": "PYTHON",
       "directory_prefixes": ["01_core/core/ai/"],
       "excluded_subpaths": [],
-      "description": "AI engineering, intent, plan, sandbox, ML interfaces. Always Python per constitution section 2.",
+      "description": "AI engineering, intent, plan, sandbox, ML interfaces. Always Python per AI_ENTRY.md §1.",
       "allow_python_glue": true,
-      "python_glue_scope": "ALL - AI/ML is Python-owned per constitution section 2"
+      "python_glue_scope": "ALL - AI/ML is Python-owned per AI_ENTRY.md §1"
     },
     {
       "id": "PROVIDER_SDK",
@@ -34,7 +34,7 @@
       "required_language": "PYTHON",
       "directory_prefixes": ["08_execution/execution/adaptive/", "08_execution/execution/ml_interfaces.py", "08_execution/execution/regime.py"],
       "excluded_subpaths": [],
-      "description": "Adaptive/regime/ML advisory logic inside execution. AI-adjacent stays Python per constitution section 2.",
+      "description": "Adaptive/regime/ML advisory logic inside execution. AI-adjacent stays Python per AI_ENTRY.md §1.",
       "allow_python_glue": true,
       "python_glue_scope": "ALL - advisory AI logic, never order-state authority"
     },
@@ -126,7 +126,7 @@
       "excluded_subpaths": ["05_strategy/strategy/tests/"],
       "description": "Trading strategies, experimentation. Always Python.",
       "allow_python_glue": true,
-      "python_glue_scope": "ALL — strategy logic is Python-owned per constitution §2"
+      "python_glue_scope": "ALL — strategy logic is Python-owned per AI_ENTRY.md §1"
     },
     {
       "id": "RUST_PRESENTATION",

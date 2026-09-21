@@ -6,7 +6,7 @@ UI; this service owns dataset assembly, experiment persistence and
 analysis runs. All external access goes through injected callables so the
 workspace is testable without a strategy library on disk.
 
-Research logic stays Python per the architecture constitution.
+Research logic stays Python per AI_ENTRY.md §1.
 """
 
 from __future__ import annotations

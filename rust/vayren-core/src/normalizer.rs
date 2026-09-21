@@ -1,6 +1,6 @@
 //! Stream normalizer — reorder, dedupe, staleness, heartbeat.
 //!
-//! Production authority (constitution §1: market/data processing) for the
+//! Production authority (AI_ENTRY.md §1: market/data processing) for the
 //! transport-edge stream policy. Python hands over one arrival at a time and
 //! reads back the kernel's verdict; the event objects themselves never cross
 //! the boundary (see `SeqToken`, the opaque carrier the bridge uses).

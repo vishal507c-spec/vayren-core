@@ -1,4 +1,4 @@
-"""Rust-backed execution core authority (constitution §1: Execution/Core).
+"""Rust-backed execution core authority (AI_ENTRY.md §1: Execution/Core).
 
 Pure calculations and state-machine checks live in Rust (`rust/vayren-core`,
 `execution_engine` and `order_state` modules) and are bridged here via ctypes.

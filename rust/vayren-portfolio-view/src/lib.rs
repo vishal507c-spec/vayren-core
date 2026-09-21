@@ -1,6 +1,6 @@
 //! Embeddable native Portfolio view — offscreen Slint host for the legacy shell.
 //!
-//! Architecture (constitution §3: Rust+Slint owns ALL native UI state and
+//! Architecture (AI_ENTRY.md §1: Rust+Slint owns ALL native UI state and
 //! presentation):
 //!
 //! ```text

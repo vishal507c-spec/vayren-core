@@ -1,6 +1,6 @@
 //! Venue-interaction resilience policy — the Rust-owned authority.
 //!
-//! Single owner (constitution §1: Execution/Core) for the rules that decide
+//! Single owner (AI_ENTRY.md §1: Execution/Core) for the rules that decide
 //! how the trading system behaves when a broker venue misbehaves:
 //!
 //! | Python (`08_execution/execution/broker/resilience.py`) | Rust (here) |

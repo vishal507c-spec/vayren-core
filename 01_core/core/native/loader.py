@@ -1,4 +1,4 @@
-"""Loader for the Rust `vayren_core` cdylib (constitution §8: Rust owns the
+"""Loader for the Rust `vayren_core` cdylib (AI_ENTRY.md §1: Rust owns the
 numeric/lifecycle kernels; this module is the typed interop boundary).
 
 Fail-closed: a missing library, ABI mismatch, or handshake failure raises

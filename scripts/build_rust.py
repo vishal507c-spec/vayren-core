@@ -1,4 +1,4 @@
-"""Build the Rust workspace (constitution §8: Rust owns core/perf).
+"""Build the Rust workspace (AI_ENTRY.md §1: Rust owns core/perf).
 
 Builds the `vayren-core` cdylib (release) consumed by the Python boundary
 via ctypes, the `vayren-portfolio-view` cdylib (release) hosting the native

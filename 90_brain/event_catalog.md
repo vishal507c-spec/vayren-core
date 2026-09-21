@@ -9,7 +9,7 @@
 > marker, market.Bar, execution.events market-data shapes, Strategy/AI/Research events.
 
 
-**Owns:** Events + owner + payload. **Not owns:** Language/architecture → `ARCHITECTURE_CONSTITUTION.md`/`architecture.md`; module APIs/boundaries → `module_contracts.md`.
+**Owns:** Events + owner + payload. **Not owns:** Language/architecture → `AI_ENTRY.md` §1/`architecture.md`; module APIs/boundaries → `module_contracts.md`.
 **When to read:** Before publishing/subscribing/handling any event, or adding a new event.
 **Related:** `module_contracts.md` (which module owns which events), `architecture.md` (flow).
 

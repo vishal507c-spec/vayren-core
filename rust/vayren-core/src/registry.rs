@@ -1,7 +1,7 @@
 //! Generic name-based registry.
 //!
 //! Minimal Rust port of 01_core/core/registry/registry.py. Full ComponentRegistry
-//! orchestration (manifest/capability wiring) stays Python per constitution §11
+//! orchestration (manifest/capability wiring) stays Python per AI_ENTRY.md §11
 //! (big-bang risk, stdlib-only foundation).
 
 use std::collections::HashMap;

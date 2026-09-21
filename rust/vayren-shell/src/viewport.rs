@@ -1,5 +1,5 @@
 //! Chart viewport zoom state — pure, headless-testable native UI state
-//! (constitution §3: Rust owns UI state/interaction logic; Slint only
+//! (AI_ENTRY.md §1: Rust owns UI state/interaction logic; Slint only
 //! renders bound properties).
 //!
 //! This is the first migrated slice of the chart workspace: the zoom level

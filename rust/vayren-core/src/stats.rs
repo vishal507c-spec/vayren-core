@@ -1,4 +1,4 @@
-//! Small numeric statistics kernels — Rust-owned (constitution §1:
+//! Small numeric statistics kernels — Rust-owned (AI_ENTRY.md §1:
 //! Numerical calculations). Used by the market timeframe detectors.
 
 /// Most-frequent value, breaking ties by first-seen order — exactly the

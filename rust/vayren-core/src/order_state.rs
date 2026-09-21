@@ -1,4 +1,4 @@
-//! Order lifecycle state machine — the Rust-owned authority (constitution §1:
+//! Order lifecycle state machine — the Rust-owned authority (AI_ENTRY.md §1:
 //! Execution / Core / Performance).
 //!
 //! This is the single source of truth for which order-state transitions are

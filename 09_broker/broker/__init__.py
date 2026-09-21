@@ -27,7 +27,7 @@ unsupported capability → :class:`UnsupportedCapabilityError`, corrupt
 selection file → :class:`SelectionLoadError`. No concrete broker SDK is ever
 imported here; adapters live in isolated packages.
 
-Scope (per ``90_brain/broker_layer_design.md``): M1–M3 vocabulary,
+Scope (per ``90_brain/module_contracts.md`` §5.10): M1–M3 vocabulary,
 capability model, faces, registry with Paper/Sandbox/Zerodha-history
 wrappers, selection contract; M4 file-backed selection store; M6
 funds surface (Paper/Sandbox cash-only, Zerodha history-only).

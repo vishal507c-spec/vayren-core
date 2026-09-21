@@ -633,7 +633,7 @@
             "validation": ["cargo test -p vayren-shell", "cargo fmt -p vayren-shell -- --check"],
             "forbidden": ["00_app/*", "02_data/*", "05_strategy/*", "rust/vayren-core/src/*"],
             "symbols": {"rust/vayren-shell/src/market.rs": ["MarketBar", "apply_snapshot_json"]},
-            "contract": "UI_DESIGN_SYSTEM.md",
+            "contract": "rust/vayren-shell/ui/palette.slint (canonical tokens)",
             "change_surface": {
                 "likely_changed": [
                     "rust/vayren-shell/src/<screen>.rs",
@@ -674,7 +674,7 @@
             "validation": ["cargo test -p vayren-core --lib event_bus"],
             "forbidden": ["01_core/*", "05_strategy/strategy/*", "08_execution/execution/*"],
             "symbols": {},
-            "contract": "ARCHITECTURE_CONSTITUTION.md sections 11-12",
+            "contract": "AI_ENTRY.md section 1 (language map)",
             "change_surface": {
                 "likely_changed": [
                     "rust/vayren-core/src/event_bus.rs",

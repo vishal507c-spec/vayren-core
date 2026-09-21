@@ -1,6 +1,6 @@
 //! Embeddable native Live view — offscreen Slint host for the legacy shell.
 //!
-//! Architecture (constitution §3: Rust+Slint owns ALL native UI state and
+//! Architecture (AI_ENTRY.md §1: Rust+Slint owns ALL native UI state and
 //! presentation) — the proven `vayren-portfolio-view` mechanism reused for
 //! LIVE, with one addition this surface needs: an ACTION OUT channel.
 //!

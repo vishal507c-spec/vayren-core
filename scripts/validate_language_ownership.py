@@ -1,7 +1,7 @@
-"""Enforce constitutional language ownership (hard gate).
+"""Enforce language ownership (hard gate).
 
-Replaces the previous baseline-allowlist validator. Rules derived from
-ARCHITECTURE_CONSTITUTION.md 1-8 and 90_brain/ownership_policy.json.
+Ownership rules: AI_ENTRY.md section 1 (fixed rules + language map),
+machine-readable in 90_brain/ownership_policy.json.
 
 Checks:
   1. Every Python file maps to a domain via ownership_policy.json.

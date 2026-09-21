@@ -67,7 +67,7 @@ secrets.yaml
 *.key
 *.pem
 
-# Rust (constitution §8: Rust workspace builds locally, never committed)
+# Rust (AI_ENTRY.md §1: Rust workspace builds locally, never committed)
 rust/target/
 rust/shell_build.log
 rust/shell_build.err

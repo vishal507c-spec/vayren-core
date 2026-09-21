@@ -1,4 +1,4 @@
-"""Rust-backed backtest position kernel (constitution §1: Backtesting /
+"""Rust-backed backtest position kernel (AI_ENTRY.md §1: Backtesting /
 Performance-critical).
 
 The entry fill (slippage direction, affordability rejection, fractional

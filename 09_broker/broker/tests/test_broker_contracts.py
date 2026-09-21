@@ -1,7 +1,7 @@
 """M1–M3 contract tests: vocab, capabilities, faces, registry, selection.
 
-Every test proves a design-doc rule (references are to
-``90_brain/broker_layer_design.md``). No network, no SDKs, no secrets.
+Every test proves a contract rule (see ``90_brain/module_contracts.md``
+§5.10). No network, no SDKs, no secrets.
 """
 
 from __future__ import annotations
