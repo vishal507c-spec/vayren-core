@@ -1,6 +1,8 @@
 # AGENTS.md — AI Agent ke Liye Rules
 
-> **AI-FIRST:** `AGENTS.md → ARCHITECTURE_CONSTITUTION.md → relevant 90_brain doc → module → code`. AI ko har MD padhne ki zaroorat nahi — ye path enough hai.
+> **AI-FIRST:** `AI_ENTRY.md → module → code` (startup: entry + current `90_brain/ai_memory.md` only).
+> Full rules live below; canonical docs are linked from the entry — read a doc only when the entry routes you there.
+> History (`90_brain/ai_history.md`) is never active context.
 
 **Owns:** AI workflow, coding standards, naming, forbidden, validation. **Not owns:** Language ownership → `ARCHITECTURE_CONSTITUTION.md`; detailed boundaries/events/contracts/state → `90_brain/architecture.md`, `module_contracts.md`, `event_catalog.md`, `ai_memory.md`.
 **When to read:** ALWAYS first, before any code change. **Related:** `ARCHITECTURE_CONSTITUTION.md` (languages), `90_brain/` (contracts/state).
@@ -18,6 +20,8 @@ Ye repository ka **Brain** `90_brain/` folder mein hai. AI agent ko code chhune 
 | `ai_memory.md` | Abhi kya state hai, kya baaki hai |
 
 > `ARCHITECTURE_CONSTITUTION.md` language ownership ka single source hai — Rust→Core/Perf, Python→Strategy/AI, Rust+Slint→UI. Naya code wahi se decide karo. Constitution duplicate mat karo, reference karo.
+>
+> **FAST PATH (default):** `AI_ENTRY.md` se route mil jaye to poora `90_brain/` har task par mat padho — entry jahan bheje (module + contract + policy), wahi padho. Neeche wali table full-reference list hai, har-task checklist nahi.
 
 Code badalne ke baad `ai_memory.md` update karo.
 
@@ -28,20 +32,25 @@ Code badalne ke baad `ai_memory.md` update karo.
 Numbered chapters = **development story order** (numbers organizational hain, strict dependency nahi):
 
 ```
-00_app/   app/     bootstrap, lifecycle, entry point      depends on: core, data, market, chart
-01_core/  core/    EventBus, events, logger, registry     depends on: kuch nahi
-02_data/  data/    historical download engine (write)     depends on: core
-03_market/ market/ SQLite candles (database→repository→loader)  depends on: core
-04_chart/ chart/   ChartEngine, renderer, widgets, windows  depends on: core, market
-90_brain/  (docs) permanent knowledge
+00_app/   app/     composition (headless backend + services)   depends on: all chapters (partly unwired — see ai_memory.md)
+01_core/  core/    Event marker, AI guardrails, native loader  depends on: stdlib only
+02_data/  data/    provider SDK boundary, settings, bridge     depends on: core, broker
+03_market/ market/ Bar vocabulary + native bridges             depends on: core
+05_strategy/ strategy/ registry, runtime, research, lab        depends on: core, market
+06_backtest/ backtest/ native bridges only (Rust owns engine)  depends on: — (via FFI)
+07_risk/   risk/   native bridges only (Rust owns engine)      depends on: — (via FFI)
+08_execution/ execution/ AI-adjacent logic + bridges (Rust owns core)  depends on: — (via FFI)
+09_broker/ broker/ registry, selection, vocab (UBL)            depends on: stdlib only
+rust/     kernels (vayren-core, std-only) + Slint shell       depends on: std / Slint
+90_brain/  (docs) knowledge — ai_memory.md active, ai_history.md archive (never active)
 ```
 
 Aage ke modules usi order mein: `05_strategy, 06_backtest, 07_risk, 08_execution, 09_portfolio` (phir `10_scanner, 11_indicator, 12_drawing, 13_replay, 14_workspace, 15_plugin`).
 
 ## Architecture Rules
 
-- **Event-driven only.** Har module sirf EventBus se baat karta hai. Seedha call — mana hai.
-- **Subscriptions sirf `00_app/app/bootstrap/bootstrap.py` mein.** Widgets kabhi EventBus chhunte nahi.
+- **Event-driven only (target wiring).** Modules talk via public surface + bridge/snapshot only — direct internal calls forbidden. (Python bus subscription is future rewire; current mechanism status: `ai_memory.md`.)
+- **Single composition root.** `00_app` (+ Rust shell) owns wiring. UI layers never touch bus/SQL/loading.
 - **One module = one responsibility.** Naya feature = naya module. Purana kabhi expand nahi hota.
 - **No circular dependencies.** Import hamesha numbering ke neeche ki taraf.
 - **Layers alag-alag:** UI mein SQL nahi, loader mein drawing nahi, UI mein business logic nahi.
@@ -57,6 +66,8 @@ from market import Bar, MarketDataLoader, LoadSymbol, DataLoaded
 from chart import ChartEngine, ChartWindow, ChartModel, ChartReady
 from .services.order_manager import OrderManager   # apne module ke andar
 
+# (event-bus/loader/chart rows = target-wiring vocabulary; current live names:
+#  core.Event, market.Bar, broker.* UBL, strategy.* — see AI_ENTRY routing)
 # ❌ GALAT
 from market.database.sqlite import SqliteCandleDatabase   # market ke andar ki cheez, bahar se nahi
 from ..market import Bar                                    # relative cross-module

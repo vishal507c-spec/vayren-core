@@ -42,7 +42,7 @@ trace files under `.forensics/` (gitignored).
 python scripts/forensics/__main__.py mark --phase CONTEXT_READING --action read_file --file 90_brain --name "My task"
 
 # 2. record phase evidence while working
-python scripts/forensics/__main__.py mark --phase CONTEXT_READING   --action read_file    --file chart/windows/chart_window.py
+python scripts/forensics/__main__.py mark --phase CONTEXT_READING   --action read_file    --file 05_strategy/strategy/runtime.py
 python scripts/forensics/__main__.py mark --phase ARCHITECTURE_ANALYSIS --action design --note "..."
 
 # 3. wrap commands that have measurable duration (time belongs to that phase)

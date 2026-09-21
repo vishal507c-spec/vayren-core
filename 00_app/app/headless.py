@@ -14,9 +14,7 @@ import sys
 from datetime import datetime
 from logging import getLogger
 from pathlib import Path
-
-from core.logger import configure_logging
-from market.repository.symbol_repository import SymbolRepository
+from typing import Any
 
 logger = getLogger(__name__)
 
@@ -24,11 +22,20 @@ logger = getLogger(__name__)
 def _logs_to_stderr(level: str) -> None:
     """Route all logs to stderr — stdout carries ONLY protocol JSON.
 
-    The shared ``configure_logging`` writes to stdout, which would corrupt
-    the newline-delimited JSON protocol. Keep using it (single format
-    source), then move its stdout handlers to stderr.
+    ``core.logger`` was removed in the Rust-owned core cleanup, so fall back
+    to stdlib ``basicConfig`` when the shared helper is gone. Either way, any
+    stdout handler is then moved to stderr — stdout carries ONLY protocol
+    JSON, never log text.
     """
-    configure_logging(level)
+    try:
+        from core.logger import configure_logging
+
+        configure_logging(level)
+    except ImportError:
+        logging.basicConfig(
+            level=getattr(logging, level.upper(), logging.INFO),
+            format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        )
     root = logging.getLogger()
     for handler in list(root.handlers):
         if isinstance(handler, logging.StreamHandler) and handler.stream is sys.stdout:
@@ -60,7 +67,32 @@ def _bar_to_dict(bar) -> dict:
     }
 
 
-def _market_snapshot(repository: SymbolRepository, command: dict) -> dict:
+def _market_repository(data_dir: str | Path) -> Any | None:
+    """Resolve the market repository, or None when the Python store is gone.
+
+    Market storage/repository is Rust-owned and its Python twin was removed,
+    so headless reports honest-empty market data until the store is rewired.
+    """
+    try:
+        from market.repository.symbol_repository import SymbolRepository
+    except ImportError:
+        return None
+    return SymbolRepository(data_dir)
+
+
+def _empty_market_snapshot() -> dict:
+    """Honest-empty market snapshot (no store wired, never invented bars)."""
+    return {
+        "symbols": [],
+        "selected_symbol": "",
+        "timeframes": [],
+        "timeframe": "",
+        "exchange": "",
+        "bars": [],
+    }
+
+
+def _market_snapshot(repository: Any, command: dict) -> dict:
     """Build the native Market snapshot from real SQLite data.
 
     Single round-trip feeding Rust ``apply_snapshot_json``: watchlist rows
@@ -68,6 +100,8 @@ def _market_snapshot(repository: SymbolRepository, command: dict) -> dict:
     timeframe), and the detected timeframe ladder. Honest emptiness when
     the store has nothing — never invented bars.
     """
+    if repository is None:
+        return _empty_market_snapshot()
     symbols = repository.list_symbols()
     symbol = command.get("symbol") or (symbols[0] if symbols else "")
     timeframe = command.get("timeframe") or ""
@@ -324,7 +358,7 @@ def _research_snapshot(data_dir: str, strategy_dir: str) -> dict:
             strategy_dir=strategy_dir,
             list_strategies_fn=list_strategies,
             list_histories_fn=list_histories,
-            repository=SymbolRepository(data_dir),
+            repository=_market_repository(data_dir),
         )
         names = [str(n) for n in (service.available_strategies() or [])]
         strategies = []
@@ -397,8 +431,9 @@ def run_headless_backend(args: argparse.Namespace) -> int:
 
     logger.info("Headless backend starting: data_dir=%s strategy_dir=%s", data_dir, strategy_dir)
 
-    # Initialize core services (no UI toolkit)
-    repository = SymbolRepository(data_dir)
+    # Initialize core services (no UI toolkit). Market store is Rust-owned
+    # and currently unwired on the Python side — honest-empty when absent.
+    repository = _market_repository(data_dir)
 
     # Ready signal
     response = {
@@ -421,7 +456,7 @@ def run_headless_backend(args: argparse.Namespace) -> int:
                 cmd_type = command.get("type")
 
                 if cmd_type == "list_symbols":
-                    symbols = repository.list_symbols()
+                    symbols = repository.list_symbols() if repository is not None else []
                     result = {
                         "type": "symbols_listed",
                         "data": {"symbols": symbols},

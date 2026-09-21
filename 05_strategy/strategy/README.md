@@ -3,12 +3,10 @@
 Registry, definitions, Python-native runtime + lab UI.
 
 - `strategies/` — native Python strategies (`base.PythonStrategy` + `indicators` + `obr.py`/`sma.py`)
-- `language/` — Python compiler (`compile_strategy` → `PythonStrategy`), storage (`StrategyRecord` → `.py`)
-- `storage.py` — `StrategyRecord` file store (user-owned library, no auto-seeding, no VM)
+- `language/` — Python compiler (`compile_strategy` → `PythonStrategy`), storage (`StrategyRecord` → `.py` library files)
 - `models/` — definition, parameters, signal, state
 - `runtime.py` — Python bar-by-bar signals (`StrategyLogic.on_bar`)
 - `events/` — `StrategiesListed`, `StrategySelected`, `PaperTradeRequested`, `LabReset`
 - `research/` — intelligence, evidence, lineage, evolution, validation
-- `ui/` — Strategy Lab panel (edits Python code)
 
-Depends on: core, market. Event-driven; subscriptions in `bootstrap`.
+Depends on: core, market. Event-driven; composition root `00_app` ke through wired.

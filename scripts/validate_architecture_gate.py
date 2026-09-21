@@ -71,6 +71,72 @@ class GateReport:
         }
 
 
+# NEW LANGUAGE = DENIED (Phase 3 governance). Programming-language extensions
+# outside this allowed set fail the gate when introduced as new/changed files.
+# Data/config/doc extensions are not languages and always pass; extensionless
+# paths (Makefile, LICENSE) pass. Diff-scoped, so the existing tree is
+# unaffected — only newly introduced languages trip it.
+ALLOWED_LANGUAGE_EXTENSIONS = frozenset({".py", ".rs", ".slint"})
+
+# Known programming-language extensions that are NOT authorized in this repo.
+# Anything here as a new/changed file is an unapproved language introduction
+# (Phase 3 §2/§5: explicit allowlist change + validator update required first).
+UNAUTHORIZED_LANGUAGE_EXTENSIONS = frozenset(
+    {
+        ".js",
+        ".jsx",
+        ".mjs",
+        ".cjs",
+        ".ts",
+        ".tsx",
+        ".vue",
+        ".svelte",
+        ".go",
+        ".java",
+        ".kt",
+        ".kts",
+        ".scala",
+        ".cs",
+        ".rb",
+        ".php",
+        ".swift",
+        ".dart",
+        ".r",
+        ".jl",
+        ".lua",
+        ".pl",
+        ".zig",
+        ".nim",
+        ".c",
+        ".h",
+        ".cpp",
+        ".hpp",
+        ".cc",
+        ".cxx",
+    }
+)
+
+
+def check_new_file_extension(rel: str) -> Violation | None:
+    """Pure new-language guard (Phase 3 §2/§5): unauthorized programming-language
+    extension on a new/changed file → Violation; allowed language, data/config/
+    doc extension, or extensionless path → None (no false positives)."""
+    suffix = Path(rel).suffix.lower()
+    if not suffix or suffix in ALLOWED_LANGUAGE_EXTENSIONS:
+        return None
+    if suffix in UNAUTHORIZED_LANGUAGE_EXTENSIONS:
+        return Violation(
+            file=rel,
+            rule="unauthorized-language",
+            message=(
+                f"new file uses unauthorized programming language ({suffix}). "
+                "Allowed languages: Python (.py), Rust (.rs), Slint (.slint). "
+                "A new language needs an explicit allowlist change first."
+            ),
+        )
+    return None
+
+
 def _git_changed(ref: str) -> tuple[list[str], list[str]]:
     """Changed-tracked and untracked .py files (repo-relative posix)."""
 
@@ -89,6 +155,21 @@ def _git_changed(ref: str) -> tuple[list[str], list[str]]:
         if line.endswith(".py")
     ]
     return tracked, untracked
+
+
+def _git_changed_all(ref: str) -> list[str]:
+    """All changed-tracked + untracked paths (any extension) for the
+    new-language guard. Respects .gitignore via --exclude-standard."""
+
+    def run(*args: str) -> str:
+        proc = subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, check=False)
+        if proc.returncode != 0:
+            raise RuntimeError(f"git {' '.join(args)} failed: {proc.stderr.strip()}")
+        return proc.stdout
+
+    tracked = run("diff", "--name-only", ref).splitlines()
+    untracked = run("ls-files", "--others", "--exclude-standard").splitlines()
+    return tracked + untracked
 
 
 def _declared_distributions() -> set[str]:
@@ -127,15 +208,32 @@ def _load_policy() -> tuple[list[dict], dict]:
 
 
 def _required_language(rel: str, rules: list[dict]) -> str | None:
-    """First-match ownership rule (same order semantics as the validator)."""
+    """First-match ownership rule (exact same semantics as
+    validate_language_ownership._classify_file: first rule whose prefix
+    matches owns the path, unless the path falls under that rule's excluded
+    subpaths — then no rule owns it. Test/AI files therefore never inherit
+    their parent domain's required language."""
     for rule in rules:
         for prefix in rule.get("directory_prefixes", ()):
             if rel.startswith(prefix):
                 excluded = rule.get("excluded_subpaths", ())
-                if any(rel.startswith(prefix + sub) for sub in excluded):
-                    continue
+                if any(rel.startswith(sub) for sub in excluded):
+                    return None
                 return rule.get("required_language")
     return None
+
+
+def _is_first_party_root(root: str, local_modules: set[str]) -> bool:
+    """Pure check: stdlib, chapter roots, test tooling, or a bare module name
+    that resolves to a file inside scripts/ (path-insertion imports in tests).
+    Anything else needs a declared distribution (checked by the caller)."""
+    return (
+        not root
+        or root in sys.stdlib_module_names
+        or root in FIRST_PARTY_ROOTS
+        or root in TEST_TOOLING
+        or root in local_modules
+    )
 
 
 def check_changes(ref: str = "HEAD") -> GateReport:
@@ -153,7 +251,24 @@ def check_changes(ref: str = "HEAD") -> GateReport:
         report.verdict = "ERROR"
         report.details.append(str(exc))
         return report
-    stdlib = set(sys.stdlib_module_names)
+    # Repo-local bare modules (scripts tooling imported by path-insertion in
+    # tests, e.g. `from validate_architecture_gate import ...`) are first-party,
+    # not third-party: resolve them against files actually present in scripts/.
+    local_modules = {path.stem for path in (ROOT / "scripts").rglob("*.py")}
+    try:
+        all_changed = _git_changed_all(ref)
+    except Exception as exc:  # noqa: BLE001
+        report.verdict = "ERROR"
+        report.details.append(str(exc))
+        return report
+    for rel in all_changed:
+        if not (ROOT / rel).is_file():
+            continue
+        violation = check_new_file_extension(rel)
+        if violation is not None:
+            report.verdict = "FAIL"
+            report.violations.append(violation)
+            report.files_checked += 1
     changed = [(path, False) for path in tracked] + [(path, True) for path in untracked]
     for rel, is_new in changed:
         path = ROOT / rel
@@ -176,7 +291,7 @@ def check_changes(ref: str = "HEAD") -> GateReport:
             else:
                 continue
             root = module.split(".")[0]
-            if not root or root in stdlib or root in FIRST_PARTY_ROOTS:
+            if _is_first_party_root(root, local_modules):
                 continue
             if root in TEST_TOOLING:
                 continue

@@ -8,7 +8,7 @@ Rust + Slint shell hai (`make dev` → `scripts/launch_native.py` → the
 | Cheez | Kaam |
 |---|---|
 | `headless.py` | Headless backend: stdin/stdout par newline-delimited JSON (ready/symbols/market/system/portfolio/live/research/lab/shutdown) |
-| `services/` | Composition services — broker manager/selection, live trading, research (stdlib observable, koi UI toolkit nahi) |
+| `services/` | Composition services — broker manager/selection, live trading, research (koi UI toolkit nahi) |
 
 ## Wiring — Single Source
 Har screen ka snapshot backend se aata hai; Rust shell `MarketState`/`BrokerWorkspace`/`LiveState`/`ResearchState`/`LabState`/`PortfolioState` me ingest karke Slint par project karta hai. Python business logic kabhi paint nahi karta.

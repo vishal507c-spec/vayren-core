@@ -13,16 +13,12 @@ import subprocess
 import sys
 import time
 
+# Partitions with live test files only (2026-09-21 cleanup): every entry
+# must exist AND collect tests, otherwise the partition runner fails the
+# gate. Empty/missing tests/ dirs stay covered by
+# scripts/tests/test_gate_coverage.py only when they gain test files.
 PARTS = (
-    "00_app/app/tests",
-    "01_core/core/tests",
     "02_data/data/tests",
-    "03_market/market/tests",
-    "05_strategy/strategy/tests",
-    "05_strategy/strategy/research/tests",
-    "06_backtest/backtest/tests",
-    "07_risk/risk/tests",
-    "08_execution/execution/tests",
     "09_broker/broker/tests",
     "scripts/forensics/tests",
     "scripts/tests",

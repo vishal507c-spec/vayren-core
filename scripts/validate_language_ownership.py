@@ -108,6 +108,44 @@ def _classify_file(rel_path: str, rules: list[dict]) -> dict | None:
     return {"domain": "UNCLASSIFIED", "required_language": "UNKNOWN", "allow_python_glue": True}
 
 
+# FFI boundary allowlist (Phase 3 §7/§12): the ONLY production files that may
+# import the Rust cdylib loader are the transport bridges themselves
+# (`*/native_*.py`: marshal → delegate → return, no authority), the loader
+# package init, and tooling under scripts/ (build_rust). Any other importer
+# is an unauthorized bridge around language ownership → FAIL.
+def core_native_importer_allowed(rel_path: str) -> bool:
+    """Pure check: may this repo-relative path import core.native?"""
+    posix = rel_path.replace("\\", "/")
+    if posix.startswith("scripts/"):
+        return True
+    if posix.startswith("01_core/core/native/"):
+        return True
+    return Path(posix).name.startswith("native_")
+
+
+def rust_module_forbidden(rel_path: str) -> bool:
+    """Pure check: does this Rust path absorb a Python-owned domain module?"""
+    return Path(rel_path).stem.lower() in RUST_FORBIDDEN_MODULES
+
+
+def _imports_core_native(path: Path) -> bool:
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError):
+        return False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[0:2] == [
+            "core",
+            "native",
+        ]:
+            return True
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.split(".")[0:2] == ["core", "native"]:
+                    return True
+    return False
+
+
 def _defines(path: Path, name: str, kind: str) -> bool:
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -260,9 +298,21 @@ def main() -> int:
                 errors.append(f"vayren-core must stay dependency-free (std only): {deps[:120]}")
 
     for rs in (ROOT / "rust").rglob("*.rs"):
-        stem = rs.stem.lower()
-        if stem in RUST_FORBIDDEN_MODULES:
+        if rust_module_forbidden(rs.relative_to(ROOT).as_posix()):
             errors.append(f"Rust absorbed a Python-owned domain module: {rs}")
+
+    for rel in current:
+        target = ROOT / rel
+        if (
+            target.is_file()
+            and _imports_core_native(target)
+            and not core_native_importer_allowed(rel)
+        ):
+            errors.append(
+                f"UNAUTHORIZED BRIDGE: {rel} imports core.native outside the "
+                f"native_* bridge boundary (bridges must be marshal-delegate-return "
+                f"in */native_*.py, the loader package, or scripts/ tooling)."
+            )
 
     shell_lib = ROOT / "rust" / "vayren-shell" / "src" / "lib.rs"
     if not shell_lib.is_file():

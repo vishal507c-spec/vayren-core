@@ -49,46 +49,19 @@ Har naye kaam ka order pakka hai:
 
 ## 5. Gyan Kahaan Likhein
 
-| Kya hua | Kahaan likho |
-|---|---|
-| Architecture decision | `90_brain/ai_memory.md` |
-| Code change complete | `90_brain/ai_memory.md` |
-| Current state update | `90_brain/ai_memory.md` |
-| Naya module aaya | `90_brain/architecture.md` (Future) + `90_brain/module_contracts.md` |
-
-> Purana `13_knowledge/` ab `99_archive/` mein hai — wahan kuch mat likho.
+Code change complete → `90_brain/ai_memory.md` (current state only; history auto-archives).
+Naya module → `90_brain/architecture.md` + `module_contracts.md`. Rules → `AGENTS.md` owns workflow
+(commit style wahin hai — yahan duplicate nahi).
 
 ## 6. Commit Style
 
-Conventional commits — har commit ek hi kaam:
-
-| Prefix | Matlab |
-|---|---|
-| `feat:` | Naya feature |
-| `fix:` | Bug fix |
-| `docs:` | Sirf documentation |
-| `refactor:` | Kaam waisa hi, code alag |
-| `test:` | Tests add/fix |
-| `chore:` | Tooling, dependencies |
-
-Examples:
-
-```
-feat: add candle zoom for the chart widget
-fix: correct bar timestamp ordering in the repository
-docs: rewrite 04_chart README in teaching style
-test: add repository limit tests
-```
+Conventional commits, ek commit = ek kaam (`feat:`/`fix:`/`docs:`/`refactor:`/`test:`/`chore:`).
+Detail + examples: `AGENTS.md` (yahi canonical hai).
 
 ## 7. Accha Contribution Kya Hota Hai?
 
-| ✅ Accha | ❌ Kharab |
-|---|---|
-| Ek commit = ek kaam | Ek commit mein bahut kuch |
-| Tests saath mein | Tests nahi |
-| Public API badla → README update | Docs nahi |
-| `make check` pass before commit | Validation skip |
-| Brain docs update kiye | Brain update nahi kiya |
+Ek commit = ek kaam, tests saath mein, public API badla → README update,
+`make check` pass before commit, Brain update. Detail: `AGENTS.md`.
 
 ## 8. Ek Line Mein
 

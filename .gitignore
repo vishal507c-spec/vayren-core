@@ -55,6 +55,12 @@ knowledge/memory/session-logs/
 # Coding-time forensics traces
 .forensics/
 
+# Local runtime residue (strategy version experiments, never committed)
+.vayren/
+
+# Context-engine packet cache (deterministic, regenerable, never committed)
+.context_cache/
+
 # Secrets
 credentials.yaml
 secrets.yaml

@@ -47,22 +47,9 @@ AI agents must read the relevant module contract before modifying that module.
 
 ## 4. Module Dependency Rules
 
-### Allowed graph (from `scripts/validate_imports.py`)
+### Allowed graph (machine truth: `DOMAIN_DEPS` in `scripts/validate_imports.py` — read it there, not here)
 
-```
-00_app ──► 01_core, 02_data, 03_market, 04_chart, 05_strategy, 06_backtest, 07_risk, 08_execution, 09_broker
-01_core ──► (none — stdlib only)
-02_data ──► 01_core, 09_broker (UBL registry/faces only)
-03_market ──► 01_core
-04_chart ──► 01_core, 03_market
-05_strategy ──► 01_core, 03_market
-06_backtest ──► 01_core, 03_market, 05_strategy
-07_risk ──► 01_core
-08_execution ──► 01_core, 03_market, 05_strategy, 07_risk, 09_broker (UBL registry/faces only)
-09_broker ──► (none — stdlib only, self-contained coordination boundary)
-```
-
-### Table
+### Table (qualifiers the validator cannot express: `Bar`-only, UBL-faces-only, public-surface-only)
 
 | Module | May Import | Forbidden |
 |---|---|---|
@@ -329,36 +316,9 @@ plus the universal authentication contract (`broker/auth.py`): `AuthCapability` 
 
 ## 7. Event Contracts
 
-Authoritative list: `90_brain/event_catalog.md` (19 events). Summary:
-
-| # | Event | Owner | Payload |
-|---|---|---|---|
-| 1 | `AppStarted` | `core` | — |
-| 2 | `ListSymbols` | `market` | — (request) |
-| 3 | `SymbolsListed` | `market` | `symbols: tuple[str,...]` |
-| 4 | `QuotesLoaded` | `market` | `quotes: tuple[SymbolQuote,...]` |
-| 5 | `LoadSymbol` | `market` | `symbol, limit: int|None` |
-| 6 | `ListTimeframes` | `market` | `symbol` |
-| 7 | `TimeframesListed` | `market` | `symbol, timeframes: tuple[str,...]` |
-| 8 | `TimeframeChanged` | `market` | `symbol, timeframe, limit: int|None` |
-| 9 | `DataLoaded` | `market` | `symbol, bars: tuple[Bar,...]` |
-| 10 | `ChartReady` | `chart` | `model: ChartModel` |
-| 11 | `WindowRendered` | `chart` | — |
-| 12 | `DownloadRequest` | `data` | `symbol, interval, from_date, to_date` |
-| 13 | `CoverageRequest` | `data` | `symbol, interval` |
-| 14 | `CancelDownload` | `data` | `request_id` |
-| 15 | `DownloadStarted` | `data` | `request_id, symbol, interval, from_date, to_date` |
-| 16 | `DownloadProgress` | `data` | `request_id, symbol, interval, message` |
-| 17 | `DownloadCompleted` | `data` | `request_id, symbol, interval, new_rows, db_total` |
-| 18 | `DownloadFailed` | `data` | `request_id, symbol, interval, error` |
-| 19 | `DownloadCoverage` | `data` | `request_id, symbol, interval, info: SymbolInfo` |
-| 20 | `RunBacktest` etc. | `backtest` | `BacktestConfig` |
-| 21 | `StrategiesListed` etc. | `strategy` | lab events |
-| 22 | `MarketEvent` + `Quote/Trade/Candle/OrderBook/HeartbeatEvent` | `execution` | normalized live data (`symbol, timestamp, seq`) |
-| 23 | `SignalGenerated` / `RiskApproved` / `RiskDenied` | `execution` | `request_id, signal/intent ids` |
-| 24 | `OrderPlanned` / `OrderSubmitted` / `OrderAcknowledged` | `execution` | `request_id, client_order_id` |
-| 25 | `OrderFill` / `OrderRejected` / `PositionUpdated` | `execution` | fills, quantities |
-| 26 | `KillSwitchEngaged` | `execution` | `level, reason` |
+Authoritative list: `90_brain/event_catalog.md` — read it there, not here
+(market/chart/data bus events list their historical publishers; strategy/
+execution events list live vocabulary). Contract shape for all events:
 
 Contracts: frozen dataclass `Event` subclasses, exact-type bus dispatch, no widget/connection/callable in payload, `limit None` semantics preserved.
 
@@ -411,18 +371,10 @@ Legacy `candles(symbol, timestamp, ...)` only in `SqliteCandleDatabase` tests.
 
 ## 10. Performance Contracts
 
-| Area | Contract | Notes |
-|---|---|---|
-| Timeframe aggregation | Use `fromisoformat` + single-pass buckets (not `strptime` per row) | Preserves correctness; 100× faster |
-| Quote load | One-time `get_quotes(527)` at `SymbolsListed` (~0.5s), then `QuoteLoader` no-op cache | Never per-paint DB query |
-| Chart paint | Static pixmap cache `(model, window, price, size)`; crosshair = blit only (~0.9 ms/frame) | `paint_grid` only on cache rebuild |
-| SystemModel | Built once at `Bootstrap._build_architecture()` (~0.13 ms) | Not per-event |
-| Live event dispatch | Sync in-process pipeline, no threads; measured ~0.2 ms/200-candle batch (~932k ev/s) | `scripts/bench_execution.py` baseline |
-| Risk evaluation | Single request ~0.017 ms median | Same baseline script |
-| Paper session | 60 candles end-to-end ~3 ms median (~20k ev/s) | Same baseline script |
-| Sandbox bootstrap | Startup ~0.3 ms, event processing ~3.4 ms, reconcile ~0.03 ms, shutdown ~0.01 ms | `sandbox_bootstrap_e2e` baseline |
-
-No performance guarantee invented beyond measured facts in `ai_memory.md`.
+No invented guarantees: a performance claim needs a fresh measurement on the
+current tree (old-tree numbers were retired with the code they measured).
+Measure with `cargo test` (Rust kernels) or `pytest` (Python paths); record
+method + revision alongside any number you quote.
 
 ---
 
@@ -442,17 +394,12 @@ Existing contract
 
 ## 12. AI Agent Rules
 
-Before modifying a module:
-1. Read this module's contract (§5).
-2. Identify responsibility — do not expand it.
-3. Check allowed dependencies (§4) — do not import forbidden modules.
-4. Use only public APIs (`__init__.py`).
-5. Preserve invariants (§3, §5, §9).
-6. Do not fabricate data; never bypass `Provider` boundary for convenience.
-7. Update this file if public contract legitimately changes.
-8. Run `python scripts/validate_imports.py` + `python scripts/validate_structure.py`.
-9. Never bypass `AiBoundary` forbidden actions.
-10. Migration: follow invisible feature-driven rule per `ARCHITECTURE_CONSTITUTION.md` §5, §13, §17 — migrate directly related legacy slice as part of the feature (smallest useful), no unrelated migration.
+Before modifying a module: read its contract (§5), do not expand its
+responsibility, stay inside allowed dependencies (§4) via public APIs only,
+preserve invariants (§3, §5, §9), never fabricate data or bypass the
+`Provider` boundary, never bypass `AiBoundary` prohibitions. Public contract
+change ⇒ update this file + consumers + tests/validators (+ event catalog for
+events) and verify with `scripts/validate_*`. Workflow detail: `AGENTS.md`.
 
 Do not duplicate `AGENTS.md` — this file owns boundaries, `AGENTS.md` owns workflow.
 
@@ -465,7 +412,7 @@ Do not duplicate `AGENTS.md` — this file owns boundaries, `AGENTS.md` owns wor
 | Structure (required files per domain) | `python scripts/validate_structure.py` — checks `__init__.py`, `README.md`, `manifest.py`, `models/`, `events/`, etc. (7 domains: app/core/data/market/chart/strategy/backtest) |
 | Import boundaries (allowed graph) | `python scripts/validate_imports.py` / `--json` — AST check forward-only runtime imports (`if TYPE_CHECKING:` blocks exempt, see §4) |
 | Tests (contract behavior) | `pytest` / `make check` (lint+format+typecheck+test+validators) |
-| Manifests | `market_manifest()`, `chart_manifest()`, `data_manifest()`, `strategy_manifest()`, `backtest_manifest()` raise `ManifestError` on violation |
+| Manifests | `strategy_manifest()` structural contract only (import-debt via deleted `core.contracts`; live enforcement = future rewire, see `ai_memory.md`) |
 | Events | `90_brain/event_catalog.md` + type-exact dispatch tests |
 
 If a contract is violated, the validator and tests must fail — do not weaken validators to make a change pass.

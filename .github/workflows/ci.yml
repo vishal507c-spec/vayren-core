@@ -23,3 +23,7 @@ jobs:
       - run: python scripts/validate_imports.py
       - run: python scripts/validate_language_ownership.py
       - run: python scripts/validate_architecture_gate.py
+      - run: python scripts/validate_authority.py
+      - run: python scripts/validate_routes.py
+      - run: python scripts/context_engine.py --check
+      - run: python scripts/context.py --check

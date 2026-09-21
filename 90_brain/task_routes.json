@@ -1,0 +1,750 @@
+{
+    "_note": "Machine-readable task routing index (Phase 5). Derived from Phase-2 ground truth (code + import graph + ownership_policy.json). ONE routing system: AI_ENTRY.md is the human mirror of this file. Every path/symbol below was verified against the tree; scripts/validate_routes.py re-verifies on every run (rename/move/ownership change -> CI FAIL). Multi-language routes document their boundary explicitly (never accidental mix). Empty tests.files is honest ONLY with a note (no tracked suite); the validator requires the note.",
+    "_coverage": "Covers all 18 Phase-2 domains. AI_ENTRY rows map here: app-composition, core-bus, core-ai, native-bridge(native-loader folded in), event-vocab(market-read), provider-sdk, download-config, download-flow, market-read, backtest, risk, execution-session, order-lifecycle, execution-ai, strategy-change, broker-ubl, ui-screen, tooling-validator.",
+    "version": 1,
+    "routes": [
+        {
+            "key": "strategy-change",
+            "aliases": ["strategy", "signal", "parameter", "sma", "obr"],
+            "domain": "STRATEGY",
+            "owner_module": "05_strategy/strategy",
+            "language": "PYTHON",
+            "primary_files": [
+                "05_strategy/strategy/runtime.py",
+                "05_strategy/strategy/registry.py",
+                "05_strategy/strategy/models/parameters.py",
+                "05_strategy/strategy/models/signal.py",
+                "05_strategy/strategy/strategies/base.py"
+            ],
+            "secondary_files": [
+                "05_strategy/strategy/models/definition.py",
+                "05_strategy/strategy/models/state.py",
+                "05_strategy/strategy/language/compiler.py",
+                "05_strategy/strategy/language/storage.py"
+            ],
+            "depends_on": ["01_core/core", "03_market/market"],
+            "depended_on_by": ["06_backtest/backtest (native_validation imports BacktestForm)"],
+            "tests": {
+                "files": [],
+                "note": "no tracked suite (package-entry debt); run validators + pyright"
+            },
+            "validation": [
+                "pyright 05_strategy/strategy/<touched-file>",
+                "python scripts/validate_imports.py",
+                "python scripts/validate_language_ownership.py"
+            ],
+            "forbidden": [
+                "rust/vayren-core/src/*",
+                "rust/vayren-shell/*",
+                "09_broker/broker/*",
+                "08_execution/execution/*"
+            ],
+            "symbols": {
+                "05_strategy/strategy/registry.py": ["StrategyRegistry"],
+                "05_strategy/strategy/runtime.py": ["StrategyLogic", "StrategyRuntime", "BarView"],
+                "05_strategy/strategy/language/compiler.py": ["compile_strategy"],
+                "05_strategy/strategy/models/signal.py": ["Signal"]
+            },
+            "contract": "90_brain/module_contracts.md section 5.6",
+            "change_surface": {
+                "likely_changed": [
+                    "05_strategy/strategy/strategies/*.py",
+                    "05_strategy/strategy/models/parameters.py"
+                ],
+                "affected_interfaces": ["Signal", "StrategyParameters", "BacktestForm"],
+                "affected_modules": ["06_backtest/backtest (BacktestForm consumers)"],
+                "required_tests": "validators + pyright (no tracked suite; full pytest on rewire)"
+            },
+            "owner_paths": [
+                "05_strategy/strategy",
+                "05_strategy/strategy/models",
+                "05_strategy/strategy/strategies"
+            ]
+        },
+        {
+            "key": "provider-sdk",
+            "aliases": ["provider", "venue", "zerodha", "fyers", "adapter", "credentials", "auth"],
+            "domain": "PROVIDER_BOUNDARY",
+            "owner_module": "02_data/data/provider",
+            "language": "PYTHON",
+            "primary_files": [
+                "02_data/data/provider/contract.py",
+                "02_data/data/provider/factory.py"
+            ],
+            "secondary_files": [
+                "02_data/data/provider/credentials_store.py",
+                "02_data/data/provider/zerodha/adapter.py",
+                "02_data/data/provider/fyers/adapter.py"
+            ],
+            "depends_on": ["09_broker/broker", "01_core/core"],
+            "depended_on_by": ["09_broker/broker (venue records via factory seeds)"],
+            "tests": {"files": ["02_data/data/tests"], "command": "pytest 02_data/data/tests -q"},
+            "validation": [
+                "pytest 02_data/data/tests -q",
+                "pyright 02_data/data/provider/<touched-file>",
+                "python scripts/validate_imports.py"
+            ],
+            "forbidden": [
+                "rust/vayren-core/src/*",
+                "05_strategy/strategy/*",
+                "07_risk/risk/*",
+                "08_execution/execution/*"
+            ],
+            "symbols": {
+                "02_data/data/provider/contract.py": ["Provider", "ProviderError"],
+                "02_data/data/provider/factory.py": ["build_provider"]
+            },
+            "contract": "90_brain/module_contracts.md section 5.3",
+            "change_surface": {
+                "likely_changed": [
+                    "02_data/data/provider/zerodha/*.py",
+                    "02_data/data/provider/fyers/*.py"
+                ],
+                "affected_interfaces": ["Provider", "BrokerSpec (via factory)"],
+                "affected_modules": ["09_broker/broker (capability matrix)"],
+                "required_tests": "pytest 02_data/data/tests -q"
+            },
+            "owner_paths": ["02_data/data/provider"]
+        },
+        {
+            "key": "download-config",
+            "aliases": ["download settings", "throttle", "intervals", "holidays"],
+            "domain": "DATA_PROCESSING",
+            "owner_module": "02_data/data",
+            "language": "PYTHON",
+            "primary_files": ["02_data/data/settings.py", "02_data/data/throttle.py"],
+            "secondary_files": ["02_data/data/native_download.py"],
+            "depends_on": ["09_broker/broker", "01_core/core"],
+            "depended_on_by": [],
+            "tests": {
+                "files": ["02_data/data/tests"],
+                "command": "pytest 02_data/data/tests/test_settings.py -q"
+            },
+            "validation": [
+                "pytest 02_data/data/tests/test_settings.py -q",
+                "pyright 02_data/data/settings.py"
+            ],
+            "forbidden": ["rust/vayren-core/src/*", "02_data/data/provider/*/adapter.py"],
+            "symbols": {"02_data/data/settings.py": ["DownloadSettings"]},
+            "contract": "90_brain/module_contracts.md section 5.3",
+            "change_surface": {
+                "likely_changed": ["02_data/data/settings.py"],
+                "affected_interfaces": [
+                    "DownloadSettings.provider (derived; writer = future rewire)"
+                ],
+                "affected_modules": [],
+                "required_tests": "pytest 02_data/data/tests/test_settings.py -q"
+            },
+            "owner_paths": ["02_data/data"]
+        },
+        {
+            "key": "download-flow",
+            "aliases": ["download engine", "sweep", "coverage", "chunk"],
+            "domain": "DATA_PROCESSING",
+            "owner_module": "rust/vayren-core download + download_engine",
+            "language": "RUST",
+            "primary_files": [
+                "rust/vayren-core/src/download.rs",
+                "rust/vayren-core/src/download_engine.rs",
+                "02_data/data/native_download.py"
+            ],
+            "secondary_files": ["rust/vayren-core/src/lib.rs"],
+            "depends_on": [],
+            "depended_on_by": [],
+            "tests": {
+                "files": [],
+                "note": "no Python driver (unwired); Rust unit tests live in-module"
+            },
+            "validation": ["cargo test -p vayren-core --lib download"],
+            "forbidden": ["05_strategy/strategy/*", "rust/vayren-shell/*"],
+            "symbols": {"rust/vayren-core/src/download_engine.rs": ["DownloadEngine"]},
+            "contract": "90_brain/module_contracts.md section 5.3",
+            "change_surface": {
+                "likely_changed": [
+                    "rust/vayren-core/src/download.rs",
+                    "rust/vayren-core/src/download_engine.rs"
+                ],
+                "affected_interfaces": ["vy_dl_* FFI exports in lib.rs", "native_download bridge"],
+                "affected_modules": ["02_data/data (bridge consumer, unwired)"],
+                "required_tests": "cargo test -p vayren-core --lib download"
+            },
+            "owner_paths": ["02_data/data", "rust/vayren-core/src"]
+        },
+        {
+            "key": "market-read",
+            "aliases": ["market", "bar", "candles", "timeframe", "aggregate", "quotes"],
+            "domain": "MARKET_DATA",
+            "owner_module": "rust/vayren-core market + aggregate / market.Bar vocab",
+            "language": "PYTHON+RUST",
+            "language_boundary": "Python owns the Bar payload shape only; Rust owns storage/aggregation/timeframe math; boundary = FFI (native_* bridges). Never reimplement kernel math in Python.",
+            "primary_files": [
+                "03_market/market/models/bar.py",
+                "03_market/market/native_aggregate.py",
+                "03_market/market/native_bar.py",
+                "03_market/market/native_timeframe.py",
+                "rust/vayren-core/src/market.rs",
+                "rust/vayren-core/src/aggregate.rs"
+            ],
+            "secondary_files": ["rust/vayren-core/src/lib.rs"],
+            "depends_on": ["01_core/core"],
+            "depended_on_by": ["05_strategy/strategy (Bar consumer)"],
+            "tests": {
+                "files": [],
+                "note": "no Python driver (unwired); Rust unit tests live in-module"
+            },
+            "validation": [
+                "cargo test -p vayren-core --lib market",
+                "cargo test -p vayren-core --lib aggregate",
+                "python -c \"import market\""
+            ],
+            "forbidden": ["05_strategy/strategy/*", "rust/vayren-shell/*"],
+            "symbols": {
+                "03_market/market/models/bar.py": ["Bar"],
+                "rust/vayren-core/src/aggregate.rs": ["aggregate"]
+            },
+            "contract": "90_brain/module_contracts.md section 5.4",
+            "change_surface": {
+                "likely_changed": [
+                    "rust/vayren-core/src/market.rs",
+                    "rust/vayren-core/src/aggregate.rs"
+                ],
+                "affected_interfaces": [
+                    "vy_agg_*/vy_timeframe_* FFI exports",
+                    "Bar shape (frozen)"
+                ],
+                "affected_modules": ["05_strategy/strategy (Bar consumers)"],
+                "required_tests": "cargo test -p vayren-core --lib market"
+            },
+            "owner_paths": ["03_market/market", "03_market/market/models", "rust/vayren-core/src"]
+        },
+        {
+            "key": "backtest",
+            "aliases": ["replay", "metrics", "sharpe", "drawdown", "simulation"],
+            "domain": "BACKTEST",
+            "owner_module": "rust/vayren-core backtest*",
+            "language": "RUST",
+            "primary_files": [
+                "rust/vayren-core/src/backtest.rs",
+                "rust/vayren-core/src/backtest_engine.rs",
+                "rust/vayren-core/src/metrics.rs",
+                "rust/vayren-core/src/backtest_runner.rs",
+                "rust/vayren-core/src/backtest_validation.rs",
+                "06_backtest/backtest/native_metrics.py",
+                "06_backtest/backtest/native_positions.py",
+                "06_backtest/backtest/native_replay.py",
+                "06_backtest/backtest/native_runner.py",
+                "06_backtest/backtest/native_validation.py"
+            ],
+            "secondary_files": ["rust/vayren-core/src/lib.rs"],
+            "depends_on": ["01_core/core"],
+            "depended_on_by": [],
+            "tests": {
+                "files": [],
+                "note": "no Python driver (unwired); Rust unit tests live in-module"
+            },
+            "validation": ["cargo test -p vayren-core --lib backtest"],
+            "forbidden": [
+                "05_strategy/strategy/*",
+                "08_execution/execution/*",
+                "rust/vayren-shell/*"
+            ],
+            "symbols": {"rust/vayren-core/src/backtest.rs": ["PositionManager"]},
+            "contract": "90_brain/module_contracts.md section 5.7",
+            "change_surface": {
+                "likely_changed": [
+                    "rust/vayren-core/src/backtest.rs",
+                    "rust/vayren-core/src/backtest_engine.rs"
+                ],
+                "affected_interfaces": ["vy_bt_* FFI exports", "native_* bridges"],
+                "affected_modules": [],
+                "required_tests": "cargo test -p vayren-core --lib backtest"
+            },
+            "owner_paths": ["06_backtest/backtest", "rust/vayren-core/src"]
+        },
+        {
+            "key": "risk",
+            "aliases": ["risk engine", "kill switch", "killswitch", "session rules", "gates"],
+            "domain": "RISK",
+            "owner_module": "rust/vayren-core risk_engine + kill_switch",
+            "language": "RUST",
+            "primary_files": [
+                "rust/vayren-core/src/risk_engine.rs",
+                "rust/vayren-core/src/kill_switch.rs",
+                "rust/vayren-core/src/risk.rs",
+                "07_risk/risk/native_engine.py",
+                "07_risk/risk/native_kill_switch.py",
+                "07_risk/risk/native_session.py"
+            ],
+            "secondary_files": ["rust/vayren-core/src/lib.rs"],
+            "depends_on": ["01_core/core"],
+            "depended_on_by": [],
+            "tests": {
+                "files": [],
+                "note": "no Python driver (unwired); Rust unit tests live in-module"
+            },
+            "validation": ["cargo test -p vayren-core --lib risk"],
+            "forbidden": [
+                "05_strategy/strategy/*",
+                "08_execution/execution/*",
+                "rust/vayren-shell/*"
+            ],
+            "symbols": {"rust/vayren-core/src/risk.rs": ["evaluate_risk_kernel"]},
+            "contract": "90_brain/module_contracts.md section 5.8",
+            "change_surface": {
+                "likely_changed": [
+                    "rust/vayren-core/src/risk_engine.rs",
+                    "rust/vayren-core/src/kill_switch.rs"
+                ],
+                "affected_interfaces": [
+                    "vy_risk_*/vy_ks_* FFI exports",
+                    "reason strings (byte-pinned)"
+                ],
+                "affected_modules": [],
+                "required_tests": "cargo test -p vayren-core --lib risk"
+            },
+            "owner_paths": ["07_risk/risk", "rust/vayren-core/src"]
+        },
+        {
+            "key": "execution-session",
+            "aliases": ["execution", "live session", "planner", "ledger", "paper"],
+            "domain": "EXECUTION",
+            "owner_module": "rust/vayren-core execution*",
+            "language": "RUST",
+            "primary_files": [
+                "rust/vayren-core/src/execution_engine.rs",
+                "rust/vayren-core/src/execution.rs",
+                "rust/vayren-core/src/live_session.rs",
+                "rust/vayren-core/src/live_readiness.rs",
+                "rust/vayren-core/src/resilience.rs",
+                "rust/vayren-core/src/sandbox_policy.rs",
+                "rust/vayren-core/src/normalizer.rs",
+                "08_execution/execution/native_execution.py",
+                "08_execution/execution/market_data/native_normalizer.py",
+                "08_execution/execution/broker/native_policy.py"
+            ],
+            "secondary_files": ["rust/vayren-core/src/lib.rs"],
+            "depends_on": ["01_core/core"],
+            "depended_on_by": [],
+            "tests": {
+                "files": [],
+                "note": "no Python driver (unwired); Rust unit tests live in-module"
+            },
+            "validation": ["cargo test -p vayren-core --lib execution"],
+            "forbidden": [
+                "05_strategy/strategy/*",
+                "06_backtest/backtest/*",
+                "rust/vayren-shell/*"
+            ],
+            "symbols": {"rust/vayren-core/src/execution_engine.rs": ["ExecutionEngine"]},
+            "contract": "90_brain/module_contracts.md section 5.9",
+            "change_surface": {
+                "likely_changed": ["rust/vayren-core/src/execution_engine.rs"],
+                "affected_interfaces": ["vy_exec_* FFI exports", "native_* bridges"],
+                "affected_modules": [],
+                "required_tests": "cargo test -p vayren-core --lib execution"
+            },
+            "owner_paths": [
+                "08_execution/execution",
+                "08_execution/execution/broker",
+                "08_execution/execution/market_data"
+            ]
+        },
+        {
+            "key": "order-lifecycle",
+            "aliases": ["order state", "transitions", "orderstate", "terminal states"],
+            "domain": "EXECUTION",
+            "owner_module": "rust/vayren-core order_state",
+            "language": "PYTHON+RUST",
+            "primary_files": [
+                "rust/vayren-core/src/order_state.rs",
+                "08_execution/execution/native_order_state.py",
+                "08_execution/execution/models/order_state.py"
+            ],
+            "secondary_files": ["rust/vayren-core/src/lib.rs"],
+            "depends_on": ["01_core/core"],
+            "depended_on_by": [],
+            "tests": {"files": [], "note": "parity-pinned on both sides; no tracked Python suite"},
+            "validation": [
+                "cargo test -p vayren-core --lib order_state",
+                "python -c \"import execution.native_order_state\""
+            ],
+            "forbidden": ["05_strategy/strategy/*", "09_broker/broker/*", "rust/vayren-shell/*"],
+            "symbols": {"08_execution/execution/native_order_state.py": ["transition_allowed"]},
+            "contract": "90_brain/module_contracts.md section 5.9",
+            "change_surface": {
+                "likely_changed": ["rust/vayren-core/src/order_state.rs"],
+                "affected_interfaces": [
+                    "state-code mapping (pinned both sides)",
+                    "OrderState enum order"
+                ],
+                "affected_modules": ["08_execution/execution (bridge + enum)"],
+                "required_tests": "cargo test -p vayren-core --lib order_state"
+            },
+            "owner_paths": [
+                "08_execution/execution",
+                "08_execution/execution/models",
+                "rust/vayren-core/src"
+            ],
+            "language_boundary": "Python owns the OrderState enum vocabulary only; Rust owns the transition table and terminal set; boundary = kernel-direct legality calls (no materialized table)."
+        },
+        {
+            "key": "execution-ai",
+            "aliases": ["adaptive", "regime", "confidence", "attention", "memory", "ml"],
+            "domain": "AI_ADJACENT",
+            "owner_module": "08_execution/execution/adaptive",
+            "language": "PYTHON",
+            "primary_files": [
+                "08_execution/execution/adaptive/attention.py",
+                "08_execution/execution/adaptive/confidence.py",
+                "08_execution/execution/adaptive/memory.py",
+                "08_execution/execution/regime.py",
+                "08_execution/execution/ml_interfaces.py"
+            ],
+            "secondary_files": ["08_execution/execution/events/__init__.py"],
+            "depends_on": ["01_core/core"],
+            "depended_on_by": [],
+            "tests": {
+                "files": [],
+                "note": "no tracked suite; advisory-only (no path to RiskPolicy)"
+            },
+            "validation": [
+                "python -c \"import execution.adaptive.memory\"",
+                "pyright 08_execution/execution/adaptive/<touched-file>"
+            ],
+            "forbidden": [
+                "rust/vayren-core/src/risk_engine.rs",
+                "rust/vayren-core/src/execution_engine.rs",
+                "rust/vayren-shell/*"
+            ],
+            "symbols": {"08_execution/execution/adaptive/memory.py": ["WorkingMemory", "Incident"]},
+            "contract": "90_brain/module_contracts.md section 5.9",
+            "change_surface": {
+                "likely_changed": ["08_execution/execution/adaptive/*.py"],
+                "affected_interfaces": ["advisory outputs only (preferences, diagnostics)"],
+                "affected_modules": [],
+                "required_tests": "import check + pyright (no tracked suite)"
+            },
+            "owner_paths": ["08_execution/execution", "08_execution/execution/adaptive"]
+        },
+        {
+            "key": "broker-ubl",
+            "aliases": [
+                "broker",
+                "ubl",
+                "registry",
+                "selection",
+                "capabilities",
+                "faces",
+                "funds",
+                "skeleton"
+            ],
+            "domain": "BROKER_CONTRACT",
+            "owner_module": "09_broker/broker",
+            "language": "PYTHON",
+            "primary_files": [
+                "09_broker/broker/registry.py",
+                "09_broker/broker/selection.py",
+                "09_broker/broker/vocab.py",
+                "09_broker/broker/capabilities.py",
+                "09_broker/broker/faces.py"
+            ],
+            "secondary_files": [
+                "09_broker/broker/funds.py",
+                "09_broker/broker/credentials.py",
+                "09_broker/broker/health.py",
+                "09_broker/broker/identity.py",
+                "09_broker/broker/management.py",
+                "09_broker/broker/selection_store.py",
+                "09_broker/broker/adapters/skeleton/__init__.py"
+            ],
+            "depends_on": [],
+            "depended_on_by": ["02_data/data (venue records)", "00_app/app (selection service)"],
+            "tests": {
+                "files": ["09_broker/broker/tests"],
+                "command": "pytest 09_broker/broker/tests -q"
+            },
+            "validation": [
+                "pytest 09_broker/broker/tests -q",
+                "pyright 09_broker/broker/<touched-file>",
+                "python scripts/validate_imports.py"
+            ],
+            "forbidden": [
+                "rust/vayren-core/src/*",
+                "02_data/data/provider/*",
+                "05_strategy/strategy/*"
+            ],
+            "symbols": {
+                "09_broker/broker/registry.py": ["BrokerRegistry", "default_registry"],
+                "09_broker/broker/selection.py": ["BrokerSelection"],
+                "09_broker/broker/faces.py": ["HistoricalFace", "MarketDataFace", "TradingFace"],
+                "09_broker/broker/adapters/skeleton/__init__.py": ["skeleton_record"]
+            },
+            "contract": "90_brain/module_contracts.md section 5.10",
+            "change_surface": {
+                "likely_changed": ["09_broker/broker/*.py"],
+                "affected_interfaces": ["BrokerRegistry (single map)", "faces", "capability ids"],
+                "affected_modules": ["02_data/data (adapters)", "00_app/app (selection service)"],
+                "required_tests": "pytest 09_broker/broker/tests -q"
+            },
+            "owner_paths": ["09_broker/broker"]
+        },
+        {
+            "key": "app-composition",
+            "aliases": ["app", "headless", "composition", "backend", "launcher", "services"],
+            "domain": "APP_COMPOSITION",
+            "owner_module": "00_app/app",
+            "language": "PYTHON",
+            "primary_files": [
+                "00_app/app/headless.py",
+                "00_app/app/services/broker_selection_service.py"
+            ],
+            "secondary_files": [
+                "00_app/app/services/broker_manager.py",
+                "00_app/app/services/live_trading_service.py",
+                "00_app/app/services/research_service.py",
+                "scripts/launch_native.py"
+            ],
+            "depends_on": [
+                "01_core/core",
+                "03_market/market",
+                "05_strategy/strategy",
+                "09_broker/broker"
+            ],
+            "depended_on_by": ["rust/vayren-shell (spawns backend over stdio)"],
+            "tests": {
+                "files": [],
+                "note": "no tracked suite (composition tests deleted in purity pass)"
+            },
+            "validation": [
+                "python -c \"from app.services.broker_selection_service import BrokerSelectionService\"",
+                "python scripts/validate_imports.py"
+            ],
+            "forbidden": ["rust/vayren-shell/*", "rust/vayren-shell/ui/*"],
+            "symbols": {},
+            "contract": "90_brain/module_contracts.md section 5.1",
+            "change_surface": {
+                "likely_changed": [
+                    "00_app/app/headless.py",
+                    "00_app/app/services/broker_selection_service.py"
+                ],
+                "affected_interfaces": ["JSON snapshot protocol (ready/symbols/market/system/...)"],
+                "affected_modules": ["rust/vayren-shell (snapshot consumer)"],
+                "required_tests": "validators + import check (no tracked suite)"
+            },
+            "owner_paths": ["00_app/app", "00_app/app/services"]
+        },
+        {
+            "key": "core-ai",
+            "aliases": ["ai boundary", "intent", "plan", "sandbox", "guardrails"],
+            "domain": "AI_ADJACENT",
+            "owner_module": "01_core/core/ai",
+            "language": "PYTHON",
+            "primary_files": [
+                "01_core/core/ai/boundary.py",
+                "01_core/core/ai/intent.py",
+                "01_core/core/ai/plan.py",
+                "01_core/core/ai/sandbox.py"
+            ],
+            "secondary_files": [
+                "01_core/core/ai/context.py",
+                "01_core/core/ai/optimization.py",
+                "01_core/core/ai/providers.py",
+                "01_core/core/ai/plan_validator.py",
+                "01_core/core/ai/change_simulation.py"
+            ],
+            "depends_on": [],
+            "depended_on_by": [],
+            "tests": {
+                "files": [],
+                "note": "no tracked suite (import-debt via deleted core.contracts)"
+            },
+            "validation": ["python scripts/validate_language_ownership.py"],
+            "forbidden": [
+                "rust/vayren-core/src/*",
+                "05_strategy/strategy/*",
+                "08_execution/execution/*"
+            ],
+            "symbols": {},
+            "contract": "90_brain/architecture.md section 4.2",
+            "change_surface": {
+                "likely_changed": ["01_core/core/ai/*.py"],
+                "affected_interfaces": ["AiBoundary (fail-closed)"],
+                "affected_modules": [],
+                "required_tests": "validators (no tracked suite)"
+            },
+            "owner_paths": ["01_core/core/ai"]
+        },
+        {
+            "key": "native-bridge",
+            "aliases": ["bridge", "ffi", "native", "ctypes", "loader", "binding"],
+            "domain": "BOUNDARY_LOADER",
+            "owner_module": "01_core/core/native (+ owning domain bridge)",
+            "language": "PYTHON+RUST",
+            "language_boundary": "Python side marshals/delegates/returns only; Rust side (lib.rs exports + kernels) owns every rule. A bridge file must never contain decision logic.",
+            "primary_files": ["01_core/core/native/loader.py", "rust/vayren-core/src/lib.rs"],
+            "secondary_files": [],
+            "depends_on": ["01_core/core"],
+            "depended_on_by": ["every */native_*.py bridge (17 files)"],
+            "tests": {
+                "files": [],
+                "note": "bridges verified via kernel parity suites in Rust + import checks"
+            },
+            "validation": [
+                "python scripts/validate_language_ownership.py",
+                "cargo test -p vayren-core --lib <kernel>"
+            ],
+            "forbidden": ["05_strategy/strategy/*", "rust/vayren-shell/*"],
+            "symbols": {"01_core/core/native/loader.py": ["load_vayren_core"]},
+            "contract": "90_brain/module_contracts.md section 5.1 (bridge note)",
+            "change_surface": {
+                "likely_changed": [
+                    "<domain>/native_*.py",
+                    "rust/vayren-core/src/lib.rs (export surface)"
+                ],
+                "affected_interfaces": ["vy_* FFI exports (additive only; no ABI break)"],
+                "affected_modules": ["owning domain bridge consumers"],
+                "required_tests": "kernel parity suite + validators"
+            },
+            "owner_paths": ["01_core/core/native", "rust/vayren-core/src"]
+        },
+        {
+            "key": "ui-screen",
+            "aliases": ["ui", "slint", "screen", "shell", "market screen", "chart", "widget"],
+            "domain": "NATIVE_UI",
+            "owner_module": "rust/vayren-shell + view crates",
+            "language": "RUST+SLINT",
+            "language_boundary": "Rust owns view-model + interaction state; Slint renders bound properties only; Python never touches UI.",
+            "primary_files": [
+                "rust/vayren-shell/src/market.rs",
+                "rust/vayren-shell/ui/market.slint"
+            ],
+            "secondary_files": [
+                "rust/vayren-shell/src/shell.rs",
+                "rust/vayren-shell/src/python_bridge.rs",
+                "rust/vayren-shell/src/view_model.rs",
+                "rust/vayren-shell/src/lib.rs"
+            ],
+            "depends_on": [],
+            "depended_on_by": [],
+            "tests": {
+                "files": ["rust/vayren-shell/tests"],
+                "command": "cargo test -p vayren-shell"
+            },
+            "validation": ["cargo test -p vayren-shell", "cargo fmt -p vayren-shell -- --check"],
+            "forbidden": ["00_app/*", "02_data/*", "05_strategy/*", "rust/vayren-core/src/*"],
+            "symbols": {"rust/vayren-shell/src/market.rs": ["MarketBar", "apply_snapshot_json"]},
+            "contract": "UI_DESIGN_SYSTEM.md",
+            "change_surface": {
+                "likely_changed": [
+                    "rust/vayren-shell/src/<screen>.rs",
+                    "rust/vayren-shell/ui/<screen>.slint"
+                ],
+                "affected_interfaces": [
+                    "Slint property bindings",
+                    "snapshot ingest (apply_*_json)"
+                ],
+                "affected_modules": ["00_app/app (snapshot producer, unwired paths)"],
+                "required_tests": "cargo test -p vayren-shell"
+            },
+            "owner_paths": ["rust/vayren-shell/src", "rust/vayren-shell/ui"]
+        },
+        {
+            "key": "core-bus",
+            "aliases": ["event bus", "eventbus", "contracts", "system model"],
+            "domain": "CORE",
+            "owner_module": "rust/vayren-core event_bus + registry",
+            "language": "RUST",
+            "primary_files": [
+                "rust/vayren-core/src/event_bus.rs",
+                "rust/vayren-core/src/registry.rs"
+            ],
+            "secondary_files": [
+                "rust/vayren-core/src/chart_events.rs",
+                "rust/vayren-core/src/data_events.rs",
+                "rust/vayren-core/src/market_events.rs",
+                "rust/vayren-core/src/execution_events.rs",
+                "rust/vayren-core/src/backtest_events.rs"
+            ],
+            "depends_on": [],
+            "depended_on_by": ["rust *_events modules (in-crate consumers)"],
+            "tests": {
+                "files": [],
+                "note": "Rust unit tests live in-module; no FFI surface, no Python twin"
+            },
+            "validation": ["cargo test -p vayren-core --lib event_bus"],
+            "forbidden": ["01_core/*", "05_strategy/strategy/*", "08_execution/execution/*"],
+            "symbols": {},
+            "contract": "ARCHITECTURE_CONSTITUTION.md sections 11-12",
+            "change_surface": {
+                "likely_changed": [
+                    "rust/vayren-core/src/event_bus.rs",
+                    "rust/vayren-core/src/registry.rs"
+                ],
+                "affected_interfaces": ["in-crate event vocabulary (no FFI)"],
+                "affected_modules": ["rust *_events modules"],
+                "required_tests": "cargo test -p vayren-core --lib"
+            },
+            "owner_paths": ["rust/vayren-core/src"]
+        },
+        {
+            "key": "tooling-validator",
+            "aliases": [
+                "validator",
+                "tooling",
+                "scripts",
+                "policy",
+                "retention",
+                "gate",
+                "ci",
+                "lint"
+            ],
+            "domain": "TOOLING",
+            "owner_module": "scripts/",
+            "language": "PYTHON",
+            "primary_files": [
+                "scripts/validate_language_ownership.py",
+                "scripts/validate_architecture_gate.py",
+                "scripts/validate_imports.py",
+                "scripts/validate_structure.py",
+                "90_brain/ownership_policy.json",
+                "90_brain/language_retention.json",
+                "90_brain/task_routes.json"
+            ],
+            "secondary_files": [
+                "scripts/route.py",
+                "scripts/validate_routes.py",
+                "scripts/run_tests.py",
+                "scripts/build_rust.py"
+            ],
+            "depends_on": [],
+            "depended_on_by": ["CI (.github/workflows/ci.yml)", "pre-commit", "Makefile check"],
+            "tests": {"files": ["scripts/tests"], "command": "pytest scripts/tests -q"},
+            "validation": [
+                "pytest scripts/tests -q",
+                "ruff check scripts/<touched-file>",
+                "pyright scripts/<touched-file>"
+            ],
+            "forbidden": [
+                "00_app/*",
+                "01_core/*",
+                "02_data/*",
+                "03_market/*",
+                "05_strategy/*",
+                "06_backtest/*",
+                "07_risk/*",
+                "08_execution/*",
+                "09_broker/*",
+                "rust/*"
+            ],
+            "symbols": {},
+            "contract": "AGENTS.md workflow + Makefile check",
+            "change_surface": {
+                "likely_changed": ["scripts/validate_*.py", "90_brain/*.json"],
+                "affected_interfaces": ["CI gate behavior (additive checks only; never weaken)"],
+                "affected_modules": ["all (validators scan the whole tree)"],
+                "required_tests": "pytest scripts/tests -q"
+            },
+            "owner_paths": ["90_brain", "scripts"]
+        }
+    ]
+}

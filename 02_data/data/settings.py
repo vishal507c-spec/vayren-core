@@ -1,7 +1,7 @@
 """Download settings — the configuration boundary of the historical downloader.
 
 VAYREN has no configuration framework: modules receive everything through
-constructor injection from Bootstrap (CLI args + environment). This dataclass
+constructor injection from the composition root (CLI args + environment). This dataclass
 is that boundary for 02_data. Machine-specific hard-coded paths (the old
 engine's ``D:\\ZerodhaTradingData``, ``Desktop\\token.json``) are gone — every
 path is derived from ``data_dir`` and overridable.
@@ -115,7 +115,7 @@ class DownloadSettings:
     # Derived compatibility field (M7) — NOT an independent selection source.
     # INVARIANT: ``provider`` must always equal the authoritative
     # ``BrokerSelection.name``. The ONLY product write path is the
-    # composition root (``Bootstrap`` copies ``selection.name`` here);
+    # composition root (``00_app`` copies ``selection.name`` here when wired);
     # readers (factory, credentials manager, engine status) treat it as a
     # display/plumbing value. Default venue id single-sourced from the UBL
     # adapter package (one stable broker identity).

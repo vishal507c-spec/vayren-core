@@ -2,14 +2,6 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Run Application",
-      "type": "python",
-      "request": "launch",
-      "module": "app",
-      "args": ["--symbol", "SPY", "--db", "data/vayren.db"],
-      "jinja": true
-    },
-    {
       "name": "Run Tests",
       "type": "python",
       "request": "launch",

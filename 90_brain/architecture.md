@@ -35,20 +35,14 @@ Desktop charting platform: `SQLite per-stock OHLCV → EventBus → candlestick 
 
 ## 3. How Modules Are Connected
 
-**Allowed dependency graph** (enforced by `scripts/validate_imports.py`):
+**Allowed dependency graph** (machine truth: `DOMAIN_DEPS` in
+`scripts/validate_imports.py`; qualified per-module rules: `module_contracts.md` §4):
 
-```
-01_core ─────────────────────► (none)
-  ↑                          
-02_data ─────────────────────► 01_core, 09_broker
-03_market ───────────────────► 01_core
-05_strategy ─────────────────► 01_core, 03_market
-04_chart ────────────────────► 01_core, 03_market
-06_backtest ─────────────────► 01_core, 03_market, 05_strategy
-07_risk ─────────────────────► 01_core
-08_execution ─────────────────► 01_core, 03_market, 05_strategy, 07_risk, 09_broker
-09_broker ───────────────────► (none)
-00_app ──────────────────────► 01_core, 02_data, 03_market, 04_chart, 05_strategy, 06_backtest, 07_risk, 08_execution, 09_broker
+```text
+00_app → all chapters (composition root) · 01_core → none · 09_broker → none
+02_data → core, broker · 03_market → core · 05_strategy → core, market
+06_backtest → core, market, strategy · 07_risk → core
+08_execution → core, market, strategy, risk, broker
 ```
 
 | Dependency | Allowed? | Reason |

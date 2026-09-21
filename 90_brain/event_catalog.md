@@ -99,49 +99,15 @@ WindowRendered       ← "window khul gayi, sab dikh raha hai"
 | `limit: int \| None = None` | Phase 5C se `LoadSymbol`/`TimeframeChanged` ka `limit` default `None` hai — `None` = asli SQLite ki **poori available history** (2016→2026), explicit `--limit N` sirf tab cap karta hai. DB layer `LIMIT ?` NULL never bind karta (SQLite `datatype mismatch` deta hai) — `limit is None` pe ascending full scan |
 | Catalog update zaroori | Event badla → catalog update |
 
-## 6. Story
+## 6. Dispatch model (one paragraph)
 
-Socho ek post office hai.
-
-Har message ka apna envelope hai. Envelope par naam likha hai — `DataLoaded`.
-
-Post office (EventBus) sirf naam milata hai → us naam ke jisne subscribe kiya hai, message pahunchta hai.
-
-Agar kisi ne subscribe nahi kiya → message kisi ko nahi jata. Koi problem nahi.
-
-Agar sunne wala fail ho gaya → post office log karta hai, aage ka kaam chalta rahta hai.
-
-## 7. Example — Event Ka Shape
-
-```python
-@dataclass(frozen=True)
-class DataLoaded(Event):
-    symbol: str
-    bars: tuple[Bar, ...]
-
-
-@dataclass(frozen=True)
-class TimeframeChanged(Event):
-    symbol: str
-    timeframe: str
-    limit: int | None = None
-```
-
-- Frozen = badla nahi ja sakta
-- `tuple` = order pakka
-- `Bar` = market ka model (event apna model nahi banata)
-
-## 8. Ye Kya Nahi Karega
-
-- Phase 5N mein **11 events** hain — `QuotesLoaded` naya aaya (result; `SymbolsListed` ke turant baad, ek baar universe load par — `QuoteLoader` identical universe par no-op karta hai, kabhi re-query nahi)
-- Events business logic nahi rakhte — sirf data
-- `LoadSymbol`, `TimeframeChanged`, `ListTimeframes`, `ListSymbols` requests hain (commands); baaki sab past-tense facts
-
-## 9. Future
-
-`05_strategy` aayega → `StrategyCalculated` jaisa event catalog mein add hoga. Wahi pattern.
-
-> 11 events, 11 messages, 1 post office. Catalog padho — sab clear.
+Bus matches `type(event)` exactly and delivers to subscribers; no subscriber
+→ message dropped, no error. A failing handler is logged, the app continues.
+Events are frozen dataclasses (`Event` base), ordered `tuple` payloads, module
+models reused (no per-event models), never widgets/connections/callables.
+`LoadSymbol`/`TimeframeChanged`/`ListTimeframes`/`ListSymbols` are requests
+(commands); the rest are past-tense facts. `limit None` = full history
+(DB layer never binds `LIMIT NULL`). New event ⇒ update this catalog.
 
 ## 10. Live Execution Events (`08_execution`)
 

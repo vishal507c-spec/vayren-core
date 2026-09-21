@@ -26,8 +26,8 @@ broker/
 ## Rules (from the approved design)
 
 - Core, strategy, backtest, risk, chart, market never import `broker`.
-- `data.provider.factory` and `execution.broker.factory` are delegation
-  shims: same instances, same errors, same sentinel identity.
+- `data.provider.factory` resolves history through the registry (same
+  instances, same errors, same sentinel identity; unknown names fail closed).
 - Capability absent → fail-closed (`UnsupportedCapabilityError` /
   `NotConfiguredError` / explicit ValueError). No silent fallback.
 - Tri-state declaration (M8): SUPPORTED / NOT_SUPPORTED / NOT_CONFIGURED —

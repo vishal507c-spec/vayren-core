@@ -265,7 +265,6 @@
     "06_backtest/backtest/engine/simulator.py": "Rust-owned responsibility; Python implementation removed (ownership purity)",
     "06_backtest/backtest/engine/replay.py": "Rust-owned responsibility; Python implementation removed (ownership purity)",
     "07_risk/risk/engine.py": "Rust-owned responsibility; Python implementation removed (ownership purity)",
-    "00_app/app/services/research_service.py": "duplicated aggregation-window margin maths -> Rust backtest_runner window bounds kernel",
     "03_market/market/repository/candle_repository.py": "Rust-owned responsibility; Python implementation removed (ownership purity)",
     "02_data/data/calendar.py": "Rust-owned responsibility; Python implementation removed (ownership purity)",
     "02_data/data/storage/scanner.py": "Rust-owned responsibility; Python implementation removed (ownership purity)",

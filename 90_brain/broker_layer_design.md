@@ -1,5 +1,14 @@
 # Unified Broker Layer — Architecture Audit & Contract Design (Phase 19)
 
+> **STATUS: HISTORICAL (retired 2026-09-21, Phase 4).** The UBL this document
+> designed is now implemented (`09_broker/broker/` — registry, selection,
+> capabilities, faces, funds, credentials, health, adapters). Design-phase
+> statements below like "implementation deliberately not done" and the
+> "what actually happened: NOTHING" record describe Phase 19, not today.
+> Current truth: `09_broker/broker/README.md` + code + `module_contracts.md`
+> §5.10. This file is preserved verbatim as the design-evidence archive —
+> read it only for *why* the UBL is shaped this way, never for current status.
+
 **Status:** DESIGN ONLY — implementation deliberately not done (Phase-19 directive).
 **Owns:** Current broker-facing architecture audit, duplication/conflict map, Unified
 Broker Layer (UBL) target design, contracts, registry/capability model, selection
