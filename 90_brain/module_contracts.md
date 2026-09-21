@@ -119,32 +119,12 @@ AI agents must read the relevant module contract before modifying that module.
 
 ### 5.2 Module: `01_core` — Foundation
 
-**Responsibility:** Platform foundation: bus, base event, logging, registries, universal contracts (`contracts/`), system intelligence (`system/`), AI boundary (`ai/`).
+**Responsibility:** Core/bus/registry/contracts/system are Rust-owned; their
+Python twins were removed (ownership purity). Python retains `core.ai/*`
+(AI, Python-owned), `core/native/*` (FFI bridge) and the zero-logic `Event`
+marker base for Strategy/AI/Research event vocabulary.
 
-**Public API** (`core/__init__.py`):
-- **Bus/events:** `EventBus`, `Event`, `AppStarted`
-- **Logging:** `configure_logging`, `get_logger`
-- **Registries:** `Registry[T]`, `ComponentRegistry`, `CapabilityRegistry`, `RegisteredComponent`, `ComponentRegistryError`
-- **Contracts:** `ComponentId`, `ComponentVersion`, `CapabilityId`, `CapabilityDecl`, `ComponentManifest`, `ComponentContract`, `CapabilityContract`, `validate_manifest`, `Health`, etc.
-- **System:** `SystemModel`, `ChangeImpact`, `RiskLevel`, `SystemSnapshot`, `Workflow`, `WorkflowRegistry`, `WorkflowStep`, `analyze_change` (plus `analyze_*`), `build_snapshot`
-- **AI:** `Intent`/`IntentKind`/`classify`/`parse_intent`, `Plan`/`PlanChange`/`PlanRisk`/`Rollback`/`validate_plan`, `Policy`/`PlanValidator`, `simulate_plan`/`ChangeSimulation`, `Sandbox`/`SandboxStage`/`SandboxDeployment`, `AiBoundary`/`ActionKind`/`BoundaryViolation`, `EngineeringMemory`, `PerformanceMemory`, `OptimizationStudy`, `AiProvider`/`OfflineProvider`/`AiProviderRegistry`, `ContextBuilder`/`AiContext`
-
-**Consumes:** Stdlib only.
-
-**Produces:** Bus dispatch, capability discovery, system model, AI guardrails.
-
-**Forbidden:** Domain concepts (`symbol`, `candle`, `chart`, `provider`). Core is domain-agnostic.
-
-**Invariants & contracts (selection):**
-- `EventBus.subscribe(type, handler)`, `publish(event)`, `unsubscribe`, `clear` — exact-type, sync, fail-safe.
-- `Plan.id` regex `^[a-z][a-z0-9_]*$`; `reused` ∩ `new` overlap rejected.
-- `Sandbox` lifecycle `PLAN→SANDBOX→TEST→BENCHMARK→VALIDATE→APPROVE→DEPLOY`; skip → `SandboxError`; `deploy()` = recorded decision only.
-- `AiBoundary` fail-closed: 6 forbidden actions (`execute_trade`, `bypass_risk`, `delete_production_data`, `modify_protected_system`, `deploy_unvalidated`, `override_contract`) → `BoundaryViolation`. Unknown action → denied.
-- `OfflineProvider` is default (always unavailable) → AI optional.
-
-**AI modification:** Core changes must stay stdlib-only, preserve deterministic semantics, not add network/LLM calls in runtime.
-
-**Validation:** `core/tests` (+ `scripts/validate_imports.py` core→none).
+**Public API** (`core/__init__.py`): `Event` only.
 
 ---
 
@@ -153,13 +133,14 @@ AI agents must read the relevant module contract before modifying that module.
 **Responsibility:** Download missing historical OHLCV into per-symbol SQLite files that `market` reads. MODE 1 only: download, idempotent resume, never audit/repair/verify.
 
 **Public API** (`data/__init__.py`):
-`DownloadSettings`, `HistoricalDownloadEngine`, `DownloadWorker`, `data_manifest`, events `DownloadRequest`, `CoverageRequest`, `CancelDownload`, `DownloadStarted`, `DownloadProgress`, `DownloadCompleted`, `DownloadFailed`, `DownloadCoverage`
+`DownloadSettings`, `data_manifest`, events `DownloadRequest`, `CoverageRequest`, `CancelDownload`, `DownloadStarted`, `DownloadProgress`, `DownloadCompleted`, `DownloadFailed`, `DownloadCoverage`.
+Flow mechanics ki sole authority Rust hai (`download` + `download_engine`); Python twins (`downloader/engine.py`, `sweep.py`, `queue.py`, `worker.py`) removed.
 
 **Consumes:** `core` only (bus, contracts).
 
 **Produces:** Files `<data_dir>/SYMBOL.db` + events. Capabilities `historical_data.download`, `.coverage`, `.status`.
 
-**Dependencies:** `core` only. INVARIANT: Engine import must not load any broker SDK (`data.provider.contract` only).
+**Dependencies:** `core` only. INVARIANT: Outside `data/provider/`, no module may load any broker SDK (`data.provider.contract` vocabulary only).
 
 **Forbidden:** `market`, `chart`, `app`, `strategy`, `backtest`. No market reads, no chart imports.
 
@@ -179,44 +160,25 @@ WAL, `V9/V9.1` migrations.
 
 **Provider boundary** (`data/provider/contract.py`): `Provider` protocol `available()`, `symbols()`, `fetch_candles(symbol, interval, start, end)`, `new_session()`, `renew()`; sentinels `TOKEN_EXPIRED`/`RATE_LIMITED`; `ProviderError(message, code)` 7 codes (`AUTHENTICATION_FAILED` …). `ZerodhaProvider` in `data/provider/zerodha/adapter.py` is the history-only Kite venue. `FyersProvider` in `data/provider/fyers/adapter.py` is the FYERS venue (own credential schema `app_id`/`secret`/`client_id`/`totp_secret`/`pin`/`redirect_uri`, official API v3 OAuth in `fyers/live_auth.py`, fully automatic TOTP+PIN login in `fyers/auto_auth.py` mirroring the Zerodha auto-auth engine, read-only session in `fyers/session_adapter.py` — no order placement exists; history stays fail-closed `PROVIDER_UNAVAILABLE` in this phase). M7: the `register_provider` shim is retired — venues register directly in the single UBL `BrokerRegistry`; `build_provider(settings)` is retained only as a compatibility delegate while the composition root resolves the selected broker's historical face straight from the registry. `DownloadSettings.provider` is derived state (INVARIANT: always equals `BrokerSelection.name`; the ONLY product write path is `Bootstrap`). `store → env → Not Configured` credential priority via `ProviderCredentialsManager`.
 
-**Implementation note:** `HistoricalDownloadEngine(provider, ...)` requires provider (None→TypeError). `forward_sweep(fetch_chunk)` uses 200-day chunks + jitter. `DownloadWorker` (stdlib thread) drives the engine off the main thread; progress arrives via observable signals.
+**Implementation note:** Flow mechanics Rust-owned (`download_engine::DownloadEngine`, `download::forward_sweep`, chunk windows, coverage verdicts — Rust-side tested). Python holds the provider SDK seam, SQLite storage/scanner, settings, event vocabulary and manifest only.
 
 **Performance constraints:** `get_quotes` not here; download is I/O-bound, not per-candle hot path.
 
-**AI modification:** Never add `market`/`chart` imports. Keep engine library-only (no CLI). Keep broker IDs inside `zerodha/` only.
+**AI modification:** Never add `market`/`chart` imports. Keep broker IDs inside `zerodha/` only.
 
-**Validation:** `data/tests` (engine no-network), `test_provider` isolation (fresh interpreter must not import `kiteconnect` when importing `data.downloader.engine`).
+**Validation:** `data/tests` (provider boundary no-network; flow mechanics Rust-side tested).
 
 ---
 
 ### 5.4 Module: `03_market` — Storage & Query (Read Path)
 
-**Responsibility:** Read-only candle storage: `database → repository → loader`. Serves quotes, timeframes, and bars.
+**Responsibility:** Market storage/loading/aggregation are Rust-owned
+(`rust/vayren-core`, `market` + `aggregate`); their Python twins
+(database, repository, loader, timeframe, events, manifest) were removed
+(ownership purity). Python retains `Bar` (zero-logic payload shape for
+Strategy code) and the native bridges.
 
-**Public API** (`market/__init__.py`):
-`Bar`, `SymbolQuote`, `SqliteCandleDatabase`, `OhlcvCandleDatabase`, `CandleRepository`, `SymbolRepository`, `MarketDataLoader`, `SymbolListLoader`, `TimeframeListLoader`, `QuoteLoader`, `market_manifest`, `TIMEFRAME_LADDER`, `timeframe_seconds`, `timeframe_name`, `available_timeframes`, events `LoadSymbol`, `ListSymbols`, `DataLoaded`, `SymbolsListed`, `QuotesLoaded`, `TimeframeChanged`, `ListTimeframes`, `TimeframesListed`
-
-**Consumes:** `core`.
-
-**Produces:** `Bar`/`SymbolQuote`/`DataLoaded` etc. Capabilities `data.query.candles`, `data.query.timeframes`, `data.query.quotes`, `data.transform.aggregate`.
-
-**Forbidden:** `data`, `chart`, `app`. INVARIANT: Chart must not import `market.database`.
-
-**Invariants:**
-- `Bar(symbol, open, high, low, close, volume, timestamp: ISO str, bar_size?, vwap?, trades?, source?)` frozen, loop-free.
-- `OhlcvCandleDatabase.fetch_candles(symbol, limit)` — `limit None` ⇒ full ascending scan; never bind `LIMIT NULL`.
-- `fetch_candles(symbol, limit, start?, end?)` — optional inclusive timestamp bounds on the aggregation window only; detection (base duration, session anchor) always uses the unbounded latest sample, so bucket alignment never changes. Bounds compose with `limit`.
-- `CandleRepository.get_candles` is the only rows→Bar mapping.
-- Timeframe detection: base = mode of bar-to-bar deltas; `available_timeframes` pure function (ladder entries that are whole multiples of base). Existence always from DB, never cached.
-- Aggregation: session-anchored intraday (session start = mode of first-bar-per-day, NSE 09:15 aligned), daily=midnight, weekly=Monday midnight; OHLC = first/max/min/last, volume=sum; zero fabricated. Windowed fetch `(limit+1)×ratio` with `bars[-limit:]` drop of oldest partial bucket; `limit None` ⇒ full fetch no drop. Parsed via `datetime.fromisoformat` (not `strptime`).
-
-**Data contract:** See §8.
-
-**Performance note:** `aggregate_bars` bucketing/accumulation is Rust-owned (`rust/vayren-core`, `aggregate` + `stats` kernels; measured ~1.5× end-to-end on 60k rows, kernel 8×); Python keeps timestamp parsing/formatting. `get_quotes` is `fetch_candles(symbol,1)` per symbol (~1 ms/symbol, ~0.5 s for 527 symbols, one-time at `SymbolsListed`, cached via `QuoteLoader._last_symbols` no-op on identical universe).
-
-**AI modification:** Add provider/timeframe → extend repository/loader, not UI. Preserve `_last_symbols` guard and no-re-query.
-
-**Validation:** `market/tests` + `scripts/validate_imports.py`.
+**Public API** (`market/__init__.py`): `Bar` only.
 
 ---
 
@@ -276,99 +238,32 @@ plus the universal plot contract (`strategy/models/plot_event.py`): `PlotEvent`,
 
 ### 5.7 Module: `06_backtest` — Research Engine
 
-**Responsibility:** Historical replay, execution simulation, positions, journal, metrics. Python orchestration over Rust numeric kernels.
-
-**Public API** (`backtest/__init__.py`):
-`BacktestRunner`, `run_variant_backtest`, `BacktestWorker`, `BatchEnqueued`, `BacktestConfig`, `BacktestResult`, `StrategyResult`, `TradeRecord`, `EquityPoint`, `PerformanceMetrics`, `RunBacktest`, `BacktestStarted`, `BacktestProgress`, `BacktestCompleted`, `BacktestFailed`, `backtest_manifest`, `validate_backtest_form`
-`BatchSpec` / `SymbolBatchResult` / `run_symbol_batch` / `default_batch_workers` / `execute_bars`: bounded parallel multi-symbol batch (one strategy × N symbols; compile-once per worker, shared `execute_bars` core with the single path, deterministic symbol order, per-symbol error isolation, stock-level progress, `include_plots=False` default for bulk ranking).
-`derive_symbol_results(base, symbols)`: single-pass grouped equivalent of per-symbol `derive_symbol_result` (identical math, used by stock ranking).
-`BacktestWorker` batch queue: `enqueue_batch(BatchEnqueued)` / `cancel_batch()` + `batch_progress` / `batch_done` / `batch_failed` observable signals (payloads are plain tuples, not bus events — only the final merged `BacktestCompleted` travels the bus).
-`StrategyResult.chart_plots: tuple[Any, ...]` (defaulted): universal strategy-owned plot events (same contract live/backtest/replay), forwarded from `logic.get_plot_events()`; directional/symbol derivations preserve it alongside `chart_series`.
-`StrategyResult.muted_bars: tuple[int, ...]` (defaulted, generic ints): strategy-declared visually silent bars from `logic.get_muted_signal_bars()` (`PythonStrategy.mute_signal_bar`), consumed by `TradeOverlay` coverage alongside marker bars; directional derivations preserve it. Trading data is never affected.
-
-**Consumes:** `core`, `market`, `strategy`.
-
-**Produces:** `TradeRecord`/`EquityPoint`/metrics, events.
-
-**Forbidden:** `data` provider SDK, `chart` rendering.
-
-**Invariants:**
-- `BacktestRunner(repository, registry, data_dir)` loads Python strategy via `get_strategy_by_id` → `compile_strategy` → `PythonStrategy`; no `.vstrat`/VM fallback.
-- Batch execution reuses the single-run core (`execute_bars`) and the same repository/compile/metrics helpers — same bars in, same results out; only scheduling differs.
-- Metrics math is Rust-owned (`rust/vayren-core`, `metrics` kernels: drawdown/equity/Sharpe; measured 4–5× on 20–100k inputs); `engine/metrics.py` keeps model assembly + `None`-semantics only.
-- `validate_backtest_form` is honest validation (no fake results).
-- `BacktestWorker` off-UI-thread (like `DownloadWorker`).
-- Cross-module imports use the provider's public surface (`strategy`, `market`, `core`)
-  wherever the name is exported. Accepted exceptions (documented, not accidental):
-  `strategy.language.*` (strategy exposes no public loader API; function-level imports
-  in `runner.py`) and `strategy.research.lineage` (optional, lazy, try/except-guarded
-  in `execution.py` by design). The domain-level arrow backtest → strategy is still
-  enforced by `validate_imports.py`.
-
-**AI modification:** Preserve Python dispatch; respect `PerformanceMemory` measured-only metrics.
-
-**Validation:** `06_backtest/backtest/tests` + `scripts/run_tests.py` partitions.
+**Responsibility:** Backtest runner/engine/validation/models are Rust-owned
+(`rust/vayren-core`, `backtest` + `backtest_engine` + `metrics`); their
+Python twins were removed (ownership purity). Python retains the native
+bridges only.
 
 ---
 
 ### 5.8 Module: `07_risk` — Safety Gates
 
-**Responsibility:** Fail-closed pre-order policy evaluation, latched kill switches, session/clock rules. No order planning, no broker knowledge, no market reads.
-
-**Public API** (`risk/__init__.py`):
-`RiskPolicy`, `RiskRequest`, `RiskCheck`, `RiskDecision`, `RiskEngine`, `KillSwitch`, `KillSwitchState`, `SessionRules`, `within_session`, `clock_sane`, `risk_manifest`
-
-**Consumes:** `core` (contracts for the manifest only).
-
-**Produces:** `RiskDecision` (approved + per-check audit trail, or denied with reasons).
-
-**Forbidden:** Everything except `core`. In particular: no `market` reads, no `strategy` imports, no broker access — the engine judges data snapshots handed to it.
-
-**Invariants:**
-- `RiskEngine.evaluate` never raises: any internal error denies with reason `risk engine error — fail closed`.
-- Denied decisions always carry non-empty reasons; approved decisions record every check.
-- Approved intent IDs are remembered; a repeated intent ID is denied (duplicate protection).
-- Kill-switch state persists to JSON; an engaged switch survives restarts and is only released by explicit `disengage`.
-- `clock_sane` requires caller-supplied epoch on the event-time basis (deterministic, no hidden tz).
-
-**AI modification:** Add a gate by adding a named check (never by weakening an existing one). Keep evaluation side-effect-free apart from the seen-intent set and kill-switch file.
-
-**Validation:** `07_risk/risk/tests` + `scripts/run_tests.py` partitions.
+**Responsibility:** Risk engine/session/kill-switch/models are Rust-owned
+(`rust/vayren-core`, `risk_engine` + `kill_switch`); their Python twins
+were removed (ownership purity). Python retains the native bridges only.
 
 ---
 
 ### 5.9 Module: `08_execution` — Live/Paper Execution
 
-**Responsibility:** Run registered strategies against normalized market events through risk → plan → engine → broker → portfolio, with journal/replay/regime/adaptive observation. Strategy logic is reused from `05_strategy`, never reimplemented.
-
-**Public API** (`execution/__init__.py`, additions Phase 15):
-`SandboxBroker`, `ReadOnlyBroker`, `BrokerCredentials`, `CredentialStore`, `EnvCredentialStore`, `validate_credentials`, `evaluate_live_gates`, `LiveGatesReport`, `confirm_account`, `risk_configuration_valid`, `RateLimiter`, `RetryKind`, `classify_retry`, `clock_drift_ok`, `LiveArm`, `arm_transition`, `TimeoutPolicy`, `BackoffPolicy`, `ReconnectPolicy`, `ActivationReport`, `ActivationStep`, `evaluate_activation`, `record_activation`, `funds_snapshot_from_face`, `funds_valid_for_live`, `risk_capital_from_funds`.
-`execution_manifest`, events (`MarketEvent`, `QuoteEvent`, `TradeEvent`, `CandleEvent`, `OrderBookEvent`, `HeartbeatEvent`, `SignalGenerated`, `RiskApproved`, `RiskDenied`, `OrderPlanned`, `OrderSubmitted`, `OrderAcknowledged`, `OrderFill`, `OrderRejected`, `PositionUpdated`, `KillSwitchEngaged`, `ACTIVATION_EVALUATED`, `RECONCILED`, `IDEMPOTENCY_RESTORED`), models (`StrategySignal`, `ExecutionIntent`, `make_intent_id`, `OrderState`, `OrderPlan`, `BrokerOrder`, `Fill`, `Position`, `AccountSnapshot`, `StrategyRuntimeContract`), `MarketDataProvider`, `ReplayProvider`, `SqliteTailProvider` (closed-candle tail over per-stock SQLite: watermarked exactly-once, forming-candle withheld, stale health, reconnect-safe), `StreamNormalizer`, `inspect_strategy`, `LiveSession`, `OrderPlanner`, `ExecutionEngine`, `BrokerAdapter`, `PaperBroker`, `resolve_broker`, `ExecutionMode`, `ModeGates`, `PositionLedger`, `ReconcileStatus`, `ReconciliationVerdict`, `verdict_of`, `record_verdict`, `reconcile_positions/orders/funds`, `StatisticalRegimeDetector`, `LiveEventRecorder`, `replay_and_compare`, `ExecutionJournal`, `LatencyTracker`
-
-**Consumes:** `core`, `market` (`Bar` only), `strategy` (public surface: logic, signals, params, definitions), `risk` (engine, kill switch, policy).
-
-**Produces:** Fills, positions, journal facts, replay tapes, reconciliation reports.
-
-**Forbidden:** `02_data`, `04_chart`, `app` internals, `backtest`, `market.database`. In particular: strategy code never touches the broker (no path exists), risk never sees adaptive output as authority, adaptive code never touches risk limits or kill switches.
-
-**Invariants:**
-- Default mode is PAPER; LIVE without all five gates degrades to PAPER with recorded reasons. LIVE_BROKER_INTEGRATION = NOT_CONFIGURED (no live adapter ships).
-- REAL_BROKER_UNSPECIFIED (Phase 15 verdict): the only broker in the repo (Zerodha/KiteConnect) is a historical-data provider in `02_data`; no execution venue is configured anywhere. No Zerodha order code exists or may be inferred from data credentials.
-- LIVE venue (Zerodha): real order execution lives in `02_data/data/provider/zerodha/` (`live_trading.py` TradingFace-compatible adapter over the installed `kiteconnect` SDK, `live_market_data.py` poll-based quote face, `live_activation.py` env-gated registration as venue `"zerodha-live"` + request_token exchange helper). `09_broker/broker/adapters/zerodha/` stays identity/capabilities/registration only (arch-tests enforce). Activation needs ALL of: `VAYREN_ENABLE_LIVE_VENUE=true` + `VAYREN_ZERODHA_API_KEY` + daily `VAYREN_ZERODHA_ACCESS_TOKEN` + explicit LIVE START (service probes connect/health/account read-only, asserts effective mode, never falls back to PAPER silently). Idempotency via `tag=client_order_id` + tag-scan adopt + timeout-tag-resolve; timeouts never blindly retry.
-- LIVE submissions additionally require explicit arming (`DISARMED` default; consent never inferred). Read-only verification is available via `ReadOnlyBroker` (mutations raise before reaching any venue).
-- No order without a risk approval; the FINAL planned quantity is re-validated after adaptive shrink.
-- `UNKNOWN` order states exit only via explicit `reconcile()`; never blind-resubmit. Engine idempotency snapshots (`snapshot`/`restore`) persist through checkpoint/recover; restored UNKNOWN orders reconcile before any new submission; unresolved restart mismatch blocks start (fail-closed; operator clears checkpoint for a clean paper restart).
-- Lifecycle includes `RECONCILING`: recovered sessions run `reconcile_now()` (positions+orders+verdict journaling) before VALIDATING. Funds reconcile via explicit `reconcile_funds` (ledger-vs-venue cash semantics differ by design — paper deducts notional on fill; the activation ceremony carries the funds verdict).
-- Activation ceremony (`evaluate_activation`, 12 ordered steps, pure verifier): broker → LIVE env → credentials → account → market data → funds → risk → reconcile → gates → kill switch → explicit ARM → START (never auto-ok). Every evaluation journals `ACTIVATION_EVALUATED` without secrets.
-- Intent IDs are deterministic (`strategy:version:event_seq:intent_seq`); duplicates are denied at both risk and engine.
-- Startup order RECOVER → RECONCILE → VALIDATE → WARMUP → READY is enforced; orders are impossible before RUNNING.
-- Warmup feeds history with signals discarded; restart recovery re-warms from persisted bar windows (no logic pickling).
-- Backtest ↔ paper parity: identical logic + identical bars → identical signal stream (modulo the documented one-bar warmup-boundary transient); identical fill-price math. Sizing models differ by design and are not compared.
-- Language ownership (FINAL migration): the order lifecycle TABLE and terminal set are Rust-owned (`rust/vayren-core`, `order_state`; ABI v1). `execution.models.order` re-exports `TRANSITIONS`/`TERMINAL_STATES` as a read-only projection (no Python table); `execution.native_order_state.transition_allowed` is the single legality check used by `ExecutionEngine`. Public import paths unchanged; reintroducing a Python table fails `validate_language_ownership.py`.
-
-**AI modification:** New venue → new `BrokerAdapter` implementation + direct `BrokerRegistry.register(...)` in `09_broker` (M7: the `register_adapter` shim is retired; never touch strategy/risk). New order type → planner + engine transition coverage + tests. Keep the runtime synchronous and deterministic.
-
-**Validation:** `08_execution/execution/tests` + `scripts/run_tests.py` partitions.
+**Responsibility:** Session/engine/venues/ledger/reconcile/journal/runtime/planner
+are Rust-owned (`rust/vayren-core`, `execution_engine` + `execution` +
+`order_state` + `live_readiness` + `resilience` + `sandbox_policy`); their
+Python twins were removed (ownership purity). Python retains the AI-adjacent
+layer (`adaptive/`, `regime.py`, `ml_interfaces.py` — Python-owned), the
+`OrderState` enum + frozen market-event shapes consumed by it, and the
+native bridges (`native_execution`, `native_order_state` — kernel-direct
+legality checks, no materialized tables — `native_policy`,
+`market_data/native_normalizer`).
 
 ---
 
@@ -497,7 +392,7 @@ Legacy `candles(symbol, timestamp, ...)` only in `SqliteCandleDatabase` tests.
 |---|---|---|---|---|---|
 | `core` | platform | everyone | — | events, manifests | domain concepts |
 | `market.database` | `market` | `market.repository` only | `chart`, `data`, `app` | `Bar` | raw rows, SQL handles |
-| `data/provider` | `data` | `HistoricalDownloadEngine` via `Provider` protocol | `market`, `chart` | canonical `1m..1h` intervals | Kite interval IDs, tokens |
+| `data/provider` | `data` | Rust `download_engine` via `Provider` protocol seam | `market`, `chart` | canonical `1m..1h` intervals | Kite interval IDs, tokens |
 | `chart/renderer` | `chart` | `CandleChartWidget` | loaders | `Bar`/`ChartModel` | bus, SQL |
 | `strategy` | `strategy` | `backtest` via public registry; `execution` via public surface | `chart` | `Signal` | `exec` strings |
 | `risk` | `risk` | `execution` via `RiskEngine.evaluate` | everyone else (no reads, no broker) | `RiskRequest` | market state, broker handles |

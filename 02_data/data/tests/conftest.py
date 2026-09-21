@@ -22,8 +22,8 @@ def make_settings(data_dir, **overrides: Any) -> DownloadSettings:
         "min_inter_call_seconds": 0.0,
         "max_consecutive_429": 2,
         "max_passes": 2,
-        # Market window pinned outside real IST hours so engine/worker tests
-        # are deterministic no matter when the suite runs (09:15-12:40 IST
+        # Market window pinned outside real IST hours so tests are
+        # deterministic no matter when the suite runs (09:15-12:40 IST
         # blocks downloads by design; the calendar tests override ist_now and
         # keep the default window via their own explicit settings).
         "market_open_h": 0,

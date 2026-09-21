@@ -1,6 +1,5 @@
-"""Market models public API."""
+"""Market models public API — candle payload shape only."""
 
 from market.models.bar import Bar
-from market.models.symbol_quote import SymbolQuote
 
-__all__ = ["Bar", "SymbolQuote"]
+__all__ = ["Bar"]

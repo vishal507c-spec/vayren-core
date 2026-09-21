@@ -1,5 +1,14 @@
 ﻿# Event Catalog — Post Office Ki Register
 
+> **Ownership purity note:** Rust-owned publishers/subscribers below were removed
+> from Python - DownloadWorker + download flow, market loaders/repository,
+> backtest runner/engine, risk engine/session/kill-switch, execution
+> session/engine/venues/ledger, and the core bus/registry/contracts/system
+> (Rust owns them all). The tables below remain as the wire-contract reference
+> (names + payloads) for future wiring. Live Python vocabulary: core.Event
+> marker, market.Bar, execution.events market-data shapes, Strategy/AI/Research events.
+
+
 **Owns:** Events + owner + payload. **Not owns:** Language/architecture → `ARCHITECTURE_CONSTITUTION.md`/`architecture.md`; module APIs/boundaries → `module_contracts.md`.
 **When to read:** Before publishing/subscribing/handling any event, or adding a new event.
 **Related:** `module_contracts.md` (which module owns which events), `architecture.md` (flow).

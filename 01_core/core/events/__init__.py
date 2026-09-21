@@ -1,6 +1,5 @@
-"""Core events public API."""
+"""Core events public API — marker base only (bus/registry are Rust-owned)."""
 
-from core.events.app_started import AppStarted
 from core.events.event import Event
 
-__all__ = ["Event", "AppStarted"]
+__all__ = ["Event"]

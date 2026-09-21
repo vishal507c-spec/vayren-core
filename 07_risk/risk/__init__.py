@@ -1,24 +1,6 @@
-"""Risk domain — fail-closed pre-order gates and kill switches.
+"""Risk domain — Python retains the native bridges only.
 
-Depends on: core.
+Engine, session/clock rules, kill switch and models are Rust-owned
+(``rust/vayren-core`` ``risk_engine`` + ``kill_switch``); their Python
+twins were removed.
 """
-
-from risk.engine import RiskEngine
-from risk.kill_switch import KillSwitch, KillSwitchState
-from risk.manifest import risk_manifest
-from risk.models import RiskCheck, RiskDecision, RiskPolicy, RiskRequest
-from risk.session import SessionRules, clock_sane, within_session
-
-__all__ = [
-    "RiskPolicy",
-    "RiskRequest",
-    "RiskCheck",
-    "RiskDecision",
-    "RiskEngine",
-    "KillSwitch",
-    "KillSwitchState",
-    "SessionRules",
-    "within_session",
-    "clock_sane",
-    "risk_manifest",
-]

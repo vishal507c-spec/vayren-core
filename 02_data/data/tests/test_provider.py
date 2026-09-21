@@ -1,25 +1,17 @@
-"""Provider contract, factory, adapter and core-isolation tests.
+"""Provider contract, factory and adapter tests.
 
-- The isolation test runs a fresh interpreter: importing the core engine must
-  NOT import the Zerodha adapter, its SDKs, credentials or any provider
-  internals.
-- The FakeProvider test proves the engine drives a NON-Zerodha provider
-  (implementing only the contract) end to end into SQLite — a future broker
-  needs zero engine changes.
+The download flow mechanics live in Rust (``rust/vayren-core``,
+``download`` + ``download_engine`` modules, tested from the Rust side);
+these tests pin the Python-owned provider SDK boundary only.
 """
 
 from __future__ import annotations
 
-import os
-import subprocess
-import sys
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import cast
 
 import pytest
 
-from data.downloader.engine import HistoricalDownloadEngine
 from data.provider import RATE_LIMITED, TOKEN_EXPIRED, ProviderError
 from data.provider.contract import (
     CANONICAL_INTERVALS,
@@ -30,12 +22,8 @@ from data.provider.contract import (
 )
 from data.provider.factory import build_provider
 from data.provider.zerodha import AuthEngine, ZerodhaProvider
-from data.reporter import RecordingReporter
 from data.settings import DownloadSettings
-from data.storage.candle_db import CandleDB, db_path
 from data.tests.conftest import FakeAuth, FakeKite, candle, make_settings
-
-_DATA_ROOT = Path(__file__).resolve().parents[2]
 
 _INSTRUMENT_ROWS = [{"tradingsymbol": "TEST", "instrument_token": 777}]
 
@@ -243,86 +231,7 @@ def test_zerodha_provider_network_failure_is_normalized(tmp_path) -> None:
     assert err.value.code == ERR_NETWORK_ERROR
 
 
-# ── engine requires a provider ──────────────────────────────────────────────
-
-
-def test_engine_requires_provider(tmp_path) -> None:
-    with pytest.raises(TypeError, match="requires a provider"):
-        HistoricalDownloadEngine(make_settings(tmp_path))
-
-
-# ── future broker: FakeProvider drives the real engine into SQLite ──────────
-
-
-def test_engine_downloads_through_fake_provider_into_sqlite(tmp_path) -> None:
-    """Future Broker proof: engine → FakeProvider → normalized candles → SQLite."""
-    settings = make_settings(tmp_path, chunk_days=200)
-    fake = FakeProvider(symbols={"RELIANCE"})
-    engine = HistoricalDownloadEngine(settings, reporter=RecordingReporter(), provider=fake)
-
-    result = engine.run_download("RELIANCE", "15m", datetime(2026, 1, 1), datetime(2026, 1, 3))
-
-    assert result["ok"]
-    assert result["new_rows"] == 3
-    assert fake._calls  # fetched through the provider
-    assert fake._session_resets == 1
-
-    cdb = CandleDB(db_path(settings.data_dir, "RELIANCE", "15m"))
-    cdb.connect()
-    assert cdb.count() == 3
-    cdb.close()
-
-
-def test_engine_reports_unknown_symbol_from_fake_provider(tmp_path) -> None:
-    settings = make_settings(tmp_path, chunk_days=200)
-    fake = FakeProvider(symbols={"RELIANCE"})
-    reporter = RecordingReporter()
-    engine = HistoricalDownloadEngine(settings, reporter=reporter, provider=fake)
-
-    result = engine.run_download("GHOST", "15m", datetime(2026, 1, 1), datetime(2026, 1, 2))
-
-    assert not result["ok"]
-    assert result["error"] == "unknown-symbol"
-    assert any("symbol not found" in c["message"] for _, c in reporter.calls)
-
-
-# ── core import isolation (fresh interpreter) ───────────────────────────────
-
-
-def test_core_engine_imports_are_broker_free() -> None:
-    """Fresh interpreter: importing the core engine pulls in NO provider
-    internals, SDKs or broker credentials.
-
-    The engine may import the contract (``data.provider.contract``) and the
-    parent package, but never the Zerodha adapter, its auth stack, the
-    factory, kiteconnect, or ``ZerodhaCredentials``.
-    """
-    code = (
-        "import sys\n"
-        "import data.downloader.engine\n"
-        "import data.provider.contract\n"
-        "forbidden = ["
-        "'data.provider.zerodha', 'data.provider.zerodha.adapter', "
-        "'data.provider.zerodha.auth', 'data.provider.zerodha.credentials', "
-        "'data.provider.zerodha.fetch', 'data.provider.zerodha.instruments', "
-        "'data.provider.factory', 'kiteconnect'\n"
-        "]\n"
-        "present = [m for m in sys.modules if m in forbidden]\n"
-        "assert not present, f'core engine imported provider internals: {present}'\n"
-        "settings_mod = sys.modules.get('data.settings')\n"
-        "assert settings_mod is not None\n"
-        "assert not hasattr(settings_mod, 'ZerodhaCredentials'), "
-        "'ZerodhaCredentials leaked into data.settings'\n"
-        "print('CLEAN')\n"
-    )
-    env = {**os.environ, "PYTHONPATH": str(_DATA_ROOT)}
-    result = subprocess.run(
-        [sys.executable, "-c", code],
-        capture_output=True,
-        text=True,
-        env=env,
-        cwd=str(_DATA_ROOT),
-        timeout=60,
-    )
-    assert result.returncode == 0, result.stderr
-    assert "CLEAN" in result.stdout
+# ── download flow mechanics live in Rust ──────────────────────────────────────
+# (``rust/vayren-core`` ``download`` + ``download_engine``, tested from the
+# Rust side). The engine/sweep/queue/worker Python twins were removed; the
+# provider SDK boundary pinned above stays Python-owned.
