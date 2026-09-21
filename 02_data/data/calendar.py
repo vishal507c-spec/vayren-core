@@ -1,12 +1,21 @@
 """Calendar helpers — IST time, market hours and NSE trading days.
 
-Preserved verbatim from the original engine (TIME / CALENDAR HELPERS), now
-parameterised by ``DownloadSettings`` instead of module-level constants.
+The rules live in the Rust data kernel (``rust/vayren-core``, ``download``
+module) and reach Python through ``data.native_download``: the trading-day
+vocabulary, the inclusive market-hours window, the history window and the
+trading-day count are all the kernel's. What stays here is reading the host
+clock — the one input the kernel is not allowed to sample itself.
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+
+from data.native_download import count_trading_days as _kernel_count
+from data.native_download import is_trading_day as _kernel_is_trading_day
+from data.native_download import market_open as _kernel_market_open
+from data.native_download import target_start as _kernel_target_start
+from data.native_download import today_end as _kernel_today_end
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -18,39 +27,33 @@ def ist_now() -> datetime:
 def is_market_open(settings) -> bool:
     """True inside NSE market hours (Mon–Fri, open..close IST).
 
-    NOTE: the close time 12:40 IST is preserved exactly as the original
-    engine had it — a documented quirk of that engine, not a change.
+    The window's own seconds already fall outside it — the kernel keeps the
+    quirk the original engine had, including the 12:40 IST close.
     """
-    n = ist_now()
-    if n.weekday() >= 5:
-        return False
-    mo = n.replace(
-        hour=settings.market_open_h, minute=settings.market_open_m, second=0, microsecond=0
+    return _kernel_market_open(
+        ist_now(),
+        settings.market_open_h,
+        settings.market_open_m,
+        settings.market_close_h,
+        settings.market_close_m,
     )
-    mc = n.replace(
-        hour=settings.market_close_h, minute=settings.market_close_m, second=0, microsecond=0
-    )
-    return mo <= n <= mc
 
 
 def is_trading_day(d: datetime, settings) -> bool:
-    return d.weekday() < 5 and d.strftime("%Y-%m-%d") not in settings.holidays
+    """Weekday and not a listed holiday, decided on the kernel's calendar."""
+    return _kernel_is_trading_day(d, settings.holidays)
 
 
 def target_start_dt(settings) -> datetime:
-    return datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(
-        days=settings.max_history_years * 365
-    )
+    """Midnight the configured history window opens at."""
+    return _kernel_target_start(datetime.now(), settings.max_history_years)
 
 
 def today_end_dt() -> datetime:
-    return datetime.now().replace(hour=23, minute=59, second=59, microsecond=0)
+    """End of today as the engine records it: 23:59:59."""
+    return _kernel_today_end(datetime.now())
 
 
 def count_trading_days(d1: datetime, d2: datetime, settings) -> int:
-    count, cur = 0, d1
-    while cur < d2:
-        if is_trading_day(cur, settings):
-            count += 1
-        cur += timedelta(days=1)
-    return count
+    """Trading days in ``[d1, d2)``, stepped whole days by the kernel."""
+    return _kernel_count(d1, d2, settings.holidays)

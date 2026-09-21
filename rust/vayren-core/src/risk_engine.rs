@@ -15,8 +15,9 @@
 //! | `_seen_intent_ids` (approved only) | caller-visible `seen` set on the engine |
 //! | `evaluate` fail-closed wrapper | structural: no panics, no exceptions |
 //!
-//! Stays Python: `KillSwitch` persistence/orchestration (compose via the
-//! `kill_halted` input — see [`crate::kill_switch`]), settings/credentials,
+//! Stays Python: the kill-switch *file* read/write call itself (the latch table
+//! and reload rule are Rust — see [`crate::kill_switch`], compose via the
+//! `kill_halted` input), settings/credentials,
 //! UI. RISK has no EventBus traffic (manifest: nothing consumed/produced),
 //! so no bus integration is added — Phase 6 is intentionally a no-op.
 
@@ -151,10 +152,31 @@ fn digits(s: &str) -> bool {
     !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())
 }
 
+fn days_in_month(year: i64, month: i64) -> i64 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        _ => {
+            let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+            if leap {
+                29
+            } else {
+                28
+            }
+        }
+    }
+}
+
 /// Parse an ISO-8601 timestamp to epoch seconds: `YYYY-MM-DD<T>HH:MM:SS[.frac]`
 /// with `Z`/`±HH:MM`/`±HHMM`/`±HH` offset or naive (= UTC, like Python's
 /// `fromisoformat` + UTC-assume). `None` on anything unparseable (fail-closed).
 fn parse_epoch(text: &str) -> Option<f64> {
+    // Every slice below is byte-indexed: ASCII-only input keeps all offsets on
+    // char boundaries. `fromisoformat` accepts a non-ASCII character only as
+    // the date/time separator — a garbage timestamp, so fail closed.
+    if !text.is_ascii() {
+        return None;
+    }
     let t = text
         .strip_suffix('Z')
         .map(|s| format!("{s}+00:00"))
@@ -168,7 +190,7 @@ fn parse_epoch(text: &str) -> Option<f64> {
         return None;
     }
     let (y, m, d): (i64, i64, i64) = (ys.parse().ok()?, ms.parse().ok()?, ds.parse().ok()?);
-    if !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+    if y < 1 || !(1..=12).contains(&m) || !(1..=days_in_month(y, m)).contains(&d) {
         return None;
     }
     // Any single-char date/time separator (mirrors `fromisoformat`).
@@ -180,7 +202,7 @@ fn parse_epoch(text: &str) -> Option<f64> {
         return None;
     }
     let (h, n, mut s): (i64, i64, f64) = (hs.parse().ok()?, ns.parse().ok()?, ss.parse().ok()?);
-    if h > 23 || n > 59 {
+    if h > 23 || n > 59 || s >= 60.0 {
         return None;
     }
     let mut rest = &t[19..];
@@ -286,6 +308,12 @@ impl RiskEngine {
 
     pub fn policy(&self) -> &RiskPolicy {
         &self.policy
+    }
+
+    /// Builder hook for the FFI boundary: the symbol allow-list arrives one
+    /// entry per call because a variable-length list has no fixed slot.
+    pub fn policy_mut(&mut self) -> &mut RiskPolicy {
+        &mut self.policy
     }
 
     /// Approve only when every applicable check passes. Never panics —
@@ -615,10 +643,43 @@ impl RiskEngine {
     }
 }
 
+// ── FFI document ──────────────────────────────────────────────────────────
+
+/// Encode a decision as JSON for the Python boundary. Verdicts, the check
+/// order and every reason string are decided here; Python only re-materialises
+/// its frozen value objects, so no rule is ever evaluated a second time.
+pub fn decision_to_json(decision: &RiskDecision) -> String {
+    let esc = |text: &str| crate::kill_switch::json_escape(text);
+    let reasons: Vec<String> = decision
+        .reasons
+        .iter()
+        .map(|reason| esc(reason))
+        .collect::<Vec<_>>();
+    let checks: Vec<String> = decision
+        .checks
+        .iter()
+        .map(|check| {
+            format!(
+                "{{\"name\":{},\"passed\":{},\"detail\":{}}}",
+                esc(check.name),
+                check.passed,
+                esc(&check.detail)
+            )
+        })
+        .collect::<Vec<_>>();
+    format!(
+        "{{\"approved\":{},\"intent_id\":{},\"reasons\":[{}],\"checks\":[{}]}}",
+        decision.approved,
+        esc(&decision.intent_id),
+        reasons.join(","),
+        checks.join(",")
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::kill_switch::{KillSwitch, KillSwitchLevel};
+    use crate::kill_switch::KillSwitch;
 
     const NOW: f64 = 1767700000.0;
 
@@ -925,9 +986,9 @@ mod tests {
 
         // Reuse of the persisted kill-switch: engaged global denies everything.
         let mut ks = KillSwitch::in_memory();
-        ks.engage("halt", KillSwitchLevel::Global);
+        ks.engage("halt", "global").unwrap();
         let denied = RiskEngine::new(RiskPolicy::default())
-            .evaluate(&base_request(), ks.is_halted(KillSwitchLevel::Global));
+            .evaluate(&base_request(), ks.is_halted("global").unwrap());
         assert!(!denied.approved);
         assert_eq!(denied.reasons, vec!["kill switch engaged".to_string()]);
     }
@@ -987,6 +1048,18 @@ mod tests {
         });
         assert!(!d.approved);
         assert_eq!(d.reasons, vec!["clock anomaly".to_string()]);
+    }
+
+    #[test]
+    fn clock_rejects_calendar_impossible_timestamps() {
+        assert!(!clock_sane("2026-02-30T09:30:00+00:00", NOW, 300.0));
+        assert!(!clock_sane("2026-02-29T09:30:00+00:00", NOW, 300.0));
+        assert!(clock_sane("2024-02-29T09:30:00+00:00", NOW, 300.0));
+        assert!(!clock_sane("2026-13-01T09:30:00+00:00", NOW, 300.0));
+        assert!(!clock_sane("2026-01-06T09:30:60+00:00", NOW, 300.0));
+        assert!(clock_sane("2026-01-06T09:30:59.999999+00:00", NOW, 300.0));
+        assert!(!clock_sane("0000-01-01T00:00:00", NOW, 300.0));
+        assert!(!clock_sane("2026-01-06T09:30:00+00:00\u{e9}", NOW, 300.0));
     }
 
     #[test]

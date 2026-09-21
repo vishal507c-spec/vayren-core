@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from execution.models.order import Fill
 from execution.models.position import AccountSnapshot, Position
-from execution.native_execution import native_ledger_apply_fill, native_ledger_snapshot
+from execution.native_execution import (
+    native_ledger_apply_fill,
+    native_ledger_snapshot,
+    native_position_state,
+)
 
 
 class PositionLedger:
@@ -70,6 +74,7 @@ class PositionLedger:
     def strategy_state_for(self, symbol: str) -> tuple[float, str | None, float | None]:
         """(signed qty, side, avg entry) for BarView position state."""
         pos = self.position(symbol)
-        if pos.flat:
+        flat, side = native_position_state(pos.quantity)
+        if flat:
             return 0.0, None, None
-        return pos.quantity, ("LONG" if pos.quantity > 0 else "SHORT"), pos.avg_price
+        return pos.quantity, side, pos.avg_price

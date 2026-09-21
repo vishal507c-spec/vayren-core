@@ -78,7 +78,7 @@ def test_trade_journal():
     )
     j.record(trade)
     assert len(j) == 1
-    assert j.trades[0].winning
+    assert j.trades[0] == trade
 
 
 def test_compute_metrics_no_trades():

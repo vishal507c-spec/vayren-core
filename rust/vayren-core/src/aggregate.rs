@@ -99,6 +99,93 @@ pub fn aggregate(
     acc
 }
 
+/// Session anchor `"HH:MM"` → seconds of day. Anything that does not read as
+/// two integers falls back to the NSE open, so a mis-set anchor buckets from
+/// 09:15 rather than from midnight.
+pub fn anchor_seconds(text: &str) -> i64 {
+    let mut parts = text.split(':');
+    let hour = parts
+        .next()
+        .and_then(|value| value.trim().parse::<i64>().ok());
+    let minute = parts
+        .next()
+        .and_then(|value| value.trim().parse::<i64>().ok());
+    match (hour, minute) {
+        (Some(hour), Some(minute)) => hour * 3600 + minute * 60,
+        _ => 9 * 3600 + 15 * 60,
+    }
+}
+
+/// Floor a `"YYYY-MM-DD HH:MM:SS"` stamp to its bucket start: intraday buckets
+/// floor from the session anchor (a pre-open stamp floors from midnight, the
+/// same alignment [`bucket_key`] gives), daily and longer buckets floor on the
+/// calendar day. `None` when the stamp is not the agreed 19-character shape.
+pub fn bucket_start(stamp: &str, size_s: i64, anchor_s: i64) -> Option<String> {
+    let day = stamp.get(..10)?;
+    let clock = stamp.get(11..19)?;
+    let parts: Vec<&str> = clock.split(':').collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    let seconds = parts[0].parse::<i64>().ok()? * 3600
+        + parts[1].parse::<i64>().ok()? * 60
+        + parts[2].parse::<i64>().ok()?;
+    if size_s >= DAY_SECONDS {
+        return Some(format!("{day} 00:00:00"));
+    }
+    let mut anchor = anchor_s;
+    if seconds < anchor {
+        anchor -= DAY_SECONDS;
+    }
+    let mut start = anchor + (seconds - anchor) / size_s * size_s;
+    if start < 0 {
+        start += DAY_SECONDS;
+    }
+    let start = start.rem_euclid(DAY_SECONDS);
+    Some(format!(
+        "{day} {:02}:{:02}:{:02}",
+        start / 3600,
+        start % 3600 / 60,
+        start % 60
+    ))
+}
+
+/// Fold one quote into the bucket it belongs to — the streaming twin of
+/// [`aggregate`]'s accumulation: a fresh bucket takes all five fields from this
+/// quote, an open bucket absorbs the extremes, adopts the latest close and
+/// grows by the day-volume delta (never negative, and a symbol's first
+/// observation contributes nothing).
+pub fn fold_tick(
+    fresh: bool,
+    open: f64,
+    high: f64,
+    low: f64,
+    volume: f64,
+    price: f64,
+    dayvol: f64,
+    last_dayvol: Option<f64>,
+) -> [f64; 5] {
+    let delta = (dayvol - last_dayvol.unwrap_or(dayvol)).max(0.0);
+    if fresh {
+        [price, price, price, price, delta]
+    } else {
+        [open, high.max(price), low.min(price), price, volume + delta]
+    }
+}
+
+/// How many of a fresh ascending batch are already closed. The store's newest
+/// row is still forming, so it never emits — one row of fresh data means
+/// nothing to publish yet.
+pub fn closed_count(fresh: i64, newest_fresh_is_forming: bool) -> i64 {
+    if fresh <= 0 {
+        0
+    } else if newest_fresh_is_forming {
+        fresh - 1
+    } else {
+        fresh
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,5 +243,69 @@ mod tests {
     fn empty_input_is_empty_output() {
         let out = aggregate(&[], &[], &[], &[], &[], &[], &[], 900, 0);
         assert!(out.is_empty());
+    }
+
+    #[test]
+    fn a_forming_row_is_always_the_last_to_emit() {
+        assert_eq!(closed_count(0, false), 0);
+        assert_eq!(closed_count(1, true), 0);
+        assert_eq!(closed_count(1, false), 1);
+        assert_eq!(closed_count(4, true), 3);
+        assert_eq!(closed_count(4, false), 4);
+    }
+
+    #[test]
+    fn anchors_read_clock_labels() {
+        assert_eq!(anchor_seconds("09:15"), 33_300);
+        assert_eq!(anchor_seconds(" 14 : 45 "), 53_100);
+        assert_eq!(anchor_seconds("09:15:00"), 33_300);
+        assert_eq!(anchor_seconds("nope"), 33_300);
+        assert_eq!(anchor_seconds("09"), 33_300);
+        assert_eq!(anchor_seconds(""), 33_300);
+    }
+
+    #[test]
+    fn buckets_floor_from_the_session_anchor() {
+        let anchor = 33_300;
+        assert_eq!(
+            bucket_start("2026-01-05 09:15:00", 900, anchor).as_deref(),
+            Some("2026-01-05 09:15:00")
+        );
+        assert_eq!(
+            bucket_start("2026-01-05 09:29:59", 900, anchor).as_deref(),
+            Some("2026-01-05 09:15:00")
+        );
+        assert_eq!(
+            bucket_start("2026-01-05 15:47:00", 900, anchor).as_deref(),
+            Some("2026-01-05 15:45:00")
+        );
+        // Pre-open stamps floor from midnight, like the bucket key does.
+        assert_eq!(
+            bucket_start("2026-01-05 08:20:00", 900, anchor).as_deref(),
+            Some("2026-01-05 08:15:00")
+        );
+        assert_eq!(
+            bucket_start("2026-01-05 09:15:00", 86_400, anchor).as_deref(),
+            Some("2026-01-05 00:00:00")
+        );
+        assert_eq!(bucket_start("2026-01-05", 900, anchor), None);
+        assert_eq!(bucket_start("2026-01-05 09:15", 900, anchor), None);
+    }
+
+    #[test]
+    fn a_quote_opens_or_folds_into_its_bucket() {
+        assert_eq!(
+            fold_tick(true, 0.0, 0.0, 0.0, 0.0, 101.0, 500.0, None),
+            [101.0, 101.0, 101.0, 101.0, 0.0]
+        );
+        assert_eq!(
+            fold_tick(false, 101.0, 101.0, 101.0, 0.0, 99.5, 640.0, Some(500.0)),
+            [101.0, 101.0, 99.5, 99.5, 140.0]
+        );
+        // A replayed day-volume never subtracts.
+        assert_eq!(
+            fold_tick(false, 101.0, 101.0, 99.5, 140.0, 100.0, 400.0, Some(640.0)),
+            [101.0, 101.0, 99.5, 100.0, 140.0]
+        );
     }
 }

@@ -1,6 +1,8 @@
-"""Backtest time-range filtering and window slicing."""
+"""Backtest window slicing — the range rule is Rust's, the bars are Python's."""
 
 from market import Bar
+
+from backtest.native_replay import window as _native_window
 
 
 def slice_bars(
@@ -10,20 +12,9 @@ def slice_bars(
 ) -> tuple[Bar, ...]:
     """Return the bars whose timestamp date falls within [start, end].
 
-    ``start_date`` and ``end_date`` are ISO date strings (``YYYY-MM-DD``).
-    A None bound means open-ended. The input is already ascending, so the
-    output preserves that order. Empty input returns empty.
+    ``start_date`` and ``end_date`` are ISO date strings (``YYYY-MM-DD``); a
+    None bound means open-ended. Which bars survive is decided by
+    `backtest_engine::slice_indices`; input order is preserved.
     """
-    if not bars:
-        return ()
-    if start_date is None and end_date is None:
-        return bars
-    filtered: list[Bar] = []
-    for bar in bars:
-        day = bar.timestamp[:10]
-        if start_date is not None and day < start_date:
-            continue
-        if end_date is not None and day > end_date:
-            continue
-        filtered.append(bar)
-    return tuple(filtered)
+    kept = _native_window([bar.timestamp for bar in bars], start_date, end_date)
+    return tuple(bars[index] for index in kept)

@@ -13,9 +13,9 @@
 //! | `_package_visuals` filtering | [`package_visuals`] over [`VisualSource`] |
 //! | `run_variant_backtest` defaults + metadata | [`variant_config`], [`variant_metadata`] |
 //! | `BatchSpec` / `BatchTask` / `SymbolBatchResult` | same structs, same defaults |
-//! | `_window_bounds` ±7d margins | [`window_bounds`] (integer civil math) |
+//! | `_window_bounds` ±7d margins | [`window_bounds`] (authority; no Python copy) |
 //! | `_spec_task` mapping | [`spec_task`] |
-//! | `default_batch_workers` clamp | [`default_workers`] over injected cpu count |
+//! | `default_batch_workers` clamp | [`default_workers`] over injected cpu count (authority) |
 //! | `_run_inline` cancel/progress sequencing | [`run_inline`] |
 //! | `run_symbol_batch` plan + deterministic merge | [`resolve_batch`], [`merge_batch`] |
 //!
@@ -594,6 +594,21 @@ fn civil_from_days(z: i64) -> (i64, i64, i64) {
     (if m <= 2 { y + 1 } else { y }, m, d)
 }
 
+fn days_in_month(year: i64, month: i64) -> i64 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        // `month == 2` here; the other arms above cover 1..=12.
+        _ => {
+            if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) {
+                29
+            } else {
+                28
+            }
+        }
+    }
+}
+
 fn parse_date(text: &str) -> Option<(i64, i64, i64)> {
     let parts: Vec<&str> = text.split('-').collect();
     if parts.len() != 3 {
@@ -602,14 +617,24 @@ fn parse_date(text: &str) -> Option<(i64, i64, i64)> {
     let year: i64 = parts[0].parse().ok()?;
     let month: i64 = parts[1].parse().ok()?;
     let day: i64 = parts[2].parse().ok()?;
-    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+    if !(1..=12).contains(&month) || !(1..=days_in_month(year, month)).contains(&day) {
         return None;
     }
     Some((year, month, day))
 }
 
-/// Aggregation-window bounds with weekly safety margins (mirrors
-/// `_window_bounds`: ±7 days, `"00:00:00"` / `"23:59:59"` stamps).
+/// Aggregation-window bounds for a `[start, end]` date range, with safety
+/// margins: the single authority for the rule (Python bridges call this; no
+/// copy of the margin arithmetic lives outside here).
+///
+/// Buckets are built from real rows only, so a bucket intersecting the
+/// requested range needs every row it contains: weekly buckets span up to 7
+/// calendar days (Monday–Sunday), hence ±7 days. Intraday/daily buckets never
+/// leave their own day. Detection (base duration, session anchor) stays on
+/// the unbounded latest sample, so alignment never changes.
+///
+/// `None` when either input is not a real `YYYY-MM-DD` day (`"00:00:00"` /
+/// `"23:59:59"` stamps on success).
 pub fn window_bounds(start_date: &str, end_date: &str) -> Option<(String, String)> {
     let (sy, sm, sd) = parse_date(start_date)?;
     let (ey, em, ed) = parse_date(end_date)?;
@@ -640,8 +665,9 @@ pub fn spec_task(data_dir: &str, spec: &BatchSpec, symbol: &str) -> BatchTask {
     }
 }
 
-/// Bounded worker count (mirrors `default_batch_workers` over an injected
-/// cpu count; os stays out).
+/// Bounded batch worker count: the clamp rule itself, over an injected cpu
+/// count (`0` = unknown machine → 4, then clamped to 2..=6). `os` stays out —
+/// the caller probes the machine and Python never re-clamps.
 pub fn default_workers(cpu_count: usize) -> usize {
     let cpu = if cpu_count == 0 { 4 } else { cpu_count };
     cpu.clamp(2, 6)
@@ -1036,6 +1062,11 @@ mod tests {
             ))
         );
         assert_eq!(window_bounds("junk", "2026-01-01"), None);
+        // A day the month never has is rejected, not normalised into March.
+        assert_eq!(window_bounds("2026-02-30", "2026-03-01"), None);
+        assert_eq!(window_bounds("2024-02-30", "2024-03-01"), None);
+        assert_eq!(window_bounds("2026-04-31", "2026-04-30"), None);
+        assert!(window_bounds("2024-02-29", "2024-02-29").is_some());
     }
 
     #[test]

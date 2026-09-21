@@ -10,6 +10,12 @@ no duplicated gate logic:
    account/environment; a sandbox account is never a live account.
 4. RISK_CONFIGURATION_VALID — the active RiskPolicy is sane.
 5. EXECUTION_SAFETY_ENABLED — kill switch disengaged (reuses KillSwitch).
+
+Ownership: every verdict, reason string, join, fallback and the gate order
+themselves live in Rust (``rust/vayren-core/src/live_readiness.rs``). What
+stays here is the report types, the re-exported gate names, presentation and
+the IO a kernel cannot perform — asking an adapter, a store and the risk
+policy what their current facts are (constitution §1, migration §7).
 """
 
 from __future__ import annotations
@@ -24,6 +30,12 @@ from execution.broker.credentials import (
     BrokerCredentials,
     CredentialStore,
     validate_credentials,
+)
+from execution.broker.native_policy import (
+    native_account_reasons,
+    native_funds_reasons,
+    native_gate_verdict,
+    native_risk_reasons,
 )
 
 BROKER_ADAPTER_READY = "BROKER_ADAPTER_READY"
@@ -58,25 +70,23 @@ class LiveGatesReport:
 
 
 def risk_configuration_valid(policy: RiskPolicy) -> tuple[bool, tuple[str, ...]]:
-    """Pure sanity check on the active risk policy (no market data needed)."""
-    reasons: list[str] = []
-    if policy.max_position_qty <= 0:
-        reasons.append("max_position_qty must be positive")
-    if policy.max_order_qty <= 0:
-        reasons.append("max_order_qty must be positive")
-    if policy.max_order_qty > policy.max_position_qty:
-        reasons.append("max_order_qty exceeds max_position_qty")
-    for name in ("max_notional", "max_exposure_pct", "daily_loss_limit", "strategy_loss_limit"):
-        value = getattr(policy, name, None)
-        if value is not None and value <= 0:
-            reasons.append(f"{name} must be positive when set")
-    if policy.cooldown_seconds < 0:
-        reasons.append("cooldown_seconds must not be negative")
-    if policy.max_orders_per_day is not None and policy.max_orders_per_day <= 0:
-        reasons.append("max_orders_per_day must be positive when set")
-    if policy.require_fresh_data_seconds is not None and policy.require_fresh_data_seconds <= 0:
-        reasons.append("require_fresh_data_seconds must be positive when set")
-    return (not reasons, tuple(reasons))
+    """Pure sanity check on the active risk policy (no market data needed).
+
+    The kernel (``live_readiness::risk_reasons``) owns the ten comparisons
+    and the words it denies with; this gathers the policy's limits.
+    """
+    reasons = native_risk_reasons(
+        max_position_qty=policy.max_position_qty,
+        max_order_qty=policy.max_order_qty,
+        max_notional=policy.max_notional,
+        max_exposure_pct=policy.max_exposure_pct,
+        daily_loss_limit=policy.daily_loss_limit,
+        strategy_loss_limit=policy.strategy_loss_limit,
+        cooldown_seconds=policy.cooldown_seconds,
+        max_orders_per_day=policy.max_orders_per_day,
+        require_fresh_data_seconds=policy.require_fresh_data_seconds,
+    )
+    return (not reasons, reasons)
 
 
 def confirm_account(
@@ -87,7 +97,8 @@ def confirm_account(
     """Verify broker/account identity through the adapter.
 
     A sandbox account never confirms as LIVE, even when the account id
-    matches — environment is part of identity.
+    matches — environment is part of identity, and that rule is the
+    kernel's: this function only reads what the adapter reports.
     """
     if adapter is None:
         return False, ("no broker adapter available",)
@@ -95,21 +106,13 @@ def confirm_account(
         info = adapter.account()
     except Exception as exc:
         return False, (f"account query failed: {exc}",)
-    account_id = str(info.get("account_id", ""))
-    environment = str(info.get("environment", ""))
-    if not account_id:
-        return False, ("adapter reports no account_id",)
-    reasons: list[str] = []
-    if expected_account_id and account_id != expected_account_id:
-        reasons.append(f"account mismatch: adapter={account_id!r} expected={expected_account_id!r}")
-    if expected_environment:
-        if environment != expected_environment:
-            reasons.append(
-                f"environment mismatch: adapter={environment!r} expected={expected_environment!r}"
-            )
-        if expected_environment == "live" and environment != "live":
-            reasons.append("sandbox account must never be treated as LIVE")
-    return (not reasons, tuple(reasons))
+    reasons = native_account_reasons(
+        account_id=str(info.get("account_id", "")),
+        environment=str(info.get("environment", "")),
+        expected_account_id=expected_account_id,
+        expected_environment=expected_environment,
+    )
+    return (not reasons, reasons)
 
 
 def evaluate_live_gates(
@@ -123,49 +126,51 @@ def evaluate_live_gates(
     risk_policy: RiskPolicy | None = None,
     kill_halted: bool = True,
 ) -> LiveGatesReport:
-    """Evaluate the five live gates. Fail-closed: any false → not ready."""
-    gates: list[GateResult] = []
-    if adapter is None:
-        gates.append(GateResult(BROKER_ADAPTER_READY, False, adapter_error or "no adapter"))
-    else:
+    """Evaluate the five live gates. Fail-closed: any false → not ready.
+
+    Only facts are gathered here — an adapter answers its own health and
+    identity, a store answers secret resolvability. The kernel assembles the
+    gate list, so names, order, joins and fallback wording never exist twice.
+    """
+    adapter_present = adapter is not None
+    health_ok, health_detail = False, ""
+    if adapter is not None:
         try:
             healthy, reason = adapter.health()
         except Exception as exc:
             healthy, reason = False, f"health check failed: {exc}"
-        gates.append(GateResult(BROKER_ADAPTER_READY, bool(healthy), "" if healthy else reason))
+        health_ok, health_detail = bool(healthy), "" if healthy else str(reason)
     creds = credentials or BrokerCredentials()
     creds_ok, creds_reasons = validate_credentials(
         creds, credential_store, require_secrets=True, expected_environment=expected_environment
     )
-    gates.append(
-        GateResult(CREDENTIALS_READY, creds_ok, "" if creds_ok else "; ".join(creds_reasons))
+    account_ok, account_reasons = (
+        confirm_account(adapter, expected_account_id, expected_environment)
+        if adapter is not None
+        else (False, ())
     )
-    if adapter is None:
-        gates.append(GateResult(ACCOUNT_CONFIRMED, False, "no adapter to confirm against"))
-    else:
-        account_ok, account_reasons = confirm_account(
-            adapter, expected_account_id, expected_environment
-        )
-        gates.append(
-            GateResult(
-                ACCOUNT_CONFIRMED, account_ok, "" if account_ok else "; ".join(account_reasons)
-            )
-        )
-    if risk_policy is None:
-        gates.append(GateResult(RISK_CONFIGURATION_VALID, False, "no risk policy active"))
-    else:
-        policy_ok, policy_reasons = risk_configuration_valid(risk_policy)
-        gates.append(
-            GateResult(
-                RISK_CONFIGURATION_VALID, policy_ok, "" if policy_ok else "; ".join(policy_reasons)
-            )
-        )
-    gates.append(
-        GateResult(
-            EXECUTION_SAFETY_ENABLED, not kill_halted, "kill switch engaged" if kill_halted else ""
-        )
+    risk_ok, risk_reasons = (
+        risk_configuration_valid(risk_policy) if risk_policy is not None else (False, ())
     )
-    return LiveGatesReport(ready=all(g.passed for g in gates), gates=tuple(gates))
+    ready, gates = native_gate_verdict(
+        adapter_present=adapter_present,
+        adapter_error=adapter_error,
+        health_ok=health_ok,
+        health_detail=health_detail,
+        credentials_ok=creds_ok,
+        credential_reasons=creds_reasons,
+        account_evaluated=adapter_present,
+        account_ok=account_ok,
+        account_reasons=account_reasons,
+        risk_present=risk_policy is not None,
+        risk_ok=risk_ok,
+        risk_reasons=risk_reasons,
+        kill_halted=kill_halted,
+    )
+    return LiveGatesReport(
+        ready=ready,
+        gates=tuple(GateResult(name, passed, detail) for name, passed, detail in gates),
+    )
 
 
 def format_gates_report(report: LiveGatesReport) -> str:
@@ -229,13 +234,12 @@ def funds_valid_for_live(snapshot: FundsSnapshot) -> tuple[bool, tuple[str, ...]
     """Funds preconditions for LIVE (FINAL §H/§S).
 
     Fail-closed: non-positive availability/equity or an empty currency
-    denies. Zero available capital can never authorize a live order.
+    denies. Zero available capital can never authorize a live order — the
+    comparisons and their wording are the kernel's.
     """
-    reasons: list[str] = []
-    if snapshot.available <= 0:
-        reasons.append(f"available capital not positive: {snapshot.available}")
-    if snapshot.equity <= 0:
-        reasons.append(f"equity not positive: {snapshot.equity}")
-    if not snapshot.currency or not snapshot.currency.strip():
-        reasons.append("funds currency missing")
-    return (not reasons, tuple(reasons))
+    reasons = native_funds_reasons(
+        available=float(snapshot.available),
+        equity=float(snapshot.equity),
+        currency=snapshot.currency,
+    )
+    return (not reasons, reasons)

@@ -28,6 +28,7 @@ from data.events.download_failed import DownloadFailed
 from data.events.download_progress import DownloadProgress
 from data.events.download_request import DownloadRequest
 from data.events.download_started import DownloadStarted
+from data.native_download import validate_range
 
 _DATE_FMT = "%Y-%m-%d"
 
@@ -101,21 +102,12 @@ class DownloadWorker(WorkerThread):
                     self._busy = False
 
     def _run_download(self, event: DownloadRequest) -> None:
-        try:
-            from_dt = datetime.strptime(event.from_date, _DATE_FMT)
-            to_dt = datetime.strptime(event.to_date, _DATE_FMT).replace(
-                hour=23, minute=59, second=59
-            )
-        except ValueError:
-            self.failed.emit(DownloadFailed(event.symbol, event.interval, "invalid date range"))
-            return
-        if from_dt > to_dt:
-            self.failed.emit(
-                DownloadFailed(event.symbol, event.interval, "from date after to date")
-            )
+        window = validate_range(event.from_date, event.to_date)
+        if window.from_dt is None or window.to_dt is None:
+            self.failed.emit(DownloadFailed(event.symbol, event.interval, window.reason))
             return
         self._engine.reset()
-        self._engine.run_download(event.symbol, event.interval, from_dt, to_dt)
+        self._engine.run_download(event.symbol, event.interval, window.from_dt, window.to_dt)
 
     def _run_coverage(self, event: CoverageRequest) -> None:
         try:

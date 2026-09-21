@@ -1,9 +1,17 @@
-"""Trading-session and clock rules — deterministic, no network time."""
+"""Trading-session and clock rules — deterministic, no network time.
+
+The window comparison and the timestamp/clock-skew rule are Rust authority
+(`rust/vayren-core/src/risk_engine.rs`, reached through
+`risk.native_session`); this module keeps the public shape its callers import
+and holds no rule of its own.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC
+
+from risk.native_session import clock_sane as _kernel_clock_sane
+from risk.native_session import within_session as _kernel_within_session
 
 
 @dataclass(frozen=True)
@@ -14,24 +22,9 @@ class SessionRules:
     end: str | None = None  # "HH:MM" inclusive
 
 
-def _hhmm(timestamp: str) -> str | None:
-    """Extract HH:MM from an ISO-like timestamp, else None (fail-closed input)."""
-    try:
-        return str(timestamp)[11:16]
-    except Exception:
-        return None
-
-
 def within_session(timestamp: str, rules: SessionRules) -> bool:
     """True when the timestamp falls inside the allowed window."""
-    if rules.start is None and rules.end is None:
-        return True
-    hhmm = _hhmm(timestamp)
-    if hhmm is None:
-        return False
-    if rules.start is not None and hhmm < rules.start:
-        return False
-    return not (rules.end is not None and hhmm > rules.end)
+    return _kernel_within_session(timestamp, rules.start, rules.end)
 
 
 def clock_sane(timestamp: str, now_epoch: float, max_future_skew_seconds: float = 300.0) -> bool:
@@ -41,14 +34,4 @@ def clock_sane(timestamp: str, now_epoch: float, max_future_skew_seconds: float 
     timestamps (callers construct both, keeping the check deterministic and
     timezone-explicit). Unparseable timestamps fail closed.
     """
-    try:
-        from datetime import datetime
-
-        text = str(timestamp).replace("Z", "+00:00")
-        parsed = datetime.fromisoformat(text)
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=UTC)
-        event_epoch = parsed.timestamp()
-    except Exception:
-        return False
-    return event_epoch <= now_epoch + max_future_skew_seconds
+    return _kernel_clock_sane(timestamp, now_epoch, max_future_skew_seconds)

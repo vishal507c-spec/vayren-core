@@ -1,7 +1,5 @@
 """Backtest runner end-to-end with VM-only path (.vstrat → IR → VM)."""
 
-
-
 import sqlite3
 import tempfile
 from pathlib import Path

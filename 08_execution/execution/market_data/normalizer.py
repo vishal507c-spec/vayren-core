@@ -1,28 +1,31 @@
-"""Stream normalizer — sequence, duplicates, order, staleness, heartbeat.
+"""Stream normalizer — the Python-shaped half of the transport-edge gate.
 
-Every provider is untrusted at the transport edge: sequence gaps, duplicate
-deliveries, out-of-order arrivals and silent stalls are normalized HERE so
-downstream stages (strategy, risk, execution) see a clean ordered stream.
-Dropped/duplicates are counted, never silently swallowed.
+Every verdict comes from Rust: sequence watermarking, duplicate suppression,
+reorder-buffer overflow, delivery order, staleness thresholds and all six
+counters are decided by ``rust/vayren-core/src/normalizer.rs`` and reach this
+module through :mod:`execution.market_data.native_normalizer`. What stays here
+is what cannot cross an FFI boundary — the market event objects themselves,
+keyed by the token the kernel hands back — plus the malformed-arrival guard at
+the provider edge. Dropped/duplicates are counted by the kernel, never
+silently swallowed.
 """
 
 from __future__ import annotations
 
-from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import astuple, dataclass, field
 
 from execution.events import HeartbeatEvent, MarketEvent
+from execution.market_data.native_normalizer import NativeStreamGate, NativeStreamStats
 from execution.market_data.provider import MarketDataError
 
 
 @dataclass
 class StreamStats:
+    """Mirror of the kernel's counters (the caller-facing shape)."""
+
     accepted: int = 0
     duplicates: int = 0
-    # Arrivals jumping ahead of the expected seq (predecessors missing at
-    # arrival; they may still fill from the buffer).
     gaps: int = 0
-    # Buffer-overflow drops: genuine data loss, counted loudly.
     evicted: int = 0
     heartbeats: int = 0
     stale_flags: int = 0
@@ -36,16 +39,18 @@ class NormalizerConfig:
 
 
 class StreamNormalizer:
-    """Per-symbol ordered gate with duplicate suppression and health signals."""
+    """Per-symbol ordered gate; the gate itself is Rust state."""
 
     def __init__(self, config: NormalizerConfig | None = None) -> None:
-        self._config = config if config is not None else NormalizerConfig()
-        self._last_seq: dict[str, int] = {}
-        self._buffer: dict[str, deque[MarketEvent]] = {}
-        self._last_event_epoch: dict[str, float] = {}
-        self._last_heartbeat_epoch: dict[str, float] = {}
+        settings = config if config is not None else NormalizerConfig()
+        self._gate = NativeStreamGate(
+            settings.max_reorder_buffer,
+            settings.stale_after_seconds,
+            settings.heartbeat_timeout_seconds,
+        )
+        self._pending: dict[int, MarketEvent] = {}
+        self._token = 0
         self.stats = StreamStats()
-        self._stale: set[str] = set()
 
     def observe(self, event: MarketEvent, now_epoch: float) -> tuple[MarketEvent, ...]:
         """Accept one raw event; return newly deliverable events in order.
@@ -58,69 +63,33 @@ class StreamNormalizer:
                 f"malformed market event: {type(event).__name__} is not a MarketEvent"
             )
         if isinstance(event, HeartbeatEvent):
-            self.stats.heartbeats += 1
-            self._last_heartbeat_epoch[event.symbol] = now_epoch
-            self._stale.discard(event.symbol)
-            return ()
-        key = f"{event.symbol}"
-        last = self._last_seq.get(key, 0)
-        if event.seq <= last:
-            self.stats.duplicates += 1
-            return ()
-        buf = self._buffer.setdefault(key, deque())
-        if event.seq > last + 1 + len(buf):
-            self.stats.gaps += 1
-        buf.append(event)
-        if len(buf) > self._config.max_reorder_buffer:
-            lowest = min(buf, key=lambda e: e.seq)
-            if lowest.seq == self._last_seq.get(key, 0) + 1:
-                # Dropping the next deliverable: skip exactly one lost event.
-                buf.remove(lowest)
-                self._last_seq[key] = lowest.seq
-            else:
-                # Unfillable hole below `lowest`: jump the watermark to it,
-                # keeping `lowest` buffered for delivery. Late arrivals below
-                # the jumped watermark count as duplicates from here on.
-                self._last_seq[key] = lowest.seq - 1
-            self.stats.evicted += 1
-        ready: list[MarketEvent] = []
-        expected = self._last_seq.get(key, 0) + 1
-        ordered = sorted(buf, key=lambda e: e.seq)
-        for candidate in ordered:
-            if candidate.seq == expected:
-                ready.append(candidate)
-                expected += 1
-            elif candidate.seq < expected:
-                self.stats.duplicates += 1
-            else:
-                break
-        for delivered in ready:
-            buf.remove(delivered)
-        if ready:
-            self._last_seq[key] = ready[-1].seq
-            self._last_event_epoch[key] = now_epoch
-            self.stats.accepted += len(ready)
-        return tuple(ready)
+            delivered, dropped, stats = self._gate.observe_heartbeat(event.symbol, now_epoch)
+        else:
+            self._token += 1
+            self._pending[self._token] = event
+            delivered, dropped, stats = self._gate.observe_event(
+                event.symbol, event.seq, self._token, now_epoch
+            )
+        ready = tuple(self._pending[token] for token in delivered)
+        for token in (*delivered, *dropped):
+            del self._pending[token]
+        self._refresh(stats)
+        return ready
 
     def check_health(self, symbol: str, now_epoch: float) -> tuple[bool, str]:
-        """(healthy, reason): heartbeat gaps and event stalls flag stale."""
-        last_hb = self._last_heartbeat_epoch.get(symbol)
-        if last_hb is not None and now_epoch - last_hb > self._config.heartbeat_timeout_seconds:
-            self.stats.stale_flags += 1
-            self._stale.add(symbol)
-            return False, "heartbeat timeout"
-        last_event = self._last_event_epoch.get(symbol)
-        if last_event is not None and now_epoch - last_event > self._config.stale_after_seconds:
-            self.stats.stale_flags += 1
-            self._stale.add(symbol)
-            return False, "stale market data"
-        return True, "ok"
+        """(healthy, reason): the kernel decides both, this method relays them."""
+        healthy, reason, stats = self._gate.check_health(symbol, now_epoch)
+        self._refresh(stats)
+        return healthy, reason
 
     def is_stale(self, symbol: str) -> bool:
-        return symbol in self._stale
+        return self._gate.is_stale(symbol)
 
     def expected_seq(self, symbol: str) -> int:
-        return self._last_seq.get(symbol, 0) + 1
+        return self._gate.expected_seq(symbol)
+
+    def _refresh(self, stats: NativeStreamStats) -> None:
+        self.stats = StreamStats(*astuple(stats))
 
 
 @dataclass

@@ -3,8 +3,9 @@
 from market.database.ohlcv import OhlcvCandleDatabase
 from market.database.sqlite import SqliteCandleDatabase
 from market.models.bar import Bar
+from market.native_timeframe import fetch_plan as _fetch_plan
 from market.timeframe.aggregate import aggregate_bars, detect_bar_duration, detect_session_start
-from market.timeframe.timeframe import available_timeframes, timeframe_seconds
+from market.timeframe.timeframe import available_timeframes
 
 _DETECTION_SAMPLE = 5000
 
@@ -101,22 +102,22 @@ class CandleRepository:
 
         Timeframes at or below the detected base duration fall back to the
         plain fetch. Larger timeframes are aggregated from real rows only.
+        Which of those applies — and how many base rows to read — is decided
+        by the Rust timeframe plan kernel (``market.native_timeframe``).
         The session anchor is detected from a full sample — never from the
         (possibly partial) aggregation window.
         """
-        seconds = timeframe_seconds(timeframe)
         if detection is not None:
             base, session_start = detection
         else:
             sample_rows = self._database.fetch_candles(symbol, _DETECTION_SAMPLE)
             base = detect_bar_duration([row["timestamp"] for row in sample_rows])
             session_start = detect_session_start(sample_rows) if base is not None else 0
-        if seconds is None or base is None or seconds <= base:
+        plan = _fetch_plan(timeframe, base, limit)
+        if plan.plain:
             return self.get_candles(symbol, limit, start, end)
-        ratio = seconds // base
-        if limit is None:
-            rows = self._database.fetch_candles(symbol, None, start, end)
-            return aggregate_bars(rows, seconds, timeframe, session_start)
-        rows = self._database.fetch_candles(symbol, (limit + 1) * ratio, start, end)
-        bars = aggregate_bars(rows, seconds, timeframe, session_start)
-        return bars[-limit:]
+        rows = self._database.fetch_candles(symbol, plan.row_budget, start, end)
+        bars = aggregate_bars(rows, plan.seconds, timeframe, session_start)
+        if plan.keep_last is None:
+            return bars
+        return bars[-plan.keep_last :]

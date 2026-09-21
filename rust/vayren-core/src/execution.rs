@@ -200,6 +200,32 @@ pub struct Fill {
     pub partial: bool,
 }
 
+/// Signed-quantity verdict: ``0`` flat, ``1`` long, ``2`` short.
+///
+/// The one place that reads a position's sign, so the flat test, the
+/// ``LONG``/``SHORT`` label and the Python bridge can never drift apart.
+pub fn position_state(quantity: f64) -> i32 {
+    if quantity == 0.0 {
+        0
+    } else if quantity > 0.0 {
+        1
+    } else {
+        2
+    }
+}
+
+/// Side labels indexed by [`position_state`]; index 0 is the flat sentinel.
+pub const POSITION_SIDES: [Option<&'static str>; 3] = [None, Some("LONG"), Some("SHORT")];
+
+/// Mark-to-market P&L of a signed quantity; flat legs have no basis.
+pub fn position_unrealized(quantity: f64, avg_price: f64, mark_price: f64) -> f64 {
+    if quantity == 0.0 {
+        0.0
+    } else {
+        (mark_price - avg_price) * quantity
+    }
+}
+
 /// Net position in one symbol.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Position {
@@ -221,15 +247,11 @@ impl Position {
     }
 
     pub fn is_flat(&self) -> bool {
-        self.quantity == 0.0
+        position_state(self.quantity) == 0
     }
 
     pub fn unrealized(&self, mark_price: f64) -> f64 {
-        if self.is_flat() {
-            0.0
-        } else {
-            (mark_price - self.avg_price) * self.quantity
-        }
+        position_unrealized(self.quantity, self.avg_price, mark_price)
     }
 
     /// Apply a fill: weighted-average entry when adding, realized P&L when
@@ -352,6 +374,29 @@ mod tests {
         let position = Position::flat_at("AAPL");
         assert!(position.is_flat());
         assert_eq!(position.unrealized(150.0), 0.0);
+    }
+
+    #[test]
+    fn position_state_reads_the_sign_once() {
+        assert_eq!(position_state(0.0), 0);
+        assert_eq!(position_state(0.1), 1);
+        assert_eq!(position_state(-0.1), 2);
+        assert_eq!(position_state(-0.0), 0);
+        assert_eq!(position_state(f64::NAN), 2);
+        assert_eq!(POSITION_SIDES[0], None);
+        assert_eq!(POSITION_SIDES[1], Some("LONG"));
+        assert_eq!(POSITION_SIDES[2], Some("SHORT"));
+        let short = Position {
+            symbol: "AAPL".to_string(),
+            quantity: -10.0,
+            avg_price: 100.0,
+            realized_pnl: 0.0,
+        };
+        assert_eq!(short.unrealized(90.0), 100.0);
+        assert_eq!(
+            short.unrealized(90.0),
+            position_unrealized(short.quantity, short.avg_price, 90.0)
+        );
     }
 
     #[test]

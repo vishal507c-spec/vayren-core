@@ -32,7 +32,7 @@ import logging
 import random
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from functools import partial
 from typing import Any
 
@@ -41,6 +41,7 @@ from data.downloader.queue import DownloadQueue
 from data.downloader.sweep import forward_sweep
 from data.lock import EngineLock
 from data.models import DLState, SymbolInfo
+from data.native_download import chunk_count
 from data.provider.contract import (
     ERR_AUTHENTICATION_FAILED,
     Provider,
@@ -405,14 +406,7 @@ class HistoricalDownloadEngine:
     # ── helpers ──────────────────────────────────────────────────────────────
 
     def _count_chunks(self, from_dt: datetime, to_dt: datetime) -> int:
-        count = 0
-        chunk = from_dt
-        while chunk <= to_dt:
-            count += 1
-            chunk = min(chunk + timedelta(days=self._settings.chunk_days), to_dt) + timedelta(
-                minutes=1
-            )
-        return max(count, 1)
+        return chunk_count(from_dt, to_dt, self._settings.chunk_days)
 
     def _start_heartbeat(self, lock: EngineLock) -> threading.Event:
         stop = threading.Event()

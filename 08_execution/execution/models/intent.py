@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from execution.native_execution import native_intent_id
+
 
 @dataclass(frozen=True)
 class StrategySignal:
@@ -28,8 +30,12 @@ class StrategySignal:
 
 
 def make_intent_id(strategy_id: str, strategy_version: str, event_seq: int, intent_seq: int) -> str:
-    """Deterministic idempotency key: same input events always yield same ids."""
-    return f"{strategy_id}:{strategy_version}:{event_seq}:{intent_seq}"
+    """Deterministic idempotency key: same input events always yield same ids.
+
+    The key's spelling is the Rust kernel's (`execution::make_intent_id`);
+    this asks for the string, it does not format it.
+    """
+    return native_intent_id(strategy_id, strategy_version, event_seq, intent_seq)
 
 
 @dataclass(frozen=True)

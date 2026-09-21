@@ -10,11 +10,12 @@ database state without any progress files.
 from __future__ import annotations
 
 import logging
-import re
 import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+from data.native_download import candle_time, candle_time_for, filename_token
 
 log = logging.getLogger("HistDownloadEngine")
 
@@ -54,26 +55,10 @@ CREATE TABLE IF NOT EXISTS history_boundaries (
 _SQLITE_INT_MAX = (1 << 63) - 1
 
 
-# ── Timestamp normalisation (preserved) ──────────────────────────────────────
-
-
-def normalise_ts_str(raw: str) -> str:
-    """Force ``YYYY-MM-DD HH:MM:00``; strip seconds and ISO separators."""
-    s = raw[:19]
-    s = s.replace("T", " ")
-    if len(s) == 19:
-        s = s[:17] + "00"
-    return s
-
-
-def normalise_ts_dt(dt: datetime) -> str:
-    return dt.strftime("%Y-%m-%d %H:%M:00")
-
-
 def parse_dt(s: str | None) -> datetime | None:
     if not s:
         return None
-    cleaned = normalise_ts_str(s)
+    cleaned = candle_time(s)
     try:
         return datetime.strptime(cleaned, "%Y-%m-%d %H:%M:%S")
     except Exception:
@@ -86,8 +71,7 @@ def db_path(data_dir: str | Path, symbol: str, _interval: str) -> str:
     NOTE: the interval label is deliberately not part of the filename —
     preserved exactly as the original engine behaved (one DB per symbol).
     """
-    safe = re.sub(r"[^A-Za-z0-9_]", "", symbol)
-    return str(Path(data_dir) / f"{safe}.db")
+    return str(Path(data_dir) / f"{filename_token(symbol)}.db")
 
 
 class CandleDB:
@@ -236,10 +220,8 @@ class CandleDB:
         rows: list[tuple] = []
         for c in candles:
             try:
-                if isinstance(c["date"], datetime):
-                    ts = normalise_ts_dt(c["date"])
-                else:
-                    ts = normalise_ts_str(str(c["date"]))
+                date = c["date"]
+                ts = candle_time_for(date) if isinstance(date, datetime) else candle_time(str(date))
                 vol = int(c["volume"])
                 if vol > _SQLITE_INT_MAX:
                     vol = _SQLITE_INT_MAX
@@ -305,7 +287,7 @@ class CandleDB:
         updates: list[tuple[str, str]] = []
         for (raw_ts,) in bad_rows:
             try:
-                normalised = normalise_ts_str(raw_ts)
+                normalised = candle_time(raw_ts)
                 if normalised != raw_ts:
                     updates.append((normalised, raw_ts))
             except Exception as exc:

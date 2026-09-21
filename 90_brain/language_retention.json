@@ -11,48 +11,6 @@
     "NATIVE_UI": "Native UI is Rust+Slint only (rust/vayren-shell). The legacy Python UI was removed in the native migration; no Python UI surfaces remain."
   },
   "files": {
-    "08_execution/execution/runtime/lifecycle.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "EXECUTION",
-      "reason": "LifecycleState machine is session orchestration vocabulary (string reasons, legacy UI-adjacent). Order-state authority migrated to Rust.",
-      "migration_target": "rust/vayren-core/src/",
-      "migration_condition": "When LiveSession ported to Rust or FFI bridge covers full lifecycle"
-    },
-    "08_execution/execution/market_data/sqlite_tail.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "EXECUTION",
-      "reason": "SQLite-tail provider is IO orchestration (per-symbol polling, watermark dedupe). Zero numeric authority.",
-      "migration_target": "rust/vayren-core/src/",
-      "migration_condition": "When execution market-data layer ported"
-    },
-    "08_execution/execution/market_data/broker_feed.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "EXECUTION",
-      "reason": "Broker-feed candle builder is stream plumbing over injected face. Zero numeric authority.",
-      "migration_target": "rust/vayren-core/src/",
-      "migration_condition": "Same as sqlite_tail"
-    },
-    "02_data/data/provider/zerodha/live_trading.py": {
-      "state": "EXEMPT_WITH_JUSTIFICATION",
-      "domain": "PROVIDER_BOUNDARY",
-      "reason": "Kite order-execution venue in sanctioned SDK boundary. SDK wire protocol, not core math.",
-      "migration_target": "N/A - external SDK adapter stays Python",
-      "migration_condition": "Never - provider SDK boundary is permanently Python"
-    },
-    "02_data/data/provider/zerodha/live_market_data.py": {
-      "state": "EXEMPT_WITH_JUSTIFICATION",
-      "domain": "PROVIDER_BOUNDARY",
-      "reason": "Kite quote-poll face: throttled REST polling. Same SDK boundary proof.",
-      "migration_target": "N/A",
-      "migration_condition": "Never"
-    },
-    "02_data/data/provider/zerodha/live_activation.py": {
-      "state": "EXEMPT_WITH_JUSTIFICATION",
-      "domain": "PROVIDER_BOUNDARY",
-      "reason": "Venue activation glue. No transport math.",
-      "migration_target": "N/A",
-      "migration_condition": "Never"
-    },
     "01_core/core/__init__.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "CORE",
@@ -154,7 +112,7 @@
     "01_core/core/observable.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "CORE",
-      "reason": "Stdlib Signal/WorkerThread/IntervalTimer replacing the legacy toolkit primitives the service layer used to keep work off the main thread. Pure stdlib event-dispatch glue (no numeric compute, no migrated authority) - same retention basis as event_bus.py.",
+      "reason": "Stdlib Signal/WorkerThread/IntervalTimer replacing the legacy toolkit primitives the service layer used to keep work off the main thread. Pure stdlib event-dispatch glue (no numeric compute, no migrated authority) - same retention basis as event_bus.py. File role: core dispatch primitive (no rule)",
       "migration_target": "rust/vayren-core/src/core/",
       "migration_condition": "When the CORE slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
     },
@@ -259,7 +217,7 @@
     "02_data/data/calendar.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "DATA_PROCESSING",
-      "reason": "Download-engine IO/threading orchestration (worker threads, locks, auth flows) around the provider boundary. Numeric detectors already migrated. File role: orchestration glue (no migrated authority)",
+      "reason": "Settings-shaped reads around the download kernel: it resolves the host clock and the configured market bounds and forwards every question (market hours, trading day, trading-day count, target window, end of today) to data.native_download. No calendar rule of its own. File role: glue over a kernel read",
       "migration_target": "rust/vayren-core/src/data/",
       "migration_condition": "When the DATA_PROCESSING slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
     },
@@ -273,21 +231,21 @@
     "02_data/data/downloader/engine.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "DATA_PROCESSING",
-      "reason": "Download flow twinned in Rust (download_engine.rs: gates/retry/batch/queue/boundary/status, 12 parity tests, reuses download.rs kernels); Python stays production authority (SDKs/SQLite/threads stay Python). File role: orchestration driver (wires migrated kernels)",
+      "reason": "Download flow orchestration around the provider boundary: worker threads, engine lock, cancellation, retry/backoff pacing, batch passes and status reporting. The chunk plan is a kernel read (data.native_download.chunk_count); the remaining decisions are threading and provider IO, which the DATA_PROCESSING glue scope keeps in Python. File role: orchestration glue (no numeric authority)",
       "migration_target": "rust/vayren-core/src/data/",
       "migration_condition": "When the DATA_PROCESSING slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
     },
     "02_data/data/downloader/queue.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "DATA_PROCESSING",
-      "reason": "Download-engine IO/threading orchestration (worker threads, locks, auth flows) around the provider boundary. Numeric detectors already migrated. File role: orchestration glue (no migrated authority)",
+      "reason": "Job-list construction over migrated kernels: every queued range and reason string comes from download.rs through native_download.job_window, and since 2026-09-20 the PARTIAL-before-NOT_STARTED priority is download.rs job_rank, so the local priority_map is gone. What stays here is the provider's own universe-filter decision, gap-kind selection from scan flags, the job list itself and logging. File role: orchestration glue (no rule)",
       "migration_target": "rust/vayren-core/src/data/",
       "migration_condition": "When the DATA_PROCESSING slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
     },
     "02_data/data/downloader/sweep.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "DATA_PROCESSING",
-      "reason": "Download-engine IO/threading orchestration (worker threads, locks, auth flows) around the provider boundary. Numeric detectors already migrated. File role: orchestration glue (no migrated authority)",
+      "reason": "The chunk loop that calls the provider and stores rows: pacing, jitter, abort checks and progress reporting. The chunk plan and the LISTING_START eligibility rule come from data.native_download. File role: provider IO orchestration (no rule)",
       "migration_target": "rust/vayren-core/src/data/",
       "migration_condition": "When the DATA_PROCESSING slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
     },
@@ -371,9 +329,37 @@
     "02_data/data/models.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "DATA_PROCESSING",
-      "reason": "Download-engine IO/threading orchestration (worker threads, locks, auth flows) around the provider boundary. Numeric detectors already migrated. File role: orchestration glue (no migrated authority)",
+      "reason": "Download state vocabulary only: the DLState members and the SymbolInfo payload the scanner fills in. The state names themselves are the kernel's - the coverage document carries download.rs's spelling, which scanner.py maps onto these members. No rules, no derived flags. File role: boundary vocabulary",
       "migration_target": "rust/vayren-core/src/data/",
       "migration_condition": "When the DATA_PROCESSING slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+    },
+    "02_data/data/native_download.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "domain": "DATA_PROCESSING",
+      "reason": "Rust-backed ctypes bridge for the whole download kernel (vy_cal_*, vy_dl_*, vy_sym_filename, vy_ts_*): converts naive wall-clock datetimes to the seconds the kernel expects, crosses a holiday set as one NUL-joined blob, and reads the kernel's one-line verdict documents back. Since 2026-09-20 it also carries validate_range (end-of-day window plus both failure reasons) and job_rank (queue priority). Holds no rule of its own - trading-day vocabulary, market-hours window, target window, coverage verdict, stored candle-key shape, on-disk filename token, chunk plan, queued job ranges and date bounds all live in rust/vayren-core/src/download.rs. File role: bridge (no authority)",
+      "migration_target": "rust/vayren-core/src/download.rs",
+      "migration_condition": "Terminal bridge state: retained as the FFI projection (same pattern as native_aggregate/native_timeframe)."
+    },
+    "02_data/data/provider/zerodha/live_activation.py": {
+      "state": "EXEMPT_WITH_JUSTIFICATION",
+      "domain": "PROVIDER_BOUNDARY",
+      "reason": "Venue activation glue. No transport math. File role: provider boundary adapter (class C)",
+      "migration_target": "N/A",
+      "migration_condition": "Never"
+    },
+    "02_data/data/provider/zerodha/live_market_data.py": {
+      "state": "EXEMPT_WITH_JUSTIFICATION",
+      "domain": "PROVIDER_BOUNDARY",
+      "reason": "Kite quote-poll face: throttled REST polling. Same SDK boundary proof. File role: provider boundary adapter (class C)",
+      "migration_target": "N/A",
+      "migration_condition": "Never"
+    },
+    "02_data/data/provider/zerodha/live_trading.py": {
+      "state": "EXEMPT_WITH_JUSTIFICATION",
+      "domain": "PROVIDER_BOUNDARY",
+      "reason": "Kite order-execution venue in sanctioned SDK boundary. SDK wire protocol, not core math. File role: provider boundary adapter (class C)",
+      "migration_target": "N/A - external SDK adapter stays Python",
+      "migration_condition": "Never - provider SDK boundary is permanently Python"
     },
     "02_data/data/reporter.py": {
       "state": "TEMPORARILY_RETAINED",
@@ -399,14 +385,14 @@
     "02_data/data/storage/candle_db.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "DATA_PROCESSING",
-      "reason": "Download-engine IO/threading orchestration (worker threads, locks, auth flows) around the provider boundary. Numeric detectors already migrated. File role: storage orchestration (SQL IO, no numeric authority)",
+      "reason": "SQLite connection, schema, idempotent upserts, boundary rows and legacy migrations. The stored candle-key shape and the on-disk filename token are read from the download kernel, and the volume bind is column marshalling for a NOT NULL INTEGER (provider rows arrive as strings that a float crossing would silently accept). File role: storage IO",
       "migration_target": "rust/vayren-core/src/data/",
       "migration_condition": "When the DATA_PROCESSING slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
     },
     "02_data/data/storage/scanner.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "DATA_PROCESSING",
-      "reason": "Download-engine IO/threading orchestration (worker threads, locks, auth flows) around the provider boundary. Numeric detectors already migrated. File role: storage orchestration (SQL IO, no numeric authority)",
+      "reason": "Per-symbol SQLite reads (row count, corrupt count, earliest/latest, boundary row) plus the SymbolInfo assembly. The whole coverage verdict - state, head/tail gaps, percent, listing-boundary suppression - comes back from data.native_download.decide_coverage. File role: storage orchestration (SQL IO, no rule)",
       "migration_target": "rust/vayren-core/src/data/",
       "migration_condition": "When the DATA_PROCESSING slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
     },
@@ -427,7 +413,7 @@
     "02_data/data/worker.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "DATA_PROCESSING",
-      "reason": "Download-engine IO/threading orchestration (worker threads, locks, auth flows) around the provider boundary. Numeric detectors already migrated. File role: orchestration driver (wires migrated kernels, holds no migrated math)",
+      "reason": "Download-engine IO/threading orchestration (worker threads, locks, auth flows) around the provider boundary. Migrated 2026-09-20: the YYYY-MM-DD range validation, its end-of-day pinning and both failure strings are download.rs validate_range through native_download.validate_range, so the strptime/replace/compare copy was deleted. File role: orchestration driver (wires migrated kernels, holds no date rule)",
       "migration_target": "rust/vayren-core/src/data/",
       "migration_condition": "When the DATA_PROCESSING slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
     },
@@ -574,23 +560,37 @@
     "03_market/market/models/bar.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "MARKET_DATA",
-      "reason": "SQLite IO orchestration / repository / loader / event payloads. Aggregation kernel already migrated to Rust; full storage port is product-scale with zero measured need. File role: frozen dataclass vocabulary (data holders, no algorithms)",
+      "reason": "Frozen OHLCV payload for repository, loader and event boundaries. Its one derived metric is a kernel read through market.native_bar, so no arithmetic lives here. File role: boundary vocabulary",
       "migration_target": "rust/vayren-core/src/market/",
       "migration_condition": "When the MARKET_DATA slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
     },
     "03_market/market/models/symbol_quote.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "MARKET_DATA",
-      "reason": "SQLite IO orchestration / repository / loader / event payloads. Aggregation kernel already migrated to Rust; full storage port is product-scale with zero measured need. File role: frozen dataclass vocabulary (data holders, no algorithms)",
+      "reason": "Frozen dataclass vocabulary for market quote/bar payloads (strings and numbers only, no algorithms); event payloads travel as plain data. File role: boundary vocabulary",
       "migration_target": "rust/vayren-core/src/market/",
       "migration_condition": "When the MARKET_DATA slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
     },
     "03_market/market/native_aggregate.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "MARKET_DATA",
-      "reason": "SQLite IO orchestration / repository / loader / event payloads. Aggregation kernel already migrated to Rust; full storage port is product-scale with zero measured need. File role: orchestration glue (no migrated authority)",
-      "migration_target": "rust/vayren-core/src/market/",
-      "migration_condition": "When the MARKET_DATA slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+      "reason": "Rust-backed ctypes bridge for the aggregation kernels: batch aggregation, the mode counter, and since 2026-09-20 the streaming rules the live providers used to hold in Python - session anchor, bucket floor, tick->OHLCV fold and the closed-row cut. No logic: it marshals arrays and value tuples across the boundary and drains the kernel's two-call text buffer; every decision lives in rust/vayren-core/src/aggregate.rs. File role: bridge/facade (no authority)",
+      "migration_target": "rust/vayren-core/src/aggregate.rs",
+      "migration_condition": "Terminal bridge state: retained as the FFI projection (same pattern as native_metrics/native_checks)."
+    },
+    "03_market/market/native_bar.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "domain": "MARKET_DATA",
+      "reason": "ctypes bridge for the single derived candle metric (vy_bar_return_pct). Marshals two doubles and returns the kernel's answer; the formula and the zero-open rule live in rust/vayren-core/src/market.rs, which the Bar payload's own metric read calls through. File role: bridge (no authority)",
+      "migration_target": "rust/vayren-core/src/market.rs",
+      "migration_condition": "Terminal bridge state: retained as the FFI projection (same pattern as native_aggregate/native_timeframe)."
+    },
+    "03_market/market/native_timeframe.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "domain": "MARKET_DATA",
+      "reason": "Rust-backed ctypes bridge for the timeframe ladder (vy_timeframe_* exports). No logic: marshals UTF-8 labels over the two-call buffer protocol and maps the kernel's answers back; ladder/grammar authority lives in rust/vayren-core/src/market.rs. File role: bridge (no authority)",
+      "migration_target": "rust/vayren-core/src/market.rs",
+      "migration_condition": "Terminal bridge state: retained as the FFI projection (same pattern as native_aggregate/native_checks)."
     },
     "03_market/market/repository/__init__.py": {
       "state": "TEMPORARILY_RETAINED",
@@ -602,14 +602,14 @@
     "03_market/market/repository/candle_repository.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "MARKET_DATA",
-      "reason": "SQLite IO orchestration / repository / loader / event payloads. Aggregation kernel already migrated to Rust; full storage port is product-scale with zero measured need. File role: storage orchestration (SQL IO, no numeric authority)",
+      "reason": "SQLite IO plus row->Bar assembly. Migrated 2026-09-20: the fetch plan (plain vs aggregated, base-row budget, how many aggregated bars to keep) is Rust authority (market.rs timeframe plan kernel, bridged by market.native_timeframe); the aggregation kernel was already Rust. No ratio or window maths left here. File role: storage orchestration (SQL IO, no numeric authority)",
       "migration_target": "rust/vayren-core/src/market/",
       "migration_condition": "When the MARKET_DATA slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
     },
     "03_market/market/repository/symbol_repository.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "MARKET_DATA",
-      "reason": "SQLite IO orchestration / repository / loader / event payloads. Aggregation kernel already migrated to Rust; full storage port is product-scale with zero measured need. File role: storage orchestration (SQL IO, no numeric authority)",
+      "reason": "Per-symbol SQLite reads (file probe, latest-candle fetch, timeframe detection) plus the row→Bar/quote mapping. The one derived quote number is a kernel read through market.native_bar, so no arithmetic lives here. File role: storage orchestration (SQL IO, no numeric authority)",
       "migration_target": "rust/vayren-core/src/market/",
       "migration_condition": "When the MARKET_DATA slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
     },
@@ -623,9 +623,9 @@
     "03_market/market/timeframe/timeframe.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "MARKET_DATA",
-      "reason": "SQLite IO orchestration / repository / loader / event payloads. Aggregation kernel already migrated to Rust; full storage port is product-scale with zero measured need. File role: orchestration glue (no migrated authority)",
-      "migration_target": "rust/vayren-core/src/market/",
-      "migration_condition": "When the MARKET_DATA slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+      "reason": "Migrated 2026-09-20: the ladder table, label grammar and availability rule are Rust authority (rust/vayren-core/src/market.rs, exposed as vy_timeframe_*). This file keeps only the public names callers import (market/__init__, candle_repository, tests) and forwards every answer to the kernel; it holds no ladder copy and makes no decision. File role: bridge/facade (no authority)",
+      "migration_target": "rust/vayren-core/src/market.rs",
+      "migration_condition": "Terminal bridge state: the facade must remain for its importers; authority stays in Rust."
     },
     "06_backtest/backtest/__init__.py": {
       "state": "TEMPORARILY_RETAINED",
@@ -644,7 +644,7 @@
     "06_backtest/backtest/engine/directional.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "BACKTEST",
-      "reason": "Runner/optimizer/worker orchestration driving Python strategies (strategies must stay Python). Metrics kernels already migrated. File role: orchestration glue (no migrated authority)",
+      "reason": "Per-side and per-symbol result views: trade filtering plus field assembly, with every number recomputed by the Rust metrics/equity kernels through backtest.native_metrics. No formula, no strategy rule, and no Rust twin. File role: view assembly (no authority)",
       "migration_target": "rust/vayren-core/src/backtest/",
       "migration_condition": "When the BACKTEST slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
     },
@@ -658,21 +658,21 @@
     "06_backtest/backtest/engine/positions.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "BACKTEST",
-      "reason": "Runner/optimizer/worker orchestration driving Python strategies (strategies must stay Python). Metrics kernels already migrated. File role: orchestration glue (no migrated authority)",
-      "migration_target": "rust/vayren-core/src/backtest/",
-      "migration_condition": "When the BACKTEST slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+      "reason": "Migrated 2026-09-20: the exit rule (signal slippage, SL/TP bar crossing per leg) and the trade maths (commission, gross, pnl, pnl%, risk, R multiple) are Rust authority (rust/vayren-core/src/backtest.rs, exposed as vy_bt_try_close/vy_bt_close_trade). This file keeps only open-leg state, the flat-entry gate and TradeRecord identity assembly; it decides nothing and computes nothing. File role: state + facade over the kernel (no authority)",
+      "migration_target": "rust/vayren-core/src/backtest.rs",
+      "migration_condition": "Terminal bridge state: the manager owns position state that TradeRecord callers need; authority stays in Rust."
     },
     "06_backtest/backtest/engine/replay.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "BACKTEST",
-      "reason": "Runner/optimizer/worker orchestration driving Python strategies (strategies must stay Python). Metrics kernels already migrated. File role: orchestration glue (no migrated authority)",
+      "reason": "Migrated 2026-09-20: which bars a [start, end] window keeps is Rust authority (backtest_engine.rs::slice_indices, bridged by native_replay.py); this module maps the surviving indices back onto the Bar tuples it already holds. No date compare of its own. File role: facade over the kernel (no authority)",
       "migration_target": "rust/vayren-core/src/backtest/",
       "migration_condition": "When the BACKTEST slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
     },
     "06_backtest/backtest/engine/simulator.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "BACKTEST",
-      "reason": "Runner/optimizer/worker orchestration driving Python strategies (strategies must stay Python). Metrics kernels already migrated. File role: orchestration driver (wires migrated kernels, holds no migrated math)",
+      "reason": "Migrated 2026-09-20: the fill rule (slippage direction, affordability rejection, fractional sizing quantity = available_equity / fill_price, commission) is Rust authority (backtest.rs fill kernel, bridged as vy_bt_fill). This class only keeps the percentages-in / Fill-out domain shape. File role: facade over the kernel (no authority)",
       "migration_target": "rust/vayren-core/src/backtest/",
       "migration_condition": "When the BACKTEST slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
     },
@@ -742,28 +742,49 @@
     "06_backtest/backtest/models/trade.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "BACKTEST",
-      "reason": "Runner/optimizer/worker orchestration driving Python strategies (strategies must stay Python). Metrics kernels already migrated. File role: frozen dataclass vocabulary (data holders, no algorithms)",
+      "reason": "Runner/optimizer/worker orchestration driving Python strategies (strategies must stay Python). Metrics kernels already migrated. Migrated 2026-09-20: the win verdict (pnl > 0) is Rust only - the duplicate Python winning property is deleted, so trades carry numbers and decide nothing. File role: frozen dataclass vocabulary (data holders, no algorithms)",
       "migration_target": "rust/vayren-core/src/backtest/",
       "migration_condition": "When the BACKTEST slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
     },
     "06_backtest/backtest/native_metrics.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "BACKTEST",
-      "reason": "Runner/optimizer/worker orchestration driving Python strategies (strategies must stay Python). Metrics kernels already migrated. File role: orchestration glue (no migrated authority)",
-      "migration_target": "rust/vayren-core/src/backtest/",
-      "migration_condition": "When the BACKTEST slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+      "reason": "Rust-backed ctypes bridge for the backtest numeric kernels (drawdown / equity curve / Sharpe / whole-report framing) over vy_max_drawdown, vy_equity_curve, vy_sharpe, vy_bt_report. No math: marshals float arrays and maps the kernel answers back; authority lives in rust/vayren-core/src/metrics.rs. File role: bridge (no authority)",
+      "migration_target": "rust/vayren-core/src/metrics.rs",
+      "migration_condition": "Terminal bridge state: retained as the FFI projection (same pattern as native_aggregate/native_checks)."
+    },
+    "06_backtest/backtest/native_positions.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "domain": "BACKTEST",
+      "reason": "Rust-backed ctypes bridge for the backtest trade kernels: bar-crossing exit (vy_bt_try_close/vy_bt_close_trade), signal exit and exit-price choice (vy_bt_signal_exit/vy_bt_exit_price) and entry fill economics (vy_bt_fill). No policy: packs floats, reads packed structs and renders absent exit / absent R multiple as None; every rule lives in rust/vayren-core/src/backtest.rs. File role: bridge (no authority)",
+      "migration_target": "rust/vayren-core/src/backtest.rs",
+      "migration_condition": "Terminal bridge state: retained as the FFI projection (same pattern as native_metrics/native_validation)."
+    },
+    "06_backtest/backtest/native_replay.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "domain": "BACKTEST",
+      "reason": "ctypes bridge for the replay window kernel (vy_bt_slice): encodes the timestamp blob plus the two optional bounds (a -1 length is Python's None) and reads back the surviving bar indices. No policy: which bars a [start, end] range keeps is decided by backtest_engine.rs::slice_indices, and the bars themselves never cross the boundary. File role: bridge (no authority)",
+      "migration_target": "rust/vayren-core/src/backtest_engine.rs",
+      "migration_condition": "Terminal bridge state: retained as the FFI projection (same pattern as native_positions/native_validation)."
+    },
+    "06_backtest/backtest/native_runner.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "domain": "BACKTEST",
+      "reason": "ctypes bridge for the two runner kernels (vy_bt_window_bounds, vy_bt_default_workers). No policy of its own: the aggregation-window margin rule and the bounded worker-count clamp live in backtest_runner.rs; the machine probe and the process pool stay in runner.py as host IO/process control. File role: bridge (no authority)",
+      "migration_target": "rust/vayren-core/src/backtest_runner.rs",
+      "migration_condition": "Terminal bridge state: retained as the FFI projection (same pattern as native_positions/native_validation)."
     },
     "06_backtest/backtest/native_validation.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "BACKTEST",
-      "reason": "Rust-backed ctypes bridge for backtest form checks (7-check bitmask decision). No independent logic: calls vy_backtest_validate_form in rust/vayren-core.",
+      "reason": "Rust-backed ctypes bridge for backtest form checks (7-check bitmask decision). No independent logic: calls vy_backtest_validate_form in rust/vayren-core. File role: bridge (no authority)",
       "migration_target": "rust/vayren-core/src/backtest_validation.rs",
       "migration_condition": "Kernel proven; bridge retained as the FFI projection (same pattern as native_metrics/native_checks)."
     },
     "06_backtest/backtest/runner.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "BACKTEST",
-      "reason": "Runner orchestration twinned in Rust (backtest_runner.rs: fan-out/assembly/visuals/variant/batch + backtest_validation.rs kernel, 17 parity tests); Python stays production authority (strategies/repo/pool stay Python). File role: orchestration driver (wires migrated kernels)",
+      "reason": "Runner orchestration over migrated kernels (backtest_runner.rs fan-out/assembly/visuals/variant/batch plus backtest_validation.rs, 17 parity tests). Migrated 2026-09-20: the aggregation-window margin rule and the worker-count clamp are asked of Rust through native_runner.py, and the SL/TP crossing plus fill economics through native_positions.py. Disclosed remainder: the running-equity line accumulates kernel-returned trade pnl (initial capital plus fills the Rust fill kernel produced); the equity-curve definition owner stays metrics.rs equity_curve, so this is composition of kernel answers rather than a second implementation. Strategies, the candle repository and the process pool must stay Python. File role: orchestration driver (wires migrated kernels, holds no math)",
       "migration_target": "rust/vayren-core/src/backtest/",
       "migration_condition": "When the BACKTEST slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
     },
@@ -791,16 +812,16 @@
     "07_risk/risk/engine.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "RISK",
-      "reason": "Fail-closed orchestration over string-keyed audit reasons, kill-switch persistence, session rules (~0.017ms/req). Port splits safety-critical strings across FFI with regression risk. File role: orchestration driver (wires migrated kernels, holds no migrated math)",
+      "reason": "Migrated 2026-09-20: the 18-gate checklist itself is Rust authority (risk_engine.rs, bridged by risk.native_engine.py) - gate order, verdicts, every reason string and the duplicate-intent memory. What stays here is the Python-shaped boundary: value objects plus the wrapper that turns any bridge fault into a denial, because an uncertain verdict must never order. File role: facade over the kernel (no rule of its own)",
       "migration_target": "rust/vayren-core/src/risk/",
       "migration_condition": "When the RISK slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
     },
     "07_risk/risk/kill_switch.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "RISK",
-      "reason": "Fail-closed orchestration over string-keyed audit reasons, kill-switch persistence, session rules (~0.017ms/req). Port splits safety-critical strings across FFI with regression risk. File role: orchestration glue (no migrated authority)",
-      "migration_target": "rust/vayren-core/src/risk/",
-      "migration_condition": "When the RISK slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+      "reason": "Migrated 2026-09-20: Rust kill_switch.rs is production authority for latch state, level vocabulary, timestamps, reload rule and the byte-exact persisted JSON. This file keeps only the public facade (KillSwitch/KillSwitchState) plus the Path.read_text/write_text call, and is required to exist by validate_structure. File role: bridge/facade (no authority)",
+      "migration_target": "rust/vayren-core/src/kill_switch.rs",
+      "migration_condition": "Terminal bridge state: retained as the ctypes-facing facade; only a native-owned filesystem API could retire it."
     },
     "07_risk/risk/manifest.py": {
       "state": "TEMPORARILY_RETAINED",
@@ -816,12 +837,33 @@
       "migration_target": "rust/vayren-core/src/risk/",
       "migration_condition": "When the RISK slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
     },
+    "07_risk/risk/native_engine.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "domain": "RISK",
+      "reason": "Handle-based ctypes bridge for the Rust risk decision engine (vy_risk_* exports): marshals the policy and request across the boundary and re-materialises the kernel's JSON decision as the frozen value objects callers expect. No policy: the 18 named gates, their order, verdicts, reason strings and duplicate-intent memory live in rust/vayren-core/src/risk_engine.rs. Replaces native_checks.py, whose kernel moved here. File role: bridge (no authority)",
+      "migration_target": "rust/vayren-core/src/risk_engine.rs",
+      "migration_condition": "Terminal bridge state: retained as the FFI projection (same pattern as native_kill_switch/native_session)."
+    },
+    "07_risk/risk/native_kill_switch.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "domain": "RISK",
+      "reason": "ctypes bridge for the Rust kill-switch kernel: marshals UTF-8 handle calls (vy_ks_*), maps kernel rejections onto the historical ValueError/AttributeError texts. No policy: latch, levels, timestamps, reload rule and JSON shape all stay in Rust. File role: bridge (no authority)",
+      "migration_target": "rust/vayren-core/src/kill_switch.rs",
+      "migration_condition": "Kernel proven; bridge retained as the FFI projection (same pattern as native_checks/native_execution)."
+    },
+    "07_risk/risk/native_session.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "domain": "RISK",
+      "reason": "ctypes bridge for the Rust session/clock gates: encodes UTF-8 timestamps and HH:MM bounds (a -1 length is Python's None) and maps the verdict code onto a bool. No policy: window comparison, ISO parsing and skew rule stay in Rust. File role: bridge (no authority)",
+      "migration_target": "rust/vayren-core/src/risk_engine.rs",
+      "migration_condition": "Terminal bridge state: retained as the FFI projection (same pattern as native_checks/native_kill_switch)."
+    },
     "07_risk/risk/session.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "RISK",
-      "reason": "Fail-closed orchestration over string-keyed audit reasons, kill-switch persistence, session rules (~0.017ms/req). Port splits safety-critical strings across FFI with regression risk. File role: orchestration glue (no migrated authority)",
-      "migration_target": "rust/vayren-core/src/risk/",
-      "migration_condition": "When the RISK slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+      "reason": "Migrated 2026-09-20: the HH:MM window comparison and the ISO-timestamp/clock-skew rule are Rust authority (rust/vayren-core/src/risk_engine.rs, exposed as vy_risk_within_session/vy_risk_clock_sane). This file keeps only the frozen SessionRules shape and the public names engine.py imports, forwarding both verdicts; it holds no rule. File role: bridge/facade (no authority)",
+      "migration_target": "rust/vayren-core/src/risk_engine.rs",
+      "migration_condition": "Terminal bridge state: the facade is the caller-facing vocabulary; authority stays in Rust."
     },
     "08_execution/execution/__init__.py": {
       "state": "TEMPORARILY_RETAINED",
@@ -829,6 +871,76 @@
       "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: package re-export surface (no logic)",
       "migration_target": "rust/vayren-core/src/execution/",
       "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+    },
+    "08_execution/execution/broker/__init__.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "domain": "EXECUTION",
+      "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: package re-export surface (no logic)",
+      "migration_target": "rust/vayren-core/src/execution/",
+      "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+    },
+    "08_execution/execution/broker/activation.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "domain": "EXECUTION",
+      "reason": "Activation report facade + the activation-record file write. Migrated 2026-09-21: the twelve ceremony steps, their order, per-step detail wording and the blocker list are decided by rust/vayren-core/src/live_readiness.rs (vy_cer_activation); this file converts verdict/gates/funds facts into kernel arguments and rebuilds the report objects. File role: bridge facade + persistence (no authority)",
+      "migration_target": "rust/vayren-core/src/live_readiness.rs",
+      "migration_condition": "Terminal bridge state: retained as the FFI projection (no rule lives here)."
+    },
+    "08_execution/execution/broker/adapter.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "domain": "EXECUTION",
+      "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: orchestration glue (no migrated authority)",
+      "migration_target": "rust/vayren-core/src/execution/",
+      "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+    },
+    "08_execution/execution/broker/credentials.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "domain": "EXECUTION",
+      "reason": "BrokerCredentials/CredentialStore types plus the store lookup. Migrated 2026-09-21: validate_credentials' identity, environment-mismatch and unresolved-key rules, in kernel order with kernel wording, live in rust/vayren-core/src/live_readiness.rs (vy_cer_credentials); this file only resolves each key_ref against the injected store and asks the kernel. File role: bridge facade (no authority)",
+      "migration_target": "rust/vayren-core/src/live_readiness.rs",
+      "migration_condition": "Terminal bridge state: retained as the FFI projection (no rule lives here)."
+    },
+    "08_execution/execution/broker/factory.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "domain": "EXECUTION",
+      "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: orchestration glue (no migrated authority)",
+      "migration_target": "rust/vayren-core/src/execution/",
+      "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+    },
+    "08_execution/execution/broker/gates.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "domain": "EXECUTION",
+      "reason": "Live-gate facade: it collects IO facts (adapter presence/health, account report, funds snapshot, credential store lookups, kill-switch state) and re-materialises the kernel documents. Migrated 2026-09-21: the five gate names, their order, verdicts and fallback wording, the risk-policy sanity messages, account confirmation and the funds-for-live preconditions all come from rust/vayren-core/src/live_readiness.rs. GATE_* stay here only as the re-exported public vocabulary 09_broker imports. File role: bridge facade (no authority)",
+      "migration_target": "rust/vayren-core/src/live_readiness.rs",
+      "migration_condition": "Terminal bridge state: retained as the FFI projection (no rule lives here)."
+    },
+    "08_execution/execution/broker/paper.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "domain": "EXECUTION",
+      "reason": "Paper venue composition: order records, connection scripting and the event stream stay venue-side; fill economics already delegate to the Rust simulated-fill kernel through execution.native_execution. File role: bridge caller + venue state",
+      "migration_target": "rust/vayren-core/src/execution/",
+      "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+    },
+    "08_execution/execution/broker/readonly.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "domain": "EXECUTION",
+      "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: orchestration glue (no migrated authority)",
+      "migration_target": "rust/vayren-core/src/execution/",
+      "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+    },
+    "08_execution/execution/broker/resilience.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "domain": "EXECUTION",
+      "reason": "Vocabulary + handle facade over broker/native_policy.py: RetryKind, RateLimiter, TimeoutPolicy, BackoffPolicy and ReconnectPolicy carry configuration and delegate every classification, window, drift, delay and budget-validity answer to rust/vayren-core/src/resilience.rs (migrated 2026-09-21). No retry table, window arithmetic, comparison or budget message survives in Python. File role: bridge facade (no authority)",
+      "migration_target": "rust/vayren-core/src/resilience.rs",
+      "migration_condition": "Terminal bridge state: retained as the FFI projection (no rule lives here)."
+    },
+    "08_execution/execution/broker/sandbox.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "domain": "EXECUTION",
+      "reason": "Sandbox venue state: account identity, order records, scripted policies, event stream and disconnect simulation (no SDK, no network). Migrated 2026-09-21: the policy grammar itself - delay countdown, reject reason fallback, full/partial quantities and the fail-closed rejection of unknown text - is decided by rust/vayren-core/src/sandbox_policy.rs, and fill economics use the same Rust simulated-fill kernel PaperBroker calls. File role: venue state + bridge caller (no authority)",
+      "migration_target": "rust/vayren-core/src/sandbox_policy.rs",
+      "migration_condition": "Terminal bridge state: retained as the FFI projection (no rule lives here)."
     },
     "08_execution/execution/engine.py": {
       "state": "TEMPORARILY_RETAINED",
@@ -847,7 +959,7 @@
     "08_execution/execution/journal.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "EXECUTION",
-      "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: persistence/audit glue (records, no compute kernels)",
+      "reason": "Migrated 2026-09-20: the latency percentile rank rule is Rust authority (execution_engine.rs percentile kernel, bridged by native_execution.py); the local copy is deleted. What stays here is append-only JSONL persistence and stage labelling. File role: persistence/audit glue (records, no compute kernels)",
       "migration_target": "rust/vayren-core/src/execution/",
       "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
     },
@@ -865,10 +977,24 @@
       "migration_target": "rust/vayren-core/src/execution/",
       "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
     },
+    "08_execution/execution/market_data/broker_feed.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "domain": "EXECUTION",
+      "reason": "Migrated 2026-09-20: session-anchor parsing, bucket flooring, the tick->OHLCV fold, the staleness floor, the gap verdict and the stall wording are Rust answers (aggregate.rs anchor_seconds/bucket_start/fold_tick/closed_count plus normalizer.rs stale_floor/gap_stale/gap_reason), asked through market.native_aggregate and native_normalizer. What stays here is provider-boundary plumbing: the injected broker face, subscription, quote-field coercion, sequence numbering and CandleEvent construction. The earlier 'Zero numeric authority' claim was untrue while the bucket and fold math lived here; it holds now. File role: provider adapter (no rule)",
+      "migration_target": "rust/vayren-core/src/",
+      "migration_condition": "When the EXECUTION market-data slice is next touched by feature work, move the remaining provider plumbing per constitution section 5; the numeric rules are already Rust-owned."
+    },
+    "08_execution/execution/market_data/native_normalizer.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "domain": "EXECUTION",
+      "reason": "Handle-based ctypes bridge for the stream gate (vy_norm_*) plus, since 2026-09-20, its stateless rules: the staleness floor, the strict gap comparison, the stall reason wording and the sequence watermark. It packs a symbol, sequence and opaque token, drains the kernel's verdict documents (delivered/dropped tokens, the six counters, health wording) and re-materialises them as plain value tuples. No policy: watermarking, gap/duplicate accounting, reorder overflow, staleness thresholds, counters and every reason string are decided in rust/vayren-core/src/normalizer.rs. File role: bridge (no authority)",
+      "migration_target": "rust/vayren-core/src/normalizer.rs",
+      "migration_condition": "Terminal bridge state: retained as the FFI projection (same pattern as native_aggregate/native_timeframe)."
+    },
     "08_execution/execution/market_data/normalizer.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "EXECUTION",
-      "reason": "Stream-normalizer math twinned in Rust (normalizer.rs: reorder/dedupe/staleness, 8 live-probe parity tests); Python stays production authority. File role: pure stream math (no IO)",
+      "reason": "The Python-shaped half of the transport-edge gate: it holds the MarketEvent objects keyed by the kernel's token and the malformed-arrival guard. Every verdict, counter and health reason crosses from rust/vayren-core/src/normalizer.rs through native_normalizer. File role: event-object holder (no rule)",
       "migration_target": "rust/vayren-core/src/execution/",
       "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
     },
@@ -885,6 +1011,13 @@
       "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: orchestration glue (no migrated authority)",
       "migration_target": "rust/vayren-core/src/execution/",
       "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+    },
+    "08_execution/execution/market_data/sqlite_tail.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "domain": "EXECUTION",
+      "reason": "Migrated 2026-09-20: the staleness floor, the strict gap comparison and the stall reason come from normalizer.rs, and the withhold-the-forming-candle cut is aggregate.rs closed_count through market.native_aggregate. What stays here is repository IO: per-symbol polling, the fetch window, ascending-watermark dedupe of stored rows and CandleEvent construction. File role: repository-backed provider (no rule)",
+      "migration_target": "rust/vayren-core/src/",
+      "migration_condition": "When the EXECUTION market-data slice is next touched by feature work, move the remaining polling IO per constitution section 5; the row-selection rules are already Rust-owned."
     },
     "08_execution/execution/models/__init__.py": {
       "state": "TEMPORARILY_RETAINED",
@@ -903,7 +1036,7 @@
     "08_execution/execution/models/intent.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "EXECUTION",
-      "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: frozen dataclass vocabulary (data holders, no algorithms)",
+      "reason": "Frozen signal/intent payload vocabulary for the execution chain. The idempotency key is asked for from the Rust kernel (execution::make_intent_id via native_execution) rather than formatted here. File role: boundary vocabulary",
       "migration_target": "rust/vayren-core/src/execution/",
       "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
     },
@@ -917,28 +1050,35 @@
     "08_execution/execution/models/position.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "EXECUTION",
-      "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: frozen dataclass vocabulary (data holders, no algorithms)",
+      "reason": "Migrated 2026-09-20: the sign verdict (flat / LONG / SHORT) and the mark-to-market maths are Rust authority (execution.rs position_state and position_unrealized, bridged by native_execution.py); this model holds qty/avg-price fields and forwards both questions. File role: frozen dataclass vocabulary over migrated authority (no algorithms)",
       "migration_target": "rust/vayren-core/src/execution/",
       "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
     },
     "08_execution/execution/modes.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "EXECUTION",
-      "reason": "LiveArm.arm_transition delegates transition legality to Rust execution_engine via the native_execution bridge (parity-tested, execution suite green); arm vocabulary stays Python. File role: orchestration driver (wires migrated kernels)",
+      "reason": "Migrated 2026-09-20, adding to the earlier gate migration: the flag->mask pack and mask->flag unpack are execution_engine.rs bool_flags_to_mask and mask_to_flags through native_execution.py, so the Python bit loop is gone. Kept here: the mode enum, the five-flag holder, the GATE_ENV_KEYS spellings used to read configuration, and the exception Python callers catch. File role: bridge caller plus boundary vocabulary (no gate rule)",
       "migration_target": "rust/vayren-core/src/execution/",
       "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
+    },
+    "08_execution/execution/native_execution.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "domain": "EXECUTION",
+      "reason": "Rust-backed ctypes bridge for the execution kernels: arm/lifecycle transitions, planner math, ledger fill accounting and position sign/mark reads, the basic live-readiness check, the gate mask / missing-gate / mode-resolution rules, the latency percentile, the reconciliation reports (positions, orders, funds) and verdict status codes over vy_exec_*. Since 2026-09-20 it also carries the pure rules the runtime used to hold: default order quantity, advisory multiplier narrowing plus its validation message, and gate flag pack/unpack. Migrated 2026-09-21: the risk-policy sanity mask export and its bridge function were deleted - live_readiness (through broker/native_policy.py) owns that gate and its wording. No independent logic: every answer comes from rust/vayren-core. Terminal bridge state",
+      "migration_target": "rust/vayren-core/src/execution_engine.rs",
+      "migration_condition": "Kernel proven; bridge retained as the FFI projection (same pattern as native_metrics/native_checks)."
     },
     "08_execution/execution/native_order_state.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "EXECUTION",
-      "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: orchestration glue (no migrated authority)",
+      "reason": "Rust-backed ctypes bridge: the order transition table and terminal set live in rust/vayren-core/src/order_state.rs and are projected here as read-only views (handshake-verified, parity-pinned). No transition logic of its own. Terminal bridge state. File role: bridge (no authority)",
       "migration_target": "rust/vayren-core/src/execution/",
       "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
     },
     "08_execution/execution/planner.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "EXECUTION",
-      "reason": "OrderPlanner.plan delegates planning math and size multiplier to Rust execution_engine via the native_execution bridge (parity-tested, execution suite green); strategies/venues stay Python. File role: orchestration driver (wires migrated kernels)",
+      "reason": "OrderPlanner.plan delegates planning math and size multiplier to Rust execution_engine via the native_execution bridge (parity-tested, execution suite green). Migrated 2026-09-20: the (0, 1] validation and its message are execution_engine.rs multiplier_problem, so __post_init__ holds no comparison of its own. Strategies and venues stay Python. File role: orchestration driver (wires migrated kernels)",
       "migration_target": "rust/vayren-core/src/execution/",
       "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
     },
@@ -952,14 +1092,14 @@
     "08_execution/execution/portfolio/ledger.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "EXECUTION",
-      "reason": "PositionLedger.apply_fill/snapshot delegate fill accounting and PnL folding to Rust execution_engine via the native_execution bridge (parity-tested, execution suite green); Python stays production authority. File role: orchestration driver (wires migrated kernels)",
+      "reason": "PositionLedger.apply_fill/snapshot delegate fill accounting and PnL folding, and strategy_state_for delegates the sign/side read, to Rust execution_engine via the native_execution bridge (parity-tested, execution suite green). What stays here is cash/position bookkeeping structure plus plain input guards that reject a caller's bad request rather than decide an economic rule; no fill, PnL or sizing arithmetic is repeated. File role: orchestration driver (wires migrated kernels, holds no fill or sign math)",
       "migration_target": "rust/vayren-core/src/execution/",
       "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
     },
     "08_execution/execution/portfolio/reconcile.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "EXECUTION",
-      "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: persistence/audit glue (records, no compute kernels)",
+      "reason": "Migrated 2026-09-20: every reconciliation rule is Rust authority (execution_engine.rs) - the quantity-tolerance compare, the unparseable-as-zero broker reading, the order symmetric difference, the unknown-equity rule, the SAFE/WARNING/BLOCKED combination and the blocks-live verdict. This module only picks payload fields, packs them and rebuilds frozen records; no comparison or threshold of its own remains. File role: bridge caller + persistence glue",
       "migration_target": "rust/vayren-core/src/execution/",
       "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
     },
@@ -984,108 +1124,61 @@
       "migration_target": "rust/vayren-core/src/execution/",
       "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
     },
+    "08_execution/execution/runtime/lifecycle.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "domain": "EXECUTION",
+      "reason": "LifecycleState machine is session orchestration vocabulary (string reasons, legacy UI-adjacent). Order-state authority migrated to Rust. File role: composition vocabulary (no order-state rule)",
+      "migration_target": "rust/vayren-core/src/",
+      "migration_condition": "When LiveSession ported to Rust or FFI bridge covers full lifecycle"
+    },
     "08_execution/execution/runtime/session.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "EXECUTION",
-      "reason": "LiveSession pipeline twinned in Rust (live_session.rs: start/readiness/step/signal/submit/fill/dispatch/checkpoint/recover/arm/state + normalizer.rs, 29 parity tests); Python stays production authority (strategies/venues/providers/adaptive stay Python). File role: orchestration driver (wires migrated kernels)",
+      "reason": "LiveSession pipeline twinned in Rust (live_session.rs: start/readiness/step/signal/submit/fill/dispatch/checkpoint/recover/arm/state plus normalizer.rs, 29 parity tests). Migrated 2026-09-20: the default order quantity (capital/price clamped to the policy ceiling) and the advisory size-multiplier narrowing are asked of execution_engine.rs through native_execution.py, and the _size_multiplier copy that duplicated that rule was deleted. What genuinely stays Python is composition the kernel cannot own: strategy instances, broker venues, market-data providers and the adaptive layer, plus the event loop that sequences them. The old 'Python stays production authority' claim is retired - no sizing or order-state rule is decided here. File role: composition driver (wires migrated kernels)",
       "migration_target": "rust/vayren-core/src/execution/",
       "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
     },
     "08_execution/execution/runtime/strategy_runtime.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "EXECUTION",
-      "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: orchestration glue (no migrated authority)",
+      "reason": "Migrated 2026-09-20: the sequence watermark is normalizer.rs watermark through native_normalizer, so the max(seq+1, event.seq) copy is gone. What stays here is warmup/evaluate plumbing: a bounded history window, BarView construction, signal sequencing and the lifecycle gate around Python-owned strategy logic. File role: orchestration glue (no rule)",
       "migration_target": "rust/vayren-core/src/execution/",
       "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
     },
-    "08_execution/execution/broker/__init__.py": {
+    "08_execution/execution/broker/native_policy.py": {
       "state": "TEMPORARILY_RETAINED",
       "domain": "EXECUTION",
-      "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: package re-export surface (no logic)",
-      "migration_target": "rust/vayren-core/src/execution/",
-      "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
-    },
-    "08_execution/execution/broker/activation.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "EXECUTION",
-      "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: orchestration glue (no migrated authority)",
-      "migration_target": "rust/vayren-core/src/execution/",
-      "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
-    },
-    "08_execution/execution/broker/adapter.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "EXECUTION",
-      "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: orchestration glue (no migrated authority)",
-      "migration_target": "rust/vayren-core/src/execution/",
-      "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
-    },
-    "08_execution/execution/broker/credentials.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "EXECUTION",
-      "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: orchestration glue (no migrated authority)",
-      "migration_target": "rust/vayren-core/src/execution/",
-      "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
-    },
-    "08_execution/execution/broker/factory.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "EXECUTION",
-      "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: orchestration glue (no migrated authority)",
-      "migration_target": "rust/vayren-core/src/execution/",
-      "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
-    },
-    "08_execution/execution/broker/gates.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "EXECUTION",
-      "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: orchestration glue (no migrated authority)",
-      "migration_target": "rust/vayren-core/src/execution/",
-      "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
-    },
-    "08_execution/execution/broker/paper.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "EXECUTION",
-      "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: orchestration glue (no migrated authority)",
-      "migration_target": "rust/vayren-core/src/execution/",
-      "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
-    },
-    "08_execution/execution/broker/readonly.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "EXECUTION",
-      "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: orchestration glue (no migrated authority)",
-      "migration_target": "rust/vayren-core/src/execution/",
-      "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
-    },
-    "08_execution/execution/broker/resilience.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "EXECUTION",
-      "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: orchestration glue (no migrated authority)",
-      "migration_target": "rust/vayren-core/src/execution/",
-      "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
-    },
-    "08_execution/execution/broker/sandbox.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "EXECUTION",
-      "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: orchestration glue (no migrated authority)",
-      "migration_target": "rust/vayren-core/src/execution/",
-      "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per constitution section 5 (smallest useful slice)."
-    },
-    "07_risk/risk/native_checks.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "RISK",
-      "reason": "Agent-migrated ctypes bridge for the risk policy kernel. No logic: packs spec-ordered env, calls vy_risk_kernel. Strings/state stay in engine.py.",
-      "migration_target": "rust/vayren-core/src/risk.rs",
-      "migration_condition": "Kernel proven; bridge retained as the FFI projection (same pattern as native_metrics/native_aggregate)."
-    },
-    "08_execution/execution/native_execution.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "domain": "EXECUTION",
-      "reason": "Rust-backed ctypes bridge for execution core kernels (arm transitions, lifecycle transitions, planner, ledger fill accounting). No independent logic: calls vy_exec_* in rust/vayren-core.",
-      "migration_target": "rust/vayren-core/src/execution_engine.rs",
-      "migration_condition": "Kernel proven; bridge retained as the FFI projection (same pattern as native_metrics/native_checks)."
+      "reason": "Rust-backed ctypes bridge for the broker-boundary kernels: vy_res_* (retry table, sliding-window throttle, clock drift, budget validators), vy_cer_* (credential, account, risk-policy and funds reason wording, the five-gate assembly, the twelve-step activation ceremony) and vy_sbx_settle_decision (sandbox fill script). It encodes text arguments, drains the kernel's length-prefixed documents and frees limiter handles. No rule, threshold, ordering or reason string is decided here. File role: bridge (no authority)",
+      "migration_target": "rust/vayren-core/src/resilience.rs",
+      "migration_condition": "Terminal bridge state: retained as the FFI projection (no rule lives here)."
     }
   },
   "migrated": {
     "08_execution/execution/models/order.py": "TRANSITIONS/TERMINAL_STATES -> Rust order_state; enum/models stay as boundary vocabulary",
     "06_backtest/backtest/engine/metrics.py": "drawdown/equity/sharpe math -> Rust metrics kernels",
-    "03_market/market/timeframe/aggregate.py": "bucketing/accumulation + mode -> Rust aggregate/stats kernels"
+    "06_backtest/backtest/engine/positions.py": "exit rule + trade economics -> Rust backtest position kernel",
+    "07_risk/risk/session.py": "HH:MM window + ISO clock-skew rule -> Rust risk_engine session/clock gates",
+    "03_market/market/timeframe/aggregate.py": "bucketing/accumulation + mode -> Rust aggregate/stats kernels",
+    "08_execution/execution/broker/gates.py": "ten risk-policy sanity comparisons, the five-gate assembly (names, order, verdicts, fallback wording), account confirmation and the funds-for-live preconditions -> Rust live_readiness kernels; the GATE_* name constants stay as re-exported vocabulary",
+    "08_execution/execution/broker/sandbox.py": "duplicated paper fill economics -> Rust vy_exec_paper_calculate_fill, and the scripted policy grammar (delay/reject/full/partial, unknown-text fail-closed rejection) -> Rust sandbox_policy::settle_decision; the venue keeps order records, events and state moves",
+    "08_execution/execution/portfolio/reconcile.py": "all local-vs-broker compares, verdict status and the blocks-live rule -> Rust execution_engine reconciliation kernels",
+    "08_execution/execution/models/position.py": "flat sign verdict + unrealized mark maths -> Rust execution position_state/position_unrealized",
+    "08_execution/execution/modes.py": "gate-flag grammar, missing-gate list, LIVE->PAPER degradation -> Rust execution_engine modes",
+    "08_execution/execution/journal.py": "latency percentile rank rule -> Rust execution_engine percentile kernel",
+    "06_backtest/backtest/engine/simulator.py": "fill rule (slippage, affordability, fractional sizing, commission) -> Rust backtest fill kernel",
+    "06_backtest/backtest/engine/replay.py": "date-range window keep rule -> Rust backtest_engine slice_indices",
+    "07_risk/risk/engine.py": "18-gate checklist, verdicts, reason strings and duplicate-intent memory -> Rust risk_engine (via risk/native_engine.py)",
+    "00_app/app/services/research_service.py": "duplicated aggregation-window margin maths -> Rust backtest_runner window bounds kernel",
+    "03_market/market/repository/candle_repository.py": "fetch-plan ratio/budget/keep-last arithmetic -> Rust market timeframe plan kernel",
+    "02_data/data/calendar.py": "trading-day vocabulary, market-hours window, target window -> Rust download calendar (data/native_download.py)",
+    "02_data/data/storage/scanner.py": "coverage state, head/tail gaps, percent, listing-boundary suppression -> Rust download::decide_coverage",
+    "02_data/data/storage/candle_db.py": "stored candle-key shape + on-disk filename token -> Rust download::normalise_ts_str / sanitize_symbol",
+    "02_data/data/downloader/queue.py": "queued job ranges and reason strings -> Rust download::job_window",
+    "02_data/data/downloader/sweep.py": "chunk plan + LISTING_START head-sweep eligibility -> Rust download::chunk_windows / head_sweep_eligible",
+    "02_data/data/downloader/engine.py": "chunk counting loop -> Rust download::count_chunks",
+    "08_execution/execution/market_data/normalizer.py": "watermark, reorder overflow, staleness thresholds, counters and health wording -> Rust normalizer.rs (market_data/native_normalizer.py)",
+    "08_execution/execution/broker/credentials.py": "credential identity, environment match and unresolved-key rules -> Rust live_readiness::credential_reasons; the facade only resolves key refs against the store",
+    "08_execution/execution/broker/activation.py": "twelve-step activation ceremony: step order, per-step wording and the blocker list -> Rust live_readiness::evaluate_ceremony; the activation record file write stays Python",
+    "08_execution/execution/broker/resilience.py": "retry classification table, sliding-window throttle, clock-drift gate and the timeout/backoff/reconnect budget validators -> Rust resilience kernels; the facades carry configuration and handles only"
   }
 }

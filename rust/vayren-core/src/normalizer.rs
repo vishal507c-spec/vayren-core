@@ -1,18 +1,19 @@
-//! Stream normalizer twin — reorder, dedupe, staleness, heartbeat.
+//! Stream normalizer — reorder, dedupe, staleness, heartbeat.
 //!
-//! Rust port of `08_execution/execution/market_data/normalizer.py`
-//! (`StreamNormalizer` + `StreamStats` + `NormalizerConfig`). Every provider
-//! is untrusted at the transport edge; sequence gaps, duplicate deliveries,
-//! out-of-order arrivals and silent stalls are normalized here so downstream
-//! stages see a clean ordered stream. Dropped/duplicates are counted, never
-//! silently swallowed.
+//! Production authority (constitution §1: market/data processing) for the
+//! transport-edge stream policy. Python hands over one arrival at a time and
+//! reads back the kernel's verdict; the event objects themselves never cross
+//! the boundary (see `SeqToken`, the opaque carrier the bridge uses).
+//! `08_execution/execution/market_data/normalizer.py` is the ctypes-facing
+//! shape only.
 //!
-//! This module is a required dependency of the `live_session` pipeline twin
-//! (the session calls `observe`/`check_health`/`is_stale` per event). The
-//! Python `StreamNormalizer` stays the production authority; behavior here
-//! is identical, pinned by parity tests.
+//! Every provider is untrusted at the transport edge: sequence gaps, duplicate
+//! deliveries, out-of-order arrivals and silent stalls are normalized here so
+//! downstream stages see a clean ordered stream. Dropped/duplicates are
+//! counted, never silently swallowed.
 //!
-//! Two deliberate narrowings, both outside production shapes:
+//! Two deliberate narrowings versus the retired Python rule copy, both outside
+//! production shapes:
 //! - Python accepts any object and raises `MarketDataError` for
 //!   non-`MarketEvent` arrivals; Rust takes [`StreamInput`], so malformed
 //!   arrivals are unrepresentable (the error path becomes a type-level
@@ -24,6 +25,45 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::execution_events::MarketEvent;
+
+/// What a buffered arrival must expose: the per-symbol gate key plus its
+/// sequence number. The kernel orders on those two and never inspects the
+/// payload itself, which is what lets the same rule serve both the typed
+/// [`MarketEvent`] twin and the FFI's opaque tokens.
+pub trait StreamSeq {
+    fn symbol(&self) -> &str;
+    fn seq(&self) -> i64;
+}
+
+impl StreamSeq for MarketEvent {
+    fn symbol(&self) -> &str {
+        &self.symbol
+    }
+
+    fn seq(&self) -> i64 {
+        self.seq
+    }
+}
+
+/// One arrival at the FFI boundary: the gate key, the sequence number and a
+/// token the caller uses to find its own object again. The kernel never
+/// decodes the token.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SeqToken {
+    pub symbol: String,
+    pub seq: i64,
+    pub token: i64,
+}
+
+impl StreamSeq for SeqToken {
+    fn symbol(&self) -> &str {
+        &self.symbol
+    }
+
+    fn seq(&self) -> i64 {
+        self.seq
+    }
+}
 
 /// Per-symbol stream counters (mirrors `StreamStats`).
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -58,28 +98,61 @@ impl Default for NormalizerConfig {
 /// `observe`: heartbeats take the health branch, everything else the
 /// sequence branch).
 #[derive(Debug, Clone, PartialEq)]
-pub enum StreamInput {
+pub enum StreamInput<P: StreamSeq = MarketEvent> {
     Heartbeat {
         symbol: String,
         timestamp: String,
         seq: i64,
     },
-    Event(MarketEvent),
+    Event(P),
+}
+
+/// What one [`StreamNormalizer::observe`] call removed from the buffer:
+/// arrivals released downstream in delivery order, plus arrivals retired
+/// without ever being delivered (buffer overflow, duplicate below the
+/// watermark). Callers holding their own payload map prune on `dropped`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Observed<P> {
+    pub delivered: Vec<P>,
+    pub dropped: Vec<P>,
+}
+
+impl<P> Default for Observed<P> {
+    fn default() -> Self {
+        Self {
+            delivered: Vec::new(),
+            dropped: Vec::new(),
+        }
+    }
 }
 
 /// Per-symbol ordered gate with duplicate suppression and health signals.
-#[derive(Debug, Default)]
-pub struct StreamNormalizer {
+#[derive(Debug)]
+pub struct StreamNormalizer<P: StreamSeq = MarketEvent> {
     config: NormalizerConfig,
     last_seq: HashMap<String, i64>,
-    buffer: HashMap<String, VecDeque<MarketEvent>>,
+    buffer: HashMap<String, VecDeque<P>>,
     last_event_epoch: HashMap<String, f64>,
     last_heartbeat_epoch: HashMap<String, f64>,
     stats: StreamStats,
     stale: HashSet<String>,
 }
 
-impl StreamNormalizer {
+impl<P: StreamSeq> Default for StreamNormalizer<P> {
+    fn default() -> Self {
+        Self {
+            config: NormalizerConfig::default(),
+            last_seq: HashMap::new(),
+            buffer: HashMap::new(),
+            last_event_epoch: HashMap::new(),
+            last_heartbeat_epoch: HashMap::new(),
+            stats: StreamStats::default(),
+            stale: HashSet::new(),
+        }
+    }
+}
+
+impl<P: StreamSeq + Clone> StreamNormalizer<P> {
     pub fn new(config: NormalizerConfig) -> Self {
         Self {
             config,
@@ -92,47 +165,51 @@ impl StreamNormalizer {
     }
 
     /// Accept one raw arrival; return newly deliverable events in order.
-    pub fn observe(
+    pub fn observe(&mut self, input: StreamInput<P>, now_epoch: f64) -> Result<Vec<P>, String> {
+        Ok(self.observe_report(input, now_epoch)?.delivered)
+    }
+
+    /// Accept one raw arrival; report both deliveries and retirements.
+    pub fn observe_report(
         &mut self,
-        input: StreamInput,
+        input: StreamInput<P>,
         now_epoch: f64,
-    ) -> Result<Vec<MarketEvent>, String> {
-        let (symbol, seq) = match &input {
+    ) -> Result<Observed<P>, String> {
+        let mut observed = Observed::default();
+        let (symbol, event) = match input {
             StreamInput::Heartbeat { symbol, .. } => {
                 self.stats.heartbeats += 1;
                 self.last_heartbeat_epoch.insert(symbol.clone(), now_epoch);
-                self.stale.remove(symbol);
-                return Ok(Vec::new());
+                self.stale.remove(&symbol);
+                return Ok(observed);
             }
-            StreamInput::Event(event) => (event.symbol.clone(), event.seq),
+            StreamInput::Event(event) => (event.symbol().to_string(), event),
         };
+        let seq = event.seq();
         let last = self.last_seq.get(&symbol).copied().unwrap_or(0);
         if seq <= last {
             self.stats.duplicates += 1;
-            return Ok(Vec::new());
+            observed.dropped.push(event);
+            return Ok(observed);
         }
         let buf = self.buffer.entry(symbol.clone()).or_default();
         if seq > last + 1 + buf.len() as i64 {
             self.stats.gaps += 1;
         }
-        let event = match input {
-            StreamInput::Event(event) => event,
-            StreamInput::Heartbeat { .. } => unreachable!("handled above"),
-        };
         buf.push_back(event);
         if buf.len() > self.config.max_reorder_buffer {
             // First lowest wins (mirrors Python `min`, which keeps the
             // first minimum on ties — `min_by_key` would keep the last).
             let mut lowest_idx = 0;
             for (idx, candidate) in buf.iter().enumerate() {
-                if candidate.seq < buf[lowest_idx].seq {
+                if candidate.seq() < buf[lowest_idx].seq() {
                     lowest_idx = idx;
                 }
             }
-            let lowest_seq = buf[lowest_idx].seq;
+            let lowest_seq = buf[lowest_idx].seq();
             if lowest_seq == self.last_seq.get(&symbol).copied().unwrap_or(0) + 1 {
                 // Dropping the next deliverable: skip exactly one lost event.
-                buf.remove(lowest_idx);
+                observed.dropped.push(buf.remove(lowest_idx).unwrap());
                 self.last_seq.insert(symbol.clone(), lowest_seq);
             } else {
                 // Unfillable hole below `lowest`: jump the watermark to it,
@@ -142,30 +219,32 @@ impl StreamNormalizer {
             self.stats.evicted += 1;
         }
         let expected = self.last_seq.get(&symbol).copied().unwrap_or(0) + 1;
-        let mut ordered: Vec<MarketEvent> = buf.drain(..).collect();
+        let mut ordered: Vec<P> = buf.drain(..).collect();
         // Stable sort: equal seqs keep arrival order (mirrors `sorted`).
-        ordered.sort_by_key(|e| e.seq);
-        let mut ready = Vec::new();
+        ordered.sort_by_key(StreamSeq::seq);
         let mut waiting = VecDeque::new();
         let mut cursor = expected;
         for candidate in ordered {
-            if candidate.seq == cursor {
-                ready.push(candidate);
+            if candidate.seq() == cursor {
+                observed.delivered.push(candidate);
                 cursor += 1;
-            } else if candidate.seq < cursor {
+            } else if candidate.seq() < cursor {
+                // Counted, then kept: the retired rule only ever removed
+                // delivered arrivals, so a stale entry stays buffered.
                 self.stats.duplicates += 1;
+                waiting.push_back(candidate);
             } else {
                 waiting.push_back(candidate);
             }
         }
         *buf = waiting;
-        if !ready.is_empty() {
-            self.last_seq
-                .insert(symbol.clone(), ready.last().unwrap().seq);
+        if !observed.delivered.is_empty() {
+            let last_delivered = observed.delivered.last().unwrap().seq();
+            self.last_seq.insert(symbol.clone(), last_delivered);
             self.last_event_epoch.insert(symbol, now_epoch);
-            self.stats.accepted += ready.len() as u64;
+            self.stats.accepted += observed.delivered.len() as u64;
         }
-        Ok(ready)
+        Ok(observed)
     }
 
     /// `(healthy, reason)`: heartbeat gaps and event stalls flag stale.
@@ -182,7 +261,7 @@ impl StreamNormalizer {
             if now_epoch - last_event > self.config.stale_after_seconds {
                 self.stats.stale_flags += 1;
                 self.stale.insert(symbol.to_string());
-                return (false, "stale market data");
+                return (false, STALE_GAP_REASON);
             }
         }
         (true, "ok")
@@ -194,6 +273,35 @@ impl StreamNormalizer {
 
     pub fn expected_seq(&self, symbol: &str) -> i64 {
         self.last_seq.get(symbol).copied().unwrap_or(0) + 1
+    }
+}
+
+/// Why a stream that has gone quiet is unhealthy — the wording `check_health`
+/// reports and the wording a provider reports, from one place.
+pub const STALE_GAP_REASON: &str = "stale market data";
+
+/// A staleness window shorter than a second would flag every poll as stale;
+/// the usable floor is one second.
+pub fn stale_floor(seconds: f64) -> f64 {
+    seconds.max(1.0)
+}
+
+/// Has the stream been quiet longer than the window? The same comparison
+/// [`StreamNormalizer::check_health`] makes, without the bookkeeping — a
+/// provider that keeps its own last-seen clock asks this instead of holding a
+/// second copy of the rule.
+pub fn gap_stale(now_epoch: f64, last_seen: f64, stale_after: f64) -> bool {
+    now_epoch - last_seen > stale_after
+}
+
+/// Sequence watermark for an arriving event: the stream follows the arriving
+/// sequence forward but never falls below the next expected one.
+pub fn watermark(last_seq: i64, incoming_seq: i64) -> i64 {
+    let expected = last_seq.saturating_add(1);
+    if incoming_seq > expected {
+        incoming_seq
+    } else {
+        expected
     }
 }
 
@@ -352,5 +460,28 @@ mod tests {
         assert!(normalizer.observe(event("A", 2), 6.0).unwrap().is_empty());
         assert_eq!(normalizer.stats.duplicates, 2);
         assert_eq!(normalizer.stats.accepted, 4);
+    }
+
+    #[test]
+    fn the_staleness_window_has_a_one_second_floor_and_a_strict_edge() {
+        assert_eq!(stale_floor(0.0), 1.0);
+        assert_eq!(stale_floor(-5.0), 1.0);
+        assert_eq!(stale_floor(300.0), 300.0);
+        assert!(!gap_stale(1_000.0, 700.0, 300.0), "exactly at the edge");
+        assert!(gap_stale(1_000.1, 700.0, 300.0));
+        assert!(!gap_stale(700.0, 700.0, 300.0), "never-seen is fresh");
+    }
+
+    #[test]
+    fn the_watermark_only_moves_forward() {
+        assert_eq!(watermark(0, 1), 1);
+        assert_eq!(watermark(4, 3), 5, "a late replay cannot drag it back");
+        assert_eq!(watermark(4, 9), 9, "a jump forwards is adopted");
+        assert_eq!(watermark(-1, i64::MAX), i64::MAX);
+        assert_eq!(
+            watermark(i64::MAX, 0),
+            i64::MAX,
+            "it saturates, never wraps"
+        );
     }
 }

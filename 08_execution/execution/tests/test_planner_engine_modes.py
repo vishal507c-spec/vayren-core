@@ -28,6 +28,7 @@ def _intent(**overrides) -> ExecutionIntent:
 
 def test_intent_ids_are_deterministic() -> None:
     assert make_intent_id("s", "1.0", 10, 1) == make_intent_id("s", "1.0", 10, 1)
+    assert make_intent_id("s", "1.0", 10, 1) == "s:1.0:10:1"
     assert make_intent_id("s", "1.0", 10, 1) != make_intent_id("s", "1.0", 10, 2)
     assert make_intent_id("s", "1.0", 10, 1) != make_intent_id("s", "1.0", 11, 1)
 

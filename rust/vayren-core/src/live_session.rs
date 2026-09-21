@@ -884,14 +884,14 @@ impl LiveSession {
     }
 
     fn default_quantity(&mut self, symbol: &str, price: f64) -> f64 {
-        if price <= 0.0 {
-            return 0.0;
-        }
         let mut marks = HashMap::new();
         marks.insert(symbol.to_string(), price);
         let snapshot = self.ledger.snapshot(&marks);
-        let affordable = snapshot.available_capital / price;
-        affordable.min(self.risk.policy().max_order_qty).max(0.0)
+        crate::execution_engine::default_quantity(
+            snapshot.available_capital,
+            price,
+            self.risk.policy().max_order_qty,
+        )
     }
 
     #[allow(clippy::too_many_arguments)]

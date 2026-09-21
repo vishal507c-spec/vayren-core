@@ -28,7 +28,7 @@ use std::collections::{BTreeMap, HashSet};
 /// Seconds since the Unix epoch (UTC-naive wall clock, as in Python).
 pub type Ts = i64;
 
-const SECONDS_PER_DAY: i64 = 86_400;
+pub const SECONDS_PER_DAY: i64 = 86_400;
 
 fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
     let y = if month <= 2 { year - 1 } else { year };
@@ -144,6 +144,12 @@ pub fn normalise_ts_str(raw: &str) -> String {
     s
 }
 
+/// Canonical `candle_time` for a wall-clock timestamp: seconds field forced to
+/// `00`, everything else preserved.
+pub fn candle_time_from_secs(ts: Ts) -> String {
+    format_ts(ts - ts.rem_euclid(60))
+}
+
 /// Mirror of `parse_dt`: empty/unparseable input → `None` (never panics).
 pub fn parse_dt_opt(s: &str) -> Option<Ts> {
     if s.is_empty() {
@@ -176,6 +182,22 @@ pub struct Candle {
 /// SQLite integer ceiling used by the upsert clamp.
 pub const SQLITE_INT_MAX: i64 = i64::MAX;
 
+/// Volume as stored: truncated toward zero and clamped to
+/// `[0, SQLITE_INT_MAX]`. `None` when it is not a finite number — Python's
+/// `int()` raises there and the row is skipped.
+pub fn clamp_volume(volume: f64) -> Option<i64> {
+    if !volume.is_finite() {
+        return None;
+    }
+    Some(if volume > SQLITE_INT_MAX as f64 {
+        SQLITE_INT_MAX
+    } else if volume < 0.0 {
+        0
+    } else {
+        volume as i64
+    })
+}
+
 /// Mirror of `CandleDB.upsert` row mapping: normalize the timestamp, clamp
 /// volume to `[0, SQLITE_INT_MAX]`, skip the row (`None`) when the volume is
 /// not finite (Python's `int()` raises there).
@@ -191,16 +213,7 @@ pub fn normalise_candle(
     close: f64,
     volume: f64,
 ) -> Option<Candle> {
-    if !volume.is_finite() {
-        return None;
-    }
-    let vol = if volume > SQLITE_INT_MAX as f64 {
-        SQLITE_INT_MAX
-    } else if volume < 0.0 {
-        0
-    } else {
-        volume as i64
-    };
+    let vol = clamp_volume(volume)?;
     Some(Candle {
         ts: normalise_ts_str(date),
         open,
@@ -216,6 +229,15 @@ pub fn normalise_candle(
 /// True on Mon–Fri and not a holiday (`"YYYY-MM-DD"` set).
 pub fn is_trading_day(days: i64, holidays: &HashSet<String>) -> bool {
     weekday(days) < 5 && !holidays.contains(&format_date(days))
+}
+
+/// True inside the inclusive `HH:MM` trading window on a weekday.
+///
+/// The bounds carry no seconds while `now` does, exactly as the original
+/// engine compared them: the closing minute's own seconds already fall
+/// outside the window.
+pub fn market_open(weekday: i64, now_secs: i64, open_secs: i64, close_secs: i64) -> bool {
+    weekday < 5 && open_secs <= now_secs && now_secs <= close_secs
 }
 
 /// Count trading days in `[d1, d2)` stepping whole days (mirrors the loop,
@@ -387,6 +409,78 @@ pub struct JobInfo {
     pub listing_start_verified: bool,
 }
 
+/// Which gap a queued job covers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JobKind {
+    NotStarted,
+    Head,
+    Tail,
+}
+
+impl JobKind {
+    /// Wire form of the kind (`0`, `1`, `2`), or `None` when out of range.
+    pub fn from_i32(value: i32) -> Option<Self> {
+        match value {
+            0 => Some(Self::NotStarted),
+            1 => Some(Self::Head),
+            2 => Some(Self::Tail),
+            _ => None,
+        }
+    }
+}
+
+/// Range one job covers, plus its display reason.
+///
+/// Head and tail jobs stop one minute short of / one minute after the observed
+/// DB edge so the boundary candle itself is re-fetched (upserts are idempotent).
+/// A gap with no observed edge queues the full window instead.
+pub fn job_window(
+    kind: JobKind,
+    bound: Option<Ts>,
+    target_start: Ts,
+    today_end: Ts,
+) -> (Ts, Ts, &'static str) {
+    match kind {
+        JobKind::NotStarted => (target_start, today_end, "NOT_STARTED: full history"),
+        JobKind::Head => match bound {
+            Some(earliest) => (
+                target_start,
+                earliest - 60,
+                "PARTIAL: missing head coverage",
+            ),
+            None => (
+                target_start,
+                today_end,
+                "PARTIAL: missing head (no earliest)",
+            ),
+        },
+        JobKind::Tail => match bound {
+            Some(latest) => (latest + 60, today_end, "PARTIAL: missing tail coverage"),
+            None => (target_start, today_end, "PARTIAL: missing tail (no latest)"),
+        },
+    }
+}
+
+/// Queue priority: PARTIAL first, then NOT_STARTED, COMPLETE last.
+pub fn job_rank(state: DLState) -> i64 {
+    match state {
+        DLState::PartialDownload => 1,
+        DLState::NotStarted => 2,
+        DLState::DownloadComplete => 3,
+    }
+}
+
+/// [`job_rank`] by the Python enum's spelling; a state this kernel does not
+/// know sorts after every known one.
+pub fn job_rank_name(name: &str) -> i64 {
+    match name {
+        "PARTIAL_DOWNLOAD" => 1,
+        "NOT_STARTED" => 2,
+        "DOWNLOAD_COMPLETE" => 3,
+        _ => 9,
+    }
+}
+
 /// Mirror of `DownloadQueue.build_from_scan`: PARTIAL first, then NOT_STARTED
 /// (stable within a state), COMPLETE skipped, unknown symbols skipped when a
 /// universe filter is given (`None` = no filter).
@@ -397,11 +491,7 @@ pub fn build_jobs(
     today_end: Ts,
 ) -> Vec<Job> {
     let mut ordered: Vec<&JobInfo> = infos.iter().collect();
-    ordered.sort_by_key(|si| match si.state {
-        DLState::PartialDownload => 1,
-        DLState::NotStarted => 2,
-        DLState::DownloadComplete => 3,
-    });
+    ordered.sort_by_key(|si| job_rank(si.state));
 
     let mut jobs = Vec::new();
     for si in ordered {
@@ -413,51 +503,27 @@ pub fn build_jobs(
                 continue;
             }
         }
-        if si.state == DLState::NotStarted {
+        let mut queue = |kind: JobKind, bound: Option<Ts>| {
+            let (from, to, reason) = job_window(kind, bound, target_start, today_end);
             jobs.push(Job {
                 symbol: si.symbol.clone(),
                 interval: si.interval.clone(),
-                from: target_start,
-                to: today_end,
-                reason: "NOT_STARTED: full history",
+                from,
+                to,
+                reason,
             });
-        } else if si.state == DLState::PartialDownload {
-            if si.missing_head && !si.listing_start_verified {
-                match si.earliest {
-                    Some(earliest) => jobs.push(Job {
-                        symbol: si.symbol.clone(),
-                        interval: si.interval.clone(),
-                        from: target_start,
-                        to: earliest - 60,
-                        reason: "PARTIAL: missing head coverage",
-                    }),
-                    None => jobs.push(Job {
-                        symbol: si.symbol.clone(),
-                        interval: si.interval.clone(),
-                        from: target_start,
-                        to: today_end,
-                        reason: "PARTIAL: missing head (no earliest)",
-                    }),
+        };
+        match si.state {
+            DLState::NotStarted => queue(JobKind::NotStarted, None),
+            DLState::PartialDownload => {
+                if si.missing_head && !si.listing_start_verified {
+                    queue(JobKind::Head, si.earliest);
+                }
+                if si.missing_tail {
+                    queue(JobKind::Tail, si.latest);
                 }
             }
-            if si.missing_tail {
-                match si.latest {
-                    Some(latest) => jobs.push(Job {
-                        symbol: si.symbol.clone(),
-                        interval: si.interval.clone(),
-                        from: latest + 60,
-                        to: today_end,
-                        reason: "PARTIAL: missing tail coverage",
-                    }),
-                    None => jobs.push(Job {
-                        symbol: si.symbol.clone(),
-                        interval: si.interval.clone(),
-                        from: target_start,
-                        to: today_end,
-                        reason: "PARTIAL: missing tail (no latest)",
-                    }),
-                }
-            }
+            DLState::DownloadComplete => {}
         }
     }
     jobs
@@ -568,6 +634,26 @@ pub struct ChunkProgress {
     pub db_total: usize,
 }
 
+/// Whether a finished head sweep may write the `LISTING_START` boundary: it
+/// yielded nothing new AND the earliest candle's date did not move (an empty
+/// database before and after also qualifies).
+pub fn head_sweep_eligible(
+    total_new: usize,
+    earliest_before: Option<Ts>,
+    after: Option<Ts>,
+) -> bool {
+    if total_new != 0 {
+        return false;
+    }
+    match (earliest_before, after) {
+        (None, None) => true,
+        (Some(before), Some(observed)) => {
+            observed.div_euclid(SECONDS_PER_DAY) == before.div_euclid(SECONDS_PER_DAY)
+        }
+        _ => false,
+    }
+}
+
 /// Mirror of `forward_sweep`: returns `(ok, total_new, all_chunks_zero)`.
 ///
 /// Jitter sleeps are caller-side (timing, not observable behavior).
@@ -622,19 +708,8 @@ pub fn forward_sweep(
         }
     }
 
-    let mut all_zero = false;
-    if is_head_sweep && total_new == 0 {
-        let after = sink.earliest();
-        match (earliest_before, after) {
-            (None, None) => all_zero = true,
-            (Some(before), Some(after)) => {
-                if after.div_euclid(SECONDS_PER_DAY) == before.div_euclid(SECONDS_PER_DAY) {
-                    all_zero = true;
-                }
-            }
-            _ => {}
-        }
-    }
+    let all_zero =
+        is_head_sweep && head_sweep_eligible(total_new, earliest_before, sink.earliest());
     (true, total_new, all_zero)
 }
 

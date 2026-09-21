@@ -11,8 +11,6 @@ framework-free observable queue, so the test pumps it to the main thread
 (host pump path) — no nested UI event loop, the suite stays hermetic.
 """
 
-
-
 import sqlite3
 import tempfile
 import threading

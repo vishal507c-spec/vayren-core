@@ -72,11 +72,7 @@ impl Bar {
 
     /// Return percentage: ((close - open) / open) * 100.
     pub fn return_pct(&self) -> f64 {
-        if self.open == 0.0 {
-            0.0
-        } else {
-            ((self.close - self.open) / self.open) * 100.0
-        }
+        return_pct(self.open, self.close)
     }
 
     /// True if all OHLCV values are valid (non-zero, high >= low, etc.).
@@ -101,6 +97,20 @@ impl fmt::Display for Bar {
             "{} {} O:{:.2} H:{:.2} L:{:.2} C:{:.2} V:{}",
             self.symbol, self.timestamp, self.open, self.high, self.low, self.close, self.volume
         )
+    }
+}
+
+/// Intraday change of one candle, in percent.
+///
+/// The single owner of the `(close − open) / open` semantics the chart header
+/// and the quote snapshot share; a zero open answers `0.0` rather than
+/// dividing. `Bar::return_pct` and the `vy_bar_return_pct` export both route
+/// here — neither restates the rule.
+pub fn return_pct(open: f64, close: f64) -> f64 {
+    if open == 0.0 {
+        0.0
+    } else {
+        ((close - open) / open) * 100.0
     }
 }
 
@@ -296,6 +306,50 @@ pub fn tail_bars(mut bars: Vec<Bar>, limit: Option<usize>) -> Vec<Bar> {
     }
 }
 
+/// One higher-timeframe query: how to read base rows, what to keep.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FetchPlan {
+    /// Read the stored rows as-is: timeframe at or below the detected base
+    /// bar duration (or either side unknown) needs no aggregation.
+    pub plain: bool,
+    /// Base rows to fetch for aggregation (`None` = whole history).
+    pub row_budget: Option<usize>,
+    /// Newest aggregated bars to keep (`None` = keep all of them).
+    pub keep_last: Option<usize>,
+}
+
+/// The query plan behind `CandleRepository.get_candles_timeframe`.
+///
+/// Owns the three rules that decision is made of: the plain-fetch fallback
+/// (`seconds <= base`), the `(limit + 1) * ratio` base-row over-fetch, and
+/// the newest-`limit` tail. A `limit` of `0` keeps everything, because
+/// Python's `bars[-0:]` does. A base duration that is not positive cannot be
+/// divided into, so it also falls back to the plain fetch.
+pub fn timeframe_fetch_plan(
+    seconds: Option<i64>,
+    base: Option<i64>,
+    limit: Option<usize>,
+) -> FetchPlan {
+    let (ratio, limit) = match (seconds, base, limit) {
+        (Some(s), Some(b), limit) if b > 0 && s > b => ((s / b) as usize, limit),
+        _ => {
+            return FetchPlan {
+                plain: true,
+                row_budget: None,
+                keep_last: None,
+            }
+        }
+    };
+    FetchPlan {
+        plain: false,
+        row_budget: fetch_window(limit, ratio),
+        keep_last: match limit {
+            Some(0) | None => None,
+            Some(l) => Some(l),
+        },
+    }
+}
+
 impl fmt::Display for Timeframe {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
@@ -466,5 +520,46 @@ mod tests {
         assert_eq!(tail.len(), 2);
         assert_eq!(tail[0].timestamp, "2026-01-04 09:15:00");
         assert_eq!(tail[1].timestamp, "2026-01-05 09:15:00");
+    }
+
+    #[test]
+    fn timeframe_fetch_plan_matches_the_repository_decision() {
+        let plain = FetchPlan {
+            plain: true,
+            row_budget: None,
+            keep_last: None,
+        };
+        // At or below the detected base bar: read the rows as stored.
+        assert_eq!(timeframe_fetch_plan(Some(60), Some(60), Some(10)), plain);
+        assert_eq!(timeframe_fetch_plan(Some(15), Some(60), Some(10)), plain);
+        assert_eq!(timeframe_fetch_plan(None, Some(60), Some(10)), plain);
+        assert_eq!(timeframe_fetch_plan(Some(60), None, Some(10)), plain);
+        assert_eq!(timeframe_fetch_plan(Some(60), Some(0), Some(10)), plain);
+        // Higher timeframe: ratio over-fetch + newest-limit tail.
+        assert_eq!(
+            timeframe_fetch_plan(Some(900), Some(60), Some(500)),
+            FetchPlan {
+                plain: false,
+                row_budget: Some(7515),
+                keep_last: Some(500),
+            }
+        );
+        assert_eq!(
+            timeframe_fetch_plan(Some(86_400), Some(900), None),
+            FetchPlan {
+                plain: false,
+                row_budget: None,
+                keep_last: None,
+            }
+        );
+        // bars[-0:] keeps everything, so no tail is cut.
+        assert_eq!(
+            timeframe_fetch_plan(Some(300), Some(60), Some(0)),
+            FetchPlan {
+                plain: false,
+                row_budget: Some(5),
+                keep_last: None,
+            }
+        );
     }
 }

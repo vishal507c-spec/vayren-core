@@ -1,11 +1,14 @@
-"""ExecutionSimulator — fill a signal against one bar.
+"""ExecutionSimulator — ask the Rust kernel to fill a signal against one bar.
 
-Applies slippage and records a commission. Position sizing uses fractional
-model (``quantity = available_equity / fill_price``) so metrics stay
-deterministic without rounding artifacts; document this choice in UI text.
+The rule (slippage direction, affordability rejection, fractional position
+sizing ``quantity = available_equity / fill_price``, commission) lives in
+`rust/vayren-core/src/backtest.rs`. This class keeps the domain shape —
+percentages in, `Fill` out — and holds no pricing logic of its own.
 """
 
 from dataclasses import dataclass
+
+from backtest.native_positions import fill as _native_fill
 
 
 @dataclass(frozen=True)
@@ -28,8 +31,8 @@ class ExecutionSimulator:
         slippage_pct: float = 0.02,
         commission_pct: float = 0.03,
     ) -> None:
-        self._slippage_pct = max(0.0, float(slippage_pct))
-        self._commission_pct = max(0.0, float(commission_pct))
+        self._slippage_pct = float(slippage_pct)
+        self._commission_pct = float(commission_pct)
 
     def fill(self, signal_side: str, bar_close: float, available_equity: float) -> Fill | None:
         """Return a Fill for ``bar_close``, or None when not affordable.
@@ -37,19 +40,19 @@ class ExecutionSimulator:
         A LONG signal buys; a SELL signal is only reached by the runner
         when a long position is already open and is handled as an exit
         through :class:`PositionManager` rather than a new Fill.
-        Entry is rejected when quantity would be < 1 share equivalent worth
-        of ``available_equity`` — prevents infinite-precision micro-fills.
         """
-        if available_equity <= 0.0 or bar_close <= 0.0:
+        filled = _native_fill(
+            signal_side,
+            bar_close,
+            available_equity,
+            self._slippage_pct,
+            self._commission_pct,
+        )
+        if filled is None:
             return None
-        slip = bar_close * (self._slippage_pct / 100.0)
-        fill_price = bar_close + slip if signal_side == "LONG" else bar_close - slip
-        if fill_price <= 0.0:
-            return None
-        quantity = available_equity / fill_price
-        if quantity <= 0.0:
-            return None
-        commission = fill_price * quantity * (self._commission_pct / 100.0)
         return Fill(
-            side=signal_side, fill_price=fill_price, quantity=quantity, commission=commission
+            side=filled.side,
+            fill_price=filled.fill_price,
+            quantity=filled.quantity,
+            commission=filled.commission,
         )

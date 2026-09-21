@@ -5,6 +5,7 @@ from pathlib import Path
 from market.database.ohlcv import OhlcvCandleDatabase
 from market.models.bar import Bar
 from market.models.symbol_quote import SymbolQuote
+from market.native_bar import return_pct as _return_pct
 from market.repository.candle_repository import CandleRepository
 
 
@@ -64,7 +65,7 @@ class SymbolRepository:
                 SymbolQuote(
                     symbol=symbol,
                     price=bar.close,
-                    change_pct=bar.return_pct,
+                    change_pct=_return_pct(bar.open, bar.close),
                     timestamp=bar.timestamp,
                 )
             )

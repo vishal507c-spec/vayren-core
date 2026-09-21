@@ -4,7 +4,7 @@
 
 [project]
 name = "vayren-core"
-version = "1.19.0"
+version = "1.20.0"
 description = "Event-driven desktop charting platform"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -24,6 +24,7 @@ dev = [
     "ruff>=0.6",
     "pyright>=1.1",
     "pre-commit>=3.0",
+    "pillow>=10.0",  # icon asset generation (scripts/assets/)
 ]
 
 # ── Data Domain Extras (historical downloader) ─────────────────

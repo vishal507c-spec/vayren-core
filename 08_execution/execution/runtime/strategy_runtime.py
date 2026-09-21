@@ -16,6 +16,7 @@ from market import Bar
 from strategy import BarView, StrategyLogic, StrategyParameters, StrategyState
 
 from execution.events import CandleEvent
+from execution.market_data.native_normalizer import watermark
 from execution.models.contract import StrategyRuntimeContract
 from execution.models.intent import StrategySignal
 from execution.runtime.lifecycle import StrategyLifecycle
@@ -85,7 +86,7 @@ class LiveStrategyDriver:
         Non-closed candles update nothing (no lookahead on partial bars).
         """
         ctx = self._ctx
-        ctx.event_seq = max(ctx.event_seq + 1, event.seq)
+        ctx.event_seq = watermark(ctx.event_seq, event.seq)
         if not event.is_closed:
             return None
         bar = candle_to_bar(event)

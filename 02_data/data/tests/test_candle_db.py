@@ -5,12 +5,7 @@ from datetime import datetime
 
 import pytest
 
-from data.storage.candle_db import (
-    CandleDB,
-    db_path,
-    normalise_ts_str,
-    parse_dt,
-)
+from data.storage.candle_db import CandleDB, db_path, parse_dt
 from data.tests.conftest import candle
 
 
@@ -117,8 +112,10 @@ def test_migrations_run_on_connect(tmp_path) -> None:
     assert "reason" in cols
 
 
-def test_normalise_ts_str_helpers() -> None:
-    assert normalise_ts_str("2026-01-01T09:15:30") == "2026-01-01 09:15:00"
-    assert normalise_ts_str("2026-01-01 09:15:45") == "2026-01-01 09:15:00"
+def test_parse_dt_reads_the_stored_shape() -> None:
     assert parse_dt("2026-01-01T09:15:30") == datetime(2026, 1, 1, 9, 15)
+    assert parse_dt("2026-01-01 09:15:45") == datetime(2026, 1, 1, 9, 15)
+    assert parse_dt("2026-01-01 09:15:00") == datetime(2026, 1, 1, 9, 15)
+    assert parse_dt("") is None
     assert parse_dt(None) is None
+    assert parse_dt("not-a-date") is None

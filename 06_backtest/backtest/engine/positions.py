@@ -1,8 +1,16 @@
-"""PositionManager — tracks the one open position and closes trades."""
+"""PositionManager — tracks the one open position and closes trades.
+
+State and trade identity live here; every closing decision (whether this bar
+exits the leg, at what price, with what PnL and risk) is the Rust kernel's,
+reached through `backtest.native_positions` (constitution §1: Backtesting).
+"""
 
 from dataclasses import dataclass, field
 
 from backtest.models.trade import TradeRecord
+from backtest.native_positions import ClosedTrade
+from backtest.native_positions import close_trade as _kernel_close
+from backtest.native_positions import try_close as _kernel_try_close
 
 
 @dataclass
@@ -102,31 +110,25 @@ class PositionManager:
         commission_pct: float,
         exit_signal: bool = False,
     ) -> TradeRecord | None:
-        if self._open is None:
+        entry = self._open
+        if entry is None:
             return None
-        exit_price: float | None = None
-        exit_reason = "SIGNAL"
-        if exit_signal:
-            slip = bar_close * 0.0002
-            exit_price = bar_close - slip if self._open.side == "LONG" else bar_close + slip
-            exit_reason = "SIGNAL"
-        elif self._open.side == "LONG":
-            if self._open.sl_price is not None and bar_low <= self._open.sl_price:
-                exit_price = self._open.sl_price
-                exit_reason = "SL"
-            elif self._open.tp_price is not None and bar_high >= self._open.tp_price:
-                exit_price = self._open.tp_price
-                exit_reason = "TP"
-        else:  # SHORT
-            if self._open.sl_price is not None and bar_high >= self._open.sl_price:
-                exit_price = self._open.sl_price
-                exit_reason = "SL"
-            elif self._open.tp_price is not None and bar_low <= self._open.tp_price:
-                exit_price = self._open.tp_price
-                exit_reason = "TP"
-        if exit_price is None:
+        closed = _kernel_try_close(
+            side=entry.side,
+            sl_price=entry.sl_price,
+            tp_price=entry.tp_price,
+            bar_high=bar_high,
+            bar_low=bar_low,
+            bar_close=bar_close,
+            entry_price=entry.entry_price,
+            quantity=entry.quantity,
+            commission_entry=entry.commission_entry,
+            commission_pct=commission_pct,
+            exit_signal=exit_signal,
+        )
+        if closed is None:
             return None
-        return self._close_position(exit_index, exit_time, exit_price, commission_pct, exit_reason)
+        return self._record(entry, exit_index, exit_time, closed)
 
     def close_signal(
         self,
@@ -135,9 +137,7 @@ class PositionManager:
         exit_price: float,
         commission_pct: float,
     ) -> TradeRecord | None:
-        if self._open is None:
-            return None
-        return self._close_position(exit_index, exit_time, exit_price, commission_pct, "SIGNAL")
+        return self._close_at(exit_index, exit_time, exit_price, commission_pct, "SIGNAL")
 
     def close_end(
         self,
@@ -146,31 +146,38 @@ class PositionManager:
         exit_price: float,
         commission_pct: float,
     ) -> TradeRecord | None:
-        if self._open is None:
-            return None
-        return self._close_position(exit_index, exit_time, exit_price, commission_pct, "END")
+        return self._close_at(exit_index, exit_time, exit_price, commission_pct, "END")
 
-    def _close_position(
+    def _close_at(
         self,
         exit_index: int,
         exit_time: str,
         exit_price: float,
         commission_pct: float,
         exit_reason: str,
-    ) -> TradeRecord:
-        assert self._open is not None
+    ) -> TradeRecord | None:
         entry = self._open
-        commission_exit = exit_price * entry.quantity * (commission_pct / 100.0)
-        commission = entry.commission_entry + commission_exit
-        if entry.side == "LONG":
-            gross = (exit_price - entry.entry_price) * entry.quantity
-        else:
-            gross = (entry.entry_price - exit_price) * entry.quantity
-        pnl = gross - commission
-        entry_cost = entry.entry_price * entry.quantity
-        pnl_pct = (pnl / entry_cost * 100.0) if entry_cost else 0.0
-        risk = abs(entry.entry_price - entry.sl_price) * entry.quantity if entry.sl_price else None
-        r_multiple = (pnl / risk) if risk and risk != 0 else None
+        if entry is None:
+            return None
+        closed = _kernel_close(
+            side=entry.side,
+            exit_reason=exit_reason,
+            entry_price=entry.entry_price,
+            quantity=entry.quantity,
+            commission_entry=entry.commission_entry,
+            exit_price=exit_price,
+            commission_pct=commission_pct,
+            sl_price=entry.sl_price,
+        )
+        return self._record(entry, exit_index, exit_time, closed)
+
+    def _record(
+        self,
+        entry: _OpenPosition,
+        exit_index: int,
+        exit_time: str,
+        closed: ClosedTrade,
+    ) -> TradeRecord:
         trade = TradeRecord(
             symbol=entry.symbol,
             side=entry.side,
@@ -179,14 +186,14 @@ class PositionManager:
             entry_time=entry.entry_time,
             exit_time=exit_time,
             entry_price=entry.entry_price,
-            exit_price=exit_price,
+            exit_price=closed.exit_price,
             quantity=entry.quantity,
-            pnl=pnl,
-            pnl_pct=pnl_pct,
-            commission=commission,
+            pnl=closed.pnl,
+            pnl_pct=closed.pnl_pct,
+            commission=closed.commission,
             bars_held=exit_index - entry.entry_index,
-            exit_reason=exit_reason,
-            r_multiple=r_multiple,
+            exit_reason=closed.exit_reason,
+            r_multiple=closed.r_multiple,
         )
         self._open = None
         return trade

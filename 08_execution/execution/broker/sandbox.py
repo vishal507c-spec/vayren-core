@@ -6,19 +6,36 @@ NOT a real exchange. A contract-testing venue implementing exactly the
 policies and disconnect simulation. Every behavior is deterministic:
 no randomness, no network, no SDKs.
 
-Fill economics mirror :class:`PaperBroker` (reference price ± slippage,
-commission on notional) so paper ↔ sandbox parity is testable.
+Fill economics are the same Rust simulated-fill kernel :class:`PaperBroker`
+calls, so paper ↔ sandbox parity is structural, not a copied rule table.
+
+The scripted policy grammar (``delay:``/``reject:``/``full``/``partial:`` and
+the fail-closed rejection of anything else) is decided by the Rust kernel in
+``rust/vayren-core/src/sandbox_policy.rs``; this venue only applies the
+answer — state transitions, events and the fill call.
 """
 
 from __future__ import annotations
 
 from contextlib import suppress
+from enum import Enum
 
 from broker.funds import FundsSnapshot
 
 from execution.broker.adapter import BrokerCapabilities, BrokerError
 from execution.broker.credentials import BrokerCredentials, CredentialStore, validate_credentials
+from execution.broker.native_policy import native_settle_decision
 from execution.models.order import Fill, OrderPlan
+from execution.native_execution import native_paper_calculate_fill
+
+
+class SettleAction(Enum):
+    """Kernel answer vocabulary; the rules behind it are in Rust."""
+
+    WAIT = "WAIT"
+    FULL = "FULL"
+    PARTIAL = "PARTIAL"
+    REJECT = "REJECT"
 
 
 class SandboxBroker:
@@ -187,34 +204,23 @@ class SandboxBroker:
         return self._policies.get(client_order_id, self._default_policy)
 
     def settle(self, client_order_id: str, reference_price: float, timestamp: str) -> Fill | None:
-        """Fill one submitted order per its scripted policy (deterministic)."""
+        """Apply the kernel's scripted decision to one open order (deterministic)."""
         self._require_usable()
         info = self._orders.get(client_order_id)
         if info is None or info["state"] not in ("SUBMITTED", "ACKNOWLEDGED", "PARTIALLY_FILLED"):
             return None
-        policy = self._policy_for(client_order_id)
-        if policy.startswith("delay:"):
-            try:
-                remaining = int(policy.split(":", 1)[1])
-            except ValueError:
-                return self._reject(info, client_order_id, f"bad delay policy: {policy}")
-            if remaining > 0:
-                self._policies[client_order_id] = f"delay:{remaining - 1}"
-                return None
-            policy = "full"
-        if policy.startswith("reject:"):
-            return self._reject(info, client_order_id, policy.split(":", 1)[1] or "venue reject")
-        if policy == "full":
+        kind, detail, quantity = native_settle_decision(self._policy_for(client_order_id))
+        action = SettleAction(kind)
+        if action is SettleAction.WAIT:
+            self._policies[client_order_id] = detail
+            return None
+        if action is SettleAction.FULL:
             return self._fill(
                 info, client_order_id, info["plan"].quantity, reference_price, timestamp
             )
-        if policy.startswith("partial:"):
-            try:
-                qty = float(policy.split(":", 1)[1])
-            except ValueError:
-                return self._reject(info, client_order_id, f"bad partial policy: {policy}")
-            return self._fill(info, client_order_id, qty, reference_price, timestamp)
-        return self._reject(info, client_order_id, f"unknown policy: {policy}")
+        if action is SettleAction.PARTIAL and quantity is not None:
+            return self._fill(info, client_order_id, quantity, reference_price, timestamp)
+        return self._reject(info, client_order_id, detail)
 
     def _reject(self, info: dict, client_order_id: str, reason: str) -> None:
         info["state"] = "REJECTED"
@@ -237,32 +243,21 @@ class SandboxBroker:
         timestamp: str,
     ) -> Fill | None:
         plan: OrderPlan = info["plan"]
-        if reference_price <= 0:
-            return None
-        slip = reference_price * (self._slippage_pct / 100.0)
-        if plan.order_type == "LIMIT" and plan.limit_price is not None:
-            if plan.side == "BUY":
-                fill_price = min(plan.limit_price, reference_price + slip)
-            else:
-                fill_price = max(plan.limit_price, reference_price - slip)
-        else:
-            fill_price = reference_price + slip if plan.side == "BUY" else reference_price - slip
-        if fill_price <= 0:
-            return None
         remaining = plan.quantity - info["filled_qty"]
-        if plan.side == "BUY":
-            affordable = self._capital / fill_price if fill_price > 0 else 0.0
-            fill_qty = min(remaining, want_qty, affordable)
-        else:
-            fill_qty = min(remaining, want_qty)
-        if fill_qty <= 0:
+        calc = native_paper_calculate_fill(
+            plan.order_type == "LIMIT",
+            plan.limit_price is not None,
+            plan.limit_price or 0.0,
+            plan.side == "BUY",
+            reference_price,
+            self._slippage_pct,
+            self._commission_pct,
+            self._capital,
+            min(remaining, want_qty),
+        )
+        if calc is None:
             return None
-        notional = fill_price * fill_qty
-        commission = notional * (self._commission_pct / 100.0)
-        if plan.side == "BUY":
-            self._capital -= notional + commission
-        else:
-            self._capital += notional - commission
+        fill_price, fill_qty, _notional, commission, self._capital = calc
         fill = Fill(
             client_order_id=client_order_id,
             broker_order_id=info["broker_order_id"],

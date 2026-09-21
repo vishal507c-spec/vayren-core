@@ -157,3 +157,132 @@ def test_mode_fuzz_vs_counter() -> None:
         values = [rng.randint(0, 12) for _ in range(rng.randint(0, 40))]
         assert mode(values) == _ref_mode(values), values
     assert mode([]) is None
+
+
+# ── streaming rules the live provider used to hold in Python ───────────────
+
+
+def _ref_bucket_start(timestamp: str, size_s: int, anchor_s: int) -> str:
+    """Old ``broker_feed._bucket_start``, verbatim."""
+    day, clock = timestamp[:10], timestamp[11:19]
+    parts = clock.split(":")
+    seconds = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+    if size_s >= 86_400:
+        return f"{day} 00:00:00"
+    if seconds < anchor_s:
+        anchor_s -= 86_400
+    index = (seconds - anchor_s) // size_s
+    start = anchor_s + index * size_s
+    if start < 0:
+        start += 86_400
+    hh, rem = divmod(start % 86_400, 3600)
+    mm, ss = divmod(rem, 60)
+    return f"{day} {hh:02d}:{mm:02d}:{ss:02d}"
+
+
+def _ref_parse_anchor(anchor: object) -> int:
+    """Old ``broker_feed._parse_anchor``, verbatim."""
+    try:
+        hh, mm = anchor.split(":")[:2]  # type: ignore[union-attr]
+        return int(hh) * 3600 + int(mm) * 60
+    except (ValueError, AttributeError):
+        return 9 * 3600 + 15 * 60
+
+
+def _ref_fold(
+    bucket: tuple[float, float, float, float, float] | None,
+    price: float,
+    dayvol: int,
+    last_dayvol: int | None,
+) -> tuple[float, float, float, float, float]:
+    """Old ``BrokerFeedProvider._ingest`` OHLCV accumulation, verbatim."""
+    delta = max(0, dayvol - (last_dayvol if last_dayvol is not None else dayvol))
+    if bucket is None:
+        return (price, price, price, price, delta)
+    open_, high, low, _close, volume = bucket
+    return (open_, max(high, price), min(low, price), price, volume + delta)
+
+
+def _ref_closed_count(fresh: int, newest_is_forming: bool) -> int:
+    """Old ``SqliteTailProvider`` withhold-the-forming-candle rule."""
+    return max(0, fresh - 1) if newest_is_forming else fresh
+
+
+def test_bucket_flooring_matches_the_retired_provider_rule() -> None:
+    from market.native_aggregate import bucket_start
+
+    anchors = [0, 33300, 34200, 86399]
+    sizes = [60, 300, 900, 1800, 3600, 7200, 14400, 86400, 604800]
+    stamps = [
+        "2026-01-05 00:00:00",
+        "2026-01-05 09:14:59",
+        "2026-01-05 09:15:00",
+        "2026-01-05 09:15:01",
+        "2026-01-05 15:47:00",
+        "2026-01-05 23:59:59",
+        "2026-01-06 08:20:00",
+    ]
+    for stamp in stamps:
+        for size_s in sizes:
+            for anchor_s in anchors:
+                assert bucket_start(stamp, size_s, anchor_s) == _ref_bucket_start(
+                    stamp, size_s, anchor_s
+                ), (stamp, size_s, anchor_s)
+
+
+def test_bucket_flooring_survives_a_random_quote_stream() -> None:
+    from market.native_aggregate import bucket_start
+
+    rng = random.Random(20260920)
+    for _ in range(400):
+        stamp = (
+            f"2026-01-{rng.randint(1, 28):02d} "
+            f"{rng.randint(0, 23):02d}:{rng.randint(0, 59):02d}:{rng.randint(0, 59):02d}"
+        )
+        size_s = rng.choice([60, 300, 900, 1800, 3600, 86400])
+        anchor_s = rng.choice([0, 33300, rng.randint(0, 86_399)])
+        assert bucket_start(stamp, size_s, anchor_s) == _ref_bucket_start(stamp, size_s, anchor_s)
+
+
+def test_session_anchors_read_like_the_retired_parser() -> None:
+    from market.native_aggregate import session_anchor_seconds
+
+    for label in ["09:15", "9:15", " 09 : 15 ", "00:00", "23:59", "", "junk", "09", "ab:cd"]:
+        assert session_anchor_seconds(label) == _ref_parse_anchor(label), label
+    for _ in range(200):
+        hh, mm = random.Random().randrange(24), random.Random().randrange(60)
+        label = f"{hh:02d}:{mm:02d}"
+        assert session_anchor_seconds(label) == _ref_parse_anchor(label)
+
+
+def test_quotes_fold_into_their_bucket_exactly_like_the_retired_rule() -> None:
+    from market.native_aggregate import fold_tick
+
+    rng = random.Random(20260921)
+    for _ in range(300):
+        bucket: tuple[float, float, float, float, float] | None = None
+        dayvol = rng.randint(0, 500)
+        last_dayvol: int | None = None
+        for _ in range(rng.randint(1, 12)):
+            price = round(rng.uniform(50.0, 500.0), 2)
+            dayvol = rng.randint(0, 100_000)
+            expected = _ref_fold(bucket, price, dayvol, last_dayvol)
+            assert fold_tick(bucket, price, dayvol, last_dayvol) == expected, (
+                bucket,
+                price,
+                dayvol,
+                last_dayvol,
+            )
+            bucket = expected
+            last_dayvol = dayvol
+
+
+def test_the_forming_row_is_the_last_one_to_emit() -> None:
+    from market.native_aggregate import closed_count
+
+    for fresh in range(0, 12):
+        for forming in (False, True):
+            assert closed_count(fresh, forming) == _ref_closed_count(fresh, forming), (
+                fresh,
+                forming,
+            )

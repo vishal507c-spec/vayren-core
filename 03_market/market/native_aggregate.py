@@ -13,10 +13,25 @@ import ctypes
 import struct
 from array import array
 from collections.abc import Sequence
+from typing import Any
 
-from core.native.loader import load_vayren_core
+from core.native.loader import NativeBridgeError, load_vayren_core
 
 _lib = load_vayren_core()
+
+_REQUIRED_EXPORTS = (
+    "vy_agg_anchor_seconds",
+    "vy_agg_bucket_start",
+    "vy_agg_closed_count",
+    "vy_agg_fold_tick",
+)
+
+_missing_exports = [name for name in _REQUIRED_EXPORTS if not hasattr(_lib, name)]
+if _missing_exports:
+    raise NativeBridgeError(
+        f"native library has no streaming aggregation kernel ({', '.join(_missing_exports)}). "
+        "Rebuild: `python scripts/build_rust.py`"
+    )
 
 # AggBucket layout: i32 day, i32 index, 5 x f64 (48 bytes, no padding).
 _BUCKET_FORMAT = "ii5d"
@@ -107,4 +122,87 @@ def mode(values: Sequence[int]) -> int | None:
     return int(out.value) if defined else None
 
 
-__all__ = ["aggregate", "mode"]
+def _read(invoke: Any) -> str:
+    """Probe for the length, then fill a buffer; the kernel's two-call form."""
+    needed = int(invoke(None, 0))
+    if needed < 0:
+        raise NativeBridgeError(f"aggregation kernel rejected the call: {needed}")
+    buf = ctypes.create_string_buffer(needed + 1)
+    if int(invoke(buf, needed + 1)) != needed:
+        raise NativeBridgeError("aggregation kernel length drift")
+    return buf.raw[:needed].decode("utf-8")
+
+
+def session_anchor_seconds(anchor: str) -> int:
+    """Session anchor `"HH:MM"` as seconds of day (09:15 when unreadable)."""
+    payload = anchor.encode("utf-8")
+    code = int(_lib.vy_agg_anchor_seconds(payload, len(payload)))
+    if code < 0:
+        raise NativeBridgeError("aggregation kernel could not read the anchor")
+    return code
+
+
+def bucket_start(stamp: str, size_s: int, anchor_s: int) -> str:
+    """Bucket start a `"YYYY-MM-DD HH:MM:SS"` quote stamp falls into."""
+    payload = stamp.encode("utf-8")
+    return _read(
+        lambda b, c: _lib.vy_agg_bucket_start(
+            payload, len(payload), int(size_s), int(anchor_s), b, c
+        )
+    )
+
+
+def closed_count(fresh_rows: int, newest_is_forming: bool) -> int:
+    """Rows already closed in a fresh ascending batch; the forming one waits."""
+    return int(_lib.vy_agg_closed_count(int(fresh_rows), 1 if newest_is_forming else 0))
+
+
+# One bucket: open, high, low, close, volume.
+Bucket = tuple[float, float, float, float, float]
+
+_FOLD_SLOTS = ctypes.c_double * 5
+
+
+def fold_tick(
+    bucket: Bucket | None,
+    price: float,
+    dayvol: int,
+    last_dayvol: int | None,
+) -> Bucket:
+    """Fold one quote into its bucket: the kernel decides the five OHLCV fields.
+
+    ``bucket=None`` opens the bucket at this quote; otherwise the extremes
+    absorb it, the close becomes this price, and the volume grows by the
+    day-volume delta.
+    """
+    held = bucket if bucket is not None else (0.0, 0.0, 0.0, 0.0, 0.0)
+    out = _FOLD_SLOTS()
+    code = int(
+        _lib.vy_agg_fold_tick(
+            1 if bucket is None else 0,
+            held[0],
+            held[1],
+            held[2],
+            held[4],
+            float(price),
+            float(dayvol),
+            1 if last_dayvol is not None else 0,
+            float(last_dayvol) if last_dayvol is not None else 0.0,
+            out,
+            5,
+        )
+    )
+    if code != 5:
+        raise NativeBridgeError(f"native bucket fold failed: {code}")
+    return (out[0], out[1], out[2], out[3], out[4])
+
+
+__all__ = [
+    "Bucket",
+    "aggregate",
+    "bucket_start",
+    "closed_count",
+    "fold_tick",
+    "mode",
+    "session_anchor_seconds",
+]

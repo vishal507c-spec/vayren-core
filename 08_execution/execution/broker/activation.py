@@ -4,6 +4,11 @@ Twelve explicit steps, evaluated purely and journaled. This module never
 arms, never starts order flow, never touches the network: it VERIFIES.
 Any failure → STOP, fail closed, no order. LIVE additionally requires the
 operator's explicit ARM (a passed ceremony alone authorizes nothing).
+
+Ownership: the ceremony — step order, names, verdicts, detail wording and
+blockers — is Rust (``rust/vayren-core/src/live_readiness.rs``). This module
+keeps the immutable report types, converts already-gathered verdicts into
+kernel facts, and journals the result (migration §7).
 """
 
 from __future__ import annotations
@@ -12,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from execution.broker.gates import LiveGatesReport
+from execution.broker.native_policy import native_activation_verdict
 from execution.modes import LiveArm
 from execution.portfolio.reconcile import ReconciliationVerdict
 
@@ -38,10 +44,6 @@ class ActivationReport:
     blockers: tuple[str, ...] = field(default_factory=tuple)
 
 
-def _step(index: int, name: str, ok: bool, detail: str = "") -> ActivationStep:
-    return ActivationStep(index=index, name=name, ok=bool(ok), detail=detail)
-
-
 def evaluate_activation(
     *,
     broker_name: str = "",
@@ -61,97 +63,49 @@ def evaluate_activation(
     gates: LiveGatesReport | None = None,
     armed: LiveArm = LiveArm.DISARMED,
 ) -> ActivationReport:
-    """Evaluate the twelve activation steps in order. Pure, fail-closed."""
-    steps = (
-        _step(1, "SELECT_BROKER", bool(broker_name), "" if broker_name else "no broker selected"),
-        _step(
-            2,
-            "LIVE_ENVIRONMENT",
-            environment == "live",
-            "" if environment == "live" else f"environment is {environment!r}, not 'live'",
-        ),
-        _step(
-            3,
-            "VALIDATE_CREDENTIALS",
-            credentials_ok,
-            "" if credentials_ok else "; ".join(credential_reasons) or "credentials invalid",
-        ),
-        _step(
-            4,
-            "CONFIRM_ACCOUNT",
-            account_ok,
-            "" if account_ok else "; ".join(account_reasons) or "account unconfirmed",
-        ),
-        _step(
-            5,
-            "VERIFY_MARKET_DATA",
-            market_healthy,
-            "" if market_healthy else market_reason or "market data unhealthy",
-        ),
-        _step(
-            6,
-            "VERIFY_FUNDS",
-            funds_ok,
-            "" if funds_ok else "; ".join(funds_reasons) or "funds invalid",
-        ),
-        _step(
-            7,
-            "VALIDATE_RISK",
-            risk_ok,
-            "" if risk_ok else "; ".join(risk_reasons) or "risk invalid",
-        ),
-        _step(
-            8,
-            "RECONCILE",
-            verdict is not None and not verdict.blocks_live,
-            "reconciliation not evaluated"
-            if verdict is None
-            else (
-                ""
-                if not verdict.blocks_live
-                else "; ".join(verdict.reasons) or "reconciliation blocks live"
-            ),
-        ),
-        _step(
-            9,
-            "EVALUATE_GATES",
-            gates is not None and gates.ready,
-            "gates not evaluated"
-            if gates is None
-            else (
-                ""
-                if gates.ready
-                else "; ".join(f"{g.name}: {g.detail}" for g in gates.failed()) or "gates failing"
-            ),
-        ),
-        _step(
-            10, "VERIFY_KILL_SWITCH", not kill_halted, "kill switch engaged" if kill_halted else ""
-        ),
-        _step(
-            11,
-            "EXPLICIT_ARM",
-            armed == LiveArm.ARMED,
-            "" if armed == LiveArm.ARMED else f"arming is {armed.value}, not ARMED",
-        ),
-        _step(0, "START_LIVE", False, "ceremony verifies only — start is an operator act"),
-    )
-    start, ordered = steps[-1], steps[:-1]
-    verifiable_ready = all(step.ok for step in ordered)
-    final_start = ActivationStep(
-        index=12,
-        name=start.name,
-        ok=False,
-        detail=(
-            "ceremony green — start remains an explicit operator act"
-            if verifiable_ready
-            else "blocked: ceremony not fully green"
-        ),
-    )
-    blockers = tuple(
-        f"{step.name}: {step.detail}" for step in ordered if not step.ok and step.detail
+    """Evaluate the twelve activation steps in order. Pure, fail-closed.
+
+    The ceremony itself — step names, order, verdicts, detail wording and
+    blocker composition — belongs to Rust
+    (``live_readiness::evaluate_ceremony``). This converts the gathered
+    verdicts into kernel facts and materialises the frozen report.
+    """
+    verdict_blocks = False
+    verdict_reasons: tuple[str, ...] = ()
+    if verdict is not None:
+        verdict_blocks = bool(verdict.blocks_live)
+        verdict_reasons = tuple(verdict.reasons)
+    failed_gates = gates.failed() if gates is not None else ()
+    ready, steps, blockers = native_activation_verdict(
+        broker_name=broker_name,
+        environment=environment,
+        credentials_ok=credentials_ok,
+        credential_reasons=tuple(credential_reasons),
+        account_ok=account_ok,
+        account_reasons=tuple(account_reasons),
+        market_healthy=market_healthy,
+        market_reason=market_reason,
+        funds_ok=funds_ok,
+        funds_reasons=tuple(funds_reasons),
+        risk_ok=risk_ok,
+        risk_reasons=tuple(risk_reasons),
+        verdict_present=verdict is not None,
+        verdict_blocks=verdict_blocks,
+        verdict_reasons=verdict_reasons,
+        kill_halted=kill_halted,
+        gates_present=gates is not None,
+        gates_ready=bool(gates is not None and gates.ready),
+        failed_gate_names=tuple(gate.name for gate in failed_gates),
+        failed_gate_details=tuple(gate.detail for gate in failed_gates),
+        armed_value=armed.value,
     )
     return ActivationReport(
-        ready=verifiable_ready, steps=(*ordered, final_start), blockers=blockers
+        ready=ready,
+        steps=tuple(
+            ActivationStep(index=index, name=name, ok=ok, detail=detail)
+            for index, name, ok, detail in steps
+        ),
+        blockers=blockers,
     )
 
 

@@ -6,6 +6,14 @@ SAFE journals info; WARNING and BLOCKED both block LIVE. Startup must
 reconcile (RECOVER → RECONCILE → …) before LIVE; every verdict is
 journaled. Ledger and strategy execution state rebuild from fills, so
 positions/fills coverage flows through the same reports.
+
+Every comparison rule is owned by Rust (`rust/vayren-core`, the
+`execution_engine` module): the quantity tolerance, the sorted symbol union,
+the parse-or-zero broker quantity, the ``local-only``/``broker-only``
+labelling, the unknown-equity mismatch, the SAFE/WARNING/BLOCKED combination
+and both blocking rules. What is left here selects payload, rebuilds the
+kernel's mismatch records as value objects and renders the reason text — the
+message wording stays in the bridge, the decision does not.
 """
 
 from __future__ import annotations
@@ -15,7 +23,16 @@ from enum import StrEnum
 from typing import Any
 
 from execution.models.position import Position
-from execution.native_execution import native_reconcile_funds, native_verdict_blocks_live
+from execution.native_execution import (
+    native_reconcile_funds,
+    native_reconcile_orders,
+    native_reconcile_positions,
+    native_report_blocks_live,
+    native_verdict_blocks_live,
+    native_verdict_status,
+)
+
+_NOT_EVALUATED = "reconciliation not evaluated"
 
 
 class ReconcileStatus(StrEnum):
@@ -43,22 +60,18 @@ class ReconciliationReport:
     @property
     def blocks_live(self) -> bool:
         """Unresolved mismatch blocks live execution. Paper only reports."""
-        return not self.matched
+        return native_report_blocks_live(self.matched)
 
 
-def _qty_of(position: dict) -> float:
-    try:
-        return float(position.get("quantity", 0.0))
-    except Exception:
-        return 0.0
-
-
-def _money_of(payload: dict, key: str) -> float | None:
-    try:
-        value = payload.get(key)
-        return None if value is None else float(value)
-    except (TypeError, ValueError):
-        return None
+def _report_of(records: list[tuple[str, str, str, str]], checked_at: str) -> ReconciliationReport:
+    """Rebuild one kernel report — an empty mismatch list IS its matched flag."""
+    mismatches = tuple(
+        ReconciliationMismatch(kind=kind, symbol_or_id=ident, local=local, broker=broker)
+        for kind, ident, local, broker in records
+    )
+    return ReconciliationReport(
+        matched=not mismatches, mismatches=mismatches, checked_at=checked_at
+    )
 
 
 def reconcile_positions(
@@ -68,24 +81,15 @@ def reconcile_positions(
     checked_at: str = "",
 ) -> ReconciliationReport:
     """Compare local ledger against broker snapshot. Pure function."""
-    mismatches: list[ReconciliationMismatch] = []
-    broker_qty = {str(p.get("symbol", "")): _qty_of(p) for p in broker_positions}
-    local_qty = {p.symbol: p.quantity for p in local}
-    for symbol in sorted(set(local_qty) | set(broker_qty)):
-        mine = local_qty.get(symbol, 0.0)
-        theirs = broker_qty.get(symbol, 0.0)
-        if abs(mine - theirs) > tolerance:
-            mismatches.append(
-                ReconciliationMismatch(
-                    kind="position",
-                    symbol_or_id=symbol,
-                    local=f"{mine}",
-                    broker=f"{theirs}",
-                )
-            )
-    return ReconciliationReport(
-        matched=not mismatches, mismatches=tuple(mismatches), checked_at=checked_at
+    records = native_reconcile_positions(
+        [(position.symbol, position.quantity) for position in local],
+        [
+            (str(payload.get("symbol", "")), payload.get("quantity", ""))
+            for payload in broker_positions
+        ],
+        tolerance,
     )
+    return _report_of(records, checked_at)
 
 
 def reconcile_orders(
@@ -94,15 +98,8 @@ def reconcile_orders(
     checked_at: str = "",
 ) -> ReconciliationReport:
     """Compare open-order id sets. Pure function."""
-    mismatches: list[ReconciliationMismatch] = []
-    for cid in sorted(set(local_open_ids) ^ set(broker_open_ids)):
-        side = "local-only" if cid in local_open_ids else "broker-only"
-        mismatches.append(
-            ReconciliationMismatch(kind="order", symbol_or_id=cid, local=side, broker=side)
-        )
-    return ReconciliationReport(
-        matched=not mismatches, mismatches=tuple(mismatches), checked_at=checked_at
-    )
+    records = native_reconcile_orders(local_open_ids, broker_open_ids)
+    return _report_of(records, checked_at)
 
 
 def reconcile_funds(
@@ -113,37 +110,12 @@ def reconcile_funds(
 ) -> ReconciliationReport:
     """Compare ledger equity against the broker funds snapshot (FINAL §L).
 
-    Missing/unparseable broker equity is a mismatch (UNKNOWN ≠ zero —
-    never treated as matching). Pure function.
+    The payload value travels as text: the kernel decides that a missing or
+    unparseable equity is UNKNOWN (never treated as matching) and applies the
+    tolerance compare. Pure function.
     """
-    broker_equity = _money_of(broker_funds, "equity")
-    if broker_equity is None:
-        return ReconciliationReport(
-            matched=False,
-            mismatches=(
-                ReconciliationMismatch(
-                    kind="funds",
-                    symbol_or_id="equity",
-                    local=f"{local_equity}",
-                    broker="unknown",
-                ),
-            ),
-            checked_at=checked_at,
-        )
-    if not native_reconcile_funds(float(local_equity), True, broker_equity, float(tolerance)):
-        return ReconciliationReport(
-            matched=False,
-            mismatches=(
-                ReconciliationMismatch(
-                    kind="funds",
-                    symbol_or_id="equity",
-                    local=f"{local_equity}",
-                    broker=f"{broker_equity}",
-                ),
-            ),
-            checked_at=checked_at,
-        )
-    return ReconciliationReport(matched=True, checked_at=checked_at)
+    records = native_reconcile_funds(local_equity, broker_funds.get("equity"), tolerance)
+    return _report_of(records, checked_at)
 
 
 @dataclass(frozen=True)
@@ -185,31 +157,25 @@ def verdict_of(
     evaluated: bool = True,
     checked_at: str = "",
 ) -> ReconciliationVerdict:
-    """Combine reports: unevaluated → WARNING; any mismatch → BLOCKED;
-    all matched → SAFE. Pure function, never raises."""
+    """Combine reports into the kernel's SAFE/WARNING/BLOCKED verdict.
+
+    Rendering only: the status comes from ``native_verdict_status`` given the
+    evaluation flag and the total mismatch count, never from a Python branch.
+    Pure function, never raises.
+    """
     if not evaluated:
-        return ReconciliationVerdict(
-            status=ReconcileStatus.WARNING,
-            reports=reports,
-            checked_at=checked_at,
-            reasons=("reconciliation not evaluated",),
+        status = ReconcileStatus(native_verdict_status(False, 0))
+        reasons: tuple[str, ...] = (_NOT_EVALUATED,)
+    else:
+        reasons = tuple(
+            f"{mismatch.kind} {mismatch.symbol_or_id}: "
+            f"local={mismatch.local} broker={mismatch.broker}"
+            for report in reports
+            for mismatch in report.mismatches
         )
-    reasons: list[str] = []
-    for report in reports:
-        for mismatch in report.mismatches:
-            reasons.append(
-                f"{mismatch.kind} {mismatch.symbol_or_id}: "
-                f"local={mismatch.local} broker={mismatch.broker}"
-            )
-    if reasons:
-        return ReconciliationVerdict(
-            status=ReconcileStatus.BLOCKED,
-            reports=reports,
-            checked_at=checked_at,
-            reasons=tuple(reasons),
-        )
+        status = ReconcileStatus(native_verdict_status(True, len(reasons)))
     return ReconciliationVerdict(
-        status=ReconcileStatus.SAFE, reports=reports, checked_at=checked_at
+        status=status, reports=reports, checked_at=checked_at, reasons=reasons
     )
 
 
@@ -230,7 +196,7 @@ class ReconciliationState:
 
     @property
     def blocks_live(self) -> bool:
-        return self.positions.blocks_live or self.orders.blocks_live or self.funds.blocks_live
+        return native_verdict_blocks_live(self.verdict().status.value)
 
     def verdict(self, *, evaluated: bool = True) -> ReconciliationVerdict:
         """Combined SAFE/WARNING/BLOCKED verdict (FINAL §L)."""

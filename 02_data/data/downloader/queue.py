@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from data.calendar import target_start_dt, today_end_dt
 from data.models import DLState, SymbolInfo
+from data.native_download import job_rank, job_window
 
 log = logging.getLogger("HistDownloadEngine")
 
@@ -54,13 +55,7 @@ class DownloadQueue:
         today_end = today_end_dt()
         target = target_start_dt(settings)
 
-        # Priority: PARTIAL first, then NOT_STARTED, skip DOWNLOAD_COMPLETE
-        priority_map = {
-            DLState.PARTIAL_DOWNLOAD: 1,
-            DLState.NOT_STARTED: 2,
-            DLState.DOWNLOAD_COMPLETE: 3,
-        }
-        sorted_infos = sorted(infos, key=lambda si: priority_map.get(si.state, 9))
+        sorted_infos = sorted(infos, key=lambda si: job_rank(si.state.name))
 
         for si in sorted_infos:
             if si.state == DLState.DOWNLOAD_COMPLETE:
@@ -71,64 +66,27 @@ class DownloadQueue:
                 continue
 
             if si.state == DLState.NOT_STARTED:
-                # Full historical range
+                gaps = [("full", None)]
+            else:
+                # Head gap: target_start → earliest DB candle.
+                # Skipped entirely when LISTING_START is already verified.
+                gaps = []
+                if si.missing_head and not si.listing_start_verified:
+                    gaps.append(("head", si.earliest))
+                if si.missing_tail:
+                    gaps.append(("tail", si.latest))
+
+            for kind, bound in gaps:
+                window = job_window(kind, bound, target, today_end)
                 self._jobs.append(
                     DownloadJob(
                         symbol=si.symbol,
                         interval=si.interval,
-                        from_dt=target,
-                        to_dt=today_end,
-                        reason="NOT_STARTED: full history",
+                        from_dt=window.from_dt,
+                        to_dt=window.to_dt,
+                        reason=window.reason,
                     )
                 )
-
-            elif si.state == DLState.PARTIAL_DOWNLOAD:
-                # Head gap: target_start → earliest DB candle.
-                # Skipped entirely when LISTING_START is already verified.
-                if si.missing_head and not si.listing_start_verified:
-                    if si.earliest:
-                        self._jobs.append(
-                            DownloadJob(
-                                symbol=si.symbol,
-                                interval=si.interval,
-                                from_dt=target,
-                                to_dt=si.earliest - timedelta(minutes=1),
-                                reason="PARTIAL: missing head coverage",
-                            )
-                        )
-                    else:
-                        self._jobs.append(
-                            DownloadJob(
-                                symbol=si.symbol,
-                                interval=si.interval,
-                                from_dt=target,
-                                to_dt=today_end,
-                                reason="PARTIAL: missing head (no earliest)",
-                            )
-                        )
-
-                # Tail gap: latest DB candle → today
-                if si.missing_tail:
-                    if si.latest:
-                        self._jobs.append(
-                            DownloadJob(
-                                symbol=si.symbol,
-                                interval=si.interval,
-                                from_dt=si.latest + timedelta(minutes=1),
-                                to_dt=today_end,
-                                reason="PARTIAL: missing tail coverage",
-                            )
-                        )
-                    else:
-                        self._jobs.append(
-                            DownloadJob(
-                                symbol=si.symbol,
-                                interval=si.interval,
-                                from_dt=target,
-                                to_dt=today_end,
-                                reason="PARTIAL: missing tail (no latest)",
-                            )
-                        )
 
         log.info(f"[DownloadQueue] Built {len(self._jobs)} job(s) from scan.")
 

@@ -1,8 +1,15 @@
-"""Position and account snapshots — execution-owned ledger state."""
+"""Position and account snapshots — execution-owned ledger state.
+
+Plain data only. The sign verdict (``flat``) and the mark-to-market rule
+are decided by the Rust execution kernel; this module asks, it does not
+calculate.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+
+from execution.native_execution import native_position_state, native_position_unrealized
 
 
 @dataclass(frozen=True)
@@ -16,12 +23,10 @@ class Position:
 
     @property
     def flat(self) -> bool:
-        return self.quantity == 0.0
+        return native_position_state(self.quantity)[0]
 
     def unrealized(self, mark_price: float) -> float:
-        if self.flat:
-            return 0.0
-        return (mark_price - self.avg_price) * self.quantity
+        return native_position_unrealized(self.quantity, self.avg_price, mark_price)
 
 
 @dataclass(frozen=True)

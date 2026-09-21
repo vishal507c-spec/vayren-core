@@ -1,19 +1,20 @@
 """DatabaseScanner — derives download state from candle DBs (preserved).
 
-State is derived, never stored. Head-gap suppression via verified
-LISTING_START boundaries is preserved exactly, including the ``<=`` rule
-that lets the boundary survive cleanup operations.
+State is derived, never stored: the scan reads the database, the Rust data
+kernel decides coverage (`data.native_download.decide_coverage`), including
+the head-gap suppression through a verified LISTING_START boundary and its
+``<=`` rule that lets the boundary survive cleanup operations.
 """
 
 from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime
 from typing import Any
 
-from data.calendar import count_trading_days, target_start_dt, today_end_dt
+from data.calendar import target_start_dt, today_end_dt
 from data.models import DLState, SymbolInfo
+from data.native_download import decide_coverage
 from data.storage.candle_db import CandleDB, db_path
 
 log = logging.getLogger("HistDownloadEngine")
@@ -60,7 +61,35 @@ class DatabaseScanner:
         listing_boundary = cdb.get_boundary("LISTING_START")
         cdb.close()
 
-        if earliest is None or latest is None or row_count == 0:
+        target = target_start_dt(settings)
+        today_end = today_end_dt()
+        verdict = decide_coverage(
+            row_count=row_count,
+            trading_days=trading_days,
+            corrupt=corrupt,
+            earliest=earliest,
+            latest=latest,
+            boundary=listing_boundary,
+            target_start_at=target,
+            today_end_at=today_end,
+            max_history_years=settings.max_history_years,
+            head_tolerance_trading_days=settings.head_tolerance_trading_days,
+            tail_lag_tolerance_days=settings.tail_lag_tolerance_days,
+            holidays=settings.holidays,
+        )
+
+        if verdict.listing_start_verified and listing_boundary and earliest is not None:
+            _log_key = f"{symbol}/{interval}"
+            if _log_key not in self._logged_listing_starts:
+                self._logged_listing_starts.add(_log_key)
+                log.debug(
+                    f"[Scanner] {symbol}/{interval}: LISTING_START boundary "
+                    f"verified at {listing_boundary['boundary_date']} "
+                    f"(earliest candle {earliest.date()}) — "
+                    "suppressing head-gap download."
+                )
+
+        if verdict.state == DLState.NOT_STARTED.name:
             return SymbolInfo(
                 symbol=symbol,
                 interval=interval,
@@ -71,65 +100,18 @@ class DatabaseScanner:
                 trading_days=0,
             )
 
-        target = target_start_dt(settings)
-        today_end = today_end_dt()
-        target_td = settings.max_history_years * 252
-        cov_pct = min(100.0, trading_days / target_td * 100) if target_td else 0.0
-
-        head_td_gap = count_trading_days(target, earliest, settings)
-        missing_head = head_td_gap > settings.head_tolerance_trading_days
-
-        # ── Listing-boundary check (preserved) ───────────────────────────────
-        # A verified LISTING_START boundary whose date is <= the earliest
-        # candle date means head coverage is verified. Using <= (not ==) lets
-        # the boundary survive cleanup operations (duplicate removal,
-        # timestamp normalisation) that may shift the earliest candle forward.
-        listing_start_verified = False
-        if missing_head and listing_boundary:
-            try:
-                boundary_dt = datetime.strptime(
-                    listing_boundary["boundary_date"], "%Y-%m-%d"
-                ).date()
-            except Exception:
-                boundary_dt = None
-            if (
-                listing_boundary["verified"] == 1
-                and boundary_dt is not None
-                and boundary_dt <= earliest.date()
-            ):
-                missing_head = False
-                listing_start_verified = True
-                _log_key = f"{symbol}/{interval}"
-                if _log_key not in self._logged_listing_starts:
-                    self._logged_listing_starts.add(_log_key)
-                    log.debug(
-                        f"[Scanner] {symbol}/{interval}: LISTING_START boundary "
-                        f"verified at {listing_boundary['boundary_date']} "
-                        f"(earliest candle {earliest.date()}) — "
-                        "suppressing head-gap download."
-                    )
-        # ─────────────────────────────────────────────────────────────────────
-
-        days_tail = (today_end.date() - latest.date()).days
-        missing_tail = days_tail > settings.tail_lag_tolerance_days
-
-        if missing_head or missing_tail or corrupt > 0:
-            state = DLState.PARTIAL_DOWNLOAD
-        else:
-            state = DLState.DOWNLOAD_COMPLETE
-
         return SymbolInfo(
             symbol=symbol,
             interval=interval,
-            state=state,
+            state=DLState[verdict.state],
             earliest=earliest,
             latest=latest,
             row_count=row_count,
             trading_days=trading_days,
-            missing_head=missing_head,
-            missing_tail=missing_tail,
-            coverage_pct=cov_pct,
-            listing_start_verified=listing_start_verified,
+            missing_head=verdict.missing_head,
+            missing_tail=verdict.missing_tail,
+            coverage_pct=verdict.coverage_pct,
+            listing_start_verified=verdict.listing_start_verified,
         )
 
 

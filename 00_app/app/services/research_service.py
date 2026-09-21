@@ -115,13 +115,10 @@ class SignalRecordingLogic:
 
 
 def _window_bounds(start_date: str, end_date: str) -> tuple[str, str]:
-    """Aggregation-window bounds with safety margins (same math as the batch path)."""
-    from datetime import date, timedelta
+    """Aggregation-window bounds — the backtest kernel owns the margin rule."""
+    from backtest.native_runner import window_bounds
 
-    margin = timedelta(days=7)
-    lower = date.fromisoformat(start_date[:10]) - margin
-    upper = date.fromisoformat(end_date[:10]) + margin
-    return f"{lower.isoformat()} 00:00:00", f"{upper.isoformat()} 23:59:59"
+    return window_bounds(start_date[:10], end_date[:10])
 
 
 def _source_hash(text: str) -> str:

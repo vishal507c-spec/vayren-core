@@ -28,7 +28,10 @@
 //! the [`crate::metrics`] kernels — no duplicate math. Timestamps stay
 //! caller-side (the kernels never see them).
 
-use crate::backtest::{ExecutionSimulator, PositionManager, Side, TradeJournal, TradeRecord};
+use crate::backtest::{
+    closes_on_signal, slipped_exit_price, ExecutionSimulator, PositionManager, Side, TradeJournal,
+    TradeRecord,
+};
 use crate::market::Bar;
 use crate::metrics;
 
@@ -166,16 +169,8 @@ pub fn execute_bars(
             }
         } else {
             let view = positions.open_position().expect("checked non-flat above");
-            let is_long = view.side == Side::Long;
-            let should_close = (is_long && signal.kind == SignalKind::Sell)
-                || (!is_long && signal.kind == SignalKind::Buy);
-            if should_close {
-                let slip = bar.close * (config.slippage_pct / 100.0);
-                let fill_price = if is_long {
-                    bar.close - slip
-                } else {
-                    bar.close + slip
-                };
+            if closes_on_signal(view.side, signal.kind == SignalKind::Buy) {
+                let fill_price = slipped_exit_price(view.side, bar.close, config.slippage_pct);
                 if let Some(trade) = positions.close_signal(
                     index,
                     bar.timestamp.clone(),
@@ -192,12 +187,7 @@ pub fn execute_bars(
     if !positions.flat() && !bars.is_empty() {
         let last = &bars[bars.len() - 1];
         let view = positions.open_position().expect("checked non-flat above");
-        let slip = last.close * (config.slippage_pct / 100.0);
-        let last_price = if view.side == Side::Short {
-            last.close + slip
-        } else {
-            last.close - slip
-        };
+        let last_price = slipped_exit_price(view.side, last.close, config.slippage_pct);
         if let Some(trade) = positions.close_end(
             bars.len() - 1,
             last.timestamp.clone(),
@@ -290,6 +280,20 @@ pub fn assemble_report(
     initial: f64,
     final_equity: f64,
 ) -> PerformanceReport {
+    let (equities, _) = assemble_curve(initial, pnls);
+    report_with_curve(pnls, bars_held, &equities, initial, final_equity)
+}
+
+/// The same report with the drawdown read off a caller-supplied equity curve —
+/// which is what `compute_metrics(trades, equity_curve, capital)` displays, so
+/// the FFI boundary passes the curve on screen rather than a recomputed one.
+pub fn report_with_curve(
+    pnls: &[f64],
+    bars_held: &[f64],
+    equities: &[f64],
+    initial: f64,
+    final_equity: f64,
+) -> PerformanceReport {
     let total = pnls.len();
     let net = final_equity - initial;
     let net_pct = if initial != 0.0 {
@@ -326,8 +330,7 @@ pub fn assemble_report(
         None
     };
     let avg = pnls.iter().sum::<f64>() / total as f64;
-    let (equities, _) = assemble_curve(initial, pnls);
-    let (dd_pct, dd_abs) = metrics::max_drawdown(&equities);
+    let (dd_pct, dd_abs) = metrics::max_drawdown(equities);
     PerformanceReport {
         net_profit: net,
         net_profit_pct: net_pct,
@@ -343,6 +346,95 @@ pub fn assemble_report(
         gross_loss,
         starting_capital: initial,
         ending_capital: final_equity,
+    }
+}
+
+/// The same report with the ending capital read off the curve on screen: the
+/// last point is the final equity, or `initial` when there is no curve at all
+/// (the boundary never has to pick it).
+pub fn report_for_curve(
+    pnls: &[f64],
+    bars_held: &[f64],
+    equities: &[f64],
+    initial: f64,
+) -> PerformanceReport {
+    let final_equity = equities.last().copied().unwrap_or(initial);
+    report_with_curve(pnls, bars_held, equities, initial, final_equity)
+}
+
+/// Packed report for the Python boundary (`vy_bt_report`).
+///
+/// Layout: thirteen `f64` slots, one `i64`, then two `i32` — 120 bytes. A slot
+/// is only meaningful when its bit in [`ReportOut::DEFINED`] is set; the
+/// absent-value slots carry `0.0`, never a sentinel number.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ReportOut {
+    pub values: [f64; 13],
+    pub total_trades: i64,
+    pub defined: i32,
+    pub _pad: i32,
+}
+
+impl ReportOut {
+    /// Slot order, shared with `native_metrics.REPORT_SLOTS`.
+    pub const SLOT_NET_PROFIT: usize = 0;
+    pub const SLOT_NET_PROFIT_PCT: usize = 1;
+    pub const SLOT_WIN_RATE: usize = 2;
+    pub const SLOT_PROFIT_FACTOR: usize = 3;
+    pub const SLOT_MAX_DD_PCT: usize = 4;
+    pub const SLOT_MAX_DD_ABS: usize = 5;
+    pub const SLOT_AVG_TRADE: usize = 6;
+    pub const SLOT_EXPECTANCY: usize = 7;
+    pub const SLOT_SHARPE: usize = 8;
+    pub const SLOT_GROSS_PROFIT: usize = 9;
+    pub const SLOT_GROSS_LOSS: usize = 10;
+    pub const SLOT_STARTING_CAPITAL: usize = 11;
+    pub const SLOT_ENDING_CAPITAL: usize = 12;
+
+    pub const DEFINED_WIN_RATE: i32 = 1 << 0;
+    pub const DEFINED_PROFIT_FACTOR: i32 = 1 << 1;
+    pub const DEFINED_AVG_TRADE: i32 = 1 << 2;
+    pub const DEFINED_EXPECTANCY: i32 = 1 << 3;
+    pub const DEFINED_SHARPE: i32 = 1 << 4;
+
+    pub fn from_report(report: &PerformanceReport) -> Self {
+        let mut out = Self {
+            total_trades: report.total_trades as i64,
+            ..Self::default()
+        };
+        out.values[Self::SLOT_NET_PROFIT] = report.net_profit;
+        out.values[Self::SLOT_NET_PROFIT_PCT] = report.net_profit_pct;
+        out.values[Self::SLOT_MAX_DD_PCT] = report.max_drawdown_pct;
+        out.values[Self::SLOT_MAX_DD_ABS] = report.max_drawdown_abs;
+        out.values[Self::SLOT_GROSS_PROFIT] = report.gross_profit;
+        out.values[Self::SLOT_GROSS_LOSS] = report.gross_loss;
+        out.values[Self::SLOT_STARTING_CAPITAL] = report.starting_capital;
+        out.values[Self::SLOT_ENDING_CAPITAL] = report.ending_capital;
+        let mut put = |slot: usize, bit: i32, value: Option<f64>| {
+            if let Some(number) = value {
+                out.values[slot] = number;
+                out.defined |= bit;
+            }
+        };
+        put(Self::SLOT_WIN_RATE, Self::DEFINED_WIN_RATE, report.win_rate);
+        put(
+            Self::SLOT_PROFIT_FACTOR,
+            Self::DEFINED_PROFIT_FACTOR,
+            report.profit_factor,
+        );
+        put(
+            Self::SLOT_AVG_TRADE,
+            Self::DEFINED_AVG_TRADE,
+            report.avg_trade,
+        );
+        put(
+            Self::SLOT_EXPECTANCY,
+            Self::DEFINED_EXPECTANCY,
+            report.expectancy,
+        );
+        put(Self::SLOT_SHARPE, Self::DEFINED_SHARPE, report.sharpe_ratio);
+        out
     }
 }
 

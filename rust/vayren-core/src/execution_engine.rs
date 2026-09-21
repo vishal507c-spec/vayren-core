@@ -9,12 +9,15 @@
 //! | `modes.py` (arm table, gates, resolve) | `LiveArm`, `ModeGates`, `resolve_mode`, … |
 //! | `runtime/lifecycle.py` | `LifecycleState`, `StrategyLifecycle` |
 //! | `runtime/session.py::check_live_readiness` | `check_live_readiness` (reason strings) |
+//! | `broker/gates.py::risk_configuration_valid` | `risk_configuration_mask` (bitmask helper; `live_readiness::risk_reasons` owns the gate and its wording) |
 //! | `portfolio/ledger.py` (fold economics) | `Ledger::apply_fill` (+ snapshot/state) |
+//! | `models/position.py` (flat, mark math) | `execution::position_state` / `position_unrealized` |
 //! | `portfolio/reconcile.py` (pure fns) | `reconcile_*`, `verdict_of` |
 //! | `journal.py` (`_pct`, segments) | `percentile`, `segments` |
 //!
 //! Reused untouched: `order_state` (lifecycle table), `execution` (order/
-//! fill/position models), `risk_engine::py_float` (reason formatting).
+//! fill/position models, position verdicts), `risk_engine::py_float` (reason
+//! formatting).
 //! Stays Python: `LiveSession` pipeline, broker adapters/SDKs, market-data
 //! providers, strategy runtime/inspector, adaptive/regime/ML, journal + replay
 //! file IO, UI. Session-added reason prefixes (`"{key}: …"`, live-block extra)
@@ -22,7 +25,9 @@
 
 use std::collections::{BTreeSet, HashMap};
 
-use crate::execution::{AccountSnapshot, BrokerOrder, Fill, OrderType, Position, Side};
+use crate::execution::{
+    position_state, AccountSnapshot, BrokerOrder, Fill, OrderType, Position, Side, POSITION_SIDES,
+};
 use crate::order_state;
 use crate::risk_engine::py_float;
 
@@ -432,14 +437,44 @@ pub struct ExecutionPreferences {
 impl ExecutionPreferences {
     /// `size_multiplier` must be in `(0, 1]` — shrink-only, never enlarge.
     pub fn new(prefer_limit: bool, size_multiplier: f64) -> Result<Self, String> {
-        if !(0.0 < size_multiplier && size_multiplier <= 1.0) {
-            return Err("size_multiplier must be in (0, 1]".to_string());
+        match multiplier_problem(size_multiplier) {
+            None => Ok(Self {
+                prefer_limit,
+                size_multiplier,
+            }),
+            Some(problem) => Err(problem.to_string()),
         }
-        Ok(Self {
-            prefer_limit,
-            size_multiplier,
-        })
     }
+}
+
+/// Why an advisory `size_multiplier` is unusable — `(0, 1]` shrinks, never
+/// enlarges. `None` means the value is usable.
+pub fn multiplier_problem(size_multiplier: f64) -> Option<&'static str> {
+    if 0.0 < size_multiplier && size_multiplier <= 1.0 {
+        None
+    } else {
+        Some("size_multiplier must be in (0, 1]")
+    }
+}
+
+/// The advisory multiplier as the planner can use it: only `(0, 1]` is
+/// honoured, and anything else — including a value the caller could not read
+/// (`defined` false) — means "no shrink".
+pub fn narrow_multiplier(defined: bool, raw: f64) -> f64 {
+    if defined && multiplier_problem(raw).is_none() {
+        raw
+    } else {
+        1.0
+    }
+}
+
+/// Default order quantity: what the account can afford at `price`, capped by
+/// the policy's per-order ceiling. A non-positive price buys nothing.
+pub fn default_quantity(available_capital: f64, price: f64, max_order_qty: f64) -> f64 {
+    if price <= 0.0 {
+        return 0.0;
+    }
+    (available_capital / price).min(max_order_qty).max(0.0)
 }
 
 impl Default for ExecutionPreferences {
@@ -500,6 +535,16 @@ impl ExecutionMode {
             Self::Paper => "PAPER",
             Self::Sandbox => "SANDBOX",
             Self::Live => "LIVE",
+        }
+    }
+
+    /// Mode for its wire label (`as_str` round trip); `None` if unknown.
+    pub fn from_label(name: &str) -> Option<Self> {
+        match name {
+            "PAPER" => Some(Self::Paper),
+            "SANDBOX" => Some(Self::Sandbox),
+            "LIVE" => Some(Self::Live),
+            _ => None,
         }
     }
 }
@@ -572,6 +617,17 @@ impl Default for ModeGates {
 }
 
 impl ModeGates {
+    /// The gates in declaration order — the order [`bool_flags_to_mask`] packs.
+    pub fn as_flags(&self) -> [bool; GATE_COUNT] {
+        [
+            self.live_trading_enabled,
+            self.broker_live_enabled,
+            self.account_confirmed,
+            self.risk_limits_valid,
+            self.kill_switch_off,
+        ]
+    }
+
     pub fn all_satisfied(&self) -> bool {
         self.live_trading_enabled
             && self.broker_live_enabled
@@ -604,7 +660,7 @@ impl ModeGates {
 /// Read gates from configuration: only the exact string `"true"`
 /// (case-insensitive, trimmed) counts as ON — `"1"`/`"yes"` are OFF.
 pub fn gates_from_env(get: &dyn Fn(&str) -> String) -> ModeGates {
-    let flag = |name: &str| get(name).trim().to_lowercase() == "true";
+    let flag = |name: &str| flag_on(&get(name));
     ModeGates {
         live_trading_enabled: flag("LIVE_TRADING_ENABLED"),
         broker_live_enabled: flag("BROKER_LIVE_ENABLED"),
@@ -633,6 +689,68 @@ pub fn resolve_mode(requested: ExecutionMode, gates: &ModeGates) -> (ExecutionMo
         return (ExecutionMode::Sandbox, Vec::new());
     }
     (ExecutionMode::Paper, Vec::new())
+}
+
+/// One gate value counts as ON only when it reads exactly `"true"`
+/// (trimmed, case-insensitive): `"1"`/`"yes"` stay OFF.
+fn flag_on(raw: &str) -> bool {
+    raw.trim().to_lowercase() == "true"
+}
+
+/// Number of mandatory live gates.
+pub const GATE_COUNT: usize = 5;
+
+/// Gate flags in declaration order → mask (bit 0 = live trading switch).
+/// `None` when the value list is not exactly [`GATE_COUNT`] flags.
+pub fn flags_to_mask(values: &[&str]) -> Option<u32> {
+    if values.len() != GATE_COUNT {
+        return None;
+    }
+    let mut mask = 0u32;
+    for (index, raw) in values.iter().enumerate() {
+        if flag_on(raw) {
+            mask |= 1 << index;
+        }
+    }
+    Some(mask)
+}
+
+/// Gate booleans in declaration order → mask, for a holder that already read
+/// the values. Same bit order as [`flags_to_mask`]; `None` when the list is not
+/// exactly [`GATE_COUNT`] flags.
+pub fn bool_flags_to_mask(values: &[bool]) -> Option<u32> {
+    if values.len() != GATE_COUNT {
+        return None;
+    }
+    let mut mask = 0u32;
+    for (index, on) in values.iter().enumerate() {
+        if *on {
+            mask |= 1 << index;
+        }
+    }
+    Some(mask)
+}
+
+/// Gates as the mask encodes them.
+pub fn gates_from_mask(mask: u32) -> ModeGates {
+    ModeGates {
+        live_trading_enabled: mask & (1 << 0) != 0,
+        broker_live_enabled: mask & (1 << 1) != 0,
+        account_confirmed: mask & (1 << 2) != 0,
+        risk_limits_valid: mask & (1 << 3) != 0,
+        kill_switch_off: mask & (1 << 4) != 0,
+    }
+}
+
+/// Names of the unsatisfied gates, in gate order.
+pub fn missing_gates(mask: u32) -> Vec<&'static str> {
+    gates_from_mask(mask).missing()
+}
+
+/// Effective mode for a requested-mode label plus the gate mask.
+/// `None` when the label is not a mode this module knows.
+pub fn resolve_mode_mask(requested: &str, mask: u32) -> Option<(ExecutionMode, Vec<String>)> {
+    ExecutionMode::from_label(requested).map(|mode| resolve_mode(mode, &gates_from_mask(mask)))
 }
 
 // ── runtime/lifecycle.py ──────────────────────────────────────────────────
@@ -809,6 +927,79 @@ pub fn check_live_readiness(
     (ready, reasons)
 }
 
+// ── broker/gates.py::risk_configuration_valid ─────────────────────────────
+
+/// Presence bits for the optional policy limits. A clear bit means the Python
+/// model holds `None` there (check disabled) and the kernel must ignore that
+/// value slot — `0.0` is NOT the absent sentinel, it is an invalid limit.
+pub const PRESENT_MAX_NOTIONAL: u32 = 1 << 0;
+pub const PRESENT_MAX_EXPOSURE_PCT: u32 = 1 << 1;
+pub const PRESENT_DAILY_LOSS_LIMIT: u32 = 1 << 2;
+pub const PRESENT_STRATEGY_LOSS_LIMIT: u32 = 1 << 3;
+pub const PRESENT_MAX_ORDERS_PER_DAY: u32 = 1 << 4;
+pub const PRESENT_REQUIRE_FRESH_DATA_SECONDS: u32 = 1 << 5;
+
+/// Every policy check failed (fail-closed value for panics/wrong shapes).
+pub const RISK_CONFIG_ALL_BITS: u32 = 0x3FF;
+
+/// Active risk policy sanity check — failure bitmask, `0` = valid.
+///
+/// Bit i is Python's i-th reason, in `risk_configuration_valid` order:
+/// 0 `max_position_qty <= 0`, 1 `max_order_qty <= 0`,
+/// 2 `max_order_qty > max_position_qty`, 3-6 the four optional limits
+/// (`max_notional`, `max_exposure_pct`, `daily_loss_limit`,
+/// `strategy_loss_limit`) when set and `<= 0`, 7 `cooldown_seconds < 0`,
+/// 8 `max_orders_per_day <= 0` when set, 9 `require_fresh_data_seconds <= 0`
+/// when set. Comparisons mirror Python's operators exactly, so NaN fails no
+/// check there and none here. The message table lives in the bridge: strings
+/// never cross the FFI.
+#[allow(clippy::too_many_arguments)]
+pub fn risk_configuration_mask(
+    present: u32,
+    max_position_qty: f64,
+    max_order_qty: f64,
+    max_notional: f64,
+    max_exposure_pct: f64,
+    daily_loss_limit: f64,
+    strategy_loss_limit: f64,
+    cooldown_seconds: f64,
+    max_orders_per_day: i64,
+    require_fresh_data_seconds: f64,
+) -> u32 {
+    let mut bits = 0u32;
+    if max_position_qty <= 0.0 {
+        bits |= 1 << 0;
+    }
+    if max_order_qty <= 0.0 {
+        bits |= 1 << 1;
+    }
+    if max_order_qty > max_position_qty {
+        bits |= 1 << 2;
+    }
+    if present & PRESENT_MAX_NOTIONAL != 0 && max_notional <= 0.0 {
+        bits |= 1 << 3;
+    }
+    if present & PRESENT_MAX_EXPOSURE_PCT != 0 && max_exposure_pct <= 0.0 {
+        bits |= 1 << 4;
+    }
+    if present & PRESENT_DAILY_LOSS_LIMIT != 0 && daily_loss_limit <= 0.0 {
+        bits |= 1 << 5;
+    }
+    if present & PRESENT_STRATEGY_LOSS_LIMIT != 0 && strategy_loss_limit <= 0.0 {
+        bits |= 1 << 6;
+    }
+    if cooldown_seconds < 0.0 {
+        bits |= 1 << 7;
+    }
+    if present & PRESENT_MAX_ORDERS_PER_DAY != 0 && max_orders_per_day <= 0 {
+        bits |= 1 << 8;
+    }
+    if present & PRESENT_REQUIRE_FRESH_DATA_SECONDS != 0 && require_fresh_data_seconds <= 0.0 {
+        bits |= 1 << 9;
+    }
+    bits
+}
+
 // ── portfolio/ledger.py ───────────────────────────────────────────────────
 
 /// Execution-owned book. One writer; no shared state. Mirrors
@@ -931,12 +1122,13 @@ impl Ledger {
     /// `(signed qty, side, avg entry)` for position state (flat → Nones).
     pub fn strategy_state_for(&self, symbol: &str) -> (f64, Option<&'static str>, Option<f64>) {
         let pos = self.position(symbol);
-        if pos.is_flat() {
+        let state = position_state(pos.quantity);
+        if state == 0 {
             (0.0, None, None)
         } else {
             (
                 pos.quantity,
-                Some(if pos.quantity > 0.0 { "LONG" } else { "SHORT" }),
+                POSITION_SIDES[state as usize],
                 Some(pos.avg_price),
             )
         }
@@ -964,12 +1156,20 @@ pub struct ReconReport {
 
 impl ReconReport {
     pub fn blocks_live(&self) -> bool {
-        !self.matched
+        report_blocks_live(self.matched)
     }
 }
 
+/// Unresolved mismatch blocks live execution; paper only reports.
+///
+/// `matched` is already the kernel's verdict, so this is the whole rule —
+/// which is exactly why the bridge asks instead of carrying a copy.
+pub fn report_blocks_live(matched: bool) -> bool {
+    !matched
+}
+
 /// Compare local ledger against broker snapshot (tolerance on quantities;
-/// unparseable broker quantities count as zero — mirror `_qty_of`).
+/// a broker quantity that is not a number counts as zero).
 pub fn reconcile_positions(
     local: &[(String, f64)],
     broker: &[(String, String)],
@@ -1120,6 +1320,41 @@ pub fn verdict_of(
     } else {
         Verdict::Blocked
     }
+}
+
+/// Status code for the combined verdict: 0 SAFE, 1 WARNING, 2 BLOCKED.
+///
+/// The counts arrive already totalled by the caller; which report contributed
+/// a mismatch never changes the answer, so no ordering rule lives here.
+pub fn verdict_status(evaluated: bool, mismatch_total: i64) -> u32 {
+    if !evaluated {
+        return 1;
+    }
+    if mismatch_total > 0 {
+        2
+    } else {
+        0
+    }
+}
+
+/// One report as the bridge document `"<count>\n"` then, per mismatch, four
+/// NUL-terminated fields (`kind`, `id`, `local`, `broker`).
+///
+/// Four fields per record plus an explicit count is why no field has to
+/// escape the separator: the boundaries are arithmetic, not syntactic.
+pub fn report_doc(report: &ReconReport) -> String {
+    let mut doc = format!("{}\n", report.mismatches.len());
+    for m in &report.mismatches {
+        doc.push_str(m.kind);
+        doc.push('\0');
+        doc.push_str(&m.id);
+        doc.push('\0');
+        doc.push_str(&m.local);
+        doc.push('\0');
+        doc.push_str(&m.broker);
+        doc.push('\0');
+    }
+    doc
 }
 
 // ── journal.py (pure math) ────────────────────────────────────────────────
@@ -1402,6 +1637,43 @@ mod tests {
     }
 
     #[test]
+    fn gate_masks_agree_with_the_struct_rules() {
+        assert_eq!(
+            flags_to_mask(&["true", "TRUE ", "1", "yes", " true "]),
+            Some(0b0_0011 | 0b1_0000)
+        );
+        assert_eq!(flags_to_mask(&["true"]), None);
+        assert_eq!(
+            missing_gates(0b0_0011),
+            vec!["ACCOUNT_CONFIRMED", "RISK_LIMITS_VALID", "KILL_SWITCH_OFF"]
+        );
+        assert!(missing_gates(0b1_1111).is_empty());
+        let (mode, reasons) = resolve_mode_mask("LIVE", 0b0_0011).unwrap();
+        assert_eq!(mode, ExecutionMode::Paper);
+        assert_eq!(
+            reasons,
+            vec![
+                "live gate off: ACCOUNT_CONFIRMED",
+                "live gate off: RISK_LIMITS_VALID",
+                "live gate off: KILL_SWITCH_OFF"
+            ]
+        );
+        assert_eq!(
+            resolve_mode_mask("LIVE", 0b1_1111).unwrap(),
+            (ExecutionMode::Live, vec![])
+        );
+        assert_eq!(
+            resolve_mode_mask("PAPER", 0).unwrap().0,
+            ExecutionMode::Paper
+        );
+        assert_eq!(
+            resolve_mode_mask("SANDBOX", 0).unwrap().0,
+            ExecutionMode::Sandbox
+        );
+        assert!(resolve_mode_mask("DESKTOP", 0).is_none());
+    }
+
+    #[test]
     fn lifecycle_matches_python() {
         let mut lc = StrategyLifecycle::new();
         assert!(!lc.live());
@@ -1489,6 +1761,34 @@ mod tests {
     }
 
     #[test]
+    fn report_doc_and_status_frame_the_bridge() {
+        let report = reconcile_positions(
+            &[("A".to_string(), 1.0), ("B".to_string(), 2.0)],
+            &[("A".to_string(), "9".to_string())],
+            1e-9,
+            "",
+        );
+        let doc = report_doc(&report);
+        let (head, body) = doc.split_once('\n').unwrap();
+        assert_eq!(head, "2");
+        let fields: Vec<&str> = body.split('\0').collect();
+        assert_eq!(
+            fields,
+            vec!["position", "A", "1.0", "9.0", "position", "B", "2.0", "0.0", "",]
+        );
+        let matched = ReconReport {
+            matched: true,
+            mismatches: Vec::new(),
+            checked_at: String::new(),
+        };
+        assert_eq!(report_doc(&matched), "0\n");
+        assert_eq!(verdict_status(true, 0), 0);
+        assert_eq!(verdict_status(true, 1), 2);
+        assert_eq!(verdict_status(false, 0), 1);
+        assert_eq!(verdict_status(false, 5), 1);
+    }
+
+    #[test]
     fn latency_math_matches() {
         assert_eq!(percentile(&[1.0, 2.0, 3.0, 4.0], 50.0), 3.0);
         assert_eq!(percentile(&[1.0, 2.0, 3.0, 4.0], 95.0), 4.0);
@@ -1543,5 +1843,140 @@ mod tests {
         assert!(reasons2.contains(&"warmup shortfall: have 5, need 20".to_string()));
         assert!(reasons2.contains(&"risk policy invalid".to_string()));
         assert!(reasons2.contains(&"kill switch engaged or unavailable".to_string()));
+    }
+
+    // ── broker/gates.py::risk_configuration_valid ───────────────────────
+
+    const ALL_OPTIONAL: u32 = PRESENT_MAX_NOTIONAL
+        | PRESENT_MAX_EXPOSURE_PCT
+        | PRESENT_DAILY_LOSS_LIMIT
+        | PRESENT_STRATEGY_LOSS_LIMIT
+        | PRESENT_MAX_ORDERS_PER_DAY
+        | PRESENT_REQUIRE_FRESH_DATA_SECONDS;
+
+    /// Kernel call with the five optional `f64` slots filled explicitly.
+    fn mask(present: u32, slots: [f64; 5], max_orders_per_day: i64) -> u32 {
+        risk_configuration_mask(
+            present,
+            1000.0,
+            500.0,
+            slots[0],
+            slots[1],
+            slots[2],
+            slots[3],
+            0.0,
+            max_orders_per_day,
+            slots[4],
+        )
+    }
+
+    fn one_bit(bit: u32) -> u32 {
+        1 << bit
+    }
+
+    #[test]
+    fn a_sane_policy_sets_no_bits() {
+        assert_eq!(mask(0, [0.0; 5], 0), 0);
+        assert_eq!(
+            mask(ALL_OPTIONAL, [100_000.0, 25.0, 5_000.0, 2_500.0, 60.0], 2),
+            0
+        );
+    }
+
+    #[test]
+    fn optional_limits_are_checked_only_when_present() {
+        for slot in 0..4 {
+            let mut slots = [0.0; 5];
+            slots[slot] = -5.0;
+            // Presence bits 0..3 map onto result bits 3..6.
+            assert_eq!(
+                mask(1 << slot, slots, 0),
+                one_bit(3 + slot as u32),
+                "slot {slot}"
+            );
+            // Same garbage in a disabled slot is `None` in Python: no verdict.
+            assert_eq!(mask(0, slots, 0), 0);
+        }
+        assert_eq!(
+            mask(
+                PRESENT_REQUIRE_FRESH_DATA_SECONDS,
+                [1.0, 1.0, 1.0, 1.0, 0.0],
+                0
+            ),
+            one_bit(9)
+        );
+        assert_eq!(mask(0, [1.0, 1.0, 1.0, 1.0, 0.0], 0), 0);
+    }
+
+    #[test]
+    fn quantity_cooldown_and_daily_order_rules() {
+        assert_eq!(
+            risk_configuration_mask(0, 0.0, 500.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0.0),
+            one_bit(0) | one_bit(2),
+            "a zero position ceiling is exceeded by any order ceiling"
+        );
+        assert_eq!(
+            risk_configuration_mask(0, 1000.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0.0),
+            one_bit(1)
+        );
+        assert_eq!(
+            risk_configuration_mask(0, 10.0, 9999.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0.0),
+            one_bit(2)
+        );
+        // An equal order/position ceiling is legal (`>`, not `>=`).
+        assert_eq!(
+            risk_configuration_mask(0, 500.0, 500.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0.0),
+            0
+        );
+        assert_eq!(
+            risk_configuration_mask(0, 1000.0, 500.0, 0.0, 0.0, 0.0, 0.0, -0.5, 0, 0.0),
+            one_bit(7)
+        );
+        assert_eq!(mask(PRESENT_MAX_ORDERS_PER_DAY, [0.0; 5], 0), one_bit(8));
+        assert_eq!(mask(PRESENT_MAX_ORDERS_PER_DAY, [0.0; 5], -3), one_bit(8));
+        assert_eq!(mask(PRESENT_MAX_ORDERS_PER_DAY, [0.0; 5], 3), 0);
+    }
+
+    #[test]
+    fn every_failure_is_reachable_and_ordered() {
+        let all = mask(ALL_OPTIONAL, [-1.0, -1.0, -1.0, -1.0, -1.0], 0);
+        let worst = risk_configuration_mask(
+            ALL_OPTIONAL,
+            -10.0,
+            -5.0,
+            -1.0,
+            -1.0,
+            -1.0,
+            -1.0,
+            -1.0,
+            0,
+            -1.0,
+        );
+        assert_eq!(
+            all,
+            one_bit(3) | one_bit(4) | one_bit(5) | one_bit(6) | one_bit(8) | one_bit(9)
+        );
+        assert_eq!(worst, RISK_CONFIG_ALL_BITS);
+        assert_eq!(RISK_CONFIG_ALL_BITS, (1 << 10) - 1);
+    }
+
+    #[test]
+    fn nan_limits_fail_no_check_like_python() {
+        // Python's `nan <= 0` and `nan > x` are both False; same here.
+        assert_eq!(
+            risk_configuration_mask(
+                ALL_OPTIONAL,
+                f64::NAN,
+                f64::NAN,
+                f64::NAN,
+                f64::NAN,
+                f64::NAN,
+                f64::NAN,
+                f64::NAN,
+                1,
+                f64::NAN,
+            ),
+            0
+        );
     }
 }

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 from execution.models.intent import ExecutionIntent
 from execution.models.order import OrderPlan
-from execution.native_execution import native_plan_order
+from execution.native_execution import native_multiplier_problem, native_plan_order
 
 
 @dataclass(frozen=True)
@@ -22,8 +22,9 @@ class ExecutionPreferences:
     size_multiplier: float = 1.0  # (0, 1]: shrink-only, never enlarge
 
     def __post_init__(self) -> None:
-        if not 0.0 < self.size_multiplier <= 1.0:
-            raise ValueError("size_multiplier must be in (0, 1]")
+        problem = native_multiplier_problem(self.size_multiplier)
+        if problem:
+            raise ValueError(problem)
 
 
 class OrderPlanner:

@@ -26,9 +26,10 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from market import SymbolRepository
+from market import SymbolRepository, closed_count
 
 from execution.events import CandleEvent, MarketEvent
+from execution.market_data.native_normalizer import gap_reason, gap_stale, stale_floor
 from execution.market_data.provider import MarketDataProvider
 
 _POLL_WINDOW = 8
@@ -47,7 +48,7 @@ class SqliteTailProvider(MarketDataProvider):
         self._data_dir = Path(data_dir)
         self._timeframe = timeframe
         self._clock = clock or time.time
-        self._stale_after_s = max(1.0, float(stale_after_s))
+        self._stale_after_s = stale_floor(stale_after_s)
         self._subscribed: tuple[str, ...] = ()
         self._watermarks: dict[str, str] = {}
         self._detection: dict[str, tuple[int, int] | None] = {}
@@ -166,10 +167,12 @@ class SqliteTailProvider(MarketDataProvider):
             return False, f"provider error: {self._last_error}"
         now = self._clock()
         stale = [
-            s for s in self._subscribed if now - self._last_seen.get(s, now) > self._stale_after_s
+            s
+            for s in self._subscribed
+            if gap_stale(now, self._last_seen.get(s, now), self._stale_after_s)
         ]
         if stale:
-            return False, f"stale market data: {', '.join(sorted(stale))}"
+            return False, f"{gap_reason()}: {', '.join(sorted(stale))}"
         return True, "streaming"
 
     def close(self) -> None:
@@ -212,6 +215,11 @@ class SqliteTailProvider(MarketDataProvider):
         except Exception:
             return None
 
+    def _closed(self, rows: list, fresh: list) -> list:
+        """The kernel's cut: fresh rows, minus the newest one still forming."""
+        forming = fresh[-1].timestamp == rows[-1].timestamp
+        return fresh[: closed_count(len(fresh), forming)]
+
     def _fresh_closed(self, repository: SymbolRepository, symbol: str) -> list:
         """Rows newer than the watermark, minus the still-forming newest."""
         try:
@@ -232,9 +240,7 @@ class SqliteTailProvider(MarketDataProvider):
         fresh = [bar for bar in rows if bar.timestamp > watermark]
         if not fresh:
             return []
-        if len(fresh) == 1 and fresh[0].timestamp == rows[-1].timestamp:
-            return []  # only the forming candle is new — withhold it
-        return fresh if fresh[-1].timestamp != rows[-1].timestamp else fresh[:-1]
+        return self._closed(rows, fresh)
 
     def _catch_up_gap(self, repository: SymbolRepository, symbol: str, watermark: str) -> list:
         """Long-gap recovery: bounded fetch from the watermark, forming withheld.
@@ -251,4 +257,4 @@ class SqliteTailProvider(MarketDataProvider):
         fresh = [bar for bar in rows if bar.timestamp > watermark]
         if not fresh:
             return []
-        return fresh if fresh[-1].timestamp != rows[-1].timestamp else fresh[:-1]
+        return self._closed(rows, fresh)

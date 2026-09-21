@@ -27,6 +27,10 @@ from backtest.engine.simulator import ExecutionSimulator
 from backtest.models.config import BacktestConfig
 from backtest.models.result import BacktestResult, StrategyResult
 from backtest.models.trade import TradeRecord
+from backtest.native_positions import exit_price as _kernel_exit_price
+from backtest.native_positions import signal_exit as _kernel_signal_exit
+from backtest.native_runner import default_workers as _kernel_default_workers
+from backtest.native_runner import window_bounds as _kernel_window_bounds
 
 logger = getLogger(__name__)
 
@@ -132,36 +136,36 @@ def execute_bars(
                 sl_price=signal.stop_loss,
                 tp_price=signal.take_profit,
             )
-        elif not positions.flat:
-            is_long = positions.open_position is not None and positions.open_position.side == "LONG"
-            should_close = (is_long and signal.kind == SignalKind.SELL) or (
-                not is_long and signal.kind == SignalKind.BUY
+        elif positions.open_position is not None:
+            open_leg = positions.open_position
+            exit_price = _kernel_signal_exit(
+                open_leg.side,
+                signal.kind == SignalKind.BUY,
+                bar.close,
+                config.slippage_pct,
             )
-            if should_close:
-                fill_price = bar.close - bar.close * (config.slippage_pct / 100.0)
-                if not is_long:
-                    fill_price = bar.close + bar.close * (config.slippage_pct / 100.0)
+            if exit_price is not None:
                 trade = positions.close_signal(
                     exit_index=index,
                     exit_time=bar.timestamp,
-                    exit_price=fill_price,
+                    exit_price=exit_price,
                     commission_pct=config.commission_pct,
                 )
                 if trade is not None:
                     journal.record(trade)
                     realized += trade.pnl
 
-    if not positions.flat and window:
+    open_leg = positions.open_position
+    if open_leg is not None and window:
         last = window[-1]
-        op = positions.open_position
-        slip = last.close * (config.slippage_pct / 100.0)
-        last_price = (
-            last.close + slip if op is not None and op.side == "SHORT" else last.close - slip
-        )
         trade = positions.close_end(
             exit_index=len(window) - 1,
             exit_time=last.timestamp,
-            exit_price=last_price,
+            exit_price=_kernel_exit_price(
+                open_leg.side,
+                last.close,
+                config.slippage_pct,
+            ),
             commission_pct=config.commission_pct,
         )
         if trade is not None:
@@ -517,37 +521,35 @@ class BacktestRunner:
                     sl_price=signal.stop_loss,
                     tp_price=signal.take_profit,
                 )
-            elif not positions.flat:
-                is_long = (
-                    positions.open_position is not None and positions.open_position.side == "LONG"
+            elif positions.open_position is not None:
+                open_leg = positions.open_position
+                exit_price = _kernel_signal_exit(
+                    open_leg.side,
+                    signal.kind == SignalKind.BUY,
+                    bar.close,
+                    config.slippage_pct,
                 )
-                should_close = (is_long and signal.kind == SignalKind.SELL) or (
-                    not is_long and signal.kind == SignalKind.BUY
-                )
-                if should_close:
-                    fill_price = bar.close - bar.close * (config.slippage_pct / 100.0)
-                    if not is_long:
-                        fill_price = bar.close + bar.close * (config.slippage_pct / 100.0)
+                if exit_price is not None:
                     trade = positions.close_signal(
                         exit_index=index,
                         exit_time=bar.timestamp,
-                        exit_price=fill_price,
+                        exit_price=exit_price,
                         commission_pct=config.commission_pct,
                     )
                     if trade is not None:
                         journal.record(trade)
 
-        if not positions.flat and window:
+        open_leg = positions.open_position
+        if open_leg is not None and window:
             last = window[-1]
-            op = positions.open_position
-            slip = last.close * (config.slippage_pct / 100.0)
-            last_price = (
-                last.close + slip if op is not None and op.side == "SHORT" else last.close - slip
-            )
             trade = positions.close_end(
                 exit_index=len(window) - 1,
                 exit_time=last.timestamp,
-                exit_price=last_price,
+                exit_price=_kernel_exit_price(
+                    open_leg.side,
+                    last.close,
+                    config.slippage_pct,
+                ),
                 commission_pct=config.commission_pct,
             )
             if trade is not None:
@@ -732,30 +734,13 @@ class _RecView:
     version: str
 
 
-def _window_bounds(start_date: str, end_date: str) -> tuple[str, str]:
-    """Aggregation-window bounds for a date range, with safety margins.
-
-    Buckets are built from real rows only, so a bucket intersecting the
-    requested range needs every row it contains: weekly buckets span up to
-    7 calendar days (Monday–Sunday), hence ±7 days. Intraday/daily buckets
-    never leave their own day. Detection (base duration, session anchor)
-    stays on the unbounded latest sample, so alignment never changes.
-    """
-    from datetime import date, timedelta
-
-    margin = timedelta(days=7)
-    lower = date.fromisoformat(start_date) - margin
-    upper = date.fromisoformat(end_date) + margin
-    return f"{lower.isoformat()} 00:00:00", f"{upper.isoformat()} 23:59:59"
-
-
 def _run_batch_symbol(task: BatchTask) -> SymbolBatchResult:
     """Execute one symbol of a batch (runs inside a pool worker process)."""
     try:
         from market.repository.symbol_repository import SymbolRepository
 
         repository = SymbolRepository(task.data_dir)
-        lower, upper = _window_bounds(task.start_date, task.end_date)
+        lower, upper = _kernel_window_bounds(task.start_date, task.end_date)
         bars = repository.get_candles_timeframe(task.symbol, task.timeframe, None, lower, upper)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Market fetch failed for %s %s: %s", task.symbol, task.timeframe, exc)
@@ -817,10 +802,10 @@ def _run_batch_symbol(task: BatchTask) -> SymbolBatchResult:
 def default_batch_workers() -> int:
     """Bounded worker count derived from the machine (never one-per-stock)."""
     try:
-        cpu = os.cpu_count() or 4
+        cpu = os.cpu_count() or 0
     except Exception:  # noqa: BLE001
-        cpu = 4
-    return max(2, min(6, cpu))
+        cpu = 0
+    return _kernel_default_workers(cpu)
 
 
 def _run_inline(

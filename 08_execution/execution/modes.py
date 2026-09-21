@@ -2,6 +2,11 @@
 
 LIVE requires every gate explicitly satisfied; any failure forces PAPER.
 There is no path from default configuration to real orders.
+
+Which gate names are missing, what counts as an ON flag, and when a LIVE
+request degrades to PAPER are decided by Rust (`execution_engine::modes`,
+bridged through :mod:`execution.native_execution`). What stays here is the
+vocabulary Python callers pass around and the plain five-flag holder.
 """
 
 from __future__ import annotations
@@ -10,7 +15,14 @@ import os
 from dataclasses import dataclass
 from enum import Enum
 
-from execution.native_execution import native_arm_transition
+from execution.native_execution import (
+    native_arm_transition,
+    native_flags_to_mask,
+    native_gates_mask,
+    native_mask_to_flags,
+    native_missing_gates,
+    native_resolve_mode,
+)
 
 
 class ExecutionMode(Enum):
@@ -47,6 +59,16 @@ def arm_transition(current: LiveArm, target: LiveArm) -> LiveArm:
         raise ArmingError(str(exc)) from exc
 
 
+# Configuration keys, in gate order: bit i of the kernel mask is gate i.
+GATE_ENV_KEYS = (
+    "LIVE_TRADING_ENABLED",
+    "BROKER_LIVE_ENABLED",
+    "ACCOUNT_CONFIRMED",
+    "RISK_LIMITS_VALID",
+    "KILL_SWITCH_OFF",
+)
+
+
 @dataclass(frozen=True)
 class ModeGates:
     """The five mandatory live gates (§14 mission spec)."""
@@ -58,49 +80,38 @@ class ModeGates:
     kill_switch_off: bool = False
 
     @property
-    def all_satisfied(self) -> bool:
-        return (
-            self.live_trading_enabled
-            and self.broker_live_enabled
-            and self.account_confirmed
-            and self.risk_limits_valid
-            and self.kill_switch_off
+    def mask(self) -> int:
+        """The flags as the kernel encodes them (bit i = field i)."""
+        return native_flags_to_mask(
+            (
+                self.live_trading_enabled,
+                self.broker_live_enabled,
+                self.account_confirmed,
+                self.risk_limits_valid,
+                self.kill_switch_off,
+            )
         )
 
+    @property
+    def all_satisfied(self) -> bool:
+        return not self.missing()
+
     def missing(self) -> tuple[str, ...]:
-        missing = []
-        if not self.live_trading_enabled:
-            missing.append("LIVE_TRADING_ENABLED")
-        if not self.broker_live_enabled:
-            missing.append("BROKER_LIVE_ENABLED")
-        if not self.account_confirmed:
-            missing.append("ACCOUNT_CONFIRMED")
-        if not self.risk_limits_valid:
-            missing.append("RISK_LIMITS_VALID")
-        if not self.kill_switch_off:
-            missing.append("KILL_SWITCH_OFF")
-        return tuple(missing)
+        """Unsatisfied gate names, in the kernel's gate order."""
+        return native_missing_gates(self.mask)
 
 
 def gates_from_env(env: dict[str, str] | None = None) -> ModeGates:
     """Read gates from explicit configuration (env mapping by default).
 
-    Values must be the exact string ``"true"`` (case-insensitive) — any
-    other value, including ``"1"``/``"yes"``, counts as OFF. Fail-closed
-    parsing: no truthy surprises.
+    Only the raw values are read here — the kernel decides which of them are
+    ON. Fail-closed parsing: nothing but an explicit ``"true"`` (any case,
+    padded) arms a gate, so ``"1"``/``"yes"`` stay OFF with no truthy
+    surprises.
     """
     source = env if env is not None else os.environ
-
-    def flag(name: str) -> bool:
-        return str(source.get(name, "")).strip().lower() == "true"
-
-    return ModeGates(
-        live_trading_enabled=flag("LIVE_TRADING_ENABLED"),
-        broker_live_enabled=flag("BROKER_LIVE_ENABLED"),
-        account_confirmed=flag("ACCOUNT_CONFIRMED"),
-        risk_limits_valid=flag("RISK_LIMITS_VALID"),
-        kill_switch_off=flag("KILL_SWITCH_OFF"),
-    )
+    values = [str(source.get(name, "")) for name in GATE_ENV_KEYS]
+    return ModeGates(*native_mask_to_flags(native_gates_mask(values)))
 
 
 def resolve_mode(
@@ -109,12 +120,8 @@ def resolve_mode(
     """Resolve the effective mode. LIVE without all gates degrades to PAPER.
 
     Returns (effective_mode, downgrade_reasons). Downgrade is never silent:
-    every missing gate is reported.
+    every missing gate is reported. The kernel owns the decision and the
+    reason text.
     """
-    if requested == ExecutionMode.LIVE and gates.all_satisfied:
-        return ExecutionMode.LIVE, ()
-    if requested == ExecutionMode.LIVE:
-        return ExecutionMode.PAPER, tuple(f"live gate off: {name}" for name in gates.missing())
-    if requested == ExecutionMode.SANDBOX:
-        return ExecutionMode.SANDBOX, ()
-    return ExecutionMode.PAPER, ()
+    mode, reasons = native_resolve_mode(requested.value, gates.mask)
+    return ExecutionMode(mode), reasons

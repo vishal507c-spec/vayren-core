@@ -12,6 +12,8 @@ from __future__ import annotations
 import math
 import random
 
+import pytest
+
 from backtest import native_metrics
 
 
@@ -130,3 +132,119 @@ def test_sharpe_fuzz() -> None:
             assert actual is not None and _close(actual, expected), (pnls, bars)
             checked += 1
     assert checked > 50, "fuzz must exercise defined Sharpe cases"
+
+
+def _ref_report(
+    pnls: list[float],
+    bars: list[float],
+    equities: list[float],
+    initial: float,
+) -> dict[str, object]:
+    """Verbatim pre-migration `compute_metrics` aggregate, kept as the oracle."""
+    total = len(pnls)
+    final = equities[-1] if equities else initial
+    net = final - initial
+    net_pct = (net / initial * 100.0) if initial else 0.0
+    if total == 0:
+        return {
+            "net_profit": net,
+            "net_profit_pct": net_pct,
+            "total_trades": 0,
+            "win_rate": None,
+            "profit_factor": None,
+            "max_drawdown_pct": 0.0,
+            "max_drawdown_abs": 0.0,
+            "avg_trade": None,
+            "expectancy": None,
+            "sharpe_ratio": None,
+            "gross_profit": 0.0,
+            "gross_loss": 0.0,
+            "starting_capital": initial,
+            "ending_capital": final,
+        }
+    gross_profit = sum(p for p in pnls if p > 0.0)
+    gross_loss = sum(p for p in pnls if p < 0.0)
+    avg = sum(pnls) / total
+    dd_pct, dd_abs = _ref_drawdown(equities)
+    return {
+        "net_profit": net,
+        "net_profit_pct": net_pct,
+        "total_trades": total,
+        "win_rate": sum(1 for p in pnls if p > 0.0) / total,
+        "profit_factor": (gross_profit / abs(gross_loss)) if gross_loss != 0.0 else None,
+        "max_drawdown_pct": dd_pct,
+        "max_drawdown_abs": dd_abs,
+        "avg_trade": avg,
+        "expectancy": avg,
+        "sharpe_ratio": _ref_sharpe(pnls, bars, initial),
+        "gross_profit": gross_profit,
+        "gross_loss": gross_loss,
+        "starting_capital": initial,
+        "ending_capital": final,
+    }
+
+
+def _assert_same_report(got: native_metrics.NativeReport, want: dict[str, object]) -> None:
+    for name, expected in want.items():
+        actual = getattr(got, name)
+        if isinstance(expected, float) and isinstance(actual, float):
+            assert _close(actual, expected), (name, actual, expected)
+        else:
+            assert actual == expected, (name, actual, expected)
+
+
+def test_no_trades_still_reports_the_capital_shape() -> None:
+    _assert_same_report(
+        native_metrics.report([], [], [1000.0], 1000.0),
+        _ref_report([], [], [1000.0], 1000.0),
+    )
+    empty = native_metrics.report([], [], [], 1000.0)
+    assert empty.total_trades == 0
+    assert empty.win_rate is empty.profit_factor is empty.avg_trade is None
+    assert empty.expectancy is empty.sharpe_ratio is None
+    assert (empty.starting_capital, empty.ending_capital) == (1000.0, 1000.0)
+    assert (empty.net_profit, empty.net_profit_pct) == (0.0, 0.0)
+
+
+def test_win_rate_and_profit_factor_are_separate_verdicts() -> None:
+    # Every trade won: gross loss is zero, so the factor stays undefined
+    # while the win rate is a hard 1.0.
+    got = native_metrics.report([10.0, 20.0], [1.0, 1.0], [1000.0, 1010.0, 1030.0], 1000.0)
+    assert got.win_rate == 1.0
+    assert got.profit_factor is None
+    assert (got.gross_profit, got.gross_loss) == (30.0, 0.0)
+    # A breakeven trade is neither a win nor part of either gross total.
+    flat = native_metrics.report([10.0, -10.0, 0.0], [1.0, 1.0, 1.0], [100.0, 110.0, 100.0], 100.0)
+    assert flat.win_rate is not None and _close(flat.win_rate, 1 / 3)
+    assert flat.gross_profit == 10.0 and flat.gross_loss == -10.0
+    assert flat.profit_factor == 1.0
+
+
+def test_drawdown_is_read_off_the_curve_on_screen() -> None:
+    # The curve dips far below what the trade PnLs alone would accumulate:
+    # the displayed drawdown follows the curve, not a recomputed one.
+    got = native_metrics.report([-100.0, 50.0], [1.0, 1.0], [1000.0, 900.0, 1200.0], 1000.0)
+    assert _close(got.max_drawdown_pct, 10.0) and _close(got.max_drawdown_abs, 100.0)
+    assert _close(got.ending_capital, 1200.0) and _close(got.net_profit, 200.0)
+    assert _close(got.net_profit_pct, 20.0)
+    # Zero starting capital: percentages fall back to 0.0, never to a crash.
+    zeroed = native_metrics.report([5.0], [1.0], [5.0], 0.0)
+    assert zeroed.net_profit_pct == 0.0 and zeroed.net_profit == 5.0
+
+
+def test_report_fuzz() -> None:
+    rng = random.Random(20260922)
+    for _ in range(250):
+        n = rng.randint(0, 20)
+        pnls = [rng.choice([0.0, rng.uniform(-400.0, 400.0)]) for _ in range(n)]
+        bars = [float(rng.randint(1, 40)) for _ in range(n)]
+        initial = rng.choice([0.0, 100.0, 10_000.0, 1_000_000.0])
+        curve_points = rng.randint(0, n + 1)
+        equities = [initial] + [rng.uniform(-200.0, 20_000.0) for _ in range(curve_points)]
+        want = _ref_report(pnls, bars, equities, initial)
+        _assert_same_report(native_metrics.report(pnls, bars, equities, initial), want)
+
+
+def test_report_requires_paired_pnl_and_bar_lengths() -> None:
+    with pytest.raises(ValueError, match="share a length"):
+        native_metrics.report([1.0, 2.0], [1.0], [100.0, 101.0, 103.0], 100.0)

@@ -44,11 +44,6 @@ class TradeRecord:
     exit_reason: str
     r_multiple: float | None = None
 
-    @property
-    def winning(self) -> bool:
-        """True when the trade profited after commissions."""
-        return self.pnl > 0.0
-
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 

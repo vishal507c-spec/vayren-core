@@ -12,6 +12,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from execution.native_execution import native_percentile
+
 
 def utcnow_iso() -> str:
     return datetime.now(UTC).isoformat()
@@ -67,18 +69,11 @@ class LatencyTracker:
             return {"n": 0}
         return {
             "n": len(samples),
-            "p50": _pct(samples, 50),
-            "p95": _pct(samples, 95),
-            "p99": _pct(samples, 99),
+            "p50": native_percentile(samples, 50),
+            "p95": native_percentile(samples, 95),
+            "p99": native_percentile(samples, 99),
             "max": samples[-1],
         }
 
     def stages(self) -> tuple[str, ...]:
         return tuple(sorted(self._samples))
-
-
-def _pct(ordered: list[float], pct: float) -> float:
-    if not ordered:
-        return 0.0
-    rank = min(len(ordered) - 1, max(0, int(pct / 100.0 * len(ordered))))
-    return ordered[rank]

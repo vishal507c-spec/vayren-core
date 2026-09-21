@@ -9,6 +9,10 @@ Design rules (fail-closed, auditable):
   environment labels and key-ref names.
 - Missing or unresolvable credentials fail validation BEFORE any order
   path is constructed.
+- The validation RULE and its reason wording are Rust-owned
+  (``rust/vayren-core/src/live_readiness.rs``); this module keeps the types,
+  the redaction and the one step a kernel cannot do — resolving a secret
+  name through the store (constitution §1, migration §7).
 """
 
 from __future__ import annotations
@@ -16,6 +20,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from typing import Protocol
+
+from execution.broker.native_policy import native_credential_reasons
 
 
 @dataclass(frozen=True)
@@ -65,28 +71,25 @@ def validate_credentials(
 ) -> tuple[bool, tuple[str, ...]]:
     """Validate identity (+ secrets when required). Never touches orders.
 
-    Returns (ok, reasons). Reasons name missing fields, never values.
+    The store lookup is the only step performed here because it needs the
+    secret values. The rule and its wording belong to the Rust kernel; the
+    reasons it returns name missing fields, never values.
     """
-    reasons: list[str] = []
-    if not creds.account_id:
-        reasons.append("missing account_id")
-    if not creds.environment:
-        reasons.append("missing environment")
-    elif expected_environment and creds.environment != expected_environment:
-        reasons.append(
-            f"environment mismatch: credentials say {creds.environment!r}, "
-            f"expected {expected_environment!r}"
-        )
-    if require_secrets:
-        if store is None:
-            reasons.append("no credential store configured")
-        else:
-            for ref in creds.key_refs:
-                if store.get(ref) is None:
-                    reasons.append(f"secret not resolvable: {ref}")
-        if not creds.key_refs:
-            reasons.append("no secret key_refs declared")
-    return (not reasons, tuple(reasons))
+    resolvable: tuple[bool, ...]
+    if require_secrets and store is not None:
+        resolvable = tuple(store.get(ref) is not None for ref in creds.key_refs)
+    else:
+        resolvable = (False,) * len(creds.key_refs)
+    reasons = native_credential_reasons(
+        account_id=creds.account_id,
+        environment=creds.environment,
+        expected_environment=expected_environment,
+        key_refs=tuple(creds.key_refs),
+        resolvable=resolvable,
+        require_secrets=require_secrets,
+        store_present=store is not None,
+    )
+    return (not reasons, reasons)
 
 
 def default_account_id() -> str:

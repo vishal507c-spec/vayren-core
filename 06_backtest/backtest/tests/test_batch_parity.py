@@ -5,8 +5,6 @@ inline and pooled): same candles, same bars, same trades, same equity,
 same metrics, same visuals. Only scheduling may differ.
 """
 
-
-
 import sqlite3
 import tempfile
 from pathlib import Path

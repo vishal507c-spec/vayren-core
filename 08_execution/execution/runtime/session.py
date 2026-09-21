@@ -50,7 +50,11 @@ from execution.models.contract import StrategyRuntimeContract
 from execution.models.intent import ExecutionIntent, StrategySignal, make_intent_id
 from execution.models.order import BrokerOrder, Fill, OrderPlan, OrderState
 from execution.modes import ExecutionMode, LiveArm, ModeGates, arm_transition
-from execution.native_execution import native_check_live_readiness_basic
+from execution.native_execution import (
+    native_check_live_readiness_basic,
+    native_default_quantity,
+    native_narrow_multiplier,
+)
 from execution.planner import ExecutionPreferences, OrderPlanner
 from execution.portfolio.ledger import PositionLedger
 from execution.portfolio.reconcile import ReconciliationState, reconcile_orders, reconcile_positions
@@ -89,15 +93,6 @@ class SessionConfig:
 class ReadinessReport:
     ready: bool
     reasons: tuple[str, ...] = ()
-
-
-def _size_multiplier(raw: object) -> float:
-    """Narrow an advisory size multiplier to (0, 1]; anything else means 1.0."""
-    if isinstance(raw, bool):
-        return 1.0
-    if isinstance(raw, (int, float)) and 0.0 < raw <= 1.0:
-        return float(raw)
-    return 1.0
 
 
 def check_live_readiness(
@@ -505,7 +500,7 @@ class LiveSession:
         self._emit(RiskApproved(self._request_id, intent.intent_id))
         prefs = ExecutionPreferences(
             prefer_limit=bool(preferences.get("prefer_limit")),
-            size_multiplier=_size_multiplier(preferences.get("size_multiplier", 1.0)),
+            size_multiplier=native_narrow_multiplier(preferences.get("size_multiplier", 1.0)),
         )
         plan = self._planner.plan(intent, signal.price, prefs)
         # Risk re-validates the FINAL planned quantity (adaptive shrink applied).
@@ -542,10 +537,9 @@ class LiveSession:
 
     def _default_quantity(self, signal: StrategySignal) -> float:
         snapshot = self._ledger.snapshot({signal.symbol: signal.price})
-        if signal.price <= 0:
-            return 0.0
-        affordable = snapshot.available_capital / signal.price if signal.price > 0 else 0.0
-        return max(0.0, min(affordable, self._risk.policy.max_order_qty))
+        return native_default_quantity(
+            snapshot.available_capital, signal.price, self._risk.policy.max_order_qty
+        )
 
     def _submit(self, intent: ExecutionIntent, plan: OrderPlan, now_epoch: float) -> None:
         assert self._broker is not None

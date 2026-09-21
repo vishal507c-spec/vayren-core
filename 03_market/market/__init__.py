@@ -20,6 +20,13 @@ from market.loader.timeframe_list_loader import TimeframeListLoader
 from market.manifest import market_manifest
 from market.models.bar import Bar
 from market.models.symbol_quote import SymbolQuote
+from market.native_aggregate import (
+    Bucket,
+    bucket_start,
+    closed_count,
+    fold_tick,
+    session_anchor_seconds,
+)
 from market.repository.candle_repository import CandleRepository
 from market.repository.symbol_repository import SymbolRepository
 from market.timeframe.timeframe import (
@@ -53,4 +60,9 @@ __all__ = [
     "timeframe_seconds",
     "timeframe_name",
     "available_timeframes",
+    "Bucket",
+    "bucket_start",
+    "closed_count",
+    "fold_tick",
+    "session_anchor_seconds",
 ]

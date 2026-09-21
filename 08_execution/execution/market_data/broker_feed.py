@@ -25,36 +25,14 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from market import timeframe_seconds
+from market import Bucket, bucket_start, fold_tick, session_anchor_seconds, timeframe_seconds
 
 from execution.events import CandleEvent, MarketEvent
+from execution.market_data.native_normalizer import gap_reason, gap_stale, stale_floor
 from execution.market_data.provider import MarketDataProvider
 
-
-def _bucket_start(timestamp: str, size_s: int, anchor_s: int) -> str:
-    """Floor an ISO timestamp to its bucket start (same-day arithmetic)."""
-    day, clock = timestamp[:10], timestamp[11:19]
-    parts = clock.split(":")
-    seconds = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
-    if size_s >= 86_400:
-        return f"{day} 00:00:00"
-    if seconds < anchor_s:
-        anchor_s -= 86_400
-    index = (seconds - anchor_s) // size_s
-    start = anchor_s + index * size_s
-    if start < 0:
-        start += 86_400
-    hh, rem = divmod(start % 86_400, 3600)
-    mm, ss = divmod(rem, 60)
-    return f"{day} {hh:02d}:{mm:02d}:{ss:02d}"
-
-
-def _parse_anchor(anchor: str) -> int:
-    try:
-        hh, mm = anchor.split(":")[:2]
-        return int(hh) * 3600 + int(mm) * 60
-    except (ValueError, AttributeError):
-        return 9 * 3600 + 15 * 60
+# One open bucket: its start stamp and the kernel's OHLCV fold.
+_Open = tuple[str, Bucket]
 
 
 class BrokerFeedProvider(MarketDataProvider):
@@ -70,14 +48,14 @@ class BrokerFeedProvider(MarketDataProvider):
     ) -> None:
         self._face = face
         self._timeframe = timeframe
-        self._anchor_s = _parse_anchor(session_anchor)
+        self._anchor_s = session_anchor_seconds(session_anchor)
         self._clock = clock or time.time
-        self._stale_after_s = max(1.0, float(stale_after_s))
+        self._stale_after_s = stale_floor(stale_after_s)
         self._subscribed: tuple[str, ...] = ()
         self._open = False
         self._dropped = False
         self._seq: dict[str, int] = {}
-        self._buckets: dict[str, dict[str, Any]] = {}
+        self._buckets: dict[str, _Open] = {}
         self._emitted: dict[str, str] = {}
         self._last_seen: dict[str, float] = {}
         self._last_dayvol: dict[str, int] = {}
@@ -170,10 +148,12 @@ class BrokerFeedProvider(MarketDataProvider):
             return False, self._last_error
         now = self._clock()
         stale = [
-            s for s in self._subscribed if now - self._last_seen.get(s, now) > self._stale_after_s
+            s
+            for s in self._subscribed
+            if gap_stale(now, self._last_seen.get(s, now), self._stale_after_s)
         ]
         if stale:
-            return False, f"stale market data: {', '.join(sorted(stale))}"
+            return False, f"{gap_reason()}: {', '.join(sorted(stale))}"
         return True, "broker feed streaming"
 
     def close(self) -> None:
@@ -235,48 +215,39 @@ class BrokerFeedProvider(MarketDataProvider):
         size_s = self._size_s()
         if not size_s:
             return None
-        bucket = _bucket_start(stamp, size_s, self._anchor_s)
-        current = self._buckets.get(symbol)
-        if current is None or current["start"] != bucket:
-            emitted = None
-            if current is not None and (
-                symbol not in self._emitted or current["start"] > self._emitted[symbol]
-            ):
-                emitted = self._close_bucket(symbol, current)
-            delta = max(0, dayvol - self._last_dayvol.get(symbol, dayvol))
-            self._buckets[symbol] = {
-                "start": bucket,
-                "open": price,
-                "high": price,
-                "low": price,
-                "close": price,
-                "volume": delta,
-            }
-            self._last_dayvol[symbol] = dayvol
-            self._last_seen[symbol] = self._clock()
-            return emitted
-        current["high"] = max(current["high"], price)
-        current["low"] = min(current["low"], price)
-        current["close"] = price
-        delta = max(0, dayvol - self._last_dayvol.get(symbol, dayvol))
-        current["volume"] += delta
+        bucket = bucket_start(stamp, size_s, self._anchor_s)
+        held = self._buckets.get(symbol)
+        fresh = held is None or held[0] != bucket
+        emitted: CandleEvent | None = None
+        if (
+            held is not None
+            and fresh
+            and (symbol not in self._emitted or held[0] > self._emitted[symbol])
+        ):
+            emitted = self._close_bucket(symbol, held)
+        previous = held[1] if held is not None and not fresh else None
+        self._buckets[symbol] = (
+            bucket,
+            fold_tick(previous, price, dayvol, self._last_dayvol.get(symbol)),
+        )
         self._last_dayvol[symbol] = dayvol
         self._last_seen[symbol] = self._clock()
-        return None
+        return emitted
 
-    def _close_bucket(self, symbol: str, bucket: dict[str, Any]) -> CandleEvent:
+    def _close_bucket(self, symbol: str, held: _Open) -> CandleEvent:
+        start, (open_, high, low, close, volume) = held
         self._seq[symbol] = self._seq.get(symbol, 0) + 1
-        self._emitted[symbol] = bucket["start"]
+        self._emitted[symbol] = start
         return CandleEvent(
             symbol=symbol,
-            timestamp=bucket["start"],
+            timestamp=start,
             seq=self._seq[symbol],
             source=self.name,
-            open=float(bucket["open"]),
-            high=float(bucket["high"]),
-            low=float(bucket["low"]),
-            close=float(bucket["close"]),
-            volume=int(bucket["volume"]),
+            open=open_,
+            high=high,
+            low=low,
+            close=close,
+            volume=int(volume),
             timeframe=self._timeframe,
             is_closed=True,
         )
