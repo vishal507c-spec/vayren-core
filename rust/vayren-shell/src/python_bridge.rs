@@ -47,6 +47,18 @@ pub enum BackendCommand {
     GetLiveSnapshot,
     GetResearchSnapshot,
     GetLabSnapshot,
+    SelectLabStrategy {
+        strategy: String,
+    },
+    RunBacktest {
+        strategy: String,
+        symbols: Vec<String>,
+        timeframe: Option<String>,
+        start: Option<String>,
+        end: Option<String>,
+        capital: f64,
+        mode: String,
+    },
     Shutdown,
 }
 
@@ -387,6 +399,72 @@ mod tests {
         assert_eq!(state.strategies.len(), 1);
         assert_eq!(state.strategies[0].name, "OBR");
         assert_eq!(state.selected, Some(0));
+    }
+
+    #[test]
+    fn test_select_lab_strategy_command_serialization() {
+        let cmd = BackendCommand::SelectLabStrategy {
+            strategy: "SMA Crossover".to_string(),
+        };
+        let json = serde_json::to_string(&cmd).unwrap();
+        assert_eq!(
+            json,
+            r#"{"type":"select_lab_strategy","strategy":"SMA Crossover"}"#
+        );
+    }
+
+    #[test]
+    fn test_run_backtest_command_serialization() {
+        let cmd = BackendCommand::RunBacktest {
+            strategy: "SMA Crossover".to_string(),
+            symbols: vec!["RELIANCE".to_string()],
+            timeframe: Some("15m".to_string()),
+            start: Some("2026-01-01".to_string()),
+            end: None,
+            capital: 1000000.0,
+            mode: "buy".to_string(),
+        };
+        let json = serde_json::to_string(&cmd).unwrap();
+        assert_eq!(
+            json,
+            r#"{"type":"run_backtest","strategy":"SMA Crossover","symbols":["RELIANCE"],"timeframe":"15m","start":"2026-01-01","end":null,"capital":1000000.0,"mode":"buy"}"#
+        );
+    }
+
+    #[test]
+    fn test_lab_run_result_ingestion() {
+        let data = serde_json::json!({
+            "strategies": [{"name": "SMA Crossover", "modified": "built-in"}],
+            "selected_name": "SMA Crossover",
+            "mode": "buy",
+            "run": "complete",
+            "engine_wired": true,
+            "config": {"universe": "RELIANCE", "timeframe": "15m"},
+            "results": {
+                "metrics": {"net_profit": 1234.5, "total_trades": 10,
+                    "win_rate": 60.0, "profit_factor": 1.5, "expectancy": 123.4,
+                    "max_drawdown_pct": 2.5, "sharpe_ratio": 1.1, "avg_trade": 123.4},
+                "ranking": [{"rank": 1, "symbol": "RELIANCE", "status": "ranked",
+                    "net_profit": 1234.5, "return_pct": 1.2, "total_trades": 10,
+                    "win_rate": 60.0, "profit_factor": 1.5, "max_drawdown_pct": 2.5,
+                    "sharpe_ratio": 1.1}],
+                "trades": [{"symbol": "RELIANCE", "side": "LONG",
+                    "entry_time": "2026-01-02T09:15:00", "exit_time": "2026-01-02T15:30:00",
+                    "entry_px": 100.0, "exit_px": 101.0, "pnl": 100.0,
+                    "r_multiple": 1.0, "bars": 5, "reason": "SIGNAL", "winning": true}],
+                "equity_curve": [{"equity": 1000000.0, "drawdown_pct": 0.0},
+                    {"equity": 1001234.5, "drawdown_pct": 0.0}],
+                "risk_notes": []
+            }
+        });
+        let mut state = crate::shell::demo_lab_state();
+        crate::lab::apply_snapshot_json(&mut state, &data);
+        assert_eq!(state.run, crate::lab::RunState::Complete);
+        let view = crate::lab::project(&state);
+        assert!(view.show_results);
+        assert_eq!(view.ranking.len(), 1);
+        assert_eq!(view.trades.len(), 1);
+        assert!(!view.equity.is_empty());
     }
 
     #[test]

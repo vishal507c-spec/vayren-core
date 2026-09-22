@@ -77,7 +77,7 @@ Allowed graph (machine truth: `DOMAIN_DEPS` in `scripts/validate_imports.py`). Q
 
 ### 5.6 Module: `05_strategy` — Strategy Platform
 **Responsibility:** Strategy registry, Python-native runtime, storage, research, Lab (allowed: `core`, `market` — see §4).
-**Public API:** `StrategyRegistry`, `StrategyRegistryError`, `StrategyDefinition`, `StrategyParameters`, `ParameterSpec`, `ParameterError`, `Signal`, `SignalKind`, `StrategyState`, `StrategyRuntime`, `StrategyLogic`, `BarView`, `BacktestForm`, `ResearchDataset`, `strategy_manifest`, plot contract (`PlotEvent`, `PlotType`, `MarkerType`, `PlotLifecycle`, `RenderLayer`, `PlotValidationError`, `default_layer`, `make_event_id`), events `StrategiesListed`, `StrategySelected`, `PaperTradeRequested`, `LabReset`.
+**Public API:** `StrategyRegistry`, `StrategyRegistryError`, `StrategyDefinition`, `StrategyParameters`, `ParameterSpec`, `ParameterError`, `Signal`, `SignalKind`, `StrategyState`, `StrategyRuntime`, `StrategyLogic`, `BarView`, `BacktestForm`, `ResearchDataset`, `strategy_manifest` (structural dict — the `core` contract authorities are Rust-owned with no Python twin, so the manifest documents identity/capabilities/events/dependencies without importing them), plot contract (`PlotEvent`, `PlotType`, `MarkerType`, `PlotLifecycle`, `RenderLayer`, `PlotValidationError`, `default_layer`, `make_event_id`), events `StrategiesListed`, `StrategySelected`, `PaperTradeRequested`, `LabReset`.
 **Invariants:** `class Strategy(PythonStrategy)` is the ONLY execution path (no DSL/VM/`exec`); `StrategyParameters` frozen; `StrategyRegistry` is the definition registry; `strategy.research` never imports `backtest` at runtime (variant re-execution is injected); backtest uses `compile_strategy`, never file parsing.
 **Validation:** `05_strategy/strategy/tests` — note: package entry currently import-debt (see `ai_memory.md`).
 
@@ -146,7 +146,7 @@ Read this module's contract (§5) before modifying it. Do not expand responsibil
 ## 13. Contract Validation
 | Check | Command |
 |---|---|
-| Manifests | `strategy_manifest()` structural contract (import-debt; live enforcement = future rewire) |
+| Manifests | `strategy_manifest()` structural dict (import-debt repaired 2026-09-22: no deleted `core` authorities; live enforcement = future rewire) |
 | Events | `90_brain/event_catalog.md` + type-exact dispatch tests |
 | Tests | `pytest` / `make check` (contract behavior lives here) |
 

@@ -3,6 +3,11 @@
 //! Production entry point: spawns headless Python backend, communicates via
 //! JSON/IPC, renders native Slint UI. No legacy toolkit dependency.
 
+// GUI subsystem on Windows: no console window ever — the app opens directly.
+// Backend diagnostics stay available via the Slint status surfaces; startup
+// failures surface as native UI messages, never as a terminal.
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+
 use slint::ComponentHandle;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -31,10 +36,21 @@ fn arg_value(argv: &[String], name: &str) -> Option<String> {
 }
 
 fn default_data_dir() -> String {
-    std::env::var("VAYREN_DATA_DIR").unwrap_or_else(|_| {
-        let home = std::env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string());
-        format!("{}/.vayren/data", home)
-    })
+    // Same precedence as the Python launcher: explicit flags (handled by the
+    // caller) → VAYREN_DATA_DIR → legacy workstation folder when present →
+    // per-user default. Never invents data: a missing folder surfaces as a
+    // backend honest-empty snapshot, never as fabricated bars.
+    if let Ok(dir) = std::env::var("VAYREN_DATA_DIR") {
+        if !dir.trim().is_empty() {
+            return dir;
+        }
+    }
+    let legacy = std::path::Path::new(r"D:\ZerodhaTradingData");
+    if legacy.is_dir() {
+        return legacy.to_string_lossy().into_owned();
+    }
+    let home = std::env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string());
+    format!("{}/.vayren/data", home)
 }
 
 fn default_strategy_dir() -> String {
@@ -168,6 +184,49 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let lab_state = Rc::new(RefCell::new(lab_state));
+    // Lab refetch closures (same snapshot shape as startup; selection pulls
+    // the strategy workspace, RUN executes a real backend backtest).
+    let fetch_lab_workspace: Rc<dyn Fn(String) -> Option<serde_json::Value>> = Rc::new({
+        let backend = backend.clone();
+        move |name: String| -> Option<serde_json::Value> {
+            match backend.send_command(BackendCommand::SelectLabStrategy { strategy: name }) {
+                Ok(BackendResponse::LabSnapshot { data }) => Some(data),
+                Ok(other) => {
+                    eprintln!("Lab select: unexpected response ({other:?})");
+                    None
+                }
+                Err(err) => {
+                    eprintln!("Lab select failed: {err}");
+                    None
+                }
+            }
+        }
+    });
+    let fetch_lab_run: Rc<dyn Fn(shell::LabRunRequest) -> Option<serde_json::Value>> = Rc::new({
+        let backend = backend.clone();
+        move |request: shell::LabRunRequest| -> Option<serde_json::Value> {
+            let command = BackendCommand::RunBacktest {
+                strategy: request.strategy,
+                symbols: request.symbols,
+                timeframe: Some(request.timeframe).filter(|s| !s.is_empty()),
+                start: Some(request.start).filter(|s| !s.is_empty()),
+                end: Some(request.end).filter(|s| !s.is_empty()),
+                capital: request.capital,
+                mode: request.mode,
+            };
+            match backend.send_command(command) {
+                Ok(BackendResponse::LabSnapshot { data }) => Some(data),
+                Ok(other) => {
+                    eprintln!("Lab run: unexpected response ({other:?})");
+                    None
+                }
+                Err(err) => {
+                    eprintln!("Lab run failed: {err}");
+                    None
+                }
+            }
+        }
+    });
     // Portfolio production wiring (SLICE 4b): the idle trading service
     // snapshot feeds the native portfolio state (honest not-running book).
     println!("Requesting portfolio snapshot...");
@@ -255,7 +314,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let live_state = Rc::new(RefCell::new(live_state));
     shell::wire(&ui);
     shell::wire_zoom(&ui, zoom.clone());
-    shell::wire_lab(&ui, lab_state.clone());
+    shell::wire_lab(&ui, lab_state.clone(), fetch_lab_workspace, fetch_lab_run);
     shell::wire_portfolio(&ui, portfolio_state.clone());
     shell::wire_research(&ui, research_state.clone());
     shell::wire_live(&ui, live_state.clone());

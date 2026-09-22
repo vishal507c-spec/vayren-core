@@ -348,6 +348,10 @@ pub struct MarketState {
     pub timeframe: String,
     pub bars: Vec<MarketBar>,
     pub status: MarketStatus,
+    /// Actionable backend notice for the empty chart (e.g. which symbol /
+    /// timeframe has no candles). Empty when there is nothing to report —
+    /// the generic message is the fallback, never the primary.
+    pub notice: String,
     pub exchange: String,
     /// Visible window: first bar index + count (legacy `_first`/`_last`).
     pub first: usize,
@@ -407,6 +411,7 @@ impl Default for MarketState {
             timeframe: String::new(),
             bars: Vec::new(),
             status: MarketStatus::Loading,
+            notice: String::new(),
             exchange: String::new(),
             first: 0,
             count: INITIAL_BARS,
@@ -522,6 +527,9 @@ impl MarketState {
         self.hover = None;
         self.price_manual = None;
         self.bars = clean;
+        if !self.bars.is_empty() {
+            self.notice.clear();
+        }
         if self.bars.is_empty() {
             self.status = MarketStatus::Empty;
             self.first = 0;
@@ -1375,11 +1383,18 @@ pub fn project(state: &MarketState) -> MarketView {
     let status_message = match state.status {
         MarketStatus::Loading => "Loading chart…".to_string(),
         MarketStatus::Empty => {
-            if state.bars.is_empty() {
-                if state.timeframe.is_empty() {
+            if !state.notice.is_empty() {
+                state.notice.clone()
+            } else if state.bars.is_empty() {
+                if state.selected_symbol.is_empty() {
                     "No data available".to_string()
+                } else if state.timeframe.is_empty() {
+                    format!("No candle data for {}", state.selected_symbol)
                 } else {
-                    format!("No {} data available", state.timeframe)
+                    format!(
+                        "No candle data for {} on {} timeframe",
+                        state.selected_symbol, state.timeframe
+                    )
                 }
             } else {
                 "No data in viewport".to_string()
@@ -2151,6 +2166,10 @@ pub fn apply_snapshot_json(state: &mut MarketState, value: &serde_json::Value) {
             "empty" => MarketStatus::Empty,
             _ => MarketStatus::Loading,
         };
+    }
+    let notice = snap_str(value, "notice");
+    if !notice.is_empty() {
+        state.notice = notice;
     }
     // Indicator visibility: the retained panel ROWS (name -> bool). Only
     // entries the backend confirms are kept; nothing is seeded or invented.
@@ -3223,6 +3242,61 @@ mod tests {
         assert_eq!(by_key["Trend strength"], ("--", true));
         // Snapshot NEVER touches the view-local open flag.
         assert!(!view.market_status_open);
+    }
+
+    #[test]
+    fn backend_notice_replaces_generic_empty_message() {
+        let mut state = MarketState::default();
+        let json = serde_json::json!({
+            "symbols": [],
+            "selected_symbol": "RELIANCE",
+            "timeframes": ["15m"],
+            "timeframe": "5m",
+            "exchange": "",
+            "bars": [],
+            "notice": "No candle data for RELIANCE on 5m timeframe",
+        });
+        apply_snapshot_json(&mut state, &json);
+        assert_eq!(state.selected_symbol, "RELIANCE");
+        assert!(state.bars.is_empty());
+        let view = project(&state);
+        assert!(!view.has_data);
+        assert_eq!(
+            view.status_message,
+            "No candle data for RELIANCE on 5m timeframe"
+        );
+    }
+
+    #[test]
+    fn empty_without_notice_names_symbol_and_timeframe() {
+        let mut state = MarketState::default();
+        state.set_bars("RELIANCE", "5m", "", Vec::new());
+        let view = project(&state);
+        assert_eq!(
+            view.status_message,
+            "No candle data for RELIANCE on 5m timeframe"
+        );
+    }
+
+    #[test]
+    fn fresh_bars_clear_a_prior_notice() {
+        let mut state = MarketState::default();
+        state.notice = "stale notice".to_string();
+        state.set_bars(
+            "RELIANCE",
+            "15m",
+            "",
+            vec![MarketBar {
+                time: "2026-06-10 09:15:00".to_string(),
+                open: 1.0,
+                high: 2.0,
+                low: 0.5,
+                close: 1.5,
+                volume: 100.0,
+            }],
+        );
+        assert!(state.notice.is_empty());
+        assert!(project(&state).has_data);
     }
 
     #[test]

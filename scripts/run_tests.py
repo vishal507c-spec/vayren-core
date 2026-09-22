@@ -18,7 +18,9 @@ import time
 # gate. Empty/missing tests/ dirs stay covered by
 # scripts/tests/test_gate_coverage.py only when they gain test files.
 PARTS = (
+    "00_app/app/tests",
     "02_data/data/tests",
+    "05_strategy/strategy/tests",
     "09_broker/broker/tests",
     "scripts/forensics/tests",
     "scripts/tests",

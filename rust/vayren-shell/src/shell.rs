@@ -1403,7 +1403,81 @@ fn filter_kind(filter: LibFilter) -> i32 {
 /// Wire Strategy Lab interactions: the Slint surface only reports actions;
 /// the Rust view-model mutates centrally and re-projects (single state
 /// source). RUN stays inert until the engine bridge is wired.
-pub fn wire_lab(ui: &AppWindow, state: Rc<RefCell<LabState>>) {
+/// One backtest request gathered from the Lab workspace state (the host
+/// forwards it to the Python backend; all values are backend-owned echoes).
+#[derive(Debug, Clone, PartialEq)]
+pub struct LabRunRequest {
+    pub strategy: String,
+    pub symbols: Vec<String>,
+    pub timeframe: String,
+    pub start: String,
+    pub end: String,
+    pub capital: f64,
+    pub mode: String,
+}
+
+impl LabRunRequest {
+    /// Gather the current workspace request; `None` when no strategy is
+    /// selected (RUN stays honestly disabled — never invents a request).
+    pub fn gather(state: &LabState) -> Option<Self> {
+        let name = state.selected_strategy()?.name.clone();
+        let known = |s: &String| state.universe_symbols.iter().any(|u| u == s);
+        let mut symbols: Vec<String> = state
+            .universe_selected
+            .iter()
+            .filter(|s| known(s))
+            .cloned()
+            .collect();
+        if symbols.is_empty() {
+            symbols = state
+                .cfg_universe_csv
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty() && known(&s))
+                .collect();
+        }
+        let timeframe = state
+            .timeframes
+            .get(state.timeframe_index.max(0) as usize)
+            .cloned()
+            .unwrap_or_default();
+        let capital = parse_capital(&state.cfg_capital).unwrap_or(0.0);
+        let mode = match state.mode {
+            LabMode::Long => "buy",
+            LabMode::Short => "sell",
+            LabMode::Compare => "compare",
+        }
+        .to_string();
+        Some(LabRunRequest {
+            strategy: name,
+            symbols,
+            timeframe,
+            start: state.cfg_dates_start.clone(),
+            end: state.cfg_dates_end.clone(),
+            capital,
+            mode,
+        })
+    }
+}
+
+/// Parse a capital echo ("₹10,00,000", "1000000", "") into a number.
+fn parse_capital(text: &str) -> Option<f64> {
+    let cleaned: String = text
+        .chars()
+        .filter(|c| c.is_ascii_digit() || *c == '.' || *c == '-')
+        .collect();
+    if cleaned.is_empty() {
+        return None;
+    }
+    cleaned.parse::<f64>().ok()
+}
+
+pub fn wire_lab(
+    ui: &AppWindow,
+    state: Rc<RefCell<LabState>>,
+    fetch_workspace: Rc<dyn Fn(String) -> Option<serde_json::Value>>,
+    fetch_run: Rc<dyn Fn(LabRunRequest) -> Option<serde_json::Value>>,
+) {
     let bind = |ui: &AppWindow, state: &Rc<RefCell<LabState>>, handler: fn(&mut LabState, i32)| {
         let strong = state.clone();
         let handle = ui.as_weak();
@@ -1424,9 +1498,33 @@ pub fn wire_lab(ui: &AppWindow, state: Rc<RefCell<LabState>>) {
             }
         }
     };
-    ui.on_lab_library_picked(bind(ui, &state, |s, i| {
-        let _ = s.interaction_select(i.max(0) as usize);
-    }));
+    {
+        // Library selection refreshes the workspace from the backend (code,
+        // params, config echoes); the optimistic local select keeps the UI
+        // instant, the snapshot makes it truthful.
+        let strong = state.clone();
+        let weak = ui.as_weak();
+        let fetch = fetch_workspace.clone();
+        ui.on_lab_library_picked(move |i: i32| {
+            let Some(ui) = weak.upgrade() else { return };
+            let name = {
+                let mut guard = strong.borrow_mut();
+                if !guard.interaction_select(i.max(0) as usize) {
+                    return;
+                }
+                guard
+                    .selected_strategy()
+                    .map(|s| s.name.clone())
+                    .unwrap_or_default()
+            };
+            if !name.is_empty() {
+                if let Some(data) = fetch(name) {
+                    lab::apply_snapshot_json(&mut strong.borrow_mut(), &data);
+                }
+            }
+            apply_lab(&ui, &strong.borrow());
+        });
+    }
     ui.on_lab_filter_picked(bind(ui, &state, |s, i| {
         s.interaction_filter(match i {
             1 => LibFilter::Favorites,
@@ -1441,12 +1539,31 @@ pub fn wire_lab(ui: &AppWindow, state: Rc<RefCell<LabState>>) {
         s.interaction_tab(i.max(0) as usize)
     }));
     {
-        // `lab-run-requested` carries no argument: a dedicated zero-arity
-        // closure (the int-arg `bind` helper does not apply here).
+        // RUN executes a real backend backtest: optimistic Running state for
+        // instant feedback, then the engine snapshot (results or an
+        // actionable config_error — never fabricated numbers).
         let strong = state.clone();
         let handle = ui.as_weak();
+        let fetch = fetch_run.clone();
         ui.on_lab_run_requested(move || {
-            strong.borrow_mut().interaction_run();
+            let Some(ui) = handle.upgrade() else { return };
+            let request = {
+                let mut guard = strong.borrow_mut();
+                guard.interaction_run();
+                if !guard.start_run() {
+                    None
+                } else {
+                    LabRunRequest::gather(&guard)
+                }
+            };
+            if let Some(request) = request {
+                apply_lab(&ui, &strong.borrow());
+                if let Some(data) = fetch(request) {
+                    lab::apply_snapshot_json(&mut strong.borrow_mut(), &data);
+                } else {
+                    strong.borrow_mut().fail_run();
+                }
+            }
             if let Some(ui) = handle.upgrade() {
                 apply_lab(&ui, &strong.borrow());
             }
@@ -3093,7 +3210,9 @@ mod tests {
         assert_eq!(ui.get_lab_library().row_count(), 2);
         assert!(ui.get_lab_library().row_data(0).unwrap().selected);
 
-        wire_lab(&ui, lab_state.clone());
+        let no_fetch: Rc<dyn Fn(String) -> Option<serde_json::Value>> = Rc::new(|_| None);
+        let no_run: Rc<dyn Fn(LabRunRequest) -> Option<serde_json::Value>> = Rc::new(|_| None);
+        wire_lab(&ui, lab_state.clone(), no_fetch, no_run);
         ui.invoke_lab_library_picked(1);
         assert_eq!(ui.get_lab().name, "SMA");
         assert!(ui.get_lab_library().row_data(1).unwrap().selected);
@@ -3565,5 +3684,44 @@ mod tests {
 
         select(&ui, ShellScreen::Broker);
         assert!(!ui.get_screen_pending());
+    }
+
+    #[test]
+    fn lab_run_request_gathers_backend_echoes() {
+        let mut state = demo_lab_state();
+        // No selection → honestly no request (RUN stays disabled).
+        state.selected = None;
+        assert!(LabRunRequest::gather(&state).is_none());
+        // Selection + backend echoes → a complete request.
+        state.selected = Some(1);
+        state.engine_wired = true;
+        state.universe_symbols = vec!["RELIANCE".into(), "TCS".into()];
+        state.universe_selected = vec!["TCS".into()];
+        state.timeframes = vec!["15m".into(), "1h".into()];
+        state.timeframe_index = 1;
+        state.cfg_dates_start = "2026-01-01".into();
+        state.cfg_dates_end = "2026-06-10".into();
+        state.cfg_capital = "₹10,00,000".into();
+        let request = LabRunRequest::gather(&state).expect("request");
+        assert_eq!(request.strategy, "SMA");
+        assert_eq!(request.symbols, vec!["TCS".to_string()]);
+        assert_eq!(request.timeframe, "1h");
+        assert_eq!(request.start, "2026-01-01");
+        assert_eq!(request.end, "2026-06-10");
+        assert_eq!(request.capital, 1000000.0);
+        assert_eq!(request.mode, "buy");
+        // Unknown symbols in the echo can never be queued.
+        state.universe_selected = vec!["BOGUS".into()];
+        state.cfg_universe_csv = "RELIANCE, BOGUS".into();
+        let request = LabRunRequest::gather(&state).expect("request");
+        assert_eq!(request.symbols, vec!["RELIANCE".to_string()]);
+    }
+
+    #[test]
+    fn lab_capital_parses_display_echoes() {
+        assert_eq!(parse_capital("₹10,00,000"), Some(1000000.0));
+        assert_eq!(parse_capital("1000000"), Some(1000000.0));
+        assert_eq!(parse_capital(""), None);
+        assert_eq!(parse_capital("—"), None);
     }
 }
