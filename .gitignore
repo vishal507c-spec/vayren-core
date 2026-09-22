@@ -61,6 +61,9 @@ knowledge/memory/session-logs/
 # Context-engine packet cache (deterministic, regenerable, never committed)
 .context_cache/
 
+# Warm repository index (Phase 2: deterministic, regenerable, never committed)
+.repo_index/
+
 # Secrets
 credentials.yaml
 secrets.yaml
