@@ -213,6 +213,9 @@ export component AppWindow inherits Window {
     callback market-trade-prev();
     callback market-trade-next();
     callback market-trade-open();
+    callback market-scale-cycle();
+    callback market-grid-toggle();
+    callback market-cross-toggle();
     callback market-status-toggle();
     callback market-dl-toggle();
     callback market-dl-interval(string);
@@ -342,6 +345,10 @@ export component AppWindow inherits Window {
     in-out property <string> market-hover-volume: "";
     in-out property <bool> market-hover-bull: true;
     in-out property <bool> market-has-hover: false;
+    in-out property <int> market-scale-mode: 0;
+    in-out property <string> market-scale-label: "₹";
+    in-out property <bool> market-grid-visible: true;
+    in-out property <bool> market-cross-visible: true;
     in-out property <[MarketIndicator]> market-indicator-rows;
     in-out property <bool> market-popup-open: false;
     in-out property <string> market-popup-query: "";
@@ -763,6 +770,10 @@ export component AppWindow inherits Window {
                     hover-volume: root.market-hover-volume;
                     hover-bull: root.market-hover-bull;
                     has-hover: root.market-has-hover;
+                    scale-mode: root.market-scale-mode;
+                    scale-label: root.market-scale-label;
+                    grid-visible: root.market-grid-visible;
+                    cross-visible: root.market-cross-visible;
                     indicator-rows: root.market-indicator-rows;
                     popup-open: root.market-popup-open;
                     popup-query: root.market-popup-query;
@@ -841,6 +852,9 @@ export component AppWindow inherits Window {
                     trade-prev() => { root.market-trade-prev(); }
                     trade-next() => { root.market-trade-next(); }
                     trade-open() => { root.market-trade-open(); }
+                    scale-cycle() => { root.market-scale-cycle(); }
+                    grid-toggle() => { root.market-grid-toggle(); }
+                    cross-toggle() => { root.market-cross-toggle(); }
                     status-toggle() => { root.market-status-toggle(); }
                     dl-toggle() => { root.market-dl-toggle(); }
                     dl-interval(s) => { root.market-dl-interval(s); }

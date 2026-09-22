@@ -1628,6 +1628,11 @@ export component MarketScreen inherits Rectangle {
     in property <string> hover-volume;
     in property <bool> hover-bull: true;
     in property <bool> has-hover: false;
+    // Chart display settings (Rust-owned ChartScaleMode + visibility flags).
+    in property <int> scale-mode: 0;
+    in property <string> scale-label: "₹";
+    in property <bool> grid-visible: true;
+    in property <bool> cross-visible: true;
     in property <[MarketIndicator]> indicator-rows;
     in property <bool> popup-open: false;
     in property <string> popup-query;
@@ -1746,6 +1751,9 @@ export component MarketScreen inherits Rectangle {
     callback trade-prev();
     callback trade-next();
     callback trade-open();
+    callback scale-cycle();
+    callback grid-toggle();
+    callback cross-toggle();
 
     // ── local presentation state (menus, drag) ──
     property <string> open-menu: "none";
@@ -1975,6 +1983,21 @@ export component MarketScreen inherits Rectangle {
                                 root.popup-x = self.absolute-position.x;
                             }
                         }
+                        SmallButton {
+                            label: root.scale-label;
+                            active: root.scale-mode != 0;
+                            picked => { root.scale-cycle(); }
+                        }
+                        SmallButton {
+                            label: "GRID";
+                            active: root.grid-visible;
+                            picked => { root.grid-toggle(); }
+                        }
+                        SmallButton {
+                            label: "CROSS";
+                            active: root.cross-visible;
+                            picked => { root.cross-toggle(); }
+                        }
                         if root.active-label != "": Text {
                             text: root.active-label;
                             color: VayrenPalette.faint;
@@ -2115,6 +2138,7 @@ export component MarketScreen inherits Rectangle {
 
                             // horizontal grid lines (price ticks)
                             for t in root.price-ticks: Rectangle {
+                                visible: root.grid-visible;
                                 x: 0;
                                 width: plot.width;
                                 height: 1px;
@@ -2219,7 +2243,7 @@ export component MarketScreen inherits Rectangle {
                             }
 
                             // crosshair + tags
-                            if root.has-hover: Rectangle {
+                            if root.has-hover && root.cross-visible: Rectangle {
                                 x: 0;
                                 y: 0;
                                 width: plot.width;

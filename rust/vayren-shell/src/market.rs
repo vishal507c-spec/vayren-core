@@ -156,6 +156,49 @@ pub struct TradeContext {
     pub r: String,
 }
 
+/// Price-scale mode (TradingView-observable vocabulary, own implementation).
+/// Regular = price; Percent = % move vs the first visible close; Logarithmic
+/// = log-spaced geometry with price labels. Percent/Log fall back to Regular
+/// for any frame whose data cannot represent them (never invents a scale).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ChartScaleMode {
+    #[default]
+    Regular,
+    Percent,
+    Logarithmic,
+}
+
+impl ChartScaleMode {
+    pub fn kind(self) -> i32 {
+        match self {
+            ChartScaleMode::Regular => 0,
+            ChartScaleMode::Percent => 1,
+            ChartScaleMode::Logarithmic => 2,
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            ChartScaleMode::Regular => "₹",
+            ChartScaleMode::Percent => "%",
+            ChartScaleMode::Logarithmic => "log",
+        }
+    }
+    pub fn from_kind(kind: i32) -> Self {
+        match kind {
+            1 => ChartScaleMode::Percent,
+            2 => ChartScaleMode::Logarithmic,
+            _ => ChartScaleMode::Regular,
+        }
+    }
+    pub fn cycle(self) -> Self {
+        match self {
+            ChartScaleMode::Regular => ChartScaleMode::Percent,
+            ChartScaleMode::Percent => ChartScaleMode::Logarithmic,
+            ChartScaleMode::Logarithmic => ChartScaleMode::Regular,
+        }
+    }
+}
+
 /// Data-availability state of the chart region — exactly the three honest
 /// messages the legacy widget paints (`paintEvent`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -241,6 +284,12 @@ pub enum MarketAction {
     /// Toggle the market-status strip (rail button; view-local like
     /// `PanelToggle` — no backend wire).
     ToggleStatus,
+    /// Cycle the price-scale mode Regular → Percent → Logarithmic.
+    CycleScaleMode,
+    /// Toggle grid-line visibility (display only, no geometry rebuild).
+    ToggleGrid,
+    /// Toggle crosshair visibility (display only, no geometry rebuild).
+    ToggleCrosshair,
 }
 
 // Viewport numbers ported 1:1 from `CandleChartWidget` (behavior parity).
@@ -395,6 +444,12 @@ pub struct MarketState {
     /// Queued backend intents for the embedded host to drain (mirrors
     /// `LabState::pending_actions`).
     pub pending_actions: Vec<String>,
+    /// Chart display settings (engine-owned, Slint renders them verbatim):
+    /// price-scale mode plus grid/crosshair visibility. Toggles never touch
+    /// data, viewport or caches — geometry rebuilds only for scale changes.
+    pub scale_mode: ChartScaleMode,
+    pub grid_visible: bool,
+    pub cross_visible: bool,
 }
 
 impl Default for MarketState {
@@ -440,6 +495,9 @@ impl Default for MarketState {
             download: DownloadState::default(),
             market_status: MarketStatusFacts::default(),
             pending_actions: Vec::new(),
+            scale_mode: ChartScaleMode::Regular,
+            grid_visible: true,
+            cross_visible: true,
         }
     }
 }
@@ -952,6 +1010,18 @@ impl MarketState {
                 self.indicators.len() != before
             }
             MarketAction::TradePrev | MarketAction::TradeNext | MarketAction::TradeOpen => true,
+            MarketAction::CycleScaleMode => {
+                self.scale_mode = self.scale_mode.cycle();
+                true
+            }
+            MarketAction::ToggleGrid => {
+                self.grid_visible = !self.grid_visible;
+                true
+            }
+            MarketAction::ToggleCrosshair => {
+                self.cross_visible = !self.cross_visible;
+                true
+            }
         }
     }
 
@@ -1332,6 +1402,11 @@ pub struct MarketView {
     pub settings_rows: Vec<SettingsRow>,
     pub active_label: String,
     pub trade_context: TradeContext,
+    /// Chart display settings echo (Slint binds visibility + scale label).
+    pub scale_mode: i32,
+    pub scale_label: String,
+    pub grid_visible: bool,
+    pub cross_visible: bool,
     pub download: DownloadView,
     /// Market-status strip (legacy `MarketStatusPanel` parity): open flag +
     /// (key, value, muted) rows in the legacy grid order.
@@ -1376,6 +1451,210 @@ fn western2(value: f64) -> String {
         digits = out.chars().rev().collect();
     }
     format!("{sign}{digits}.{frac:02}")
+}
+
+/// Hover-only projection: crosshair tags + OHLC readout, nothing else.
+///
+/// The crosshair fast path — moving the pointer must never rebuild candle
+/// geometry, ticks, segments, markers or list models. `plot_slots` mirrors
+/// the `project()` grid so positions agree byte-for-byte.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HoverView {
+    pub hover_x: f32,
+    pub hover_y: f32,
+    pub hover_price: String,
+    pub hover_time: String,
+    pub hover_volume: String,
+    pub hover_bull: bool,
+    pub has_hover: bool,
+    pub header_ohlc: String,
+}
+
+pub fn project_hover(state: &MarketState) -> HoverView {
+    let plot_slots = state.count.max(1);
+    let frame = scale_frame(state);
+    let mut out = HoverView {
+        hover_x: 0.5,
+        hover_y: 0.5,
+        hover_price: String::new(),
+        hover_time: String::new(),
+        hover_volume: String::new(),
+        hover_bull: true,
+        has_hover: false,
+        header_ohlc: "—".to_string(),
+    };
+    if state.has_data() {
+        if let Some(last) = state.bars.last() {
+            out.header_ohlc = format!(
+                "O {}  H {}  L {}  C {}",
+                fmt_price(last.open),
+                fmt_price(last.high),
+                fmt_price(last.low),
+                fmt_price(last.close)
+            );
+        }
+    }
+    if let Some(hover) = state.hover {
+        if let Some(bar) = state.bars.get(hover.index) {
+            out.has_hover = true;
+            let rel = hover.index.saturating_sub(state.first);
+            out.hover_x = (rel as f64 + 0.5) as f32 / plot_slots as f32;
+            out.hover_y = hover.y_frac;
+            // Regular keeps the state-computed price verbatim (golden
+            // parity); Percent/Log read the cursor position off the same
+            // transformed frame the axis labels use.
+            out.hover_price = match frame.xform {
+                ScaleXform::Identity => fmt_price(hover.price),
+                xform => {
+                    let frac = f64::from(hover.y_frac).clamp(0.0, 1.0);
+                    fmt_scale(xform, frame.high - frac * (frame.high - frame.low))
+                }
+            };
+            out.hover_time = short_time(&bar.time);
+            out.hover_volume = fmt_volume(bar.volume);
+            out.hover_bull = bar.close >= bar.open;
+            out.header_ohlc = format!(
+                "O {}  H {}  L {}  C {}",
+                fmt_price(bar.open),
+                fmt_price(bar.high),
+                fmt_price(bar.low),
+                fmt_price(bar.close)
+            );
+        }
+    }
+    out
+}
+
+/// Transformed price frame for the current scale mode: how a raw price maps
+/// into the 0..1 plot band plus the range it normalizes against. Regular is
+/// the identity over `price_range()`; Percent/Log fall back to it whenever
+/// the visible data cannot represent them (zero anchor, non-positive prices).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ScaleXform {
+    Identity,
+    Percent { anchor: f64 },
+    Log,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ScaleFrame {
+    xform: ScaleXform,
+    low: f64,
+    high: f64,
+}
+
+fn transform_price(xform: ScaleXform, value: f64) -> Option<f64> {
+    match xform {
+        ScaleXform::Identity => Some(value),
+        ScaleXform::Percent { anchor } => {
+            if anchor.is_finite() && anchor != 0.0 && value.is_finite() {
+                Some(100.0 * (value - anchor) / anchor.abs())
+            } else {
+                None
+            }
+        }
+        ScaleXform::Log => {
+            if value.is_finite() && value > 0.0 {
+                Some(value.ln())
+            } else {
+                None
+            }
+        }
+    }
+}
+
+fn pad_range(low: f64, high: f64) -> (f64, f64) {
+    let mut span = high - low;
+    if !span.is_finite() || span <= 0.0 {
+        span = high.abs() * 0.01;
+        if !span.is_finite() || span <= 0.0 {
+            span = 0.01;
+        }
+    }
+    let pad = span * PRICE_EDGE_MARGIN;
+    (low - pad, high + pad)
+}
+
+fn scale_frame(state: &MarketState) -> ScaleFrame {
+    let window = state.visible_window();
+    let fallback = || {
+        let (low, high) = state.price_range();
+        ScaleFrame {
+            xform: ScaleXform::Identity,
+            low,
+            high,
+        }
+    };
+    if window.is_empty() {
+        return ScaleFrame {
+            xform: ScaleXform::Identity,
+            low: 0.0,
+            high: 1.0,
+        };
+    }
+    let mode = state.scale_mode;
+    if mode == ChartScaleMode::Regular {
+        return fallback();
+    }
+    let xform = match mode {
+        ChartScaleMode::Percent => {
+            let anchor = window[0].close;
+            if !anchor.is_finite() || anchor == 0.0 {
+                return fallback();
+            }
+            ScaleXform::Percent { anchor }
+        }
+        ChartScaleMode::Logarithmic => ScaleXform::Log,
+        ChartScaleMode::Regular => return fallback(),
+    };
+    // Manual zoom ends live in raw price: transform them with the same frame.
+    if let Some((raw_low, raw_high)) = state.price_manual {
+        if raw_high > raw_low {
+            if let (Some(low), Some(high)) = (
+                transform_price(xform, raw_low),
+                transform_price(xform, raw_high),
+            ) {
+                if high > low {
+                    return ScaleFrame { xform, low, high };
+                }
+            }
+        }
+    }
+    let mut low = f64::INFINITY;
+    let mut high = f64::NEG_INFINITY;
+    for bar in window {
+        let (Some(l), Some(h)) = (
+            transform_price(xform, bar.low),
+            transform_price(xform, bar.high),
+        ) else {
+            return fallback();
+        };
+        low = low.min(l);
+        high = high.max(h);
+    }
+    let (low, high) = pad_range(low, high);
+    ScaleFrame { xform, low, high }
+}
+
+/// Axis/crosshair label for a transformed scale value.
+fn fmt_scale(xform: ScaleXform, t_value: f64) -> String {
+    match xform {
+        ScaleXform::Identity => fmt_price(t_value),
+        ScaleXform::Percent { .. } => {
+            if t_value.is_finite() {
+                format!("{t_value:+.2}%")
+            } else {
+                "N/A".to_string()
+            }
+        }
+        ScaleXform::Log => {
+            if t_value.is_finite() {
+                fmt_price(t_value.exp())
+            } else {
+                "N/A".to_string()
+            }
+        }
+    }
 }
 
 /// Project state into the flat render view (pure; no I/O, no inference).
@@ -1445,11 +1724,14 @@ pub fn project(state: &MarketState) -> MarketView {
     // while panning and the region past the newest bar renders as real empty
     // space instead of stretching the remaining candles across the plot.
     let plot_slots = state.count.max(1);
-    let (price_low, price_high) = state.price_range();
-    let span = price_high - price_low;
+    let frame = scale_frame(state);
+    let span = frame.high - frame.low;
     let norm = |v: f64| {
         if span > 0.0 {
-            ((price_high - v) / span) as f32
+            match transform_price(frame.xform, v) {
+                Some(t) => ((frame.high - t) / span) as f32,
+                None => 0.5,
+            }
         } else {
             0.5
         }
@@ -1457,7 +1739,6 @@ pub fn project(state: &MarketState) -> MarketView {
     let mut candles = Vec::with_capacity(window.len());
     let mut price_ticks = Vec::new();
     let mut time_ticks = Vec::new();
-    let mut header_ohlc = "—".to_string();
     if has_data {
         // Bars the data actually holds: the tick labels are sampled from
         // these, while their positions come from the slot grid above.
@@ -1488,7 +1769,7 @@ pub fn project(state: &MarketState) -> MarketView {
         for frac in [0.0f32, 0.25, 0.5, 0.75, 1.0] {
             price_ticks.push(AxisTick {
                 pos: frac,
-                label: fmt_price(price_high - f64::from(frac) * span),
+                label: fmt_scale(frame.xform, frame.high - f64::from(frac) * span),
             });
         }
         let ticks = 6usize.min(visible);
@@ -1502,44 +1783,19 @@ pub fn project(state: &MarketState) -> MarketView {
                 label: short_time(&window[idx].time),
             });
         }
-        if let Some(last) = state.bars.last() {
-            header_ohlc = format!(
-                "O {}  H {}  L {}  C {}",
-                fmt_price(last.open),
-                fmt_price(last.high),
-                fmt_price(last.low),
-                fmt_price(last.close)
-            );
-        }
     }
 
-    // Crosshair tags from the snapped hover.
-    let mut hover_x = 0.5f32;
-    let mut hover_y = 0.5f32;
-    let mut hover_price = String::new();
-    let mut hover_time = String::new();
-    let mut hover_volume = String::new();
-    let mut hover_bull = true;
-    let mut has_hover = false;
-    if let Some(hover) = state.hover {
-        if let Some(bar) = state.bars.get(hover.index) {
-            has_hover = true;
-            let rel = hover.index.saturating_sub(state.first);
-            hover_x = (rel as f64 + 0.5) as f32 / plot_slots as f32;
-            hover_y = hover.y_frac;
-            hover_price = fmt_price(hover.price);
-            hover_time = short_time(&bar.time);
-            hover_volume = fmt_volume(bar.volume);
-            hover_bull = bar.close >= bar.open;
-            header_ohlc = format!(
-                "O {}  H {}  L {}  C {}",
-                fmt_price(bar.open),
-                fmt_price(bar.high),
-                fmt_price(bar.low),
-                fmt_price(bar.close)
-            );
-        }
-    }
+    // Crosshair tags from the snapped hover (hover-only fast path shares
+    // this exact helper — one source of truth, never duplicated).
+    let hover = project_hover(state);
+    let hover_x = hover.hover_x;
+    let hover_y = hover.hover_y;
+    let hover_price = hover.hover_price;
+    let hover_time = hover.hover_time;
+    let hover_volume = hover.hover_volume;
+    let hover_bull = hover.hover_bull;
+    let has_hover = hover.has_hover;
+    let header_ohlc = hover.header_ohlc;
 
     /// Horizontal ray emitter shared by extend series and store RAY records
     /// (legacy paint_overlay ray algorithm, same inputs): each origin extends to
@@ -2033,6 +2289,10 @@ pub fn project(state: &MarketState) -> MarketView {
         settings_rows,
         active_label,
         trade_context: state.trade_context.clone(),
+        scale_mode: state.scale_mode.kind(),
+        scale_label: state.scale_mode.label().to_string(),
+        grid_visible: state.grid_visible,
+        cross_visible: state.cross_visible,
         download: mdownload::project_download(&state.download),
         market_status_open: state.market_status.open,
         market_status_regime: market_status_rows(&state.market_status).0,
@@ -3242,6 +3502,113 @@ mod tests {
         assert_eq!(by_key["Trend strength"], ("--", true));
         // Snapshot NEVER touches the view-local open flag.
         assert!(!view.market_status_open);
+    }
+
+    fn scale_bars() -> Vec<MarketBar> {
+        (0..100)
+            .map(|i| {
+                let close = 100.0 + i as f64;
+                MarketBar {
+                    time: format!("2024-01-02T{:02}:{:02}:00", 9 + i / 60, i % 60),
+                    open: close - 1.0,
+                    high: close + 1.0,
+                    low: close - 2.0,
+                    close,
+                    volume: 1000.0,
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn scale_cycle_order_and_flag_toggles() {
+        let mut st = MarketState::default();
+        assert_eq!(st.scale_mode, ChartScaleMode::Regular);
+        assert!(st.apply(MarketAction::CycleScaleMode));
+        assert_eq!(st.scale_mode, ChartScaleMode::Percent);
+        assert!(st.apply(MarketAction::CycleScaleMode));
+        assert_eq!(st.scale_mode, ChartScaleMode::Logarithmic);
+        assert!(st.apply(MarketAction::CycleScaleMode));
+        assert_eq!(st.scale_mode, ChartScaleMode::Regular);
+        assert_eq!(ChartScaleMode::Percent.label(), "%");
+        assert_eq!(ChartScaleMode::Logarithmic.kind(), 2);
+        assert!(st.grid_visible && st.cross_visible);
+        assert!(st.apply(MarketAction::ToggleGrid));
+        assert!(!st.grid_visible);
+        assert!(st.apply(MarketAction::ToggleCrosshair));
+        assert!(!st.cross_visible);
+    }
+
+    #[test]
+    fn percent_scale_anchors_first_visible_bar_at_zero() {
+        let mut st = MarketState::default();
+        st.width_cap = 200;
+        st.set_bars("S", "15m", "", scale_bars());
+        assert!(st.apply(MarketAction::CycleScaleMode));
+        let view = project(&st);
+        assert!(view.has_data);
+        // First bar sits at ~0%, last near +99%: monotonic rise preserved.
+        assert!(view.candles.len() > 10);
+        for w in view.candles.windows(2) {
+            assert!(w[0].close >= w[1].close, "percent order must follow price");
+        }
+        assert!(view.price_ticks.iter().all(|t| t.label.ends_with('%')));
+        let proj = project_hover(&st);
+        assert!(proj.header_ohlc.starts_with('O'));
+    }
+
+    #[test]
+    fn log_scale_keeps_price_labels_and_order() {
+        let mut st = MarketState::default();
+        st.width_cap = 200;
+        st.set_bars("S", "15m", "", scale_bars());
+        assert!(st.apply(MarketAction::CycleScaleMode));
+        assert!(st.apply(MarketAction::CycleScaleMode));
+        assert_eq!(st.scale_mode, ChartScaleMode::Logarithmic);
+        let view = project(&st);
+        assert!(!view.price_ticks.is_empty());
+        assert!(view.price_ticks.iter().all(|t| !t.label.ends_with('%')));
+        // Geometry stays in band and ordered.
+        for c in &view.candles {
+            for v in [c.open, c.high, c.low, c.close] {
+                assert!((0.0..=1.0).contains(&v));
+            }
+        }
+    }
+
+    #[test]
+    fn degenerate_scale_falls_back_to_regular() {
+        // Zero anchor: percent cannot represent, regular geometry survives.
+        let mut st = MarketState::default();
+        st.width_cap = 200;
+        st.set_bars(
+            "S",
+            "15m",
+            "",
+            vec![MarketBar {
+                time: "2024-01-02T10:00:00".to_string(),
+                open: 0.0,
+                high: 0.0,
+                low: 0.0,
+                close: 0.0,
+                volume: 0.0,
+            }],
+        );
+        assert!(st.apply(MarketAction::CycleScaleMode));
+        let view = project(&st);
+        assert!(view.price_ticks.iter().all(|t| !t.label.ends_with('%')));
+    }
+
+    #[test]
+    fn settings_project_into_view() {
+        let mut st = MarketState::default();
+        st.set_bars("S", "15m", "", scale_bars());
+        assert!(st.apply(MarketAction::ToggleGrid));
+        let view = project(&st);
+        assert_eq!(view.scale_mode, 0);
+        assert_eq!(view.scale_label, "₹");
+        assert!(!view.grid_visible);
+        assert!(view.cross_visible);
     }
 
     #[test]

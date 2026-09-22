@@ -43,14 +43,6 @@
     },
     {
       "from": "00_app/app",
-      "kind": "actual",
-      "sources": [
-        "00_app/app/headless.py"
-      ],
-      "to": "03_market/market"
-    },
-    {
-      "from": "00_app/app",
       "kind": "declared",
       "sources": [
         "DOMAIN_DEPS:app",
@@ -156,6 +148,7 @@
       "kind": "actual",
       "sources": [
         "00_app/app/services/live_trading_service.py",
+        "00_app/app/services/market_data_service.py",
         "00_app/app/services/research_service.py"
       ],
       "to": "03_market/market"
@@ -172,6 +165,7 @@
       "from": "00_app/app/services",
       "kind": "actual",
       "sources": [
+        "00_app/app/services/backtest_service.py",
         "00_app/app/services/live_trading_service.py",
         "00_app/app/services/research_service.py"
       ],
@@ -189,6 +183,7 @@
       "from": "00_app/app/services",
       "kind": "actual",
       "sources": [
+        "00_app/app/services/backtest_service.py",
         "00_app/app/services/research_service.py"
       ],
       "to": "06_backtest/backtest"
@@ -357,8 +352,7 @@
         "05_strategy/strategy/events/lab_reset.py",
         "05_strategy/strategy/events/paper_trade_requested.py",
         "05_strategy/strategy/events/strategies_listed.py",
-        "05_strategy/strategy/events/strategy_selected.py",
-        "05_strategy/strategy/manifest.py"
+        "05_strategy/strategy/events/strategy_selected.py"
       ],
       "to": "01_core/core"
     },
@@ -754,6 +748,11 @@
     {
       "from": "00_app/app",
       "kind": "declared-without-actual",
+      "to": "03_market/market"
+    },
+    {
+      "from": "00_app/app",
+      "kind": "declared-without-actual",
       "to": "07_risk/risk"
     },
     {
@@ -932,7 +931,7 @@
       "to": "01_core/core/native"
     }
   ],
-  "entity_count": 3636,
+  "entity_count": 3734,
   "files": [
     {
       "domain": "APP_COMPOSITION",
@@ -971,6 +970,16 @@
       "module": "00_app/app/services",
       "owner": "PYTHON_APP",
       "owner_source": "policy",
+      "path": "00_app/app/services/backtest_service.py",
+      "retention_state": null
+    },
+    {
+      "domain": "APP_COMPOSITION",
+      "is_test": false,
+      "language": "PYTHON",
+      "module": "00_app/app/services",
+      "owner": "PYTHON_APP",
+      "owner_source": "policy",
       "path": "00_app/app/services/broker_manager.py",
       "retention_state": null
     },
@@ -995,6 +1004,16 @@
       "retention_state": null
     },
     {
+      "domain": "APP_COMPOSITION",
+      "is_test": false,
+      "language": "PYTHON",
+      "module": "00_app/app/services",
+      "owner": "PYTHON_APP",
+      "owner_source": "policy",
+      "path": "00_app/app/services/market_data_service.py",
+      "retention_state": null
+    },
+    {
       "domain": "RESEARCH",
       "is_test": false,
       "language": "PYTHON",
@@ -1012,6 +1031,26 @@
       "owner": "route:app-composition",
       "owner_source": "route",
       "path": "00_app/app/tests/__init__.py",
+      "retention_state": null
+    },
+    {
+      "domain": "APP_COMPOSITION",
+      "is_test": true,
+      "language": "PYTHON",
+      "module": "00_app/app",
+      "owner": "route:app-composition",
+      "owner_source": "route",
+      "path": "00_app/app/tests/test_backtest_service.py",
+      "retention_state": null
+    },
+    {
+      "domain": "APP_COMPOSITION",
+      "is_test": true,
+      "language": "PYTHON",
+      "module": "00_app/app",
+      "owner": "route:app-composition",
+      "owner_source": "route",
+      "path": "00_app/app/tests/test_market_data_service.py",
       "retention_state": null
     },
     {
@@ -1701,6 +1740,16 @@
       "module": "05_strategy/strategy",
       "owner": "PYTHON_STRATEGY",
       "owner_source": "policy",
+      "path": "05_strategy/strategy/builtins.py",
+      "retention_state": null
+    },
+    {
+      "domain": "STRATEGY",
+      "is_test": false,
+      "language": "PYTHON",
+      "module": "05_strategy/strategy",
+      "owner": "PYTHON_STRATEGY",
+      "owner_source": "policy",
       "path": "05_strategy/strategy/events/__init__.py",
       "retention_state": null
     },
@@ -2131,6 +2180,16 @@
       "module": "05_strategy/strategy",
       "owner": "PYTHON_STRATEGY",
       "owner_source": "policy",
+      "path": "05_strategy/strategy/strategies/ema.py",
+      "retention_state": null
+    },
+    {
+      "domain": "STRATEGY",
+      "is_test": false,
+      "language": "PYTHON",
+      "module": "05_strategy/strategy",
+      "owner": "PYTHON_STRATEGY",
+      "owner_source": "policy",
       "path": "05_strategy/strategy/strategies/indicators.py",
       "retention_state": null
     },
@@ -2151,6 +2210,16 @@
       "module": "05_strategy/strategy",
       "owner": "PYTHON_STRATEGY",
       "owner_source": "policy",
+      "path": "05_strategy/strategy/strategies/rsi.py",
+      "retention_state": null
+    },
+    {
+      "domain": "STRATEGY",
+      "is_test": false,
+      "language": "PYTHON",
+      "module": "05_strategy/strategy",
+      "owner": "PYTHON_STRATEGY",
+      "owner_source": "policy",
       "path": "05_strategy/strategy/strategies/sma.py",
       "retention_state": null
     },
@@ -2162,6 +2231,16 @@
       "owner": "PYTHON_STRATEGY",
       "owner_source": "policy",
       "path": "05_strategy/strategy/tests/__init__.py",
+      "retention_state": null
+    },
+    {
+      "domain": "STRATEGY",
+      "is_test": true,
+      "language": "PYTHON",
+      "module": "05_strategy/strategy",
+      "owner": "PYTHON_STRATEGY",
+      "owner_source": "policy",
+      "path": "05_strategy/strategy/tests/test_builtins.py",
       "retention_state": null
     },
     {
@@ -3271,6 +3350,16 @@
       "module": "rust/vayren-shell",
       "owner": "rust/vayren-shell",
       "owner_source": "synthetic",
+      "path": "rust/vayren-shell/src/perf.rs",
+      "retention_state": null
+    },
+    {
+      "domain": "NATIVE_UI",
+      "is_test": false,
+      "language": "RUST_SLINT",
+      "module": "rust/vayren-shell",
+      "owner": "rust/vayren-shell",
+      "owner_source": "synthetic",
       "path": "rust/vayren-shell/src/portfolio.rs",
       "retention_state": null
     },
@@ -4135,7 +4224,7 @@
       "retention_state": null
     }
   ],
-  "inputs_hash": "e6f77b85df2ba1d9eacd16c68c033619784b55364abeba07ef7133cff8395bd9",
+  "inputs_hash": "c19d8a33a9bb0fbcc8bdde8d5dcb3da6c43aa3499fb7479c3403303ede444630",
   "languages": [
     {
       "id": "RUST"
@@ -4155,7 +4244,6 @@
         "00_app/app/services",
         "01_core/core",
         "02_data/data/provider",
-        "03_market/market",
         "05_strategy/strategy",
         "06_backtest/backtest"
       ],
@@ -4174,7 +4262,9 @@
       "files": [
         "00_app/app/__init__.py",
         "00_app/app/headless.py",
-        "00_app/app/tests/__init__.py"
+        "00_app/app/tests/__init__.py",
+        "00_app/app/tests/test_backtest_service.py",
+        "00_app/app/tests/test_market_data_service.py"
       ],
       "id": "00_app/app",
       "language": "PYTHON",
@@ -4208,9 +4298,11 @@
       "domain": "APP_COMPOSITION",
       "files": [
         "00_app/app/services/__init__.py",
+        "00_app/app/services/backtest_service.py",
         "00_app/app/services/broker_manager.py",
         "00_app/app/services/broker_selection_service.py",
         "00_app/app/services/live_trading_service.py",
+        "00_app/app/services/market_data_service.py",
         "00_app/app/services/research_service.py"
       ],
       "id": "00_app/app/services",
@@ -4459,6 +4551,7 @@
       "domain": "STRATEGY",
       "files": [
         "05_strategy/strategy/__init__.py",
+        "05_strategy/strategy/builtins.py",
         "05_strategy/strategy/events/__init__.py",
         "05_strategy/strategy/events/lab_reset.py",
         "05_strategy/strategy/events/paper_trade_requested.py",
@@ -4502,10 +4595,13 @@
         "05_strategy/strategy/runtime.py",
         "05_strategy/strategy/strategies/__init__.py",
         "05_strategy/strategy/strategies/base.py",
+        "05_strategy/strategy/strategies/ema.py",
         "05_strategy/strategy/strategies/indicators.py",
         "05_strategy/strategy/strategies/obr.py",
+        "05_strategy/strategy/strategies/rsi.py",
         "05_strategy/strategy/strategies/sma.py",
         "05_strategy/strategy/tests/__init__.py",
+        "05_strategy/strategy/tests/test_builtins.py",
         "05_strategy/strategy/version.py"
       ],
       "id": "05_strategy/strategy",
@@ -4850,6 +4946,7 @@
         "rust/vayren-shell/src/main.rs",
         "rust/vayren-shell/src/market.rs",
         "rust/vayren-shell/src/market_download.rs",
+        "rust/vayren-shell/src/perf.rs",
         "rust/vayren-shell/src/portfolio.rs",
         "rust/vayren-shell/src/python_bridge.rs",
         "rust/vayren-shell/src/research_state.rs",
@@ -5155,7 +5252,7 @@
       "required_language": "PYTHON"
     }
   ],
-  "relationship_count": 5694,
+  "relationship_count": 5908,
   "repository": {
     "name": "vayren-core",
     "root": "."
@@ -5172,7 +5269,7 @@
       "file": "00_app/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 132,
+      "line": 221,
       "module": "00_app/app",
       "name": "_await_broker_settled",
       "public": false,
@@ -5190,11 +5287,26 @@
       "file": "00_app/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 58,
+      "line": 101,
       "module": "00_app/app",
       "name": "_bar_to_dict",
       "public": false,
       "qualified": "app.headless:_bar_to_dict",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "app.headless._bootstrap_chapter_path",
+      "file": "00_app/app/headless.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 21,
+      "module": "00_app/app",
+      "name": "_bootstrap_chapter_path",
+      "public": false,
+      "qualified": "app.headless:_bootstrap_chapter_path",
       "tests": []
     },
     {
@@ -5207,7 +5319,7 @@
       "file": "00_app/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 151,
+      "line": 240,
       "module": "00_app/app",
       "name": "_credential_field_rows",
       "public": false,
@@ -5224,7 +5336,7 @@
       "file": "00_app/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 49,
+      "line": 92,
       "module": "00_app/app",
       "name": "_emit",
       "public": false,
@@ -5241,7 +5353,7 @@
       "file": "00_app/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 83,
+      "line": 132,
       "module": "00_app/app",
       "name": "_empty_market_snapshot",
       "public": false,
@@ -5250,21 +5362,104 @@
     },
     {
       "called_by": [
-        "app.headless:run_headless_backend"
+        "app.headless:_lab_run",
+        "app.headless:_lab_snapshot",
+        "app.headless:_lab_workspace"
       ],
       "callers_complete": true,
       "calls": [
         "strategy.language.storage:list_strategies"
       ],
+      "dotted": "app.headless._lab_library_rows",
+      "file": "00_app/app/headless.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 381,
+      "module": "00_app/app",
+      "name": "_lab_library_rows",
+      "public": false,
+      "qualified": "app.headless:_lab_library_rows",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.headless:run_headless_backend"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "app.headless:_lab_library_rows",
+        "app.headless:_lab_workspace",
+        "app.services.backtest_service:BacktestError",
+        "app.services.backtest_service:run_backtest"
+      ],
+      "dotted": "app.headless._lab_run",
+      "file": "00_app/app/headless.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 559,
+      "module": "00_app/app",
+      "name": "_lab_run",
+      "public": false,
+      "qualified": "app.headless:_lab_run",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.headless:run_headless_backend"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "app.headless:_lab_library_rows",
+        "app.headless:_lab_workspace"
+      ],
       "dotted": "app.headless._lab_snapshot",
       "file": "00_app/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 292,
+      "line": 539,
       "module": "00_app/app",
       "name": "_lab_snapshot",
       "public": false,
       "qualified": "app.headless:_lab_snapshot",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.headless:_lab_workspace"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "app.headless._lab_universe",
+      "file": "00_app/app/headless.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 430,
+      "module": "00_app/app",
+      "name": "_lab_universe",
+      "public": false,
+      "qualified": "app.headless:_lab_universe",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.headless:_lab_run",
+        "app.headless:_lab_snapshot"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "app.headless:_lab_library_rows",
+        "app.headless:_lab_universe",
+        "app.services.backtest_service:describe_strategy"
+      ],
+      "dotted": "app.headless._lab_workspace",
+      "file": "00_app/app/headless.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 440,
+      "module": "00_app/app",
+      "name": "_lab_workspace",
+      "public": false,
+      "qualified": "app.headless:_lab_workspace",
       "tests": []
     },
     {
@@ -5277,7 +5472,7 @@
       "file": "00_app/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 22,
+      "line": 56,
       "module": "00_app/app",
       "name": "_logs_to_stderr",
       "public": false,
@@ -5290,12 +5485,14 @@
         "app.headless:run_headless_backend"
       ],
       "callers_complete": true,
-      "calls": [],
+      "calls": [
+        "app.services.market_data_service:MarketDataService"
+      ],
       "dotted": "app.headless._market_repository",
       "file": "00_app/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 70,
+      "line": 113,
       "module": "00_app/app",
       "name": "_market_repository",
       "public": false,
@@ -5315,7 +5512,7 @@
       "file": "00_app/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 95,
+      "line": 145,
       "module": "00_app/app",
       "name": "_market_snapshot",
       "public": false,
@@ -5334,7 +5531,7 @@
       "file": "00_app/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 287,
+      "line": 376,
       "module": "00_app/app",
       "name": "_portfolio_snapshot",
       "public": false,
@@ -5355,7 +5552,7 @@
       "file": "00_app/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 340,
+      "line": 658,
       "module": "00_app/app",
       "name": "_research_snapshot",
       "public": false,
@@ -5378,7 +5575,7 @@
       "file": "00_app/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 191,
+      "line": 280,
       "module": "00_app/app",
       "name": "_system_snapshot",
       "public": false,
@@ -5399,7 +5596,7 @@
       "file": "00_app/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 264,
+      "line": 353,
       "module": "00_app/app",
       "name": "_trading_service_snapshot",
       "public": false,
@@ -5417,7 +5614,7 @@
       "file": "00_app/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 536,
+      "line": 876,
       "module": "00_app/app",
       "name": "main_headless",
       "public": true,
@@ -5434,7 +5631,7 @@
       "file": "00_app/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 402,
+      "line": 720,
       "module": "00_app/app",
       "name": "parse_headless_args",
       "public": true,
@@ -5448,6 +5645,7 @@
       "callers_complete": true,
       "calls": [
         "app.headless:_emit",
+        "app.headless:_lab_run",
         "app.headless:_lab_snapshot",
         "app.headless:_logs_to_stderr",
         "app.headless:_market_repository",
@@ -5461,11 +5659,227 @@
       "file": "00_app/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 421,
+      "line": 739,
       "module": "00_app/app",
       "name": "run_headless_backend",
       "public": true,
       "qualified": "app.headless:run_headless_backend",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.headless:_lab_run",
+        "app.services.backtest_service:_make_logic",
+        "app.services.backtest_service:_run_symbol",
+        "app.services.backtest_service:_strategy_source",
+        "app.services.backtest_service:describe_strategy",
+        "app.services.backtest_service:run_backtest",
+        "app.tests.test_backtest_service:test_insufficient_data_fails_closed",
+        "app.tests.test_backtest_service:test_unknown_strategy_and_bad_inputs_fail_actionably"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "app.services.backtest_service.BacktestError",
+      "file": "00_app/app/services/backtest_service.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 23,
+      "module": "00_app/app/services",
+      "name": "BacktestError",
+      "public": true,
+      "qualified": "app.services.backtest_service:BacktestError",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.services.backtest_service:run_backtest"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "app.services.backtest_service:_running_equities"
+      ],
+      "dotted": "app.services.backtest_service._aggregate_metrics",
+      "file": "00_app/app/services/backtest_service.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 395,
+      "module": "00_app/app/services",
+      "name": "_aggregate_metrics",
+      "public": false,
+      "qualified": "app.services.backtest_service:_aggregate_metrics",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.services.backtest_service:run_backtest"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "app.services.backtest_service:BacktestError",
+        "app.services.backtest_service:_strategy_source",
+        "strategy.language.compiler:compile_strategy",
+        "strategy.models.parameters:StrategyParameters"
+      ],
+      "dotted": "app.services.backtest_service._make_logic",
+      "file": "00_app/app/services/backtest_service.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 70,
+      "module": "00_app/app/services",
+      "name": "_make_logic",
+      "public": false,
+      "qualified": "app.services.backtest_service:_make_logic",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.services.backtest_service:run_backtest"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "app.services.backtest_service:_running_equities"
+      ],
+      "dotted": "app.services.backtest_service._rank_row",
+      "file": "00_app/app/services/backtest_service.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 360,
+      "module": "00_app/app/services",
+      "name": "_rank_row",
+      "public": false,
+      "qualified": "app.services.backtest_service:_rank_row",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.services.backtest_service:run_backtest"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "app.services.backtest_service:BacktestError",
+        "app.services.backtest_service:_trade",
+        "strategy.models.parameters:StrategyParameters",
+        "strategy.models.signal:SignalKind",
+        "strategy.models.state:StrategyState",
+        "strategy.runtime:BarView"
+      ],
+      "dotted": "app.services.backtest_service._run_symbol",
+      "file": "00_app/app/services/backtest_service.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 175,
+      "module": "00_app/app/services",
+      "name": "_run_symbol",
+      "public": false,
+      "qualified": "app.services.backtest_service:_run_symbol",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.services.backtest_service:_aggregate_metrics",
+        "app.services.backtest_service:_rank_row"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "app.services.backtest_service._running_equities",
+      "file": "00_app/app/services/backtest_service.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 385,
+      "module": "00_app/app/services",
+      "name": "_running_equities",
+      "public": false,
+      "qualified": "app.services.backtest_service:_running_equities",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.services.backtest_service:_make_logic",
+        "app.services.backtest_service:describe_strategy"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "app.services.backtest_service:BacktestError",
+        "strategy.language.storage:load_strategy"
+      ],
+      "dotted": "app.services.backtest_service._strategy_source",
+      "file": "00_app/app/services/backtest_service.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 27,
+      "module": "00_app/app/services",
+      "name": "_strategy_source",
+      "public": false,
+      "qualified": "app.services.backtest_service:_strategy_source",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.services.backtest_service:_run_symbol"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "app.services.backtest_service._trade",
+      "file": "00_app/app/services/backtest_service.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 343,
+      "module": "00_app/app/services",
+      "name": "_trade",
+      "public": false,
+      "qualified": "app.services.backtest_service:_trade",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.headless:_lab_workspace",
+        "app.tests.test_backtest_service:test_describe_strategy_reports_params"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "app.services.backtest_service:BacktestError",
+        "app.services.backtest_service:_strategy_source",
+        "strategy.language.compiler:compile_strategy"
+      ],
+      "dotted": "app.services.backtest_service.describe_strategy",
+      "file": "00_app/app/services/backtest_service.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 44,
+      "module": "00_app/app/services",
+      "name": "describe_strategy",
+      "public": true,
+      "qualified": "app.services.backtest_service:describe_strategy",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.headless:_lab_run",
+        "app.tests.test_backtest_service:test_builtin_strategy_runs_on_real_bars",
+        "app.tests.test_backtest_service:test_insufficient_data_fails_closed",
+        "app.tests.test_backtest_service:test_rsi_and_ema_builtins_run",
+        "app.tests.test_backtest_service:test_sell_mode_shorts",
+        "app.tests.test_backtest_service:test_unknown_strategy_and_bad_inputs_fail_actionably"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "app.services.backtest_service:BacktestError",
+        "app.services.backtest_service:_aggregate_metrics",
+        "app.services.backtest_service:_make_logic",
+        "app.services.backtest_service:_rank_row",
+        "app.services.backtest_service:_run_symbol",
+        "app.services.market_data_service:MarketDataError",
+        "app.services.market_data_service:MarketDataService"
+      ],
+      "dotted": "app.services.backtest_service.run_backtest",
+      "file": "00_app/app/services/backtest_service.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 87,
+      "module": "00_app/app/services",
+      "name": "run_backtest",
+      "public": true,
+      "qualified": "app.services.backtest_service:run_backtest",
       "tests": []
     },
     {
@@ -5692,6 +6106,169 @@
     },
     {
       "called_by": [
+        "app.services.market_data_service:MarketDataService"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "app.services.market_data_service.DiscoveryReport",
+      "file": "00_app/app/services/market_data_service.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 51,
+      "module": "00_app/app/services",
+      "name": "DiscoveryReport",
+      "public": true,
+      "qualified": "app.services.market_data_service:DiscoveryReport",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.services.backtest_service:run_backtest",
+        "app.services.market_data_service:MarketDataService",
+        "app.services.market_data_service:resolve_data_dir",
+        "app.tests.test_market_data_service:test_date_filtering",
+        "app.tests.test_market_data_service:test_unknown_symbol_is_actionable",
+        "app.tests.test_market_data_service:test_unsupported_timeframe_is_actionable"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "app.services.market_data_service.MarketDataError",
+      "file": "00_app/app/services/market_data_service.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 37,
+      "module": "00_app/app/services",
+      "name": "MarketDataError",
+      "public": true,
+      "qualified": "app.services.market_data_service:MarketDataError",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.headless:_market_repository",
+        "app.services.backtest_service:run_backtest",
+        "app.tests.test_market_data_service:test_base_bars_normalize_to_canonical_shape",
+        "app.tests.test_market_data_service:test_date_filtering",
+        "app.tests.test_market_data_service:test_discovery_lists_real_symbols_and_skips_invalid",
+        "app.tests.test_market_data_service:test_invalid_rows_are_skipped_not_fatal",
+        "app.tests.test_market_data_service:test_quotes_and_ranges",
+        "app.tests.test_market_data_service:test_timeframe_aggregation_uses_kernel",
+        "app.tests.test_market_data_service:test_unknown_symbol_is_actionable",
+        "app.tests.test_market_data_service:test_unsupported_timeframe_is_actionable"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "app.services.market_data_service:DiscoveryReport",
+        "app.services.market_data_service:MarketDataError",
+        "app.services.market_data_service:Quote",
+        "app.services.market_data_service:_epoch",
+        "app.services.market_data_service:_parse_stamp",
+        "app.services.market_data_service:_valid_ohlcv",
+        "app.services.market_data_service:resolve_data_dir",
+        "market.native_aggregate:mode"
+      ],
+      "dotted": "app.services.market_data_service.MarketDataService",
+      "file": "00_app/app/services/market_data_service.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 109,
+      "module": "00_app/app/services",
+      "name": "MarketDataService",
+      "public": true,
+      "qualified": "app.services.market_data_service:MarketDataService",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.services.market_data_service:MarketDataService",
+        "app.tests.test_market_data_service:test_quotes_and_ranges"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "app.services.market_data_service.Quote",
+      "file": "00_app/app/services/market_data_service.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 42,
+      "module": "00_app/app/services",
+      "name": "Quote",
+      "public": true,
+      "qualified": "app.services.market_data_service:Quote",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.services.market_data_service:MarketDataService"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "app.services.market_data_service._epoch",
+      "file": "00_app/app/services/market_data_service.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 96,
+      "module": "00_app/app/services",
+      "name": "_epoch",
+      "public": false,
+      "qualified": "app.services.market_data_service:_epoch",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.services.market_data_service:MarketDataService"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "app.services.market_data_service._parse_stamp",
+      "file": "00_app/app/services/market_data_service.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 84,
+      "module": "00_app/app/services",
+      "name": "_parse_stamp",
+      "public": false,
+      "qualified": "app.services.market_data_service:_parse_stamp",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.services.market_data_service:MarketDataService"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "app.services.market_data_service._valid_ohlcv",
+      "file": "00_app/app/services/market_data_service.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 100,
+      "module": "00_app/app/services",
+      "name": "_valid_ohlcv",
+      "public": false,
+      "qualified": "app.services.market_data_service:_valid_ohlcv",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.services.market_data_service:MarketDataService",
+        "app.tests.test_market_data_service:test_resolve_prefers_env_and_falls_back"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "app.services.market_data_service:MarketDataError"
+      ],
+      "dotted": "app.services.market_data_service.resolve_data_dir",
+      "file": "00_app/app/services/market_data_service.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 60,
+      "module": "00_app/app/services",
+      "name": "resolve_data_dir",
+      "public": true,
+      "qualified": "app.services.market_data_service:resolve_data_dir",
+      "tests": []
+    },
+    {
+      "called_by": [
         "app.services.research_service:ResearchService"
       ],
       "callers_complete": true,
@@ -5906,6 +6483,379 @@
       "name": "validate_research_config",
       "public": false,
       "qualified": "app.services.research_service:validate_research_config",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.tests.test_backtest_service:store"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "app.tests.test_backtest_service._write_trend_db",
+      "file": "00_app/app/tests/test_backtest_service.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 30,
+      "module": "00_app/app",
+      "name": "_write_trend_db",
+      "public": false,
+      "qualified": "app.tests.test_backtest_service:_write_trend_db",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.tests.test_backtest_service:test_builtin_strategy_runs_on_real_bars",
+        "app.tests.test_backtest_service:test_rsi_and_ema_builtins_run",
+        "app.tests.test_backtest_service:test_sell_mode_shorts",
+        "app.tests.test_backtest_service:test_unknown_strategy_and_bad_inputs_fail_actionably"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "app.tests.test_backtest_service:_write_trend_db"
+      ],
+      "dotted": "app.tests.test_backtest_service.store",
+      "file": "00_app/app/tests/test_backtest_service.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 60,
+      "module": "00_app/app",
+      "name": "store",
+      "public": true,
+      "qualified": "app.tests.test_backtest_service:store",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.backtest_service:run_backtest",
+        "app.tests.test_backtest_service:store"
+      ],
+      "dotted": "app.tests.test_backtest_service.test_builtin_strategy_runs_on_real_bars",
+      "file": "00_app/app/tests/test_backtest_service.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 65,
+      "module": "00_app/app",
+      "name": "test_builtin_strategy_runs_on_real_bars",
+      "public": true,
+      "qualified": "app.tests.test_backtest_service:test_builtin_strategy_runs_on_real_bars",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.backtest_service:describe_strategy"
+      ],
+      "dotted": "app.tests.test_backtest_service.test_describe_strategy_reports_params",
+      "file": "00_app/app/tests/test_backtest_service.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 149,
+      "module": "00_app/app",
+      "name": "test_describe_strategy_reports_params",
+      "public": true,
+      "qualified": "app.tests.test_backtest_service:test_describe_strategy_reports_params",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.backtest_service:BacktestError",
+        "app.services.backtest_service:run_backtest"
+      ],
+      "dotted": "app.tests.test_backtest_service.test_insufficient_data_fails_closed",
+      "file": "00_app/app/tests/test_backtest_service.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 104,
+      "module": "00_app/app",
+      "name": "test_insufficient_data_fails_closed",
+      "public": true,
+      "qualified": "app.tests.test_backtest_service:test_insufficient_data_fails_closed",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.backtest_service:run_backtest",
+        "app.tests.test_backtest_service:store"
+      ],
+      "dotted": "app.tests.test_backtest_service.test_rsi_and_ema_builtins_run",
+      "file": "00_app/app/tests/test_backtest_service.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 88,
+      "module": "00_app/app",
+      "name": "test_rsi_and_ema_builtins_run",
+      "public": true,
+      "qualified": "app.tests.test_backtest_service:test_rsi_and_ema_builtins_run",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.backtest_service:run_backtest",
+        "app.tests.test_backtest_service:store"
+      ],
+      "dotted": "app.tests.test_backtest_service.test_sell_mode_shorts",
+      "file": "00_app/app/tests/test_backtest_service.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 97,
+      "module": "00_app/app",
+      "name": "test_sell_mode_shorts",
+      "public": true,
+      "qualified": "app.tests.test_backtest_service:test_sell_mode_shorts",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.backtest_service:BacktestError",
+        "app.services.backtest_service:run_backtest",
+        "app.tests.test_backtest_service:store"
+      ],
+      "dotted": "app.tests.test_backtest_service.test_unknown_strategy_and_bad_inputs_fail_actionably",
+      "file": "00_app/app/tests/test_backtest_service.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 128,
+      "module": "00_app/app",
+      "name": "test_unknown_strategy_and_bad_inputs_fail_actionably",
+      "public": true,
+      "qualified": "app.tests.test_backtest_service:test_unknown_strategy_and_bad_inputs_fail_actionably",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.tests.test_market_data_service:store"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "app.tests.test_market_data_service._bars_15m",
+      "file": "00_app/app/tests/test_market_data_service.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 47,
+      "module": "00_app/app",
+      "name": "_bars_15m",
+      "public": false,
+      "qualified": "app.tests.test_market_data_service:_bars_15m",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.tests.test_market_data_service:store",
+        "app.tests.test_market_data_service:test_invalid_rows_are_skipped_not_fatal"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "app.tests.test_market_data_service._write_db",
+      "file": "00_app/app/tests/test_market_data_service.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 31,
+      "module": "00_app/app",
+      "name": "_write_db",
+      "public": false,
+      "qualified": "app.tests.test_market_data_service:_write_db",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.tests.test_market_data_service:test_base_bars_normalize_to_canonical_shape",
+        "app.tests.test_market_data_service:test_date_filtering",
+        "app.tests.test_market_data_service:test_discovery_lists_real_symbols_and_skips_invalid",
+        "app.tests.test_market_data_service:test_quotes_and_ranges",
+        "app.tests.test_market_data_service:test_timeframe_aggregation_uses_kernel",
+        "app.tests.test_market_data_service:test_unknown_symbol_is_actionable",
+        "app.tests.test_market_data_service:test_unsupported_timeframe_is_actionable"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "app.tests.test_market_data_service:_bars_15m",
+        "app.tests.test_market_data_service:_write_db"
+      ],
+      "dotted": "app.tests.test_market_data_service.store",
+      "file": "00_app/app/tests/test_market_data_service.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 58,
+      "module": "00_app/app",
+      "name": "store",
+      "public": true,
+      "qualified": "app.tests.test_market_data_service:store",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.market_data_service:MarketDataService",
+        "app.tests.test_market_data_service:store"
+      ],
+      "dotted": "app.tests.test_market_data_service.test_base_bars_normalize_to_canonical_shape",
+      "file": "00_app/app/tests/test_market_data_service.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 93,
+      "module": "00_app/app",
+      "name": "test_base_bars_normalize_to_canonical_shape",
+      "public": true,
+      "qualified": "app.tests.test_market_data_service:test_base_bars_normalize_to_canonical_shape",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.market_data_service:MarketDataError",
+        "app.services.market_data_service:MarketDataService",
+        "app.tests.test_market_data_service:store"
+      ],
+      "dotted": "app.tests.test_market_data_service.test_date_filtering",
+      "file": "00_app/app/tests/test_market_data_service.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 150,
+      "module": "00_app/app",
+      "name": "test_date_filtering",
+      "public": true,
+      "qualified": "app.tests.test_market_data_service:test_date_filtering",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.market_data_service:MarketDataService",
+        "app.tests.test_market_data_service:store"
+      ],
+      "dotted": "app.tests.test_market_data_service.test_discovery_lists_real_symbols_and_skips_invalid",
+      "file": "00_app/app/tests/test_market_data_service.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 85,
+      "module": "00_app/app",
+      "name": "test_discovery_lists_real_symbols_and_skips_invalid",
+      "public": true,
+      "qualified": "app.tests.test_market_data_service:test_discovery_lists_real_symbols_and_skips_invalid",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.market_data_service:MarketDataService",
+        "app.tests.test_market_data_service:_write_db"
+      ],
+      "dotted": "app.tests.test_market_data_service.test_invalid_rows_are_skipped_not_fatal",
+      "file": "00_app/app/tests/test_market_data_service.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 105,
+      "module": "00_app/app",
+      "name": "test_invalid_rows_are_skipped_not_fatal",
+      "public": true,
+      "qualified": "app.tests.test_market_data_service:test_invalid_rows_are_skipped_not_fatal",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.market_data_service:MarketDataService",
+        "app.services.market_data_service:Quote",
+        "app.tests.test_market_data_service:store"
+      ],
+      "dotted": "app.tests.test_market_data_service.test_quotes_and_ranges",
+      "file": "00_app/app/tests/test_market_data_service.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 159,
+      "module": "00_app/app",
+      "name": "test_quotes_and_ranges",
+      "public": true,
+      "qualified": "app.tests.test_market_data_service:test_quotes_and_ranges",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.market_data_service:resolve_data_dir"
+      ],
+      "dotted": "app.tests.test_market_data_service.test_resolve_prefers_env_and_falls_back",
+      "file": "00_app/app/tests/test_market_data_service.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 73,
+      "module": "00_app/app",
+      "name": "test_resolve_prefers_env_and_falls_back",
+      "public": true,
+      "qualified": "app.tests.test_market_data_service:test_resolve_prefers_env_and_falls_back",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.market_data_service:MarketDataService",
+        "app.tests.test_market_data_service:store"
+      ],
+      "dotted": "app.tests.test_market_data_service.test_timeframe_aggregation_uses_kernel",
+      "file": "00_app/app/tests/test_market_data_service.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 125,
+      "module": "00_app/app",
+      "name": "test_timeframe_aggregation_uses_kernel",
+      "public": true,
+      "qualified": "app.tests.test_market_data_service:test_timeframe_aggregation_uses_kernel",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.market_data_service:MarketDataError",
+        "app.services.market_data_service:MarketDataService",
+        "app.tests.test_market_data_service:store"
+      ],
+      "dotted": "app.tests.test_market_data_service.test_unknown_symbol_is_actionable",
+      "file": "00_app/app/tests/test_market_data_service.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 144,
+      "module": "00_app/app",
+      "name": "test_unknown_symbol_is_actionable",
+      "public": true,
+      "qualified": "app.tests.test_market_data_service:test_unknown_symbol_is_actionable",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.market_data_service:MarketDataError",
+        "app.services.market_data_service:MarketDataService",
+        "app.tests.test_market_data_service:store"
+      ],
+      "dotted": "app.tests.test_market_data_service.test_unsupported_timeframe_is_actionable",
+      "file": "00_app/app/tests/test_market_data_service.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 138,
+      "module": "00_app/app",
+      "name": "test_unsupported_timeframe_is_actionable",
+      "public": true,
+      "qualified": "app.tests.test_market_data_service:test_unsupported_timeframe_is_actionable",
       "tests": []
     },
     {
@@ -18076,7 +19026,9 @@
       "tests": []
     },
     {
-      "called_by": [],
+      "called_by": [
+        "app.services.market_data_service:MarketDataService"
+      ],
       "callers_complete": true,
       "calls": [
         "market.native_aggregate:_i64_view"
@@ -29872,7 +30824,7 @@
       "file": "rust/vayren-shell/src/lib.rs",
       "kind": "mod",
       "language": "RUST_SLINT",
-      "line": 36,
+      "line": 38,
       "module": "rust/vayren-shell",
       "name": "live_harness_ui",
       "public": true,
@@ -29913,11 +30865,26 @@
       "called_by": [],
       "callers_complete": false,
       "calls": [],
+      "dotted": "rust::vayren-shell::src::lib::perf",
+      "file": "rust/vayren-shell/src/lib.rs",
+      "kind": "mod",
+      "language": "RUST_SLINT",
+      "line": 12,
+      "module": "rust/vayren-shell",
+      "name": "perf",
+      "public": true,
+      "qualified": "rust::vayren-shell::src::lib::perf",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
       "dotted": "rust::vayren-shell::src::lib::portfolio",
       "file": "rust/vayren-shell/src/lib.rs",
       "kind": "mod",
       "language": "RUST_SLINT",
-      "line": 11,
+      "line": 13,
       "module": "rust/vayren-shell",
       "name": "portfolio",
       "public": true,
@@ -29932,7 +30899,7 @@
       "file": "rust/vayren-shell/src/lib.rs",
       "kind": "mod",
       "language": "RUST_SLINT",
-      "line": 12,
+      "line": 14,
       "module": "rust/vayren-shell",
       "name": "python_bridge",
       "public": true,
@@ -29947,7 +30914,7 @@
       "file": "rust/vayren-shell/src/lib.rs",
       "kind": "mod",
       "language": "RUST_SLINT",
-      "line": 28,
+      "line": 30,
       "module": "rust/vayren-shell",
       "name": "research_harness_ui",
       "public": true,
@@ -29962,7 +30929,7 @@
       "file": "rust/vayren-shell/src/lib.rs",
       "kind": "mod",
       "language": "RUST_SLINT",
-      "line": 13,
+      "line": 15,
       "module": "rust/vayren-shell",
       "name": "research_state",
       "public": true,
@@ -29977,7 +30944,7 @@
       "file": "rust/vayren-shell/src/lib.rs",
       "kind": "mod",
       "language": "RUST_SLINT",
-      "line": 14,
+      "line": 16,
       "module": "rust/vayren-shell",
       "name": "shell",
       "public": true,
@@ -29992,7 +30959,7 @@
       "file": "rust/vayren-shell/src/lib.rs",
       "kind": "mod",
       "language": "RUST_SLINT",
-      "line": 15,
+      "line": 17,
       "module": "rust/vayren-shell",
       "name": "view_model",
       "public": true,
@@ -30007,7 +30974,7 @@
       "file": "rust/vayren-shell/src/lib.rs",
       "kind": "mod",
       "language": "RUST_SLINT",
-      "line": 16,
+      "line": 18,
       "module": "rust/vayren-shell",
       "name": "viewport",
       "public": true,
@@ -30832,7 +31799,7 @@
       "file": "rust/vayren-shell/src/main.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 18,
+      "line": 27,
       "module": "rust/vayren-shell",
       "name": "arg_value",
       "public": false,
@@ -30847,7 +31814,7 @@
       "file": "rust/vayren-shell/src/main.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 33,
+      "line": 42,
       "module": "rust/vayren-shell",
       "name": "default_data_dir",
       "public": false,
@@ -30862,7 +31829,7 @@
       "file": "rust/vayren-shell/src/main.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 40,
+      "line": 60,
       "module": "rust/vayren-shell",
       "name": "default_strategy_dir",
       "public": false,
@@ -30877,7 +31844,7 @@
       "file": "rust/vayren-shell/src/main.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 47,
+      "line": 67,
       "module": "rust/vayren-shell",
       "name": "main",
       "public": false,
@@ -30892,7 +31859,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "struct",
       "language": "RUST_SLINT",
-      "line": 1218,
+      "line": 1296,
       "module": "rust/vayren-shell",
       "name": "AxisTick",
       "public": true,
@@ -30907,11 +31874,26 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "struct",
       "language": "RUST_SLINT",
-      "line": 1204,
+      "line": 1282,
       "module": "rust/vayren-shell",
       "name": "CandlePoint",
       "public": true,
       "qualified": "rust::vayren-shell::src::market::CandlePoint",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "rust::vayren-shell::src::market::ChartScaleMode",
+      "file": "rust/vayren-shell/src/market.rs",
+      "kind": "enum",
+      "language": "RUST_SLINT",
+      "line": 164,
+      "module": "rust/vayren-shell",
+      "name": "ChartScaleMode",
+      "public": true,
+      "qualified": "rust::vayren-shell::src::market::ChartScaleMode",
       "tests": []
     },
     {
@@ -30933,11 +31915,26 @@
       "called_by": [],
       "callers_complete": false,
       "calls": [],
+      "dotted": "rust::vayren-shell::src::market::HoverView",
+      "file": "rust/vayren-shell/src/market.rs",
+      "kind": "struct",
+      "language": "RUST_SLINT",
+      "line": 1462,
+      "module": "rust/vayren-shell",
+      "name": "HoverView",
+      "public": true,
+      "qualified": "rust::vayren-shell::src::market::HoverView",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
       "dotted": "rust::vayren-shell::src::market::INDICATOR_CATEGORIES",
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "const",
       "language": "RUST_SLINT",
-      "line": 262,
+      "line": 311,
       "module": "rust/vayren-shell",
       "name": "INDICATOR_CATEGORIES",
       "public": true,
@@ -30952,7 +31949,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "const",
       "language": "RUST_SLINT",
-      "line": 249,
+      "line": 298,
       "module": "rust/vayren-shell",
       "name": "INITIAL_BARS",
       "public": true,
@@ -30982,7 +31979,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "struct",
       "language": "RUST_SLINT",
-      "line": 1225,
+      "line": 1303,
       "module": "rust/vayren-shell",
       "name": "IndicatorRow",
       "public": true,
@@ -30997,7 +31994,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "const",
       "language": "RUST_SLINT",
-      "line": 277,
+      "line": 326,
       "module": "rust/vayren-shell",
       "name": "MARKET_MEDIUM_PX",
       "public": true,
@@ -31012,7 +32009,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "const",
       "language": "RUST_SLINT",
-      "line": 276,
+      "line": 325,
       "module": "rust/vayren-shell",
       "name": "MARKET_WIDE_PX",
       "public": true,
@@ -31027,7 +32024,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "const",
       "language": "RUST_SLINT",
-      "line": 248,
+      "line": 297,
       "module": "rust/vayren-shell",
       "name": "MAX_VISIBLE_BARS",
       "public": true,
@@ -31042,7 +32039,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "const",
       "language": "RUST_SLINT",
-      "line": 251,
+      "line": 300,
       "module": "rust/vayren-shell",
       "name": "MIN_CANDLE_SLOT_PX",
       "public": true,
@@ -31057,7 +32054,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "const",
       "language": "RUST_SLINT",
-      "line": 247,
+      "line": 296,
       "module": "rust/vayren-shell",
       "name": "MIN_VISIBLE_BARS",
       "public": true,
@@ -31072,7 +32069,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "struct",
       "language": "RUST_SLINT",
-      "line": 1255,
+      "line": 1333,
       "module": "rust/vayren-shell",
       "name": "MarkerGlyph",
       "public": true,
@@ -31087,7 +32084,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "enum",
       "language": "RUST_SLINT",
-      "line": 174,
+      "line": 217,
       "module": "rust/vayren-shell",
       "name": "MarketAction",
       "public": true,
@@ -31117,7 +32114,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "struct",
       "language": "RUST_SLINT",
-      "line": 298,
+      "line": 347,
       "module": "rust/vayren-shell",
       "name": "MarketHover",
       "public": true,
@@ -31132,7 +32129,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "enum",
       "language": "RUST_SLINT",
-      "line": 280,
+      "line": 329,
       "module": "rust/vayren-shell",
       "name": "MarketLayoutMode",
       "public": true,
@@ -31147,7 +32144,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "struct",
       "language": "RUST_SLINT",
-      "line": 339,
+      "line": 388,
       "module": "rust/vayren-shell",
       "name": "MarketState",
       "public": true,
@@ -31162,7 +32159,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "enum",
       "language": "RUST_SLINT",
-      "line": 162,
+      "line": 205,
       "module": "rust/vayren-shell",
       "name": "MarketStatus",
       "public": true,
@@ -31177,7 +32174,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "struct",
       "language": "RUST_SLINT",
-      "line": 308,
+      "line": 357,
       "module": "rust/vayren-shell",
       "name": "MarketStatusFacts",
       "public": true,
@@ -31192,7 +32189,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "struct",
       "language": "RUST_SLINT",
-      "line": 1285,
+      "line": 1363,
       "module": "rust/vayren-shell",
       "name": "MarketView",
       "public": true,
@@ -31207,7 +32204,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "const",
       "language": "RUST_SLINT",
-      "line": 253,
+      "line": 302,
       "module": "rust/vayren-shell",
       "name": "PRICE_EDGE_MARGIN",
       "public": true,
@@ -31222,7 +32219,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "const",
       "language": "RUST_SLINT",
-      "line": 255,
+      "line": 304,
       "module": "rust/vayren-shell",
       "name": "PRICE_ZOOM_STEP",
       "public": true,
@@ -31237,7 +32234,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "struct",
       "language": "RUST_SLINT",
-      "line": 1241,
+      "line": 1319,
       "module": "rust/vayren-shell",
       "name": "PlotSegment",
       "public": true,
@@ -31267,7 +32264,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "struct",
       "language": "RUST_SLINT",
-      "line": 1232,
+      "line": 1310,
       "module": "rust/vayren-shell",
       "name": "PopupRow",
       "public": true,
@@ -31282,11 +32279,41 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "const",
       "language": "RUST_SLINT",
-      "line": 252,
+      "line": 301,
       "module": "rust/vayren-shell",
       "name": "RIGHT_MARGIN_FRACTION",
       "public": true,
       "qualified": "rust::vayren-shell::src::market::RIGHT_MARGIN_FRACTION",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "rust::vayren-shell::src::market::ScaleFrame",
+      "file": "rust/vayren-shell/src/market.rs",
+      "kind": "struct",
+      "language": "RUST_SLINT",
+      "line": 1540,
+      "module": "rust/vayren-shell",
+      "name": "ScaleFrame",
+      "public": false,
+      "qualified": "rust::vayren-shell::src::market::ScaleFrame",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "rust::vayren-shell::src::market::ScaleXform",
+      "file": "rust/vayren-shell/src/market.rs",
+      "kind": "enum",
+      "language": "RUST_SLINT",
+      "line": 1533,
+      "module": "rust/vayren-shell",
+      "name": "ScaleXform",
+      "public": false,
+      "qualified": "rust::vayren-shell::src::market::ScaleXform",
       "tests": []
     },
     {
@@ -31342,7 +32369,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "const",
       "language": "RUST_SLINT",
-      "line": 259,
+      "line": 308,
       "module": "rust/vayren-shell",
       "name": "TIMEFRAME_VISIBLE_ORDER",
       "public": true,
@@ -31357,7 +32384,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "struct",
       "language": "RUST_SLINT",
-      "line": 1195,
+      "line": 1273,
       "module": "rust/vayren-shell",
       "name": "TimeframeRow",
       "public": true,
@@ -31417,7 +32444,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "struct",
       "language": "RUST_SLINT",
-      "line": 1185,
+      "line": 1263,
       "module": "rust/vayren-shell",
       "name": "WatchRow",
       "public": true,
@@ -31432,7 +32459,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "const",
       "language": "RUST_SLINT",
-      "line": 254,
+      "line": 303,
       "module": "rust/vayren-shell",
       "name": "ZOOM_STEP",
       "public": true,
@@ -31447,7 +32474,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 2086,
+      "line": 2361,
       "module": "rust/vayren-shell",
       "name": "apply_snapshot_json",
       "public": true,
@@ -31462,7 +32489,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1117,
+      "line": 1195,
       "module": "rust/vayren-shell",
       "name": "fmt_int",
       "public": true,
@@ -31477,7 +32504,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1082,
+      "line": 1160,
       "module": "rust/vayren-shell",
       "name": "fmt_price",
       "public": true,
@@ -31488,11 +32515,26 @@
       "called_by": [],
       "callers_complete": false,
       "calls": [],
+      "dotted": "rust::vayren-shell::src::market::fmt_scale",
+      "file": "rust/vayren-shell/src/market.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 1640,
+      "module": "rust/vayren-shell",
+      "name": "fmt_scale",
+      "public": false,
+      "qualified": "rust::vayren-shell::src::market::fmt_scale",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
       "dotted": "rust::vayren-shell::src::market::fmt_signed_pct",
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1109,
+      "line": 1187,
       "module": "rust/vayren-shell",
       "name": "fmt_signed_pct",
       "public": true,
@@ -31507,7 +32549,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1136,
+      "line": 1214,
       "module": "rust/vayren-shell",
       "name": "fmt_volume",
       "public": true,
@@ -31522,7 +32564,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 269,
+      "line": 318,
       "module": "rust/vayren-shell",
       "name": "indicator_categories",
       "public": true,
@@ -31537,7 +32579,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1337,
+      "line": 1420,
       "module": "rust/vayren-shell",
       "name": "last_change",
       "public": false,
@@ -31552,7 +32594,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 286,
+      "line": 335,
       "module": "rust/vayren-shell",
       "name": "layout_mode",
       "public": true,
@@ -31567,7 +32609,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 2030,
+      "line": 2305,
       "module": "rust/vayren-shell",
       "name": "market_status_rows",
       "public": false,
@@ -31582,7 +32624,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1073,
+      "line": 1151,
       "module": "rust/vayren-shell",
       "name": "normalize_indicator_name",
       "public": true,
@@ -31593,11 +32635,26 @@
       "called_by": [],
       "callers_complete": false,
       "calls": [],
+      "dotted": "rust::vayren-shell::src::market::pad_range",
+      "file": "rust/vayren-shell/src/market.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 1566,
+      "module": "rust/vayren-shell",
+      "name": "pad_range",
+      "public": false,
+      "qualified": "rust::vayren-shell::src::market::pad_range",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
       "dotted": "rust::vayren-shell::src::market::pill_w",
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1278,
+      "line": 1356,
       "module": "rust/vayren-shell",
       "name": "pill_w",
       "public": false,
@@ -31627,7 +32684,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1374,
+      "line": 1661,
       "module": "rust/vayren-shell",
       "name": "project",
       "public": true,
@@ -31638,11 +32695,26 @@
       "called_by": [],
       "callers_complete": false,
       "calls": [],
+      "dotted": "rust::vayren-shell::src::market::project_hover",
+      "file": "rust/vayren-shell/src/market.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 1473,
+      "module": "rust/vayren-shell",
+      "name": "project_hover",
+      "public": true,
+      "qualified": "rust::vayren-shell::src::market::project_hover",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
       "dotted": "rust::vayren-shell::src::market::round_py",
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1052,
+      "line": 1130,
       "module": "rust/vayren-shell",
       "name": "round_py",
       "public": false,
@@ -31653,11 +32725,26 @@
       "called_by": [],
       "callers_complete": false,
       "calls": [],
+      "dotted": "rust::vayren-shell::src::market::scale_frame",
+      "file": "rust/vayren-shell/src/market.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 1578,
+      "module": "rust/vayren-shell",
+      "name": "scale_frame",
+      "public": false,
+      "qualified": "rust::vayren-shell::src::market::scale_frame",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
       "dotted": "rust::vayren-shell::src::market::short_time",
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1153,
+      "line": 1231,
       "module": "rust/vayren-shell",
       "name": "short_time",
       "public": true,
@@ -31672,7 +32759,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 2069,
+      "line": 2344,
       "module": "rust/vayren-shell",
       "name": "snap_bool",
       "public": false,
@@ -31687,7 +32774,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 2065,
+      "line": 2340,
       "module": "rust/vayren-shell",
       "name": "snap_f64",
       "public": false,
@@ -31702,7 +32789,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 2057,
+      "line": 2332,
       "module": "rust/vayren-shell",
       "name": "snap_str",
       "public": false,
@@ -31717,7 +32804,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 2073,
+      "line": 2348,
       "module": "rust/vayren-shell",
       "name": "snap_str_list",
       "public": false,
@@ -31747,7 +32834,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "mod",
       "language": "RUST_SLINT",
-      "line": 2399,
+      "line": 2678,
       "module": "rust/vayren-shell",
       "name": "tests",
       "public": false,
@@ -31762,7 +32849,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1171,
+      "line": 1249,
       "module": "rust/vayren-shell",
       "name": "tone_of_bar",
       "public": false,
@@ -31777,7 +32864,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1162,
+      "line": 1240,
       "module": "rust/vayren-shell",
       "name": "tone_of_change",
       "public": false,
@@ -31788,11 +32875,26 @@
       "called_by": [],
       "callers_complete": false,
       "calls": [],
+      "dotted": "rust::vayren-shell::src::market::transform_price",
+      "file": "rust/vayren-shell/src/market.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 1546,
+      "module": "rust/vayren-shell",
+      "name": "transform_price",
+      "public": false,
+      "qualified": "rust::vayren-shell::src::market::transform_price",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
       "dotted": "rust::vayren-shell::src::market::western2",
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1351,
+      "line": 1434,
       "module": "rust/vayren-shell",
       "name": "western2",
       "public": false,
@@ -32112,6 +33214,126 @@
       "name": "tests",
       "public": false,
       "qualified": "rust::vayren-shell::src::market_download::tests",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "rust::vayren-shell::src::perf::Stats",
+      "file": "rust/vayren-shell/src/perf.rs",
+      "kind": "struct",
+      "language": "RUST_SLINT",
+      "line": 41,
+      "module": "rust/vayren-shell",
+      "name": "Stats",
+      "public": false,
+      "qualified": "rust::vayren-shell::src::perf::Stats",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "rust::vayren-shell::src::perf::bench_apply_tiers_single_window",
+      "file": "rust/vayren-shell/src/perf.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 143,
+      "module": "rust/vayren-shell",
+      "name": "bench_apply_tiers_single_window",
+      "public": false,
+      "qualified": "rust::vayren-shell::src::perf::bench_apply_tiers_single_window",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "rust::vayren-shell::src::perf::bench_bars",
+      "file": "rust/vayren-shell/src/perf.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 16,
+      "module": "rust/vayren-shell",
+      "name": "bench_bars",
+      "public": false,
+      "qualified": "rust::vayren-shell::src::perf::bench_bars",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "rust::vayren-shell::src::perf::bench_hover_full_path_cost",
+      "file": "rust/vayren-shell/src/perf.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 92,
+      "module": "rust/vayren-shell",
+      "name": "bench_hover_full_path_cost",
+      "public": false,
+      "qualified": "rust::vayren-shell::src::perf::bench_hover_full_path_cost",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "rust::vayren-shell::src::perf::bench_pan_and_zoom_ops",
+      "file": "rust/vayren-shell/src/perf.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 112,
+      "module": "rust/vayren-shell",
+      "name": "bench_pan_and_zoom_ops",
+      "public": false,
+      "qualified": "rust::vayren-shell::src::perf::bench_pan_and_zoom_ops",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "rust::vayren-shell::src::perf::bench_project_visible_window_only",
+      "file": "rust/vayren-shell/src/perf.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 75,
+      "module": "rust/vayren-shell",
+      "name": "bench_project_visible_window_only",
+      "public": false,
+      "qualified": "rust::vayren-shell::src::perf::bench_project_visible_window_only",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "rust::vayren-shell::src::perf::bench_set_bars_scales_linearly",
+      "file": "rust/vayren-shell/src/perf.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 62,
+      "module": "rust/vayren-shell",
+      "name": "bench_set_bars_scales_linearly",
+      "public": false,
+      "qualified": "rust::vayren-shell::src::perf::bench_set_bars_scales_linearly",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "rust::vayren-shell::src::perf::loaded_state",
+      "file": "rust/vayren-shell/src/perf.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 33,
+      "module": "rust/vayren-shell",
+      "name": "loaded_state",
+      "public": false,
+      "qualified": "rust::vayren-shell::src::perf::loaded_state",
       "tests": []
     },
     {
@@ -32782,7 +34004,7 @@
       "file": "rust/vayren-shell/src/python_bridge.rs",
       "kind": "enum",
       "language": "RUST_SLINT",
-      "line": 56,
+      "line": 68,
       "module": "rust/vayren-shell",
       "name": "BackendResponse",
       "public": true,
@@ -32827,7 +34049,7 @@
       "file": "rust/vayren-shell/src/python_bridge.rs",
       "kind": "struct",
       "language": "RUST_SLINT",
-      "line": 82,
+      "line": 94,
       "module": "rust/vayren-shell",
       "name": "ErrorData",
       "public": true,
@@ -32842,7 +34064,7 @@
       "file": "rust/vayren-shell/src/python_bridge.rs",
       "kind": "struct",
       "language": "RUST_SLINT",
-      "line": 87,
+      "line": 99,
       "module": "rust/vayren-shell",
       "name": "PythonBackend",
       "public": true,
@@ -32857,7 +34079,7 @@
       "file": "rust/vayren-shell/src/python_bridge.rs",
       "kind": "struct",
       "language": "RUST_SLINT",
-      "line": 69,
+      "line": 81,
       "module": "rust/vayren-shell",
       "name": "ReadyData",
       "public": true,
@@ -32872,7 +34094,7 @@
       "file": "rust/vayren-shell/src/python_bridge.rs",
       "kind": "struct",
       "language": "RUST_SLINT",
-      "line": 77,
+      "line": 89,
       "module": "rust/vayren-shell",
       "name": "SymbolsData",
       "public": true,
@@ -32902,7 +34124,7 @@
       "file": "rust/vayren-shell/src/python_bridge.rs",
       "kind": "mod",
       "language": "RUST_SLINT",
-      "line": 207,
+      "line": 305,
       "module": "rust/vayren-shell",
       "name": "tests",
       "public": false,
@@ -33993,11 +35215,26 @@
       "called_by": [],
       "callers_complete": false,
       "calls": [],
+      "dotted": "rust::vayren-shell::src::shell::LabRunRequest",
+      "file": "rust/vayren-shell/src/shell.rs",
+      "kind": "struct",
+      "language": "RUST_SLINT",
+      "line": 1582,
+      "module": "rust/vayren-shell",
+      "name": "LabRunRequest",
+      "public": true,
+      "qualified": "rust::vayren-shell::src::shell::LabRunRequest",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
       "dotted": "rust::vayren-shell::src::shell::Tap",
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "trait",
       "language": "RUST_SLINT",
-      "line": 1562,
+      "line": 1846,
       "module": "rust/vayren-shell",
       "name": "Tap",
       "public": false,
@@ -34038,11 +35275,41 @@
       "called_by": [],
       "callers_complete": false,
       "calls": [],
+      "dotted": "rust::vayren-shell::src::shell::apply_flags_props",
+      "file": "rust/vayren-shell/src/shell.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 685,
+      "module": "rust/vayren-shell",
+      "name": "apply_flags_props",
+      "public": false,
+      "qualified": "rust::vayren-shell::src::shell::apply_flags_props",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "rust::vayren-shell::src::shell::apply_hover_props",
+      "file": "rust/vayren-shell/src/shell.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 646,
+      "module": "rust/vayren-shell",
+      "name": "apply_hover_props",
+      "public": false,
+      "qualified": "rust::vayren-shell::src::shell::apply_hover_props",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
       "dotted": "rust::vayren-shell::src::shell::apply_lab",
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1096,
+      "line": 1269,
       "module": "rust/vayren-shell",
       "name": "apply_lab",
       "public": true,
@@ -34057,7 +35324,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 2360,
+      "line": 2644,
       "module": "rust/vayren-shell",
       "name": "apply_live",
       "public": true,
@@ -34072,7 +35339,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 308,
+      "line": 315,
       "module": "rust/vayren-shell",
       "name": "apply_market",
       "public": true,
@@ -34083,11 +35350,41 @@
       "called_by": [],
       "callers_complete": false,
       "calls": [],
+      "dotted": "rust::vayren-shell::src::shell::apply_market_hover",
+      "file": "rust/vayren-shell/src/shell.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 658,
+      "module": "rust/vayren-shell",
+      "name": "apply_market_hover",
+      "public": true,
+      "qualified": "rust::vayren-shell::src::shell::apply_market_hover",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "rust::vayren-shell::src::shell::apply_market_viewport",
+      "file": "rust/vayren-shell/src/shell.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 665,
+      "module": "rust/vayren-shell",
+      "name": "apply_market_viewport",
+      "public": true,
+      "qualified": "rust::vayren-shell::src::shell::apply_market_viewport",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
       "dotted": "rust::vayren-shell::src::shell::apply_portfolio",
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1741,
+      "line": 2025,
       "module": "rust/vayren-shell",
       "name": "apply_portfolio",
       "public": true,
@@ -34102,7 +35399,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1928,
+      "line": 2212,
       "module": "rust/vayren-shell",
       "name": "apply_research",
       "public": true,
@@ -34117,11 +35414,26 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1075,
+      "line": 1248,
       "module": "rust/vayren-shell",
       "name": "apply_zoom",
       "public": true,
       "qualified": "rust::vayren-shell::src::shell::apply_zoom",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "rust::vayren-shell::src::shell::candles_model",
+      "file": "rust/vayren-shell/src/shell.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 584,
+      "module": "rust/vayren-shell",
+      "name": "candles_model",
+      "public": false,
+      "qualified": "rust::vayren-shell::src::shell::candles_model",
       "tests": []
     },
     {
@@ -34147,7 +35459,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1016,
+      "line": 1189,
       "module": "rust/vayren-shell",
       "name": "demo_connection_workspace",
       "public": true,
@@ -34162,7 +35474,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1574,
+      "line": 1858,
       "module": "rust/vayren-shell",
       "name": "demo_lab_state",
       "public": true,
@@ -34177,7 +35489,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 2676,
+      "line": 2960,
       "module": "rust/vayren-shell",
       "name": "demo_live_state",
       "public": true,
@@ -34192,7 +35504,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 2756,
+      "line": 3040,
       "module": "rust/vayren-shell",
       "name": "demo_live_state_running",
       "public": true,
@@ -34207,7 +35519,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 2350,
+      "line": 2634,
       "module": "rust/vayren-shell",
       "name": "demo_portfolio_configured",
       "public": true,
@@ -34222,7 +35534,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 2341,
+      "line": 2625,
       "module": "rust/vayren-shell",
       "name": "demo_portfolio_state",
       "public": true,
@@ -34237,7 +35549,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 2881,
+      "line": 3165,
       "module": "rust/vayren-shell",
       "name": "demo_snapshot",
       "public": true,
@@ -34267,7 +35579,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1395,
+      "line": 1568,
       "module": "rust/vayren-shell",
       "name": "filter_kind",
       "public": false,
@@ -34293,11 +35605,26 @@
       "called_by": [],
       "callers_complete": false,
       "calls": [],
+      "dotted": "rust::vayren-shell::src::shell::markers_model",
+      "file": "rust/vayren-shell/src/shell.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 628,
+      "module": "rust/vayren-shell",
+      "name": "markers_model",
+      "public": false,
+      "qualified": "rust::vayren-shell::src::shell::markers_model",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
       "dotted": "rust::vayren-shell::src::shell::market_model",
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 300,
+      "line": 307,
       "module": "rust/vayren-shell",
       "name": "market_model",
       "public": false,
@@ -34308,11 +35635,26 @@
       "called_by": [],
       "callers_complete": false,
       "calls": [],
+      "dotted": "rust::vayren-shell::src::shell::parse_capital",
+      "file": "rust/vayren-shell/src/shell.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 1637,
+      "module": "rust/vayren-shell",
+      "name": "parse_capital",
+      "public": false,
+      "qualified": "rust::vayren-shell::src::shell::parse_capital",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
       "dotted": "rust::vayren-shell::src::shell::refresh_live",
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 2594,
+      "line": 2878,
       "module": "rust/vayren-shell",
       "name": "refresh_live",
       "public": false,
@@ -34327,7 +35669,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 2211,
+      "line": 2495,
       "module": "rust/vayren-shell",
       "name": "refresh_research",
       "public": false,
@@ -34383,11 +35725,26 @@
       "called_by": [],
       "callers_complete": false,
       "calls": [],
+      "dotted": "rust::vayren-shell::src::shell::segments_model",
+      "file": "rust/vayren-shell/src/shell.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 613,
+      "module": "rust/vayren-shell",
+      "name": "segments_model",
+      "public": false,
+      "qualified": "rust::vayren-shell::src::shell::segments_model",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
       "dotted": "rust::vayren-shell::src::shell::select",
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1058,
+      "line": 1231,
       "module": "rust/vayren-shell",
       "name": "select",
       "public": true,
@@ -34417,7 +35774,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "mod",
       "language": "RUST_SLINT",
-      "line": 2926,
+      "line": 3210,
       "module": "rust/vayren-shell",
       "name": "tests",
       "public": false,
@@ -34428,11 +35785,26 @@
       "called_by": [],
       "callers_complete": false,
       "calls": [],
+      "dotted": "rust::vayren-shell::src::shell::ticks_model",
+      "file": "rust/vayren-shell/src/shell.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 602,
+      "module": "rust/vayren-shell",
+      "name": "ticks_model",
+      "public": false,
+      "qualified": "rust::vayren-shell::src::shell::ticks_model",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
       "dotted": "rust::vayren-shell::src::shell::visual_fixture",
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1614,
+      "line": 1898,
       "module": "rust/vayren-shell",
       "name": "visual_fixture",
       "public": true,
@@ -34447,7 +35819,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1065,
+      "line": 1238,
       "module": "rust/vayren-shell",
       "name": "wire",
       "public": true,
@@ -34462,7 +35834,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1406,
+      "line": 1648,
       "module": "rust/vayren-shell",
       "name": "wire_lab",
       "public": true,
@@ -34477,7 +35849,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 2602,
+      "line": 2886,
       "module": "rust/vayren-shell",
       "name": "wire_live",
       "public": true,
@@ -34492,7 +35864,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 613,
+      "line": 692,
       "module": "rust/vayren-shell",
       "name": "wire_market",
       "public": true,
@@ -34507,7 +35879,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1898,
+      "line": 2182,
       "module": "rust/vayren-shell",
       "name": "wire_portfolio",
       "public": true,
@@ -34522,7 +35894,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 2219,
+      "line": 2503,
       "module": "rust/vayren-shell",
       "name": "wire_research",
       "public": true,
@@ -34537,7 +35909,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1082,
+      "line": 1255,
       "module": "rust/vayren-shell",
       "name": "wire_zoom",
       "public": true,
@@ -46385,7 +47757,7 @@
       "file": "scripts/run_tests.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 28,
+      "line": 30,
       "module": "scripts",
       "name": "main",
       "public": true,
@@ -56818,6 +58190,95 @@
       "tests": []
     },
     {
+      "called_by": [
+        "strategy.builtins:list_builtins"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "strategy.builtins.BuiltinStrategy",
+      "file": "05_strategy/strategy/builtins.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 17,
+      "module": "05_strategy/strategy",
+      "name": "BuiltinStrategy",
+      "public": true,
+      "qualified": "strategy.builtins:BuiltinStrategy",
+      "tests": [
+        "05_strategy/strategy/tests/test_builtins.py"
+      ]
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "strategy.builtins.builtin_source",
+      "file": "05_strategy/strategy/builtins.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 79,
+      "module": "05_strategy/strategy",
+      "name": "builtin_source",
+      "public": true,
+      "qualified": "strategy.builtins:builtin_source",
+      "tests": [
+        "05_strategy/strategy/tests/test_builtins.py"
+      ]
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "strategy.builtins.get_builtin",
+      "file": "05_strategy/strategy/builtins.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 61,
+      "module": "05_strategy/strategy",
+      "name": "get_builtin",
+      "public": true,
+      "qualified": "strategy.builtins:get_builtin",
+      "tests": [
+        "05_strategy/strategy/tests/test_builtins.py"
+      ]
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "strategy.builtins.is_builtin",
+      "file": "05_strategy/strategy/builtins.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 73,
+      "module": "05_strategy/strategy",
+      "name": "is_builtin",
+      "public": true,
+      "qualified": "strategy.builtins:is_builtin",
+      "tests": [
+        "05_strategy/strategy/tests/test_builtins.py"
+      ]
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "strategy.builtins:BuiltinStrategy"
+      ],
+      "dotted": "strategy.builtins.list_builtins",
+      "file": "05_strategy/strategy/builtins.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 56,
+      "module": "05_strategy/strategy",
+      "name": "list_builtins",
+      "public": true,
+      "qualified": "strategy.builtins:list_builtins",
+      "tests": [
+        "05_strategy/strategy/tests/test_builtins.py"
+      ]
+    },
+    {
       "called_by": [],
       "callers_complete": true,
       "calls": [],
@@ -56920,6 +58381,8 @@
     },
     {
       "called_by": [
+        "app.services.backtest_service:_make_logic",
+        "app.services.backtest_service:describe_strategy",
         "app.services.live_trading_service:LiveTradingService",
         "app.services.research_service:ResearchService"
       ],
@@ -57123,7 +58586,7 @@
     },
     {
       "called_by": [
-        "app.headless:_lab_snapshot",
+        "app.headless:_lab_library_rows",
         "app.headless:_research_snapshot",
         "app.services.live_trading_service:LiveTradingService"
       ],
@@ -57182,7 +58645,9 @@
       "tests": []
     },
     {
-      "called_by": [],
+      "called_by": [
+        "app.services.backtest_service:_strategy_source"
+      ],
       "callers_complete": true,
       "calls": [
         "strategy.language.storage:_read_record",
@@ -57421,7 +58886,9 @@
       "called_by": [
         "strategy.models.parameters:StrategyParameters",
         "strategy.registry:StrategyRegistry",
+        "strategy.strategies.ema:EmaCrossover",
         "strategy.strategies.obr:ObrSellV10",
+        "strategy.strategies.rsi:RsiStrategy",
         "strategy.strategies.sma:SmaCrossover"
       ],
       "callers_complete": true,
@@ -57441,6 +58908,8 @@
     },
     {
       "called_by": [
+        "app.services.backtest_service:_make_logic",
+        "app.services.backtest_service:_run_symbol",
         "app.services.research_service:ResearchService",
         "strategy.language.compiler:CompiledStrategy",
         "strategy.models.definition:StrategyDefinition",
@@ -57449,7 +58918,10 @@
         "strategy.runtime:BarView",
         "strategy.runtime:StrategyRuntime",
         "strategy.strategies.base:PythonStrategy",
-        "strategy.strategies.sma:SmaCrossover"
+        "strategy.strategies.ema:EmaCrossover",
+        "strategy.strategies.sma:SmaCrossover",
+        "strategy.tests.test_builtins:_signals",
+        "strategy.tests.test_builtins:test_bar_view_state_flows_through_runtime"
       ],
       "callers_complete": true,
       "calls": [
@@ -57685,8 +59157,10 @@
     },
     {
       "called_by": [
+        "app.services.backtest_service:_run_symbol",
         "strategy.models.signal:Signal",
-        "strategy.strategies.base:PythonStrategy"
+        "strategy.strategies.base:PythonStrategy",
+        "strategy.tests.test_builtins:test_rsi_buys_oversold_and_exits_overbought"
       ],
       "callers_complete": true,
       "calls": [],
@@ -57703,9 +59177,11 @@
     },
     {
       "called_by": [
+        "app.services.backtest_service:_run_symbol",
         "strategy.research.evolution:approve_proposal",
         "strategy.runtime:BarView",
-        "strategy.runtime:StrategyRuntime"
+        "strategy.runtime:StrategyRuntime",
+        "strategy.tests.test_builtins:test_bar_view_state_flows_through_runtime"
       ],
       "callers_complete": true,
       "calls": [],
@@ -60529,11 +62005,14 @@
     },
     {
       "called_by": [
+        "app.services.backtest_service:_run_symbol",
         "strategy.research.evolution:approve_proposal",
         "strategy.runtime:StrategyLogic",
         "strategy.runtime:StrategyRuntime",
         "strategy.strategies.base:PythonStrategy",
+        "strategy.strategies.ema:EmaCrossover",
         "strategy.strategies.obr:ObrSellV10",
+        "strategy.strategies.rsi:RsiStrategy",
         "strategy.strategies.sma:SmaCrossover"
       ],
       "callers_complete": true,
@@ -60575,7 +62054,10 @@
       "tests": []
     },
     {
-      "called_by": [],
+      "called_by": [
+        "strategy.tests.test_builtins:_signals",
+        "strategy.tests.test_builtins:test_bar_view_state_flows_through_runtime"
+      ],
       "callers_complete": true,
       "calls": [
         "strategy.models.parameters:StrategyParameters",
@@ -60597,7 +62079,9 @@
     },
     {
       "called_by": [
+        "strategy.strategies.ema:EmaCrossover",
         "strategy.strategies.obr:ObrSellV10",
+        "strategy.strategies.rsi:RsiStrategy",
         "strategy.strategies.sma:SmaCrossover"
       ],
       "callers_complete": true,
@@ -60628,6 +62112,46 @@
     },
     {
       "called_by": [
+        "strategy.tests.test_builtins:test_ema_crossover_signals_on_trend_reversal"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "strategy.models.parameters:ParameterSpec",
+        "strategy.models.parameters:StrategyParameters",
+        "strategy.runtime:BarView",
+        "strategy.strategies.base:PythonStrategy",
+        "strategy.strategies.ema:calc_ema"
+      ],
+      "dotted": "strategy.strategies.ema.EmaCrossover",
+      "file": "05_strategy/strategy/strategies/ema.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 18,
+      "module": "05_strategy/strategy",
+      "name": "EmaCrossover",
+      "public": true,
+      "qualified": "strategy.strategies.ema:EmaCrossover",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "strategy.strategies.ema:EmaCrossover"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "strategy.strategies.ema.calc_ema",
+      "file": "05_strategy/strategy/strategies/ema.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 10,
+      "module": "05_strategy/strategy",
+      "name": "calc_ema",
+      "public": true,
+      "qualified": "strategy.strategies.ema:calc_ema",
+      "tests": []
+    },
+    {
+      "called_by": [
         "strategy.strategies.obr:ObrSellV10"
       ],
       "callers_complete": true,
@@ -60645,7 +62169,8 @@
     },
     {
       "called_by": [
-        "strategy.strategies.obr:ObrSellV10"
+        "strategy.strategies.obr:ObrSellV10",
+        "strategy.strategies.rsi:RsiStrategy"
       ],
       "callers_complete": true,
       "calls": [],
@@ -60699,7 +62224,32 @@
       "tests": []
     },
     {
-      "called_by": [],
+      "called_by": [
+        "strategy.tests.test_builtins:test_rsi_buys_oversold_and_exits_overbought"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "strategy.models.parameters:ParameterSpec",
+        "strategy.runtime:BarView",
+        "strategy.strategies.base:PythonStrategy",
+        "strategy.strategies.indicators:calc_rsi"
+      ],
+      "dotted": "strategy.strategies.rsi.RsiStrategy",
+      "file": "05_strategy/strategy/strategies/rsi.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 11,
+      "module": "05_strategy/strategy",
+      "name": "RsiStrategy",
+      "public": true,
+      "qualified": "strategy.strategies.rsi:RsiStrategy",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "strategy.tests.test_builtins:test_bar_view_state_flows_through_runtime",
+        "strategy.tests.test_builtins:test_sma_crossover_signals_on_trend_reversal"
+      ],
       "callers_complete": true,
       "calls": [
         "strategy.models.parameters:ParameterSpec",
@@ -60717,6 +62267,138 @@
       "name": "SmaCrossover",
       "public": true,
       "qualified": "strategy.strategies.sma:SmaCrossover",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "strategy.tests.test_builtins:_signals",
+        "strategy.tests.test_builtins:test_bar_view_state_flows_through_runtime"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "strategy.tests.test_builtins._bars",
+      "file": "05_strategy/strategy/tests/test_builtins.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 34,
+      "module": "05_strategy/strategy",
+      "name": "_bars",
+      "public": false,
+      "qualified": "strategy.tests.test_builtins:_bars",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "strategy.tests.test_builtins:test_ema_crossover_signals_on_trend_reversal",
+        "strategy.tests.test_builtins:test_rsi_buys_oversold_and_exits_overbought",
+        "strategy.tests.test_builtins:test_sma_crossover_signals_on_trend_reversal"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "strategy.models.parameters:StrategyParameters",
+        "strategy.runtime:StrategyRuntime",
+        "strategy.tests.test_builtins:_bars"
+      ],
+      "dotted": "strategy.tests.test_builtins._signals",
+      "file": "05_strategy/strategy/tests/test_builtins.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 51,
+      "module": "05_strategy/strategy",
+      "name": "_signals",
+      "public": false,
+      "qualified": "strategy.tests.test_builtins:_signals",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "strategy.models.parameters:StrategyParameters",
+        "strategy.models.state:StrategyState",
+        "strategy.runtime:StrategyRuntime",
+        "strategy.strategies.sma:SmaCrossover",
+        "strategy.tests.test_builtins:_bars"
+      ],
+      "dotted": "strategy.tests.test_builtins.test_bar_view_state_flows_through_runtime",
+      "file": "05_strategy/strategy/tests/test_builtins.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 86,
+      "module": "05_strategy/strategy",
+      "name": "test_bar_view_state_flows_through_runtime",
+      "public": true,
+      "qualified": "strategy.tests.test_builtins:test_bar_view_state_flows_through_runtime",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "strategy.tests.test_builtins.test_builtin_registry_lists_three_marked_strategies",
+      "file": "05_strategy/strategy/tests/test_builtins.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 22,
+      "module": "05_strategy/strategy",
+      "name": "test_builtin_registry_lists_three_marked_strategies",
+      "public": true,
+      "qualified": "strategy.tests.test_builtins:test_builtin_registry_lists_three_marked_strategies",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "strategy.strategies.ema:EmaCrossover",
+        "strategy.tests.test_builtins:_signals"
+      ],
+      "dotted": "strategy.tests.test_builtins.test_ema_crossover_signals_on_trend_reversal",
+      "file": "05_strategy/strategy/tests/test_builtins.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 67,
+      "module": "05_strategy/strategy",
+      "name": "test_ema_crossover_signals_on_trend_reversal",
+      "public": true,
+      "qualified": "strategy.tests.test_builtins:test_ema_crossover_signals_on_trend_reversal",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "strategy.models.signal:SignalKind",
+        "strategy.strategies.rsi:RsiStrategy",
+        "strategy.tests.test_builtins:_signals"
+      ],
+      "dotted": "strategy.tests.test_builtins.test_rsi_buys_oversold_and_exits_overbought",
+      "file": "05_strategy/strategy/tests/test_builtins.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 75,
+      "module": "05_strategy/strategy",
+      "name": "test_rsi_buys_oversold_and_exits_overbought",
+      "public": true,
+      "qualified": "strategy.tests.test_builtins:test_rsi_buys_oversold_and_exits_overbought",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "strategy.strategies.sma:SmaCrossover",
+        "strategy.tests.test_builtins:_signals"
+      ],
+      "dotted": "strategy.tests.test_builtins.test_sma_crossover_signals_on_trend_reversal",
+      "file": "05_strategy/strategy/tests/test_builtins.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 57,
+      "module": "05_strategy/strategy",
+      "name": "test_sma_crossover_signals_on_trend_reversal",
+      "public": true,
+      "qualified": "strategy.tests.test_builtins:test_sma_crossover_signals_on_trend_reversal",
       "tests": []
     },
     {
@@ -61113,6 +62795,18 @@
     },
     {
       "granularity": "module",
+      "module": "00_app/app",
+      "path": "00_app/app/tests/test_backtest_service.py",
+      "targets": []
+    },
+    {
+      "granularity": "module",
+      "module": "00_app/app",
+      "path": "00_app/app/tests/test_market_data_service.py",
+      "targets": []
+    },
+    {
+      "granularity": "module",
       "module": "01_core/core",
       "path": "01_core/core/tests/__init__.py",
       "targets": []
@@ -61214,6 +62908,14 @@
       "module": "05_strategy/strategy",
       "path": "05_strategy/strategy/tests/__init__.py",
       "targets": []
+    },
+    {
+      "granularity": "file",
+      "module": "05_strategy/strategy",
+      "path": "05_strategy/strategy/tests/test_builtins.py",
+      "targets": [
+        "05_strategy/strategy/builtins.py"
+      ]
     },
     {
       "granularity": "module",

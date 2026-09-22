@@ -75,7 +75,15 @@ def _logs_to_stderr(level: str) -> None:
         root.removeHandler(handler)
         with suppress(Exception):
             handler.close()
-    handler = logging.StreamHandler(sys.stderr)
+    # Windowless launches (pythonw / CREATE_NO_WINDOW) have no console: a
+    # broken stderr must degrade to silence, never kill the backend — the
+    # JSON protocol on stdout stays the single source of truth either way.
+    try:
+        sys.stderr.write("")
+        sys.stderr.flush()
+        handler: logging.Handler = logging.StreamHandler(sys.stderr)
+    except OSError:
+        handler = logging.NullHandler()
     handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
     handler.setLevel(getattr(logging, level.upper(), logging.INFO))
     root.addHandler(handler)

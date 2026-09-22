@@ -11,6 +11,10 @@
 use slint::ComponentHandle;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    mpsc, Arc, Mutex,
+};
 use vayren_shell::broker_connection::BrokerWorkspace;
 use vayren_shell::lab;
 use vayren_shell::market;
@@ -71,10 +75,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Data dir: {}", data_dir);
     println!("Strategy dir: {}", strategy_dir);
 
-    // Spawn Python backend
-    println!("Spawning headless Python backend...");
+    // Spawn Python backend. One mutex-guarded handle serves the UI thread
+    // (startup/shutdown snapshots) and worker threads (interaction fetches).
+    // The mutex serializes whole command round-trips: the bridge locks
+    // stdin/stdout separately, so concurrent `&PythonBackend` users without
+    // it could read each other's responses.
     let (backend, ready_data) = PythonBackend::spawn(&data_dir, &strategy_dir)?;
-    let backend = Rc::new(backend);
+    let backend: Arc<Mutex<PythonBackend>> = Arc::new(Mutex::new(backend));
     println!(
         "Backend ready: {} v{}",
         ready_data.backend, ready_data.version
@@ -82,7 +89,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Verify the backend round-trips before opening the UI.
     println!("Requesting symbol list...");
-    match backend.send_command(BackendCommand::ListSymbols)? {
+    match PythonBackend::lock_send(&backend, BackendCommand::ListSymbols)? {
         BackendResponse::SymbolsListed { data } => {
             println!("Backend returned {} symbols", data.symbols.len());
             if !data.symbols.is_empty() {
@@ -107,11 +114,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let snapshot_timeframe = arg_value(&argv, "--timeframe");
     let snapshot_limit: Option<i64> = arg_value(&argv, "--limit").and_then(|s| s.parse().ok());
     println!("Requesting market snapshot...");
-    let market_state = match backend.send_command(BackendCommand::GetMarketSnapshot {
-        symbol: snapshot_symbol,
-        timeframe: snapshot_timeframe,
-        limit: snapshot_limit,
-    })? {
+    let market_state = match PythonBackend::lock_send(
+        &backend,
+        BackendCommand::GetMarketSnapshot {
+            symbol: snapshot_symbol,
+            timeframe: snapshot_timeframe,
+            limit: snapshot_limit,
+        },
+    )? {
         BackendResponse::MarketSnapshot { data } => {
             let mut state = market::MarketState::default();
             market::apply_snapshot_json(&mut state, &data);
@@ -161,7 +171,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // the native lab state (real rows, no runs yet).
     if visual_kind.is_none() {
         println!("Requesting lab snapshot...");
-        match backend.send_command(BackendCommand::GetLabSnapshot)? {
+        match PythonBackend::lock_send(&backend, BackendCommand::GetLabSnapshot)? {
             BackendResponse::LabSnapshot { data } => {
                 lab::apply_snapshot_json(&mut lab_state, &data);
                 let selected = lab_state
@@ -184,27 +194,73 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let lab_state = Rc::new(RefCell::new(lab_state));
+    // Async fetch bus: interaction fetches run on worker threads (the UI
+    // thread never blocks on the backend), results return through the
+    // channel and apply on the UI thread via the poll timer below. Each
+    // request carries a per-kind sequence; stale arrivals lose to newer
+    // requests — latest state wins, obsolete renders never happen.
+    #[derive(Debug)]
+    enum FetchResult {
+        Market(u64, Option<serde_json::Value>),
+        LabSelect(u64, Option<serde_json::Value>),
+        LabRun(u64, Option<serde_json::Value>),
+    }
+    let (fetch_tx, fetch_rx) = mpsc::channel::<FetchResult>();
+    let market_seq = Arc::new(AtomicU64::new(0));
+    let lab_select_seq = Arc::new(AtomicU64::new(0));
+    let lab_run_seq = Arc::new(AtomicU64::new(0));
+    fn spawn_fetch(
+        backend: &Arc<Mutex<PythonBackend>>,
+        tx: &mpsc::Sender<FetchResult>,
+        command: BackendCommand,
+        wrap: impl FnOnce(Option<serde_json::Value>) -> FetchResult + Send + 'static,
+    ) {
+        let backend = Arc::clone(backend);
+        let tx = tx.clone();
+        std::thread::spawn(move || {
+            let data = match PythonBackend::lock_send(&backend, command) {
+                Ok(response) => match response {
+                    BackendResponse::MarketSnapshot { data }
+                    | BackendResponse::LabSnapshot { data } => Some(data),
+                    BackendResponse::Error { data } => {
+                        eprintln!("Fetch backend error: {}", data.message);
+                        None
+                    }
+                    other => {
+                        eprintln!("Fetch unexpected response ({other:?})");
+                        None
+                    }
+                },
+                Err(err) => {
+                    eprintln!("Fetch failed: {err}");
+                    None
+                }
+            };
+            let _ = tx.send(wrap(data));
+        });
+    }
     // Lab refetch closures (same snapshot shape as startup; selection pulls
     // the strategy workspace, RUN executes a real backend backtest).
-    let fetch_lab_workspace: Rc<dyn Fn(String) -> Option<serde_json::Value>> = Rc::new({
-        let backend = backend.clone();
-        move |name: String| -> Option<serde_json::Value> {
-            match backend.send_command(BackendCommand::SelectLabStrategy { strategy: name }) {
-                Ok(BackendResponse::LabSnapshot { data }) => Some(data),
-                Ok(other) => {
-                    eprintln!("Lab select: unexpected response ({other:?})");
-                    None
-                }
-                Err(err) => {
-                    eprintln!("Lab select failed: {err}");
-                    None
-                }
-            }
+    let fetch_lab_workspace: Rc<dyn Fn(String)> = Rc::new({
+        let backend = Arc::clone(&backend);
+        let tx = fetch_tx.clone();
+        let seq = Arc::clone(&lab_select_seq);
+        move |name: String| {
+            let id = seq.fetch_add(1, Ordering::SeqCst) + 1;
+            spawn_fetch(
+                &backend,
+                &tx,
+                BackendCommand::SelectLabStrategy { strategy: name },
+                move |data| FetchResult::LabSelect(id, data),
+            );
         }
     });
-    let fetch_lab_run: Rc<dyn Fn(shell::LabRunRequest) -> Option<serde_json::Value>> = Rc::new({
-        let backend = backend.clone();
-        move |request: shell::LabRunRequest| -> Option<serde_json::Value> {
+    let fetch_lab_run: Rc<dyn Fn(shell::LabRunRequest)> = Rc::new({
+        let backend = Arc::clone(&backend);
+        let tx = fetch_tx.clone();
+        let seq = Arc::clone(&lab_run_seq);
+        move |request: shell::LabRunRequest| {
+            let id = seq.fetch_add(1, Ordering::SeqCst) + 1;
             let command = BackendCommand::RunBacktest {
                 strategy: request.strategy,
                 symbols: request.symbols,
@@ -214,24 +270,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 capital: request.capital,
                 mode: request.mode,
             };
-            match backend.send_command(command) {
-                Ok(BackendResponse::LabSnapshot { data }) => Some(data),
-                Ok(other) => {
-                    eprintln!("Lab run: unexpected response ({other:?})");
-                    None
-                }
-                Err(err) => {
-                    eprintln!("Lab run failed: {err}");
-                    None
-                }
-            }
+            spawn_fetch(&backend, &tx, command, move |data| {
+                FetchResult::LabRun(id, data)
+            });
         }
     });
     // Portfolio production wiring (SLICE 4b): the idle trading service
     // snapshot feeds the native portfolio state (honest not-running book).
     println!("Requesting portfolio snapshot...");
     let portfolio_state = Rc::new(RefCell::new(
-        match backend.send_command(BackendCommand::GetPortfolioSnapshot)? {
+        match PythonBackend::lock_send(&backend, BackendCommand::GetPortfolioSnapshot)? {
             BackendResponse::PortfolioSnapshot { data } => {
                 let snapshot = portfolio::PortfolioSnapshot::from_json(&data);
                 println!(
@@ -264,7 +312,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // feeds the native research state (strategies + experiments).
     println!("Requesting research snapshot...");
     let mut research_state = research_state::demo_research_state();
-    match backend.send_command(BackendCommand::GetResearchSnapshot)? {
+    match PythonBackend::lock_send(&backend, BackendCommand::GetResearchSnapshot)? {
         BackendResponse::ResearchSnapshot { data } => {
             research_state.apply_host_snapshot(&data);
             println!(
@@ -290,7 +338,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // feeds the native live state (same dict the legacy workspace consumed).
     println!("Requesting live snapshot...");
     let mut live_state = shell::demo_live_state();
-    match backend.send_command(BackendCommand::GetLiveSnapshot)? {
+    match PythonBackend::lock_send(&backend, BackendCommand::GetLiveSnapshot)? {
         BackendResponse::LiveSnapshot { data } => {
             live_state.apply_snapshot(&data);
             println!(
@@ -322,53 +370,108 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // System production wiring (SLICE 4a): the real broker snapshot feeds
     // the native connection workspace (selection, states, field shapes).
     println!("Requesting system snapshot...");
-    let connection_workspace = match backend.send_command(BackendCommand::GetSystemSnapshot)? {
-        BackendResponse::SystemSnapshot { data } => {
-            let workspace = BrokerWorkspace::from_json(&data);
-            let (pill, _) = workspace.pill();
-            println!(
-                "System ready: {} broker(s), selected '{}' — {}",
-                workspace.brokers.len(),
-                workspace.selected_id,
-                pill
-            );
-            workspace
-        }
-        BackendResponse::Error { data } => {
-            eprintln!("System snapshot failed: {}", data.message);
-            BrokerWorkspace::empty()
-        }
-        _ => {
-            eprintln!("Unexpected response");
-            BrokerWorkspace::empty()
-        }
-    };
+    let connection_workspace =
+        match PythonBackend::lock_send(&backend, BackendCommand::GetSystemSnapshot)? {
+            BackendResponse::SystemSnapshot { data } => {
+                let workspace = BrokerWorkspace::from_json(&data);
+                let (pill, _) = workspace.pill();
+                println!(
+                    "System ready: {} broker(s), selected '{}' — {}",
+                    workspace.brokers.len(),
+                    workspace.selected_id,
+                    pill
+                );
+                workspace
+            }
+            BackendResponse::Error { data } => {
+                eprintln!("System snapshot failed: {}", data.message);
+                BrokerWorkspace::empty()
+            }
+            _ => {
+                eprintln!("Unexpected response");
+                BrokerWorkspace::empty()
+            }
+        };
     // Symbol/timeframe refetch for the chart interactions (same snapshot
-    // shape the startup path loads; the startup limit is preserved).
-    let fetch_market: Rc<dyn Fn(Option<String>, Option<String>) -> Option<serde_json::Value>> =
-        Rc::new({
-            let backend = backend.clone();
-            move |symbol: Option<String>, timeframe: Option<String>| -> Option<serde_json::Value> {
-                match backend.send_command(BackendCommand::GetMarketSnapshot {
+    // shape the startup path loads; the startup limit is preserved). The
+    // old bars stay visible until the worker's snapshot swaps in atomically.
+    let fetch_market: Rc<dyn Fn(Option<String>, Option<String>)> = Rc::new({
+        let backend = Arc::clone(&backend);
+        let tx = fetch_tx.clone();
+        let seq = Arc::clone(&market_seq);
+        move |symbol: Option<String>, timeframe: Option<String>| {
+            let id = seq.fetch_add(1, Ordering::SeqCst) + 1;
+            spawn_fetch(
+                &backend,
+                &tx,
+                BackendCommand::GetMarketSnapshot {
                     symbol,
                     timeframe,
                     limit: snapshot_limit,
-                }) {
-                    Ok(BackendResponse::MarketSnapshot { data }) => Some(data),
-                    Ok(other) => {
-                        eprintln!("Market refetch: unexpected response ({other:?})");
-                        None
-                    }
-                    Err(err) => {
-                        eprintln!("Market refetch failed: {err}");
-                        None
-                    }
-                }
-            }
-        });
+                },
+                move |data| FetchResult::Market(id, data),
+            );
+        }
+    });
     let market_state = Rc::new(RefCell::new(market_state));
     shell::apply_market(&ui, &market_state.borrow());
-    shell::wire_market(&ui, market_state, fetch_market);
+    shell::wire_market(&ui, market_state.clone(), fetch_market);
+    // Fetch-result pump: drains worker snapshots on the UI thread (50ms —
+    // far below a frame budget, far above fetch latency). Latest-wins per
+    // kind: a slow earlier request never overwrites a newer arrival.
+    let fetch_timer = slint::Timer::default();
+    {
+        let weak = ui.as_weak();
+        let market_state = market_state.clone();
+        let lab_state = lab_state.clone();
+        let mut last_market: u64 = 0;
+        let mut last_select: u64 = 0;
+        let mut last_run: u64 = 0;
+        fetch_timer.start(
+            slint::TimerMode::Repeated,
+            std::time::Duration::from_millis(50),
+            move || {
+                let Some(ui) = weak.upgrade() else { return };
+                for result in fetch_rx.try_iter() {
+                    match result {
+                        FetchResult::Market(id, data) => {
+                            if id > last_market {
+                                last_market = id;
+                                if let Some(data) = data {
+                                    market::apply_snapshot_json(
+                                        &mut market_state.borrow_mut(),
+                                        &data,
+                                    );
+                                    shell::apply_market(&ui, &market_state.borrow());
+                                }
+                            }
+                        }
+                        FetchResult::LabSelect(id, data) => {
+                            if id > last_select {
+                                last_select = id;
+                                if let Some(data) = data {
+                                    lab::apply_snapshot_json(&mut lab_state.borrow_mut(), &data);
+                                    shell::apply_lab(&ui, &lab_state.borrow());
+                                }
+                            }
+                        }
+                        FetchResult::LabRun(id, data) => {
+                            if id > last_run {
+                                last_run = id;
+                                match data {
+                                    Some(data) => {
+                                        lab::apply_snapshot_json(&mut lab_state.borrow_mut(), &data)
+                                    }
+                                    None => lab_state.borrow_mut().fail_run(),
+                                }
+                                shell::apply_lab(&ui, &lab_state.borrow());
+                            }
+                        }
+                    }
+                }
+            },
+        );
+    }
     shell::apply_connection(&ui, &connection_workspace);
     shell::apply_zoom(&ui, &zoom.borrow());
     shell::apply_lab(&ui, &lab_state.borrow());
@@ -384,7 +487,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Shutdown backend
     println!("Shutting down Python backend...");
-    backend.shutdown()?;
+    backend
+        .lock()
+        .map_err(|e| format!("backend lock: {e}"))?
+        .shutdown()?;
     println!("VAYREN shutdown complete");
 
     Ok(())

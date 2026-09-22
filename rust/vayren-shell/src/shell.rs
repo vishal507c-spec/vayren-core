@@ -297,6 +297,13 @@ pub fn apply_connection(ui: &AppWindow, workspace: &BrokerWorkspace) {
     });
 }
 
+/// Testing-backend init shared with headless perf/UI tests (test-only).
+#[cfg(test)]
+pub(crate) fn init_test_backend() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(i_slint_backend_testing::init_no_event_loop);
+}
+
 fn market_model<T: Clone + 'static>(rows: Vec<T>) -> slint::ModelRc<T> {
     Rc::new(slint::VecModel::from(rows)).into()
 }
@@ -313,7 +320,6 @@ pub fn apply_market(ui: &AppWindow, state: &market::MarketState) {
     ui.set_market_exchange_label(view.exchange_label.into());
     ui.set_market_status_message(view.status_message.into());
     ui.set_market_has_data(view.has_data);
-    ui.set_market_header_ohlc(view.header_ohlc.into());
     ui.set_market_watch_rows(market_model(
         view.watch_rows
             .into_iter()
@@ -348,70 +354,31 @@ pub fn apply_market(ui: &AppWindow, state: &market::MarketState) {
     ui.set_market_timeframes_visible(tf(view.timeframes_visible));
     ui.set_market_timeframes_overflow(tf(view.timeframes_overflow));
     ui.set_market_plot_slots(view.plot_slots);
-    ui.set_market_candles(market_model(
-        view.candles
-            .into_iter()
-            .map(|c| MarketCandle {
-                x: c.x,
-                o: c.open,
-                h: c.high,
-                l: c.low,
-                c: c.close,
-                vol: c.volume,
-                top: c.top,
-                body: c.body,
-                tone: c.tone.cell(),
-            })
-            .collect(),
-    ));
-    let ticks = |rows: Vec<market::AxisTick>| {
-        market_model(
-            rows.into_iter()
-                .map(|t| MarketTick {
-                    pos: t.pos,
-                    label: t.label.into(),
-                })
-                .collect(),
-        )
-    };
-    ui.set_market_price_ticks(ticks(view.price_ticks));
-    ui.set_market_time_ticks(ticks(view.time_ticks));
-    ui.set_market_plot_segments(market_model(
-        view.plot_segments
-            .into_iter()
-            .map(|s| MarketPlotSeg {
-                x1: s.x1,
-                y1: s.y1,
-                x2: s.x2,
-                y2: s.y2,
-                color: s.color,
-                wide: s.wide,
-            })
-            .collect(),
-    ));
-    ui.set_market_markers(market_model(
-        view.markers
-            .into_iter()
-            .map(|m| MarketMarker {
-                x: m.x,
-                y: m.y,
-                kind: m.kind,
-                color: m.color,
-                label: m.label.into(),
-                pill: m.pill,
-                pill_solid: m.pill_solid,
-                tip: m.tip,
-                pill_w: m.pill_w,
-            })
-            .collect(),
-    ));
-    ui.set_market_hover_x(view.hover_x);
-    ui.set_market_hover_y(view.hover_y);
-    ui.set_market_hover_price(view.hover_price.into());
-    ui.set_market_hover_time(view.hover_time.into());
-    ui.set_market_hover_volume(view.hover_volume.into());
-    ui.set_market_hover_bull(view.hover_bull);
-    ui.set_market_has_hover(view.has_hover);
+    ui.set_market_candles(candles_model(view.candles));
+    ui.set_market_price_ticks(ticks_model(view.price_ticks));
+    ui.set_market_time_ticks(ticks_model(view.time_ticks));
+    ui.set_market_plot_segments(segments_model(view.plot_segments));
+    ui.set_market_markers(markers_model(view.markers));
+    apply_flags_props(
+        ui,
+        view.scale_mode,
+        view.scale_label.as_str(),
+        view.grid_visible,
+        view.cross_visible,
+    );
+    apply_hover_props(
+        ui,
+        &market::HoverView {
+            hover_x: view.hover_x,
+            hover_y: view.hover_y,
+            hover_price: view.hover_price,
+            hover_time: view.hover_time,
+            hover_volume: view.hover_volume,
+            hover_bull: view.hover_bull,
+            has_hover: view.has_hover,
+            header_ohlc: view.header_ohlc,
+        },
+    );
     ui.set_market_indicator_rows(market_model(
         view.indicator_rows
             .into_iter()
@@ -610,13 +577,133 @@ pub fn apply_market(ui: &AppWindow, state: &market::MarketState) {
 /// snapshot, same bars the startup path loads). Backend-owned wires stay
 /// queued on the state (bounded at 64, replayed by a future engine bridge) —
 /// the legacy host drain is gone, nothing is dropped silently.
+/// Dirty-flag apply tiers (Phase 22): each interaction refreshes ONLY the
+/// Slint properties it can change. Full `apply_market` stays for data /
+/// selection / list changes; viewport ops rebuild geometry lists only;
+/// hover moves touch 8 scalar props and zero models.
+fn candles_model(rows: Vec<market::CandlePoint>) -> slint::ModelRc<MarketCandle> {
+    market_model(
+        rows.into_iter()
+            .map(|c| MarketCandle {
+                x: c.x,
+                o: c.open,
+                h: c.high,
+                l: c.low,
+                c: c.close,
+                vol: c.volume,
+                top: c.top,
+                body: c.body,
+                tone: c.tone.cell(),
+            })
+            .collect(),
+    )
+}
+
+fn ticks_model(rows: Vec<market::AxisTick>) -> slint::ModelRc<MarketTick> {
+    market_model(
+        rows.into_iter()
+            .map(|t| MarketTick {
+                pos: t.pos,
+                label: t.label.into(),
+            })
+            .collect(),
+    )
+}
+
+fn segments_model(rows: Vec<market::PlotSegment>) -> slint::ModelRc<MarketPlotSeg> {
+    market_model(
+        rows.into_iter()
+            .map(|s| MarketPlotSeg {
+                x1: s.x1,
+                y1: s.y1,
+                x2: s.x2,
+                y2: s.y2,
+                color: s.color,
+                wide: s.wide,
+            })
+            .collect(),
+    )
+}
+
+fn markers_model(rows: Vec<market::MarkerGlyph>) -> slint::ModelRc<MarketMarker> {
+    market_model(
+        rows.into_iter()
+            .map(|m| MarketMarker {
+                x: m.x,
+                y: m.y,
+                kind: m.kind,
+                color: m.color,
+                label: m.label.into(),
+                pill: m.pill,
+                pill_solid: m.pill_solid,
+                tip: m.tip,
+                pill_w: m.pill_w,
+            })
+            .collect(),
+    )
+}
+
+fn apply_hover_props(ui: &AppWindow, hover: &market::HoverView) {
+    ui.set_market_hover_x(hover.hover_x);
+    ui.set_market_hover_y(hover.hover_y);
+    ui.set_market_hover_price(hover.hover_price.clone().into());
+    ui.set_market_hover_time(hover.hover_time.clone().into());
+    ui.set_market_hover_volume(hover.hover_volume.clone().into());
+    ui.set_market_hover_bull(hover.hover_bull);
+    ui.set_market_has_hover(hover.has_hover);
+    ui.set_market_header_ohlc(hover.header_ohlc.clone().into());
+}
+
+/// CROSSHAIR_DIRTY only: pointer moves never rebuild geometry or lists.
+pub fn apply_market_hover(ui: &AppWindow, state: &market::MarketState) {
+    apply_hover_props(ui, &market::project_hover(state));
+}
+
+/// VIEWPORT_DIRTY (+ crosshair): pan/zoom/scale ops rebuild the visible
+/// geometry lists only — watchlist, timeframes, indicators, popups, the
+/// download console and status panels are untouched.
+pub fn apply_market_viewport(ui: &AppWindow, state: &market::MarketState) {
+    let view = market::project(state);
+    ui.set_market_plot_slots(view.plot_slots);
+    ui.set_market_candles(candles_model(view.candles));
+    ui.set_market_price_ticks(ticks_model(view.price_ticks));
+    ui.set_market_time_ticks(ticks_model(view.time_ticks));
+    ui.set_market_plot_segments(segments_model(view.plot_segments));
+    ui.set_market_markers(markers_model(view.markers));
+    ui.set_market_status_message(view.status_message.into());
+    ui.set_market_has_data(view.has_data);
+    apply_flags_props(
+        ui,
+        view.scale_mode,
+        view.scale_label.as_str(),
+        view.grid_visible,
+        view.cross_visible,
+    );
+    apply_hover_props(ui, &market::project_hover(state));
+}
+
+fn apply_flags_props(ui: &AppWindow, scale_mode: i32, scale_label: &str, grid: bool, cross: bool) {
+    ui.set_market_scale_mode(scale_mode);
+    ui.set_market_scale_label(scale_label.into());
+    ui.set_market_grid_visible(grid);
+    ui.set_market_cross_visible(cross);
+}
+
 pub fn wire_market(
     ui: &AppWindow,
     state: Rc<RefCell<market::MarketState>>,
-    fetch: Rc<dyn Fn(Option<String>, Option<String>) -> Option<serde_json::Value>>,
+    fetch: Rc<dyn Fn(Option<String>, Option<String>)>,
 ) {
     fn refresh(ui: &AppWindow, state: &Rc<RefCell<market::MarketState>>) {
         apply_market(ui, &state.borrow());
+    }
+    /// Crosshair-only refresh: 8 scalar props, zero model rebuilds.
+    fn refresh_hover(ui: &AppWindow, state: &Rc<RefCell<market::MarketState>>) {
+        apply_market_hover(ui, &state.borrow());
+    }
+    /// Viewport refresh: visible geometry lists only, no list panels.
+    fn refresh_viewport(ui: &AppWindow, state: &Rc<RefCell<market::MarketState>>) {
+        apply_market_viewport(ui, &state.borrow());
     }
     macro_rules! act {
         ($cb:ident, $wire:expr, $action:expr) => {{
@@ -653,7 +740,19 @@ pub fn wire_market(
             });
         }};
     }
-    macro_rules! act_f2 {
+    // Viewport-tier variants: geometry lists only, list panels untouched.
+    macro_rules! act_vp {
+        ($cb:ident, $wire:expr, $action:expr) => {{
+            let strong = state.clone();
+            let weak = ui.as_weak();
+            ui.$cb(move || {
+                let Some(ui) = weak.upgrade() else { return };
+                strong.borrow_mut().interact($wire, $action);
+                refresh_viewport(&ui, &strong);
+            });
+        }};
+    }
+    macro_rules! act_vp2 {
         ($cb:ident, $make:expr) => {{
             let strong = state.clone();
             let weak = ui.as_weak();
@@ -661,7 +760,7 @@ pub fn wire_market(
                 let Some(ui) = weak.upgrade() else { return };
                 let (wire, action) = $make(a, b);
                 strong.borrow_mut().interact(&wire, action);
-                refresh(&ui, &strong);
+                refresh_viewport(&ui, &strong);
             });
         }};
     }
@@ -682,19 +781,78 @@ pub fn wire_market(
         "watchlist:remove",
         market::MarketAction::RemoveWatchlist
     );
-    act!(
+    act_vp!(
         on_market_reset_view,
         "reset",
         market::MarketAction::ResetView
     );
-    act!(on_market_hover_left, "", market::MarketAction::HoverLeft);
-    act!(on_market_drag_end, "", market::MarketAction::DragEnd);
-    act!(
+    {
+        let strong = state.clone();
+        let weak = ui.as_weak();
+        ui.on_market_hover_left(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            strong
+                .borrow_mut()
+                .interact("", market::MarketAction::HoverLeft);
+            refresh_hover(&ui, &strong);
+        });
+    }
+    act_vp!(on_market_drag_end, "", market::MarketAction::DragEnd);
+    act_vp!(
         on_market_price_drag_end,
         "",
         market::MarketAction::PriceDragEnd
     );
-    act!(on_market_price_reset, "", market::MarketAction::PriceReset);
+    act_vp!(on_market_price_reset, "", market::MarketAction::PriceReset);
+    // Display settings: scale changes rebuild geometry (viewport tier);
+    // grid/crosshair visibility flips one flag each (flags tier only).
+    {
+        let strong = state.clone();
+        let weak = ui.as_weak();
+        ui.on_market_scale_cycle(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            strong
+                .borrow_mut()
+                .interact("scale:cycle", market::MarketAction::CycleScaleMode);
+            refresh_viewport(&ui, &strong);
+        });
+    }
+    {
+        let strong = state.clone();
+        let weak = ui.as_weak();
+        ui.on_market_grid_toggle(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            strong
+                .borrow_mut()
+                .interact("grid:toggle", market::MarketAction::ToggleGrid);
+            let guard = strong.borrow();
+            apply_flags_props(
+                &ui,
+                guard.scale_mode.kind(),
+                guard.scale_mode.label(),
+                guard.grid_visible,
+                guard.cross_visible,
+            );
+        });
+    }
+    {
+        let strong = state.clone();
+        let weak = ui.as_weak();
+        ui.on_market_cross_toggle(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            strong
+                .borrow_mut()
+                .interact("cross:toggle", market::MarketAction::ToggleCrosshair);
+            let guard = strong.borrow();
+            apply_flags_props(
+                &ui,
+                guard.scale_mode.kind(),
+                guard.scale_mode.label(),
+                guard.grid_visible,
+                guard.cross_visible,
+            );
+        });
+    }
     act!(
         on_market_trade_prev,
         "trade:prev",
@@ -747,19 +905,28 @@ pub fn wire_market(
         String::new(),
         market::MarketAction::IndicatorPopup(open)
     ));
-    act_f2!(on_market_hover_moved, |x, y| (
-        String::new(),
-        market::MarketAction::HoverMoved(x, y)
-    ));
-    act_f2!(on_market_wheel_zoom, |x, steps| (
+    {
+        // Pointer moves are the hottest path: crosshair scalars only, the
+        // 4,800-node candle scene is never rebuilt for a hover.
+        let strong = state.clone();
+        let weak = ui.as_weak();
+        ui.on_market_hover_moved(move |x: f32, y: f32| {
+            let Some(ui) = weak.upgrade() else { return };
+            strong
+                .borrow_mut()
+                .interact("", market::MarketAction::HoverMoved(x, y));
+            refresh_hover(&ui, &strong);
+        });
+    }
+    act_vp2!(on_market_wheel_zoom, |x, steps| (
         String::new(),
         market::MarketAction::WheelZoom(x, steps)
     ));
-    act_f2!(on_market_drag_start, |x, y| (
+    act_vp2!(on_market_drag_start, |x, y| (
         String::new(),
         market::MarketAction::DragStart(x, y)
     ));
-    act_f2!(on_market_drag_move, |x, y| (
+    act_vp2!(on_market_drag_move, |x, y| (
         String::new(),
         market::MarketAction::DragMove(x, y)
     ));
@@ -772,10 +939,14 @@ pub fn wire_market(
         ui.on_market_symbol_selected(move |name: slint::SharedString| {
             let Some(ui) = weak.upgrade() else { return };
             let timeframe = strong.borrow().timeframe.clone();
-            if let Some(data) = fetch(Some(name.to_string()), Some(timeframe)) {
-                market::apply_snapshot_json(&mut strong.borrow_mut(), &data);
-            }
-            refresh(&ui, &strong);
+            // Old bars stay visible (real data, previous symbol) while the
+            // worker loads; the snapshot swaps in atomically on arrival.
+            strong.borrow_mut().interact(
+                &format!("symbol:select:{name}"),
+                market::MarketAction::SelectSymbol(name.to_string()),
+            );
+            refresh_viewport(&ui, &strong);
+            fetch(Some(name.to_string()), Some(timeframe));
         });
     }
     {
@@ -785,10 +956,12 @@ pub fn wire_market(
         ui.on_market_timeframe_picked(move |timeframe: slint::SharedString| {
             let Some(ui) = weak.upgrade() else { return };
             let symbol = strong.borrow().selected_symbol.clone();
-            if let Some(data) = fetch(Some(symbol), Some(timeframe.to_string())) {
-                market::apply_snapshot_json(&mut strong.borrow_mut(), &data);
-            }
-            refresh(&ui, &strong);
+            strong.borrow_mut().interact(
+                &format!("timeframe:select:{timeframe}"),
+                market::MarketAction::SelectTimeframe(timeframe.to_string()),
+            );
+            refresh_viewport(&ui, &strong);
+            fetch(Some(symbol), Some(timeframe.to_string()));
         });
     }
     {
@@ -799,7 +972,7 @@ pub fn wire_market(
             strong
                 .borrow_mut()
                 .interact("", market::MarketAction::WheelPanX(frac));
-            refresh(&ui, &strong);
+            refresh_viewport(&ui, &strong);
         });
     }
     {
@@ -810,7 +983,7 @@ pub fn wire_market(
             strong
                 .borrow_mut()
                 .interact("", market::MarketAction::PriceZoom(steps, y));
-            refresh(&ui, &strong);
+            refresh_viewport(&ui, &strong);
         });
     }
     {
@@ -821,7 +994,7 @@ pub fn wire_market(
             strong
                 .borrow_mut()
                 .interact("", market::MarketAction::PriceDrag(notches, anchor));
-            refresh(&ui, &strong);
+            refresh_viewport(&ui, &strong);
         });
     }
     {
@@ -1475,8 +1648,8 @@ fn parse_capital(text: &str) -> Option<f64> {
 pub fn wire_lab(
     ui: &AppWindow,
     state: Rc<RefCell<LabState>>,
-    fetch_workspace: Rc<dyn Fn(String) -> Option<serde_json::Value>>,
-    fetch_run: Rc<dyn Fn(LabRunRequest) -> Option<serde_json::Value>>,
+    fetch_workspace: Rc<dyn Fn(String)>,
+    fetch_run: Rc<dyn Fn(LabRunRequest)>,
 ) {
     let bind = |ui: &AppWindow, state: &Rc<RefCell<LabState>>, handler: fn(&mut LabState, i32)| {
         let strong = state.clone();
@@ -1518,9 +1691,7 @@ pub fn wire_lab(
                     .unwrap_or_default()
             };
             if !name.is_empty() {
-                if let Some(data) = fetch(name) {
-                    lab::apply_snapshot_json(&mut strong.borrow_mut(), &data);
-                }
+                fetch(name);
             }
             apply_lab(&ui, &strong.borrow());
         });
@@ -1558,11 +1729,7 @@ pub fn wire_lab(
             };
             if let Some(request) = request {
                 apply_lab(&ui, &strong.borrow());
-                if let Some(data) = fetch(request) {
-                    lab::apply_snapshot_json(&mut strong.borrow_mut(), &data);
-                } else {
-                    strong.borrow_mut().fail_run();
-                }
+                fetch(request);
             }
             if let Some(ui) = handle.upgrade() {
                 apply_lab(&ui, &strong.borrow());
@@ -3210,8 +3377,8 @@ mod tests {
         assert_eq!(ui.get_lab_library().row_count(), 2);
         assert!(ui.get_lab_library().row_data(0).unwrap().selected);
 
-        let no_fetch: Rc<dyn Fn(String) -> Option<serde_json::Value>> = Rc::new(|_| None);
-        let no_run: Rc<dyn Fn(LabRunRequest) -> Option<serde_json::Value>> = Rc::new(|_| None);
+        let no_fetch: Rc<dyn Fn(String)> = Rc::new(|_| ());
+        let no_run: Rc<dyn Fn(LabRunRequest)> = Rc::new(|_| ());
         wire_lab(&ui, lab_state.clone(), no_fetch, no_run);
         ui.invoke_lab_library_picked(1);
         assert_eq!(ui.get_lab().name, "SMA");
