@@ -1751,9 +1751,10 @@ export component MarketScreen inherits Rectangle {
     callback trade-prev();
     callback trade-next();
     callback trade-open();
-    callback scale-cycle();
-    callback grid-toggle();
-    callback cross-toggle();
+    // Chart-settings pick from the INDICATORS popup CHART section (stable
+    // row id: "scale" | "grid" | "cross"). The popup stays the single
+    // entry point so the toolbar keeps its v1.25.0 pixel inventory.
+    callback chart-opt-picked(string);
 
     // ── local presentation state (menus, drag) ──
     property <string> open-menu: "none";
@@ -1982,21 +1983,6 @@ export component MarketScreen inherits Rectangle {
                                 root.indicator-popup(!root.popup-open);
                                 root.popup-x = self.absolute-position.x;
                             }
-                        }
-                        SmallButton {
-                            label: root.scale-label;
-                            active: root.scale-mode != 0;
-                            picked => { root.scale-cycle(); }
-                        }
-                        SmallButton {
-                            label: "GRID";
-                            active: root.grid-visible;
-                            picked => { root.grid-toggle(); }
-                        }
-                        SmallButton {
-                            label: "CROSS";
-                            active: root.cross-visible;
-                            picked => { root.cross-toggle(); }
                         }
                         if root.active-label != "": Text {
                             text: root.active-label;
@@ -2475,7 +2461,11 @@ export component MarketScreen inherits Rectangle {
                                             for pr in root.popup-rows: PopupItem {
                                                 pr: pr;
                                                 picked(name) => {
-                                                    root.add-indicator(name);
+                                                    if pr.category == "CHART" {
+                                                        root.chart-opt-picked(name);
+                                                    } else {
+                                                        root.add-indicator(name);
+                                                    }
                                                     root.indicator-popup(false);
                                                 }
                                             }

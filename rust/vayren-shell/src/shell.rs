@@ -804,53 +804,25 @@ pub fn wire_market(
         market::MarketAction::PriceDragEnd
     );
     act_vp!(on_market_price_reset, "", market::MarketAction::PriceReset);
-    // Display settings: scale changes rebuild geometry (viewport tier);
-    // grid/crosshair visibility flips one flag each (flags tier only).
+    // Chart-settings picks from the INDICATORS popup CHART section (stable
+    // row ids; labels are display-only and never matched). Geometry-affecting
+    // picks refresh the viewport tier; pure visibility flags need no rebuild.
     {
         let strong = state.clone();
         let weak = ui.as_weak();
-        ui.on_market_scale_cycle(move || {
+        ui.on_market_chart_opt_picked(move |name: slint::SharedString| {
             let Some(ui) = weak.upgrade() else { return };
+            let name = name.to_string();
+            let action = match name.as_str() {
+                "scale" => market::MarketAction::CycleScaleMode,
+                "grid" => market::MarketAction::ToggleGrid,
+                "cross" => market::MarketAction::ToggleCrosshair,
+                _ => return,
+            };
             strong
                 .borrow_mut()
-                .interact("scale:cycle", market::MarketAction::CycleScaleMode);
+                .interact(&format!("chart-opt:{name}"), action);
             refresh_viewport(&ui, &strong);
-        });
-    }
-    {
-        let strong = state.clone();
-        let weak = ui.as_weak();
-        ui.on_market_grid_toggle(move || {
-            let Some(ui) = weak.upgrade() else { return };
-            strong
-                .borrow_mut()
-                .interact("grid:toggle", market::MarketAction::ToggleGrid);
-            let guard = strong.borrow();
-            apply_flags_props(
-                &ui,
-                guard.scale_mode.kind(),
-                guard.scale_mode.label(),
-                guard.grid_visible,
-                guard.cross_visible,
-            );
-        });
-    }
-    {
-        let strong = state.clone();
-        let weak = ui.as_weak();
-        ui.on_market_cross_toggle(move || {
-            let Some(ui) = weak.upgrade() else { return };
-            strong
-                .borrow_mut()
-                .interact("cross:toggle", market::MarketAction::ToggleCrosshair);
-            let guard = strong.borrow();
-            apply_flags_props(
-                &ui,
-                guard.scale_mode.kind(),
-                guard.scale_mode.label(),
-                guard.grid_visible,
-                guard.cross_visible,
-            );
         });
     }
     act!(

@@ -2232,6 +2232,58 @@ pub fn project(state: &MarketState) -> MarketView {
                 }
             }
         }
+        // Chart display settings section (own implementation of the
+        // chart-settings grouping): shown on ALL so scale/grid/crosshair
+        // stay one click away without toolbar clutter. Rows carry stable
+        // ids; selection routes by category, never by label text.
+        if cat == "ALL" {
+            let chart_rows = [
+                (
+                    "scale",
+                    match state.scale_mode {
+                        ChartScaleMode::Regular => "Scale: Regular (₹)",
+                        ChartScaleMode::Percent => "Scale: Percent (%)",
+                        ChartScaleMode::Logarithmic => "Scale: Logarithmic (log)",
+                    },
+                ),
+                (
+                    "grid",
+                    if state.grid_visible {
+                        "Grid lines: On"
+                    } else {
+                        "Grid lines: Off"
+                    },
+                ),
+                (
+                    "cross",
+                    if state.cross_visible {
+                        "Crosshair: On"
+                    } else {
+                        "Crosshair: Off"
+                    },
+                ),
+            ];
+            let chart_rows: Vec<(&str, &str)> = chart_rows
+                .into_iter()
+                .filter(|(_, label)| query.is_empty() || label.to_lowercase().contains(&query))
+                .collect();
+            if !chart_rows.is_empty() {
+                popup_rows.push(PopupRow {
+                    kind: "section".to_string(),
+                    label: "— CHART —".to_string(),
+                    name: String::new(),
+                    category: String::new(),
+                });
+                for (name, label) in chart_rows {
+                    popup_rows.push(PopupRow {
+                        kind: "item".to_string(),
+                        label: label.to_string(),
+                        name: name.to_string(),
+                        category: "CHART".to_string(),
+                    });
+                }
+            }
+        }
         if popup_rows.iter().all(|r| r.kind != "item") {
             popup_rows.clear();
             popup_rows.push(PopupRow {
@@ -3609,6 +3661,46 @@ mod tests {
         assert_eq!(view.scale_label, "₹");
         assert!(!view.grid_visible);
         assert!(view.cross_visible);
+    }
+
+    #[test]
+    fn popup_chart_section_lists_scale_grid_cross() {
+        let mut st = MarketState::default();
+        st.set_bars("S", "15m", "", scale_bars());
+        assert!(st.apply(MarketAction::IndicatorPopup(true)));
+        let view = project(&st);
+        let rows: Vec<(&str, &str)> = view
+            .popup_rows
+            .iter()
+            .filter(|r| r.kind == "item" && r.category == "CHART")
+            .map(|r| (r.name.as_str(), r.label.as_str()))
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                ("scale", "Scale: Regular (₹)"),
+                ("grid", "Grid lines: On"),
+                ("cross", "Crosshair: On"),
+            ]
+        );
+        // Labels follow state; ids stay stable for routing.
+        assert!(st.apply(MarketAction::CycleScaleMode));
+        assert!(st.apply(MarketAction::ToggleGrid));
+        let view = project(&st);
+        let rows: Vec<(&str, &str)> = view
+            .popup_rows
+            .iter()
+            .filter(|r| r.kind == "item" && r.category == "CHART")
+            .map(|r| (r.name.as_str(), r.label.as_str()))
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                ("scale", "Scale: Percent (%)"),
+                ("grid", "Grid lines: Off"),
+                ("cross", "Crosshair: On"),
+            ]
+        );
     }
 
     #[test]

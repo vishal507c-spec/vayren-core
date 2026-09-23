@@ -213,9 +213,7 @@ export component AppWindow inherits Window {
     callback market-trade-prev();
     callback market-trade-next();
     callback market-trade-open();
-    callback market-scale-cycle();
-    callback market-grid-toggle();
-    callback market-cross-toggle();
+    callback market-chart-opt-picked(string);
     callback market-status-toggle();
     callback market-dl-toggle();
     callback market-dl-interval(string);
@@ -852,9 +850,7 @@ export component AppWindow inherits Window {
                     trade-prev() => { root.market-trade-prev(); }
                     trade-next() => { root.market-trade-next(); }
                     trade-open() => { root.market-trade-open(); }
-                    scale-cycle() => { root.market-scale-cycle(); }
-                    grid-toggle() => { root.market-grid-toggle(); }
-                    cross-toggle() => { root.market-cross-toggle(); }
+                    chart-opt-picked(s) => { root.market-chart-opt-picked(s); }
                     status-toggle() => { root.market-status-toggle(); }
                     dl-toggle() => { root.market-dl-toggle(); }
                     dl-interval(s) => { root.market-dl-interval(s); }
