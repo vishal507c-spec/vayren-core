@@ -31,16 +31,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from core.observable import IntervalTimer, Signal
+# DEBT: retained unwired imports (see 90_brain/ai_memory.md).
+from core.observable import IntervalTimer, Signal  # pyright: ignore[reportMissingImports]
 from execution import (
-    ExecutionMode,
-    LiveSession,
-    SessionConfig,
-    SqliteTailProvider,
+    ExecutionMode,  # pyright: ignore[reportAttributeAccessIssue]
+    LiveSession,  # pyright: ignore[reportAttributeAccessIssue]
+    SessionConfig,  # pyright: ignore[reportAttributeAccessIssue]
+    SqliteTailProvider,  # pyright: ignore[reportAttributeAccessIssue]
 )
-from execution.modes import LiveArm
-from market import Bar, SymbolRepository
-from risk import RiskPolicy
+from execution.modes import LiveArm  # pyright: ignore[reportMissingImports]
+from market import Bar, SymbolRepository  # pyright: ignore[reportAttributeAccessIssue]
+from risk import RiskPolicy  # pyright: ignore[reportAttributeAccessIssue]
 from strategy import StrategyDefinition, StrategyParameters
 from strategy.language.compiler import compile_strategy
 from strategy.language.storage import (
@@ -746,7 +747,10 @@ class LiveTradingService:
                 )
                 session_dir = base_dir / symbol
                 if symbol in md_faces:
-                    from execution import BrokerFeedProvider
+                    # DEBT: retained unwired import (see 90_brain/ai_memory.md).
+                    from execution import (
+                        BrokerFeedProvider,  # pyright: ignore[reportAttributeAccessIssue]
+                    )
 
                     provider = BrokerFeedProvider(md_faces[symbol], self._config.timeframe)
                 else:
@@ -829,7 +833,7 @@ class LiveTradingService:
         except Exception:
             raise LiveConfigError(f"venue {venue_id!r} has no trading face") from None
         try:
-            from execution import BrokerAdapter  # pyright: ignore[reportMissingImports]
+            from execution import BrokerAdapter  # pyright: ignore[reportAttributeAccessIssue]
 
             if not isinstance(face, BrokerAdapter):
                 raise LiveConfigError(f"venue {venue_id!r} does not satisfy the order interface")

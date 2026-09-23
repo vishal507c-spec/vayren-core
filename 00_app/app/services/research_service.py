@@ -20,7 +20,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from core.observable import Signal, WorkerThread
+# DEBT: retained unwired import (see 90_brain/ai_memory.md).
+from core.observable import Signal, WorkerThread  # pyright: ignore[reportMissingImports]
 
 
 @dataclass(frozen=True)

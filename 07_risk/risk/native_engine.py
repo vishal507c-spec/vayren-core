@@ -17,7 +17,13 @@ from typing import Any
 
 from core.native.loader import NativeBridgeError, load_vayren_core
 
-from risk.models import RiskCheck, RiskDecision, RiskPolicy, RiskRequest
+# DEBT: retained unwired import (see 90_brain/ai_memory.md).
+from risk.models import (  # pyright: ignore
+    RiskCheck,
+    RiskDecision,
+    RiskPolicy,
+    RiskRequest,
+)
 
 _lib = load_vayren_core()
 

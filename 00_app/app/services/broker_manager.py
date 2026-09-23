@@ -41,7 +41,9 @@ from typing import Any
 
 from broker import BrokerStatus
 from broker.management import BrokerSpec
-from core.observable import Signal, WorkerThread
+
+# DEBT: retained unwired import (see 90_brain/ai_memory.md).
+from core.observable import Signal, WorkerThread  # pyright: ignore[reportMissingImports]
 
 CALLBACK_PORT = 9474
 _SESSION_JOB = "session-check"
