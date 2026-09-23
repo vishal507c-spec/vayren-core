@@ -53,8 +53,10 @@ jobs:
   rust:
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    # Cache SAVE needs write; everything else runs on the default read-only token.
+    # Cache SAVE needs write; checkout still needs read (a permissions
+    # block replaces defaults, so contents:read must stay explicit).
     permissions:
+      contents: read
       actions: write
     steps:
       - uses: actions/checkout@v4
