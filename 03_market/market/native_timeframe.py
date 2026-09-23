@@ -43,6 +43,22 @@ _lib.vy_timeframe_fetch_plan.argtypes = [
     ctypes.POINTER(ctypes.c_int64),
 ]
 _lib.vy_timeframe_fetch_plan.restype = ctypes.c_int32
+# Same house rule as native_aggregate: untyped ints arrive as 4-byte C ints
+# while the kernel reads i64/usize slots (upper half is stack garbage).
+_lib.vy_timeframe_ladder_count.argtypes = []
+_lib.vy_timeframe_ladder_count.restype = ctypes.c_int32
+_lib.vy_timeframe_ladder_seconds.argtypes = [ctypes.c_int32]
+_lib.vy_timeframe_ladder_seconds.restype = ctypes.c_int64
+_lib.vy_timeframe_ladder_label.argtypes = [ctypes.c_int32, ctypes.c_char_p, ctypes.c_size_t]
+_lib.vy_timeframe_ladder_label.restype = ctypes.c_int32
+_lib.vy_timeframe_seconds.argtypes = [ctypes.c_char_p, ctypes.c_size_t]
+_lib.vy_timeframe_seconds.restype = ctypes.c_int64
+_lib.vy_timeframe_label.argtypes = [ctypes.c_int64, ctypes.c_char_p, ctypes.c_size_t]
+_lib.vy_timeframe_label.restype = ctypes.c_int32
+_lib.vy_timeframe_generate_label.argtypes = [ctypes.c_int64, ctypes.c_char_p, ctypes.c_size_t]
+_lib.vy_timeframe_generate_label.restype = ctypes.c_int32
+_lib.vy_timeframe_available.argtypes = [ctypes.c_int64, ctypes.c_char_p, ctypes.c_size_t]
+_lib.vy_timeframe_available.restype = ctypes.c_int32
 
 
 def _read(needed: int, call) -> str:
