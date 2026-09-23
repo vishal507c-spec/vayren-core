@@ -22,7 +22,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -e ".[dev]"
+      - run: pip install -e ".[dev,data]"
       - uses: dtolnay/rust-toolchain@stable
       # Mirror `make check`: rust + lint + format + typecheck + tests + validators.
       - run: python scripts/build_rust.py --test
