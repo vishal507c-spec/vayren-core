@@ -59,9 +59,6 @@ context-check:
 validate-authority:
 	python scripts/validate_authority.py
 
-context-check:
-	python scripts/context.py --check
-
 # ── Rust (AI_ENTRY.md §1: Rust owns core/perf kernels) ─────────
 
 rust:
@@ -70,7 +67,7 @@ rust:
 
 # ── Full Check ─────────────────────────────────────────────────
 
-check: rust lint typecheck test validate-structure validate-imports validate-language validate-architecture validate-authority validate-routes context-check context-check
+check: rust lint typecheck test validate-structure validate-imports validate-language validate-architecture validate-authority validate-routes context-check
 
 # ── Release (mechanics only; run `make check` first, CI validates on push) ─
 

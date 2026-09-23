@@ -38,4 +38,3 @@ jobs:
       - run: python scripts/validate_authority.py
       - run: python scripts/validate_routes.py
       - run: python scripts/context_engine.py --check
-      - run: python scripts/context.py --check
