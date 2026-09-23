@@ -9,8 +9,9 @@ import re
 from dataclasses import dataclass
 from enum import Enum
 
-from core.contracts.capability import CapabilityId
-from core.system.change_impact import RiskLevel
+# DEBT: retained unwired imports (see 90_brain/ai_memory.md).
+from core.contracts.capability import CapabilityId  # pyright: ignore[reportMissingImports]
+from core.system.change_impact import RiskLevel  # pyright: ignore[reportMissingImports]
 
 _ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 

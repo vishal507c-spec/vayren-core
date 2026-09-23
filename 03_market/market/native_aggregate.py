@@ -60,6 +60,61 @@ class _AggBucket(ctypes.Structure):
     ]
 
 
+_I32_P = ctypes.POINTER(ctypes.c_int32)
+_I64_P = ctypes.POINTER(ctypes.c_int64)
+_F64_P = ctypes.POINTER(ctypes.c_double)
+
+# Explicit signatures (house rule: every FFI binding declares argtypes).
+# Without them ctypes passes Python ints as 4-byte C ints while the kernel
+# reads usize/i64 slots (8 bytes) — the upper half stays stack garbage and
+# bucketing differs per platform/build. Seen live: one tf slot arrived huge
+# on Linux (whole session folded into a single anchor-stamped bucket).
+_lib.vy_aggregate.argtypes = [
+    _I32_P,
+    _I32_P,
+    _F64_P,
+    _F64_P,
+    _F64_P,
+    _F64_P,
+    _F64_P,
+    ctypes.c_size_t,
+    ctypes.c_int64,
+    ctypes.c_int64,
+    ctypes.POINTER(_AggBucket),
+    ctypes.c_size_t,
+]
+_lib.vy_aggregate.restype = ctypes.c_size_t
+_lib.vy_mode.argtypes = [_I64_P, ctypes.c_size_t, _I64_P]
+_lib.vy_mode.restype = ctypes.c_int32
+_lib.vy_agg_anchor_seconds.argtypes = [ctypes.c_char_p, ctypes.c_int64]
+_lib.vy_agg_anchor_seconds.restype = ctypes.c_int64
+_lib.vy_agg_bucket_start.argtypes = [
+    ctypes.c_char_p,
+    ctypes.c_int64,
+    ctypes.c_int64,
+    ctypes.c_int64,
+    ctypes.c_char_p,
+    ctypes.c_size_t,
+]
+_lib.vy_agg_bucket_start.restype = ctypes.c_int32
+_lib.vy_agg_closed_count.argtypes = [ctypes.c_int64, ctypes.c_int32]
+_lib.vy_agg_closed_count.restype = ctypes.c_int64
+_lib.vy_agg_fold_tick.argtypes = [
+    ctypes.c_int32,
+    ctypes.c_double,
+    ctypes.c_double,
+    ctypes.c_double,
+    ctypes.c_double,
+    ctypes.c_double,
+    ctypes.c_double,
+    ctypes.c_int32,
+    ctypes.c_double,
+    _F64_P,
+    ctypes.c_size_t,
+]
+_lib.vy_agg_fold_tick.restype = ctypes.c_int32
+
+
 def aggregate(
     days: Sequence[int],
     secs: Sequence[int],

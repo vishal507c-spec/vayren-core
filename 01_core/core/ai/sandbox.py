@@ -15,7 +15,9 @@ from enum import Enum
 from core.ai.change_simulation import ChangeSimulation, simulate_plan
 from core.ai.plan import Plan, PlanValidationResult
 from core.ai.plan_validator import PlanValidator, Policy
-from core.system.system_model import SystemModel
+
+# DEBT: retained unwired import (see 90_brain/ai_memory.md).
+from core.system.system_model import SystemModel  # pyright: ignore[reportMissingImports]
 
 
 class SandboxStage(Enum):

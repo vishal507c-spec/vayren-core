@@ -11,6 +11,9 @@ record in the unified registry.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+from typing import Any
+
 from broker.adapters.zerodha import BROKER_ID as ZERODHA_BROKER_ID
 from broker.adapters.zerodha import zerodha_plugin_record
 from broker.capabilities import Domain
@@ -121,7 +124,7 @@ def _seed_fyers() -> None:
 _seed_fyers()
 
 
-def _schema_rows(fields: object) -> tuple[dict[str, object], ...]:
+def _schema_rows(fields: Iterable[Any] | None) -> tuple[dict[str, object], ...]:
     """Reduce a provider ``credential_fields`` tuple to spec plain data.
 
     Home-chapter helper (concrete venue knowledge lives here): keeps only

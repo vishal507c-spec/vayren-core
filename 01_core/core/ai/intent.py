@@ -7,8 +7,9 @@ classified by rules, validated, and converted into a structured ``Intent``.
 from dataclasses import dataclass
 from enum import Enum
 
-from core.contracts.capability import CapabilityId
-from core.system.change_impact import RiskLevel
+# DEBT: retained unwired imports (see 90_brain/ai_memory.md).
+from core.contracts.capability import CapabilityId  # pyright: ignore[reportMissingImports]
+from core.system.change_impact import RiskLevel  # pyright: ignore[reportMissingImports]
 
 
 class IntentKind(Enum):

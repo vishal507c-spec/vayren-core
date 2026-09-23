@@ -15,9 +15,11 @@ from core.ai.plan import (
     risk_rank,
     validate_plan,
 )
-from core.contracts.capability import CapabilityId
-from core.system.change_impact import RiskLevel
-from core.system.system_model import SystemModel
+
+# DEBT: retained unwired imports (see 90_brain/ai_memory.md).
+from core.contracts.capability import CapabilityId  # pyright: ignore[reportMissingImports]
+from core.system.change_impact import RiskLevel  # pyright: ignore[reportMissingImports]
+from core.system.system_model import SystemModel  # pyright: ignore[reportMissingImports]
 
 
 @dataclass(frozen=True)

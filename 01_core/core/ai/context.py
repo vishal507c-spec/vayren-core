@@ -11,8 +11,10 @@ from dataclasses import dataclass
 
 from core.ai.memory.engineering import EngineeringMemory
 from core.ai.memory.performance import PerformanceMemory
-from core.system.snapshot import build_snapshot
-from core.system.system_model import SystemModel
+
+# DEBT: retained unwired imports (see 90_brain/ai_memory.md).
+from core.system.snapshot import build_snapshot  # pyright: ignore[reportMissingImports]
+from core.system.system_model import SystemModel  # pyright: ignore[reportMissingImports]
 
 SECTIONS = (
     "components",

@@ -60,8 +60,11 @@ class DiscoveryReport:
 def resolve_data_dir(explicit: str | Path | None = None) -> Path:
     """Resolve the candle store (priority: explicit → env → legacy → home).
 
-    Raises:
-        MarketDataError: When no candidate exists (actionable message).
+    A missing explicit dir never crashes resolution: the next usable
+    candidate (env, then legacy, then home) wins instead. The home default
+    (``~/.vayren/data``) always resolves — it is app-owned and created on
+    demand, so resolution itself never raises; readers treat a missing
+    store as empty.
     """
     candidates: list[tuple[str, Path]] = []
     if explicit is not None and str(explicit).strip():
@@ -71,14 +74,14 @@ def resolve_data_dir(explicit: str | Path | None = None) -> Path:
         candidates.append(("VAYREN_DATA_DIR", Path(env_dir).expanduser()))
     legacy = Path(_LEGACY_DATA_DIR)
     candidates.append(("legacy", legacy))
-    candidates.append(("default", Path.home() / ".vayren" / "data"))
+    home_default = Path.home() / ".vayren" / "data"
+    candidates.append(("default", home_default))
     for origin, path in candidates:
         if path.is_dir():
             if origin != "explicit":
                 logger.info("Data directory resolved from %s: %s", origin, path)
             return path
-    tried = ", ".join(f"{origin}={path}" for origin, path in candidates)
-    raise MarketDataError(f"Data directory not found (tried {tried})")
+    return home_default
 
 
 def _parse_stamp(raw: object) -> datetime | None:

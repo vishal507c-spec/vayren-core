@@ -63,14 +63,14 @@ from core.event_bus import EventBus
 from core.events import AppStarted
 from market import Bar, MarketDataLoader, LoadSymbol, DataLoaded
 from chart import ChartEngine, ChartWindow, ChartModel, ChartReady
-from .services.order_manager import OrderManager   # apne module ke andar
+from .services.order_manager import OrderManager  # apne module ke andar
 
 # (event-bus/loader/chart rows = target-wiring vocabulary; current live names:
 #  core.Event, market.Bar, broker.* UBL, strategy.* — see AI_ENTRY routing)
 # ❌ GALAT
-from market.database.sqlite import SqliteCandleDatabase   # market ke andar ki cheez, bahar se nahi
-from ..market import Bar                                    # relative cross-module
-from chart import *                                          # star import
+from market.database.sqlite import SqliteCandleDatabase  # market ke andar ki cheez, bahar se nahi
+from ..market import Bar  # relative cross-module
+from chart import *  # star import
 ```
 
 ## Naming Conventions
