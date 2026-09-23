@@ -20,7 +20,10 @@ SCRIPTS_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 ROOT = SCRIPTS_DIR.parent
-EXPECTED_BINARY = ROOT / "rust" / "target" / "debug" / "vayren-shell.exe"
+# build_rust.py names the debug shell binary per platform (cargo adds .exe
+# on Windows only); the existence check below must match the builder.
+_BIN_NAME = "vayren-shell.exe" if sys.platform == "win32" else "vayren-shell"
+EXPECTED_BINARY = ROOT / "rust" / "target" / "debug" / _BIN_NAME
 
 ACTIVE_DOCS = [
     "AI_ENTRY.md",
