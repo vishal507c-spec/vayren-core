@@ -931,7 +931,7 @@
       "to": "01_core/core/native"
     }
   ],
-  "entity_count": 3735,
+  "entity_count": 3734,
   "files": [
     {
       "domain": "APP_COMPOSITION",
@@ -8521,21 +8521,6 @@
       "name": "default_registry",
       "public": true,
       "qualified": "broker.registry:default_registry",
-      "tests": []
-    },
-    {
-      "called_by": [],
-      "callers_complete": true,
-      "calls": [],
-      "dotted": "broker.registry.phase6_probe_api",
-      "file": "09_broker/broker/registry.py",
-      "kind": "function",
-      "language": "PYTHON",
-      "line": 134,
-      "module": "09_broker/broker",
-      "name": "phase6_probe_api",
-      "public": true,
-      "qualified": "broker.registry:phase6_probe_api",
       "tests": []
     },
     {
