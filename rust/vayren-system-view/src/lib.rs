@@ -42,9 +42,9 @@ use slint::platform::{
     Platform, PlatformError, PointerEventButton, WindowAdapter, WindowEvent,
 };
 use slint::{LogicalPosition, PhysicalSize, Rgb8Pixel, SharedString, VecModel};
+use vayren_shell::broker_connection::{BrokerWorkspace, ConnectionState};
 use vayren_shell::shell::env_kind;
 use vayren_shell::view_model::{BrokerPanel, Environment, HealthState};
-use vayren_shell::broker_connection::{BrokerWorkspace, ConnectionState};
 
 pub const ABI_VERSION: u32 = 2;
 const MIN_SCALE: f32 = 0.25;
@@ -262,13 +262,11 @@ fn apply_connection_view(ui: &SystemHostWindow, workspace: &BrokerWorkspace) -> 
     });
     ui.set_conn_disconnect_visible(workspace.can_disconnect);
     ui.set_conn_disconnect_enabled(workspace.can_disconnect);
-    ui.set_conn_help_caption(
-        if workspace.display_name.trim().is_empty() {
-            "View setup guide.".into()
-        } else {
-            format!("View setup guide for {}.", workspace.display_name.trim()).into()
-        },
-    );
+    ui.set_conn_help_caption(if workspace.display_name.trim().is_empty() {
+        "View setup guide.".into()
+    } else {
+        format!("View setup guide for {}.", workspace.display_name.trim()).into()
+    });
     workspace.fields.iter().map(|f| f.key.clone()).collect()
 }
 

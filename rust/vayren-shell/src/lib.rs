@@ -40,5 +40,5 @@ pub mod live_harness_ui {
     include!(concat!(env!("OUT_DIR"), "/live_harness.rs"));
 }
 
-pub use view_model::{BrokerPanel, CapabilityRow, CapabilityStatus, Environment, HealthState};
 pub use broker_connection::{BrokerWorkspace, ConnectionState};
+pub use view_model::{BrokerPanel, CapabilityRow, CapabilityStatus, Environment, HealthState};

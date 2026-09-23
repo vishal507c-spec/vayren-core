@@ -109,7 +109,10 @@ pub fn connection_state(status_raw: &str, configured: bool) -> ConnectionState {
                 ConnectionState::NotConfigured
             }
         }
-        "DISCONNECTED" | "ERROR" | "ACCOUNT_NOT_READY" | "MARKET_DATA_NOT_READY"
+        "DISCONNECTED"
+        | "ERROR"
+        | "ACCOUNT_NOT_READY"
+        | "MARKET_DATA_NOT_READY"
         | "EXECUTION_NOT_READY" => ConnectionState::Failed,
         _ => {
             if configured {
@@ -158,7 +161,11 @@ impl BrokerListItem {
 
     /// Sidebar status tone (1 ok when connected, 3 bad otherwise).
     pub fn status_tone(&self) -> i32 {
-        if self.connected { 1 } else { 3 }
+        if self.connected {
+            1
+        } else {
+            3
+        }
     }
 }
 
@@ -242,11 +249,7 @@ pub fn cta_label(state: ConnectionState, display_name: &str) -> String {
         // Title-case the first letter for the button ("Fyers", "Zerodha").
         let mut chars = name.chars();
         match chars.next() {
-            Some(first) => format!(
-                "{}{}",
-                first.to_uppercase(),
-                chars.as_str().to_lowercase()
-            ),
+            Some(first) => format!("{}{}", first.to_uppercase(), chars.as_str().to_lowercase()),
             None => "Broker".to_string(),
         }
     };
@@ -269,7 +272,10 @@ pub fn description_line(display_name: &str) -> String {
     if name.is_empty() {
         "Connect your account to start trading.".to_string()
     } else {
-        format!("Connect your {} account to start trading.", name.to_uppercase())
+        format!(
+            "Connect your {} account to start trading.",
+            name.to_uppercase()
+        )
     }
 }
 
@@ -383,12 +389,8 @@ impl BrokerWorkspace {
                 _ => String::new(),
             }
         };
-        let bool_of = |key: &str| -> bool {
-            value
-                .get(key)
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false)
-        };
+        let bool_of =
+            |key: &str| -> bool { value.get(key).and_then(|v| v.as_bool()).unwrap_or(false) };
 
         // Broker list (new shape) — each row degrades independently.
         let mut brokers = Vec::new();
@@ -402,10 +404,7 @@ impl BrokerWorkspace {
                 if id.is_empty() {
                     continue;
                 }
-                let status = row
-                    .get("status")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let status = row.get("status").and_then(|v| v.as_str()).unwrap_or("");
                 brokers.push(BrokerListItem {
                     display_name: row
                         .get("display_name")
@@ -509,10 +508,7 @@ impl BrokerWorkspace {
 
         // Credential schema (never values).
         let mut fields = Vec::new();
-        if let Some(list) = value
-            .get("credential_fields")
-            .and_then(|v| v.as_array())
-        {
+        if let Some(list) = value.get("credential_fields").and_then(|v| v.as_array()) {
             for row in list {
                 let key = row
                     .get("key")
@@ -533,10 +529,7 @@ impl BrokerWorkspace {
                     .map(str::to_string)
                     .unwrap_or_else(|| format!("Enter {label}"));
                 fields.push(CredentialFieldView {
-                    secret: row
-                        .get("secret")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false),
+                    secret: row.get("secret").and_then(|v| v.as_bool()).unwrap_or(false),
                     required: row
                         .get("required")
                         .and_then(|v| v.as_bool())
@@ -559,7 +552,9 @@ impl BrokerWorkspace {
                 | ConnectionState::Verifying
         );
         let can_connect = !working
-            && (can_login || state == ConnectionState::NotConfigured || state == ConnectionState::Ready);
+            && (can_login
+                || state == ConnectionState::NotConfigured
+                || state == ConnectionState::Ready);
 
         Self {
             brokers,
@@ -633,12 +628,12 @@ mod tests {
 
     #[test]
     fn pill_is_explicit_text_with_restrained_tone() {
-        assert_eq!(
-            ConnectionState::NotConfigured.pill_label(),
-            "Not Connected"
-        );
+        assert_eq!(ConnectionState::NotConfigured.pill_label(), "Not Connected");
         assert_eq!(ConnectionState::Ready.pill_tone(), 3);
-        assert_eq!(ConnectionState::Authenticating.pill_label(), "Authenticating");
+        assert_eq!(
+            ConnectionState::Authenticating.pill_label(),
+            "Authenticating"
+        );
         assert_eq!(ConnectionState::Connected.pill_label(), "Connected");
         assert_eq!(ConnectionState::Connected.pill_tone(), 1);
         assert_eq!(ConnectionState::Failed.pill_label(), "Connection Failed");
@@ -677,8 +672,14 @@ mod tests {
 
     #[test]
     fn cta_is_the_single_obvious_action() {
-        assert_eq!(cta_label(ConnectionState::NotConfigured, "Fyers"), "Connect to Fyers");
-        assert_eq!(cta_label(ConnectionState::Ready, "Fyers"), "Connect to Fyers");
+        assert_eq!(
+            cta_label(ConnectionState::NotConfigured, "Fyers"),
+            "Connect to Fyers"
+        );
+        assert_eq!(
+            cta_label(ConnectionState::Ready, "Fyers"),
+            "Connect to Fyers"
+        );
         assert_eq!(
             cta_label(ConnectionState::Authenticating, "Fyers"),
             "Authenticating…"
@@ -804,7 +805,9 @@ mod tests {
         let workspace = BrokerWorkspace::from_json(&value);
         assert_eq!(workspace.state, ConnectionState::Failed);
         assert_eq!(workspace.cta(), "Retry");
-        assert!(workspace.status_message().contains("Check your credentials"));
+        assert!(workspace
+            .status_message()
+            .contains("Check your credentials"));
         assert!(!workspace.status_message().contains("SECRET"));
     }
 }
