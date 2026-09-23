@@ -255,6 +255,13 @@ def check_changes(ref: str = "HEAD") -> GateReport:
     # tests, e.g. `from validate_architecture_gate import ...`) are first-party,
     # not third-party: resolve them against files actually present in scripts/.
     local_modules = {path.stem for path in (ROOT / "scripts").rglob("*.py")}
+    # Package dirs under scripts/ (e.g. `forensics`) are imported bare by the
+    # scripts' own tests via path insertion — they are first-party too.
+    local_modules |= {
+        path.parent.name
+        for path in (ROOT / "scripts").rglob("__init__.py")
+        if path.parent.name.isidentifier() and path.parent.name != "tests"
+    }
     try:
         all_changed = _git_changed_all(ref)
     except Exception as exc:  # noqa: BLE001

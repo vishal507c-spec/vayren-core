@@ -162,7 +162,49 @@ fn apply_state(ui: &LabHostWindow, state: &LabState) {
         sym_search: view.sym_search.into(),
         sym_button_line: view.sym_button_line.into(),
         sym_count_line: view.sym_count_line.into(),
+        cfg_cost: view.cfg_cost.into(),
+        cfg_cost_warn: view.cfg_cost_warn,
+        run_id: view.run_id.into(),
+        run_ts: view.run_ts.into(),
+        cfg_hash: view.cfg_hash.into(),
+        result_pnl: view.result_pnl.into(),
+        result_return: view.result_return.into(),
+        result_pnl_tone: view.result_pnl_tone,
+        result_exec_line: view.result_exec_line.into(),
+        stale_exec_line: view.stale_exec_line.into(),
+        stale_cur_line: view.stale_cur_line.into(),
+        range_line: view.range_line.into(),
+        diag_show: view.diag_show,
+        diag_title: view.diag_title.into(),
+        diag_detail: view.diag_detail.into(),
+        diag_stale: view.diag_stale,
+        risk_gate_show: view.risk_gate_show,
+        risk_gate_text: view.risk_gate_text.into(),
+        lens: view.lens,
+        strategy_count_line: view.strategy_count_line.into(),
+        editing_hint: view.editing_hint.into(),
+        studio_ref_pf: view.studio_ref_pf.into(),
+        studio_source: view.studio_source.into(),
+        equity_select: view.equity_select,
+        dates_human: view.dates_human.into(),
+        dates_error: view.dates_error.into(),
+        today_days: view.today_days,
+        dates_start_days: view.dates_start_days,
+        dates_end_days: view.dates_end_days,
     });
+    ui.set_date_presets(
+        Rc::new(slint::VecModel::from(
+            view.date_presets
+                .into_iter()
+                .map(|p| LabPreset {
+                    label: p.label.into(),
+                    start_days: p.start_days,
+                    end_days: p.end_days,
+                })
+                .collect::<Vec<_>>(),
+        ))
+        .into(),
+    );
     ui.set_library(
         Rc::new(slint::VecModel::from(
             view.library
@@ -420,6 +462,15 @@ fn apply_state(ui: &LabHostWindow, state: &LabState) {
         .into(),
     );
     ui.set_sym_visible_on(Rc::new(slint::VecModel::from(view.sym_visible_on)).into());
+    ui.set_universe_chips(
+        Rc::new(slint::VecModel::from(
+            view.universe_chips
+                .into_iter()
+                .map(slint::SharedString::from)
+                .collect::<Vec<_>>(),
+        ))
+        .into(),
+    );
     ui.set_filter_active(lab::filter_kind(state.filter));
 }
 
@@ -505,6 +556,11 @@ fn wire_view(ui: &LabHostWindow, state: Rc<RefCell<LabState>>) {
     ui.on_sym_apply(bind0(ui, &state, |s| s.interaction_symapply()));
     ui.on_sym_all_visible(bind0(ui, &state, |s| s.interaction_symall()));
     ui.on_rank_order_toggled(bind0(ui, &state, |s| s.interaction_ranktoggle()));
+    ui.on_lens_picked(bind(ui, &state, |s, i| s.interaction_lens(i)));
+    ui.on_equity_select_picked(bind(ui, &state, |s, i| s.interaction_equity_view(i)));
+    ui.on_inspector_close(bind0(ui, &state, |s| s.interaction_detail_close()));
+    ui.on_reset_requested(bind0(ui, &state, |s| s.interaction_reset()));
+    ui.on_diag_link_clicked(bind0(ui, &state, |s| s.interaction_lens(1)));
     ui.on_export_trades_requested(bind0(ui, &state, |s| {
         s.interaction_simple("exporttrades");
     }));
@@ -542,6 +598,7 @@ fn wire_view(ui: &LabHostWindow, state: Rc<RefCell<LabState>>) {
     on_text!(on_rankby_picked, LabState::interaction_rankby);
     on_text!(on_trade_filter_changed, LabState::interaction_tradefilter);
     on_text!(on_sym_search_changed, LabState::interaction_symsearch);
+    on_text!(on_cost_committed, LabState::interaction_cost);
     {
         let strong = state.clone();
         let weak = ui.as_weak();
