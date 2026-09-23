@@ -43,7 +43,16 @@ class FyersCredentials:
     ) -> None:
         self._app_id = app_id
         self._secret = secret
-        self._redirect_uri = redirect_uri or DEFAULT_REDIRECT_URL
+        uri = str(redirect_uri or "").strip()
+        if (
+            not uri
+            or not (uri.startswith("http://") or uri.startswith("https://"))
+            or "\n" in uri
+            or "\r" in uri
+            or " " in uri
+        ):
+            uri = DEFAULT_REDIRECT_URL
+        self._redirect_uri = uri
         self._pin = pin
         self._client_id = client_id
         self._totp_secret = totp_secret

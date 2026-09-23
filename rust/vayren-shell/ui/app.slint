@@ -100,6 +100,7 @@ export component AppWindow inherits Window {
     callback broker-connect-requested(string, string, string, string, string, string);
     callback broker-help-requested();
     callback broker-add-requested();
+    callback broker-paste-requested(int);
 
     // Strategy Lab interactions (Slint reports; Rust view-model owns state).
     callback lab-library-picked(int);
@@ -302,6 +303,7 @@ export component AppWindow inherits Window {
     // broker screen renders this workspace (single connection purpose).
     in-out property <[BrokerRowView]> conn-brokers;
     in-out property <string> conn-display-name: "";
+    in-out property <string> conn-broker-id: "";
     in-out property <string> conn-mark: "?";
     in-out property <string> conn-venue-subtitle: "";
     in-out property <string> conn-env-label: "PAPER";
@@ -321,6 +323,12 @@ export component AppWindow inherits Window {
     in-out property <bool> conn-disconnect-visible: false;
     in-out property <bool> conn-disconnect-enabled: false;
     in-out property <string> conn-help-caption: "View setup guide.";
+    in-out property <string> broker-field-v0: "";
+    in-out property <string> broker-field-v1: "";
+    in-out property <string> broker-field-v2: "";
+    in-out property <string> broker-field-v3: "";
+    in-out property <string> broker-field-v4: "";
+    in-out property <string> broker-field-v5: "";
 
     // Native Market chart (Rust `MarketState` projection; render data only).
     in-out property <bool> market-panel-visible: true;
@@ -600,26 +608,33 @@ export component AppWindow inherits Window {
         key-pressed(event) => {
             if (event.modifiers.alt && event.text == "1") {
                 root.nav-selected(ShellScreen.chart);
+                return accept;
             }
             if (event.modifiers.alt && event.text == "2") {
                 root.nav-selected(ShellScreen.lab);
+                return accept;
             }
             if (event.modifiers.alt && event.text == "3") {
                 root.nav-selected(ShellScreen.research);
+                return accept;
             }
             if (event.modifiers.alt && event.text == "4") {
                 root.nav-selected(ShellScreen.portfolio);
+                return accept;
             }
             if (event.modifiers.alt && event.text == "5") {
                 root.nav-selected(ShellScreen.live);
+                return accept;
             }
             if (event.modifiers.alt && event.text == "6") {
                 root.nav-selected(ShellScreen.broker);
+                return accept;
             }
             if (event.modifiers.alt && event.text == "7") {
                 root.nav-selected(ShellScreen.data);
+                return accept;
             }
-            return accept;
+            return reject;
         }
     }
 
@@ -898,6 +913,7 @@ export component AppWindow inherits Window {
                     height: 100%;
                     brokers: root.conn-brokers;
                     broker-display-name: root.conn-display-name;
+                    broker-id: root.conn-broker-id;
                     logo-mark: root.conn-mark;
                     venue-subtitle: root.conn-venue-subtitle;
                     env-label: root.conn-env-label;
@@ -917,6 +933,12 @@ export component AppWindow inherits Window {
                     disconnect-visible: root.conn-disconnect-visible;
                     disconnect-enabled: root.conn-disconnect-enabled;
                     help-caption: root.conn-help-caption;
+                    field-v0 <=> root.broker-field-v0;
+                    field-v1 <=> root.broker-field-v1;
+                    field-v2 <=> root.broker-field-v2;
+                    field-v3 <=> root.broker-field-v3;
+                    field-v4 <=> root.broker-field-v4;
+                    field-v5 <=> root.broker-field-v5;
                     broker-selected(id) => { root.broker-select-requested(id); }
                     connect-requested(v0, v1, v2, v3, v4, v5) => { root.broker-connect-requested(v0, v1, v2, v3, v4, v5); }
                     retry-requested() => { root.broker-login-requested(); }
@@ -924,6 +946,7 @@ export component AppWindow inherits Window {
                     refresh-requested() => { root.broker-refresh-requested(); }
                     help-requested() => { root.broker-help-requested(); }
                     add-broker-requested() => { root.broker-add-requested(); }
+                    paste-requested(i) => { root.broker-paste-requested(i); }
                 }
                 if !root.screen-pending && root.active-screen == ShellScreen.portfolio: PortfolioScreen {
                     width: 100%;
@@ -1195,7 +1218,7 @@ export component AppWindow inherits Window {
                     alignment: space-between;
 
                     Text {
-                        text: "VAYREN - native shell";
+                        text: "VAYREN • Native Shell";
                         color: VayrenPalette.faint;
                         font-size: VayrenDesign.fs-label;
                         vertical-alignment: center;

@@ -177,6 +177,9 @@ pub struct CredentialFieldView {
     pub placeholder: String,
     pub secret: bool,
     pub required: bool,
+    /// True when this key already has a persisted value in the OS vault.
+    /// The UI shows a "saved" indicator; no actual value crosses the boundary.
+    pub saved: bool,
 }
 
 /// One connection-progress step.
@@ -344,20 +347,26 @@ impl BrokerWorkspace {
     /// reason only; empty reasons degrade to the state default).
     pub fn status_message(&self) -> String {
         match self.state {
-            ConnectionState::Connected => "Connection verified.".to_string(),
+            ConnectionState::Connected => {
+                if self.reason.trim().is_empty() {
+                    "Connection verified.".to_string()
+                } else {
+                    format!("Connection verified: {}", self.reason.trim())
+                }
+            }
             ConnectionState::Failed => {
                 if self.reason.trim().is_empty() {
                     "Authentication failed. Check your credentials and try again.".to_string()
                 } else {
                     format!(
-                        "Authentication failed. Check your credentials and try again. ({})",
+                        "Authentication failed: {}. Check your credentials and try again.",
                         self.reason.trim()
                     )
                 }
             }
             ConnectionState::Authenticating
             | ConnectionState::GettingToken
-            | ConnectionState::Verifying => "Browser authentication is in progress.".to_string(),
+            | ConnectionState::Verifying => "Authenticating with broker API…".to_string(),
             ConnectionState::Ready => "Ready to connect.".to_string(),
             ConnectionState::NotConfigured => "Enter your credentials to connect.".to_string(),
         }
@@ -532,6 +541,10 @@ impl BrokerWorkspace {
                     secret: row.get("secret").and_then(|v| v.as_bool()).unwrap_or(false),
                     required: row
                         .get("required")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false),
+                    saved: row
+                        .get("saved")
                         .and_then(|v| v.as_bool())
                         .unwrap_or(false),
                     key,

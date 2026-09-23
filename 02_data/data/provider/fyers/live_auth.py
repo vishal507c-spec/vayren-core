@@ -157,6 +157,34 @@ class _UrllibTransport:
         except urllib.error.HTTPError as exc:
             if exc.code == 401:
                 return {"s": "error", "code": -8, "message": "unauthorized"}
+            # FYERS POST /api/v3/token returns HTTP 308 with the auth_code
+            # inside the response body's ``Url`` field — not a real redirect.
+            # Read the body and hand it back so ``fetch_auth_code`` can extract
+            # the auth_code from the URL string.  All other 3xx/4xx/5xx codes
+            # remain errors.
+            if exc.code == 308:
+                try:
+                    raw = exc.read().decode("utf-8", "replace")
+                except Exception:
+                    raw = ""
+                if raw:
+                    try:
+                        body = json.loads(raw)
+                        if isinstance(body, dict) and ("Url" in body or "url" in body):
+                            return body
+                    except ValueError:
+                        pass
+            err_msg = ""
+            try:
+                err_raw = exc.read().decode("utf-8", "replace")
+                if err_raw:
+                    err_json = json.loads(err_raw)
+                    if isinstance(err_json, dict):
+                        err_msg = str(err_json.get("message") or err_json.get("error") or "").strip()
+            except Exception:
+                pass
+            if err_msg:
+                raise AuthError(f"{err_msg} (HTTP {exc.code})", code="VENUE") from None
             raise AuthError(f"venue request failed (HTTP {exc.code})", code="NETWORK") from None
         except OSError as exc:
             raise AuthError(f"venue unreachable: {exc}", code="NETWORK") from None

@@ -226,15 +226,22 @@ def fyers_management_spec() -> BrokerSpec:
         return None
 
     def _auto_authenticate(config: dict[str, str], session_store: object) -> tuple[bool, str]:
-        """Startup/check-time automatic login (Selenium-first).
+        """Startup/check-time automatic login (API-first, Selenium fallback).
 
-        Runs on the manager's worker thread: valid stored session → True
-        with one probe; missing/expired + complete auto-login triple →
-        Chrome drives FYERS' own login pages (TOTP + PIN, no copy/paste);
-        Chrome/driver missing on the host → the official API flow as a
-        fallback (logged); anything else → False with the exact reason
-        (the manager shows LOGIN_REQUIRED and the user can still CONNECT
-        through the button flow — capture stays automatic either way).
+        Runs on the manager's worker thread.  Priority:
+
+        1. Stored session still valid → ``True`` with one profile probe
+           (zero Selenium, zero vagator calls).
+        2. Complete auto-login triple → vagator API flow (OTP key →
+           TOTP verify → PIN verify → auth_code → token exchange → validate).
+           No browser needed; works headless on any host.
+        3. API flow failed for a non-transient reason → Chrome Selenium as
+           last resort (requires the full triple AND Chrome/driver installed).
+        4. Chrome/driver absent → ``False`` with the exact reason so the
+           caller shows ``LOGIN_REQUIRED`` and the user can still click
+           CONNECT for the browser-capture flow.
+
+        Messages never carry secrets (TOTP codes, PIN, tokens).
         """
         import logging
 
@@ -253,11 +260,40 @@ def fyers_management_spec() -> BrokerSpec:
             client_id=config.get("client_id", ""),
             totp_secret=config.get("totp_secret", ""),
         )
+        # API-based path first: fast, headless, no CAPTCHA risk.
+        api_engine = FyersAutoAuthEngine(credentials)
+        api_possible, api_why = api_engine.auto_login_possible()
+        if api_possible:
+            ok, message = api_engine.ensure_session(session_store)
+            if ok:
+                return ok, message
+            # If the API reported a fatal credential or venue error, fail fast so the UI
+            # gets the exact reason immediately rather than hanging in Chrome Selenium.
+            fatal_keywords = (
+                "mismatch",
+                "unauthorized",
+                "invalid",
+                "rejected",
+                "HTTP 400",
+                "HTTP 401",
+                "HTTP 403",
+                "pin",
+                "totp",
+                "otp",
+            )
+            if any(k in message.lower() for k in fatal_keywords):
+                return False, message
+            logging.getLogger(__name__).info(
+                "FYERS API auto-auth failed (%s) — trying Selenium fallback", message
+            )
+        # Selenium fallback: only attempted when API is unavailable or has transient failure.
         try:
             return FyersSeleniumAuthEngine(credentials).ensure_session(session_store)
         except BrowserUnavailableError as exc:
-            logging.getLogger(__name__).info("FYERS Selenium unavailable (%s) — API fallback", exc)
-            return FyersAutoAuthEngine(credentials).ensure_session(session_store)
+            logging.getLogger(__name__).info("FYERS Selenium unavailable (%s)", exc)
+            if api_possible:
+                return False, message
+            return False, api_why
 
     return BrokerSpec(
         broker_id="fyers",

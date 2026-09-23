@@ -31,8 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-# DEBT: retained unwired imports (see 90_brain/ai_memory.md).
-from core.observable import IntervalTimer, Signal  # pyright: ignore[reportMissingImports]
+from app.observable import IntervalTimer, Signal
 from execution import (
     ExecutionMode,  # pyright: ignore[reportAttributeAccessIssue]
     LiveSession,  # pyright: ignore[reportAttributeAccessIssue]

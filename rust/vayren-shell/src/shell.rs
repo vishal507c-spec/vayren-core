@@ -207,21 +207,39 @@ pub fn apply_connection(ui: &AppWindow, workspace: &BrokerWorkspace) {
             workspace
                 .brokers
                 .iter()
-                .map(|b| BrokerRowView {
-                    id: b.id.clone().into(),
-                    display_name: b.display_name.clone().into(),
-                    mark: b.mark().into(),
-                    venue_subtitle: b.venue_subtitle.clone().into(),
-                    status_label: b.status_label().into(),
-                    status_tone: b.status_tone(),
-                    selected: b.selected,
-                    connected: b.connected,
+                .map(|b| {
+                    let is_sel = b.selected || b.id == workspace.selected_id;
+                    let (status_label, status_tone, is_conn) = if is_sel {
+                        match workspace.state {
+                            ConnectionState::Connected => ("Connected", 1, true),
+                            ConnectionState::Authenticating
+                            | ConnectionState::GettingToken
+                            | ConnectionState::Verifying => ("Authenticating", 2, false),
+                            ConnectionState::Failed => ("Connection Failed", 3, false),
+                            ConnectionState::NotConfigured | ConnectionState::Ready => {
+                                ("Not Connected", 3, false)
+                            }
+                        }
+                    } else {
+                        (b.status_label(), b.status_tone(), b.connected)
+                    };
+                    BrokerRowView {
+                        id: b.id.clone().into(),
+                        display_name: b.display_name.clone().into(),
+                        mark: b.mark().into(),
+                        venue_subtitle: b.venue_subtitle.clone().into(),
+                        status_label: status_label.into(),
+                        status_tone,
+                        selected: is_sel,
+                        connected: is_conn,
+                    }
                 })
                 .collect::<Vec<_>>(),
         ))
         .into(),
     );
     ui.set_conn_display_name(workspace.display_name.clone().into());
+    ui.set_conn_broker_id(workspace.selected_id.clone().into());
     ui.set_conn_mark(
         workspace
             .display_name
@@ -251,6 +269,7 @@ pub fn apply_connection(ui: &AppWindow, workspace: &BrokerWorkspace) {
                     placeholder: f.placeholder.clone().into(),
                     secret: f.secret,
                     required: f.required,
+                    saved: f.saved,
                 })
                 .collect::<Vec<_>>(),
         ))
@@ -295,6 +314,26 @@ pub fn apply_connection(ui: &AppWindow, workspace: &BrokerWorkspace) {
     } else {
         format!("View setup guide for {}.", workspace.display_name.trim()).into()
     });
+    // Pre-fill saved-credential sentinel so the user sees which fields already
+    // have stored values and does not need to re-enter them on reconnect.
+    // The sentinel is a non-empty placeholder that the connect handler
+    // recognises as "unchanged — use vault value".
+    const SAVED_SENTINEL: &str = "\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}";
+    let setters: [fn(&AppWindow, slint::SharedString); 6] = [
+        AppWindow::set_broker_field_v0,
+        AppWindow::set_broker_field_v1,
+        AppWindow::set_broker_field_v2,
+        AppWindow::set_broker_field_v3,
+        AppWindow::set_broker_field_v4,
+        AppWindow::set_broker_field_v5,
+    ];
+    for (i, f) in workspace.fields.iter().enumerate() {
+        if let Some(setter) = setters.get(i) {
+            if f.saved {
+                setter(ui, SAVED_SENTINEL.into());
+            }
+        }
+    }
 }
 
 /// Testing-backend init shared with headless perf/UI tests (test-only).

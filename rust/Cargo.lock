@@ -5186,6 +5186,7 @@ dependencies = [
 name = "vayren-shell"
 version = "0.1.0"
 dependencies = [
+ "clipboard-win",
  "i-slint-backend-testing",
  "serde",
  "serde_json",
