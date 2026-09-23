@@ -94,10 +94,14 @@ class _CREDENTIAL(ctypes.Structure):
 
 
 def _win_cred_write(cred: _CREDENTIAL) -> bool:
+    if sys.platform != "win32":
+        raise OSError("Windows Credential Manager requires Windows")
     return bool(ctypes.windll.advapi32.CredWriteW(ctypes.byref(cred), 0))
 
 
 def _win_cred_read(target: str) -> bytes | None:
+    if sys.platform != "win32":
+        raise OSError("Windows Credential Manager requires Windows")
     pcred = ctypes.POINTER(_CREDENTIAL)()
     if not ctypes.windll.advapi32.CredReadW(target, _CRED_TYPE_GENERIC, 0, ctypes.byref(pcred)):
         return None
@@ -109,6 +113,8 @@ def _win_cred_read(target: str) -> bytes | None:
 
 
 def _win_cred_delete(target: str) -> bool:
+    if sys.platform != "win32":
+        raise OSError("Windows Credential Manager requires Windows")
     return bool(ctypes.windll.advapi32.CredDeleteW(target, _CRED_TYPE_GENERIC, 0))
 
 

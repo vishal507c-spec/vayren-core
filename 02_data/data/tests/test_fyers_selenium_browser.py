@@ -123,7 +123,7 @@ class MockFyersPages:
                 self.end_headers()
                 self.wfile.write(raw)
 
-            def log_message(self, *args: object) -> None:  # noqa: A002, ARG002
+            def log_message(self, format: str, *args: object) -> None:  # noqa: A002, ARG002
                 pass
 
         self._server = HTTPServer(("127.0.0.1", 0), _Handler)
