@@ -623,7 +623,7 @@ class ResearchService:
         if self._repository_override is not None:
             return self._repository_override
         try:
-            from market.repository.symbol_repository import SymbolRepository
+            from market.repository.symbol_repository import SymbolRepository  # pyright: ignore
         except Exception:
             return None
         try:
@@ -655,14 +655,14 @@ class ResearchService:
         if self._execute_bars_fn is not None:
             return self._execute_bars_fn
         try:
-            from backtest.runner import execute_bars
+            from backtest.runner import execute_bars  # pyright: ignore[reportMissingImports]
         except Exception:
             return None
         return execute_bars
 
     def _engine_source_hash(self) -> str:
         try:
-            from backtest.runner import execute_bars
+            from backtest.runner import execute_bars  # pyright: ignore[reportMissingImports]
         except Exception:
             return ""
         try:
@@ -967,8 +967,8 @@ class ResearchService:
         say: Any | None,
     ) -> tuple[list[Any], list[dict[str, Any]], dict[str, tuple[Any, ...]], dict[str, Any]]:
         """Run the canonical core per symbol; returns (trades, signals, windows, ref)."""
-        from backtest.engine.replay import slice_bars
-        from backtest.models.config import BacktestConfig
+        from backtest.engine.replay import slice_bars  # pyright: ignore[reportMissingImports]
+        from backtest.models.config import BacktestConfig  # pyright: ignore[reportMissingImports]
 
         lower, upper = _window_bounds(start_date, end_date)
         all_trades: list[Any] = []
@@ -1276,7 +1276,7 @@ class ResearchService:
                 _say("Experiment cancelled during data load.")
                 return experiment.to_dict(), log
             try:
-                from backtest.engine.replay import slice_bars as _slice
+                from backtest.engine.replay import slice_bars as _slice  # pyright: ignore
 
                 raw = repository.get_candles_timeframe(symbol, timeframe, None, lower, upper)
                 bars_by_symbol[symbol] = _slice(tuple(raw or ()), start_date, end_date)
@@ -1378,7 +1378,10 @@ class ResearchService:
             ),
         )
         try:
-            from backtest.engine.metrics import compute_equity_curve, compute_metrics
+            from backtest.engine.metrics import (  # pyright: ignore
+                compute_equity_curve,
+                compute_metrics,
+            )
 
             first_stamp = None
             for window in windows.values():
@@ -1994,7 +1997,7 @@ class ResearchService:
             bundle["benchmark"] = stored_analysis.get("benchmark", {})
         trade_objects: list[Any] = []
         try:
-            from backtest.models.trade import TradeRecord
+            from backtest.models.trade import TradeRecord  # pyright: ignore[reportMissingImports]
 
             for item in trades:
                 if isinstance(item, dict):

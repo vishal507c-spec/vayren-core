@@ -62,7 +62,7 @@ def _logs_to_stderr(level: str) -> None:
     JSON, never log text.
     """
     try:
-        from core.logger import configure_logging
+        from core.logger import configure_logging  # pyright: ignore[reportMissingImports]
 
         configure_logging(level)
     except ImportError:
@@ -664,7 +664,7 @@ def _research_snapshot(data_dir: str, strategy_dir: str) -> dict:
     selection interactions in later slices.
     """
     try:
-        from backtest.execution import list_histories
+        from backtest.execution import list_histories  # pyright: ignore[reportMissingImports]
         from strategy.language.storage import list_strategies
 
         from app.services.research_service import ResearchService

@@ -337,7 +337,7 @@ class LiveTradingService:
             )
             return blockers
         try:
-            from execution.modes import gates_from_env
+            from execution.modes import gates_from_env  # pyright: ignore[reportMissingImports]
 
             missing = gates_from_env().missing()
         except Exception:
@@ -829,7 +829,7 @@ class LiveTradingService:
         except Exception:
             raise LiveConfigError(f"venue {venue_id!r} has no trading face") from None
         try:
-            from execution import BrokerAdapter
+            from execution import BrokerAdapter  # pyright: ignore[reportMissingImports]
 
             if not isinstance(face, BrokerAdapter):
                 raise LiveConfigError(f"venue {venue_id!r} does not satisfy the order interface")
