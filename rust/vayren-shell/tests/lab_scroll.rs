@@ -149,7 +149,10 @@ fn lab_workspace_scrolls_to_footer_and_back() {
             }
         }
     }
-    assert!(offbg < 10, "bottom spacer band not visible at window bottom");
+    assert!(
+        offbg < 10,
+        "bottom spacer band not visible at window bottom"
+    );
 
     // Back to the top: the original frame must return.
     for _ in 0..80 {

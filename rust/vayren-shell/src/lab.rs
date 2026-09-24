@@ -958,7 +958,14 @@ fn days_in_month(y: i64, m: i64) -> i64 {
 /// Days since 1970-01-01 for a civil date (validates calendar ranges).
 fn parse_iso_days(s: &str) -> Option<i64> {
     let b: Vec<char> = s.chars().collect();
-    if b.len() != 10 || b[4] != '-' || b[7] != '-' || !b.iter().enumerate().all(|(i, c)| i == 4 || i == 7 || c.is_ascii_digit()) {
+    if b.len() != 10
+        || b[4] != '-'
+        || b[7] != '-'
+        || !b
+            .iter()
+            .enumerate()
+            .all(|(i, c)| i == 4 || i == 7 || c.is_ascii_digit())
+    {
         return None;
     }
     let y: i64 = s[0..4].parse().ok()?;
@@ -1392,7 +1399,9 @@ pub fn project(state: &LabState) -> LabView {
     // Reference-layout derivations — presentation mapping of engine facts
     // only; nothing here computes a financial result.
     let find_kpi = |label: &str| -> Option<(String, i32)> {
-        kpis.iter().find(|k| k.label == label).map(|k| (k.value.clone(), k.tone))
+        kpis.iter()
+            .find(|k| k.label == label)
+            .map(|k| (k.value.clone(), k.tone))
     };
     let (result_pnl, result_pnl_tone) = find_kpi("NET P&L").unwrap_or_default();
     let result_return = find_kpi("RETURN").map_or(String::new(), |k| k.0);
@@ -1400,7 +1409,9 @@ pub fn project(state: &LabState) -> LabView {
     let result_exec_line = if has_strategy {
         format!(
             "{} · {}",
-            strategy.map_or_else(String::new, |s| s.name.clone()).to_uppercase(),
+            strategy
+                .map_or_else(String::new, |s| s.name.clone())
+                .to_uppercase(),
             summary_line
         )
     } else {
@@ -1465,8 +1476,14 @@ pub fn project(state: &LabState) -> LabView {
                 String::new()
             },
         ),
-        (Some(a), None) if end_raw => (human_from_days(a), "Use a valid calendar date (YYYY-MM-DD).".to_string()),
-        (None, Some(b)) if start_raw => (human_from_days(b), "Use a valid calendar date (YYYY-MM-DD).".to_string()),
+        (Some(a), None) if end_raw => (
+            human_from_days(a),
+            "Use a valid calendar date (YYYY-MM-DD).".to_string(),
+        ),
+        (None, Some(b)) if start_raw => (
+            human_from_days(b),
+            "Use a valid calendar date (YYYY-MM-DD).".to_string(),
+        ),
         (Some(a), None) => (format!("{} \u{2014} …", human_from_days(a)), String::new()),
         (None, Some(b)) => (format!("… \u{2014} {}", human_from_days(b)), String::new()),
         (None, None) if start_raw || end_raw => (
@@ -1479,7 +1496,8 @@ pub fn project(state: &LabState) -> LabView {
 
     LabView {
         has_strategy,
-        name: strategy.map_or_else(|| "No strategy".to_string(), |s| s.name.clone()),        description: strategy.map_or_else(String::new, |s| s.description.clone()),
+        name: strategy.map_or_else(|| "No strategy".to_string(), |s| s.name.clone()),
+        description: strategy.map_or_else(String::new, |s| s.description.clone()),
         tags: strategy.map_or_else(String::new, |s| s.tags.join(" · ")),
         version: strategy.map_or_else(String::new, |s| s.version.clone()),
         modified: strategy.map_or_else(String::new, |s| s.modified.clone()),
@@ -2068,7 +2086,10 @@ mod tests {
         assert_eq!(civil_from_days(sub_months(jan31, 12)), (2025, 1, 31));
         let mar31 = parse_iso_days("2026-03-31").unwrap();
         assert_eq!(civil_from_days(sub_months(mar31, 1)), (2026, 2, 28));
-        assert_eq!(year_start_days(mar31), parse_iso_days("2026-01-01").unwrap());
+        assert_eq!(
+            year_start_days(mar31),
+            parse_iso_days("2026-01-01").unwrap()
+        );
     }
 
     #[test]
