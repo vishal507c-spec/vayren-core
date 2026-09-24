@@ -1,0 +1,139 @@
+// VAYREN global top navigation header (reusable component).
+//
+// Apple-inspired minimalist design:
+// - Height: 50px
+// - Flat near-black background
+// - Centered navigation items
+// - 1px subtle bottom border
+// - 2px cyan active underline
+// - Inactive: muted cool gray, active: white
+// - No logos, no icons, no badges, no avatars, no decorative elements
+
+import { VayrenPalette, VayrenDesign } from "palette.slint";
+
+export enum ShellScreen {
+    chart,
+    lab,
+    research,
+    portfolio,
+    live,
+    broker,
+    data,
+}
+
+export component VGlobalNavItem inherits Rectangle {
+    in property <string> label;
+    in property <bool> active: false;
+    callback clicked();
+
+    background: transparent;
+    height: VayrenDesign.h-nav-header;
+
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+
+    VerticalLayout {
+        alignment: center;
+        spacing: 0;
+        padding-left: VayrenDesign.sp-sm;
+        padding-right: VayrenDesign.sp-sm;
+
+        Rectangle {
+            vertical-stretch: 1;
+            background: transparent;
+        }
+
+        Text {
+            text: root.label;
+            color: root.active ? VayrenPalette.text-bright : (ta.has-hover ? VayrenPalette.text : VayrenPalette.muted);
+            font-size: VayrenDesign.fs-small;
+            font-weight: root.active ? 600 : 500;
+            letter-spacing: 0.5px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            animate color { duration: 150ms; easing: ease-out; }
+        }
+
+        Rectangle {
+            vertical-stretch: 1;
+            background: transparent;
+        }
+
+        // Active state: only a 2px cyan underline aligned with the navigation item
+        Rectangle {
+            height: 2px;
+            background: root.active ? VayrenPalette.accent : transparent;
+            animate background { duration: 150ms; easing: ease-out; }
+        }
+    }
+}
+
+export component VGlobalHeader inherits Rectangle {
+    in property <ShellScreen> active-screen: ShellScreen.chart;
+    callback nav-selected(ShellScreen);
+
+    height: VayrenDesign.h-nav-header;
+    background: VayrenPalette.bg;
+
+    HorizontalLayout {
+        alignment: center;
+        spacing: 36px;
+        padding-top: 0px;
+        padding-bottom: 0px;
+        padding-left: VayrenDesign.sp-xl;
+        padding-right: VayrenDesign.sp-xl;
+
+        // 1. MARKET
+        VGlobalNavItem {
+            label: "MARKET";
+            active: root.active-screen == ShellScreen.chart;
+            clicked => { root.nav-selected(ShellScreen.chart); }
+        }
+
+        // 2. STRATEGY LAB
+        VGlobalNavItem {
+            label: "STRATEGY LAB";
+            active: root.active-screen == ShellScreen.lab;
+            clicked => { root.nav-selected(ShellScreen.lab); }
+        }
+
+        // 3. RESEARCH
+        VGlobalNavItem {
+            label: "RESEARCH";
+            active: root.active-screen == ShellScreen.research;
+            clicked => { root.nav-selected(ShellScreen.research); }
+        }
+
+        // 4. PORTFOLIO
+        VGlobalNavItem {
+            label: "PORTFOLIO";
+            active: root.active-screen == ShellScreen.portfolio;
+            clicked => { root.nav-selected(ShellScreen.portfolio); }
+        }
+
+        // 5. LIVE
+        VGlobalNavItem {
+            label: "LIVE";
+            active: root.active-screen == ShellScreen.live;
+            clicked => { root.nav-selected(ShellScreen.live); }
+        }
+
+        // 6. SYSTEM
+        VGlobalNavItem {
+            label: "SYSTEM";
+            active: root.active-screen == ShellScreen.broker;
+            clicked => { root.nav-selected(ShellScreen.broker); }
+        }
+    }
+
+    // 1px subtle bottom border
+    Rectangle {
+        y: parent.height - 1px;
+        x: 0px;
+        width: parent.width;
+        height: 1px;
+        background: VayrenPalette.hairline-soft;
+    }
+}

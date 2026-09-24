@@ -8,6 +8,7 @@ with the Rust native UI via JSON over stdin/stdout.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import logging
 import sys
@@ -16,6 +17,8 @@ from datetime import datetime
 from logging import getLogger
 from pathlib import Path
 from typing import Any
+
+from broker import BrokerStatus
 
 
 def _bootstrap_chapter_path() -> None:
@@ -237,13 +240,19 @@ def _await_broker_settled(manager, timeout_s: float = 10.0) -> None:
         time.sleep(0.25)
 
 
-def _credential_field_rows(record: dict) -> list:
+def _credential_field_rows(record: dict, saved_keys: set | None = None) -> list:
     """Venue credential shapes for the form (shapes only, never values).
 
     Same hint-only placeholders the legacy bootstrap used; the Rust side also
     falls back to "Enter {label}" when a placeholder is absent.
+
+    ``saved_keys`` is the set of credential keys that already have a persisted
+    value in the OS vault.  A field marked ``saved: True`` tells the UI to show
+    a "saved" indicator so the user knows they do not need to re-enter.  Actual
+    secret values are never included.
     """
     schema = record.get("credential_schema")
+    saved = saved_keys or set()
     rows = []
     if not isinstance(schema, (list, tuple)):
         return rows
@@ -272,12 +281,17 @@ def _credential_field_rows(record: dict) -> list:
                 "placeholder": placeholder,
                 "secret": bool(field.get("secret", False)),
                 "required": bool(field.get("required", False)),
+                "saved": key in saved,
             }
         )
     return rows
 
 
-def _system_snapshot(data_dir: str) -> dict:
+def _system_snapshot(
+    data_dir: str,
+    selected_broker: str | None = None,
+    manager: Any | None = None,
+) -> dict:
     """Build the native System workspace snapshot from the broker manager.
 
     Mirrors the legacy bootstrap provider: authoritative selection + manager
@@ -296,18 +310,23 @@ def _system_snapshot(data_dir: str) -> dict:
         return {"brokers": [], "error": f"system backend unavailable: {exc}"}
     try:
         selection_service = BrokerSelectionService(app_selection_store(data_dir))
+        if selected_broker and selected_broker in ("zerodha", "fyers"):
+            with contextlib.suppress(Exception):
+                selection_service.select(selected_broker)
         selection = selection_service.current()
     except Exception:  # noqa: BLE001
         selection = None
-    manager = BrokerManager(data_dir=data_dir)
-    try:
-        for broker_id in manager.broker_ids():
-            manager.submit_check(broker_id)
-        _await_broker_settled(manager)
+
+    if manager is None:
+        manager = BrokerManager(data_dir=data_dir)
+        try:
+            snap = manager.snapshot()
+        finally:
+            manager.stop_worker()
+    else:
         snap = manager.snapshot()
-    finally:
-        manager.stop_worker()
-    selected_id = getattr(selection, "name", "") or ""
+
+    selected_id = selected_broker or getattr(selection, "name", "") or ""
     brokers = []
     for entry in snap.get("brokers", []):
         if not isinstance(entry, dict):
@@ -335,6 +354,18 @@ def _system_snapshot(data_dir: str) -> dict:
             environment = selection.environment.value
         except Exception:  # noqa: BLE001
             environment = ""
+    # Detect which credential keys are already saved in the OS vault so the
+    # UI can show a "saved" indicator without ever echoing the actual values.
+    saved_keys: set = set()
+    try:
+        from data.provider.credentials_store import default_store, provider_service
+
+        vault_store = default_store(data_dir)
+        stored = vault_store.load(provider_service(selected_id)) if selected_id else None
+        if isinstance(stored, dict):
+            saved_keys = {k for k, v in stored.items() if isinstance(v, str) and v.strip()}
+    except Exception:  # noqa: BLE001
+        pass
     return {
         "brokers": brokers,
         "selected_id": selected_id,
@@ -346,7 +377,7 @@ def _system_snapshot(data_dir: str) -> dict:
         "can_login": bool(full.get("can_login", False)),
         "can_disconnect": bool(full.get("can_disconnect", False)),
         "reason": str(full.get("reason", "") or ""),
-        "credential_fields": _credential_field_rows(full),
+        "credential_fields": _credential_field_rows(full, saved_keys),
     }
 
 
@@ -769,6 +800,19 @@ def run_headless_backend(args: argparse.Namespace) -> int:
     else:
         logger.error("Market source unavailable for data_dir=%s", data_dir)
 
+    # Initialize broker manager for system workspace
+    broker_manager = None
+    try:
+        import data.provider.factory  # noqa: F401
+
+        from app.services.broker_manager import BrokerManager
+
+        broker_manager = BrokerManager(data_dir=str(data_dir))
+        for b_id in broker_manager.broker_ids():
+            broker_manager.submit_check(b_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Broker manager startup check failed: %s", exc)
+
     # Ready signal
     response = {
         "type": "ready",
@@ -780,6 +824,8 @@ def run_headless_backend(args: argparse.Namespace) -> int:
         },
     }
     if not _emit(response):
+        if broker_manager is not None:
+            broker_manager.stop_worker()
         return 1
 
     # Command loop
@@ -805,7 +851,10 @@ def run_headless_backend(args: argparse.Namespace) -> int:
                         break
 
                 elif cmd_type == "get_system_snapshot":
-                    snapshot = _system_snapshot(str(data_dir))
+                    selected_broker = command.get("selected_id")
+                    if broker_manager is not None:
+                        _await_broker_settled(broker_manager, timeout_s=3.0)
+                    snapshot = _system_snapshot(str(data_dir), selected_broker, broker_manager)
                     result = {"type": "system_snapshot", "data": snapshot}
                     if not _emit(result):
                         break
@@ -840,8 +889,119 @@ def run_headless_backend(args: argparse.Namespace) -> int:
                     if not _emit(result):
                         break
 
+                elif cmd_type == "connect_broker":
+                    broker_id = str(command.get("broker_id") or "fyers").strip()
+                    credentials = command.get("credentials") or {}
+                    logger.info("connect_broker received for broker=%s", broker_id)
+
+                    if broker_manager is not None:
+                        spec = broker_manager._specs.get(broker_id)
+                        if spec is not None:
+                            try:
+                                stored = broker_manager._store.load(spec.config_service) or {}
+                            except Exception:
+                                stored = {}
+                            merged = dict(stored) if isinstance(stored, dict) else {}
+                            for k, v in credentials.items():
+                                val = str(v).strip()
+                                if val:
+                                    merged[str(k)] = val
+
+                            if broker_id == "fyers":
+                                from data.provider.fyers.live_auth import DEFAULT_REDIRECT_URL
+
+                                r_uri = str(merged.get("redirect_uri") or "").strip()
+                                if (
+                                    not r_uri
+                                    or not (
+                                        r_uri.startswith("http://") or r_uri.startswith("https://")
+                                    )
+                                    or "\n" in r_uri
+                                    or "\r" in r_uri
+                                    or " " in r_uri
+                                ):
+                                    merged["redirect_uri"] = DEFAULT_REDIRECT_URL
+
+                            broker_manager._set_status(
+                                broker_id, BrokerStatus.AUTHENTICATING, "connecting to venue…"
+                            )
+                            ok, msg = broker_manager.configure(broker_id, merged)
+                            logger.info(
+                                "Broker configure for %s: ok=%s, msg=%s", broker_id, ok, msg
+                            )
+                            if not ok:
+                                snapshot = _system_snapshot(
+                                    str(data_dir), broker_id, broker_manager
+                                )
+                                snapshot["status_raw"] = "ERROR"
+                                snapshot["reason"] = msg
+                                result = {"type": "system_snapshot", "data": snapshot}
+                                if not _emit(result):
+                                    break
+                                continue
+
+                            # Wait for worker thread to complete authentication (up to 15s)
+                            import time
+
+                            deadline = time.monotonic() + 15.0
+                            time.sleep(0.3)
+                            while time.monotonic() < deadline:
+                                st = broker_manager.state(broker_id)
+                                status = st.get("status")
+                                if status not in (
+                                    BrokerStatus.AUTHENTICATING,
+                                    BrokerStatus.CONFIGURING,
+                                ):
+                                    # Zerodha path without auto_auth: start interactive login
+                                    if (
+                                        status == BrokerStatus.LOGIN_REQUIRED
+                                        and spec.auto_authenticate is None
+                                        and spec.interactive_login is not None
+                                        and not broker_manager.is_connected(broker_id)
+                                    ):
+                                        ok_login, msg_login = broker_manager.start_login(broker_id)
+                                        logger.info(
+                                            "start_login triggered for %s: ok=%s, msg=%s",
+                                            broker_id,
+                                            ok_login,
+                                            msg_login,
+                                        )
+                                        if ok_login:
+                                            time.sleep(0.5)
+                                            continue
+                                    break
+                                time.sleep(0.3)
+
+                    snapshot = _system_snapshot(str(data_dir), broker_id, broker_manager)
+                    if broker_manager is not None:
+                        st = broker_manager.state(broker_id)
+                        status = st.get("status")
+                        if status not in (BrokerStatus.CONNECTED, BrokerStatus.LIVE_READY):
+                            snapshot["status_raw"] = "ERROR"
+                            snapshot["reason"] = (
+                                st.get("reason") or "Authentication failed. Check your credentials."
+                            )
+                        else:
+                            snapshot["status_raw"] = "CONNECTED"
+                            snapshot["reason"] = st.get("reason") or "Connected and verified."
+                    result = {"type": "system_snapshot", "data": snapshot}
+                    if not _emit(result):
+                        break
+
+                elif cmd_type == "disconnect_broker":
+                    broker_id = str(command.get("broker_id") or "fyers").strip()
+                    logger.info("disconnect_broker received for broker=%s", broker_id)
+                    if broker_manager is not None:
+                        broker_manager.disconnect_broker(broker_id)
+                    snapshot = _system_snapshot(str(data_dir), broker_id, broker_manager)
+                    result = {"type": "system_snapshot", "data": snapshot}
+                    if not _emit(result):
+                        break
+
                 elif cmd_type == "shutdown":
                     logger.info("Shutdown requested")
+                    if broker_manager is not None:
+                        broker_manager.stop_worker()
                     break
 
                 else:
@@ -868,6 +1028,9 @@ def run_headless_backend(args: argparse.Namespace) -> int:
     except KeyboardInterrupt:
         logger.info("Interrupted")
         return 130
+    finally:
+        if broker_manager is not None:
+            broker_manager.stop_worker()
 
     logger.info("Headless backend shutdown")
     return 0

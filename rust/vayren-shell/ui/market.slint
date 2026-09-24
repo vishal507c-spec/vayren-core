@@ -640,13 +640,13 @@ component CandleGlyph inherits Rectangle {
     property <length> body-w: Math.max(1px, slot * 0.6);
     property <length> cx: c.x * plot-w;
 
-    x: 0px;
+    x: cx - body-w / 2;
     y: 0px;
-    width: plot-w;
+    width: body-w;
     height: grid-h + vol-h;
     // wick
     Rectangle {
-        x: parent.cx - 0.5px;
+        x: (parent.width - 1px) / 2;
         y: parent.c.h * parent.grid-h;
         width: 1px;
         height: Math.max(1px, (parent.c.l - parent.c.h) * parent.grid-h);
@@ -654,17 +654,17 @@ component CandleGlyph inherits Rectangle {
     }
     // body
     Rectangle {
-        x: parent.cx - parent.body-w / 2;
+        x: 0px;
         y: parent.c.top * parent.grid-h;
-        width: parent.body-w;
+        width: parent.width;
         height: Math.max(1px, parent.c.body * parent.grid-h);
         background: MarketTone.brush(parent.c.tone);
     }
     // volume
     Rectangle {
-        x: parent.cx - parent.body-w / 2;
+        x: 0px;
         y: parent.grid-h + parent.vol-h - parent.c.vol * parent.vol-h;
-        width: parent.body-w;
+        width: parent.width;
         height: parent.c.vol * parent.vol-h;
         background: parent.c.tone == 1 ? VayrenPalette.pos-dim
             : parent.c.tone == 3 ? VayrenPalette.neg-dim : VayrenPalette.faint;
@@ -1766,12 +1766,6 @@ export component MarketScreen inherits Rectangle {
     // Price-strip drag anchor (press y fraction) — legacy zooms around the
     // press pixel, so the delta is measured from it, not the live cursor.
     property <float> price-anchor-fy: 0.5;
-    // Canvas fractions cached as plain floats (the returning scroll-event
-    // callback cannot re-infer length/length ratios, so `moved` computes them).
-    property <float> px-fx: 0.5;
-    property <float> px-fy: 0.5;
-    property <float> plot-px: 0.0;
-    property <float> plot-h-px: 0.0;
 
     property <length> price-strip: 96px;
     property <length> time-axis-h: 24px;
@@ -2234,48 +2228,21 @@ export component MarketScreen inherits Rectangle {
                                 y: 0;
                                 width: plot.width;
                                 height: plot.height;
+                                // Subtle vertical crosshair line extending through plot height to time axis
                                 Rectangle {
                                     x: root.hover-x * plot.width - 0.5px;
                                     y: 0px;
                                     width: 1px;
                                     height: plot.height;
-                                    background: VayrenPalette.faint;
+                                    background: VayrenPalette.crosshair-line;
                                 }
+                                // Subtle horizontal crosshair line extending across plot width to price axis
                                 Rectangle {
                                     x: 0px;
                                     y: root.hover-y * plot.grid-h - 0.5px;
                                     width: plot.width;
                                     height: 1px;
-                                    background: VayrenPalette.faint;
-                                }
-                                Rectangle {
-                                    x: plot.width - root.price-strip;
-                                    y: root.hover-y * plot.grid-h - 9px;
-                                    width: root.price-strip;
-                                    height: 18px;
-                                    background: VayrenPalette.accent;
-                                    Text {
-                                        text: root.hover-price;
-                                        color: VayrenPalette.accent-text;
-                                        font-size: VayrenDesign.fs-label;
-                                        font-weight: 700;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                    }
-                                }
-                                Rectangle {
-                                    x: Math.max(0px, Math.min(root.hover-x * plot.width - 60px, plot.width - 120px));
-                                    y: plot.height - root.time-axis-h;
-                                    width: 120px;
-                                    height: root.time-axis-h;
-                                    background: VayrenPalette.accent;
-                                    Text {
-                                        text: root.hover-time;
-                                        color: VayrenPalette.accent-text;
-                                        font-size: VayrenDesign.fs-label;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                    }
+                                    background: VayrenPalette.crosshair-line;
                                 }
                                 Text {
                                     x: plot.width - 96px;
@@ -2300,31 +2267,10 @@ export component MarketScreen inherits Rectangle {
                                 height: plot.height;
                                 pointer-event(ev) => {
                                     if ev.kind == PointerEventKind.move {
-                                        // Pointer tracking (hover crosshair, drag pan,
-                                        // price-strip scale): handled here rather
-                                        // than `moved` so press/move/release share
-                                        // one event stream.
-                                        // Y fractions are measured against the
-                                        // PRICE GRID height (plot.grid-h), never
-                                        // the full plot height: the legacy
-                                        // chart maps price/crosshair only inside
-                                        // its chart rect (volume strip excluded),
-                                        // and every Slint candle/overlay/crosshair
-                                        // renders price fractions × grid-h. Using
-                                        // plot.height here placed the horizontal
-                                        // crosshair at 0.85 × the cursor Y.
-                                        root.px-fx = self.mouse-x / plot.width;
-                                        root.px-fy = self.mouse-y / plot.grid-h;
-                                        root.plot-px = plot.width / 1px;
-                                        root.plot-h-px = plot.grid-h / 1px;
-                                        let fx = root.px-fx;
-                                        let fy = root.px-fy;
+                                        let fx = self.mouse-x / plot.width;
+                                        let fy = self.mouse-y / plot.grid-h;
                                         if root.dragging {
                                             root.drag-move(fx, fy);
-                                        } else if root.price-dragging {
-                                            // legacy _drag_price_from: delta from the
-                                            // press point, in wheel notches.
-                                            root.price-drag((fy - root.price-anchor-fy) * root.plot-h-px / 120.0, root.price-anchor-fy);
                                         } else {
                                             root.hover-moved(fx, fy);
                                         }
@@ -2334,46 +2280,36 @@ export component MarketScreen inherits Rectangle {
                                         root.menu-y = plot.absolute-position.y + self.mouse-y;
                                     } else if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left
                                         && plot.width > 0px {
-                                        if self.mouse-x > plot.width - root.price-strip {
-                                            root.price-dragging = true;
-                                            root.price-anchor-fy = self.mouse-y / plot.grid-h;
-                                        } else {
-                                            root.dragging = true;
-                                            root.drag-start(self.mouse-x / plot.width, self.mouse-y / plot.grid-h);
-                                        }
+                                        root.dragging = true;
+                                        root.drag-start(self.mouse-x / plot.width, self.mouse-y / plot.grid-h);
                                     } else if ev.kind == PointerEventKind.up {
                                         if root.dragging { root.drag-end(); root.dragging = false; }
-                                        if root.price-dragging { root.price-drag-end(); root.price-dragging = false; }
                                     }
                                 }
                                 changed has-hover => {
                                     if !self.has-hover { root.hover-left(); }
                                 }
                                 double-clicked => {
-                                    if self.mouse-x > plot.width - root.price-strip { root.price-reset(); }
+                                    root.reset-view();
                                 }
                                 scroll-event(ev) => {
                                     if plot.width <= 0px || root.candles.length == 0 {
                                         return reject;
                                     }
-                                    if ev.delta-y != 0px {
-                                        // Host forwards the natural wheel delta
-                                        // (UP = positive): ScrollView regions
-                                        // consume it natively. Only time-zoom
-                                        // negates, keeping the WheelZoom
-                                        // steps<0 = zoom-in contract (legacy: UP
-                                        // zooms IN); price-zoom already matches
-                                        // legacy inside its Rust kernel.
-                                        let steps = (ev.delta-y / 1px) / 120.0;
-                                        if self.mouse-x > plot.width - root.price-strip {
-                                            root.price-zoom(steps, root.px-fy);
-                                        } else {
-                                            root.wheel-zoom(root.px-fx, -steps);
-                                        }
-                                    } else if ev.delta-x != 0px && root.plot-px > 0.0 {
-                                        root.wheel-pan((ev.delta-x / 1px) / root.plot-px);
+                                    if ev.modifiers.shift && ev.delta-y != 0px {
+                                        root.wheel-pan(-(ev.delta-y / 1px) / (plot.width / 1px));
+                                        return accept;
                                     }
-                                    accept
+                                    if ev.delta-y != 0px {
+                                        let steps = (ev.delta-y / 1px) / 120.0;
+                                        root.wheel-zoom(self.mouse-x / plot.width, -steps);
+                                        return accept;
+                                    }
+                                    if ev.delta-x != 0px && plot.width > 0px {
+                                        root.wheel-pan((ev.delta-x / 1px) / (plot.width / 1px));
+                                        return accept;
+                                    }
+                                    reject
                                 }
                             }
 
@@ -2490,15 +2426,86 @@ export component MarketScreen inherits Rectangle {
                             width: root.price-strip;
                             background: VayrenPalette.bg;
                             property <length> grid-h: self.height * 0.85;
+
+                            // 1px subtle vertical separator line between plot and price axis
+                            Rectangle {
+                                x: 0px;
+                                y: 0px;
+                                width: 1px;
+                                height: parent.height;
+                                background: VayrenPalette.hairline;
+                            }
+
+                            property <length> tick-h: 16px;
                             for t in root.price-ticks: Text {
-                                y: t.pos * parent.grid-h;
-                                width: parent.width;
+                                y: Math.max(2px, Math.min(t.pos * parent.grid-h - parent.tick-h / 2, parent.grid-h - parent.tick-h - 2px));
+                                height: parent.tick-h;
+                                x: 6px;
+                                width: parent.width - 14px;
                                 text: t.label;
                                 color: VayrenPalette.faint;
                                 font-size: VayrenDesign.fs-label;
                                 horizontal-alignment: right;
                                 vertical-alignment: center;
                                 overflow: elide;
+                            }
+
+                            // Active crosshair price badge on right price axis
+                            if root.has-hover && root.cross-visible: Rectangle {
+                                property <length> lbl-w: 80px;
+                                property <length> lbl-h: 20px;
+                                x: (parent.width - self.lbl-w) / 2;
+                                y: Math.max(2px, Math.min(root.hover-y * parent.grid-h - self.lbl-h / 2, parent.grid-h - self.lbl-h - 2px));
+                                width: self.lbl-w;
+                                height: self.lbl-h;
+                                background: VayrenPalette.crosshair-bg;
+                                border-width: 1px;
+                                border-color: VayrenPalette.crosshair-border;
+                                border-radius: 4px;
+                                clip: true;
+
+                                Text {
+                                    text: root.hover-price;
+                                    color: VayrenPalette.text;
+                                    font-size: VayrenDesign.fs-label;
+                                    font-weight: 600;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            TouchArea {
+                                x: 0;
+                                y: 0;
+                                width: parent.width;
+                                height: parent.height;
+                                pointer-event(ev) => {
+                                    if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
+                                        root.price-dragging = true;
+                                        root.price-anchor-fy = self.mouse-y / parent.grid-h;
+                                    } else if ev.kind == PointerEventKind.move {
+                                        if root.price-dragging {
+                                            let fy = self.mouse-y / parent.grid-h;
+                                            root.price-drag((fy - root.price-anchor-fy) * (parent.grid-h / 1px) / 120.0, root.price-anchor-fy);
+                                        }
+                                    } else if ev.kind == PointerEventKind.up {
+                                        if root.price-dragging {
+                                            root.price-drag-end();
+                                            root.price-dragging = false;
+                                        }
+                                    }
+                                }
+                                double-clicked => {
+                                    root.price-reset();
+                                }
+                                scroll-event(ev) => {
+                                    if ev.delta-y != 0px {
+                                        let steps = (ev.delta-y / 1px) / 120.0;
+                                        root.price-zoom(steps, self.mouse-y / parent.grid-h);
+                                        return accept;
+                                    }
+                                    reject
+                                }
                             }
                         }
                     }
@@ -2514,8 +2521,8 @@ export component MarketScreen inherits Rectangle {
                             background: VayrenPalette.hairline;
                         }
                         for t in root.time-ticks: Text {
-                            x: Math.max(0px, Math.min(t.pos * parent.width - 60px, parent.width - 120px));
-                            width: 120px;
+                            x: Math.max(0px, Math.min(t.pos * (parent.width - root.price-strip) - 40px, parent.width - root.price-strip - 80px));
+                            width: 80px;
                             height: parent.height;
                             text: t.label;
                             color: VayrenPalette.faint;
@@ -2523,6 +2530,63 @@ export component MarketScreen inherits Rectangle {
                             horizontal-alignment: center;
                             vertical-alignment: center;
                             overflow: elide;
+                        }
+
+                        TouchArea {
+                            x: 0;
+                            y: 0;
+                            width: parent.width - root.price-strip;
+                            height: parent.height;
+                            pointer-event(ev) => {
+                                if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
+                                    root.dragging = true;
+                                    root.drag-start(self.mouse-x / self.width, 0.5);
+                                } else if ev.kind == PointerEventKind.move {
+                                    if root.dragging {
+                                        root.drag-move(self.mouse-x / self.width, 0.5);
+                                    }
+                                } else if ev.kind == PointerEventKind.up {
+                                    if root.dragging {
+                                        root.drag-end();
+                                        root.dragging = false;
+                                    }
+                                }
+                            }
+                            scroll-event(ev) => {
+                                if ev.delta-y != 0px {
+                                    root.wheel-pan(-(ev.delta-y / 1px) / (self.width / 1px));
+                                    return accept;
+                                }
+                                if ev.delta-x != 0px {
+                                    root.wheel-pan((ev.delta-x / 1px) / (self.width / 1px));
+                                    return accept;
+                                }
+                                reject
+                            }
+                        }
+
+                        // Active crosshair date/time label on bottom time axis
+                        if root.has-hover && root.cross-visible: Rectangle {
+                            property <length> lbl-w: 168px;
+                            property <length> lbl-h: 20px;
+                            x: Math.max(4px, Math.min(root.hover-x * (parent.width - root.price-strip) - self.lbl-w / 2, parent.width - root.price-strip - self.lbl-w - 4px));
+                            y: (parent.height - self.lbl-h) / 2;
+                            width: self.lbl-w;
+                            height: self.lbl-h;
+                            background: VayrenPalette.crosshair-bg;
+                            border-width: 1px;
+                            border-color: VayrenPalette.crosshair-border;
+                            border-radius: 4px;
+                            clip: true;
+
+                            Text {
+                                text: root.hover-time;
+                                color: VayrenPalette.text;
+                                font-size: VayrenDesign.fs-label;
+                                font-weight: 600;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
                         }
                     }
                 }

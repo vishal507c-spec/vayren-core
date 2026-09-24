@@ -231,8 +231,11 @@ class FyersAutoAuthEngine:
         possible, why = self.auto_login_possible()
         if not possible:
             return False, why
-        if not self._run_auto_auth(session_store, flow):
-            return False, "FYERS automatic login failed — check the log"
+        ok, last_err = self._run_auto_auth(session_store, flow)
+        if not ok:
+            if last_err:
+                return False, f"FYERS login failed: {last_err}"
+            return False, "FYERS automatic login failed"
         token = _stored_access_token(session_store)
         if not token:
             return False, "automatic login reported success but stored no session"
@@ -244,10 +247,11 @@ class FyersAutoAuthEngine:
 
     # ── automatic login (official TOTP+PIN API flow) ──────────────────────
 
-    def _run_auto_auth(self, session_store: Any, flow: FyersAuthFlow) -> bool:
+    def _run_auto_auth(self, session_store: Any, flow: FyersAuthFlow) -> tuple[bool, str]:
         creds = self._credentials
         pyotp = _load_pyotp()
         log.info("[FyersAutoAuth] === AUTO-AUTH START ===")
+        last_err = ""
         for attempt in (1, 2):
             log.info(f"[FyersAutoAuth] Login attempt {attempt}/2 …")
             try:
@@ -270,13 +274,14 @@ class FyersAutoAuthEngine:
                     token, str(session.get("refresh_token", "") or ""), creds.app_id
                 )
                 log.info("[FyersAutoAuth] New session saved and verified.")
-                return True
+                return True, "ok"
             except Exception as exc:
+                last_err = str(exc)
                 log.warning(f"[FyersAutoAuth] Attempt {attempt} failed: {exc}")
                 if attempt < 2:
-                    time.sleep(5)
-        log.warning("[FyersAutoAuth] Automatic login failed.")
-        return False
+                    time.sleep(1)
+        log.warning("[FyersAutoAuth] Automatic login failed: %s", last_err)
+        return False, last_err
 
 
 __all__ = [

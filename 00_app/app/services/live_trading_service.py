@@ -31,8 +31,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-# DEBT: retained unwired imports (see 90_brain/ai_memory.md).
-from core.observable import IntervalTimer, Signal  # pyright: ignore[reportMissingImports]
 from execution import (
     ExecutionMode,  # pyright: ignore[reportAttributeAccessIssue]
     LiveSession,  # pyright: ignore[reportAttributeAccessIssue]
@@ -51,6 +49,8 @@ from strategy.language.storage import (
 from strategy.language.storage import (
     strategy_dir as resolve_strategy_dir,
 )
+
+from app.observable import IntervalTimer, Signal
 
 # Backward-compatible default: the shared resolver picks env var → data_dir →
 # per-user folder. Kept as a module constant because callers and the public

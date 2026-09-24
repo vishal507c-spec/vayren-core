@@ -370,28 +370,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // System production wiring (SLICE 4a): the real broker snapshot feeds
     // the native connection workspace (selection, states, field shapes).
     println!("Requesting system snapshot...");
-    let connection_workspace =
-        match PythonBackend::lock_send(&backend, BackendCommand::GetSystemSnapshot)? {
-            BackendResponse::SystemSnapshot { data } => {
-                let workspace = BrokerWorkspace::from_json(&data);
-                let (pill, _) = workspace.pill();
-                println!(
-                    "System ready: {} broker(s), selected '{}' — {}",
-                    workspace.brokers.len(),
-                    workspace.selected_id,
-                    pill
-                );
-                workspace
-            }
-            BackendResponse::Error { data } => {
-                eprintln!("System snapshot failed: {}", data.message);
-                BrokerWorkspace::empty()
-            }
-            _ => {
-                eprintln!("Unexpected response");
-                BrokerWorkspace::empty()
-            }
-        };
+    let connection_workspace = match PythonBackend::lock_send(
+        &backend,
+        BackendCommand::GetSystemSnapshot { selected_id: None },
+    )? {
+        BackendResponse::SystemSnapshot { data } => {
+            let workspace = BrokerWorkspace::from_json(&data);
+            let (pill, _) = workspace.pill();
+            println!(
+                "System ready: {} broker(s), selected '{}' — {}",
+                workspace.brokers.len(),
+                workspace.selected_id,
+                pill
+            );
+            workspace
+        }
+        BackendResponse::Error { data } => {
+            eprintln!("System snapshot failed: {}", data.message);
+            BrokerWorkspace::empty()
+        }
+        _ => {
+            eprintln!("Unexpected response");
+            BrokerWorkspace::empty()
+        }
+    };
     // Symbol/timeframe refetch for the chart interactions (same snapshot
     // shape the startup path loads; the startup limit is preserved). The
     // old bars stay visible until the worker's snapshot swaps in atomically.
@@ -432,47 +434,362 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             std::time::Duration::from_millis(50),
             move || {
                 let Some(ui) = weak.upgrade() else { return };
+                let mut latest_market: Option<(u64, Option<serde_json::Value>)> = None;
+                let mut latest_lab_select: Option<(u64, Option<serde_json::Value>)> = None;
+                let mut latest_lab_run: Option<(u64, Option<serde_json::Value>)> = None;
+
                 for result in fetch_rx.try_iter() {
                     match result {
                         FetchResult::Market(id, data) => {
-                            if id > last_market {
-                                last_market = id;
-                                if let Some(data) = data {
-                                    market::apply_snapshot_json(
-                                        &mut market_state.borrow_mut(),
-                                        &data,
-                                    );
-                                    shell::apply_market(&ui, &market_state.borrow());
-                                }
+                            if id > last_market
+                                && latest_market
+                                    .as_ref()
+                                    .map_or(true, |(prev_id, _)| id > *prev_id)
+                            {
+                                latest_market = Some((id, data));
                             }
                         }
                         FetchResult::LabSelect(id, data) => {
-                            if id > last_select {
-                                last_select = id;
-                                if let Some(data) = data {
-                                    lab::apply_snapshot_json(&mut lab_state.borrow_mut(), &data);
-                                    shell::apply_lab(&ui, &lab_state.borrow());
-                                }
+                            if id > last_select
+                                && latest_lab_select
+                                    .as_ref()
+                                    .map_or(true, |(prev_id, _)| id > *prev_id)
+                            {
+                                latest_lab_select = Some((id, data));
                             }
                         }
                         FetchResult::LabRun(id, data) => {
-                            if id > last_run {
-                                last_run = id;
-                                match data {
-                                    Some(data) => {
-                                        lab::apply_snapshot_json(&mut lab_state.borrow_mut(), &data)
-                                    }
-                                    None => lab_state.borrow_mut().fail_run(),
-                                }
-                                shell::apply_lab(&ui, &lab_state.borrow());
+                            if id > last_run
+                                && latest_lab_run
+                                    .as_ref()
+                                    .map_or(true, |(prev_id, _)| id > *prev_id)
+                            {
+                                latest_lab_run = Some((id, data));
                             }
                         }
                     }
+                }
+
+                if let Some((id, data)) = latest_market {
+                    last_market = id;
+                    if let Some(data) = data {
+                        market::apply_snapshot_json(&mut market_state.borrow_mut(), &data);
+                        shell::apply_market(&ui, &market_state.borrow());
+                    }
+                }
+                if let Some((id, data)) = latest_lab_select {
+                    last_select = id;
+                    if let Some(data) = data {
+                        lab::apply_snapshot_json(&mut lab_state.borrow_mut(), &data);
+                        shell::apply_lab(&ui, &lab_state.borrow());
+                    }
+                }
+                if let Some((id, data)) = latest_lab_run {
+                    last_run = id;
+                    match data {
+                        Some(data) => {
+                            lab::apply_snapshot_json(&mut lab_state.borrow_mut(), &data);
+                        }
+                        None => lab_state.borrow_mut().fail_run(),
+                    }
+                    shell::apply_lab(&ui, &lab_state.borrow());
                 }
             },
         );
     }
     shell::apply_connection(&ui, &connection_workspace);
+    let current_workspace = Rc::new(RefCell::new(connection_workspace));
+
+    // Wire broker connection interactions
+    {
+        let handle = ui.as_weak();
+        let backend = Arc::clone(&backend);
+        let cur_ws = current_workspace.clone();
+        ui.on_broker_select_requested(move |id: slint::SharedString| {
+            let id_str = id.as_str().to_string();
+            println!("Broker select requested: {}", id_str);
+            match PythonBackend::lock_send(
+                &backend,
+                BackendCommand::GetSystemSnapshot {
+                    selected_id: Some(id_str),
+                },
+            ) {
+                Ok(BackendResponse::SystemSnapshot { data }) => {
+                    let workspace = BrokerWorkspace::from_json(&data);
+                    *cur_ws.borrow_mut() = workspace.clone();
+                    if let Some(ui) = handle.upgrade() {
+                        shell::apply_connection(&ui, &workspace);
+                    }
+                }
+                Ok(other) => {
+                    eprintln!("Broker select: unexpected response ({other:?})");
+                }
+                Err(err) => {
+                    eprintln!("Broker select failed: {err}");
+                }
+            }
+        });
+    }
+    {
+        let handle = ui.as_weak();
+        let backend = Arc::clone(&backend);
+        let cur_ws = current_workspace.clone();
+        ui.on_broker_refresh_requested(move || {
+            println!("Broker refresh requested");
+            match PythonBackend::lock_send(
+                &backend,
+                BackendCommand::GetSystemSnapshot { selected_id: None },
+            ) {
+                Ok(BackendResponse::SystemSnapshot { data }) => {
+                    let workspace = BrokerWorkspace::from_json(&data);
+                    *cur_ws.borrow_mut() = workspace.clone();
+                    if let Some(ui) = handle.upgrade() {
+                        shell::apply_connection(&ui, &workspace);
+                    }
+                }
+                Ok(other) => {
+                    eprintln!("Broker refresh: unexpected response ({other:?})");
+                }
+                Err(err) => {
+                    eprintln!("Broker refresh failed: {err}");
+                }
+            }
+        });
+    }
+    {
+        let handle = ui.as_weak();
+        let backend = Arc::clone(&backend);
+        let cur_ws = current_workspace.clone();
+        ui.on_broker_connect_requested(move |v0, v1, v2, v3, v4, v5| {
+            let broker_id = cur_ws.borrow().selected_id.clone();
+            let fields = cur_ws.borrow().fields.clone();
+            let raw_values = [v0, v1, v2, v3, v4, v5];
+            // Sentinel written by apply_connection when a field is saved in the
+            // OS vault.  If the user has not changed the field, the sentinel is
+            // still there — we must not forward it to the backend, which would
+            // overwrite the stored value with literal bullet characters.
+            const SAVED_SENTINEL: &str =
+                "\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}";
+            let mut credentials = std::collections::HashMap::new();
+            for (i, f) in fields.iter().enumerate() {
+                if let Some(v) = raw_values.get(i) {
+                    let s = v.as_str().trim();
+                    if !s.is_empty() && s != SAVED_SENTINEL {
+                        credentials.insert(f.key.clone(), s.to_string());
+                    }
+                }
+            }
+            println!(
+                "Broker connect requested for '{}' ({} fields entered)",
+                broker_id,
+                credentials.len()
+            );
+
+            // Update UI immediately to Authenticating state so user sees progress instantly
+            if let Some(ui) = handle.upgrade() {
+                let mut auth_ws = cur_ws.borrow().clone();
+                auth_ws.state = vayren_shell::broker_connection::ConnectionState::Authenticating;
+                for b in auth_ws.brokers.iter_mut() {
+                    if b.id == broker_id {
+                        b.connected = false;
+                    }
+                }
+                shell::apply_connection(&ui, &auth_ws);
+            }
+
+            // Spawn background thread to perform the connection IPC so UI event loop stays fluid
+            let handle_bg = handle.clone();
+            let backend_bg = Arc::clone(&backend);
+            std::thread::spawn(move || {
+                match PythonBackend::lock_send(
+                    &backend_bg,
+                    BackendCommand::ConnectBroker {
+                        broker_id,
+                        credentials,
+                    },
+                ) {
+                    Ok(BackendResponse::SystemSnapshot { data }) => {
+                        let workspace = BrokerWorkspace::from_json(&data);
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(ui) = handle_bg.upgrade() {
+                                shell::apply_connection(&ui, &workspace);
+                            }
+                        });
+                    }
+                    Ok(BackendResponse::Error { data }) => {
+                        eprintln!("Broker connect failed: {}", data.message);
+                        let msg = data.message.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(ui) = handle_bg.upgrade() {
+                                ui.set_conn_is_failed(true);
+                                ui.set_conn_error_message(msg.into());
+                                ui.set_conn_pill_label("Connection Failed".into());
+                                ui.set_conn_pill_tone(3);
+                                ui.set_conn_cta_enabled(true);
+                                ui.set_conn_form_enabled(true);
+                            }
+                        });
+                    }
+                    Ok(other) => {
+                        eprintln!("Broker connect: unexpected response ({other:?})");
+                    }
+                    Err(err) => {
+                        eprintln!("Broker connect IPC error: {err}");
+                        let err_str = err.to_string();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(ui) = handle_bg.upgrade() {
+                                ui.set_conn_is_failed(true);
+                                ui.set_conn_error_message(
+                                    format!("Connection IPC error: {err_str}").into(),
+                                );
+                                ui.set_conn_pill_label("Connection Failed".into());
+                                ui.set_conn_pill_tone(3);
+                                ui.set_conn_cta_enabled(true);
+                                ui.set_conn_form_enabled(true);
+                            }
+                        });
+                    }
+                }
+            });
+        });
+    }
+    {
+        let handle = ui.as_weak();
+        let backend = Arc::clone(&backend);
+        let cur_ws = current_workspace.clone();
+        ui.on_broker_login_requested(move || {
+            let broker_id = cur_ws.borrow().selected_id.clone();
+            println!("Broker retry requested for '{}'", broker_id);
+            if let Some(ui) = handle.upgrade() {
+                let mut auth_ws = cur_ws.borrow().clone();
+                auth_ws.state = vayren_shell::broker_connection::ConnectionState::Authenticating;
+                shell::apply_connection(&ui, &auth_ws);
+            }
+
+            let handle_bg = handle.clone();
+            let backend_bg = Arc::clone(&backend);
+            std::thread::spawn(move || {
+                match PythonBackend::lock_send(
+                    &backend_bg,
+                    BackendCommand::ConnectBroker {
+                        broker_id,
+                        credentials: std::collections::HashMap::new(),
+                    },
+                ) {
+                    Ok(BackendResponse::SystemSnapshot { data }) => {
+                        let workspace = BrokerWorkspace::from_json(&data);
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(ui) = handle_bg.upgrade() {
+                                shell::apply_connection(&ui, &workspace);
+                            }
+                        });
+                    }
+                    Ok(BackendResponse::Error { data }) => {
+                        eprintln!("Broker retry failed: {}", data.message);
+                        let msg = data.message.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(ui) = handle_bg.upgrade() {
+                                ui.set_conn_is_failed(true);
+                                ui.set_conn_error_message(msg.into());
+                                ui.set_conn_pill_label("Connection Failed".into());
+                                ui.set_conn_pill_tone(3);
+                                ui.set_conn_cta_enabled(true);
+                                ui.set_conn_form_enabled(true);
+                            }
+                        });
+                    }
+                    Ok(other) => {
+                        eprintln!("Broker retry: unexpected response ({other:?})");
+                    }
+                    Err(err) => {
+                        eprintln!("Broker retry IPC error: {err}");
+                        let err_str = err.to_string();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(ui) = handle_bg.upgrade() {
+                                ui.set_conn_is_failed(true);
+                                ui.set_conn_error_message(
+                                    format!("Connection IPC error: {err_str}").into(),
+                                );
+                                ui.set_conn_pill_label("Connection Failed".into());
+                                ui.set_conn_pill_tone(3);
+                                ui.set_conn_cta_enabled(true);
+                                ui.set_conn_form_enabled(true);
+                            }
+                        });
+                    }
+                }
+            });
+        });
+    }
+    {
+        let handle = ui.as_weak();
+        let backend = Arc::clone(&backend);
+        let cur_ws = current_workspace.clone();
+        ui.on_broker_disconnect_requested(move || {
+            let broker_id = cur_ws.borrow().selected_id.clone();
+            println!("Broker disconnect requested for '{}'", broker_id);
+            let handle_bg = handle.clone();
+            let backend_bg = Arc::clone(&backend);
+            std::thread::spawn(move || {
+                match PythonBackend::lock_send(
+                    &backend_bg,
+                    BackendCommand::DisconnectBroker { broker_id },
+                ) {
+                    Ok(BackendResponse::SystemSnapshot { data }) => {
+                        let workspace = BrokerWorkspace::from_json(&data);
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(ui) = handle_bg.upgrade() {
+                                shell::apply_connection(&ui, &workspace);
+                            }
+                        });
+                    }
+                    Ok(other) => {
+                        eprintln!("Broker disconnect: unexpected response ({other:?})");
+                    }
+                    Err(err) => {
+                        eprintln!("Broker disconnect failed: {err}");
+                    }
+                }
+            });
+        });
+    }
+    ui.on_broker_help_requested(move || {
+        println!("Broker help requested");
+    });
+    ui.on_broker_add_requested(move || {
+        println!("Add broker requested");
+    });
+    {
+        let handle = ui.as_weak();
+        ui.on_broker_paste_requested(move |idx: i32| {
+            // clipboard-win is a Windows-only crate (empty elsewhere), so the
+            // read itself is platform-gated; other platforms report unavailable.
+            #[cfg(windows)]
+            let pasted = clipboard_win::get_clipboard_string().ok();
+            #[cfg(not(windows))]
+            let pasted: Option<String> = None;
+            if let Some(text) = pasted {
+                let trimmed = text.trim();
+                println!(
+                    "Broker paste requested for field {idx}: length {}",
+                    trimmed.len()
+                );
+                if let Some(ui) = handle.upgrade() {
+                    let s = slint::SharedString::from(trimmed);
+                    match idx {
+                        0 => ui.set_broker_field_v0(s),
+                        1 => ui.set_broker_field_v1(s),
+                        2 => ui.set_broker_field_v2(s),
+                        3 => ui.set_broker_field_v3(s),
+                        4 => ui.set_broker_field_v4(s),
+                        _ => ui.set_broker_field_v5(s),
+                    }
+                }
+            } else {
+                eprintln!("Broker paste failed: clipboard empty or unavailable");
+            }
+        });
+    }
     shell::apply_zoom(&ui, &zoom.borrow());
     shell::apply_lab(&ui, &lab_state.borrow());
     shell::apply_portfolio(&ui, &portfolio_state.borrow());

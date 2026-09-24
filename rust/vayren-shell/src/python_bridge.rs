@@ -42,7 +42,17 @@ pub enum BackendCommand {
         timeframe: Option<String>,
         limit: Option<i64>,
     },
-    GetSystemSnapshot,
+    GetSystemSnapshot {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        selected_id: Option<String>,
+    },
+    ConnectBroker {
+        broker_id: String,
+        credentials: std::collections::HashMap<String, String>,
+    },
+    DisconnectBroker {
+        broker_id: String,
+    },
     GetPortfolioSnapshot,
     GetLiveSnapshot,
     GetResearchSnapshot,
@@ -364,8 +374,32 @@ mod tests {
 
     #[test]
     fn test_system_snapshot_command_serialization() {
-        let json = serde_json::to_string(&BackendCommand::GetSystemSnapshot).unwrap();
+        let json = serde_json::to_string(&BackendCommand::GetSystemSnapshot { selected_id: None })
+            .unwrap();
         assert_eq!(json, r#"{"type":"get_system_snapshot"}"#);
+    }
+
+    #[test]
+    fn test_connect_broker_command_serialization() {
+        let mut creds = std::collections::HashMap::new();
+        creds.insert("app_id".to_string(), "TEST_ID".to_string());
+        let cmd = BackendCommand::ConnectBroker {
+            broker_id: "fyers".to_string(),
+            credentials: creds,
+        };
+        let json = serde_json::to_string(&cmd).unwrap();
+        assert!(json.contains(r#""type":"connect_broker""#));
+        assert!(json.contains(r#""broker_id":"fyers""#));
+        assert!(json.contains(r#""app_id":"TEST_ID""#));
+    }
+
+    #[test]
+    fn test_disconnect_broker_command_serialization() {
+        let cmd = BackendCommand::DisconnectBroker {
+            broker_id: "fyers".to_string(),
+        };
+        let json = serde_json::to_string(&cmd).unwrap();
+        assert_eq!(json, r#"{"type":"disconnect_broker","broker_id":"fyers"}"#);
     }
 
     #[test]
