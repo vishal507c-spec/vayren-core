@@ -358,6 +358,10 @@ pub struct LabState {
     pub sym_open: bool,
     pub sym_search: String,
     pub sym_draft: Vec<String>,
+    /// Reference-layout echoes (view-local until the backend supplies them).
+    pub cfg_cost: String,
+    pub lens: i32,
+    pub equity_select: i32,
 }
 
 pub const LAB_TABS: [&str; 5] = ["EDITOR", "PERFORMANCE", "TRADES", "EQUITY", "DRAWDOWN"];
@@ -516,6 +520,39 @@ impl LabState {
         if (0..=2).contains(&side) {
             self.compare_side = side;
         }
+    }
+
+    /// Reference-layout interactions. Perspectives lens + equity view are
+    /// view-local presentation filters (never queued); the cost field and
+    /// inspector close go through the existing pending-actions bridge.
+    pub fn interaction_lens(&mut self, lens: i32) {
+        if (0..6).contains(&lens) {
+            self.lens = lens;
+        }
+    }
+
+    pub fn interaction_equity_view(&mut self, view: i32) {
+        if (0..3).contains(&view) {
+            self.equity_select = view;
+        }
+    }
+
+    pub fn interaction_cost(&mut self, value: &str) {
+        let value = value.trim();
+        if !value.is_empty() {
+            self.cfg_cost = value.to_string();
+            self.queue_action(format!("cost:{value}"));
+        }
+    }
+
+    pub fn interaction_detail_close(&mut self) {
+        self.detail = None;
+    }
+
+    /// Reset = discard the editor working copy back to the last backend echo
+    /// (legacy `_dirty` revert semantics; no backend round-trip needed).
+    pub fn interaction_reset(&mut self) {
+        self.code = self.synced_code.clone();
     }
 
     /// Symbol selector: open seeds the draft from the applied echo; toggles
@@ -845,6 +882,179 @@ pub struct LabView {
     pub sym_count_line: String,
     pub sym_visible: Vec<String>,
     pub sym_visible_on: Vec<bool>,
+    /// Applied-universe chips (split of `cfg_universe_csv`) — presentation
+    /// projection only; Slint strings have no split, so it happens here.
+    pub universe_chips: Vec<String>,
+    // Reference-layout projection (see project() derivations).
+    pub cfg_cost: String,
+    pub cfg_cost_warn: bool,
+    pub run_id: String,
+    pub run_ts: String,
+    pub cfg_hash: String,
+    pub result_pnl: String,
+    pub result_return: String,
+    pub result_pnl_tone: i32,
+    pub result_exec_line: String,
+    pub stale_exec_line: String,
+    pub stale_cur_line: String,
+    pub range_line: String,
+    pub diag_show: bool,
+    pub diag_title: String,
+    pub diag_detail: String,
+    pub diag_stale: bool,
+    pub risk_gate_show: bool,
+    pub risk_gate_text: String,
+    pub lens: i32,
+    pub strategy_count_line: String,
+    pub editing_hint: String,
+    pub studio_ref_pf: String,
+    pub studio_source: String,
+    pub equity_select: i32,
+    /// Date-range projection of the ISO config fields: humans see
+    /// "22 Sep 2026 — 22 Sep 2026" while the commit contract stays ISO
+    /// (`dates-committed` → "dates:a:b" is untouched). `dates_error` is
+    /// subtle inline validation — a bad range is flagged immediately, the
+    /// user's selection is never destroyed.
+    pub dates_human: String,
+    pub dates_error: String,
+    pub today_days: i32,
+    /// Committed selection as calendar anchors (days since epoch, -1 unset)
+    /// — Slint never parses ISO, it consumes these ints directly.
+    pub dates_start_days: i32,
+    pub dates_end_days: i32,
+    pub date_presets: Vec<LabPresetData>,
+}
+
+/// One quick-select preset for the date-range picker. Ranges are day anchors
+/// (days since epoch) so the picker highlights/applies without string parsing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LabPresetData {
+    pub label: String,
+    pub start_days: i32,
+    pub end_days: i32,
+}
+
+// Civil-date arithmetic (Howard Hinnant's algorithm, std-only). Date math is
+// view-model bookkeeping, not financial logic — it stays here so Slint keeps
+// only presentation state (§22: one authority per value).
+fn leap_year(y: i64) -> bool {
+    (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+}
+
+fn days_in_month(y: i64, m: i64) -> i64 {
+    match m {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        _ => {
+            if leap_year(y) {
+                29
+            } else {
+                28
+            }
+        }
+    }
+}
+
+/// Days since 1970-01-01 for a civil date (validates calendar ranges).
+fn parse_iso_days(s: &str) -> Option<i64> {
+    let b: Vec<char> = s.chars().collect();
+    if b.len() != 10
+        || b[4] != '-'
+        || b[7] != '-'
+        || !b
+            .iter()
+            .enumerate()
+            .all(|(i, c)| i == 4 || i == 7 || c.is_ascii_digit())
+    {
+        return None;
+    }
+    let y: i64 = s[0..4].parse().ok()?;
+    let m: i64 = s[5..7].parse().ok()?;
+    let d: i64 = s[8..10].parse().ok()?;
+    if !(1970..=2099).contains(&y) || !(1..=12).contains(&m) || d < 1 || d > days_in_month(y, m) {
+        return None;
+    }
+    let yy = if m <= 2 { y - 1 } else { y };
+    let era = (if yy >= 0 { yy } else { yy - 399 }) / 400;
+    let yoe = yy - era * 400;
+    let mp = (m + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    Some(era * 146097 + doe - 719468)
+}
+
+/// Inverse of [`parse_iso_days`]: days since epoch → civil (y, m, d).
+fn civil_from_days(z: i64) -> (i64, i64, i64) {
+    let z = z + 719468;
+    let era = (if z >= 0 { z } else { z - 146096 }) / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
+fn human_from_days(z: i64) -> String {
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let (y, m, d) = civil_from_days(z);
+    format!("{d} {} {y}", MONTHS[(m - 1) as usize])
+}
+
+/// Today at UTC midnight, in days since epoch (stable within a session; the
+/// picker only needs it to anchor the calendar view).
+fn today_days_raw() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64 / 86400)
+        .unwrap_or(0)
+}
+
+/// `months` back from `z`, clamped to the shorter month (Jan 31 − 1M = Dec 31).
+fn sub_months(z: i64, months: i64) -> i64 {
+    let (y, m, d) = civil_from_days(z);
+    let total = y * 12 + (m - 1) - months;
+    let ny = total.div_euclid(12);
+    let nm = total.rem_euclid(12) + 1;
+    let nd = d.min(days_in_month(ny, nm));
+    iso_days_from_civil(ny, nm, nd)
+}
+
+fn iso_days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let yy = if m <= 2 { y - 1 } else { y };
+    let era = (if yy >= 0 { yy } else { yy - 399 }) / 400;
+    let yoe = yy - era * 400;
+    let mp = (m + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146097 + doe - 719468
+}
+
+fn year_start_days(z: i64) -> i64 {
+    let (y, _, _) = civil_from_days(z);
+    iso_days_from_civil(y, 1, 1)
+}
+
+/// Quick-select presets ending today (brief §8: kept subtle — five entries,
+/// no exhaustive list).
+fn date_presets_for(today: i64) -> Vec<LabPresetData> {
+    let t = today as i32;
+    let p = |label: &str, start: i64| LabPresetData {
+        label: label.to_string(),
+        start_days: start as i32,
+        end_days: t,
+    };
+    vec![
+        p("Last 1M", sub_months(today, 1)),
+        p("Last 3M", sub_months(today, 3)),
+        p("Last 6M", sub_months(today, 6)),
+        p("Last 1Y", sub_months(today, 12)),
+        p("YTD", year_start_days(today)),
+    ]
 }
 
 /// Ranking rows displayed before the presentation cap (the label always
@@ -1186,6 +1396,104 @@ pub fn project(state: &LabState) -> LabView {
         .map(|s| state.sym_draft.iter().any(|d| d == s))
         .collect();
 
+    // Reference-layout derivations — presentation mapping of engine facts
+    // only; nothing here computes a financial result.
+    let find_kpi = |label: &str| -> Option<(String, i32)> {
+        kpis.iter()
+            .find(|k| k.label == label)
+            .map(|k| (k.value.clone(), k.tone))
+    };
+    let (result_pnl, result_pnl_tone) = find_kpi("NET P&L").unwrap_or_default();
+    let result_return = find_kpi("RETURN").map_or(String::new(), |k| k.0);
+    let studio_ref_pf = find_kpi("PF").map_or(String::new(), |k| k.0);
+    let result_exec_line = if has_strategy {
+        format!(
+            "{} · {}",
+            strategy
+                .map_or_else(String::new, |s| s.name.clone())
+                .to_uppercase(),
+            summary_line
+        )
+    } else {
+        String::new()
+    };
+    let (stale_exec_line, stale_cur_line) = if state.outdated {
+        (
+            state.results_fingerprint.clone().unwrap_or_default(),
+            state.config.fingerprint(),
+        )
+    } else {
+        (String::new(), String::new())
+    };
+    let range_line = if state.config.dates.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "{} · starting capital ₹{}",
+            state.config.dates, state.config.capital
+        )
+    };
+    let diag_show = show_single && !state.verdict_label.is_empty() && state.verdict_tone != 3;
+    let risk_gate_show = show_single && !state.verdict_label.is_empty() && state.verdict_tone == 3;
+    let strategy_count_line = if state.strategies.len() == 1 {
+        "1 STRATEGY".to_string()
+    } else {
+        format!("{} STRATEGIES", state.strategies.len())
+    };
+    let dirty_now = state.code != state.synced_code;
+    let editing_hint = if !has_strategy {
+        String::new()
+    } else if dirty_now {
+        format!(
+            "{} has unsaved changes in the studio.",
+            strategy.map_or_else(String::new, |s| s.name.clone())
+        )
+    } else {
+        format!(
+            "{} is the current working strategy.",
+            strategy.map_or_else(String::new, |s| s.name.clone())
+        )
+    };
+    let cfg_cost_warn = matches!(
+        state.cfg_cost.trim(),
+        "0" | "0.0" | "0.00" | "0.000" | "0.0%" | "0%"
+    );
+
+    // Date-range display + validation (ISO in, human out; the commit path is
+    // unchanged). A half-picked or unparseable range is flagged inline but
+    // whatever the user selected stays visible — never silently reset.
+    let today = today_days_raw();
+    let start_days = parse_iso_days(state.cfg_dates_start.trim());
+    let end_days = parse_iso_days(state.cfg_dates_end.trim());
+    let start_raw = !state.cfg_dates_start.trim().is_empty();
+    let end_raw = !state.cfg_dates_end.trim().is_empty();
+    let (dates_human, dates_error) = match (start_days, end_days) {
+        (Some(a), Some(b)) => (
+            format!("{} \u{2014} {}", human_from_days(a), human_from_days(b)),
+            if b < a {
+                "End date must be on or after the start date.".to_string()
+            } else {
+                String::new()
+            },
+        ),
+        (Some(a), None) if end_raw => (
+            human_from_days(a),
+            "Use a valid calendar date (YYYY-MM-DD).".to_string(),
+        ),
+        (None, Some(b)) if start_raw => (
+            human_from_days(b),
+            "Use a valid calendar date (YYYY-MM-DD).".to_string(),
+        ),
+        (Some(a), None) => (format!("{} \u{2014} …", human_from_days(a)), String::new()),
+        (None, Some(b)) => (format!("… \u{2014} {}", human_from_days(b)), String::new()),
+        (None, None) if start_raw || end_raw => (
+            String::new(),
+            "Use a valid calendar date (YYYY-MM-DD).".to_string(),
+        ),
+        _ => (String::new(), String::new()),
+    };
+    let dates_human = dates_human.to_string();
+
     LabView {
         has_strategy,
         name: strategy.map_or_else(|| "No strategy".to_string(), |s| s.name.clone()),
@@ -1264,6 +1572,12 @@ pub fn project(state: &LabState) -> LabView {
             })
             .collect(),
         cfg_universe_csv: state.cfg_universe_csv.clone(),
+        universe_chips: state
+            .cfg_universe_csv
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect(),
         timeframes: state.timeframes.clone(),
         timeframe_index: state.timeframe_index,
         cfg_dates_start: state.cfg_dates_start.clone(),
@@ -1301,6 +1615,40 @@ pub fn project(state: &LabState) -> LabView {
         sym_count_line,
         sym_visible,
         sym_visible_on,
+        cfg_cost: state.cfg_cost.clone(),
+        cfg_cost_warn: cfg_cost_warn,
+        run_id: String::new(),
+        run_ts: if show_single {
+            strategy.map_or(String::new(), |s| s.last_backtest.clone())
+        } else {
+            String::new()
+        },
+        cfg_hash: String::new(),
+        result_pnl,
+        result_return,
+        result_pnl_tone,
+        result_exec_line,
+        stale_exec_line,
+        stale_cur_line,
+        range_line,
+        diag_show,
+        diag_title: state.verdict_label.clone(),
+        diag_detail: state.verdict_note.clone(),
+        diag_stale: state.outdated,
+        risk_gate_show,
+        risk_gate_text: state.verdict_note.clone(),
+        lens: state.lens,
+        strategy_count_line,
+        editing_hint,
+        studio_ref_pf,
+        studio_source: "LOCAL".to_string(),
+        equity_select: state.equity_select,
+        dates_human,
+        dates_error,
+        today_days: today as i32,
+        dates_start_days: start_days.map_or(-1, |v| v as i32),
+        dates_end_days: end_days.map_or(-1, |v| v as i32),
+        date_presets: date_presets_for(today),
     }
 }
 
@@ -1539,6 +1887,43 @@ mod tests {
     }
 
     #[test]
+    fn lens_and_equity_view_are_view_local_and_bounded() {
+        let mut st = state_with_obr();
+        st.interaction_lens(4);
+        assert_eq!(st.lens, 4);
+        st.interaction_lens(9);
+        assert_eq!(st.lens, 4); // out-of-range ignored
+        st.interaction_equity_view(2);
+        assert_eq!(st.equity_select, 2);
+        st.interaction_equity_view(7);
+        assert_eq!(st.equity_select, 2);
+        assert!(st.pending_actions.is_empty());
+    }
+
+    #[test]
+    fn cost_mirrors_locally_and_queues_the_backend_commit() {
+        let mut st = state_with_obr();
+        st.interaction_cost(" 0.05 ");
+        assert_eq!(st.cfg_cost, "0.05");
+        assert_eq!(st.pending_actions, vec!["cost:0.05".to_string()]);
+        st.interaction_cost("");
+        assert_eq!(st.pending_actions.len(), 1); // empty never queued
+    }
+
+    #[test]
+    fn inspector_close_and_reset_stay_local() {
+        let mut st = state_with_obr();
+        st.interaction_detail_close();
+        assert!(project(&st).detail.is_none());
+        st.interaction_codeedit("edited buffer");
+        assert!(project(&st).dirty);
+        st.interaction_reset();
+        assert!(!project(&st).dirty);
+        assert_eq!(project(&st).code, st.synced_code.clone());
+        assert!(st.pending_actions.is_empty());
+    }
+
+    #[test]
     fn snapshot_adopts_backend_echo_and_formats_like_legacy() {
         let mut st = state_with_obr();
         st.select(0);
@@ -1679,6 +2064,68 @@ mod tests {
         st.universe_selected = vec!["A".into(), "B".into()];
         st.sym_draft = st.universe_selected.clone();
         assert_eq!(project(&st).sym_button_line, "A, B");
+    }
+
+    #[test]
+    fn civil_date_math_matches_known_epoch_days() {
+        // Anchor facts: 1970-01-01 = 0, epoch day 0 round-trips; leap rules.
+        assert_eq!(parse_iso_days("1970-01-01"), Some(0));
+        assert_eq!(parse_iso_days("2000-02-29"), Some(11016)); // 2000 is leap
+        assert_eq!(parse_iso_days("1900-02-29"), None); // pre-epoch rejected
+        assert_eq!(parse_iso_days("2100-02-29"), None); // out of range
+        assert_eq!(parse_iso_days("2026-02-29"), None); // 2026 is not leap
+        assert_eq!(parse_iso_days("2024-02-29"), Some(19782));
+        assert_eq!(civil_from_days(19782), (2024, 2, 29));
+        assert_eq!(parse_iso_days("2026-9-22"), None); // canonical shape only
+        assert_eq!(parse_iso_days(""), None);
+        assert_eq!(human_from_days(20454), "1 Jan 2026");
+        // month subtraction clamps to the shorter month (brief: never pick a
+        // non-existent day).
+        let jan31 = parse_iso_days("2026-01-31").unwrap();
+        assert_eq!(civil_from_days(sub_months(jan31, 1)), (2025, 12, 31));
+        assert_eq!(civil_from_days(sub_months(jan31, 12)), (2025, 1, 31));
+        let mar31 = parse_iso_days("2026-03-31").unwrap();
+        assert_eq!(civil_from_days(sub_months(mar31, 1)), (2026, 2, 28));
+        assert_eq!(
+            year_start_days(mar31),
+            parse_iso_days("2026-01-01").unwrap()
+        );
+    }
+
+    #[test]
+    fn date_range_projection_formats_validates_and_never_destroys() {
+        let mut st = state_with_obr();
+        // Untouched → empty display, no error (placeholder owns the cell).
+        let v = project(&st);
+        assert_eq!(v.dates_human, "");
+        assert_eq!(v.dates_error, "");
+        assert_eq!(v.dates_start_days, -1);
+        // Valid committed range → human display, ISO contract intact.
+        st.cfg_dates_start = "2026-01-05".into();
+        st.cfg_dates_end = "2026-09-22".into();
+        let v = project(&st);
+        assert_eq!(v.dates_human, "5 Jan 2026 — 22 Sep 2026");
+        assert_eq!(v.dates_error, "");
+        assert!(v.dates_start_days < v.dates_end_days);
+        // Reversed range is flagged but still shown (selection preserved).
+        st.cfg_dates_start = "2026-09-22".into();
+        st.cfg_dates_end = "2026-01-05".into();
+        let v = project(&st);
+        assert_eq!(v.dates_human, "22 Sep 2026 — 5 Jan 2026");
+        assert!(v.dates_error.contains("on or after"));
+        // Garbage on one side: bad input flagged, good side kept visible.
+        st.cfg_dates_start = "2026-02-30".into();
+        let v = project(&st);
+        assert!(v.dates_error.contains("valid calendar date"));
+        assert_eq!(v.dates_human, "5 Jan 2026");
+        // Presets: five quick ranges, all ending today, starts before ends.
+        assert_eq!(v.date_presets.len(), 5);
+        for p in &v.date_presets {
+            assert_eq!(p.end_days, v.today_days);
+            assert!(p.start_days <= p.end_days);
+        }
+        assert_eq!(v.date_presets[0].label, "Last 1M");
+        assert_eq!(v.date_presets[4].label, "YTD");
     }
 }
 

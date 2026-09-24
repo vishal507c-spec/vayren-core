@@ -104,10 +104,17 @@ def build_intervals(
         nxt = anchors[index + 1] if index + 1 < len(anchors) else None
         anchor_ts = parse_iso(anchor["ts"])
         span_end = parse_iso(nxt["ts"]) if nxt else end
+        # Events can land after the window closed (a mark written by a later
+        # turn against an already-closed session). Clamp so the partition
+        # stays non-overlapping and sums exactly to the elapsed duration.
+        if anchor_ts > end:
+            anchor_ts = end
+        if span_end > end:
+            span_end = end
         if anchor.get("action") == "run_start":
             pair_end = _matching_run_end(anchor, ordered)
             if pair_end is not None:
-                pair_ts = parse_iso(pair_end["ts"])
+                pair_ts = min(parse_iso(pair_end["ts"]), end)
                 intervals.append(
                     Interval(
                         anchor_ts,

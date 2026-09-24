@@ -423,6 +423,26 @@ def test_gaps_become_unknown_and_total_is_complete(env: tuple[Path, Path]) -> No
     check_no_overlap(metrics)
 
 
+def test_markers_written_after_the_window_closed_do_not_inflate_partition(
+    env: tuple[Path, Path],
+) -> None:
+    del env
+    task_id = "late_markers"
+    events = [
+        base(task_id, T0, "task_start"),
+        base(task_id, T0 + timedelta(minutes=1), "validate", "TESTING"),
+        base(task_id, T0 + timedelta(minutes=2), "task_end"),
+        base(task_id, T0 + timedelta(minutes=3), "validate", "VALIDATION"),
+        base(task_id, T0 + timedelta(minutes=4), "cleanup", "VALIDATION"),
+    ]
+    write_task(flat_store.ROOT, task_id, events)
+    metrics = analysis.analyze_task(task_id)
+
+    assert metrics.elapsed_ms == 2 * 60_000
+    check_partition(metrics)
+    check_no_overlap(metrics)
+
+
 def test_no_markers_at_all_single_unknown_interval(env: tuple[Path, Path]) -> None:
     del env
     task_id = "bare"

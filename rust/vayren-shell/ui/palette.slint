@@ -109,3 +109,100 @@ export global VayrenDesign {
     out property <length> market-wide: 1180px;
     out property <length> market-medium: 820px;
 }
+
+export global LabPalette {
+    // Strategy Lab redesign — exact reference CSS variable match.
+    // These are ONLY for lab.slint; no other surface may use lab-* tokens.
+    // Colour-role names carry the lab- prefix so a role stays defined once
+    // repo-wide (validate_authority duplicate-token gate).
+    // Surfaces.
+    out property <color> lab-bg:   #06090c;
+    out property <color> panel:    #0a0f14;
+    out property <color> panel2:   #0c1219;
+    out property <color> inset:    #080d12;
+    // Borders.
+    out property <color> line:     rgba(255,255,255, 0.08);
+    out property <color> line2:    rgba(255,255,255, 0.045);
+    // Text.
+    out property <color> lab-text: #eef3f5;
+    out property <color> soft:     #c2ccd1;
+    out property <color> lab-muted:#7b8790;
+    out property <color> dim:      #525e67;
+    out property <color> lab-faint:#39434b;
+    // Accent.
+    out property <color> lab-teal: #2dd4bf;
+    out property <color> teal-dim: rgba(45,212,191, 0.12);
+    // Semantics.
+    out property <color> lab-red:  #f87171;
+    out property <color> red-dim:  rgba(248,113,113, 0.08);
+    out property <color> green:    #34d399;
+    out property <color> green-dim:rgba(52,211,153, 0.12);
+    out property <color> lab-amber:#e5b45c;
+    out property <color> amber-dim:rgba(229,180,92, 0.05);
+    // Typography.
+    out property <length> fs-strat-name: 44px;
+    out property <length> fs-strat-name-sm: 34px;
+    out property <length> fs-outcome: 46px;
+    out property <length> fs-outcome-sm: 36px;
+    out property <length> fs-insp-big: 30px;
+    out property <length> fs-outcome-sm2: 13px;
+    // Layout.
+    out property <length> topbar-h: 58px;
+    out property <length> rail-h:   42px;
+    out property <length> max-w:    1280px;
+    out property <length> ws-px:    26px;
+    out property <length> ws-py:    30px;
+    out property <length> section-radius: 14px;
+    out property <length> section-gap: 44px;
+    out property <length> field-h:  36px;
+    out property <length> insp-w:   330px;
+    out property <length> dialog-w: 460px;
+    // Breakpoints.
+    out property <length> bp-wide: 1100px;
+    out property <length> bp-narrow: 720px;
+    // Extra reference surfaces.
+    out property <color> code-bg:      #070c11;
+    out property <color> chip-bg:      #080c0f;
+    out property <color> panel3:       #0b1218;
+    out property <color> field-bg:     #0d141b;
+    out property <color> dialog-bg:    #0e151c;
+    out property <color> run-done-bg:  #0f2e26;
+    out property <color> hover2:       #141c23;
+    out property <color> selected2:    #16202a;
+    out property <color> btn-idle-bg:  #242c33;
+    out property <color> run-error-bg: #331416;
+    // RUN primary button interaction states (§15): hover lifts, press dips.
+    out property <color> run-hover:    #f4f8fa;
+    out property <color> run-press:    #cfd9de;
+    out property <color> run-done-hover: #14402f;
+    out property <color> run-done-press: #0a2019;
+    out property <color> green-bright: #5eeab0;
+    out property <color> soft2:        #dfe6ea;
+    out property <color> run-ink:      #e8eef1;
+    out property <color> red-soft:     #fca5a5;
+    // Alpha tints (reference rgba values, CSS #RRGGBBAA order — Slint
+    // parses 8-digit hex like CSS; pixel-verified: wrong order painted
+    // white-06 as opaque cyan).
+    out property <color> scrim:     #00000099;
+    out property <color> white-02:  #ffffff05;
+    out property <color> white-04:  #ffffff0a;
+    out property <color> white-05:  #ffffff0d;
+    out property <color> white-06:  #ffffff0f;
+    out property <color> white-16:  #ffffff29;
+    out property <color> white-20:  #ffffff33;
+    out property <color> teal-06:   #2dd4bf0f;
+    out property <color> teal-25:   #2dd4bf40;
+    out property <color> teal-35:   #2dd4bf59;
+    out property <color> teal-40:   #2dd4bf66;
+    out property <color> red-06:    #f871710f;
+    out property <color> red-08:    #f8717114;
+    out property <color> red-12:    #f871711f;
+    out property <color> red-35:    #f8717159;
+    out property <color> green-30:  #34d3994d;
+    out property <color> green-35:  #34d39959;
+    out property <color> amber-05:  #e5b45c0d;
+    out property <color> amber-06:  #e5b45c0f;
+    out property <color> amber-08:  #e5b45c14;
+    out property <color> amber-25:  #e5b45c40;
+    out property <color> amber-30:  #e5b45c4d;
+}

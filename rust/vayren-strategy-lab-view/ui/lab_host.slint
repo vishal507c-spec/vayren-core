@@ -7,7 +7,7 @@
 // view-model. Nothing here may add, restyle, or recompose content — compare
 // against the `app.slint` StrategyLabScreen block (identical bindings).
 
-import { StrategyLabScreen, LabHeader, LabLibraryRow, LabKpi, LabRankRow, LabTradeRow, LabPoint, LabParam, LabDetailMetric, LabBoardCell, LabMatrixRow } from "../../vayren-shell/ui/lab.slint";
+import { StrategyLabScreen, LabHeader, LabLibraryRow, LabKpi, LabRankRow, LabTradeRow, LabPoint, LabParam, LabDetailMetric, LabBoardCell, LabMatrixRow, LabPreset } from "../../vayren-shell/ui/lab.slint";
 
 export component LabHostWindow inherits Window {
     title: "VAYREN \u{2014} Strategy Lab";
@@ -27,6 +27,7 @@ export component LabHostWindow inherits Window {
     in-out property <[string]> rank-heads;
     in-out property <[string]> trade-heads;
     in-out property <[LabDetailMetric]> detail-metrics;
+    in-out property <[string]> universe-chips;
     in-out property <[LabPoint]> detail-equity;
     in-out property <[string]> board-labels;
     in-out property <[string]> board-columns;
@@ -42,6 +43,7 @@ export component LabHostWindow inherits Window {
     in-out property <[string]> sym-visible;
     in-out property <[bool]> sym-visible-on;
     in-out property <int> filter-active: 0;
+    in-out property <[LabPreset]> date-presets;
 
     callback library-picked(int);
     callback filter-picked(int);
@@ -76,6 +78,12 @@ export component LabHostWindow inherits Window {
     callback sym-all-visible();
     callback sym-clear();
     callback sym-apply();
+    callback lens-picked(int);
+    callback cost-committed(string);
+    callback inspector-close();
+    callback diag-link-clicked();
+    callback equity-select-picked(int);
+    callback reset-requested();
 
     StrategyLabScreen {
         width: 100%;
@@ -93,6 +101,7 @@ export component LabHostWindow inherits Window {
         rank-heads: root.rank-heads;
         trade-heads: root.trade-heads;
         detail-metrics: root.detail-metrics;
+        universe-chips: root.universe-chips;
         detail-equity: root.detail-equity;
         board-labels: root.board-labels;
         board-columns: root.board-columns;
@@ -107,6 +116,7 @@ export component LabHostWindow inherits Window {
         drawdown-sell: root.drawdown-sell;
         sym-visible: root.sym-visible;
         sym-visible-on: root.sym-visible-on;
+        date-presets: root.date-presets;
         filter-active: root.filter-active;
         head-roomy: root.width >= 1210px;
         library-picked(idx) => { root.library-picked(idx); }
@@ -142,5 +152,11 @@ export component LabHostWindow inherits Window {
         sym-all-visible() => { root.sym-all-visible(); }
         sym-clear() => { root.sym-clear(); }
         sym-apply() => { root.sym-apply(); }
+        lens-picked(idx) => { root.lens-picked(idx); }
+        cost-committed(text) => { root.cost-committed(text); }
+        inspector-close() => { root.inspector-close(); }
+        diag-link-clicked() => { root.diag-link-clicked(); }
+        equity-select-picked(idx) => { root.equity-select-picked(idx); }
+        reset-requested() => { root.reset-requested(); }
     }
 }
