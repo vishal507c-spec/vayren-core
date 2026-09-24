@@ -2,9 +2,65 @@ name: CI
 
 on: [push, pull_request]
 
+# Superseded runs waste runner-minutes: cancel them, but never cancel main.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+# Job map (every original check preserved — see per-job comments):
+#   quality    = ruff check + ruff format + pyright            (~1 min)
+#   validators = all repo validators + context engine          (~1 min)
+#   build-test = cargo fmt + full Rust build/test + pytest     (bottleneck)
+#   gate       = aggregate "ALL REQUIRED CHECKS PASSED" signal
+# quality/validators run parallel to build-test: cheap failures surface in
+# ~1 minute and every domain reports independently. build-test stays ONE job
+# on purpose: the pytest suites need the just-built workspace (same target/
+# dir), so splitting build from test would force a second full compilation
+# (measured: +40m on a cold cache) or a fragile artifact handoff. No check
+# is skipped anywhere; a failure in any job fails the gate.
 jobs:
-  test:
+  quality:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: pip install -e ".[dev,data]"
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: pyright
+
+  validators:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: pip install -e ".[dev,data]"
+      - run: python scripts/validate_structure.py
+      - run: python scripts/validate_imports.py
+      - run: python scripts/validate_language_ownership.py
+      - run: python scripts/validate_architecture_gate.py
+      - run: python scripts/validate_authority.py
+      - run: python scripts/validate_routes.py
+      - run: python scripts/context_engine.py --check
+
+  build-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    # Cache SAVE needs write; checkout still needs read (a permissions
+    # block replaces defaults, so contents:read must stay explicit).
+    permissions:
+      contents: read
+      actions: write
     steps:
       - uses: actions/checkout@v4
       # The Slint workspace emits multi-GB release+debug+test artifacts and
@@ -22,19 +78,37 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
       - run: pip install -e ".[dev,data]"
       - uses: dtolnay/rust-toolchain@stable
-      # Mirror `make check`: rust + lint + format + typecheck + tests + validators.
-      - run: python scripts/build_rust.py --test
+      # Dependency-only cache (workspace crates rebuild; see README of
+      # Swatinem/rust-cache). Workspace lives in rust/ (NOT repo root), so
+      # the mapping must be explicit — the default ". -> target" would cache
+      # a nonexistent dir. Saves on every branch: GitHub isolates caches per
+      # branch (main never restores branch caches), and this private
+      # single-owner repo has no forks/external writers, so branch saves
+      # cannot poison main. Failed runs never save (cache-on-failure=false).
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "rust -> target"
+          shared-key: "vayren-rust"
+      # Formatting first: a 2s style failure must not wait behind a 38min build.
       - run: cd rust && cargo fmt --all -- --check
-      - run: ruff check .
-      - run: ruff format --check .
-      - run: pyright
+      # Full build + workspace tests, then the pytest suites against the SAME
+      # workspace: run_tests.py rebuilds incrementally (a no-op on a warm
+      # tree) and needs the compiled cdylib in place — hence one job.
+      - run: python scripts/build_rust.py --test
       - run: python scripts/run_tests.py
-      - run: python scripts/validate_structure.py
-      - run: python scripts/validate_imports.py
-      - run: python scripts/validate_language_ownership.py
-      - run: python scripts/validate_architecture_gate.py
-      - run: python scripts/validate_authority.py
-      - run: python scripts/validate_routes.py
-      - run: python scripts/context_engine.py --check
+      - name: Report disk usage
+        run: |
+          du -sh rust/target ~/.cargo/registry 2>/dev/null || true
+          df -h /
+
+  gate:
+    name: CI gate
+    needs: [quality, validators, build-test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo "ALL REQUIRED CHECKS PASSED (quality, validators, build-test)"

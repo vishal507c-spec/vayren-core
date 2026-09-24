@@ -26,10 +26,11 @@ Direct pushes to `main` are not the normal path. No history rewrites, no force-p
 
 ## Required checks
 
-- Required CI check name: **`test`** (job `test` in `.github/workflows/ci.yml`;
-  verified as the check-run name on green runs).
-- Do not merge with a failing `test` check. Cannot be server-enforced on
-  this plan — see "Manual steps".
+- Required CI check name: **`CI gate`** (job `gate` in
+  `.github/workflows/ci.yml`; it passes only when `quality`, `validators`
+  and `build-test` all pass).
+- Do not merge when `CI gate` (or any of its four jobs) is failing. Cannot
+  be server-enforced on this plan — see "Manual steps".
 
 ## Merge strategy
 
@@ -85,7 +86,8 @@ git push origin tag <tag>
 `Settings → Branches → Add classic branch protection rule` for `main`:
 
 - Require a pull request before merging (dismiss stale approvals on push).
-- Require status checks to pass: check **`test`**; require branches up to date.
+- Require status checks to pass: check **`CI gate`** (detail jobs
+  `quality`, `validators`, `build-test`); require branches up to date.
 - Require conversation resolution before merging.
 - Do not allow bypassing the above settings (no bypass list).
 - Restrict deletions; block force pushes (both implied by the rule).
