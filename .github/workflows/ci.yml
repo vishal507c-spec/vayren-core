@@ -85,13 +85,14 @@ jobs:
       # Dependency-only cache (workspace crates rebuild; see README of
       # Swatinem/rust-cache). Workspace lives in rust/ (NOT repo root), so
       # the mapping must be explicit — the default ". -> target" would cache
-      # a nonexistent dir. Saved from main only: PRs restore read-only, so a
-      # poisoned/untrusted cache can never be written by untrusted code.
+      # a nonexistent dir. Saves on every branch: GitHub isolates caches per
+      # branch (main never restores branch caches), and this private
+      # single-owner repo has no forks/external writers, so branch saves
+      # cannot poison main. Failed runs never save (cache-on-failure=false).
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: "rust -> target"
           shared-key: "vayren-rust"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
       # Formatting first: a 2s style failure must not wait behind a 38min build.
       - run: cd rust && cargo fmt --all -- --check
       # Full build + workspace tests, then the pytest suites against the SAME
