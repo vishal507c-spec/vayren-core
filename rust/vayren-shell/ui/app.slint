@@ -14,15 +14,8 @@ import { LiveScreen, LiveBar, LiveSetup, LiveMarket, LiveSymbolRow, LiveGate, Li
 import { BrokerPanel, BrokerCheckRow } from "broker.slint";
 import { BrokerConnectionWorkspace, BrokerRowView, CredentialFieldView, ProgressStepView } from "broker_connection.slint";
 
-export enum ShellScreen {
-    chart,
-    lab,
-    research,
-    portfolio,
-    live,
-    broker,
-    data,
-}
+import { ShellScreen, VGlobalHeader, VGlobalNavItem } from "global_header.slint";
+export { ShellScreen }
 
 export struct NavItem {
     label: string,
@@ -591,18 +584,8 @@ export component AppWindow inherits Window {
     in-out property <bool> live-bar-secondary: LiveTiers.bar-secondary(root.live-screen-width);
     in-out property <bool> live-bar-extended: LiveTiers.bar-extended(root.live-screen-width);
     in-out property <bool> live-blotter-side: LiveTiers.blotters-side-by-side(root.live-screen-width);
-    in-out property <bool> live-tall-inspector: (root.height - VayrenDesign.status-height) >= 720px;
+    in-out property <bool> live-tall-inspector: (root.height - VayrenDesign.h-nav-header - VayrenDesign.status-height) >= 720px;
     in-out property <length> live-inspector-w: LiveTiers.inspector-width(root.live-screen-width);
-
-    property <[NavItem]> nav-items: [
-        { label: "CHART", screen: ShellScreen.chart },
-        { label: "LAB", screen: ShellScreen.lab },
-        { label: "RESEARCH", screen: ShellScreen.research },
-        { label: "PORTFOLIO", screen: ShellScreen.portfolio },
-        { label: "LIVE", screen: ShellScreen.live },
-        { label: "BROKER", screen: ShellScreen.broker },
-        { label: "DATA", screen: ShellScreen.data },
-    ];
 
     FocusScope {
         key-pressed(event) => {
@@ -630,132 +613,21 @@ export component AppWindow inherits Window {
                 root.nav-selected(ShellScreen.broker);
                 return accept;
             }
-            if (event.modifiers.alt && event.text == "7") {
-                root.nav-selected(ShellScreen.data);
-                return accept;
-            }
             return reject;
         }
     }
 
-    HorizontalLayout {
-        // Navigation rail â€” permanent, single navigation source (shell state
-        // lives in Rust; this rail only reports clicks).
-        Rectangle {
-            width: 104px;
-            background: VayrenPalette.surface;
-            // Right-edge divider only: a full border painted a hairline
-            // strip at x=0 (clipped at the window edge — pixel-verified).
-            Rectangle { x: parent.width - 1px; width: 1px; height: 100%; background: VayrenPalette.hairline; }
+    VerticalLayout {
+        spacing: 0;
 
-            VerticalLayout {
-                padding: VayrenDesign.sp-md;
-                spacing: VayrenDesign.sp-xs;
-
-                Rectangle {
-                    height: VayrenDesign.h-context;
-                    background: transparent;
-                    VerticalLayout {
-                        alignment: center;
-                        Text {
-                            text: "VAYREN";
-                            color: VayrenPalette.accent;
-                            font-size: VayrenDesign.fs-small;
-                            font-weight: 700;
-                            horizontal-alignment: center;
-                        }
-                    }
-                }
-
-                for item in nav-items: Rectangle {
-                    height: 28px;
-                    border-radius: VayrenDesign.radius-sm;
-                    background: item.screen == root.active-screen
-                        ? VayrenPalette.accent
-                        : ta.has-hover ? VayrenPalette.hover
-                        : transparent;
-                    ta := TouchArea {
-                        clicked => {
-                            root.nav-selected(item.screen);
-                        }
-                    }
-                    Text {
-                        text: item.label;
-                        color: item.screen == root.active-screen
-                            ? VayrenPalette.accent-text
-                            : ta.has-hover ? VayrenPalette.text
-                            : VayrenPalette.muted;
-                        font-size: VayrenDesign.fs-label;
-                        font-weight: item.screen == root.active-screen ? 700 : 400;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                    }
-                }
-
-                Rectangle {
-                    vertical-stretch: 1;
-                    background: transparent;
-                }
-
-                Rectangle {
-                    height: 20px;
-                    background: transparent;
-                    VerticalLayout {
-                        alignment: center;
-                        Text {
-                            text: "RUST + SLINT";
-                            color: VayrenPalette.faint;
-                            font-size: VayrenDesign.fs-label;
-                            horizontal-alignment: center;
-                        }
-                    }
-                }
+        // Global top navigation header (50px, horizontal, minimal Apple-grade design)
+        VGlobalHeader {
+            active-screen: root.active-screen;
+            nav-selected(screen) => {
+                root.nav-selected(screen);
             }
         }
 
-        // Content column.
-        VerticalLayout {
-            spacing: 0;
-
-            // Chart toolbar — zoom label + reset for the native Market chart
-            // mounted below (Rust-owned viewport state, SLICE 5).
-            if root.active-screen == ShellScreen.chart: Rectangle {
-                height: 36px;
-                background: VayrenPalette.surface;
-                border-width: 1px;
-                border-color: VayrenPalette.hairline;
-
-                HorizontalLayout {
-                    padding-left: 10px;
-                    padding-right: 10px;
-                    spacing: VayrenDesign.sp-md;
-                    alignment: space-between;
-
-                    HorizontalLayout {
-                        spacing: VayrenDesign.sp-sm;
-
-                        Text {
-                            text: "ZOOM";
-                            color: VayrenPalette.muted;
-                            font-size: VayrenDesign.fs-label;
-                            font-weight: 700;
-                            vertical-alignment: center;
-                        }
-                        Text {
-                            text: root.chart-zoom-label;
-                            color: VayrenPalette.text;
-                            font-size: VayrenDesign.fs-label;
-                            font-weight: 700;
-                            vertical-alignment: center;
-                        }
-                    }
-                    VButton {
-                        label: "Reset Zoom";
-                        variant: 1;
-                        clicked => { root.reset-zoom(); }
-                    }
-                }
-            }
 
             Rectangle {
                 background: VayrenPalette.bg;
@@ -1205,8 +1077,8 @@ export component AppWindow inherits Window {
                 }
             }
 
-            // Status bar.
-            Rectangle {
+            // Status bar (retained for non-chart screens; chart extends edge-to-edge).
+            if root.active-screen != ShellScreen.chart: Rectangle {
                 height: 24px;
                 background: VayrenPalette.surface;
                 border-width: 1px;
@@ -1239,6 +1111,5 @@ export component AppWindow inherits Window {
                     }
                 }
             }
-        }
     }
 }

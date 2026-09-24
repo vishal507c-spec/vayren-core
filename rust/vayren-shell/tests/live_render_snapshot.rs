@@ -123,8 +123,9 @@ fn live_screen_renders_structurally_at_every_viewport_tier() {
         assert!(text > px / 1500, "{name}: text missing ({text})");
         // On short viewports the readiness panel scrolls below the fold and
         // an idle (never-faked-enabled) HALT button is neutral — so red is
-        // only mandatory where the verdicts actually fit.
-        if h >= 680 {
+        // only mandatory where the verdicts actually fit (accounting for the
+        // 50px top navigation header).
+        if h >= 730 {
             assert!(neg > px / 12000, "{name}: danger tone missing ({neg})");
         }
         // No giant flat void: at least 3% of every frame is non-background.

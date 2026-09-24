@@ -432,42 +432,56 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             std::time::Duration::from_millis(50),
             move || {
                 let Some(ui) = weak.upgrade() else { return };
+                let mut latest_market: Option<(u64, Option<serde_json::Value>)> = None;
+                let mut latest_lab_select: Option<(u64, Option<serde_json::Value>)> = None;
+                let mut latest_lab_run: Option<(u64, Option<serde_json::Value>)> = None;
+
                 for result in fetch_rx.try_iter() {
                     match result {
                         FetchResult::Market(id, data) => {
-                            if id > last_market {
-                                last_market = id;
-                                if let Some(data) = data {
-                                    market::apply_snapshot_json(
-                                        &mut market_state.borrow_mut(),
-                                        &data,
-                                    );
-                                    shell::apply_market(&ui, &market_state.borrow());
-                                }
+                            if id > last_market && latest_market.as_ref().map_or(true, |(prev_id, _)| id > *prev_id) {
+                                latest_market = Some((id, data));
                             }
                         }
                         FetchResult::LabSelect(id, data) => {
-                            if id > last_select {
-                                last_select = id;
-                                if let Some(data) = data {
-                                    lab::apply_snapshot_json(&mut lab_state.borrow_mut(), &data);
-                                    shell::apply_lab(&ui, &lab_state.borrow());
-                                }
+                            if id > last_select && latest_lab_select.as_ref().map_or(true, |(prev_id, _)| id > *prev_id) {
+                                latest_lab_select = Some((id, data));
                             }
                         }
                         FetchResult::LabRun(id, data) => {
-                            if id > last_run {
-                                last_run = id;
-                                match data {
-                                    Some(data) => {
-                                        lab::apply_snapshot_json(&mut lab_state.borrow_mut(), &data)
-                                    }
-                                    None => lab_state.borrow_mut().fail_run(),
-                                }
-                                shell::apply_lab(&ui, &lab_state.borrow());
+                            if id > last_run && latest_lab_run.as_ref().map_or(true, |(prev_id, _)| id > *prev_id) {
+                                latest_lab_run = Some((id, data));
                             }
                         }
                     }
+                }
+
+                if let Some((id, data)) = latest_market {
+                    last_market = id;
+                    if let Some(data) = data {
+                        market::apply_snapshot_json(
+                            &mut market_state.borrow_mut(),
+                            &data,
+                        );
+                        shell::apply_market(&ui, &market_state.borrow());
+                    }
+                }
+                if let Some((id, data)) = latest_lab_select {
+                    last_select = id;
+                    if let Some(data) = data {
+                        lab::apply_snapshot_json(&mut lab_state.borrow_mut(), &data);
+                        shell::apply_lab(&ui, &lab_state.borrow());
+                    }
+                }
+                if let Some((id, data)) = latest_lab_run {
+                    last_run = id;
+                    match data {
+                        Some(data) => {
+                            lab::apply_snapshot_json(&mut lab_state.borrow_mut(), &data);
+                        }
+                        None => lab_state.borrow_mut().fail_run(),
+                    }
+                    shell::apply_lab(&ui, &lab_state.borrow());
                 }
             },
         );

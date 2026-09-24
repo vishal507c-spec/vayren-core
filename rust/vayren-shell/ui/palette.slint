@@ -24,8 +24,13 @@ export global VayrenPalette {
     out property <color> accent-dim: #00A99D;
     out property <color> accent-text: #04211E;
     out property <color> text: #E6EDF3;
+    out property <color> text-bright: #FFFFFF;
     out property <color> muted: #8B98A7;
     out property <color> faint: #596675;
+    // Crosshair (§3.1, §10) — subtle neutral presentation on the chart axes.
+    out property <color> crosshair-line: #4A5260;
+    out property <color> crosshair-bg: #161B22;
+    out property <color> crosshair-border: #30363D;
     // Semantics (§3.1, §10) — identical on every screen.
     out property <color> pos: #21C58B;
     out property <color> pos-dim: #16493A;
@@ -55,6 +60,7 @@ export global VayrenDesign {
     out property <length> sp-xl: 16px;
     out property <length> sp-xxl: 24px;
     // Fixed chrome heights (§3.3).
+    out property <length> h-nav-header: 50px;
     out property <length> h-topbar: 42px;
     out property <length> h-context: 34px;
     out property <length> h-tabs: 34px;
@@ -80,7 +86,7 @@ export global VayrenDesign {
     // Shell minima (§5) — smallest usable window, logical units.
     out property <length> shell-min-width: 1024px;
     out property <length> shell-min-height: 640px;
-    out property <length> rail-width: 104px;
+    out property <length> rail-width: 0px;
     out property <length> status-height: 24px;
     // Reflow breakpoint (§5): KPI grids fold 4→2 columns below this width.
     out property <length> kpi-fold-width: 620px;

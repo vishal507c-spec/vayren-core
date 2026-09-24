@@ -294,7 +294,7 @@ pub enum MarketAction {
 
 // Viewport numbers ported 1:1 from `CandleChartWidget` (behavior parity).
 pub const MIN_VISIBLE_BARS: usize = 10;
-pub const MAX_VISIBLE_BARS: usize = 1800;
+pub const MAX_VISIBLE_BARS: usize = 10000;
 pub const INITIAL_BARS: usize = 1400;
 /// One candle's full horizontal budget in px (legacy `MIN_CANDLE_SLOT`).
 pub const MIN_CANDLE_SLOT_PX: f32 = 1.0;
@@ -450,6 +450,7 @@ pub struct MarketState {
     pub scale_mode: ChartScaleMode,
     pub grid_visible: bool,
     pub cross_visible: bool,
+    pub cached_price_range: std::cell::Cell<Option<(usize, usize, usize, (f64, f64))>>,
 }
 
 impl Default for MarketState {
@@ -498,13 +499,14 @@ impl Default for MarketState {
             scale_mode: ChartScaleMode::Regular,
             grid_visible: true,
             cross_visible: true,
+            cached_price_range: std::cell::Cell::new(None),
         }
     }
 }
 
 impl MarketState {
     /// Maximum candles readable at the current plot width (legacy
-    /// `max_visible_bars`): density cap bounded by the hard 1800 limit.
+    /// `max_visible_bars`): density cap bounded by the MAX_VISIBLE_BARS limit.
     pub fn max_visible_bars(&self) -> usize {
         self.width_cap.max(MIN_VISIBLE_BARS).min(MAX_VISIBLE_BARS)
     }
@@ -559,17 +561,18 @@ impl MarketState {
         exchange: &str,
         bars: Vec<MarketBar>,
     ) {
-        let mut clean: Vec<MarketBar> = bars
-            .into_iter()
-            .filter(|b| {
-                b.open.is_finite()
-                    && b.high.is_finite()
-                    && b.low.is_finite()
-                    && b.close.is_finite()
-                    && b.volume.is_finite()
-            })
-            .collect();
-        clean.sort_by(|a, b| a.time.cmp(&b.time));
+        let mut clean = bars;
+        clean.retain(|b| {
+            b.open.is_finite()
+                && b.high.is_finite()
+                && b.low.is_finite()
+                && b.close.is_finite()
+                && b.volume.is_finite()
+        });
+        if !clean.windows(2).all(|w| w[0].time <= w[1].time) {
+            clean.sort_by(|a, b| a.time.cmp(&b.time));
+        }
+        self.cached_price_range.set(None);
         let previous_symbol = std::mem::take(&mut self.selected_symbol);
         let previous_timeframe = std::mem::take(&mut self.timeframe);
         let previous_total = self.bars.len();
@@ -642,6 +645,12 @@ impl MarketState {
                 return (low, high);
             }
         }
+        let (first, count, total) = (self.first, self.count, self.bars.len());
+        if let Some((cf, cc, ct, cached)) = self.cached_price_range.get() {
+            if cf == first && cc == count && ct == total {
+                return cached;
+            }
+        }
         let window = self.visible_window();
         if window.is_empty() {
             return (0.0, 1.0);
@@ -660,7 +669,9 @@ impl MarketState {
             }
         }
         let pad = span * PRICE_EDGE_MARGIN;
-        (low - pad, high + pad)
+        let result = (low - pad, high + pad);
+        self.cached_price_range.set(Some((first, count, total, result)));
+        result
     }
 
     /// Apply one explicit UI action. Returns false when the action names
@@ -1237,6 +1248,149 @@ pub fn short_time(stamp: &str) -> String {
     }
 }
 
+/// Adaptive axis timestamp formatting (Problem 2):
+/// - Intraday (1m, 5m, 15m, 1h): clean times like `09:15`, `10:30`, `14:45`
+/// - Daily (1D): clean dates like `Jun 10`, `Jun 11`, `Jun 12`
+/// - Macro / Multi-month (1W, 1M, or window > 3 months): clean `Jun 2026`
+pub fn format_axis_time(stamp: &str, timeframe: &str, window: &[MarketBar]) -> String {
+    let cleaned = stamp.replace('T', " ");
+    let cleaned = cleaned.trim();
+    if cleaned.len() < 10 {
+        return short_time(stamp);
+    }
+    let parts: Vec<&str> = cleaned.split_whitespace().collect();
+    let date_part = parts.first().copied().unwrap_or("");
+    let time_part = parts.get(1).copied().unwrap_or("");
+
+    let date_segs: Vec<&str> = date_part.split('-').collect();
+    if date_segs.len() < 3 {
+        return short_time(stamp);
+    }
+    let year = date_segs[0];
+    let month = date_segs[1];
+    let day = date_segs[2];
+
+    let month_name = match month {
+        "01" => "Jan",
+        "02" => "Feb",
+        "03" => "Mar",
+        "04" => "Apr",
+        "05" => "May",
+        "06" => "Jun",
+        "07" => "Jul",
+        "08" => "Aug",
+        "09" => "Sep",
+        "10" => "Oct",
+        "11" => "Nov",
+        "12" => "Dec",
+        _ => month,
+    };
+
+    let tf = timeframe.trim().to_lowercase();
+    let is_explicit_macro = tf == "1w" || tf == "1m" && timeframe == "1M" || tf == "1y" || tf == "w" || tf == "m" && timeframe == "M";
+    let is_explicit_daily = tf == "1d" || tf == "d" || tf == "day" || tf == "daily";
+    let is_explicit_intraday = tf.ends_with('m') && timeframe != "1M" && timeframe != "M"
+        || tf.ends_with('h')
+        || tf.ends_with('s')
+        || tf.contains("min")
+        || tf.contains("sec")
+        || tf.contains("hour");
+
+    let has_intraday_time = !time_part.is_empty() && time_part != "00:00" && time_part != "00:00:00";
+
+    let span_macro = if window.len() >= 2 {
+        let first_date = window.first().map(|b| b.time.as_str()).unwrap_or("");
+        let last_date = window.last().map(|b| b.time.as_str()).unwrap_or("");
+        let y1 = first_date.get(..4).and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+        let y2 = last_date.get(..4).and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+        let m1 = first_date.get(5..7).and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+        let m2 = last_date.get(5..7).and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+        let month_diff = (y2 - y1) * 12 + (m2 - m1);
+        month_diff >= 3
+    } else {
+        false
+    };
+
+    if is_explicit_macro || span_macro {
+        format!("{month_name} {year}")
+    } else if is_explicit_intraday || (has_intraday_time && !is_explicit_daily) {
+        if time_part.len() >= 5 {
+            time_part[..5].to_string()
+        } else {
+            format!("{month_name} {day}")
+        }
+    } else {
+        let day_num = day.parse::<u32>().map(|d| d.to_string()).unwrap_or_else(|_| day.to_string());
+        format!("{month_name} {day_num}")
+    }
+}
+
+/// Sakamoto's algorithm: 0 = Sun, 1 = Mon, 2 = Tue, 3 = Wed, 4 = Thu, 5 = Fri, 6 = Sat
+fn day_of_week_sakamoto(year: i32, month: u32, day: u32) -> usize {
+    static T: [i32; 12] = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
+    let mut y = year;
+    if month < 3 {
+        y -= 1;
+    }
+    let m_idx = (month.saturating_sub(1)) as usize;
+    let t_val = if m_idx < 12 { T[m_idx] } else { 0 };
+    let dow = (y + y / 4 - y / 100 + y / 400 + t_val + day as i32) % 7;
+    let dow = (dow + 7) % 7;
+    dow as usize
+}
+
+/// Refined crosshair date/time format (Section 3):
+/// Structure: `DAY_OF_WEEK DAY MONTH 'YY   TIME`
+/// Examples: `Wed 16 Sep '26   10:15`, `Thu 17 Sep '26   14:30`, `Mon 21 Sep '26   09:15`
+pub fn format_crosshair_time(stamp: &str) -> String {
+    let cleaned = stamp.replace('T', " ");
+    let cleaned = cleaned.trim();
+    if cleaned.len() < 10 {
+        return short_time(stamp);
+    }
+    let parts: Vec<&str> = cleaned.split_whitespace().collect();
+    let date_part = parts.first().copied().unwrap_or("");
+    let time_part = parts.get(1).copied().unwrap_or("");
+
+    let date_segs: Vec<&str> = date_part.split('-').collect();
+    if date_segs.len() < 3 {
+        return short_time(stamp);
+    }
+    let Ok(year) = date_segs[0].parse::<i32>() else {
+        return short_time(stamp);
+    };
+    let Ok(month) = date_segs[1].parse::<u32>() else {
+        return short_time(stamp);
+    };
+    let Ok(day) = date_segs[2].parse::<u32>() else {
+        return short_time(stamp);
+    };
+    if month == 0 || month > 12 || day == 0 || day > 31 {
+        return short_time(stamp);
+    }
+
+    const DAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const MONTHS: [&str; 13] = [
+        "", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+
+    let dow = DAYS[day_of_week_sakamoto(year, month, day)];
+    let month_name = MONTHS[month as usize];
+    let yy = (year.rem_euclid(100)) as u32;
+
+    let time_clean = if time_part.len() >= 5 {
+        &time_part[..5]
+    } else {
+        ""
+    };
+
+    if !time_clean.is_empty() {
+        format!("{dow} {day} {month_name} '{yy:02}   {time_clean}")
+    } else {
+        format!("{dow} {day} {month_name} '{yy:02}")
+    }
+}
+
 fn tone_of_change(change_pct: Option<f64>) -> Tone {
     match change_pct {
         Some(v) if v.is_finite() && v > 0.0 => Tone::Positive,
@@ -1510,7 +1664,7 @@ pub fn project_hover(state: &MarketState) -> HoverView {
                     fmt_scale(xform, frame.high - frac * (frame.high - frame.low))
                 }
             };
-            out.hover_time = short_time(&bar.time);
+            out.hover_time = format_crosshair_time(&bar.time);
             out.hover_volume = fmt_volume(bar.volume);
             out.hover_bull = bar.close >= bar.open;
             out.header_ohlc = format!(
@@ -1772,16 +1926,25 @@ pub fn project(state: &MarketState) -> MarketView {
                 label: fmt_scale(frame.xform, frame.high - f64::from(frac) * span),
             });
         }
-        let ticks = 6usize.min(visible);
-        for k in 0..ticks {
-            let idx = ((k as f64 + 0.5) * visible as f64 / ticks as f64).floor() as usize;
+        // Adaptive tick generation (Problem 2):
+        // Calculate available plot fraction and min spacing to never allow label collision.
+        // At 80px label width on ~1000px nominal width, min readable spacing is 0.085.
+        let min_spacing_pos = 0.085f32;
+        let visible_frac = visible as f32 / plot_slots as f32;
+        let max_possible_ticks = ((visible_frac / min_spacing_pos).floor() as usize).clamp(1, 8).min(visible);
+        let mut last_pos = -1.0f32;
+        for k in 0..max_possible_ticks {
+            let idx = ((k as f64 + 0.5) * visible as f64 / max_possible_ticks as f64).floor() as usize;
             let idx = idx.min(visible - 1);
+            let pos = (idx as f32 + 0.5) / plot_slots as f32;
+            if last_pos >= 0.0 && (pos - last_pos) < min_spacing_pos {
+                continue; // Skip rather than compress to collide
+            }
             time_ticks.push(AxisTick {
-                // Ticks sit on the candle slots they label: a viewport with
-                // empty space past the newest bar carries no ticks over it.
-                pos: (idx as f32 + 0.5) / plot_slots as f32,
-                label: short_time(&window[idx].time),
+                pos,
+                label: format_axis_time(&window[idx].time, &state.timeframe, window),
             });
+            last_pos = pos;
         }
     }
 
@@ -3342,7 +3505,7 @@ mod tests {
         let v = project(&st);
         let bar = &st.bars[hover.index];
         assert_eq!(v.hover_volume, fmt_volume(bar.volume));
-        assert_eq!(v.hover_time, short_time(&bar.time));
+        assert_eq!(v.hover_time, format_crosshair_time(&bar.time));
         assert!(v.header_ohlc.contains(&fmt_price(bar.open)));
     }
 
@@ -3461,7 +3624,7 @@ mod tests {
 
                 let bar = &st.bars[hover.index];
                 // Acceptance test: crosshair candle == timestamp == volume == OHLC
-                assert_eq!(v.hover_time, short_time(&bar.time));
+                assert_eq!(v.hover_time, format_crosshair_time(&bar.time));
                 assert_eq!(v.hover_volume, fmt_volume(bar.volume));
                 assert!(v.header_ohlc.contains(&fmt_price(bar.open)));
                 assert!(v.header_ohlc.contains(&fmt_price(bar.high)));
@@ -3476,7 +3639,7 @@ mod tests {
             let v_zoom = project(&st);
             let bar_zoom = &st.bars[hover_zoom.index];
             assert_eq!(v_zoom.hover_volume, fmt_volume(bar_zoom.volume));
-            assert_eq!(v_zoom.hover_time, short_time(&bar_zoom.time));
+            assert_eq!(v_zoom.hover_time, format_crosshair_time(&bar_zoom.time));
             assert!(v_zoom.header_ohlc.contains(&fmt_price(bar_zoom.close)));
 
             // Test after Pan
@@ -3486,7 +3649,7 @@ mod tests {
             let v_pan = project(&st);
             let bar_pan = &st.bars[hover_pan.index];
             assert_eq!(v_pan.hover_volume, fmt_volume(bar_pan.volume));
-            assert_eq!(v_pan.hover_time, short_time(&bar_pan.time));
+            assert_eq!(v_pan.hover_time, format_crosshair_time(&bar_pan.time));
             assert!(v_pan.header_ohlc.contains(&fmt_price(bar_pan.close)));
         }
     }
@@ -3771,5 +3934,81 @@ mod tests {
         state.apply(MarketAction::ToggleStatus);
         let view2 = project(&state);
         assert_ne!(view.market_status_open, view2.market_status_open);
+    }
+
+    #[test]
+    fn adaptive_time_formatting_and_non_colliding_ticks() {
+        let dummy_window = vec![
+            MarketBar {
+                time: "2026-06-10 09:15:00".to_string(),
+                open: 100.0,
+                high: 105.0,
+                low: 99.0,
+                close: 102.0,
+                volume: 1000.0,
+            },
+            MarketBar {
+                time: "2026-06-10 10:30:00".to_string(),
+                open: 102.0,
+                high: 106.0,
+                low: 101.0,
+                close: 104.0,
+                volume: 1200.0,
+            },
+        ];
+        // Intraday
+        assert_eq!(format_axis_time("2026-06-10 09:15:00", "15m", &dummy_window), "09:15");
+        assert_eq!(format_axis_time("2026-06-10 14:45:00", "1h", &dummy_window), "14:45");
+        // Daily
+        assert_eq!(format_axis_time("2026-06-10 00:00:00", "1D", &dummy_window), "Jun 10");
+        assert_eq!(format_axis_time("2026-06-11 00:00:00", "1D", &dummy_window), "Jun 11");
+        // Macro
+        assert_eq!(format_axis_time("2026-06-10 00:00:00", "1M", &dummy_window), "Jun 2026");
+
+        // Verify ticks never collide on state projection
+        let mut state = MarketState::default();
+        state.set_bars("TEST", "15m", "NSE", bars(500));
+        let view = project(&state);
+        for i in 1..view.time_ticks.len() {
+            assert!(
+                view.time_ticks[i].pos - view.time_ticks[i - 1].pos >= 0.084,
+                "ticks must maintain minimum readable spacing"
+            );
+        }
+    }
+
+    #[test]
+    fn price_range_caching_and_invalidation() {
+        let mut state = MarketState::default();
+        state.set_bars("TEST", "15m", "NSE", bars(100));
+        let r1 = state.price_range();
+        // Cached read:
+        let r2 = state.price_range();
+        assert_eq!(r1, r2);
+        // After panning, recalculates and caches new range:
+        state.apply(MarketAction::WheelPanX(0.2));
+        let r3 = state.price_range();
+        let r4 = state.price_range();
+        assert_eq!(r3, r4);
+    }
+
+    #[test]
+    fn crosshair_time_exact_format_matches_specification() {
+        assert_eq!(
+            format_crosshair_time("2026-09-16 10:15:00"),
+            "Wed 16 Sep '26   10:15"
+        );
+        assert_eq!(
+            format_crosshair_time("2026-09-17 14:30:00"),
+            "Thu 17 Sep '26   14:30"
+        );
+        assert_eq!(
+            format_crosshair_time("2026-09-21 09:15:00"),
+            "Mon 21 Sep '26   09:15"
+        );
+        assert_eq!(
+            format_crosshair_time("2026-09-16T10:15:00"),
+            "Wed 16 Sep '26   10:15"
+        );
     }
 }

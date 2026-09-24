@@ -798,8 +798,16 @@ pub fn wire_market(
             ui.$cb(move |a: f32, b: f32| {
                 let Some(ui) = weak.upgrade() else { return };
                 let (wire, action) = $make(a, b);
-                strong.borrow_mut().interact(&wire, action);
-                refresh_viewport(&ui, &strong);
+                let (prev_first, prev_count, prev_manual) = {
+                    let st = strong.borrow();
+                    (st.first, st.count, st.price_manual)
+                };
+                if strong.borrow_mut().interact(&wire, action) {
+                    let st = strong.borrow();
+                    if st.first != prev_first || st.count != prev_count || st.price_manual != prev_manual {
+                        refresh_viewport(&ui, &strong);
+                    }
+                }
             });
         }};
     }
@@ -923,10 +931,12 @@ pub fn wire_market(
         let weak = ui.as_weak();
         ui.on_market_hover_moved(move |x: f32, y: f32| {
             let Some(ui) = weak.upgrade() else { return };
-            strong
+            if strong
                 .borrow_mut()
-                .interact("", market::MarketAction::HoverMoved(x, y));
-            refresh_hover(&ui, &strong);
+                .interact("", market::MarketAction::HoverMoved(x, y))
+            {
+                refresh_hover(&ui, &strong);
+            }
         });
     }
     act_vp2!(on_market_wheel_zoom, |x, steps| (
@@ -3572,7 +3582,9 @@ mod tests {
         ui.window().set_size(slint::PhysicalSize::new(1920, 1080));
         assert!(ui.get_research_wide());
         assert!(ui.get_research_medium());
-        ui.window().set_size(slint::PhysicalSize::new(1280, 800));
+        // Without a 104px vertical navigation rail, content width equals
+        // window width; 1176px is just below the 1180px wide threshold.
+        ui.window().set_size(slint::PhysicalSize::new(1176, 800));
         assert!(!ui.get_research_wide());
         assert!(ui.get_research_medium());
         ui.window().set_size(slint::PhysicalSize::new(1024, 640));
@@ -3687,8 +3699,8 @@ mod tests {
         assert!(!harness.get_inspector_shown());
 
         // ── LIVE: backend facts drive every displayed verdict ──
-        // Production tier derivation (LiveTiers at window level): the
-        // content column is window width minus the 104 px rail.
+        // Production tier derivation (LiveTiers at window level): with
+        // top navigation (0 px rail), content width equals window width.
         ui.window().set_size(slint::PhysicalSize::new(1920, 1080));
         assert!(ui.get_live_dock_inspector());
         assert!(ui.get_live_bar_extended());
@@ -3696,11 +3708,11 @@ mod tests {
         assert!(ui.get_live_blotter_side());
         assert!(ui.get_live_tall_inspector());
         assert!((ui.get_live_inspector_w() - 400.0).abs() < 1.0); // capped
-        ui.window().set_size(slint::PhysicalSize::new(1280, 720));
+        ui.window().set_size(slint::PhysicalSize::new(1176, 720));
         assert!(ui.get_live_dock_inspector()); // 1176 content ≥ 800 floor
         assert!(ui.get_live_bar_extended());
         assert!(!ui.get_live_blotter_side()); // 1176 < 1240
-        assert!(!ui.get_live_tall_inspector()); // 720 − 24 < 720
+        assert!(!ui.get_live_tall_inspector()); // 720 − 50 − 24 < 720
         ui.window().set_size(slint::PhysicalSize::new(1024, 640));
         assert!(ui.get_live_dock_inspector()); // 920 ≥ 800
         assert!(!ui.get_live_bar_secondary()); // 920 < 1040 — pills fold away
