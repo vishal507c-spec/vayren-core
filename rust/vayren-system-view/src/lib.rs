@@ -223,6 +223,7 @@ fn apply_connection_view(ui: &SystemHostWindow, workspace: &BrokerWorkspace) -> 
                     placeholder: f.placeholder.clone().into(),
                     secret: f.secret,
                     required: f.required,
+                    saved: f.saved,
                 })
                 .collect::<Vec<_>>(),
         ))
