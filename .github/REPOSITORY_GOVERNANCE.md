@@ -27,8 +27,8 @@ Direct pushes to `main` are not the normal path. No history rewrites, no force-p
 ## Required checks
 
 - Required CI check name: **`CI gate`** (job `gate` in
-  `.github/workflows/ci.yml`; it passes only when `quality`, `validators`,
-  `rust` and `integration` all pass).
+  `.github/workflows/ci.yml`; it passes only when `quality`, `validators`
+  and `build-test` all pass).
 - Do not merge when `CI gate` (or any of its four jobs) is failing. Cannot
   be server-enforced on this plan — see "Manual steps".
 
@@ -87,7 +87,7 @@ git push origin tag <tag>
 
 - Require a pull request before merging (dismiss stale approvals on push).
 - Require status checks to pass: check **`CI gate`** (detail jobs
-  `quality`, `validators`, `rust`, `integration`); require branches up to date.
+  `quality`, `validators`, `build-test`); require branches up to date.
 - Require conversation resolution before merging.
 - Do not allow bypassing the above settings (no bypass list).
 - Restrict deletions; block force pushes (both implied by the rule).
