@@ -370,28 +370,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // System production wiring (SLICE 4a): the real broker snapshot feeds
     // the native connection workspace (selection, states, field shapes).
     println!("Requesting system snapshot...");
-    let connection_workspace =
-        match PythonBackend::lock_send(&backend, BackendCommand::GetSystemSnapshot)? {
-            BackendResponse::SystemSnapshot { data } => {
-                let workspace = BrokerWorkspace::from_json(&data);
-                let (pill, _) = workspace.pill();
-                println!(
-                    "System ready: {} broker(s), selected '{}' — {}",
-                    workspace.brokers.len(),
-                    workspace.selected_id,
-                    pill
-                );
-                workspace
-            }
-            BackendResponse::Error { data } => {
-                eprintln!("System snapshot failed: {}", data.message);
-                BrokerWorkspace::empty()
-            }
-            _ => {
-                eprintln!("Unexpected response");
-                BrokerWorkspace::empty()
-            }
-        };
+    let connection_workspace = match PythonBackend::lock_send(
+        &backend,
+        BackendCommand::GetSystemSnapshot { selected_id: None },
+    )? {
+        BackendResponse::SystemSnapshot { data } => {
+            let workspace = BrokerWorkspace::from_json(&data);
+            let (pill, _) = workspace.pill();
+            println!(
+                "System ready: {} broker(s), selected '{}' — {}",
+                workspace.brokers.len(),
+                workspace.selected_id,
+                pill
+            );
+            workspace
+        }
+        BackendResponse::Error { data } => {
+            eprintln!("System snapshot failed: {}", data.message);
+            BrokerWorkspace::empty()
+        }
+        _ => {
+            eprintln!("Unexpected response");
+            BrokerWorkspace::empty()
+        }
+    };
     // Symbol/timeframe refetch for the chart interactions (same snapshot
     // shape the startup path loads; the startup limit is preserved). The
     // old bars stay visible until the worker's snapshot swaps in atomically.
