@@ -731,7 +731,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         let handle = ui.as_weak();
         ui.on_broker_paste_requested(move |idx: i32| {
-            if let Ok(text) = clipboard_win::get_clipboard_string() {
+            // clipboard-win is a Windows-only crate (empty elsewhere), so the
+            // read itself is platform-gated; other platforms report unavailable.
+            #[cfg(windows)]
+            let pasted = clipboard_win::get_clipboard_string().ok();
+            #[cfg(not(windows))]
+            let pasted: Option<String> = None;
+            if let Some(text) = pasted {
                 let trimmed = text.trim();
                 println!("Broker paste requested for field {idx}: length {}", trimmed.len());
                 if let Some(ui) = handle.upgrade() {
