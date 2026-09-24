@@ -804,7 +804,10 @@ pub fn wire_market(
                 };
                 if strong.borrow_mut().interact(&wire, action) {
                     let st = strong.borrow();
-                    if st.first != prev_first || st.count != prev_count || st.price_manual != prev_manual {
+                    if st.first != prev_first
+                        || st.count != prev_count
+                        || st.price_manual != prev_manual
+                    {
                         refresh_viewport(&ui, &strong);
                     }
                 }

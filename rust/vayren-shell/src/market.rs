@@ -670,7 +670,8 @@ impl MarketState {
         }
         let pad = span * PRICE_EDGE_MARGIN;
         let result = (low - pad, high + pad);
-        self.cached_price_range.set(Some((first, count, total, result)));
+        self.cached_price_range
+            .set(Some((first, count, total, result)));
         result
     }
 
@@ -1287,7 +1288,11 @@ pub fn format_axis_time(stamp: &str, timeframe: &str, window: &[MarketBar]) -> S
     };
 
     let tf = timeframe.trim().to_lowercase();
-    let is_explicit_macro = tf == "1w" || tf == "1m" && timeframe == "1M" || tf == "1y" || tf == "w" || tf == "m" && timeframe == "M";
+    let is_explicit_macro = tf == "1w"
+        || tf == "1m" && timeframe == "1M"
+        || tf == "1y"
+        || tf == "w"
+        || tf == "m" && timeframe == "M";
     let is_explicit_daily = tf == "1d" || tf == "d" || tf == "day" || tf == "daily";
     let is_explicit_intraday = tf.ends_with('m') && timeframe != "1M" && timeframe != "M"
         || tf.ends_with('h')
@@ -1296,15 +1301,28 @@ pub fn format_axis_time(stamp: &str, timeframe: &str, window: &[MarketBar]) -> S
         || tf.contains("sec")
         || tf.contains("hour");
 
-    let has_intraday_time = !time_part.is_empty() && time_part != "00:00" && time_part != "00:00:00";
+    let has_intraday_time =
+        !time_part.is_empty() && time_part != "00:00" && time_part != "00:00:00";
 
     let span_macro = if window.len() >= 2 {
         let first_date = window.first().map(|b| b.time.as_str()).unwrap_or("");
         let last_date = window.last().map(|b| b.time.as_str()).unwrap_or("");
-        let y1 = first_date.get(..4).and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
-        let y2 = last_date.get(..4).and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
-        let m1 = first_date.get(5..7).and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
-        let m2 = last_date.get(5..7).and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+        let y1 = first_date
+            .get(..4)
+            .and_then(|s| s.parse::<i32>().ok())
+            .unwrap_or(0);
+        let y2 = last_date
+            .get(..4)
+            .and_then(|s| s.parse::<i32>().ok())
+            .unwrap_or(0);
+        let m1 = first_date
+            .get(5..7)
+            .and_then(|s| s.parse::<i32>().ok())
+            .unwrap_or(0);
+        let m2 = last_date
+            .get(5..7)
+            .and_then(|s| s.parse::<i32>().ok())
+            .unwrap_or(0);
         let month_diff = (y2 - y1) * 12 + (m2 - m1);
         month_diff >= 3
     } else {
@@ -1320,7 +1338,10 @@ pub fn format_axis_time(stamp: &str, timeframe: &str, window: &[MarketBar]) -> S
             format!("{month_name} {day}")
         }
     } else {
-        let day_num = day.parse::<u32>().map(|d| d.to_string()).unwrap_or_else(|_| day.to_string());
+        let day_num = day
+            .parse::<u32>()
+            .map(|d| d.to_string())
+            .unwrap_or_else(|_| day.to_string());
         format!("{month_name} {day_num}")
     }
 }
@@ -1931,10 +1952,13 @@ pub fn project(state: &MarketState) -> MarketView {
         // At 80px label width on ~1000px nominal width, min readable spacing is 0.085.
         let min_spacing_pos = 0.085f32;
         let visible_frac = visible as f32 / plot_slots as f32;
-        let max_possible_ticks = ((visible_frac / min_spacing_pos).floor() as usize).clamp(1, 8).min(visible);
+        let max_possible_ticks = ((visible_frac / min_spacing_pos).floor() as usize)
+            .clamp(1, 8)
+            .min(visible);
         let mut last_pos = -1.0f32;
         for k in 0..max_possible_ticks {
-            let idx = ((k as f64 + 0.5) * visible as f64 / max_possible_ticks as f64).floor() as usize;
+            let idx =
+                ((k as f64 + 0.5) * visible as f64 / max_possible_ticks as f64).floor() as usize;
             let idx = idx.min(visible - 1);
             let pos = (idx as f32 + 0.5) / plot_slots as f32;
             if last_pos >= 0.0 && (pos - last_pos) < min_spacing_pos {
@@ -3957,13 +3981,28 @@ mod tests {
             },
         ];
         // Intraday
-        assert_eq!(format_axis_time("2026-06-10 09:15:00", "15m", &dummy_window), "09:15");
-        assert_eq!(format_axis_time("2026-06-10 14:45:00", "1h", &dummy_window), "14:45");
+        assert_eq!(
+            format_axis_time("2026-06-10 09:15:00", "15m", &dummy_window),
+            "09:15"
+        );
+        assert_eq!(
+            format_axis_time("2026-06-10 14:45:00", "1h", &dummy_window),
+            "14:45"
+        );
         // Daily
-        assert_eq!(format_axis_time("2026-06-10 00:00:00", "1D", &dummy_window), "Jun 10");
-        assert_eq!(format_axis_time("2026-06-11 00:00:00", "1D", &dummy_window), "Jun 11");
+        assert_eq!(
+            format_axis_time("2026-06-10 00:00:00", "1D", &dummy_window),
+            "Jun 10"
+        );
+        assert_eq!(
+            format_axis_time("2026-06-11 00:00:00", "1D", &dummy_window),
+            "Jun 11"
+        );
         // Macro
-        assert_eq!(format_axis_time("2026-06-10 00:00:00", "1M", &dummy_window), "Jun 2026");
+        assert_eq!(
+            format_axis_time("2026-06-10 00:00:00", "1M", &dummy_window),
+            "Jun 2026"
+        );
 
         // Verify ticks never collide on state projection
         let mut state = MarketState::default();

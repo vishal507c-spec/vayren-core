@@ -543,10 +543,7 @@ impl BrokerWorkspace {
                         .get("required")
                         .and_then(|v| v.as_bool())
                         .unwrap_or(false),
-                    saved: row
-                        .get("saved")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false),
+                    saved: row.get("saved").and_then(|v| v.as_bool()).unwrap_or(false),
                     key,
                     label,
                     placeholder,

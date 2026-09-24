@@ -165,7 +165,6 @@ impl PythonBackend {
             command.creation_flags(CREATE_NO_WINDOW);
         }
         command
-        command
             .arg("-m")
             .arg("app.headless")
             .arg("--data-dir")
@@ -376,7 +375,8 @@ mod tests {
 
     #[test]
     fn test_system_snapshot_command_serialization() {
-        let json = serde_json::to_string(&BackendCommand::GetSystemSnapshot { selected_id: None }).unwrap();
+        let json = serde_json::to_string(&BackendCommand::GetSystemSnapshot { selected_id: None })
+            .unwrap();
         assert_eq!(json, r#"{"type":"get_system_snapshot"}"#);
     }
 

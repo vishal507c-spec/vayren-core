@@ -439,17 +439,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 for result in fetch_rx.try_iter() {
                     match result {
                         FetchResult::Market(id, data) => {
-                            if id > last_market && latest_market.as_ref().map_or(true, |(prev_id, _)| id > *prev_id) {
+                            if id > last_market
+                                && latest_market
+                                    .as_ref()
+                                    .map_or(true, |(prev_id, _)| id > *prev_id)
+                            {
                                 latest_market = Some((id, data));
                             }
                         }
                         FetchResult::LabSelect(id, data) => {
-                            if id > last_select && latest_lab_select.as_ref().map_or(true, |(prev_id, _)| id > *prev_id) {
+                            if id > last_select
+                                && latest_lab_select
+                                    .as_ref()
+                                    .map_or(true, |(prev_id, _)| id > *prev_id)
+                            {
                                 latest_lab_select = Some((id, data));
                             }
                         }
                         FetchResult::LabRun(id, data) => {
-                            if id > last_run && latest_lab_run.as_ref().map_or(true, |(prev_id, _)| id > *prev_id) {
+                            if id > last_run
+                                && latest_lab_run
+                                    .as_ref()
+                                    .map_or(true, |(prev_id, _)| id > *prev_id)
+                            {
                                 latest_lab_run = Some((id, data));
                             }
                         }
@@ -459,10 +471,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if let Some((id, data)) = latest_market {
                     last_market = id;
                     if let Some(data) = data {
-                        market::apply_snapshot_json(
-                            &mut market_state.borrow_mut(),
-                            &data,
-                        );
+                        market::apply_snapshot_json(&mut market_state.borrow_mut(), &data);
                         shell::apply_market(&ui, &market_state.borrow());
                     }
                 }
@@ -497,9 +506,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ui.on_broker_select_requested(move |id: slint::SharedString| {
             let id_str = id.as_str().to_string();
             println!("Broker select requested: {}", id_str);
-            match PythonBackend::lock_send(&backend,BackendCommand::GetSystemSnapshot {
-                selected_id: Some(id_str),
-            }) {
+            match PythonBackend::lock_send(
+                &backend,
+                BackendCommand::GetSystemSnapshot {
+                    selected_id: Some(id_str),
+                },
+            ) {
                 Ok(BackendResponse::SystemSnapshot { data }) => {
                     let workspace = BrokerWorkspace::from_json(&data);
                     *cur_ws.borrow_mut() = workspace.clone();
@@ -522,7 +534,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let cur_ws = current_workspace.clone();
         ui.on_broker_refresh_requested(move || {
             println!("Broker refresh requested");
-            match PythonBackend::lock_send(&backend,BackendCommand::GetSystemSnapshot { selected_id: None }) {
+            match PythonBackend::lock_send(
+                &backend,
+                BackendCommand::GetSystemSnapshot { selected_id: None },
+            ) {
                 Ok(BackendResponse::SystemSnapshot { data }) => {
                     let workspace = BrokerWorkspace::from_json(&data);
                     *cur_ws.borrow_mut() = workspace.clone();
@@ -551,7 +566,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // OS vault.  If the user has not changed the field, the sentinel is
             // still there — we must not forward it to the backend, which would
             // overwrite the stored value with literal bullet characters.
-            const SAVED_SENTINEL: &str = "\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}";
+            const SAVED_SENTINEL: &str =
+                "\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}";
             let mut credentials = std::collections::HashMap::new();
             for (i, f) in fields.iter().enumerate() {
                 if let Some(v) = raw_values.get(i) {
@@ -583,10 +599,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let handle_bg = handle.clone();
             let backend_bg = Arc::clone(&backend);
             std::thread::spawn(move || {
-                match PythonBackend::lock_send(&backend_bg,BackendCommand::ConnectBroker {
-                    broker_id,
-                    credentials,
-                }) {
+                match PythonBackend::lock_send(
+                    &backend_bg,
+                    BackendCommand::ConnectBroker {
+                        broker_id,
+                        credentials,
+                    },
+                ) {
                     Ok(BackendResponse::SystemSnapshot { data }) => {
                         let workspace = BrokerWorkspace::from_json(&data);
                         let _ = slint::invoke_from_event_loop(move || {
@@ -618,7 +637,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let _ = slint::invoke_from_event_loop(move || {
                             if let Some(ui) = handle_bg.upgrade() {
                                 ui.set_conn_is_failed(true);
-                                ui.set_conn_error_message(format!("Connection IPC error: {err_str}").into());
+                                ui.set_conn_error_message(
+                                    format!("Connection IPC error: {err_str}").into(),
+                                );
                                 ui.set_conn_pill_label("Connection Failed".into());
                                 ui.set_conn_pill_tone(3);
                                 ui.set_conn_cta_enabled(true);
@@ -646,10 +667,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let handle_bg = handle.clone();
             let backend_bg = Arc::clone(&backend);
             std::thread::spawn(move || {
-                match PythonBackend::lock_send(&backend_bg,BackendCommand::ConnectBroker {
-                    broker_id,
-                    credentials: std::collections::HashMap::new(),
-                }) {
+                match PythonBackend::lock_send(
+                    &backend_bg,
+                    BackendCommand::ConnectBroker {
+                        broker_id,
+                        credentials: std::collections::HashMap::new(),
+                    },
+                ) {
                     Ok(BackendResponse::SystemSnapshot { data }) => {
                         let workspace = BrokerWorkspace::from_json(&data);
                         let _ = slint::invoke_from_event_loop(move || {
@@ -681,7 +705,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let _ = slint::invoke_from_event_loop(move || {
                             if let Some(ui) = handle_bg.upgrade() {
                                 ui.set_conn_is_failed(true);
-                                ui.set_conn_error_message(format!("Connection IPC error: {err_str}").into());
+                                ui.set_conn_error_message(
+                                    format!("Connection IPC error: {err_str}").into(),
+                                );
                                 ui.set_conn_pill_label("Connection Failed".into());
                                 ui.set_conn_pill_tone(3);
                                 ui.set_conn_cta_enabled(true);
@@ -703,7 +729,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let handle_bg = handle.clone();
             let backend_bg = Arc::clone(&backend);
             std::thread::spawn(move || {
-                match PythonBackend::lock_send(&backend_bg,BackendCommand::DisconnectBroker { broker_id }) {
+                match PythonBackend::lock_send(
+                    &backend_bg,
+                    BackendCommand::DisconnectBroker { broker_id },
+                ) {
                     Ok(BackendResponse::SystemSnapshot { data }) => {
                         let workspace = BrokerWorkspace::from_json(&data);
                         let _ = slint::invoke_from_event_loop(move || {
@@ -739,7 +768,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let pasted: Option<String> = None;
             if let Some(text) = pasted {
                 let trimmed = text.trim();
-                println!("Broker paste requested for field {idx}: length {}", trimmed.len());
+                println!(
+                    "Broker paste requested for field {idx}: length {}",
+                    trimmed.len()
+                );
                 if let Some(ui) = handle.upgrade() {
                     let s = slint::SharedString::from(trimmed);
                     match idx {
