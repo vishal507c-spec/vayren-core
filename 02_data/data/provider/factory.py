@@ -263,6 +263,7 @@ def fyers_management_spec() -> BrokerSpec:
         # API-based path first: fast, headless, no CAPTCHA risk.
         api_engine = FyersAutoAuthEngine(credentials)
         api_possible, api_why = api_engine.auto_login_possible()
+        message = ""
         if api_possible:
             ok, message = api_engine.ensure_session(session_store)
             if ok:

@@ -39,9 +39,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from app.observable import Signal, WorkerThread
 from broker import BrokerStatus
 from broker.management import BrokerSpec
+
+from app.observable import Signal, WorkerThread
 
 CALLBACK_PORT = 9474
 _SESSION_JOB = "session-check"

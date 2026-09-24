@@ -233,7 +233,9 @@ class FyersAutoAuthEngine:
             return False, why
         ok, last_err = self._run_auto_auth(session_store, flow)
         if not ok:
-            return False, f"FYERS login failed: {last_err}" if last_err else "FYERS automatic login failed"
+            if last_err:
+                return False, f"FYERS login failed: {last_err}"
+            return False, "FYERS automatic login failed"
         token = _stored_access_token(session_store)
         if not token:
             return False, "automatic login reported success but stored no session"

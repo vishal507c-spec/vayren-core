@@ -180,7 +180,8 @@ class _UrllibTransport:
                 if err_raw:
                     err_json = json.loads(err_raw)
                     if isinstance(err_json, dict):
-                        err_msg = str(err_json.get("message") or err_json.get("error") or "").strip()
+                        message = err_json.get("message") or err_json.get("error") or ""
+                        err_msg = str(message).strip()
             except Exception:
                 pass
             if err_msg:

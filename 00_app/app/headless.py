@@ -18,6 +18,8 @@ from logging import getLogger
 from pathlib import Path
 from typing import Any
 
+from broker import BrokerStatus
+
 
 def _bootstrap_chapter_path() -> None:
     """Ensure sibling chapter packages resolve regardless of cwd.
@@ -802,7 +804,6 @@ def run_headless_backend(args: argparse.Namespace) -> int:
     broker_manager = None
     try:
         import data.provider.factory  # noqa: F401
-        from broker import BrokerStatus
 
         from app.services.broker_manager import BrokerManager
 
@@ -912,7 +913,9 @@ def run_headless_backend(args: argparse.Namespace) -> int:
                                 r_uri = str(merged.get("redirect_uri") or "").strip()
                                 if (
                                     not r_uri
-                                    or not (r_uri.startswith("http://") or r_uri.startswith("https://"))
+                                    or not (
+                                        r_uri.startswith("http://") or r_uri.startswith("https://")
+                                    )
                                     or "\n" in r_uri
                                     or "\r" in r_uri
                                     or " " in r_uri
