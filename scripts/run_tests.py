@@ -136,15 +136,28 @@ def main(argv: list[str] | None = None) -> int:
         help="lean test path: require only the kernel cdylib + shell binary "
         "(mirrors build_rust.py --lean-test; never needs the view DLLs)",
     )
+    parser.add_argument(
+        "--exclude",
+        nargs="*",
+        default=[],
+        choices=PARTS,
+        help="skip these partitions (used by CI sharding: scripts/tests runs "
+        "in parallel shard jobs instead; local runs keep everything)",
+    )
     args = parser.parse_args(argv)
     env = os.environ.copy()
 
     if ensure_native(env, args.skip_build, args.lean) != 0:
         return 1
 
+    parts = [part for part in PARTS if part not in args.exclude]
+    if not parts:
+        print("no partitions selected (everything excluded)")
+        return 1
+
     failed: list[str] = []
     total_start = time.perf_counter()
-    for part in PARTS:
+    for part in parts:
         start = time.perf_counter()
         proc = subprocess.run(
             [sys.executable, "-m", "pytest", part, "-q", "--no-header"],
@@ -159,8 +172,10 @@ def main(argv: list[str] | None = None) -> int:
     total = time.perf_counter() - total_start
     print("")
     print("SUITE PARTITION SUMMARY")
-    passed = len(PARTS) - len(failed)
-    print(f"  partitions passed: {passed}/{len(PARTS)}   total {total:.1f}s")
+    passed = len(parts) - len(failed)
+    print(f"  partitions passed: {passed}/{len(parts)}   total {total:.1f}s")
+    if args.exclude:
+        print(f"  excluded partitions: {sorted(args.exclude)}")
     if failed:
         print("  failed partitions:")
         for name in failed:

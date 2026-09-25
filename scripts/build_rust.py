@@ -100,12 +100,26 @@ VIEW_PACKAGES = (
 )
 
 
+def _failure_summary(output: str, limit: int = 40) -> list[str]:
+    """High-signal failure lines (test names, panics, errors).
+
+    Cargo output on failure can be megabytes; the tail alone hid the failing
+    test name twice (Day-5 CI diagnoses). This prints at most `limit`
+    matching lines so the culprit is always visible.
+    """
+    patterns = ("FAILED", "panicked", "test result: FAILED", "could not compile", "error[")
+    hits = [line for line in output.splitlines() if any(p in line for p in patterns)]
+    return hits[:limit]
+
+
 def _run(argv: list[str]) -> int:
     print(f"+ {' '.join(argv)}", flush=True)
     proc = subprocess.run(argv, cwd=ROOT, capture_output=True, text=True)
     if proc.returncode != 0:
         tail = (proc.stderr or proc.stdout or "")[-3000:]
         print(f"cargo failed (rc={proc.returncode}):\n{tail}")
+        for line in _failure_summary(proc.stderr or proc.stdout or ""):
+            print(f"  ! {line.strip()[:200]}", flush=True)
     return proc.returncode
 
 

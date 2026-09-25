@@ -110,6 +110,23 @@ def test_no_new_process_shapes() -> None:
     assert len(calls) == 4, "expected: core release + batched views + shell debug + workspace test"
 
 
+def test_failure_summary_surfaces_culprits() -> None:
+    output = (
+        "   Compiling foo v0.1.0\n"
+        "test bar::baz ... FAILED\n"
+        "thread 'bar::baz' panicked at src/lib.rs:9:5\n"
+        "test result: FAILED. 1 passed; 1 failed\n"
+        "error: could not compile `foo` (lib test)\n"
+    )
+    hits = build_rust._failure_summary(output)
+    assert any("bar::baz ... FAILED" in line for line in hits)
+    assert any("panicked" in line for line in hits)
+    assert any("could not compile" in line for line in hits)
+    assert build_rust._failure_summary("all green\n") == []
+    long = "\n".join(f"test t{i} ... FAILED" for i in range(100))
+    assert len(build_rust._failure_summary(long)) == 40
+
+
 def _fake_tree(root: Path) -> None:
     # Platform-correct names via the driver's own helpers (a hardcoded
     # `.dll`/`.exe` tree goes stale on Linux CI).

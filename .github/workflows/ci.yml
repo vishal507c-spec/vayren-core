@@ -10,7 +10,9 @@ concurrency:
 # Job map (every original check preserved — see per-job comments):
 #   quality    = ruff check + ruff format + pyright            (~1 min)
 #   validators = all repo validators + context engine          (~1 min)
-#   build-test = cargo fmt + lean Rust build/test + pytest     (bottleneck)
+#   build-test = cargo fmt + lean Rust build/test + pytest     (~13 min)
+#   test-shard-stateful = live-mutator suites, serial          (~9 min)
+#   test-shard-pure     = isolated/reader suites, serial       (~8 min)
 #   gate       = aggregate "ALL REQUIRED CHECKS PASSED" signal
 # quality/validators run parallel to build-test: cheap failures surface in
 # ~1 minute and every domain reports independently. build-test stays ONE job
@@ -18,6 +20,13 @@ concurrency:
 # dir), so splitting build from test would force a second full compilation
 # (measured: +40m on a cold cache) or a fragile artifact handoff. No check
 # is skipped anywhere; a failure in any job fails the gate.
+# scripts/tests is sharded by dependency evidence (Day-6 intel: the two
+# live-tree mutators must stay serial vs index readers; same-checkout
+# parallel pytest is race-proven unsafe): mutators run serially in
+# test-shard-stateful, readers serially in test-shard-pure, on isolated
+# runners. test_desktop.py runs in build-test beside its shell binary.
+# Coverage contract: scripts/tests/test_shard_contract.py pins that every
+# test file runs in exactly one CI site (no omission, no duplication).
 jobs:
   quality:
     runs-on: ubuntu-latest
@@ -111,18 +120,91 @@ jobs:
       # workspace: --skip-build reuses the just-built artifacts only when the
       # fail-closed freshness gate proves them newer than every Rust source
       # (otherwise it rebuilds) — hence one job, no duplicate full chain.
+      # scripts/tests runs in the shard jobs below (--exclude here);
+      # test_desktop.py stays here beside its shell binary.
       - run: time python scripts/build_rust.py --lean-test
-      - run: time python scripts/run_tests.py --skip-build --lean
+      - run: time python scripts/run_tests.py --skip-build --lean --exclude scripts/tests
+      - run: python -m pytest scripts/tests/test_desktop.py -q --no-header
       - name: Report disk usage
         run: |
           date -u +%FT%TZ
           du -sh rust/target ~/.cargo/registry ~/.cargo/git 2>/dev/null || true
           df -h /
 
+  # Shard 1/2 — live-mutators, serial within the job, isolated runner.
+  # test_validate_scope.py + test_failure_intel.py mutate the live tree
+  # (TreeEdit + restore); same-checkout parallel pytest is race-proven
+  # unsafe (Day-6 intel), so mutators never share a runner with readers.
+  # Needs the kernel cdylib (scope-bench executes pytest partitions) plus
+  # the debug shell (nested full-scripts baseline includes test_desktop).
+  test-shard-stateful:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+      # Same native prerequisites as build-test: the Slint font stack
+      # links fontconfig/freetype at final link time (linker fails
+      # without the dev packages — Day-6 CI proof).
+      - name: Install Linux build dependencies
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libfontconfig1-dev
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: pip install -e ".[dev,data]"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "rust -> target"
+          shared-key: "vayren-rust"
+      - run: cargo build --release -p vayren-core --manifest-path rust/Cargo.toml
+      # The scope-bench tests execute the full `pytest scripts/tests -q`
+      # baseline, which includes test_desktop.py (needs the shell binary).
+      - run: cargo build -p vayren-shell --manifest-path rust/Cargo.toml
+      - run: python -m pytest scripts/tests/test_validate_scope.py scripts/tests/test_failure_intel.py -q --no-header
+
+  # Shard 2/2 — isolated readers, serial within the job, isolated runner.
+  # Every file here is tmp/sandbox/mock-scoped or read-only (Day-6 intel);
+  # test_desktop.py runs in build-test beside its shell binary instead.
+  test-shard-pure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: pip install -e ".[dev,data]"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "rust -> target"
+          shared-key: "vayren-rust"
+      - run: cargo build --release -p vayren-core --manifest-path rust/Cargo.toml
+      - run: >-
+          python -m pytest scripts/tests/test_authority.py
+          scripts/tests/test_build_rust.py scripts/tests/test_context.py
+          scripts/tests/test_context_packet.py scripts/tests/test_execute_surface.py
+          scripts/tests/test_gate_coverage.py scripts/tests/test_language_governance.py
+          scripts/tests/test_patch_surface.py scripts/tests/test_repo_graph.py
+          scripts/tests/test_repo_index.py scripts/tests/test_router.py
+          scripts/tests/test_run_tests.py scripts/tests/test_self_opt.py
+          scripts/tests/test_shard_contract.py scripts/tests/test_speed_loop.py
+          scripts/tests/test_speed_metrics.py scripts/tests/test_vayren_intel.py -q --no-header
+
   gate:
     name: CI gate
-    needs: [quality, validators, build-test]
+    needs: [quality, validators, build-test, test-shard-stateful, test-shard-pure]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - run: echo "ALL REQUIRED CHECKS PASSED (quality, validators, build-test)"
+      - run: echo "ALL REQUIRED CHECKS PASSED (quality, validators, build-test, test-shard-stateful, test-shard-pure)"
