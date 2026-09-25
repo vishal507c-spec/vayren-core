@@ -164,7 +164,7 @@ fn bench_apply_tiers_single_window() {
     let (full_mean, _, _) = full.report("apply_market full x20 (BEFORE path)");
     eprintln!("PERF nodes-per-full-refresh=~4800 (1200 candles x 4 Slint items)");
 
-    // AFTER reference: hover touches 8 scalar props, zero model rebuilds.
+    // AFTER reference: hover touches 9 scalar props, zero model rebuilds.
     let mut hover = Stats::default();
     for i in 0..200 {
         let x = (i % 100) as f32 / 100.0;

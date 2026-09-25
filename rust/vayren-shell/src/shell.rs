@@ -22,12 +22,13 @@ use crate::{
     LabLibraryRow, LabMatrixRow, LabParam, LabPoint, LabPreset, LabRankRow, LabTradeRow, LiveBar,
     LiveCandle, LiveEventRow, LiveFill, LiveGate, LiveKv, LiveMarket, LiveOrder, LivePosition,
     LiveSetup, LiveStat, LiveSymbolRow, MarketCandle, MarketIndicator, MarketMarker, MarketPlotSeg,
-    MarketPopupRow, MarketSettingsRow, MarketStatusRow, MarketTick, MarketTimeframe,
-    MarketTradeContext, MarketWatchRow, PortfolioAlloc, PortfolioFill, PortfolioGate, PortfolioKpi,
-    PortfolioOrder, PortfolioPosition, PortfolioRisk, ProgressStepView, ResearchCompareRow,
-    ResearchConfigGroup, ResearchEvidenceDim, ResearchEvidenceWhy, ResearchExperimentRow,
-    ResearchField, ResearchKv, ResearchKvGroup, ResearchMetric, ResearchRobustRow,
-    ResearchSignalRow, ResearchStrategyRow, ResearchTradeRow, ShellScreen,
+    MarketPopupRow, MarketRayLevel, MarketSettingsRow, MarketStatusRow, MarketTick,
+    MarketTimeframe, MarketTradeContext, MarketWatchRow, PortfolioAlloc, PortfolioFill,
+    PortfolioGate, PortfolioKpi, PortfolioOrder, PortfolioPosition, PortfolioRisk,
+    ProgressStepView, ResearchCompareRow, ResearchConfigGroup, ResearchEvidenceDim,
+    ResearchEvidenceWhy, ResearchExperimentRow, ResearchField, ResearchKv, ResearchKvGroup,
+    ResearchMetric, ResearchRobustRow, ResearchSignalRow, ResearchStrategyRow, ResearchTradeRow,
+    ShellScreen,
 };
 use slint::ComponentHandle;
 #[cfg(test)]
@@ -396,6 +397,16 @@ pub fn apply_market(ui: &AppWindow, state: &market::MarketState) {
     ui.set_market_candles(candles_model(view.candles));
     ui.set_market_price_ticks(ticks_model(view.price_ticks));
     ui.set_market_time_ticks(ticks_model(view.time_ticks));
+    ui.set_market_last_price(view.last_price.into());
+    ui.set_market_last_price_pos(view.last_price_pos);
+    ui.set_market_last_price_up(view.last_price_up);
+    ui.set_market_has_last_price(view.has_last_price);
+    ui.set_market_volume_max_label(view.volume_max_label.into());
+    ui.set_market_last_volume(view.last_volume.into());
+    ui.set_market_last_volume_pos(view.last_volume_pos);
+    ui.set_market_last_volume_up(view.last_volume_up);
+    ui.set_market_has_last_volume(view.has_last_volume);
+    ui.set_market_ray_levels(ray_levels_model(view.ray_levels));
     ui.set_market_plot_segments(segments_model(view.plot_segments));
     ui.set_market_markers(markers_model(view.markers));
     apply_flags_props(
@@ -413,6 +424,7 @@ pub fn apply_market(ui: &AppWindow, state: &market::MarketState) {
             hover_price: view.hover_price,
             hover_time: view.hover_time,
             hover_volume: view.hover_volume,
+            hover_vol_pos: view.hover_vol_pos,
             hover_bull: view.hover_bull,
             has_hover: view.has_hover,
             header_ohlc: view.header_ohlc,
@@ -619,7 +631,7 @@ pub fn apply_market(ui: &AppWindow, state: &market::MarketState) {
 /// Dirty-flag apply tiers (Phase 22): each interaction refreshes ONLY the
 /// Slint properties it can change. Full `apply_market` stays for data /
 /// selection / list changes; viewport ops rebuild geometry lists only;
-/// hover moves touch 8 scalar props and zero models.
+/// hover moves touch 9 scalar props and zero models.
 fn candles_model(rows: Vec<market::CandlePoint>) -> slint::ModelRc<MarketCandle> {
     market_model(
         rows.into_iter()
@@ -644,6 +656,18 @@ fn ticks_model(rows: Vec<market::AxisTick>) -> slint::ModelRc<MarketTick> {
             .map(|t| MarketTick {
                 pos: t.pos,
                 label: t.label.into(),
+            })
+            .collect(),
+    )
+}
+
+fn ray_levels_model(rows: Vec<market::RayLevel>) -> slint::ModelRc<MarketRayLevel> {
+    market_model(
+        rows.into_iter()
+            .map(|r| MarketRayLevel {
+                pos: r.pos,
+                label: r.label.into(),
+                color: r.color,
             })
             .collect(),
     )
@@ -688,6 +712,7 @@ fn apply_hover_props(ui: &AppWindow, hover: &market::HoverView) {
     ui.set_market_hover_price(hover.hover_price.clone().into());
     ui.set_market_hover_time(hover.hover_time.clone().into());
     ui.set_market_hover_volume(hover.hover_volume.clone().into());
+    ui.set_market_hover_vol_pos(hover.hover_vol_pos);
     ui.set_market_hover_bull(hover.hover_bull);
     ui.set_market_has_hover(hover.has_hover);
     ui.set_market_header_ohlc(hover.header_ohlc.clone().into());
@@ -707,6 +732,16 @@ pub fn apply_market_viewport(ui: &AppWindow, state: &market::MarketState) {
     ui.set_market_candles(candles_model(view.candles));
     ui.set_market_price_ticks(ticks_model(view.price_ticks));
     ui.set_market_time_ticks(ticks_model(view.time_ticks));
+    ui.set_market_last_price(view.last_price.into());
+    ui.set_market_last_price_pos(view.last_price_pos);
+    ui.set_market_last_price_up(view.last_price_up);
+    ui.set_market_has_last_price(view.has_last_price);
+    ui.set_market_volume_max_label(view.volume_max_label.into());
+    ui.set_market_last_volume(view.last_volume.into());
+    ui.set_market_last_volume_pos(view.last_volume_pos);
+    ui.set_market_last_volume_up(view.last_volume_up);
+    ui.set_market_has_last_volume(view.has_last_volume);
+    ui.set_market_ray_levels(ray_levels_model(view.ray_levels));
     ui.set_market_plot_segments(segments_model(view.plot_segments));
     ui.set_market_markers(markers_model(view.markers));
     ui.set_market_status_message(view.status_message.into());
@@ -736,7 +771,7 @@ pub fn wire_market(
     fn refresh(ui: &AppWindow, state: &Rc<RefCell<market::MarketState>>) {
         apply_market(ui, &state.borrow());
     }
-    /// Crosshair-only refresh: 8 scalar props, zero model rebuilds.
+    /// Crosshair-only refresh: 9 scalar props, zero model rebuilds.
     fn refresh_hover(ui: &AppWindow, state: &Rc<RefCell<market::MarketState>>) {
         apply_market_hover(ui, &state.borrow());
     }

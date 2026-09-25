@@ -1,11 +1,13 @@
 """Build the Rust workspace (AI_ENTRY.md §1: Rust owns core/perf).
 
 Builds the `vayren-core` cdylib (release) consumed by the Python boundary
-via ctypes, the `vayren-portfolio-view` cdylib (release) hosting the native
-Slint Portfolio screen, builds the `vayren-shell` native UI binary, and
-verifies the ABI handshake. Also runs `cargo test` for the whole workspace
-with `--test`. Fail-closed: any cargo failure exits nonzero with the log
-tail.
+via ctypes, the six `vayren-*-view` cdylibs (release, one batched
+invocation sharing a single shell build) hosting the native Slint view
+screens, builds the `vayren-shell` native UI binary (debug), and verifies
+the ABI handshake. `--test` also runs `cargo test` for the whole
+workspace. `--lean-test` is the CI test path: core release + shell debug
++ workspace tests, skipping the six consumer-less view release DLLs.
+Fail-closed: any cargo failure exits nonzero with the log tail.
 """
 
 from __future__ import annotations
@@ -88,6 +90,16 @@ def _bin_name() -> str:
     return "vayren-shell.exe" if system.startswith("win") else "vayren-shell"
 
 
+VIEW_PACKAGES = (
+    "vayren-portfolio-view",
+    "vayren-live-view",
+    "vayren-system-view",
+    "vayren-strategy-lab-view",
+    "vayren-research-view",
+    "vayren-market-view",
+)
+
+
 def _run(argv: list[str]) -> int:
     print(f"+ {' '.join(argv)}", flush=True)
     proc = subprocess.run(argv, cwd=ROOT, capture_output=True, text=True)
@@ -97,13 +109,38 @@ def _run(argv: list[str]) -> int:
     return proc.returncode
 
 
-def main() -> int:
+def _build_shell_debug() -> int:
+    """Build the debug shell binary (desktop runtime + dev test target)."""
+    rc = _run(["cargo", "build", "-p", "vayren-shell", "--manifest-path", "rust/Cargo.toml"])
+    if rc != 0:
+        return rc
+    shell_bin = ROOT / "rust" / "target" / "debug" / _bin_name()
+    if not shell_bin.is_file():
+        print(f"ERROR: expected native UI binary missing after build: {shell_bin}")
+        return 1
+    print(f"built {shell_bin} ({shell_bin.stat().st_size} bytes)")
+    return 0
+
+
+def _run_workspace_tests() -> int:
+    """Run the full workspace test suite (never narrowed, never skipped)."""
+    return _run(["cargo", "test", "--workspace", "--manifest-path", "rust/Cargo.toml"])
+
+
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build the Rust workspace")
     parser.add_argument("--test", action="store_true", help="run `cargo test` too")
     parser.add_argument(
+        "--lean-test",
+        action="store_true",
+        help="lean test path: core release + shell debug + workspace tests, "
+        "skipping the six consumer-less view release DLLs (test gate only; "
+        "packaging still uses the full path)",
+    )
+    parser.add_argument(
         "--check-only", action="store_true", help="verify the cdylib exists + handshake"
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if shutil.which("cargo") is None:
         print("ERROR: `cargo` not on PATH (install the Rust toolchain, then re-run).")
@@ -128,6 +165,16 @@ def main() -> int:
         return 1
     print(f"built {lib} ({lib.stat().st_size} bytes)")
 
+    if args.lean_test:
+        # Lean test path (verified Day-4): the test gate needs the shipped
+        # kernel (vayren_core release) + the debug shell + workspace tests.
+        # The six view release DLLs have no in-repo consumer on this path,
+        # so the batched view invocation below is skipped entirely.
+        rc = _build_shell_debug()
+        if rc != 0:
+            return rc
+        return _run_workspace_tests()
+
     rc = _run(
         [
             "cargo",
@@ -135,99 +182,14 @@ def main() -> int:
             "--release",
             "-p",
             "vayren-portfolio-view",
-            "--manifest-path",
-            "rust/Cargo.toml",
-        ]
-    )
-    if rc != 0:
-        return rc
-    view_lib = ROOT / "rust" / "target" / "release" / _view_lib_name()
-    if not view_lib.is_file():
-        print(f"ERROR: expected portfolio view cdylib missing after build: {view_lib}")
-        return 1
-    print(f"built {view_lib} ({view_lib.stat().st_size} bytes)")
-
-    rc = _run(
-        [
-            "cargo",
-            "build",
-            "--release",
             "-p",
             "vayren-live-view",
-            "--manifest-path",
-            "rust/Cargo.toml",
-        ]
-    )
-    if rc != 0:
-        return rc
-    live_lib = ROOT / "rust" / "target" / "release" / _live_lib_name()
-    if not live_lib.is_file():
-        print(f"ERROR: expected live view cdylib missing after build: {live_lib}")
-        return 1
-    print(f"built {live_lib} ({live_lib.stat().st_size} bytes)")
-
-    rc = _run(
-        [
-            "cargo",
-            "build",
-            "--release",
             "-p",
             "vayren-system-view",
-            "--manifest-path",
-            "rust/Cargo.toml",
-        ]
-    )
-    if rc != 0:
-        return rc
-    system_lib = ROOT / "rust" / "target" / "release" / _system_lib_name()
-    if not system_lib.is_file():
-        print(f"ERROR: expected system view cdylib missing after build: {system_lib}")
-        return 1
-    print(f"built {system_lib} ({system_lib.stat().st_size} bytes)")
-
-    rc = _run(
-        [
-            "cargo",
-            "build",
-            "--release",
             "-p",
             "vayren-strategy-lab-view",
-            "--manifest-path",
-            "rust/Cargo.toml",
-        ]
-    )
-    if rc != 0:
-        return rc
-    lab_lib = ROOT / "rust" / "target" / "release" / _lab_lib_name()
-    if not lab_lib.is_file():
-        print(f"ERROR: expected strategy lab view cdylib missing after build: {lab_lib}")
-        return 1
-    print(f"built {lab_lib} ({lab_lib.stat().st_size} bytes)")
-
-    rc = _run(
-        [
-            "cargo",
-            "build",
-            "--release",
             "-p",
             "vayren-research-view",
-            "--manifest-path",
-            "rust/Cargo.toml",
-        ]
-    )
-    if rc != 0:
-        return rc
-    research_lib = ROOT / "rust" / "target" / "release" / _research_lib_name()
-    if not research_lib.is_file():
-        print(f"ERROR: expected research view cdylib missing after build: {research_lib}")
-        return 1
-    print(f"built {research_lib} ({research_lib.stat().st_size} bytes)")
-
-    rc = _run(
-        [
-            "cargo",
-            "build",
-            "--release",
             "-p",
             "vayren-market-view",
             "--manifest-path",
@@ -236,23 +198,27 @@ def main() -> int:
     )
     if rc != 0:
         return rc
-    market_lib = ROOT / "rust" / "target" / "release" / _market_lib_name()
-    if not market_lib.is_file():
-        print(f"ERROR: expected market view cdylib missing after build: {market_lib}")
-        return 1
-    print(f"built {market_lib} ({market_lib.stat().st_size} bytes)")
+    # Batched single invocation (Day-2 A/B: one shared shell build instead of
+    # one per view). Same artifacts, same profile — only scheduling changed.
+    for label, lib in (
+        ("portfolio view", ROOT / "rust" / "target" / "release" / _view_lib_name()),
+        ("live view", ROOT / "rust" / "target" / "release" / _live_lib_name()),
+        ("system view", ROOT / "rust" / "target" / "release" / _system_lib_name()),
+        ("strategy lab view", ROOT / "rust" / "target" / "release" / _lab_lib_name()),
+        ("research view", ROOT / "rust" / "target" / "release" / _research_lib_name()),
+        ("market view", ROOT / "rust" / "target" / "release" / _market_lib_name()),
+    ):
+        if not lib.is_file():
+            print(f"ERROR: expected {label} cdylib missing after build: {lib}")
+            return 1
+    print(f"built {lib} ({lib.stat().st_size} bytes)")
 
-    rc = _run(["cargo", "build", "-p", "vayren-shell", "--manifest-path", "rust/Cargo.toml"])
+    rc = _build_shell_debug()
     if rc != 0:
         return rc
-    shell_bin = ROOT / "rust" / "target" / "debug" / _bin_name()
-    if not shell_bin.is_file():
-        print(f"ERROR: expected native UI binary missing after build: {shell_bin}")
-        return 1
-    print(f"built {shell_bin} ({shell_bin.stat().st_size} bytes)")
 
     if args.test:
-        rc = _run(["cargo", "test", "--workspace", "--manifest-path", "rust/Cargo.toml"])
+        rc = _run_workspace_tests()
         if rc != 0:
             return rc
     return 0

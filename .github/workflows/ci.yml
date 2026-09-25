@@ -10,7 +10,7 @@ concurrency:
 # Job map (every original check preserved — see per-job comments):
 #   quality    = ruff check + ruff format + pyright            (~1 min)
 #   validators = all repo validators + context engine          (~1 min)
-#   build-test = cargo fmt + full Rust build/test + pytest     (bottleneck)
+#   build-test = cargo fmt + lean Rust build/test + pytest     (bottleneck)
 #   gate       = aggregate "ALL REQUIRED CHECKS PASSED" signal
 # quality/validators run parallel to build-test: cheap failures surface in
 # ~1 minute and every domain reports independently. build-test stays ONE job
@@ -95,14 +95,28 @@ jobs:
           shared-key: "vayren-rust"
       # Formatting first: a 2s style failure must not wait behind a 38min build.
       - run: cd rust && cargo fmt --all -- --check
+      # CI measurement (Day-3 intelligence: wall-clock + cache effectiveness).
+      # Behavior-preserving: same commands, only observed (`time` + snapshots
+      # in the log). No CI improvement is claimed until runs prove it.
+      - name: Pre-build cache snapshot
+        run: |
+          date -u +%FT%TZ
+          du -sh ~/.cargo/registry ~/.cargo/git rust/target 2>/dev/null || true
+          df -h /
+      # Lean test path (verified Day-4/5: `cargo test --workspace` is
+      # self-contained; only the kernel cdylib + shell binary are required
+      # downstream; the six view release DLLs have no consumer on this path
+      # and are skipped — same tests, same coverage, smaller build).
       # Full build + workspace tests, then the pytest suites against the SAME
-      # workspace: run_tests.py rebuilds incrementally (a no-op on a warm
-      # tree) and needs the compiled cdylib in place — hence one job.
-      - run: python scripts/build_rust.py --test
-      - run: python scripts/run_tests.py
+      # workspace: --skip-build reuses the just-built artifacts only when the
+      # fail-closed freshness gate proves them newer than every Rust source
+      # (otherwise it rebuilds) — hence one job, no duplicate full chain.
+      - run: time python scripts/build_rust.py --lean-test
+      - run: time python scripts/run_tests.py --skip-build --lean
       - name: Report disk usage
         run: |
-          du -sh rust/target ~/.cargo/registry 2>/dev/null || true
+          date -u +%FT%TZ
+          du -sh rust/target ~/.cargo/registry ~/.cargo/git 2>/dev/null || true
           df -h /
 
   gate:

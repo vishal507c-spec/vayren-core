@@ -587,6 +587,18 @@ impl MarketState {
         }
         self.hover = None;
         self.price_manual = None;
+        if !same_series {
+            // Overlays index into a specific series' bars (positions are bar
+            // indices into the OLD window). Carrying them onto a new symbol
+            // or timeframe paints stale levels with no live source — the
+            // classic unexplained horizontal line. Fresh snapshots repopulate
+            // what is still legitimate.
+            self.strategy_rays.clear();
+            self.strategy_markers.clear();
+            self.trade_markers.clear();
+            self.focused = None;
+            self.focused_trade = None;
+        }
         self.bars = clean;
         if !self.bars.is_empty() {
             self.notice.clear();
@@ -774,9 +786,12 @@ impl MarketState {
                 let span = high - low;
                 let frac = f64::from(y_frac).clamp(0.0, 1.0);
                 let price = if span > 0.0 { high - frac * span } else { high };
+                // ONE canonical clamp: the stored fraction feeds the line,
+                // the badge and the tag, so they can never diverge at the
+                // pane edges (no per-use-site re-clamping).
                 self.hover = Some(MarketHover {
                     index: self.first + idx,
-                    y_frac,
+                    y_frac: y_frac.clamp(0.0, 1.0),
                     price,
                 });
                 true
@@ -1170,14 +1185,22 @@ pub fn normalize_indicator_name(name: &str) -> String {
 
 /// Grouped 2dp price (`2,451.10`); non-finite renders `N/A`, never invents.
 pub fn fmt_price(value: f64) -> String {
+    fmt_price_prec(value, 2)
+}
+
+/// Grouped price with explicit decimals (adaptive axis precision,
+/// TradingView parity: the tick step decides the decimals so 50-steps
+/// read "1,200.00" while 0.005-steps keep "1.200").
+pub fn fmt_price_prec(value: f64, decimals: usize) -> String {
     if !value.is_finite() {
         return "N/A".to_string();
     }
+    let decimals = decimals.min(6);
     let negative = value < 0.0;
-    let rounded = format!("{:.2}", value.abs());
+    let rounded = format!("{:.decimals$}", value.abs());
     let (int_part, frac_part) = match rounded.split_once('.') {
         Some((i, f)) => (i, f),
-        None => (rounded.as_str(), "00"),
+        None => (rounded.as_str(), ""),
     };
     let chars: Vec<char> = int_part.chars().collect();
     let mut grouped = String::new();
@@ -1187,12 +1210,31 @@ pub fn fmt_price(value: f64) -> String {
         }
         grouped.push(*ch);
     }
-    format!(
-        "{}{}.{}",
-        if negative { "-" } else { "" },
-        grouped,
-        frac_part
-    )
+    if decimals == 0 {
+        format!("{}{}", if negative { "-" } else { "" }, grouped)
+    } else {
+        format!(
+            "{}{}.{}",
+            if negative { "-" } else { "" },
+            grouped,
+            frac_part
+        )
+    }
+}
+
+/// Decimals that keep the tick step readable: steps ≥ 1 stay at the
+/// product-standard 2dp; sub-1 steps gain exactly the decimals they need.
+fn step_decimals(step: f64) -> usize {
+    if !step.is_finite() || step <= 0.0 {
+        return 2;
+    }
+    let mut dec = 0usize;
+    let mut s = step;
+    while s < 1.0 && dec < 5 {
+        s *= 10.0;
+        dec += 1;
+    }
+    dec.max(2)
 }
 
 /// Signed 2dp percent (`+1.24%`); absent renders `N/A`.
@@ -1346,24 +1388,11 @@ pub fn format_axis_time(stamp: &str, timeframe: &str, window: &[MarketBar]) -> S
     }
 }
 
-/// Sakamoto's algorithm: 0 = Sun, 1 = Mon, 2 = Tue, 3 = Wed, 4 = Thu, 5 = Fri, 6 = Sat
-fn day_of_week_sakamoto(year: i32, month: u32, day: u32) -> usize {
-    static T: [i32; 12] = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
-    let mut y = year;
-    if month < 3 {
-        y -= 1;
-    }
-    let m_idx = (month.saturating_sub(1)) as usize;
-    let t_val = if m_idx < 12 { T[m_idx] } else { 0 };
-    let dow = (y + y / 4 - y / 100 + y / 400 + t_val + day as i32) % 7;
-    let dow = (dow + 7) % 7;
-    dow as usize
-}
-
-/// Refined crosshair date/time format (Section 3):
-/// Structure: `DAY_OF_WEEK DAY MONTH 'YY   TIME`
-/// Examples: `Wed 16 Sep '26   10:15`, `Thu 17 Sep '26   14:30`, `Mon 21 Sep '26   09:15`
-pub fn format_crosshair_time(stamp: &str) -> String {
+/// Compact adaptive crosshair timestamp (TradingView parity):
+/// intraday frames read `17 Jul 2026 09:45`, daily and above read
+/// `17 Jul 2026` — no weekday, no short-year, no filler spaces, so the
+/// axis badge stays small at every zoom.
+pub fn format_crosshair_time(stamp: &str, timeframe: &str) -> String {
     let cleaned = stamp.replace('T', " ");
     let cleaned = cleaned.trim();
     if cleaned.len() < 10 {
@@ -1390,26 +1419,23 @@ pub fn format_crosshair_time(stamp: &str) -> String {
         return short_time(stamp);
     }
 
-    const DAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     const MONTHS: [&str; 13] = [
         "", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ];
 
-    let dow = DAYS[day_of_week_sakamoto(year, month, day)];
     let month_name = MONTHS[month as usize];
-    let yy = (year.rem_euclid(100)) as u32;
-
-    let time_clean = if time_part.len() >= 5 {
-        &time_part[..5]
-    } else {
-        ""
-    };
-
-    if !time_clean.is_empty() {
-        format!("{dow} {day} {month_name} '{yy:02}   {time_clean}")
-    } else {
-        format!("{dow} {day} {month_name} '{yy:02}")
+    let intraday = timeframe.contains('m') || timeframe.contains('h');
+    if intraday {
+        let time_clean = if time_part.len() >= 5 {
+            &time_part[..5]
+        } else {
+            ""
+        };
+        if !time_clean.is_empty() {
+            return format!("{day} {month_name} {year} {time_clean}");
+        }
     }
+    format!("{day} {month_name} {year}")
 }
 
 fn tone_of_change(change_pct: Option<f64>) -> Tone {
@@ -1464,6 +1490,16 @@ pub struct CandlePoint {
     pub tone: Tone,
     pub top: f32,
     pub body: f32,
+}
+
+/// One strategy-owned REF level tag: fractional axis position plus the
+/// preformatted value in the line's own color. Every persistent horizontal
+/// line carries one — no unexplained levels, ever.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RayLevel {
+    pub pos: f32,
+    pub label: String,
+    pub color: i32,
 }
 
 /// One axis tick: fractional position plus preformatted label.
@@ -1558,6 +1594,22 @@ pub struct MarketView {
     pub candles: Vec<CandlePoint>,
     pub price_ticks: Vec<AxisTick>,
     pub time_ticks: Vec<AxisTick>,
+    /// TradingView parity: permanent last-price line + badge (direction
+    /// colored, pinned to the axis edge when panned out of view).
+    pub last_price: String,
+    pub last_price_pos: f32,
+    pub last_price_up: bool,
+    pub has_last_price: bool,
+    /// TradingView parity: volume scale over the VISIBLE window (max label)
+    /// plus the latest bar's volume pinned at its own height.
+    pub volume_max_label: String,
+    pub last_volume: String,
+    pub last_volume_pos: f32,
+    pub last_volume_up: bool,
+    pub has_last_volume: bool,
+    /// Axis tags for strategy-owned REF levels (same count/order as the
+    /// rays they label; empty when no levels are live).
+    pub ray_levels: Vec<RayLevel>,
     pub plot_segments: Vec<PlotSegment>,
     pub markers: Vec<MarkerGlyph>,
     pub hover_x: f32,
@@ -1565,6 +1617,7 @@ pub struct MarketView {
     pub hover_price: String,
     pub hover_time: String,
     pub hover_volume: String,
+    pub hover_vol_pos: f32,
     pub hover_bull: bool,
     pub has_hover: bool,
     pub indicator_rows: Vec<IndicatorRow>,
@@ -1640,6 +1693,9 @@ pub struct HoverView {
     pub hover_price: String,
     pub hover_time: String,
     pub hover_volume: String,
+    /// Hovered bar's volume as a fraction of the VISIBLE max (positions the
+    /// volume tag at the bar's own height — never a fixed middle slot).
+    pub hover_vol_pos: f32,
     pub hover_bull: bool,
     pub has_hover: bool,
     pub header_ohlc: String,
@@ -1654,6 +1710,7 @@ pub fn project_hover(state: &MarketState) -> HoverView {
         hover_price: String::new(),
         hover_time: String::new(),
         hover_volume: String::new(),
+        hover_vol_pos: 0.0,
         hover_bull: true,
         has_hover: false,
         header_ohlc: "—".to_string(),
@@ -1676,17 +1733,30 @@ pub fn project_hover(state: &MarketState) -> HoverView {
             out.hover_x = (rel as f64 + 0.5) as f32 / plot_slots as f32;
             out.hover_y = hover.y_frac;
             // Regular keeps the state-computed price verbatim (golden
-            // parity); Percent/Log read the cursor position off the same
-            // transformed frame the axis labels use.
+            // parity) at axis precision; Percent/Log read the cursor
+            // position off the same transformed frame the axis labels use.
+            let dec = axis_decimals(frame.xform, frame.low, frame.high);
             out.hover_price = match frame.xform {
-                ScaleXform::Identity => fmt_price(hover.price),
+                ScaleXform::Identity => fmt_price_prec(hover.price, dec),
                 xform => {
                     let frac = f64::from(hover.y_frac).clamp(0.0, 1.0);
-                    fmt_scale(xform, frame.high - frac * (frame.high - frame.low))
+                    fmt_scale_dec(xform, frame.high - frac * (frame.high - frame.low), dec)
                 }
             };
-            out.hover_time = format_crosshair_time(&bar.time);
+            out.hover_time = format_crosshair_time(&bar.time, &state.timeframe);
             out.hover_volume = fmt_volume(bar.volume);
+            let vol_max = state
+                .visible_window()
+                .iter()
+                .map(|b| if b.volume.is_finite() { b.volume } else { 0.0 })
+                .fold(0.0f64, f64::max)
+                .max(1.0);
+            let bv = if bar.volume.is_finite() {
+                bar.volume.max(0.0)
+            } else {
+                0.0
+            };
+            out.hover_vol_pos = (bv / vol_max).clamp(0.0, 1.0) as f32;
             out.hover_bull = bar.close >= bar.open;
             out.header_ohlc = format!(
                 "O {}  H {}  L {}  C {}",
@@ -1811,10 +1881,120 @@ fn scale_frame(state: &MarketState) -> ScaleFrame {
     ScaleFrame { xform, low, high }
 }
 
-/// Axis/crosshair label for a transformed scale value.
-fn fmt_scale(xform: ScaleXform, t_value: f64) -> String {
+/// TradingView-style "nice" axis step (1/2/5 × 10^n): the largest round
+/// step that still fits `max_ticks` levels into the span, so the axis
+/// reads 1,200 / 1,150 / 1,100 instead of span-fraction slices.
+fn nice_step(span: f64, max_ticks: usize) -> f64 {
+    if !span.is_finite() || span <= 0.0 || max_ticks == 0 {
+        return 1.0;
+    }
+    let raw = span / max_ticks.max(1) as f64;
+    let mag = 10f64.powf(raw.log10().floor());
+    let scaled = raw / mag;
+    let mult = if scaled < 1.5 {
+        1.0
+    } else if scaled < 3.0 {
+        2.0
+    } else if scaled < 7.0 {
+        5.0
+    } else {
+        10.0
+    };
+    mult * mag
+}
+
+/// Label-space decimals for the current frame (single source for axis
+/// ticks, last-price badge, hover tag and ray tags — they can never
+/// disagree). Percent stays at product-standard 2dp; Log steps in
+/// real-price space.
+fn axis_decimals(xform: ScaleXform, low: f64, high: f64) -> usize {
     match xform {
-        ScaleXform::Identity => fmt_price(t_value),
+        ScaleXform::Identity => {
+            if !low.is_finite() || !high.is_finite() || high <= low {
+                2
+            } else {
+                step_decimals(nice_step(high - low, 6))
+            }
+        }
+        ScaleXform::Percent { .. } => 2,
+        ScaleXform::Log => {
+            let (lo, hi) = (low.exp(), high.exp());
+            if !lo.is_finite() || !hi.is_finite() || hi <= lo {
+                2
+            } else {
+                step_decimals(nice_step(hi - lo, 6))
+            }
+        }
+    }
+}
+
+/// Round price levels across the visible frame (TradingView parity):
+/// ticks sit on human-readable values, never on span fractions.
+/// Percent mode steps in % units; Log mode steps in real-price space
+/// (positions map back through the log frame); labels reuse the exact
+/// cursor-tag formatters so axis and crosshair can never disagree.
+fn nice_price_ticks(xform: ScaleXform, low: f64, high: f64, dec: usize) -> Vec<AxisTick> {
+    const MAX_TICKS: usize = 6;
+    if !low.is_finite() || !high.is_finite() || high <= low {
+        return vec![AxisTick {
+            pos: 0.5,
+            label: fmt_scale_dec(xform, 0.5 * (low + high), dec),
+        }];
+    }
+    let span = high - low;
+    // Label space: transformed units, except Log which steps in real prices.
+    let (lo, hi) = match xform {
+        ScaleXform::Log => (low.exp(), high.exp()),
+        _ => (low, high),
+    };
+    if !lo.is_finite() || !hi.is_finite() || hi <= lo {
+        return vec![AxisTick {
+            pos: 0.5,
+            label: fmt_scale_dec(xform, 0.5 * (low + high), dec),
+        }];
+    }
+    let step = nice_step(hi - lo, MAX_TICKS);
+    let mut ticks = Vec::new();
+    let mut k = (lo / step).ceil() as i64;
+    // Integer-grid walk: immune to `v += step` float drift, so levels stay
+    // exactly round (1,150.00, never 1,149.99999).
+    for _ in 0..12 {
+        let mut v = k as f64 * step;
+        if v > hi + step * 1e-9 {
+            break;
+        }
+        v += 0.0; // normalize -0.0 so signed labels never read "-0.00"
+        let pos = match xform {
+            ScaleXform::Log => ((high - v.ln()) / span) as f32,
+            _ => ((high - v) / span) as f32,
+        };
+        let label = match xform {
+            ScaleXform::Identity => fmt_price_prec(v, dec),
+            ScaleXform::Percent { .. } => format!("{v:+.2}%"),
+            ScaleXform::Log => fmt_price_prec(v, dec),
+        };
+        if pos.is_finite() {
+            ticks.push(AxisTick {
+                pos: pos.clamp(0.0, 1.0),
+                label,
+            });
+        }
+        k += 1;
+    }
+    if ticks.is_empty() {
+        return vec![AxisTick {
+            pos: 0.5,
+            label: fmt_scale_dec(xform, 0.5 * (low + high), dec),
+        }];
+    }
+    ticks
+}
+
+/// Axis/crosshair label with adaptive decimals (Identity/Log honor `dec`;
+/// Percent is always product-standard 2dp).
+fn fmt_scale_dec(xform: ScaleXform, t_value: f64, dec: usize) -> String {
+    match xform {
+        ScaleXform::Identity => fmt_price_prec(t_value, dec),
         ScaleXform::Percent { .. } => {
             if t_value.is_finite() {
                 format!("{t_value:+.2}%")
@@ -1824,7 +2004,7 @@ fn fmt_scale(xform: ScaleXform, t_value: f64) -> String {
         }
         ScaleXform::Log => {
             if t_value.is_finite() {
-                fmt_price(t_value.exp())
+                fmt_price_prec(t_value.exp(), dec)
             } else {
                 "N/A".to_string()
             }
@@ -1914,6 +2094,17 @@ pub fn project(state: &MarketState) -> MarketView {
     let mut candles = Vec::with_capacity(window.len());
     let mut price_ticks = Vec::new();
     let mut time_ticks = Vec::new();
+    let mut ray_levels: Vec<RayLevel> = Vec::new();
+    let mut last_price = String::new();
+    let mut last_price_pos = 0.5f32;
+    let mut last_price_up = true;
+    let mut has_last_price = false;
+    let mut volume_max_label = String::new();
+    let mut last_volume = String::new();
+    let mut last_volume_pos = 0.0f32;
+    let mut last_volume_up = true;
+    let mut has_last_volume = false;
+    let dec = axis_decimals(frame.xform, frame.low, frame.high);
     if has_data {
         // Bars the data actually holds: the tick labels are sampled from
         // these, while their positions come from the slot grid above.
@@ -1941,12 +2132,12 @@ pub fn project(state: &MarketState) -> MarketView {
                 body: (open - close).abs().max(0.004),
             });
         }
-        for frac in [0.0f32, 0.25, 0.5, 0.75, 1.0] {
-            price_ticks.push(AxisTick {
-                pos: frac,
-                label: fmt_scale(frame.xform, frame.high - f64::from(frac) * span),
-            });
-        }
+        // TradingView parity: round levels across the visible frame, never
+        // span fractions (grid lines follow these ticks one-for-one).
+        // Adjacent duplicates collapse (intraday time-only labels repeat
+        // across days) so the axis never shows the same stamp twice.
+        price_ticks = nice_price_ticks(frame.xform, frame.low, frame.high, dec);
+        let mut last_time_label = String::new();
         // Adaptive tick generation (Problem 2):
         // Calculate available plot fraction and min spacing to never allow label collision.
         // At 80px label width on ~1000px nominal width, min readable spacing is 0.085.
@@ -1964,11 +2155,77 @@ pub fn project(state: &MarketState) -> MarketView {
             if last_pos >= 0.0 && (pos - last_pos) < min_spacing_pos {
                 continue; // Skip rather than compress to collide
             }
+            let time_label = format_axis_time(&window[idx].time, &state.timeframe, window);
+            if time_label == last_time_label {
+                continue; // Same stamp twice in a row explains nothing
+            }
             time_ticks.push(AxisTick {
                 pos,
-                label: format_axis_time(&window[idx].time, &state.timeframe, window),
+                label: time_label.clone(),
             });
+            last_time_label = time_label;
             last_pos = pos;
+        }
+    }
+
+    // TradingView parity: permanent last-price line + badge and a readable
+    // volume scale. The last price tracks the symbol's LATEST bar (not the
+    // viewport edge) and pins to the axis when panned out of view; the
+    // volume max spans the VISIBLE window exactly like TV's volume scale.
+    if has_data {
+        if let Some(last) = state.bars.last() {
+            if let Some(t) = transform_price(frame.xform, last.close) {
+                last_price = fmt_scale_dec(frame.xform, t, dec);
+                last_price_pos = norm(last.close).clamp(0.0, 1.0);
+                has_last_price = true;
+            }
+            last_price_up = match state.bars.len() {
+                0 | 1 => last.close >= last.open,
+                n => last.close >= state.bars[n - 2].close,
+            };
+            let vol_max = window
+                .iter()
+                .map(|b| if b.volume.is_finite() { b.volume } else { 0.0 })
+                .fold(0.0f64, f64::max)
+                .max(1.0);
+            volume_max_label = fmt_volume(vol_max);
+            let lv = if last.volume.is_finite() {
+                last.volume.max(0.0)
+            } else {
+                0.0
+            };
+            last_volume = fmt_volume(lv);
+            last_volume_pos = (lv / vol_max).clamp(0.0, 1.0) as f32;
+            last_volume_up = last.close >= last.open;
+            // The max label already says the value when the latest bar IS
+            // the max — a second identical tag at the same spot is noise.
+            has_last_volume = (1.0 - last_volume_pos) >= 0.12;
+        }
+        // Strategy-owned REF levels get honest axis tags (same transform as
+        // their lines): no persistent line without a labeled value, ever.
+        if span > 0.0 {
+            for ray in &state.strategy_rays {
+                if ray.start < 0 {
+                    continue;
+                }
+                let Some(t) = transform_price(frame.xform, ray.price) else {
+                    continue;
+                };
+                let pos = ((frame.high - t) / span) as f32;
+                if !pos.is_finite() {
+                    continue;
+                }
+                let label = match frame.xform {
+                    ScaleXform::Identity => fmt_price_prec(ray.price, dec),
+                    ScaleXform::Percent { .. } => format!("{t:+.2}%"),
+                    ScaleXform::Log => fmt_price_prec(ray.price, dec),
+                };
+                ray_levels.push(RayLevel {
+                    pos: pos.clamp(0.0, 1.0),
+                    label,
+                    color: store_color_code(ray.layer, ray.order),
+                });
+            }
         }
     }
 
@@ -1980,6 +2237,7 @@ pub fn project(state: &MarketState) -> MarketView {
     let hover_price = hover.hover_price;
     let hover_time = hover.hover_time;
     let hover_volume = hover.hover_volume;
+    let hover_vol_pos = hover.hover_vol_pos;
     let hover_bull = hover.hover_bull;
     let has_hover = hover.has_hover;
     let header_ohlc = hover.header_ohlc;
@@ -2297,6 +2555,25 @@ pub fn project(state: &MarketState) -> MarketView {
                 total_bars,
             );
         }
+        // TradingView parity: the last-price line is a subtle dash run, not
+        // a divider — overlay segments so it honors the same transform.
+        if has_last_price {
+            let (dash, gap) = (0.014f32, 0.010f32);
+            let mut x = 0.0f32;
+            while x < 1.0 {
+                let x2 = (x + dash).min(1.0);
+                plot_segments.push(PlotSegment {
+                    x1: x,
+                    y1: last_price_pos,
+                    x2,
+                    y2: last_price_pos,
+                    color: if last_price_up { 2 } else { 3 },
+                    series: -2,
+                    wide: false,
+                });
+                x += dash + gap;
+            }
+        }
         // Strategy-owned markers (entries, exits, EOD pills): glyph + pill
         // on the exact bar; UP-family pills below, DOWN-family above — the
         // painter's placement rule, no pill de-collision in Slint (noted).
@@ -2509,6 +2786,16 @@ pub fn project(state: &MarketState) -> MarketView {
         candles,
         price_ticks,
         time_ticks,
+        last_price,
+        last_price_pos,
+        last_price_up,
+        has_last_price,
+        volume_max_label,
+        last_volume,
+        last_volume_pos,
+        last_volume_up,
+        has_last_volume,
+        ray_levels,
         plot_segments,
         markers,
         hover_x,
@@ -2516,6 +2803,7 @@ pub fn project(state: &MarketState) -> MarketView {
         hover_price,
         hover_time,
         hover_volume,
+        hover_vol_pos,
         hover_bull,
         has_hover,
         indicator_rows,
@@ -3529,7 +3817,10 @@ mod tests {
         let v = project(&st);
         let bar = &st.bars[hover.index];
         assert_eq!(v.hover_volume, fmt_volume(bar.volume));
-        assert_eq!(v.hover_time, format_crosshair_time(&bar.time));
+        assert_eq!(
+            v.hover_time,
+            format_crosshair_time(&bar.time, &st.timeframe)
+        );
         assert!(v.header_ohlc.contains(&fmt_price(bar.open)));
     }
 
@@ -3648,7 +3939,10 @@ mod tests {
 
                 let bar = &st.bars[hover.index];
                 // Acceptance test: crosshair candle == timestamp == volume == OHLC
-                assert_eq!(v.hover_time, format_crosshair_time(&bar.time));
+                assert_eq!(
+                    v.hover_time,
+                    format_crosshair_time(&bar.time, &st.timeframe)
+                );
                 assert_eq!(v.hover_volume, fmt_volume(bar.volume));
                 assert!(v.header_ohlc.contains(&fmt_price(bar.open)));
                 assert!(v.header_ohlc.contains(&fmt_price(bar.high)));
@@ -3663,7 +3957,10 @@ mod tests {
             let v_zoom = project(&st);
             let bar_zoom = &st.bars[hover_zoom.index];
             assert_eq!(v_zoom.hover_volume, fmt_volume(bar_zoom.volume));
-            assert_eq!(v_zoom.hover_time, format_crosshair_time(&bar_zoom.time));
+            assert_eq!(
+                v_zoom.hover_time,
+                format_crosshair_time(&bar_zoom.time, &st.timeframe)
+            );
             assert!(v_zoom.header_ohlc.contains(&fmt_price(bar_zoom.close)));
 
             // Test after Pan
@@ -3673,7 +3970,10 @@ mod tests {
             let v_pan = project(&st);
             let bar_pan = &st.bars[hover_pan.index];
             assert_eq!(v_pan.hover_volume, fmt_volume(bar_pan.volume));
-            assert_eq!(v_pan.hover_time, format_crosshair_time(&bar_pan.time));
+            assert_eq!(
+                v_pan.hover_time,
+                format_crosshair_time(&bar_pan.time, &st.timeframe)
+            );
             assert!(v_pan.header_ohlc.contains(&fmt_price(bar_pan.close)));
         }
     }
@@ -3776,6 +4076,256 @@ mod tests {
         assert!(!st.grid_visible);
         assert!(st.apply(MarketAction::ToggleCrosshair));
         assert!(!st.cross_visible);
+    }
+
+    #[test]
+    fn nice_step_picks_round_tv_levels() {
+        // Span 182 over ≤6 ticks: raw 30.3 -> magnitude 10 -> 5x -> 50.
+        assert_eq!(nice_step(182.0, 6), 50.0);
+        assert_eq!(nice_step(0.83, 6), 0.1);
+        assert_eq!(nice_step(9.0, 6), 2.0);
+        assert_eq!(nice_step(0.0, 6), 1.0);
+        assert_eq!(nice_step(f64::NAN, 6), 1.0);
+    }
+
+    #[test]
+    fn price_ticks_land_on_round_values() {
+        let mut st = MarketState::default();
+        st.width_cap = 200;
+        st.set_bars("S", "15m", "", scale_bars());
+        let view = project(&st);
+        assert!(view.has_data);
+        assert!((2..=7).contains(&view.price_ticks.len()));
+        // Strictly descending positions inside the band, labels parse back
+        // to exact multiples of one shared round step (never 1,159.72-style
+        // span fractions).
+        let mut prev = f32::INFINITY;
+        let mut values = Vec::new();
+        for t in &view.price_ticks {
+            assert!((0.0..=1.0).contains(&t.pos), "tick out of band: {t:?}");
+            assert!(t.pos < prev, "ticks must descend: {t:?}");
+            prev = t.pos;
+            let v: f64 = t.label.replace(',', "").parse().expect("tick parses");
+            values.push(v);
+        }
+        let step = (values[0] - values[1]).abs();
+        assert!(step > 0.0);
+        for v in &values {
+            let ratio = (v / step).round();
+            assert!(
+                (v - ratio * step).abs() < step * 1e-9,
+                "{v} is not a multiple of step {step}"
+            );
+        }
+    }
+
+    #[test]
+    fn last_price_and_volume_project_tv_badges() {
+        let mut st = MarketState::default();
+        st.width_cap = 200;
+        st.set_bars("S", "15m", "", scale_bars());
+        let view = project(&st);
+        assert!(view.has_data);
+        // scale_bars rise 100 -> 199: last close 199.0, direction up.
+        assert!(view.has_last_price);
+        assert_eq!(view.last_price, fmt_price(199.0));
+        assert!(view.last_price_up);
+        assert!((0.0..=1.0).contains(&view.last_price_pos));
+        // Volume is flat 1000 over the window: the max label is honest, and
+        // the latest bar (also the max) hides its duplicate tag.
+        assert!(!view.has_last_volume);
+        assert_eq!(view.volume_max_label, fmt_volume(1000.0));
+        assert_eq!(view.last_volume, fmt_volume(1000.0));
+    }
+
+    #[test]
+    fn step_decimals_follow_tick_size() {
+        assert_eq!(step_decimals(50.0), 2);
+        assert_eq!(step_decimals(0.5), 2);
+        assert_eq!(step_decimals(0.05), 2);
+        assert_eq!(step_decimals(0.005), 3);
+        assert_eq!(step_decimals(0.0), 2);
+        assert_eq!(step_decimals(f64::NAN), 2);
+        assert_eq!(fmt_price_prec(1150.0, 2), "1,150.00");
+        assert_eq!(fmt_price_prec(1.23456, 3), "1.235");
+        assert_eq!(fmt_price_prec(f64::NAN, 3), "N/A");
+    }
+
+    #[test]
+    fn sub_rupee_ticks_keep_precision() {
+        // Penny-stock frame: cent-level steps keep 3dp labels, never "0.05"
+        // rounded to "0.05" vs "0.050" ambiguity — axis and badge agree.
+        let bars: Vec<MarketBar> = (0..50)
+            .map(|i| {
+                let close = 0.05 + i as f64 * 0.0004;
+                MarketBar {
+                    time: format!("2024-01-02T09:{:02}:00", 15 + i / 60),
+                    open: close - 0.0001,
+                    high: close + 0.0001,
+                    low: close - 0.0002,
+                    close,
+                    volume: 1000.0,
+                }
+            })
+            .collect();
+        let mut st = MarketState::default();
+        st.width_cap = 200;
+        st.set_bars("P", "15m", "", bars);
+        let view = project(&st);
+        assert!(view.has_data);
+        assert!(!view.price_ticks.is_empty());
+        for t in &view.price_ticks {
+            let frac = t.label.split('.').nth(1).expect("has decimals");
+            assert_eq!(frac.len(), 3, "adaptive 3dp: {}", t.label);
+        }
+        let frac = view
+            .last_price
+            .split('.')
+            .nth(1)
+            .expect("badge has decimals");
+        assert_eq!(frac.len(), 3);
+    }
+
+    #[test]
+    fn series_change_clears_stale_overlays() {
+        // The 932.68-class bug: overlays index into the OLD series' bars.
+        let mut st = MarketState::default();
+        st.width_cap = 200;
+        st.set_bars("A", "15m", "", scale_bars());
+        st.strategy_rays.push(StrategyRay {
+            start: 0,
+            price: 932.68,
+            cap: -1,
+            layer: 60,
+            order: 0,
+        });
+        st.strategy_markers.push(StrategyMarker {
+            bar: 10,
+            price: 150.0,
+            kind: "DOT".to_string(),
+            text: String::new(),
+            layer: 60,
+            order: 0,
+        });
+        st.trade_markers.push(TradeMarker {
+            side: "long".to_string(),
+            entry_pos: 1,
+            exit_pos: 5,
+            entry_price: 101.0,
+            exit_price: 105.0,
+            winning: true,
+            entry_covered: false,
+            exit_covered: false,
+            exit_reason: String::new(),
+        });
+        assert!(!project(&st).ray_levels.is_empty());
+        // New symbol: every overlay dies with the old series.
+        st.set_bars("B", "15m", "", scale_bars());
+        assert!(st.strategy_rays.is_empty());
+        assert!(st.strategy_markers.is_empty());
+        assert!(st.trade_markers.is_empty());
+        assert!(st.focused.is_none());
+        assert!(st.focused_trade.is_none());
+        let view = project(&st);
+        assert!(view.ray_levels.is_empty());
+        // Same-series append keeps live overlays (indices stay valid).
+        st.strategy_rays.push(StrategyRay {
+            start: 0,
+            price: 150.0,
+            cap: -1,
+            layer: 60,
+            order: 0,
+        });
+        st.set_bars("B", "15m", "", scale_bars());
+        assert_eq!(st.strategy_rays.len(), 1);
+    }
+
+    #[test]
+    fn ray_levels_tag_live_rays() {
+        let mut st = MarketState::default();
+        st.width_cap = 200;
+        st.set_bars("S", "15m", "", scale_bars());
+        st.strategy_rays.push(StrategyRay {
+            start: 5,
+            price: 150.0,
+            cap: -1,
+            layer: 60,
+            order: 0,
+        });
+        let view = project(&st);
+        assert_eq!(view.ray_levels.len(), 1);
+        let tag = &view.ray_levels[0];
+        assert!((0.0..=1.0).contains(&tag.pos));
+        assert_eq!(tag.label, fmt_price_prec(150.0, 2));
+        assert_eq!(tag.color, store_color_code(60, 0));
+    }
+
+    #[test]
+    fn hover_clamps_to_price_pane() {
+        let mut st = MarketState::default();
+        st.width_cap = 200;
+        st.set_bars("S", "15m", "", scale_bars());
+        // Below the pane (volume zone) and above it: the stored fraction
+        // pins to the band so line, badge and tag share one value.
+        assert!(st.apply(MarketAction::HoverMoved(0.5, 1.6)));
+        assert_eq!(st.hover.expect("hover").y_frac, 1.0);
+        assert!(st.apply(MarketAction::HoverMoved(0.5, -0.4)));
+        assert_eq!(st.hover.expect("hover").y_frac, 0.0);
+        let view = project(&st);
+        assert!((0.0..=1.0).contains(&view.hover_y));
+    }
+
+    #[test]
+    fn last_price_line_is_a_subtle_dash_run() {
+        let mut st = MarketState::default();
+        st.width_cap = 200;
+        st.set_bars("S", "15m", "", scale_bars());
+        let view = project(&st);
+        assert!(view.has_last_price);
+        let dashes: Vec<_> = view
+            .plot_segments
+            .iter()
+            .filter(|s| s.series == -2 && (s.x2 - s.x1) > 0.0)
+            .collect();
+        // ~40 dashes span the full width on one shared y (up = pos code).
+        assert!((30..=60).contains(&dashes.len()));
+        for d in &dashes {
+            assert_eq!((d.y1, d.y2), (view.last_price_pos, view.last_price_pos));
+            assert_eq!(d.color, 2);
+        }
+        assert!(!view.plot_segments.iter().any(|s| s.series == 0));
+    }
+
+    #[test]
+    fn time_ticks_never_repeat_a_stamp() {
+        // Fifty bars inside one minute on a 15m frame: every raw label is
+        // "09:15" — the axis must collapse to exactly one tick.
+        let bars: Vec<MarketBar> = (0..50)
+            .map(|i| MarketBar {
+                time: format!("2024-01-02T09:15:{:02}", i % 60),
+                open: 100.0 + i as f64 * 0.01,
+                high: 101.0,
+                low: 99.0,
+                close: 100.5 + i as f64 * 0.01,
+                volume: 1000.0,
+            })
+            .collect();
+        let mut st = MarketState::default();
+        st.width_cap = 200;
+        st.set_bars("S", "15m", "", bars);
+        let view = project(&st);
+        assert_eq!(view.time_ticks.len(), 1);
+    }
+
+    #[test]
+    fn empty_state_has_no_tv_badges() {
+        let st = MarketState::default();
+        let view = project(&st);
+        assert!(!view.has_data);
+        assert!(!view.has_last_price);
+        assert!(!view.has_last_volume);
+        assert!(view.last_price.is_empty());
+        assert!(view.last_volume.is_empty());
     }
 
     #[test]
@@ -4032,22 +4582,24 @@ mod tests {
     }
 
     #[test]
-    fn crosshair_time_exact_format_matches_specification() {
+    fn crosshair_time_adapts_to_timeframe() {
+        // Intraday carries the time; daily and above carry the full date.
         assert_eq!(
-            format_crosshair_time("2026-09-16 10:15:00"),
-            "Wed 16 Sep '26   10:15"
+            format_crosshair_time("2026-09-16 10:15:00", "15m"),
+            "16 Sep 2026 10:15"
         );
         assert_eq!(
-            format_crosshair_time("2026-09-17 14:30:00"),
-            "Thu 17 Sep '26   14:30"
+            format_crosshair_time("2026-09-17 14:30:00", "1h"),
+            "17 Sep 2026 14:30"
         );
         assert_eq!(
-            format_crosshair_time("2026-09-21 09:15:00"),
-            "Mon 21 Sep '26   09:15"
+            format_crosshair_time("2026-09-21 09:15:00", "1D"),
+            "21 Sep 2026"
         );
         assert_eq!(
-            format_crosshair_time("2026-09-16T10:15:00"),
-            "Wed 16 Sep '26   10:15"
+            format_crosshair_time("2026-09-16T10:15:00", "1W"),
+            "16 Sep 2026"
         );
+        assert_eq!(format_crosshair_time("garbage", "15m"), "garbage");
     }
 }

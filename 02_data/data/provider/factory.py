@@ -20,11 +20,7 @@ from broker.capabilities import Domain
 from broker.management import BrokerSpec
 from broker.registry import default_registry
 
-from data.provider.contract import (
-    ERR_PROVIDER_UNAVAILABLE,
-    Provider,
-    ProviderError,
-)
+from data.provider.contract import Provider
 from data.provider.credentials_store import provider_service
 from data.provider.fyers import FyersProvider
 from data.provider.fyers.live_auth import (
@@ -44,40 +40,6 @@ from data.provider.fyers.selenium_auth import fyers_selenium_interactive_login
 from data.provider.fyers.session_adapter import FyersSessionAdapter
 from data.provider.zerodha import ZerodhaProvider
 from data.settings import DownloadSettings
-
-
-def unavailable_provider(reason: str) -> Provider:
-    """A fail-closed historical provider used when the selected broker
-    cannot serve history (M4).
-
-    Every method refuses with a normalized ``ProviderError`` carrying the
-    recorded reason — the download path fails loudly and honestly instead
-    of silently using another broker. No network, no state.
-    """
-
-    class _UnavailableProvider:
-        def available(self) -> tuple[bool, str]:
-            return False, reason
-
-        def symbols(self) -> set[str]:
-            raise ProviderError(reason, ERR_PROVIDER_UNAVAILABLE)
-
-        def fetch_candles(
-            self,
-            symbol: str,  # noqa: ARG002
-            interval: str,  # noqa: ARG002
-            start,  # noqa: ARG002
-            end,  # noqa: ARG002
-        ) -> list[dict]:
-            raise ProviderError(reason, ERR_PROVIDER_UNAVAILABLE)
-
-        def new_session(self) -> None:
-            raise ProviderError(reason, ERR_PROVIDER_UNAVAILABLE)
-
-        def renew(self) -> None:
-            raise ProviderError(reason, ERR_PROVIDER_UNAVAILABLE)
-
-    return _UnavailableProvider()  # type: ignore[return-value]
 
 
 def _seed_zerodha() -> None:

@@ -129,8 +129,7 @@
       "kind": "actual",
       "sources": [
         "00_app/app/services/broker_manager.py",
-        "00_app/app/services/live_trading_service.py",
-        "00_app/app/services/research_service.py"
+        "00_app/app/services/live_trading_service.py"
       ],
       "to": "00_app/app"
     },
@@ -378,8 +377,7 @@
       "kind": "actual",
       "sources": [
         "05_strategy/strategy/research/evolution.py",
-        "05_strategy/strategy/runtime.py",
-        "05_strategy/strategy/strategies/obr.py"
+        "05_strategy/strategy/runtime.py"
       ],
       "to": "03_market/market"
     },
@@ -944,7 +942,7 @@
       "to": "01_core/core/native"
     }
   ],
-  "entity_count": 3788,
+  "entity_count": 3873,
   "files": [
     {
       "domain": "APP_COMPOSITION",
@@ -2223,16 +2221,6 @@
       "module": "05_strategy/strategy",
       "owner": "PYTHON_STRATEGY",
       "owner_source": "policy",
-      "path": "05_strategy/strategy/strategies/obr.py",
-      "retention_state": null
-    },
-    {
-      "domain": "STRATEGY",
-      "is_test": false,
-      "language": "PYTHON",
-      "module": "05_strategy/strategy",
-      "owner": "PYTHON_STRATEGY",
-      "owner_source": "policy",
       "path": "05_strategy/strategy/strategies/rsi.py",
       "retention_state": null
     },
@@ -2684,6 +2672,16 @@
       "owner": "BROKER_CONTRACT",
       "owner_source": "policy",
       "path": "09_broker/broker/status.py",
+      "retention_state": null
+    },
+    {
+      "domain": "BROKER_CONTRACT",
+      "is_test": false,
+      "language": "PYTHON",
+      "module": "09_broker/broker",
+      "owner": "BROKER_CONTRACT",
+      "owner_source": "policy",
+      "path": "09_broker/broker/surprise.py",
       "retention_state": null
     },
     {
@@ -4053,6 +4051,16 @@
       "module": "scripts",
       "owner": "scripts",
       "owner_source": "synthetic",
+      "path": "scripts/tests/test_build_rust.py",
+      "retention_state": null
+    },
+    {
+      "domain": "TOOLING",
+      "is_test": true,
+      "language": "PYTHON",
+      "module": "scripts",
+      "owner": "scripts",
+      "owner_source": "synthetic",
       "path": "scripts/tests/test_context.py",
       "retention_state": null
     },
@@ -4163,6 +4171,16 @@
       "module": "scripts",
       "owner": "scripts",
       "owner_source": "synthetic",
+      "path": "scripts/tests/test_run_tests.py",
+      "retention_state": null
+    },
+    {
+      "domain": "TOOLING",
+      "is_test": true,
+      "language": "PYTHON",
+      "module": "scripts",
+      "owner": "scripts",
+      "owner_source": "synthetic",
       "path": "scripts/tests/test_self_opt.py",
       "retention_state": null
     },
@@ -4194,6 +4212,16 @@
       "owner": "scripts",
       "owner_source": "synthetic",
       "path": "scripts/tests/test_validate_scope.py",
+      "retention_state": null
+    },
+    {
+      "domain": "TOOLING",
+      "is_test": true,
+      "language": "PYTHON",
+      "module": "scripts",
+      "owner": "scripts",
+      "owner_source": "synthetic",
+      "path": "scripts/tests/test_vayren_intel.py",
       "retention_state": null
     },
     {
@@ -4275,9 +4303,19 @@
       "owner_source": "synthetic",
       "path": "scripts/validate_structure.py",
       "retention_state": null
+    },
+    {
+      "domain": "TOOLING",
+      "is_test": false,
+      "language": "PYTHON",
+      "module": "scripts",
+      "owner": "scripts",
+      "owner_source": "synthetic",
+      "path": "scripts/vayren_intel.py",
+      "retention_state": null
     }
   ],
-  "inputs_hash": "3b6c5484a952b5249a9902144fd684d9bb08654d0c12833fa0da43b72c4a9472",
+  "inputs_hash": "fa1a3c7d6bb611796eb8a6ebc0471618de089bab00b1cac096f32b55a65f87d2",
   "languages": [
     {
       "id": "RUST"
@@ -4654,7 +4692,6 @@
         "05_strategy/strategy/strategies/base.py",
         "05_strategy/strategy/strategies/ema.py",
         "05_strategy/strategy/strategies/indicators.py",
-        "05_strategy/strategy/strategies/obr.py",
         "05_strategy/strategy/strategies/rsi.py",
         "05_strategy/strategy/strategies/sma.py",
         "05_strategy/strategy/tests/__init__.py",
@@ -4825,6 +4862,7 @@
         "09_broker/broker/selection.py",
         "09_broker/broker/selection_store.py",
         "09_broker/broker/status.py",
+        "09_broker/broker/surprise.py",
         "09_broker/broker/tests/__init__.py",
         "09_broker/broker/tests/test_auth.py",
         "09_broker/broker/tests/test_broker_contracts.py",
@@ -5121,6 +5159,7 @@
         "scripts/speed/journal.py",
         "scripts/speed/markers.py",
         "scripts/tests/test_authority.py",
+        "scripts/tests/test_build_rust.py",
         "scripts/tests/test_context.py",
         "scripts/tests/test_context_packet.py",
         "scripts/tests/test_desktop.py",
@@ -5132,10 +5171,12 @@
         "scripts/tests/test_repo_graph.py",
         "scripts/tests/test_repo_index.py",
         "scripts/tests/test_router.py",
+        "scripts/tests/test_run_tests.py",
         "scripts/tests/test_self_opt.py",
         "scripts/tests/test_speed_loop.py",
         "scripts/tests/test_speed_metrics.py",
         "scripts/tests/test_validate_scope.py",
+        "scripts/tests/test_vayren_intel.py",
         "scripts/validate_architecture_gate.py",
         "scripts/validate_authority.py",
         "scripts/validate_imports.py",
@@ -5143,7 +5184,8 @@
         "scripts/validate_repo_graph.py",
         "scripts/validate_routes.py",
         "scripts/validate_scope.py",
-        "scripts/validate_structure.py"
+        "scripts/validate_structure.py",
+        "scripts/vayren_intel.py"
       ],
       "id": "scripts",
       "language": "PYTHON",
@@ -5312,7 +5354,7 @@
       "required_language": "PYTHON"
     }
   ],
-  "relationship_count": 5948,
+  "relationship_count": 6138,
   "repository": {
     "name": "vayren-core",
     "root": "."
@@ -5751,8 +5793,7 @@
     {
       "called_by": [
         "app.services.broker_manager:BrokerManager",
-        "app.services.live_trading_service:LiveTradingService",
-        "app.services.research_service:ResearchWorker"
+        "app.services.live_trading_service:LiveTradingService"
       ],
       "callers_complete": true,
       "calls": [
@@ -5772,8 +5813,7 @@
     },
     {
       "called_by": [
-        "app.services.broker_manager:_Worker",
-        "app.services.research_service:ResearchWorker"
+        "app.services.broker_manager:_Worker"
       ],
       "callers_complete": true,
       "calls": [],
@@ -5860,21 +5900,6 @@
       "name": "_is_main_thread",
       "public": false,
       "qualified": "app.observable:_is_main_thread",
-      "tests": []
-    },
-    {
-      "called_by": [],
-      "callers_complete": true,
-      "calls": [],
-      "dotted": "app.observable.pending_events",
-      "file": "00_app/app/observable.py",
-      "kind": "function",
-      "language": "PYTHON",
-      "line": 209,
-      "module": "00_app/app",
-      "name": "pending_events",
-      "public": true,
-      "qualified": "app.observable:pending_events",
       "tests": []
     },
     {
@@ -6509,7 +6534,7 @@
       "file": "00_app/app/services/research_service.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 40,
+      "line": 38,
       "module": "00_app/app/services",
       "name": "AnalysisView",
       "public": true,
@@ -6526,7 +6551,7 @@
       "file": "00_app/app/services/research_service.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 27,
+      "line": 25,
       "module": "00_app/app/services",
       "name": "DatasetSummary",
       "public": true,
@@ -6591,29 +6616,11 @@
       "file": "00_app/app/services/research_service.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 237,
+      "line": 189,
       "module": "00_app/app/services",
       "name": "ResearchService",
       "public": true,
       "qualified": "app.services.research_service:ResearchService",
-      "tests": []
-    },
-    {
-      "called_by": [],
-      "callers_complete": true,
-      "calls": [
-        "app.observable:Signal",
-        "app.observable:WorkerThread"
-      ],
-      "dotted": "app.services.research_service.ResearchWorker",
-      "file": "00_app/app/services/research_service.py",
-      "kind": "class",
-      "language": "PYTHON",
-      "line": 191,
-      "module": "00_app/app/services",
-      "name": "ResearchWorker",
-      "public": false,
-      "qualified": "app.services.research_service:ResearchWorker",
       "tests": []
     },
     {
@@ -6626,7 +6633,7 @@
       "file": "00_app/app/services/research_service.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 74,
+      "line": 72,
       "module": "00_app/app/services",
       "name": "SignalRecordingLogic",
       "public": false,
@@ -6643,7 +6650,7 @@
       "file": "00_app/app/services/research_service.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 59,
+      "line": 57,
       "module": "00_app/app/services",
       "name": "_metric",
       "public": false,
@@ -6660,7 +6667,7 @@
       "file": "00_app/app/services/research_service.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 124,
+      "line": 122,
       "module": "00_app/app/services",
       "name": "_source_hash",
       "public": false,
@@ -6677,7 +6684,7 @@
       "file": "00_app/app/services/research_service.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 128,
+      "line": 126,
       "module": "00_app/app/services",
       "name": "_spec_number",
       "public": false,
@@ -6696,7 +6703,7 @@
       "file": "00_app/app/services/research_service.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 117,
+      "line": 115,
       "module": "00_app/app/services",
       "name": "_window_bounds",
       "public": false,
@@ -6713,7 +6720,7 @@
       "file": "00_app/app/services/research_service.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 142,
+      "line": 140,
       "module": "00_app/app/services",
       "name": "validate_research_config",
       "public": false,
@@ -8726,6 +8733,21 @@
       "name": "DuplicateBrokerError",
       "public": true,
       "qualified": "broker.registry:DuplicateBrokerError",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "broker.registry._phase6_probe",
+      "file": "09_broker/broker/registry.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 134,
+      "module": "09_broker/broker",
+      "name": "_phase6_probe",
+      "public": false,
+      "qualified": "broker.registry:_phase6_probe",
       "tests": []
     },
     {
@@ -11932,8 +11954,7 @@
     },
     {
       "called_by": [
-        "data.provider.factory:build_provider",
-        "data.provider.factory:unavailable_provider"
+        "data.provider.factory:build_provider"
       ],
       "callers_complete": true,
       "calls": [],
@@ -11951,7 +11972,6 @@
     {
       "called_by": [
         "broker.tests.test_fyers_adapter:test_history_face_fails_closed_without_network",
-        "data.provider.factory:unavailable_provider",
         "data.provider.fyers.adapter:FyersProvider",
         "data.provider.zerodha.adapter:ZerodhaProvider",
         "data.tests.test_fyers_provider:test_history_calls_fail_closed_with_secret_free_reasons"
@@ -12230,7 +12250,7 @@
       "file": "02_data/data/provider/factory.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 127,
+      "line": 89,
       "module": "02_data/data/provider",
       "name": "_schema_rows",
       "public": false,
@@ -12248,7 +12268,7 @@
       "file": "02_data/data/provider/factory.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 104,
+      "line": 66,
       "module": "02_data/data/provider",
       "name": "_seed_fyers",
       "public": false,
@@ -12266,7 +12286,7 @@
       "file": "02_data/data/provider/factory.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 83,
+      "line": 45,
       "module": "02_data/data/provider",
       "name": "_seed_zerodha",
       "public": false,
@@ -12291,7 +12311,7 @@
       "file": "02_data/data/provider/factory.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 351,
+      "line": 313,
       "module": "02_data/data/provider",
       "name": "build_provider",
       "public": true,
@@ -12310,7 +12330,7 @@
       "file": "02_data/data/provider/factory.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 325,
+      "line": 287,
       "module": "02_data/data/provider",
       "name": "ensure_live_venues",
       "public": true,
@@ -12339,29 +12359,11 @@
       "file": "02_data/data/provider/factory.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 204,
+      "line": 166,
       "module": "02_data/data/provider",
       "name": "fyers_management_spec",
       "public": true,
       "qualified": "data.provider.factory:fyers_management_spec",
-      "tests": []
-    },
-    {
-      "called_by": [],
-      "callers_complete": true,
-      "calls": [
-        "data.provider.contract:Provider",
-        "data.provider.contract:ProviderError"
-      ],
-      "dotted": "data.provider.factory.unavailable_provider",
-      "file": "02_data/data/provider/factory.py",
-      "kind": "function",
-      "language": "PYTHON",
-      "line": 49,
-      "module": "02_data/data/provider",
-      "name": "unavailable_provider",
-      "public": true,
-      "qualified": "data.provider.factory:unavailable_provider",
       "tests": []
     },
     {
@@ -12386,7 +12388,7 @@
       "file": "02_data/data/provider/factory.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 149,
+      "line": 111,
       "module": "02_data/data/provider",
       "name": "zerodha_management_spec",
       "public": true,
@@ -21731,7 +21733,7 @@
       "file": "rust/vayren-core/src/download.rs",
       "kind": "const",
       "language": "RUST",
-      "line": 742,
+      "line": 736,
       "module": "rust/vayren-core",
       "name": "CANONICAL_INTERVALS",
       "public": true,
@@ -21847,96 +21849,6 @@
       "called_by": [],
       "callers_complete": false,
       "calls": [],
-      "dotted": "rust::vayren-core::src::download::ERR_INVALID_REQUEST",
-      "file": "rust/vayren-core/src/download.rs",
-      "kind": "const",
-      "language": "RUST",
-      "line": 738,
-      "module": "rust/vayren-core",
-      "name": "ERR_INVALID_REQUEST",
-      "public": true,
-      "qualified": "rust::vayren-core::src::download::ERR_INVALID_REQUEST",
-      "tests": []
-    },
-    {
-      "called_by": [],
-      "callers_complete": false,
-      "calls": [],
-      "dotted": "rust::vayren-core::src::download::ERR_INVALID_SYMBOL",
-      "file": "rust/vayren-core/src/download.rs",
-      "kind": "const",
-      "language": "RUST",
-      "line": 735,
-      "module": "rust/vayren-core",
-      "name": "ERR_INVALID_SYMBOL",
-      "public": true,
-      "qualified": "rust::vayren-core::src::download::ERR_INVALID_SYMBOL",
-      "tests": []
-    },
-    {
-      "called_by": [],
-      "callers_complete": false,
-      "calls": [],
-      "dotted": "rust::vayren-core::src::download::ERR_NETWORK_ERROR",
-      "file": "rust/vayren-core/src/download.rs",
-      "kind": "const",
-      "language": "RUST",
-      "line": 736,
-      "module": "rust/vayren-core",
-      "name": "ERR_NETWORK_ERROR",
-      "public": true,
-      "qualified": "rust::vayren-core::src::download::ERR_NETWORK_ERROR",
-      "tests": []
-    },
-    {
-      "called_by": [],
-      "callers_complete": false,
-      "calls": [],
-      "dotted": "rust::vayren-core::src::download::ERR_PROVIDER_UNAVAILABLE",
-      "file": "rust/vayren-core/src/download.rs",
-      "kind": "const",
-      "language": "RUST",
-      "line": 737,
-      "module": "rust/vayren-core",
-      "name": "ERR_PROVIDER_UNAVAILABLE",
-      "public": true,
-      "qualified": "rust::vayren-core::src::download::ERR_PROVIDER_UNAVAILABLE",
-      "tests": []
-    },
-    {
-      "called_by": [],
-      "callers_complete": false,
-      "calls": [],
-      "dotted": "rust::vayren-core::src::download::ERR_RATE_LIMITED",
-      "file": "rust/vayren-core/src/download.rs",
-      "kind": "const",
-      "language": "RUST",
-      "line": 734,
-      "module": "rust/vayren-core",
-      "name": "ERR_RATE_LIMITED",
-      "public": true,
-      "qualified": "rust::vayren-core::src::download::ERR_RATE_LIMITED",
-      "tests": []
-    },
-    {
-      "called_by": [],
-      "callers_complete": false,
-      "calls": [],
-      "dotted": "rust::vayren-core::src::download::ERR_UNKNOWN_PROVIDER_ERROR",
-      "file": "rust/vayren-core/src/download.rs",
-      "kind": "const",
-      "language": "RUST",
-      "line": 739,
-      "module": "rust/vayren-core",
-      "name": "ERR_UNKNOWN_PROVIDER_ERROR",
-      "public": true,
-      "qualified": "rust::vayren-core::src::download::ERR_UNKNOWN_PROVIDER_ERROR",
-      "tests": []
-    },
-    {
-      "called_by": [],
-      "callers_complete": false,
-      "calls": [],
       "dotted": "rust::vayren-core::src::download::FetchResult",
       "file": "rust/vayren-core/src/download.rs",
       "kind": "enum",
@@ -21956,7 +21868,7 @@
       "file": "rust/vayren-core/src/download.rs",
       "kind": "const",
       "language": "RUST",
-      "line": 745,
+      "line": 739,
       "module": "rust/vayren-core",
       "name": "INTERVAL_MINUTES",
       "public": true,
@@ -22526,7 +22438,7 @@
       "file": "rust/vayren-core/src/download.rs",
       "kind": "mod",
       "language": "RUST",
-      "line": 749,
+      "line": 743,
       "module": "rust/vayren-core",
       "name": "tests",
       "public": false,
@@ -27746,7 +27658,7 @@
       "file": "rust/vayren-core/src/risk.rs",
       "kind": "const",
       "language": "RUST",
-      "line": 49,
+      "line": 46,
       "module": "rust/vayren-core",
       "name": "BIT_BROKER_HEALTH",
       "public": true,
@@ -27761,7 +27673,7 @@
       "file": "rust/vayren-core/src/risk.rs",
       "kind": "const",
       "language": "RUST",
-      "line": 73,
+      "line": 70,
       "module": "rust/vayren-core",
       "name": "BIT_CAPITAL",
       "public": true,
@@ -27776,7 +27688,7 @@
       "file": "rust/vayren-core/src/risk.rs",
       "kind": "const",
       "language": "RUST",
-      "line": 55,
+      "line": 52,
       "module": "rust/vayren-core",
       "name": "BIT_COOLDOWN",
       "public": true,
@@ -27791,7 +27703,7 @@
       "file": "rust/vayren-core/src/risk.rs",
       "kind": "const",
       "language": "RUST",
-      "line": 69,
+      "line": 66,
       "module": "rust/vayren-core",
       "name": "BIT_DAILY_LOSS",
       "public": true,
@@ -27806,7 +27718,7 @@
       "file": "rust/vayren-core/src/risk.rs",
       "kind": "const",
       "language": "RUST",
-      "line": 67,
+      "line": 64,
       "module": "rust/vayren-core",
       "name": "BIT_EXPOSURE",
       "public": true,
@@ -27821,7 +27733,7 @@
       "file": "rust/vayren-core/src/risk.rs",
       "kind": "const",
       "language": "RUST",
-      "line": 51,
+      "line": 48,
       "module": "rust/vayren-core",
       "name": "BIT_FRESH_DATA",
       "public": true,
@@ -27836,7 +27748,7 @@
       "file": "rust/vayren-core/src/risk.rs",
       "kind": "const",
       "language": "RUST",
-      "line": 63,
+      "line": 60,
       "module": "rust/vayren-core",
       "name": "BIT_NOTIONAL",
       "public": true,
@@ -27851,7 +27763,7 @@
       "file": "rust/vayren-core/src/risk.rs",
       "kind": "const",
       "language": "RUST",
-      "line": 61,
+      "line": 58,
       "module": "rust/vayren-core",
       "name": "BIT_ORDER_QTY",
       "public": true,
@@ -27866,7 +27778,7 @@
       "file": "rust/vayren-core/src/risk.rs",
       "kind": "const",
       "language": "RUST",
-      "line": 57,
+      "line": 54,
       "module": "rust/vayren-core",
       "name": "BIT_ORDER_RATE",
       "public": true,
@@ -27881,7 +27793,7 @@
       "file": "rust/vayren-core/src/risk.rs",
       "kind": "const",
       "language": "RUST",
-      "line": 65,
+      "line": 62,
       "module": "rust/vayren-core",
       "name": "BIT_POSITION",
       "public": true,
@@ -27896,7 +27808,7 @@
       "file": "rust/vayren-core/src/risk.rs",
       "kind": "const",
       "language": "RUST",
-      "line": 59,
+      "line": 56,
       "module": "rust/vayren-core",
       "name": "BIT_SANITY",
       "public": true,
@@ -27911,7 +27823,7 @@
       "file": "rust/vayren-core/src/risk.rs",
       "kind": "const",
       "language": "RUST",
-      "line": 53,
+      "line": 50,
       "module": "rust/vayren-core",
       "name": "BIT_SPREAD",
       "public": true,
@@ -27926,26 +27838,11 @@
       "file": "rust/vayren-core/src/risk.rs",
       "kind": "const",
       "language": "RUST",
-      "line": 71,
+      "line": 68,
       "module": "rust/vayren-core",
       "name": "BIT_STRATEGY_LOSS",
       "public": true,
       "qualified": "rust::vayren-core::src::risk::BIT_STRATEGY_LOSS",
-      "tests": []
-    },
-    {
-      "called_by": [],
-      "callers_complete": false,
-      "calls": [],
-      "dotted": "rust::vayren-core::src::risk::CHECK_COUNT",
-      "file": "rust/vayren-core/src/risk.rs",
-      "kind": "const",
-      "language": "RUST",
-      "line": 46,
-      "module": "rust/vayren-core",
-      "name": "CHECK_COUNT",
-      "public": true,
-      "qualified": "rust::vayren-core::src::risk::CHECK_COUNT",
       "tests": []
     },
     {
@@ -27971,7 +27868,7 @@
       "file": "rust/vayren-core/src/risk.rs",
       "kind": "fn",
       "language": "RUST",
-      "line": 76,
+      "line": 73,
       "module": "rust/vayren-core",
       "name": "evaluate_risk_kernel",
       "public": true,
@@ -29156,7 +29053,7 @@
       "file": "rust/vayren-market-view/tests/render_market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 323,
+      "line": 375,
       "module": "rust/vayren-market-view",
       "name": "market_empty_state_still_paints",
       "public": false,
@@ -29171,7 +29068,7 @@
       "file": "rust/vayren-market-view/tests/render_market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 512,
+      "line": 564,
       "module": "rust/vayren-market-view",
       "name": "market_indicator_toolbar_buttons_queue_wires",
       "public": false,
@@ -29186,7 +29083,7 @@
       "file": "rust/vayren-market-view/tests/render_market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 251,
+      "line": 302,
       "module": "rust/vayren-market-view",
       "name": "market_one_side_free_pan_leaves_empty_right_space",
       "public": false,
@@ -29231,7 +29128,7 @@
       "file": "rust/vayren-market-view/tests/render_market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 637,
+      "line": 689,
       "module": "rust/vayren-market-view",
       "name": "market_trade_overlay_paints_parity_markers",
       "public": false,
@@ -29246,7 +29143,7 @@
       "file": "rust/vayren-market-view/tests/render_market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 465,
+      "line": 517,
       "module": "rust/vayren-market-view",
       "name": "market_watchlist_tap_queues_select",
       "public": false,
@@ -29261,7 +29158,7 @@
       "file": "rust/vayren-market-view/tests/render_market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 424,
+      "line": 476,
       "module": "rust/vayren-market-view",
       "name": "market_watchlist_tap_queues_select_in_scrollable_list",
       "public": false,
@@ -29276,7 +29173,7 @@
       "file": "rust/vayren-market-view/tests/render_market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 373,
+      "line": 425,
       "module": "rust/vayren-market-view",
       "name": "market_watchlist_tap_with_production_snapshot",
       "public": false,
@@ -29291,11 +29188,26 @@
       "file": "rust/vayren-market-view/tests/render_market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 342,
+      "line": 394,
       "module": "rust/vayren-market-view",
       "name": "near",
       "public": false,
       "qualified": "rust::vayren-market-view::tests::render_market::near",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "rust::vayren-market-view::tests::render_market::parked_right_space_tone",
+      "file": "rust/vayren-market-view/tests/render_market.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 253,
+      "module": "rust/vayren-market-view",
+      "name": "parked_right_space_tone",
+      "public": false,
+      "qualified": "rust::vayren-market-view::tests::render_market::parked_right_space_tone",
       "tests": []
     },
     {
@@ -29336,7 +29248,7 @@
       "file": "rust/vayren-market-view/tests/render_market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 350,
+      "line": 402,
       "module": "rust/vayren-market-view",
       "name": "snapshot_many",
       "public": false,
@@ -32261,7 +32173,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "struct",
       "language": "RUST_SLINT",
-      "line": 1471,
+      "line": 1507,
       "module": "rust/vayren-shell",
       "name": "AxisTick",
       "public": true,
@@ -32276,7 +32188,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "struct",
       "language": "RUST_SLINT",
-      "line": 1457,
+      "line": 1483,
       "module": "rust/vayren-shell",
       "name": "CandlePoint",
       "public": true,
@@ -32321,7 +32233,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "struct",
       "language": "RUST_SLINT",
-      "line": 1637,
+      "line": 1690,
       "module": "rust/vayren-shell",
       "name": "HoverView",
       "public": true,
@@ -32381,7 +32293,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "struct",
       "language": "RUST_SLINT",
-      "line": 1478,
+      "line": 1514,
       "module": "rust/vayren-shell",
       "name": "IndicatorRow",
       "public": true,
@@ -32471,7 +32383,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "struct",
       "language": "RUST_SLINT",
-      "line": 1508,
+      "line": 1544,
       "module": "rust/vayren-shell",
       "name": "MarkerGlyph",
       "public": true,
@@ -32591,7 +32503,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "struct",
       "language": "RUST_SLINT",
-      "line": 1538,
+      "line": 1574,
       "module": "rust/vayren-shell",
       "name": "MarketView",
       "public": true,
@@ -32636,7 +32548,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "struct",
       "language": "RUST_SLINT",
-      "line": 1494,
+      "line": 1530,
       "module": "rust/vayren-shell",
       "name": "PlotSegment",
       "public": true,
@@ -32666,7 +32578,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "struct",
       "language": "RUST_SLINT",
-      "line": 1485,
+      "line": 1521,
       "module": "rust/vayren-shell",
       "name": "PopupRow",
       "public": true,
@@ -32692,11 +32604,26 @@
       "called_by": [],
       "callers_complete": false,
       "calls": [],
+      "dotted": "rust::vayren-shell::src::market::RayLevel",
+      "file": "rust/vayren-shell/src/market.rs",
+      "kind": "struct",
+      "language": "RUST_SLINT",
+      "line": 1499,
+      "module": "rust/vayren-shell",
+      "name": "RayLevel",
+      "public": true,
+      "qualified": "rust::vayren-shell::src::market::RayLevel",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
       "dotted": "rust::vayren-shell::src::market::ScaleFrame",
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "struct",
       "language": "RUST_SLINT",
-      "line": 1715,
+      "line": 1785,
       "module": "rust/vayren-shell",
       "name": "ScaleFrame",
       "public": false,
@@ -32711,7 +32638,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "enum",
       "language": "RUST_SLINT",
-      "line": 1708,
+      "line": 1778,
       "module": "rust/vayren-shell",
       "name": "ScaleXform",
       "public": false,
@@ -32786,7 +32713,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "struct",
       "language": "RUST_SLINT",
-      "line": 1448,
+      "line": 1474,
       "module": "rust/vayren-shell",
       "name": "TimeframeRow",
       "public": true,
@@ -32846,7 +32773,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "struct",
       "language": "RUST_SLINT",
-      "line": 1438,
+      "line": 1464,
       "module": "rust/vayren-shell",
       "name": "WatchRow",
       "public": true,
@@ -32876,7 +32803,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 2600,
+      "line": 2888,
       "module": "rust/vayren-shell",
       "name": "apply_snapshot_json",
       "public": true,
@@ -32887,15 +32814,15 @@
       "called_by": [],
       "callers_complete": false,
       "calls": [],
-      "dotted": "rust::vayren-shell::src::market::day_of_week_sakamoto",
+      "dotted": "rust::vayren-shell::src::market::axis_decimals",
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1350,
+      "line": 1910,
       "module": "rust/vayren-shell",
-      "name": "day_of_week_sakamoto",
+      "name": "axis_decimals",
       "public": false,
-      "qualified": "rust::vayren-shell::src::market::day_of_week_sakamoto",
+      "qualified": "rust::vayren-shell::src::market::axis_decimals",
       "tests": []
     },
     {
@@ -32906,7 +32833,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1207,
+      "line": 1249,
       "module": "rust/vayren-shell",
       "name": "fmt_int",
       "public": true,
@@ -32921,7 +32848,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1172,
+      "line": 1187,
       "module": "rust/vayren-shell",
       "name": "fmt_price",
       "public": true,
@@ -32932,15 +32859,30 @@
       "called_by": [],
       "callers_complete": false,
       "calls": [],
-      "dotted": "rust::vayren-shell::src::market::fmt_scale",
+      "dotted": "rust::vayren-shell::src::market::fmt_price_prec",
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1815,
+      "line": 1194,
       "module": "rust/vayren-shell",
-      "name": "fmt_scale",
+      "name": "fmt_price_prec",
+      "public": true,
+      "qualified": "rust::vayren-shell::src::market::fmt_price_prec",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "rust::vayren-shell::src::market::fmt_scale_dec",
+      "file": "rust/vayren-shell/src/market.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 1995,
+      "module": "rust/vayren-shell",
+      "name": "fmt_scale_dec",
       "public": false,
-      "qualified": "rust::vayren-shell::src::market::fmt_scale",
+      "qualified": "rust::vayren-shell::src::market::fmt_scale_dec",
       "tests": []
     },
     {
@@ -32951,7 +32893,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1199,
+      "line": 1241,
       "module": "rust/vayren-shell",
       "name": "fmt_signed_pct",
       "public": true,
@@ -32966,7 +32908,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1226,
+      "line": 1268,
       "module": "rust/vayren-shell",
       "name": "fmt_volume",
       "public": true,
@@ -32981,7 +32923,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1256,
+      "line": 1298,
       "module": "rust/vayren-shell",
       "name": "format_axis_time",
       "public": true,
@@ -32996,7 +32938,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1366,
+      "line": 1395,
       "module": "rust/vayren-shell",
       "name": "format_crosshair_time",
       "public": true,
@@ -33026,7 +32968,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1595,
+      "line": 1648,
       "module": "rust/vayren-shell",
       "name": "last_change",
       "public": false,
@@ -33056,7 +32998,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 2544,
+      "line": 2832,
       "module": "rust/vayren-shell",
       "name": "market_status_rows",
       "public": false,
@@ -33067,11 +33009,41 @@
       "called_by": [],
       "callers_complete": false,
       "calls": [],
+      "dotted": "rust::vayren-shell::src::market::nice_price_ticks",
+      "file": "rust/vayren-shell/src/market.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 1936,
+      "module": "rust/vayren-shell",
+      "name": "nice_price_ticks",
+      "public": false,
+      "qualified": "rust::vayren-shell::src::market::nice_price_ticks",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "rust::vayren-shell::src::market::nice_step",
+      "file": "rust/vayren-shell/src/market.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 1887,
+      "module": "rust/vayren-shell",
+      "name": "nice_step",
+      "public": false,
+      "qualified": "rust::vayren-shell::src::market::nice_step",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
       "dotted": "rust::vayren-shell::src::market::normalize_indicator_name",
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1163,
+      "line": 1178,
       "module": "rust/vayren-shell",
       "name": "normalize_indicator_name",
       "public": true,
@@ -33086,7 +33058,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1741,
+      "line": 1811,
       "module": "rust/vayren-shell",
       "name": "pad_range",
       "public": false,
@@ -33101,7 +33073,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1531,
+      "line": 1567,
       "module": "rust/vayren-shell",
       "name": "pill_w",
       "public": false,
@@ -33131,7 +33103,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1836,
+      "line": 2016,
       "module": "rust/vayren-shell",
       "name": "project",
       "public": true,
@@ -33146,7 +33118,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1648,
+      "line": 1704,
       "module": "rust/vayren-shell",
       "name": "project_hover",
       "public": true,
@@ -33161,7 +33133,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1142,
+      "line": 1157,
       "module": "rust/vayren-shell",
       "name": "round_py",
       "public": false,
@@ -33176,7 +33148,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1753,
+      "line": 1823,
       "module": "rust/vayren-shell",
       "name": "scale_frame",
       "public": false,
@@ -33191,7 +33163,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1243,
+      "line": 1285,
       "module": "rust/vayren-shell",
       "name": "short_time",
       "public": true,
@@ -33206,7 +33178,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 2583,
+      "line": 2871,
       "module": "rust/vayren-shell",
       "name": "snap_bool",
       "public": false,
@@ -33221,7 +33193,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 2579,
+      "line": 2867,
       "module": "rust/vayren-shell",
       "name": "snap_f64",
       "public": false,
@@ -33236,7 +33208,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 2571,
+      "line": 2859,
       "module": "rust/vayren-shell",
       "name": "snap_str",
       "public": false,
@@ -33251,11 +33223,26 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 2587,
+      "line": 2875,
       "module": "rust/vayren-shell",
       "name": "snap_str_list",
       "public": false,
       "qualified": "rust::vayren-shell::src::market::snap_str_list",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "rust::vayren-shell::src::market::step_decimals",
+      "file": "rust/vayren-shell/src/market.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 1227,
+      "module": "rust/vayren-shell",
+      "name": "step_decimals",
+      "public": false,
+      "qualified": "rust::vayren-shell::src::market::step_decimals",
       "tests": []
     },
     {
@@ -33281,7 +33268,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "mod",
       "language": "RUST_SLINT",
-      "line": 2917,
+      "line": 3205,
       "module": "rust/vayren-shell",
       "name": "tests",
       "public": false,
@@ -33296,7 +33283,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1424,
+      "line": 1450,
       "module": "rust/vayren-shell",
       "name": "tone_of_bar",
       "public": false,
@@ -33311,7 +33298,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1415,
+      "line": 1441,
       "module": "rust/vayren-shell",
       "name": "tone_of_change",
       "public": false,
@@ -33326,7 +33313,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1721,
+      "line": 1791,
       "module": "rust/vayren-shell",
       "name": "transform_price",
       "public": false,
@@ -33341,7 +33328,7 @@
       "file": "rust/vayren-shell/src/market.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1609,
+      "line": 1662,
       "module": "rust/vayren-shell",
       "name": "western2",
       "public": false,
@@ -35666,7 +35653,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "struct",
       "language": "RUST_SLINT",
-      "line": 1657,
+      "line": 1692,
       "module": "rust/vayren-shell",
       "name": "LabRunRequest",
       "public": true,
@@ -35681,7 +35668,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "trait",
       "language": "RUST_SLINT",
-      "line": 1927,
+      "line": 1962,
       "module": "rust/vayren-shell",
       "name": "Tap",
       "public": false,
@@ -35696,7 +35683,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 136,
+      "line": 137,
       "module": "rust/vayren-shell",
       "name": "apply",
       "public": true,
@@ -35711,7 +35698,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 204,
+      "line": 205,
       "module": "rust/vayren-shell",
       "name": "apply_connection",
       "public": true,
@@ -35726,7 +35713,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 724,
+      "line": 759,
       "module": "rust/vayren-shell",
       "name": "apply_flags_props",
       "public": false,
@@ -35741,7 +35728,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 685,
+      "line": 709,
       "module": "rust/vayren-shell",
       "name": "apply_hover_props",
       "public": false,
@@ -35756,7 +35743,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1293,
+      "line": 1328,
       "module": "rust/vayren-shell",
       "name": "apply_lab",
       "public": true,
@@ -35771,7 +35758,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 2725,
+      "line": 2760,
       "module": "rust/vayren-shell",
       "name": "apply_live",
       "public": true,
@@ -35786,7 +35773,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 354,
+      "line": 355,
       "module": "rust/vayren-shell",
       "name": "apply_market",
       "public": true,
@@ -35801,7 +35788,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 697,
+      "line": 722,
       "module": "rust/vayren-shell",
       "name": "apply_market_hover",
       "public": true,
@@ -35816,7 +35803,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 704,
+      "line": 729,
       "module": "rust/vayren-shell",
       "name": "apply_market_viewport",
       "public": true,
@@ -35831,7 +35818,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 2106,
+      "line": 2141,
       "module": "rust/vayren-shell",
       "name": "apply_portfolio",
       "public": true,
@@ -35846,7 +35833,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 2293,
+      "line": 2328,
       "module": "rust/vayren-shell",
       "name": "apply_research",
       "public": true,
@@ -35861,7 +35848,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1272,
+      "line": 1307,
       "module": "rust/vayren-shell",
       "name": "apply_zoom",
       "public": true,
@@ -35876,7 +35863,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 623,
+      "line": 635,
       "module": "rust/vayren-shell",
       "name": "candles_model",
       "public": false,
@@ -35891,7 +35878,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 122,
+      "line": 123,
       "module": "rust/vayren-shell",
       "name": "capability_rows",
       "public": true,
@@ -35906,7 +35893,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1213,
+      "line": 1248,
       "module": "rust/vayren-shell",
       "name": "demo_connection_workspace",
       "public": true,
@@ -35921,7 +35908,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1939,
+      "line": 1974,
       "module": "rust/vayren-shell",
       "name": "demo_lab_state",
       "public": true,
@@ -35936,7 +35923,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 3041,
+      "line": 3076,
       "module": "rust/vayren-shell",
       "name": "demo_live_state",
       "public": true,
@@ -35951,7 +35938,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 3121,
+      "line": 3156,
       "module": "rust/vayren-shell",
       "name": "demo_live_state_running",
       "public": true,
@@ -35966,7 +35953,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 2715,
+      "line": 2750,
       "module": "rust/vayren-shell",
       "name": "demo_portfolio_configured",
       "public": true,
@@ -35981,7 +35968,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 2706,
+      "line": 2741,
       "module": "rust/vayren-shell",
       "name": "demo_portfolio_state",
       "public": true,
@@ -35996,7 +35983,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 3246,
+      "line": 3281,
       "module": "rust/vayren-shell",
       "name": "demo_snapshot",
       "public": true,
@@ -36011,7 +35998,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 104,
+      "line": 105,
       "module": "rust/vayren-shell",
       "name": "env_kind",
       "public": true,
@@ -36026,7 +36013,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1643,
+      "line": 1678,
       "module": "rust/vayren-shell",
       "name": "filter_kind",
       "public": false,
@@ -36041,7 +36028,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 83,
+      "line": 84,
       "module": "rust/vayren-shell",
       "name": "initial_screen",
       "public": true,
@@ -36056,7 +36043,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 667,
+      "line": 691,
       "module": "rust/vayren-shell",
       "name": "markers_model",
       "public": false,
@@ -36071,7 +36058,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 346,
+      "line": 347,
       "module": "rust/vayren-shell",
       "name": "market_model",
       "public": false,
@@ -36086,7 +36073,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1712,
+      "line": 1747,
       "module": "rust/vayren-shell",
       "name": "parse_capital",
       "public": false,
@@ -36097,11 +36084,26 @@
       "called_by": [],
       "callers_complete": false,
       "calls": [],
+      "dotted": "rust::vayren-shell::src::shell::ray_levels_model",
+      "file": "rust/vayren-shell/src/shell.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 664,
+      "module": "rust/vayren-shell",
+      "name": "ray_levels_model",
+      "public": false,
+      "qualified": "rust::vayren-shell::src::shell::ray_levels_model",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
       "dotted": "rust::vayren-shell::src::shell::refresh_live",
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 2959,
+      "line": 2994,
       "module": "rust/vayren-shell",
       "name": "refresh_live",
       "public": false,
@@ -36116,7 +36118,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 2576,
+      "line": 2611,
       "module": "rust/vayren-shell",
       "name": "refresh_research",
       "public": false,
@@ -36131,7 +36133,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 67,
+      "line": 68,
       "module": "rust/vayren-shell",
       "name": "screen_from_name",
       "public": true,
@@ -36146,7 +36148,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 53,
+      "line": 54,
       "module": "rust/vayren-shell",
       "name": "screen_pending",
       "public": true,
@@ -36161,7 +36163,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 39,
+      "line": 40,
       "module": "rust/vayren-shell",
       "name": "screen_title",
       "public": true,
@@ -36176,7 +36178,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 652,
+      "line": 676,
       "module": "rust/vayren-shell",
       "name": "segments_model",
       "public": false,
@@ -36191,7 +36193,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1255,
+      "line": 1290,
       "module": "rust/vayren-shell",
       "name": "select",
       "public": true,
@@ -36206,7 +36208,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 113,
+      "line": 114,
       "module": "rust/vayren-shell",
       "name": "status_kind",
       "public": false,
@@ -36221,7 +36223,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "mod",
       "language": "RUST_SLINT",
-      "line": 3291,
+      "line": 3326,
       "module": "rust/vayren-shell",
       "name": "tests",
       "public": false,
@@ -36236,7 +36238,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 641,
+      "line": 653,
       "module": "rust/vayren-shell",
       "name": "ticks_model",
       "public": false,
@@ -36251,7 +36253,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1979,
+      "line": 2014,
       "module": "rust/vayren-shell",
       "name": "visual_fixture",
       "public": true,
@@ -36266,7 +36268,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1262,
+      "line": 1297,
       "module": "rust/vayren-shell",
       "name": "wire",
       "public": true,
@@ -36281,7 +36283,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1723,
+      "line": 1758,
       "module": "rust/vayren-shell",
       "name": "wire_lab",
       "public": true,
@@ -36296,7 +36298,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 2967,
+      "line": 3002,
       "module": "rust/vayren-shell",
       "name": "wire_live",
       "public": true,
@@ -36311,7 +36313,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 731,
+      "line": 766,
       "module": "rust/vayren-shell",
       "name": "wire_market",
       "public": true,
@@ -36326,7 +36328,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 2263,
+      "line": 2298,
       "module": "rust/vayren-shell",
       "name": "wire_portfolio",
       "public": true,
@@ -36341,7 +36343,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 2584,
+      "line": 2619,
       "module": "rust/vayren-shell",
       "name": "wire_research",
       "public": true,
@@ -36356,7 +36358,7 @@
       "file": "rust/vayren-shell/src/shell.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1279,
+      "line": 1314,
       "module": "rust/vayren-shell",
       "name": "wire_zoom",
       "public": true,
@@ -37301,7 +37303,7 @@
       "file": "rust/vayren-shell/ui/app.slint",
       "kind": "slint-component",
       "language": "RUST_SLINT",
-      "line": 69,
+      "line": 64,
       "module": "rust/vayren-shell",
       "name": "AppWindow",
       "public": true,
@@ -37316,26 +37318,11 @@
       "file": "rust/vayren-shell/ui/app.slint",
       "kind": "slint-struct",
       "language": "RUST_SLINT",
-      "line": 25,
+      "line": 20,
       "module": "rust/vayren-shell",
       "name": "CapabilityRowView",
       "public": true,
       "qualified": "rust::vayren-shell::ui::app::CapabilityRowView",
-      "tests": []
-    },
-    {
-      "called_by": [],
-      "callers_complete": false,
-      "calls": [],
-      "dotted": "rust::vayren-shell::ui::app::NavItem",
-      "file": "rust/vayren-shell/ui/app.slint",
-      "kind": "slint-struct",
-      "language": "RUST_SLINT",
-      "line": 20,
-      "module": "rust/vayren-shell",
-      "name": "NavItem",
-      "public": true,
-      "qualified": "rust::vayren-shell::ui::app::NavItem",
       "tests": []
     },
     {
@@ -38366,7 +38353,7 @@
       "file": "rust/vayren-shell/ui/market.slint",
       "kind": "slint-component",
       "language": "RUST_SLINT",
-      "line": 953,
+      "line": 1026,
       "module": "rust/vayren-shell",
       "name": "CalDay",
       "public": false,
@@ -38381,7 +38368,7 @@
       "file": "rust/vayren-shell/ui/market.slint",
       "kind": "slint-component",
       "language": "RUST_SLINT",
-      "line": 973,
+      "line": 1046,
       "module": "rust/vayren-shell",
       "name": "CalendarPopup",
       "public": false,
@@ -38396,7 +38383,7 @@
       "file": "rust/vayren-shell/ui/market.slint",
       "kind": "slint-component",
       "language": "RUST_SLINT",
-      "line": 633,
+      "line": 705,
       "module": "rust/vayren-shell",
       "name": "CandleGlyph",
       "public": false,
@@ -38411,7 +38398,7 @@
       "file": "rust/vayren-shell/ui/market.slint",
       "kind": "slint-component",
       "language": "RUST_SLINT",
-      "line": 1029,
+      "line": 1102,
       "module": "rust/vayren-shell",
       "name": "CredFieldRow",
       "public": false,
@@ -38426,7 +38413,7 @@
       "file": "rust/vayren-shell/ui/market.slint",
       "kind": "slint-component",
       "language": "RUST_SLINT",
-      "line": 1060,
+      "line": 1133,
       "module": "rust/vayren-shell",
       "name": "CredentialsModal",
       "public": false,
@@ -38441,7 +38428,7 @@
       "file": "rust/vayren-shell/ui/market.slint",
       "kind": "slint-struct",
       "language": "RUST_SLINT",
-      "line": 187,
+      "line": 195,
       "module": "rust/vayren-shell",
       "name": "DlCalDay",
       "public": true,
@@ -38456,7 +38443,7 @@
       "file": "rust/vayren-shell/ui/market.slint",
       "kind": "slint-component",
       "language": "RUST_SLINT",
-      "line": 890,
+      "line": 963,
       "module": "rust/vayren-shell",
       "name": "DlCheckRow",
       "public": false,
@@ -38471,7 +38458,7 @@
       "file": "rust/vayren-shell/ui/market.slint",
       "kind": "slint-component",
       "language": "RUST_SLINT",
-      "line": 929,
+      "line": 1002,
       "module": "rust/vayren-shell",
       "name": "DlChip",
       "public": false,
@@ -38486,7 +38473,7 @@
       "file": "rust/vayren-shell/ui/market.slint",
       "kind": "slint-struct",
       "language": "RUST_SLINT",
-      "line": 194,
+      "line": 202,
       "module": "rust/vayren-shell",
       "name": "DlCredField",
       "public": true,
@@ -38501,7 +38488,7 @@
       "file": "rust/vayren-shell/ui/market.slint",
       "kind": "slint-component",
       "language": "RUST_SLINT",
-      "line": 819,
+      "line": 892,
       "module": "rust/vayren-shell",
       "name": "DlField",
       "public": false,
@@ -38512,26 +38499,11 @@
       "called_by": [],
       "callers_complete": false,
       "calls": [],
-      "dotted": "rust::vayren-shell::ui::market::DlKV",
-      "file": "rust/vayren-shell/ui/market.slint",
-      "kind": "slint-struct",
-      "language": "RUST_SLINT",
-      "line": 202,
-      "module": "rust/vayren-shell",
-      "name": "DlKV",
-      "public": true,
-      "qualified": "rust::vayren-shell::ui::market::DlKV",
-      "tests": []
-    },
-    {
-      "called_by": [],
-      "callers_complete": false,
-      "calls": [],
       "dotted": "rust::vayren-shell::ui::market::DlKVRow",
       "file": "rust/vayren-shell/ui/market.slint",
       "kind": "slint-component",
       "language": "RUST_SLINT",
-      "line": 863,
+      "line": 936,
       "module": "rust/vayren-shell",
       "name": "DlKVRow",
       "public": false,
@@ -38546,7 +38518,7 @@
       "file": "rust/vayren-shell/ui/market.slint",
       "kind": "slint-struct",
       "language": "RUST_SLINT",
-      "line": 138,
+      "line": 146,
       "module": "rust/vayren-shell",
       "name": "DlPlan",
       "public": true,
@@ -38561,7 +38533,7 @@
       "file": "rust/vayren-shell/ui/market.slint",
       "kind": "slint-component",
       "language": "RUST_SLINT",
-      "line": 806,
+      "line": 879,
       "module": "rust/vayren-shell",
       "name": "DlSection",
       "public": false,
@@ -38576,7 +38548,7 @@
       "file": "rust/vayren-shell/ui/market.slint",
       "kind": "slint-struct",
       "language": "RUST_SLINT",
-      "line": 147,
+      "line": 155,
       "module": "rust/vayren-shell",
       "name": "DlStatus",
       "public": true,
@@ -38591,7 +38563,7 @@
       "file": "rust/vayren-shell/ui/market.slint",
       "kind": "slint-struct",
       "language": "RUST_SLINT",
-      "line": 207,
+      "line": 210,
       "module": "rust/vayren-shell",
       "name": "DlStock",
       "public": true,
@@ -38606,7 +38578,7 @@
       "file": "rust/vayren-shell/ui/market.slint",
       "kind": "slint-component",
       "language": "RUST_SLINT",
-      "line": 1166,
+      "line": 1239,
       "module": "rust/vayren-shell",
       "name": "DownloadDock",
       "public": false,
@@ -38621,7 +38593,7 @@
       "file": "rust/vayren-shell/ui/market.slint",
       "kind": "slint-component",
       "language": "RUST_SLINT",
-      "line": 405,
+      "line": 477,
       "module": "rust/vayren-shell",
       "name": "IndicatorBarRow",
       "public": false,
@@ -38636,7 +38608,7 @@
       "file": "rust/vayren-shell/ui/market.slint",
       "kind": "slint-component",
       "language": "RUST_SLINT",
-      "line": 330,
+      "line": 402,
       "module": "rust/vayren-shell",
       "name": "IndicatorIcon",
       "public": false,
@@ -38651,7 +38623,7 @@
       "file": "rust/vayren-shell/ui/market.slint",
       "kind": "slint-component",
       "language": "RUST_SLINT",
-      "line": 383,
+      "line": 455,
       "module": "rust/vayren-shell",
       "name": "IndicatorIconBtn",
       "public": false,
@@ -38666,7 +38638,7 @@
       "file": "rust/vayren-shell/ui/market.slint",
       "kind": "slint-component",
       "language": "RUST_SLINT",
-      "line": 741,
+      "line": 814,
       "module": "rust/vayren-shell",
       "name": "IndicatorSettingsPopup",
       "public": false,
@@ -38681,7 +38653,7 @@
       "file": "rust/vayren-shell/ui/market.slint",
       "kind": "slint-component",
       "language": "RUST_SLINT",
-      "line": 239,
+      "line": 242,
       "module": "rust/vayren-shell",
       "name": "MTimeButton",
       "public": false,
@@ -38696,7 +38668,7 @@
       "file": "rust/vayren-shell/ui/market.slint",
       "kind": "slint-component",
       "language": "RUST_SLINT",
-      "line": 472,
+      "line": 544,
       "module": "rust/vayren-shell",
       "name": "MarkerGlyph",
       "public": false,
@@ -38726,7 +38698,7 @@
       "file": "rust/vayren-shell/ui/market.slint",
       "kind": "slint-struct",
       "language": "RUST_SLINT",
-      "line": 65,
+      "line": 73,
       "module": "rust/vayren-shell",
       "name": "MarketIndicator",
       "public": true,
@@ -38741,7 +38713,7 @@
       "file": "rust/vayren-shell/ui/market.slint",
       "kind": "slint-struct",
       "language": "RUST_SLINT",
-      "line": 106,
+      "line": 114,
       "module": "rust/vayren-shell",
       "name": "MarketMarker",
       "public": true,
@@ -38756,7 +38728,7 @@
       "file": "rust/vayren-shell/ui/market.slint",
       "kind": "slint-struct",
       "language": "RUST_SLINT",
-      "line": 97,
+      "line": 105,
       "module": "rust/vayren-shell",
       "name": "MarketPlotSeg",
       "public": true,
@@ -38771,7 +38743,7 @@
       "file": "rust/vayren-shell/ui/market.slint",
       "kind": "slint-struct",
       "language": "RUST_SLINT",
-      "line": 90,
+      "line": 98,
       "module": "rust/vayren-shell",
       "name": "MarketPopupRow",
       "public": true,
@@ -38782,11 +38754,26 @@
       "called_by": [],
       "callers_complete": false,
       "calls": [],
+      "dotted": "rust::vayren-shell::ui::market::MarketRayLevel",
+      "file": "rust/vayren-shell/ui/market.slint",
+      "kind": "slint-struct",
+      "language": "RUST_SLINT",
+      "line": 62,
+      "module": "rust/vayren-shell",
+      "name": "MarketRayLevel",
+      "public": true,
+      "qualified": "rust::vayren-shell::ui::market::MarketRayLevel",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
       "dotted": "rust::vayren-shell::ui::market::MarketScreen",
       "file": "rust/vayren-shell/ui/market.slint",
       "kind": "slint-component",
       "language": "RUST_SLINT",
-      "line": 1599,
+      "line": 1672,
       "module": "rust/vayren-shell",
       "name": "MarketScreen",
       "public": true,
@@ -38801,7 +38788,7 @@
       "file": "rust/vayren-shell/ui/market.slint",
       "kind": "slint-struct",
       "language": "RUST_SLINT",
-      "line": 80,
+      "line": 88,
       "module": "rust/vayren-shell",
       "name": "MarketSettingsRow",
       "public": true,
@@ -38816,7 +38803,7 @@
       "file": "rust/vayren-shell/ui/market.slint",
       "kind": "slint-struct",
       "language": "RUST_SLINT",
-      "line": 72,
+      "line": 80,
       "module": "rust/vayren-shell",
       "name": "MarketStatusRow",
       "public": true,
@@ -38846,7 +38833,7 @@
       "file": "rust/vayren-shell/ui/market.slint",
       "kind": "slint-struct",
       "language": "RUST_SLINT",
-      "line": 60,
+      "line": 68,
       "module": "rust/vayren-shell",
       "name": "MarketTimeframe",
       "public": true,
@@ -38876,7 +38863,7 @@
       "file": "rust/vayren-shell/ui/market.slint",
       "kind": "slint-struct",
       "language": "RUST_SLINT",
-      "line": 128,
+      "line": 136,
       "module": "rust/vayren-shell",
       "name": "MarketTradeContext",
       "public": true,
@@ -38906,7 +38893,7 @@
       "file": "rust/vayren-shell/ui/market.slint",
       "kind": "slint-component",
       "language": "RUST_SLINT",
-      "line": 302,
+      "line": 374,
       "module": "rust/vayren-shell",
       "name": "MenuRow",
       "public": false,
@@ -38921,7 +38908,7 @@
       "file": "rust/vayren-shell/ui/market.slint",
       "kind": "slint-component",
       "language": "RUST_SLINT",
-      "line": 442,
+      "line": 514,
       "module": "rust/vayren-shell",
       "name": "OverlaySeg",
       "public": false,
@@ -38936,7 +38923,7 @@
       "file": "rust/vayren-shell/ui/market.slint",
       "kind": "slint-component",
       "language": "RUST_SLINT",
-      "line": 675,
+      "line": 748,
       "module": "rust/vayren-shell",
       "name": "PopupItem",
       "public": false,
@@ -38951,7 +38938,7 @@
       "file": "rust/vayren-shell/ui/market.slint",
       "kind": "slint-component",
       "language": "RUST_SLINT",
-      "line": 212,
+      "line": 215,
       "module": "rust/vayren-shell",
       "name": "RailButton",
       "public": false,
@@ -38966,7 +38953,7 @@
       "file": "rust/vayren-shell/ui/market.slint",
       "kind": "slint-component",
       "language": "RUST_SLINT",
-      "line": 714,
+      "line": 787,
       "module": "rust/vayren-shell",
       "name": "SettingsField",
       "public": false,
@@ -38981,7 +38968,7 @@
       "file": "rust/vayren-shell/ui/market.slint",
       "kind": "slint-component",
       "language": "RUST_SLINT",
-      "line": 270,
+      "line": 273,
       "module": "rust/vayren-shell",
       "name": "SmallButton",
       "public": false,
@@ -38996,7 +38983,7 @@
       "file": "rust/vayren-shell/ui/palette.slint",
       "kind": "slint-global",
       "language": "RUST_SLINT",
-      "line": 119,
+      "line": 123,
       "module": "rust/vayren-shell",
       "name": "LabPalette",
       "public": true,
@@ -39011,7 +38998,7 @@
       "file": "rust/vayren-shell/ui/palette.slint",
       "kind": "slint-global",
       "language": "RUST_SLINT",
-      "line": 53,
+      "line": 57,
       "module": "rust/vayren-shell",
       "name": "VayrenDesign",
       "public": true,
@@ -40567,7 +40554,7 @@
       "file": "scripts/benchmark.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 821,
+      "line": 868,
       "module": "scripts",
       "name": "_add_phase_args",
       "public": false,
@@ -40584,7 +40571,7 @@
       "file": "scripts/benchmark.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 534,
+      "line": 581,
       "module": "scripts",
       "name": "_cell",
       "public": false,
@@ -40601,7 +40588,7 @@
       "file": "scripts/benchmark.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 229,
+      "line": 259,
       "module": "scripts",
       "name": "_changed_files",
       "public": false,
@@ -40613,12 +40600,14 @@
         "scripts.benchmark:impact_plan"
       ],
       "callers_complete": true,
-      "calls": [],
+      "calls": [
+        "scripts.benchmark:_rust_domain_of"
+      ],
       "dotted": "scripts.benchmark._domain_of",
       "file": "scripts/benchmark.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 222,
+      "line": 239,
       "module": "scripts",
       "name": "_domain_of",
       "public": false,
@@ -40690,7 +40679,7 @@
       "file": "scripts/benchmark.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 371,
+      "line": 418,
       "module": "scripts",
       "name": "_last_task_start",
       "public": false,
@@ -40748,7 +40737,7 @@
       "file": "scripts/benchmark.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 431,
+      "line": 478,
       "module": "scripts",
       "name": "_phase_ops_dict",
       "public": false,
@@ -40792,6 +40781,23 @@
     },
     {
       "called_by": [
+        "scripts.benchmark:_domain_of"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.benchmark._rust_domain_of",
+      "file": "scripts/benchmark.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 246,
+      "module": "scripts",
+      "name": "_rust_domain_of",
+      "public": false,
+      "qualified": "scripts.benchmark:_rust_domain_of",
+      "tests": []
+    },
+    {
+      "called_by": [
         "scripts.benchmark:cmd_scoreboard"
       ],
       "callers_complete": true,
@@ -40800,7 +40806,7 @@
       "file": "scripts/benchmark.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 542,
+      "line": 589,
       "module": "scripts",
       "name": "_speed_section",
       "public": false,
@@ -40836,7 +40842,7 @@
       "file": "scripts/benchmark.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 385,
+      "line": 432,
       "module": "scripts",
       "name": "_wall_since",
       "public": false,
@@ -40855,7 +40861,7 @@
       "file": "scripts/benchmark.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 364,
+      "line": 411,
       "module": "scripts",
       "name": "cmd_begin",
       "public": true,
@@ -40898,7 +40904,7 @@
       "file": "scripts/benchmark.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 347,
+      "line": 392,
       "module": "scripts",
       "name": "cmd_impact",
       "public": true,
@@ -40918,7 +40924,7 @@
       "file": "scripts/benchmark.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 454,
+      "line": 501,
       "module": "scripts",
       "name": "cmd_phases",
       "public": true,
@@ -40943,7 +40949,7 @@
       "file": "scripts/benchmark.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 394,
+      "line": 441,
       "module": "scripts",
       "name": "cmd_record",
       "public": true,
@@ -40963,7 +40969,7 @@
       "file": "scripts/benchmark.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 467,
+      "line": 514,
       "module": "scripts",
       "name": "cmd_record_action",
       "public": true,
@@ -40985,7 +40991,7 @@
       "file": "scripts/benchmark.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 486,
+      "line": 533,
       "module": "scripts",
       "name": "cmd_replay",
       "public": true,
@@ -41006,7 +41012,7 @@
       "file": "scripts/benchmark.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 569,
+      "line": 616,
       "module": "scripts",
       "name": "cmd_scoreboard",
       "public": true,
@@ -41025,7 +41031,7 @@
       "file": "scripts/benchmark.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 249,
+      "line": 279,
       "module": "scripts",
       "name": "impact_plan",
       "public": true,
@@ -41050,7 +41056,7 @@
       "file": "scripts/benchmark.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 839,
+      "line": 886,
       "module": "scripts",
       "name": "main",
       "public": true,
@@ -41059,7 +41065,7 @@
     },
     {
       "called_by": [
-        "scripts.build_rust:main"
+        "scripts.build_rust:_build_shell_debug"
       ],
       "callers_complete": true,
       "calls": [],
@@ -41067,12 +41073,36 @@
       "file": "scripts/build_rust.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 86,
+      "line": 88,
       "module": "scripts",
       "name": "_bin_name",
       "public": false,
       "qualified": "scripts.build_rust:_bin_name",
-      "tests": []
+      "tests": [
+        "scripts/tests/test_build_rust.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.build_rust:main"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "scripts.build_rust:_bin_name",
+        "scripts.build_rust:_run"
+      ],
+      "dotted": "scripts.build_rust._build_shell_debug",
+      "file": "scripts/build_rust.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 112,
+      "module": "scripts",
+      "name": "_build_shell_debug",
+      "public": false,
+      "qualified": "scripts.build_rust:_build_shell_debug",
+      "tests": [
+        "scripts/tests/test_build_rust.py"
+      ]
     },
     {
       "called_by": [
@@ -41084,12 +41114,14 @@
       "file": "scripts/build_rust.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 50,
+      "line": 52,
       "module": "scripts",
       "name": "_lab_lib_name",
       "public": false,
       "qualified": "scripts.build_rust:_lab_lib_name",
-      "tests": []
+      "tests": [
+        "scripts/tests/test_build_rust.py"
+      ]
     },
     {
       "called_by": [
@@ -41101,12 +41133,14 @@
       "file": "scripts/build_rust.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 23,
+      "line": 25,
       "module": "scripts",
       "name": "_lib_name",
       "public": false,
       "qualified": "scripts.build_rust:_lib_name",
-      "tests": []
+      "tests": [
+        "scripts/tests/test_build_rust.py"
+      ]
     },
     {
       "called_by": [
@@ -41118,12 +41152,14 @@
       "file": "scripts/build_rust.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 41,
+      "line": 43,
       "module": "scripts",
       "name": "_live_lib_name",
       "public": false,
       "qualified": "scripts.build_rust:_live_lib_name",
-      "tests": []
+      "tests": [
+        "scripts/tests/test_build_rust.py"
+      ]
     },
     {
       "called_by": [
@@ -41135,12 +41171,14 @@
       "file": "scripts/build_rust.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 77,
+      "line": 79,
       "module": "scripts",
       "name": "_market_lib_name",
       "public": false,
       "qualified": "scripts.build_rust:_market_lib_name",
-      "tests": []
+      "tests": [
+        "scripts/tests/test_build_rust.py"
+      ]
     },
     {
       "called_by": [
@@ -41152,15 +41190,19 @@
       "file": "scripts/build_rust.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 68,
+      "line": 70,
       "module": "scripts",
       "name": "_research_lib_name",
       "public": false,
       "qualified": "scripts.build_rust:_research_lib_name",
-      "tests": []
+      "tests": [
+        "scripts/tests/test_build_rust.py"
+      ]
     },
     {
       "called_by": [
+        "scripts.build_rust:_build_shell_debug",
+        "scripts.build_rust:_run_workspace_tests",
         "scripts.build_rust:main"
       ],
       "callers_complete": true,
@@ -41169,12 +41211,35 @@
       "file": "scripts/build_rust.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 91,
+      "line": 103,
       "module": "scripts",
       "name": "_run",
       "public": false,
       "qualified": "scripts.build_rust:_run",
-      "tests": []
+      "tests": [
+        "scripts/tests/test_build_rust.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.build_rust:main"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "scripts.build_rust:_run"
+      ],
+      "dotted": "scripts.build_rust._run_workspace_tests",
+      "file": "scripts/build_rust.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 125,
+      "module": "scripts",
+      "name": "_run_workspace_tests",
+      "public": false,
+      "qualified": "scripts.build_rust:_run_workspace_tests",
+      "tests": [
+        "scripts/tests/test_build_rust.py"
+      ]
     },
     {
       "called_by": [
@@ -41186,12 +41251,14 @@
       "file": "scripts/build_rust.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 59,
+      "line": 61,
       "module": "scripts",
       "name": "_system_lib_name",
       "public": false,
       "qualified": "scripts.build_rust:_system_lib_name",
-      "tests": []
+      "tests": [
+        "scripts/tests/test_build_rust.py"
+      ]
     },
     {
       "called_by": [
@@ -41203,25 +41270,28 @@
       "file": "scripts/build_rust.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 32,
+      "line": 34,
       "module": "scripts",
       "name": "_view_lib_name",
       "public": false,
       "qualified": "scripts.build_rust:_view_lib_name",
-      "tests": []
+      "tests": [
+        "scripts/tests/test_build_rust.py"
+      ]
     },
     {
       "called_by": [],
       "callers_complete": true,
       "calls": [
         "core.native.loader:load_vayren_core",
-        "scripts.build_rust:_bin_name",
+        "scripts.build_rust:_build_shell_debug",
         "scripts.build_rust:_lab_lib_name",
         "scripts.build_rust:_lib_name",
         "scripts.build_rust:_live_lib_name",
         "scripts.build_rust:_market_lib_name",
         "scripts.build_rust:_research_lib_name",
         "scripts.build_rust:_run",
+        "scripts.build_rust:_run_workspace_tests",
         "scripts.build_rust:_system_lib_name",
         "scripts.build_rust:_view_lib_name"
       ],
@@ -41229,12 +41299,14 @@
       "file": "scripts/build_rust.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 100,
+      "line": 130,
       "module": "scripts",
       "name": "main",
       "public": true,
       "qualified": "scripts.build_rust:main",
-      "tests": []
+      "tests": [
+        "scripts/tests/test_build_rust.py"
+      ]
     },
     {
       "called_by": [
@@ -48581,19 +48653,84 @@
       "tests": []
     },
     {
-      "called_by": [],
+      "called_by": [
+        "scripts.run_tests:native_fresh"
+      ],
       "callers_complete": true,
       "calls": [],
+      "dotted": "scripts.run_tests._expected_artifacts",
+      "file": "scripts/run_tests.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 45,
+      "module": "scripts",
+      "name": "_expected_artifacts",
+      "public": false,
+      "qualified": "scripts.run_tests:_expected_artifacts",
+      "tests": [
+        "scripts/tests/test_run_tests.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.run_tests:main"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "scripts.run_tests:native_fresh"
+      ],
+      "dotted": "scripts.run_tests.ensure_native",
+      "file": "scripts/run_tests.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 96,
+      "module": "scripts",
+      "name": "ensure_native",
+      "public": true,
+      "qualified": "scripts.run_tests:ensure_native",
+      "tests": [
+        "scripts/tests/test_run_tests.py"
+      ]
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "scripts.run_tests:ensure_native"
+      ],
       "dotted": "scripts.run_tests.main",
       "file": "scripts/run_tests.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 30,
+      "line": 126,
       "module": "scripts",
       "name": "main",
       "public": true,
       "qualified": "scripts.run_tests:main",
-      "tests": []
+      "tests": [
+        "scripts/tests/test_run_tests.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.run_tests:ensure_native"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "scripts.run_tests:_expected_artifacts"
+      ],
+      "dotted": "scripts.run_tests.native_fresh",
+      "file": "scripts/run_tests.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 72,
+      "module": "scripts",
+      "name": "native_fresh",
+      "public": true,
+      "qualified": "scripts.run_tests:native_fresh",
+      "tests": [
+        "scripts/tests/test_run_tests.py"
+      ]
     },
     {
       "called_by": [
@@ -48690,7 +48827,7 @@
       "file": "scripts/self_opt.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1042,
+      "line": 1032,
       "module": "scripts",
       "name": "_candidate_applies",
       "public": false,
@@ -48733,7 +48870,7 @@
       "file": "scripts/self_opt.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 850,
+      "line": 840,
       "module": "scripts",
       "name": "_evaluate_context_level",
       "public": false,
@@ -48757,7 +48894,7 @@
       "file": "scripts/self_opt.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 973,
+      "line": 963,
       "module": "scripts",
       "name": "_evaluate_decision_memo",
       "public": false,
@@ -48781,7 +48918,7 @@
       "file": "scripts/self_opt.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 902,
+      "line": 892,
       "module": "scripts",
       "name": "_evaluate_scope_memo",
       "public": false,
@@ -48865,7 +49002,7 @@
       "file": "scripts/self_opt.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 898,
+      "line": 888,
       "module": "scripts",
       "name": "_median_ms",
       "public": false,
@@ -48884,7 +49021,7 @@
       "file": "scripts/self_opt.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1217,
+      "line": 1207,
       "module": "scripts",
       "name": "_opt_summary",
       "public": false,
@@ -49027,7 +49164,7 @@
       "file": "scripts/self_opt.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1070,
+      "line": 1060,
       "module": "scripts",
       "name": "accept_candidate",
       "public": true,
@@ -49115,7 +49252,7 @@
       "file": "scripts/self_opt.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1144,
+      "line": 1134,
       "module": "scripts",
       "name": "benchmark_suite",
       "public": true,
@@ -49185,7 +49322,7 @@
       "file": "scripts/self_opt.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1174,
+      "line": 1164,
       "module": "scripts",
       "name": "diagnostic_report",
       "public": true,
@@ -49208,7 +49345,7 @@
       "file": "scripts/self_opt.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 828,
+      "line": 818,
       "module": "scripts",
       "name": "evaluate_candidate",
       "public": true,
@@ -49329,7 +49466,7 @@
       "file": "scripts/self_opt.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1251,
+      "line": 1241,
       "module": "scripts",
       "name": "main",
       "public": true,
@@ -49357,23 +49494,6 @@
       "name": "propose_candidates",
       "public": true,
       "qualified": "scripts.self_opt:propose_candidates",
-      "tests": [
-        "scripts/tests/test_self_opt.py"
-      ]
-    },
-    {
-      "called_by": [],
-      "callers_complete": true,
-      "calls": [],
-      "dotted": "scripts.self_opt.protected_snapshot",
-      "file": "scripts/self_opt.py",
-      "kind": "function",
-      "language": "PYTHON",
-      "line": 766,
-      "module": "scripts",
-      "name": "protected_snapshot",
-      "public": true,
-      "qualified": "scripts.self_opt:protected_snapshot",
       "tests": [
         "scripts/tests/test_self_opt.py"
       ]
@@ -49435,7 +49555,7 @@
       "file": "scripts/self_opt.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1094,
+      "line": 1084,
       "module": "scripts",
       "name": "reject_candidate",
       "public": true,
@@ -49454,7 +49574,7 @@
       "file": "scripts/self_opt.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1232,
+      "line": 1222,
       "module": "scripts",
       "name": "render_text",
       "public": true,
@@ -49477,7 +49597,7 @@
       "file": "scripts/self_opt.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1109,
+      "line": 1099,
       "module": "scripts",
       "name": "rollback_candidate",
       "public": true,
@@ -49552,7 +49672,7 @@
       "file": "scripts/self_opt.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 776,
+      "line": 766,
       "module": "scripts",
       "name": "snapshot_from_run",
       "public": true,
@@ -49573,7 +49693,7 @@
       "file": "scripts/self_opt.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1049,
+      "line": 1039,
       "module": "scripts",
       "name": "store_candidate",
       "public": true,
@@ -49592,7 +49712,7 @@
       "file": "scripts/self_opt.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 808,
+      "line": 798,
       "module": "scripts",
       "name": "verify_safety",
       "public": true,
@@ -50897,6 +51017,198 @@
       "name": "test_valid_all_passes",
       "public": true,
       "qualified": "scripts.tests.test_authority:test_valid_all_passes",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "scripts.tests.test_build_rust:test_full_test_keeps_batched_views",
+        "scripts.tests.test_build_rust:test_lean_test_skips_view_invocation"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_build_rust._fake_tree",
+      "file": "scripts/tests/test_build_rust.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 113,
+      "module": "scripts",
+      "name": "_fake_tree",
+      "public": false,
+      "qualified": "scripts.tests.test_build_rust:_fake_tree",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "scripts.tests.test_build_rust:test_full_test_keeps_batched_views",
+        "scripts.tests.test_build_rust:test_kernel_release_stays_separate",
+        "scripts.tests.test_build_rust:test_single_batched_view_release_invocation"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_build_rust._p_flags",
+      "file": "scripts/tests/test_build_rust.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 51,
+      "module": "scripts",
+      "name": "_p_flags",
+      "public": false,
+      "qualified": "scripts.tests.test_build_rust:_p_flags",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "scripts.tests.test_build_rust:test_full_workspace_test_safety_net_intact",
+        "scripts.tests.test_build_rust:test_kernel_release_stays_separate",
+        "scripts.tests.test_build_rust:test_no_new_process_shapes",
+        "scripts.tests.test_build_rust:test_single_batched_view_release_invocation"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_build_rust._run_calls",
+      "file": "scripts/tests/test_build_rust.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 31,
+      "module": "scripts",
+      "name": "_run_calls",
+      "public": false,
+      "qualified": "scripts.tests.test_build_rust:_run_calls",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_build_rust.test_all_six_dlls_still_asserted",
+      "file": "scripts/tests/test_build_rust.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 93,
+      "module": "scripts",
+      "name": "test_all_six_dlls_still_asserted",
+      "public": true,
+      "qualified": "scripts.tests.test_build_rust:test_all_six_dlls_still_asserted",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "scripts.tests.test_build_rust:_fake_tree",
+        "scripts.tests.test_build_rust:_p_flags"
+      ],
+      "dotted": "scripts.tests.test_build_rust.test_full_test_keeps_batched_views",
+      "file": "scripts/tests/test_build_rust.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 149,
+      "module": "scripts",
+      "name": "test_full_test_keeps_batched_views",
+      "public": true,
+      "qualified": "scripts.tests.test_build_rust:test_full_test_keeps_batched_views",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "scripts.tests.test_build_rust:_run_calls"
+      ],
+      "dotted": "scripts.tests.test_build_rust.test_full_workspace_test_safety_net_intact",
+      "file": "scripts/tests/test_build_rust.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 82,
+      "module": "scripts",
+      "name": "test_full_workspace_test_safety_net_intact",
+      "public": true,
+      "qualified": "scripts.tests.test_build_rust:test_full_workspace_test_safety_net_intact",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "scripts.tests.test_build_rust:_p_flags",
+        "scripts.tests.test_build_rust:_run_calls"
+      ],
+      "dotted": "scripts.tests.test_build_rust.test_kernel_release_stays_separate",
+      "file": "scripts/tests/test_build_rust.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 75,
+      "module": "scripts",
+      "name": "test_kernel_release_stays_separate",
+      "public": true,
+      "qualified": "scripts.tests.test_build_rust:test_kernel_release_stays_separate",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "scripts.tests.test_build_rust:_fake_tree"
+      ],
+      "dotted": "scripts.tests.test_build_rust.test_lean_test_skips_view_invocation",
+      "file": "scripts/tests/test_build_rust.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 132,
+      "module": "scripts",
+      "name": "test_lean_test_skips_view_invocation",
+      "public": true,
+      "qualified": "scripts.tests.test_build_rust:test_lean_test_skips_view_invocation",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "scripts.tests.test_build_rust:_run_calls"
+      ],
+      "dotted": "scripts.tests.test_build_rust.test_no_new_process_shapes",
+      "file": "scripts/tests/test_build_rust.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 106,
+      "module": "scripts",
+      "name": "test_no_new_process_shapes",
+      "public": true,
+      "qualified": "scripts.tests.test_build_rust:test_no_new_process_shapes",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "scripts.tests.test_build_rust:_p_flags",
+        "scripts.tests.test_build_rust:_run_calls"
+      ],
+      "dotted": "scripts.tests.test_build_rust.test_single_batched_view_release_invocation",
+      "file": "scripts/tests/test_build_rust.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 59,
+      "module": "scripts",
+      "name": "test_single_batched_view_release_invocation",
+      "public": true,
+      "qualified": "scripts.tests.test_build_rust:test_single_batched_view_release_invocation",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_build_rust.test_view_packages_cover_all_six",
+      "file": "scripts/tests/test_build_rust.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 55,
+      "module": "scripts",
+      "name": "test_view_packages_cover_all_six",
+      "public": true,
+      "qualified": "scripts.tests.test_build_rust:test_view_packages_cover_all_six",
       "tests": []
     },
     {
@@ -55305,6 +55617,252 @@
       "tests": []
     },
     {
+      "called_by": [
+        "scripts.tests.test_run_tests:test_fresh_tree_may_skip",
+        "scripts.tests.test_run_tests:test_lean_fresh_ignores_missing_view_dlls",
+        "scripts.tests.test_run_tests:test_skip_build_skips_subprocess",
+        "scripts.tests.test_run_tests:test_stale_source_forces_build",
+        "scripts.tests.test_run_tests:test_stale_tree_builds_even_with_skip_flag",
+        "scripts.tests.test_run_tests:test_unreadable_tree_forces_build"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_run_tests._fake_root",
+      "file": "scripts/tests/test_run_tests.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 22,
+      "module": "scripts",
+      "name": "_fake_root",
+      "public": false,
+      "qualified": "scripts.tests.test_run_tests:_fake_root",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "scripts.tests.test_run_tests:test_fresh_tree_may_skip",
+        "scripts.tests.test_run_tests:test_skip_build_skips_subprocess",
+        "scripts.tests.test_run_tests:test_stale_source_forces_build",
+        "scripts.tests.test_run_tests:test_stale_tree_builds_even_with_skip_flag",
+        "scripts.tests.test_run_tests:test_unreadable_tree_forces_build"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "scripts.tests.test_run_tests:_touch"
+      ],
+      "dotted": "scripts.tests.test_run_tests._make_tree",
+      "file": "scripts/tests/test_run_tests.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 38,
+      "module": "scripts",
+      "name": "_make_tree",
+      "public": false,
+      "qualified": "scripts.tests.test_run_tests:_make_tree",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "scripts.tests.test_run_tests:_make_tree",
+        "scripts.tests.test_run_tests:test_lean_fresh_ignores_missing_view_dlls"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_run_tests._touch",
+      "file": "scripts/tests/test_run_tests.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 30,
+      "module": "scripts",
+      "name": "_touch",
+      "public": false,
+      "qualified": "scripts.tests.test_run_tests:_touch",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_run_tests.test_expected_artifacts_cover_build_chain",
+      "file": "scripts/tests/test_run_tests.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 46,
+      "module": "scripts",
+      "name": "test_expected_artifacts_cover_build_chain",
+      "public": true,
+      "qualified": "scripts.tests.test_run_tests:test_expected_artifacts_cover_build_chain",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "scripts.tests.test_run_tests:_fake_root",
+        "scripts.tests.test_run_tests:_make_tree"
+      ],
+      "dotted": "scripts.tests.test_run_tests.test_fresh_tree_may_skip",
+      "file": "scripts/tests/test_run_tests.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 74,
+      "module": "scripts",
+      "name": "test_fresh_tree_may_skip",
+      "public": true,
+      "qualified": "scripts.tests.test_run_tests:test_fresh_tree_may_skip",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_run_tests.test_lean_artifacts_cover_kernel_and_shell_only",
+      "file": "scripts/tests/test_run_tests.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 53,
+      "module": "scripts",
+      "name": "test_lean_artifacts_cover_kernel_and_shell_only",
+      "public": true,
+      "qualified": "scripts.tests.test_run_tests:test_lean_artifacts_cover_kernel_and_shell_only",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_run_tests.test_lean_fallback_builds_lean_test",
+      "file": "scripts/tests/test_run_tests.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 121,
+      "module": "scripts",
+      "name": "test_lean_fallback_builds_lean_test",
+      "public": true,
+      "qualified": "scripts.tests.test_run_tests:test_lean_fallback_builds_lean_test",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "scripts.tests.test_run_tests:_fake_root",
+        "scripts.tests.test_run_tests:_touch"
+      ],
+      "dotted": "scripts.tests.test_run_tests.test_lean_fresh_ignores_missing_view_dlls",
+      "file": "scripts/tests/test_run_tests.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 60,
+      "module": "scripts",
+      "name": "test_lean_fresh_ignores_missing_view_dlls",
+      "public": true,
+      "qualified": "scripts.tests.test_run_tests:test_lean_fresh_ignores_missing_view_dlls",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_run_tests.test_missing_artifacts_force_build",
+      "file": "scripts/tests/test_run_tests.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 70,
+      "module": "scripts",
+      "name": "test_missing_artifacts_force_build",
+      "public": true,
+      "qualified": "scripts.tests.test_run_tests:test_missing_artifacts_force_build",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_run_tests.test_parts_stays_tuple_literal",
+      "file": "scripts/tests/test_run_tests.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 140,
+      "module": "scripts",
+      "name": "test_parts_stays_tuple_literal",
+      "public": true,
+      "qualified": "scripts.tests.test_run_tests:test_parts_stays_tuple_literal",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "scripts.tests.test_run_tests:_fake_root",
+        "scripts.tests.test_run_tests:_make_tree"
+      ],
+      "dotted": "scripts.tests.test_run_tests.test_skip_build_skips_subprocess",
+      "file": "scripts/tests/test_run_tests.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 94,
+      "module": "scripts",
+      "name": "test_skip_build_skips_subprocess",
+      "public": true,
+      "qualified": "scripts.tests.test_run_tests:test_skip_build_skips_subprocess",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "scripts.tests.test_run_tests:_fake_root",
+        "scripts.tests.test_run_tests:_make_tree"
+      ],
+      "dotted": "scripts.tests.test_run_tests.test_stale_source_forces_build",
+      "file": "scripts/tests/test_run_tests.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 79,
+      "module": "scripts",
+      "name": "test_stale_source_forces_build",
+      "public": true,
+      "qualified": "scripts.tests.test_run_tests:test_stale_source_forces_build",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "scripts.tests.test_run_tests:_fake_root",
+        "scripts.tests.test_run_tests:_make_tree"
+      ],
+      "dotted": "scripts.tests.test_run_tests.test_stale_tree_builds_even_with_skip_flag",
+      "file": "scripts/tests/test_run_tests.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 107,
+      "module": "scripts",
+      "name": "test_stale_tree_builds_even_with_skip_flag",
+      "public": true,
+      "qualified": "scripts.tests.test_run_tests:test_stale_tree_builds_even_with_skip_flag",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "scripts.tests.test_run_tests:_fake_root",
+        "scripts.tests.test_run_tests:_make_tree"
+      ],
+      "dotted": "scripts.tests.test_run_tests.test_unreadable_tree_forces_build",
+      "file": "scripts/tests/test_run_tests.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 84,
+      "module": "scripts",
+      "name": "test_unreadable_tree_forces_build",
+      "public": true,
+      "qualified": "scripts.tests.test_run_tests:test_unreadable_tree_forces_build",
+      "tests": []
+    },
+    {
       "called_by": [],
       "callers_complete": true,
       "calls": [],
@@ -57373,6 +57931,381 @@
       "tests": []
     },
     {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel._isolated_store",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 22,
+      "module": "scripts",
+      "name": "_isolated_store",
+      "public": false,
+      "qualified": "scripts.tests.test_vayren_intel:_isolated_store",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_baseline_roundtrip",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 69,
+      "module": "scripts",
+      "name": "test_baseline_roundtrip",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_baseline_roundtrip",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_bottleneck_unknown_when_no_evidence",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 151,
+      "module": "scripts",
+      "name": "test_bottleneck_unknown_when_no_evidence",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_bottleneck_unknown_when_no_evidence",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_console_fallback_is_ascii",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 125,
+      "module": "scripts",
+      "name": "test_console_fallback_is_ascii",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_console_fallback_is_ascii",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_experiment_cli_keeps_record",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 219,
+      "module": "scripts",
+      "name": "test_experiment_cli_keeps_record",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_experiment_cli_keeps_record",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_experiment_log_keeps_failures",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 97,
+      "module": "scripts",
+      "name": "test_experiment_log_keeps_failures",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_experiment_log_keeps_failures",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_goal_prefers_verified_bottleneck",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 155,
+      "module": "scripts",
+      "name": "test_goal_prefers_verified_bottleneck",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_goal_prefers_verified_bottleneck",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_goal_says_no_action_when_healthy",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 162,
+      "module": "scripts",
+      "name": "test_goal_says_no_action_when_healthy",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_goal_says_no_action_when_healthy",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_impact_reuses_benchmark_levels",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 168,
+      "module": "scripts",
+      "name": "test_impact_reuses_benchmark_levels",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_impact_reuses_benchmark_levels",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_impact_tiny_rust_change_avoids_full_gate",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 176,
+      "module": "scripts",
+      "name": "test_impact_tiny_rust_change_avoids_full_gate",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_impact_tiny_rust_change_avoids_full_gate",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_impact_ui_change_targets_shell",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 185,
+      "module": "scripts",
+      "name": "test_impact_ui_change_targets_shell",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_impact_ui_change_targets_shell",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_knowledge_rejects_bad_state",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 83,
+      "module": "scripts",
+      "name": "test_knowledge_rejects_bad_state",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_knowledge_rejects_bad_state",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_knowledge_states_cover_lifecycle",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 39,
+      "module": "scripts",
+      "name": "test_knowledge_states_cover_lifecycle",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_knowledge_states_cover_lifecycle",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_knowledge_transition_keeps_history",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 88,
+      "module": "scripts",
+      "name": "test_knowledge_transition_keeps_history",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_knowledge_transition_keeps_history",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_learn_cli_records_item",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 204,
+      "module": "scripts",
+      "name": "test_learn_cli_records_item",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_learn_cli_records_item",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_learn_cli_rejects_confidence_text",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 214,
+      "module": "scripts",
+      "name": "test_learn_cli_rejects_confidence_text",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_learn_cli_rejects_confidence_text",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_level_map_keeps_full_safety_net",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 200,
+      "module": "scripts",
+      "name": "test_level_map_keeps_full_safety_net",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_level_map_keeps_full_safety_net",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_progress_current_matches_active_stage",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 130,
+      "module": "scripts",
+      "name": "test_progress_current_matches_active_stage",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_progress_current_matches_active_stage",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_progress_reflects_real_state",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 113,
+      "module": "scripts",
+      "name": "test_progress_reflects_real_state",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_progress_reflects_real_state",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_report_compares_against_baseline",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 138,
+      "module": "scripts",
+      "name": "test_report_compares_against_baseline",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_report_compares_against_baseline",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_scan_measures_live_tree",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 54,
+      "module": "scripts",
+      "name": "test_scan_measures_live_tree",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_scan_measures_live_tree",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_scan_never_fabricates",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 64,
+      "module": "scripts",
+      "name": "test_scan_never_fabricates",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_scan_never_fabricates",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_stage_rejects_bad_transition",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 106,
+      "module": "scripts",
+      "name": "test_stage_rejects_bad_transition",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_stage_rejects_bad_transition",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_stages_cover_lifecycle",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 26,
+      "module": "scripts",
+      "name": "test_stages_cover_lifecycle",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_stages_cover_lifecycle",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_timed_check_reports_shape_without_compiling",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 193,
+      "module": "scripts",
+      "name": "test_timed_check_reports_shape_without_compiling",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_timed_check_reports_shape_without_compiling",
+      "tests": []
+    },
+    {
       "called_by": [
         "scripts.validate_architecture_gate:check_changes"
       ],
@@ -59022,6 +59955,657 @@
     },
     {
       "called_by": [
+        "scripts.vayren_intel:add_knowledge",
+        "scripts.vayren_intel:set_stage"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.vayren_intel.IntelError",
+      "file": "scripts/vayren_intel.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 88,
+      "module": "scripts",
+      "name": "IntelError",
+      "public": true,
+      "qualified": "scripts.vayren_intel:IntelError",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.vayren_intel:build_baseline",
+        "scripts.vayren_intel:daily_report",
+        "scripts.vayren_intel:log_experiment"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "scripts.vayren_intel:_path"
+      ],
+      "dotted": "scripts.vayren_intel._append_jsonl",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 113,
+      "module": "scripts",
+      "name": "_append_jsonl",
+      "public": false,
+      "qualified": "scripts.vayren_intel:_append_jsonl",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.vayren_intel:daily_report",
+        "scripts.vayren_intel:next_goal"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.vayren_intel._current_bottleneck",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 540,
+      "module": "scripts",
+      "name": "_current_bottleneck",
+      "public": false,
+      "qualified": "scripts.vayren_intel:_current_bottleneck",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.vayren_intel:daily_report"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.vayren_intel._delta",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 501,
+      "module": "scripts",
+      "name": "_delta",
+      "public": false,
+      "qualified": "scripts.vayren_intel:_delta",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.vayren_intel:add_knowledge",
+        "scripts.vayren_intel:log_experiment",
+        "scripts.vayren_intel:scan_repository"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.vayren_intel._git_revision",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 137,
+      "module": "scripts",
+      "name": "_git_revision",
+      "public": false,
+      "qualified": "scripts.vayren_intel:_git_revision",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.vayren_intel:daily_report"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "scripts.vayren_intel:_path"
+      ],
+      "dotted": "scripts.vayren_intel._history_since",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 477,
+      "module": "scripts",
+      "name": "_history_since",
+      "public": false,
+      "qualified": "scripts.vayren_intel:_history_since",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.vayren_intel:load_baseline",
+        "scripts.vayren_intel:load_knowledge",
+        "scripts.vayren_intel:load_state"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "scripts.vayren_intel:_path"
+      ],
+      "dotted": "scripts.vayren_intel._load_json",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 99,
+      "module": "scripts",
+      "name": "_load_json",
+      "public": false,
+      "qualified": "scripts.vayren_intel:_load_json",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.vayren_intel:scan_repository"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.vayren_intel._loc",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 154,
+      "module": "scripts",
+      "name": "_loc",
+      "public": false,
+      "qualified": "scripts.vayren_intel:_loc",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.vayren_intel:add_knowledge",
+        "scripts.vayren_intel:daily_report",
+        "scripts.vayren_intel:log_experiment",
+        "scripts.vayren_intel:next_goal",
+        "scripts.vayren_intel:scan_repository",
+        "scripts.vayren_intel:set_stage"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.vayren_intel._now_iso",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 119,
+      "module": "scripts",
+      "name": "_now_iso",
+      "public": false,
+      "qualified": "scripts.vayren_intel:_now_iso",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.vayren_intel:_append_jsonl",
+        "scripts.vayren_intel:_history_since",
+        "scripts.vayren_intel:_load_json",
+        "scripts.vayren_intel:_store_json",
+        "scripts.vayren_intel:load_experiments"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.vayren_intel._path",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 95,
+      "module": "scripts",
+      "name": "_path",
+      "public": false,
+      "qualified": "scripts.vayren_intel:_path",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.vayren_intel:add_knowledge",
+        "scripts.vayren_intel:build_baseline",
+        "scripts.vayren_intel:set_stage"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "scripts.vayren_intel:_path"
+      ],
+      "dotted": "scripts.vayren_intel._store_json",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 106,
+      "module": "scripts",
+      "name": "_store_json",
+      "public": false,
+      "qualified": "scripts.vayren_intel:_store_json",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.vayren_intel:main"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.vayren_intel._to_console",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 123,
+      "module": "scripts",
+      "name": "_to_console",
+      "public": false,
+      "qualified": "scripts.vayren_intel:_to_console",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.vayren_intel:main",
+        "scripts.vayren_intel:seed_day1_knowledge"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "scripts.vayren_intel:IntelError",
+        "scripts.vayren_intel:_git_revision",
+        "scripts.vayren_intel:_now_iso",
+        "scripts.vayren_intel:_store_json",
+        "scripts.vayren_intel:load_knowledge"
+      ],
+      "dotted": "scripts.vayren_intel.add_knowledge",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 272,
+      "module": "scripts",
+      "name": "add_knowledge",
+      "public": true,
+      "qualified": "scripts.vayren_intel:add_knowledge",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.vayren_intel:main"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "scripts.vayren_intel:_append_jsonl",
+        "scripts.vayren_intel:_store_json",
+        "scripts.vayren_intel:scan_repository",
+        "scripts.vayren_intel:timed_check"
+      ],
+      "dotted": "scripts.vayren_intel.build_baseline",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 222,
+      "module": "scripts",
+      "name": "build_baseline",
+      "public": true,
+      "qualified": "scripts.vayren_intel:build_baseline",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.vayren_intel:main"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "scripts.vayren_intel:_append_jsonl",
+        "scripts.vayren_intel:_current_bottleneck",
+        "scripts.vayren_intel:_delta",
+        "scripts.vayren_intel:_history_since",
+        "scripts.vayren_intel:_now_iso",
+        "scripts.vayren_intel:load_baseline",
+        "scripts.vayren_intel:load_experiments",
+        "scripts.vayren_intel:load_knowledge",
+        "scripts.vayren_intel:scan_repository"
+      ],
+      "dotted": "scripts.vayren_intel.daily_report",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 509,
+      "module": "scripts",
+      "name": "daily_report",
+      "public": true,
+      "qualified": "scripts.vayren_intel:daily_report",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.vayren_intel:main"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.vayren_intel.impact_for",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 636,
+      "module": "scripts",
+      "name": "impact_for",
+      "public": true,
+      "qualified": "scripts.vayren_intel:impact_for",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.vayren_intel:daily_report",
+        "scripts.vayren_intel:render_progress"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "scripts.vayren_intel:_load_json"
+      ],
+      "dotted": "scripts.vayren_intel.load_baseline",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 257,
+      "module": "scripts",
+      "name": "load_baseline",
+      "public": true,
+      "qualified": "scripts.vayren_intel:load_baseline",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.vayren_intel:daily_report",
+        "scripts.vayren_intel:next_goal"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "scripts.vayren_intel:_path"
+      ],
+      "dotted": "scripts.vayren_intel.load_experiments",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 388,
+      "module": "scripts",
+      "name": "load_experiments",
+      "public": true,
+      "qualified": "scripts.vayren_intel:load_experiments",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.vayren_intel:add_knowledge",
+        "scripts.vayren_intel:daily_report",
+        "scripts.vayren_intel:main",
+        "scripts.vayren_intel:next_goal"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "scripts.vayren_intel:_load_json"
+      ],
+      "dotted": "scripts.vayren_intel.load_knowledge",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 265,
+      "module": "scripts",
+      "name": "load_knowledge",
+      "public": true,
+      "qualified": "scripts.vayren_intel:load_knowledge",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.vayren_intel:render_progress",
+        "scripts.vayren_intel:set_stage"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "scripts.vayren_intel:_load_json"
+      ],
+      "dotted": "scripts.vayren_intel.load_state",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 408,
+      "module": "scripts",
+      "name": "load_state",
+      "public": true,
+      "qualified": "scripts.vayren_intel:load_state",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.vayren_intel:main"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "scripts.vayren_intel:_append_jsonl",
+        "scripts.vayren_intel:_git_revision",
+        "scripts.vayren_intel:_now_iso"
+      ],
+      "dotted": "scripts.vayren_intel.log_experiment",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 360,
+      "module": "scripts",
+      "name": "log_experiment",
+      "public": true,
+      "qualified": "scripts.vayren_intel:log_experiment",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "scripts.vayren_intel:_to_console",
+        "scripts.vayren_intel:add_knowledge",
+        "scripts.vayren_intel:build_baseline",
+        "scripts.vayren_intel:daily_report",
+        "scripts.vayren_intel:impact_for",
+        "scripts.vayren_intel:load_knowledge",
+        "scripts.vayren_intel:log_experiment",
+        "scripts.vayren_intel:next_goal",
+        "scripts.vayren_intel:render_progress",
+        "scripts.vayren_intel:render_report",
+        "scripts.vayren_intel:scan_repository",
+        "scripts.vayren_intel:seed_day1_knowledge",
+        "scripts.vayren_intel:set_stage"
+      ],
+      "dotted": "scripts.vayren_intel.main",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 646,
+      "module": "scripts",
+      "name": "main",
+      "public": true,
+      "qualified": "scripts.vayren_intel:main",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.vayren_intel:main"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "scripts.vayren_intel:_current_bottleneck",
+        "scripts.vayren_intel:_now_iso",
+        "scripts.vayren_intel:load_experiments",
+        "scripts.vayren_intel:load_knowledge"
+      ],
+      "dotted": "scripts.vayren_intel.next_goal",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 602,
+      "module": "scripts",
+      "name": "next_goal",
+      "public": true,
+      "qualified": "scripts.vayren_intel:next_goal",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.vayren_intel:main"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "scripts.vayren_intel:load_baseline",
+        "scripts.vayren_intel:load_state"
+      ],
+      "dotted": "scripts.vayren_intel.render_progress",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 430,
+      "module": "scripts",
+      "name": "render_progress",
+      "public": true,
+      "qualified": "scripts.vayren_intel:render_progress",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.vayren_intel:main"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.vayren_intel.render_report",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 564,
+      "module": "scripts",
+      "name": "render_report",
+      "public": true,
+      "qualified": "scripts.vayren_intel:render_report",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.vayren_intel:build_baseline",
+        "scripts.vayren_intel:daily_report",
+        "scripts.vayren_intel:main"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "scripts.vayren_intel:_git_revision",
+        "scripts.vayren_intel:_loc",
+        "scripts.vayren_intel:_now_iso"
+      ],
+      "dotted": "scripts.vayren_intel.scan_repository",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 165,
+      "module": "scripts",
+      "name": "scan_repository",
+      "public": true,
+      "qualified": "scripts.vayren_intel:scan_repository",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.vayren_intel:main"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "scripts.vayren_intel:add_knowledge"
+      ],
+      "dotted": "scripts.vayren_intel.seed_day1_knowledge",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 307,
+      "module": "scripts",
+      "name": "seed_day1_knowledge",
+      "public": true,
+      "qualified": "scripts.vayren_intel:seed_day1_knowledge",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.vayren_intel:main"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "scripts.vayren_intel:IntelError",
+        "scripts.vayren_intel:_now_iso",
+        "scripts.vayren_intel:_store_json",
+        "scripts.vayren_intel:load_state"
+      ],
+      "dotted": "scripts.vayren_intel.set_stage",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 415,
+      "module": "scripts",
+      "name": "set_stage",
+      "public": true,
+      "qualified": "scripts.vayren_intel:set_stage",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.vayren_intel:build_baseline"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.vayren_intel.timed_check",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 205,
+      "module": "scripts",
+      "name": "timed_check",
+      "public": true,
+      "qualified": "scripts.vayren_intel:timed_check",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
         "strategy.builtins:list_builtins"
       ],
       "callers_complete": true,
@@ -59718,7 +61302,6 @@
         "strategy.models.parameters:StrategyParameters",
         "strategy.registry:StrategyRegistry",
         "strategy.strategies.ema:EmaCrossover",
-        "strategy.strategies.obr:ObrSellV10",
         "strategy.strategies.rsi:RsiStrategy",
         "strategy.strategies.sma:SmaCrossover"
       ],
@@ -62842,7 +64425,6 @@
         "strategy.runtime:StrategyRuntime",
         "strategy.strategies.base:PythonStrategy",
         "strategy.strategies.ema:EmaCrossover",
-        "strategy.strategies.obr:ObrSellV10",
         "strategy.strategies.rsi:RsiStrategy",
         "strategy.strategies.sma:SmaCrossover"
       ],
@@ -62911,7 +64493,6 @@
     {
       "called_by": [
         "strategy.strategies.ema:EmaCrossover",
-        "strategy.strategies.obr:ObrSellV10",
         "strategy.strategies.rsi:RsiStrategy",
         "strategy.strategies.sma:SmaCrossover"
       ],
@@ -62982,9 +64563,7 @@
       "tests": []
     },
     {
-      "called_by": [
-        "strategy.strategies.obr:ObrSellV10"
-      ],
+      "called_by": [],
       "callers_complete": true,
       "calls": [],
       "dotted": "strategy.strategies.indicators.calc_range",
@@ -63000,7 +64579,6 @@
     },
     {
       "called_by": [
-        "strategy.strategies.obr:ObrSellV10",
         "strategy.strategies.rsi:RsiStrategy"
       ],
       "callers_complete": true,
@@ -63031,27 +64609,6 @@
       "name": "calc_sma",
       "public": true,
       "qualified": "strategy.strategies.indicators:calc_sma",
-      "tests": []
-    },
-    {
-      "called_by": [],
-      "callers_complete": true,
-      "calls": [
-        "strategy.models.parameters:ParameterSpec",
-        "strategy.runtime:BarView",
-        "strategy.strategies.base:PythonStrategy",
-        "strategy.strategies.indicators:calc_range",
-        "strategy.strategies.indicators:calc_rsi"
-      ],
-      "dotted": "strategy.strategies.obr.ObrSellV10",
-      "file": "05_strategy/strategy/strategies/obr.py",
-      "kind": "class",
-      "language": "PYTHON",
-      "line": 13,
-      "module": "05_strategy/strategy",
-      "name": "ObrSellV10",
-      "public": true,
-      "qualified": "strategy.strategies.obr:ObrSellV10",
       "tests": []
     },
     {
@@ -63366,9 +64923,7 @@
     {
       "called_by": [
         "strategy.version:StrategyVersion",
-        "strategy.version:create_version",
-        "strategy.version:restore_version_source",
-        "strategy.version:verify_version_ir"
+        "strategy.version:create_version"
       ],
       "callers_complete": true,
       "calls": [
@@ -63501,9 +65056,7 @@
       "called_by": [
         "strategy.research.evolution:approve_proposal",
         "strategy.research.evolution:compare_versions",
-        "strategy.version:list_versions",
-        "strategy.version:restore_version_source",
-        "strategy.version:verify_version_ir"
+        "strategy.version:list_versions"
       ],
       "callers_complete": true,
       "calls": [
@@ -63519,24 +65072,6 @@
       "name": "load_version",
       "public": true,
       "qualified": "strategy.version:load_version",
-      "tests": []
-    },
-    {
-      "called_by": [],
-      "callers_complete": true,
-      "calls": [
-        "strategy.version:_hash_text",
-        "strategy.version:load_version"
-      ],
-      "dotted": "strategy.version.restore_version_source",
-      "file": "05_strategy/strategy/version.py",
-      "kind": "function",
-      "language": "PYTHON",
-      "line": 476,
-      "module": "05_strategy/strategy",
-      "name": "restore_version_source",
-      "public": true,
-      "qualified": "strategy.version:restore_version_source",
       "tests": []
     },
     {
@@ -63596,24 +65131,6 @@
       "name": "validate_new_version",
       "public": true,
       "qualified": "strategy.version:validate_new_version",
-      "tests": []
-    },
-    {
-      "called_by": [],
-      "callers_complete": true,
-      "calls": [
-        "strategy.version:_hash_text",
-        "strategy.version:load_version"
-      ],
-      "dotted": "strategy.version.verify_version_ir",
-      "file": "05_strategy/strategy/version.py",
-      "kind": "function",
-      "language": "PYTHON",
-      "line": 497,
-      "module": "05_strategy/strategy",
-      "name": "verify_version_ir",
-      "public": true,
-      "qualified": "strategy.version:verify_version_ir",
       "tests": []
     }
   ],
@@ -63849,6 +65366,14 @@
       "targets": []
     },
     {
+      "granularity": "file",
+      "module": "scripts",
+      "path": "scripts/tests/test_build_rust.py",
+      "targets": [
+        "scripts/build_rust.py"
+      ]
+    },
+    {
       "granularity": "module",
       "module": "scripts",
       "path": "scripts/tests/test_context.py",
@@ -63929,6 +65454,14 @@
     {
       "granularity": "file",
       "module": "scripts",
+      "path": "scripts/tests/test_run_tests.py",
+      "targets": [
+        "scripts/run_tests.py"
+      ]
+    },
+    {
+      "granularity": "file",
+      "module": "scripts",
       "path": "scripts/tests/test_self_opt.py",
       "targets": [
         "scripts/self_opt.py"
@@ -63952,6 +65485,14 @@
       "path": "scripts/tests/test_validate_scope.py",
       "targets": [
         "scripts/validate_scope.py"
+      ]
+    },
+    {
+      "granularity": "file",
+      "module": "scripts",
+      "path": "scripts/tests/test_vayren_intel.py",
+      "targets": [
+        "scripts/vayren_intel.py"
       ]
     }
   ],

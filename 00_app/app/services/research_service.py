@@ -20,8 +20,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from app.observable import Signal, WorkerThread
-
 
 @dataclass(frozen=True)
 class DatasetSummary:
@@ -186,52 +184,6 @@ def validate_research_config(
         if unknown:
             errors.append(f"Unknown parameters: {sorted(unknown)} (valid: {sorted(known)}).")
     return errors
-
-
-class ResearchWorker(WorkerThread):
-    """Background execution for one research experiment (UI never blocks).
-
-    The heavy run (data fetch, strategy execution, analysis) happens here;
-    the workspace only receives progress/log/finished signals. Cancellation
-    is cooperative (checked between symbols and stages) and never corrupts
-    saved experiments — a cancelled run persists as CANCELLED.
-    """
-
-    progressed = Signal(str, str, int, int)
-    log_line = Signal(str, str)
-    finished_ok = Signal(str)
-    finished_fail = Signal(str, str)
-
-    def __init__(self, service: Any, experiment_id: str) -> None:
-        super().__init__()
-        self._service = service
-        self._experiment_id = str(experiment_id)
-        self._cancelled = False
-
-    def request_cancel(self) -> None:
-        """Ask the run to stop at the next safe checkpoint."""
-        self._cancelled = True
-
-    def run(self) -> None:  # noqa: D102
-        service = self._service
-        exp_id = self._experiment_id
-
-        def _progress(stage: str, done: int, total: int, message: str = "") -> None:
-            self.progressed.emit(exp_id, stage, int(done), int(total))
-            if message:
-                self.log_line.emit(exp_id, message)
-
-        try:
-            service.run_experiment(
-                exp_id,
-                progress=_progress,
-                is_cancelled=lambda: bool(self._cancelled),
-                on_log=lambda message: self.log_line.emit(exp_id, str(message)),
-            )
-        except Exception as exc:  # noqa: BLE001
-            self.finished_fail.emit(exp_id, str(exc))
-            return
-        self.finished_ok.emit(exp_id)
 
 
 class ResearchService:

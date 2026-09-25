@@ -42,9 +42,6 @@ pub struct RiskKernelInputs {
     pub request_available_capital: f64,
 }
 
-/// Number of kernel checks (bitmask width).
-pub const CHECK_COUNT: usize = 13;
-
 /// Bit 0: `broker_health`.
 pub const BIT_BROKER_HEALTH: u32 = 1 << 0;
 /// Bit 1: `fresh_data`.
