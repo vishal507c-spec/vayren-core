@@ -243,6 +243,57 @@ fn tone_pixels(out: &[u8], w: u32, h: u32, fx0: f32, fx1: f32, fy0: f32, fy1: f3
     hits
 }
 
+/// Vacated-space tone for the one-side free-pan test: like `tone_pixels`,
+/// but rows belonging to a thin full-span band are the intentional
+/// permanent last-price overlay (a 2px direction-colored dashed line,
+/// present by design even where no candles are), not stale candles.
+/// A ghost candle body/wick always has vertical extent, so masking only
+/// rows inside a ≤3-row toned window cannot hide one — the emptiness
+/// intent is fully preserved.
+fn parked_right_space_tone(out: &[u8], w: u32, h: u32) -> usize {
+    let (x0, x1) = (
+        (w as f32 * 0.60) as u32,
+        (w as f32 * 0.90).min(w as f32) as u32,
+    );
+    let (y0, y1) = (
+        (h as f32 * 0.30) as u32,
+        (h as f32 * 0.80).min(h as f32) as u32,
+    );
+    let width = (x1 - x0) as usize;
+    let is_tone = |x: u32, y: u32| -> bool {
+        let i = ((y * w + x) * 3) as usize;
+        let px = [out[i], out[i + 1], out[i + 2]];
+        near(&px, [0x21, 0xC5, 0x8B], 12) || near(&px, [0xF0, 0x5A, 0x67], 12)
+    };
+    // Per-row toned counts first (a second pass needs them for windowing).
+    let mut row_hits: Vec<usize> = Vec::with_capacity((y1 - y0) as usize);
+    for y in y0..y1 {
+        let mut row = 0usize;
+        for x in x0..x1 {
+            if is_tone(x, y) {
+                row += 1;
+            }
+        }
+        row_hits.push(row);
+    }
+    let mut hits = 0usize;
+    for (idx, row) in row_hits.iter().enumerate() {
+        if *row == 0 {
+            continue;
+        }
+        // Thin-band test: toned rows within ±2 of this row number ≤ 3
+        // (the overlay dash band) AND this row is widely toned (≥25%).
+        let lo = idx.saturating_sub(2);
+        let hi = (idx + 3).min(row_hits.len());
+        let band_rows = row_hits[lo..hi].iter().filter(|r| **r > 0).count();
+        if band_rows <= 3 && *row * 4 >= width {
+            continue;
+        }
+        hits += row;
+    }
+    hits
+}
+
 /// One-side free pan through the REAL C ABI (the path the legacy host drives):
 /// dragging the candles left must park the newest candle on the LEFT of the
 /// plot with a large, genuinely empty region to its right — and the next
@@ -294,8 +345,9 @@ fn market_one_side_free_pan_leaves_empty_right_space() {
         tone_pixels(&parked, w, h, 0.20, 0.60, 0.30, 0.80) > 0,
         "parked candles must still paint on the left"
     );
-    // … and the right side of the plot is genuinely empty space.
-    let right = tone_pixels(&parked, w, h, 0.60, 0.90, 0.30, 0.80);
+    // … and the right side of the plot is genuinely empty space
+    // (the permanent last-price overlay line is masked by the counter).
+    let right = parked_right_space_tone(&parked, w, h);
     assert_eq!(right, 0, "empty right space must stay empty (got {right})");
 
     // The next snapshot of the same series must not move the view.
@@ -312,7 +364,7 @@ fn market_one_side_free_pan_leaves_empty_right_space() {
         "release must not move the view (snap-back)"
     );
     assert_eq!(
-        tone_pixels(&after, w, h, 0.60, 0.90, 0.30, 0.80),
+        parked_right_space_tone(&after, w, h),
         0,
         "empty right space must survive the next snapshot"
     );
