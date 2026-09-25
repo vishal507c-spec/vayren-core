@@ -111,17 +111,19 @@ def test_no_new_process_shapes() -> None:
 
 
 def _fake_tree(root: Path) -> None:
+    # Platform-correct names via the driver's own helpers (a hardcoded
+    # `.dll`/`.exe` tree goes stale on Linux CI).
     (root / "rust" / "target" / "release").mkdir(parents=True)
     (root / "rust" / "target" / "debug").mkdir(parents=True)
     for artifact in (
-        "rust/target/release/vayren_core.dll",
-        "rust/target/release/vayren_portfolio_view.dll",
-        "rust/target/release/vayren_live_view.dll",
-        "rust/target/release/vayren_system_view.dll",
-        "rust/target/release/vayren_strategy_lab_view.dll",
-        "rust/target/release/vayren_research_view.dll",
-        "rust/target/release/vayren_market_view.dll",
-        "rust/target/debug/vayren-shell.exe",
+        f"rust/target/release/{build_rust._lib_name()}",
+        f"rust/target/release/{build_rust._view_lib_name()}",
+        f"rust/target/release/{build_rust._live_lib_name()}",
+        f"rust/target/release/{build_rust._system_lib_name()}",
+        f"rust/target/release/{build_rust._lab_lib_name()}",
+        f"rust/target/release/{build_rust._research_lib_name()}",
+        f"rust/target/release/{build_rust._market_lib_name()}",
+        f"rust/target/debug/{build_rust._bin_name()}",
     ):
         path = root / artifact
         path.write_text("x", encoding="utf-8")
