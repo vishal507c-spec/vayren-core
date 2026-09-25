@@ -145,6 +145,11 @@ jobs:
       actions: write
     steps:
       - uses: actions/checkout@v4
+      # Same native prerequisites as build-test: the Slint font stack
+      # links fontconfig/freetype at final link time (linker fails
+      # without the dev packages — Day-6 CI proof).
+      - name: Install Linux build dependencies
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libfontconfig1-dev
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
