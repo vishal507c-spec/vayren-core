@@ -59,6 +59,20 @@ CHANGED_BROKER = ["09_broker/broker/registry.py"]
 CHANGED_ROUTE = ["scripts/route.py"]
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _warm_index() -> None:
+    """Heal the repo index once: staleness probes below assume READY.
+
+    The full suite warms this incidentally via earlier modules; sharded or
+    single-file runs start cold (REBUILD_REQUIRED) without it.
+    """
+    _heal_index()
+
+
+def _heal_index() -> None:
+    repo_index.ensure_fresh()
+
+
 class TreeEdit:
     """One live-tree mutation with guaranteed byte-identical restore."""
 
@@ -941,3 +955,10 @@ def test_decide_and_attribute_are_directly_usable() -> None:
     assert decision["category"] == "UNKNOWN"
     assert decision["next_action"] == "ESCALATE_VALIDATION"
     assert decision["escalation_target"] == "L3"
+
+
+def test_warm_index_heals_before_probes(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[None] = []
+    monkeypatch.setattr(repo_index, "ensure_fresh", lambda: calls.append(None))
+    _heal_index()
+    assert calls == [None]

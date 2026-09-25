@@ -105,7 +105,12 @@ def test_shard_jobs_exist() -> None:
 
 
 def test_every_file_covered_exactly_once() -> None:
-    text = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    text = "\n".join(
+        raw.split("#", 1)[0]
+        for raw in (ROOT / ".github" / "workflows" / "ci.yml")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    )
     bare = re.findall(r"pytest\s+scripts/tests(?![/\w])", text)
     assert bare == [], f"directory-form pytest would duplicate shards: {bare}"
     covered = _ci_pytest_files()

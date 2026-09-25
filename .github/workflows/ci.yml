@@ -131,11 +131,12 @@ jobs:
           du -sh rust/target ~/.cargo/registry ~/.cargo/git 2>/dev/null || true
           df -h /
 
-  # Shard 1/2 — live-tree mutators, serial within the job, isolated runner.
+  # Shard 1/2 — live-mutators, serial within the job, isolated runner.
   # test_validate_scope.py + test_failure_intel.py mutate the live tree
   # (TreeEdit + restore); same-checkout parallel pytest is race-proven
   # unsafe (Day-6 intel), so mutators never share a runner with readers.
-  # Needs only the kernel cdylib (scope-bench executes pytest partitions).
+  # Needs the kernel cdylib (scope-bench executes pytest partitions) plus
+  # the debug shell (nested full-scripts baseline includes test_desktop).
   test-shard-stateful:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -156,6 +157,9 @@ jobs:
           workspaces: "rust -> target"
           shared-key: "vayren-rust"
       - run: cargo build --release -p vayren-core --manifest-path rust/Cargo.toml
+      # The scope-bench tests execute the full `pytest scripts/tests -q`
+      # baseline, which includes test_desktop.py (needs the shell binary).
+      - run: cargo build -p vayren-shell --manifest-path rust/Cargo.toml
       - run: python -m pytest scripts/tests/test_validate_scope.py scripts/tests/test_failure_intel.py -q --no-header
 
   # Shard 2/2 — isolated readers, serial within the job, isolated runner.
