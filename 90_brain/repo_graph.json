@@ -942,7 +942,7 @@
       "to": "01_core/core/native"
     }
   ],
-  "entity_count": 3873,
+  "entity_count": 3881,
   "files": [
     {
       "domain": "APP_COMPOSITION",
@@ -2676,16 +2676,6 @@
     },
     {
       "domain": "BROKER_CONTRACT",
-      "is_test": false,
-      "language": "PYTHON",
-      "module": "09_broker/broker",
-      "owner": "BROKER_CONTRACT",
-      "owner_source": "policy",
-      "path": "09_broker/broker/surprise.py",
-      "retention_state": null
-    },
-    {
-      "domain": "BROKER_CONTRACT",
       "is_test": true,
       "language": "PYTHON",
       "module": "09_broker/broker",
@@ -4191,6 +4181,16 @@
       "module": "scripts",
       "owner": "scripts",
       "owner_source": "synthetic",
+      "path": "scripts/tests/test_shard_contract.py",
+      "retention_state": null
+    },
+    {
+      "domain": "TOOLING",
+      "is_test": true,
+      "language": "PYTHON",
+      "module": "scripts",
+      "owner": "scripts",
+      "owner_source": "synthetic",
       "path": "scripts/tests/test_speed_loop.py",
       "retention_state": null
     },
@@ -4862,7 +4862,6 @@
         "09_broker/broker/selection.py",
         "09_broker/broker/selection_store.py",
         "09_broker/broker/status.py",
-        "09_broker/broker/surprise.py",
         "09_broker/broker/tests/__init__.py",
         "09_broker/broker/tests/test_auth.py",
         "09_broker/broker/tests/test_broker_contracts.py",
@@ -5173,6 +5172,7 @@
         "scripts/tests/test_router.py",
         "scripts/tests/test_run_tests.py",
         "scripts/tests/test_self_opt.py",
+        "scripts/tests/test_shard_contract.py",
         "scripts/tests/test_speed_loop.py",
         "scripts/tests/test_speed_metrics.py",
         "scripts/tests/test_validate_scope.py",
@@ -5354,7 +5354,7 @@
       "required_language": "PYTHON"
     }
   ],
-  "relationship_count": 6138,
+  "relationship_count": 6150,
   "repository": {
     "name": "vayren-core",
     "root": "."
@@ -8733,21 +8733,6 @@
       "name": "DuplicateBrokerError",
       "public": true,
       "qualified": "broker.registry:DuplicateBrokerError",
-      "tests": []
-    },
-    {
-      "called_by": [],
-      "callers_complete": true,
-      "calls": [],
-      "dotted": "broker.registry._phase6_probe",
-      "file": "09_broker/broker/registry.py",
-      "kind": "function",
-      "language": "PYTHON",
-      "line": 134,
-      "module": "09_broker/broker",
-      "name": "_phase6_probe",
-      "public": false,
-      "qualified": "broker.registry:_phase6_probe",
       "tests": []
     },
     {
@@ -56348,6 +56333,146 @@
     },
     {
       "called_by": [
+        "scripts.tests.test_shard_contract:_ci_pytest_files",
+        "scripts.tests.test_shard_contract:test_shard_jobs_exist"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_shard_contract._ci_jobs",
+      "file": "scripts/tests/test_shard_contract.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 29,
+      "module": "scripts",
+      "name": "_ci_jobs",
+      "public": false,
+      "qualified": "scripts.tests.test_shard_contract:_ci_jobs",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "scripts.tests.test_shard_contract:test_desktop_runs_beside_its_binary",
+        "scripts.tests.test_shard_contract:test_every_file_covered_exactly_once",
+        "scripts.tests.test_shard_contract:test_mutators_share_one_serial_shard"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "scripts.tests.test_shard_contract:_ci_jobs"
+      ],
+      "dotted": "scripts.tests.test_shard_contract._ci_pytest_files",
+      "file": "scripts/tests/test_shard_contract.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 79,
+      "module": "scripts",
+      "name": "_ci_pytest_files",
+      "public": false,
+      "qualified": "scripts.tests.test_shard_contract:_ci_pytest_files",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "scripts.tests.test_shard_contract:test_every_file_covered_exactly_once"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_shard_contract._on_disk",
+      "file": "scripts/tests/test_shard_contract.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 94,
+      "module": "scripts",
+      "name": "_on_disk",
+      "public": false,
+      "qualified": "scripts.tests.test_shard_contract:_on_disk",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "scripts.tests.test_shard_contract:_ci_pytest_files"
+      ],
+      "dotted": "scripts.tests.test_shard_contract.test_desktop_runs_beside_its_binary",
+      "file": "scripts/tests/test_shard_contract.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 129,
+      "module": "scripts",
+      "name": "test_desktop_runs_beside_its_binary",
+      "public": true,
+      "qualified": "scripts.tests.test_shard_contract:test_desktop_runs_beside_its_binary",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "scripts.tests.test_shard_contract:_ci_pytest_files",
+        "scripts.tests.test_shard_contract:_on_disk"
+      ],
+      "dotted": "scripts.tests.test_shard_contract.test_every_file_covered_exactly_once",
+      "file": "scripts/tests/test_shard_contract.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 107,
+      "module": "scripts",
+      "name": "test_every_file_covered_exactly_once",
+      "public": true,
+      "qualified": "scripts.tests.test_shard_contract:test_every_file_covered_exactly_once",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_shard_contract.test_local_serial_path_intact",
+      "file": "scripts/tests/test_shard_contract.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 134,
+      "module": "scripts",
+      "name": "test_local_serial_path_intact",
+      "public": true,
+      "qualified": "scripts.tests.test_shard_contract:test_local_serial_path_intact",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "scripts.tests.test_shard_contract:_ci_pytest_files"
+      ],
+      "dotted": "scripts.tests.test_shard_contract.test_mutators_share_one_serial_shard",
+      "file": "scripts/tests/test_shard_contract.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 123,
+      "module": "scripts",
+      "name": "test_mutators_share_one_serial_shard",
+      "public": true,
+      "qualified": "scripts.tests.test_shard_contract:test_mutators_share_one_serial_shard",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "scripts.tests.test_shard_contract:_ci_jobs"
+      ],
+      "dotted": "scripts.tests.test_shard_contract.test_shard_jobs_exist",
+      "file": "scripts/tests/test_shard_contract.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 98,
+      "module": "scripts",
+      "name": "test_shard_jobs_exist",
+      "public": true,
+      "qualified": "scripts.tests.test_shard_contract:test_shard_jobs_exist",
+      "tests": []
+    },
+    {
+      "called_by": [
         "scripts.tests.test_speed_loop:test_build_record_embeds_derived_segments",
         "scripts.tests.test_speed_loop:test_first_milestone_wins_repeated_marks",
         "scripts.tests.test_speed_loop:test_full_chain_measures_every_segment",
@@ -65466,6 +65591,12 @@
       "targets": [
         "scripts/self_opt.py"
       ]
+    },
+    {
+      "granularity": "module",
+      "module": "scripts",
+      "path": "scripts/tests/test_shard_contract.py",
+      "targets": []
     },
     {
       "granularity": "module",
