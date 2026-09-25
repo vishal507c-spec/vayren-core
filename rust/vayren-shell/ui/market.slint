@@ -57,6 +57,14 @@ export struct MarketTick {
     label: string,
 }
 
+// One strategy-owned REF level tag: axis position + value + line color.
+// Every persistent horizontal line carries one (no unexplained levels).
+export struct MarketRayLevel {
+    pos: float,
+    label: string,
+    color: int,
+}
+
 export struct MarketTimeframe {
     label: string,
     selected: bool,
@@ -199,11 +207,6 @@ export struct DlCredField {
     revealed: bool,
 }
 
-export struct DlKV {
-    k: string,
-    v: string,
-}
-
 export struct DlStock {
     symbol: string,
     selected: bool,
@@ -272,6 +275,10 @@ component SmallButton inherits Rectangle {
     in property <bool> active: false;
     in property <bool> primary: false;
     in property <bool> enabled: true;
+    // Vector icon (TradingView parity — never a font glyph: several Windows
+    // fonts lack ▾/↩/⋯ and paint tofu boxes). "" = text-only (legacy);
+    // "chevron" = text + drop chevron; "reset" / "dots" = icon-only.
+    in property <string> icon;
     callback picked();
 
     min-height: 24px;
@@ -280,6 +287,9 @@ component SmallButton inherits Rectangle {
     border-color: root.active ? VayrenPalette.accent-dim : VayrenPalette.hairline;
     background: root.primary ? VayrenPalette.accent
         : ta.has-hover && root.enabled ? VayrenPalette.hover : transparent;
+    property <color> ink: root.primary ? VayrenPalette.accent-text
+        : root.active ? VayrenPalette.accent
+        : root.enabled ? VayrenPalette.muted : VayrenPalette.faint;
     ta := TouchArea {
         enabled: root.enabled;
         clicked => { if root.enabled { root.picked(); } }
@@ -287,14 +297,76 @@ component SmallButton inherits Rectangle {
     HorizontalLayout {
         padding-left: VayrenDesign.sp-md;
         padding-right: VayrenDesign.sp-md;
-        Text {
+        spacing: VayrenDesign.sp-sm;
+        alignment: center;
+        // Text stretches to the full button height and centers internally;
+        // vector Paths cannot do that, so every icon sits in a
+        // VerticalLayout that centers it against the text baseline.
+        if root.label != "": Text {
             text: root.label;
-            color: root.primary ? VayrenPalette.accent-text
-                : root.active ? VayrenPalette.accent
-                : root.enabled ? VayrenPalette.muted : VayrenPalette.faint;
+            color: root.ink;
             font-size: VayrenDesign.fs-label;
             font-weight: 700;
             vertical-alignment: center;
+        }
+        // drop chevron (text buttons)
+        if root.icon == "chevron": VerticalLayout {
+            alignment: center;
+            Path {
+                width: 10px;
+                height: 6px;
+                viewbox-x: 0;
+                viewbox-y: 0;
+                viewbox-width: 10;
+                viewbox-height: 6;
+                commands: "M1.5 1.5 L5 4.5 L8.5 1.5";
+                fill: transparent;
+                stroke: root.ink;
+                stroke-width: 1.5px;
+            }
+        }
+        // reset-view (circular arrow, icon-only)
+        if root.icon == "reset": VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 14px;
+                height: 14px;
+                Path {
+                    width: 14px;
+                    height: 14px;
+                    viewbox-x: 0;
+                    viewbox-y: 0;
+                    viewbox-width: 16;
+                    viewbox-height: 16;
+                    commands: "M13.4 8 A5.4 5.4 0 1 1 8 2.6";
+                    fill: transparent;
+                    stroke: root.ink;
+                    stroke-width: 1.6px;
+                }
+                Path {
+                    x: 8px - 5.2px;
+                    y: 0px;
+                    width: 10.4px;
+                    height: 5px;
+                    viewbox-x: 0;
+                    viewbox-y: 0;
+                    viewbox-width: 104;
+                    viewbox-height: 50;
+                    commands: "M52 4 L78 46 L26 46 Z";
+                    fill: root.ink;
+                }
+            }
+        }
+        // more-menu (three dots, icon-only)
+        if root.icon == "dots": VerticalLayout {
+            alignment: center;
+            HorizontalLayout {
+                spacing: 2px;
+                alignment: center;
+                Rectangle { width: 3px; height: 3px; border-radius: 1.5px; background: root.ink; }
+                Rectangle { width: 3px; height: 3px; border-radius: 1.5px; background: root.ink; }
+                Rectangle { width: 3px; height: 3px; border-radius: 1.5px; background: root.ink; }
+            }
         }
     }
 }
@@ -660,14 +732,15 @@ component CandleGlyph inherits Rectangle {
         height: Math.max(1px, parent.c.body * parent.grid-h);
         background: MarketTone.brush(parent.c.tone);
     }
-    // volume
+    // volume (TradingView parity: candle-direction hue at 50% — the bar
+    // reads bullish/bearish at a glance while grid + wicks show through)
     Rectangle {
         x: 0px;
         y: parent.grid-h + parent.vol-h - parent.c.vol * parent.vol-h;
         width: parent.width;
         height: parent.c.vol * parent.vol-h;
-        background: parent.c.tone == 1 ? VayrenPalette.pos-dim
-            : parent.c.tone == 3 ? VayrenPalette.neg-dim : VayrenPalette.faint;
+        background: parent.c.tone == 1 ? VayrenPalette.vol-up
+            : parent.c.tone == 3 ? VayrenPalette.vol-down : VayrenPalette.faint;
     }
 }
 
@@ -1619,6 +1692,7 @@ export component MarketScreen inherits Rectangle {
     in property <[MarketCandle]> candles;
     in property <[MarketTick]> price-ticks;
     in property <[MarketTick]> time-ticks;
+    in property <[MarketRayLevel]> ray-levels;
     in property <[MarketPlotSeg]> plot-segments;
     in property <[MarketMarker]> markers;
     in property <float> hover-x: 0.5;
@@ -1626,8 +1700,20 @@ export component MarketScreen inherits Rectangle {
     in property <string> hover-price;
     in property <string> hover-time;
     in property <string> hover-volume;
+    in property <float> hover-vol-pos: 0.0;
     in property <bool> hover-bull: true;
     in property <bool> has-hover: false;
+    // TradingView parity: permanent last-price line + badge (Rust-owned).
+    in property <string> last-price;
+    in property <float> last-price-pos: 0.5;
+    in property <bool> last-price-up: true;
+    in property <bool> has-last-price: false;
+    // TradingView parity: volume scale (visible-window max + latest bar).
+    in property <string> volume-max-label;
+    in property <string> last-volume;
+    in property <float> last-volume-pos: 0.0;
+    in property <bool> last-volume-up: true;
+    in property <bool> has-last-volume: false;
     // Chart display settings (Rust-owned ChartScaleMode + visibility flags).
     in property <int> scale-mode: 0;
     in property <string> scale-label: "₹";
@@ -1827,7 +1913,8 @@ export component MarketScreen inherits Rectangle {
                                 x: 0;
                                 width: parent.width;
                                 height: parent.height;
-                                label: root.watchlist-name + " ▾";
+                                label: root.watchlist-name;
+                                icon: "chevron";
                                 active: root.open-menu == "watchlist";
                                 picked => {
                                     root.open-menu = "watchlist";
@@ -1841,11 +1928,13 @@ export component MarketScreen inherits Rectangle {
                             picked => { root.add-watchlist(); }
                         }
                         SmallButton {
-                            label: "↩";
+                            label: "";
+                            icon: "reset";
                             picked => { root.reset-view(); }
                         }
                         SmallButton {
-                            label: "⋯";
+                            label: "";
+                            icon: "dots";
                             active: root.open-menu == "more";
                             picked => {
                                 root.open-menu = "more";
@@ -1869,7 +1958,8 @@ export component MarketScreen inherits Rectangle {
                         }
                         Rectangle { horizontal-stretch: 1; background: transparent; }
                         SmallButton {
-                            label: "Sort by ▾";
+                            label: "Sort by";
+                            icon: "chevron";
                             active: root.open-menu == "sort";
                             picked => {
                                 root.open-menu = "sort";
@@ -1962,7 +2052,8 @@ export component MarketScreen inherits Rectangle {
                             picked => { root.timeframe-picked(tf.label); }
                         }
                         if root.timeframes-overflow.length > 0: SmallButton {
-                            label: "▾";
+                            label: "";
+                            icon: "chevron";
                             active: root.open-menu == "overflow";
                             picked => {
                                 root.open-menu = "overflow";
@@ -2125,6 +2216,15 @@ export component MarketScreen inherits Rectangle {
                                 y: t.pos * plot.grid-h;
                                 background: VayrenPalette.hairline-soft;
                             }
+                            // vertical grid lines (time ticks, same transform)
+                            for t in root.time-ticks: Rectangle {
+                                visible: root.grid-visible;
+                                y: 0;
+                                height: plot.height;
+                                width: 1px;
+                                x: t.pos * plot.width;
+                                background: VayrenPalette.hairline-soft;
+                            }
                             // volume baseline
                             Rectangle {
                                 x: 0;
@@ -2201,24 +2301,38 @@ export component MarketScreen inherits Rectangle {
                                     width: plot.width;
                                     background: VayrenPalette.hairline;
                                 }
-                                Text {
-                                    x: VayrenDesign.sp-md;
-                                    text: root.symbol-title + "  •  " + root.timeframe-label
-                                        + (root.exchange-label != "" ? "  •  " + root.exchange-label : "");
-                                    color: VayrenPalette.text;
-                                    font-size: VayrenDesign.fs-label;
-                                    font-weight: 700;
-                                    vertical-alignment: center;
+                                // Symbol primary, timeframe secondary (accent),
+                                // OHLC compact secondary — flow layout, so a
+                                // long symbol can never collide with the OHLC.
+                                HorizontalLayout {
+                                    x: 0px;
+                                    width: plot.width;
                                     height: root.header-h;
-                                }
-                                Text {
-                                    x: VayrenDesign.sp-md + 200px;
-                                    text: root.header-ohlc;
-                                    color: VayrenPalette.muted;
-                                    font-size: VayrenDesign.fs-label;
-                                    vertical-alignment: center;
-                                    height: root.header-h;
-                                    overflow: elide;
+                                    padding-left: VayrenDesign.sp-md;
+                                    padding-right: VayrenDesign.sp-md;
+                                    spacing: VayrenDesign.sp-md;
+                                    Text {
+                                        text: root.symbol-title;
+                                        color: VayrenPalette.text-bright;
+                                        font-size: VayrenDesign.fs-label;
+                                        font-weight: 700;
+                                        vertical-alignment: center;
+                                    }
+                                    Text {
+                                        text: root.timeframe-label
+                                            + (root.exchange-label != "" ? "  •  " + root.exchange-label : "");
+                                        color: VayrenPalette.accent;
+                                        font-size: VayrenDesign.fs-label;
+                                        vertical-alignment: center;
+                                    }
+                                    Text {
+                                        text: root.header-ohlc;
+                                        color: VayrenPalette.muted;
+                                        font-size: VayrenDesign.fs-label;
+                                        vertical-alignment: center;
+                                        horizontal-stretch: 1;
+                                        overflow: elide;
+                                    }
                                 }
                             }
 
@@ -2244,11 +2358,14 @@ export component MarketScreen inherits Rectangle {
                                     height: 1px;
                                     background: VayrenPalette.crosshair-line;
                                 }
+                                // Volume tag at the HOVERED bar's own height
+                                // (same scale as the bars — never a fixed
+                                // middle slot).
                                 Text {
                                     x: plot.width - 96px;
-                                    y: plot.grid-h;
+                                    y: plot.grid-h + plot.vol-h - root.hover-vol-pos * plot.vol-h - VayrenDesign.sp-md;
                                     width: 90px;
-                                    height: plot.vol-h;
+                                    height: VayrenDesign.sp-xl;
                                     text: root.hover-volume;
                                     color: root.hover-bull ? VayrenPalette.pos : VayrenPalette.neg;
                                     font-size: VayrenDesign.fs-label;
@@ -2474,6 +2591,105 @@ export component MarketScreen inherits Rectangle {
                                 }
                             }
 
+                            // TradingView parity: permanent last-price badge —
+                            // direction-colored, painted after (above) the
+                            // crosshair badge so it is never hidden by it.
+                            if root.has-data && root.has-last-price: Rectangle {
+                                property <length> lbl-w: 80px;
+                                property <length> lbl-h: 20px;
+                                x: (parent.width - self.lbl-w) / 2;
+                                y: Math.max(2px, Math.min(root.last-price-pos * parent.grid-h - self.lbl-h / 2, parent.grid-h - self.lbl-h - 2px));
+                                width: self.lbl-w;
+                                height: self.lbl-h;
+                                background: root.last-price-up
+                                    ? VayrenPalette.pos : VayrenPalette.neg;
+                                border-radius: 4px;
+                                clip: true;
+
+                                Text {
+                                    text: root.last-price;
+                                    color: VayrenPalette.accent-text;
+                                    font-size: VayrenDesign.fs-label;
+                                    font-weight: 700;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            // Strategy-owned REF level tags: hollow pills in
+                            // the line's own color, centered on its level —
+                            // every persistent line carries its value.
+                            for r in root.ray-levels: Rectangle {
+                                property <color> ink: r.color == 2 ? VayrenPalette.pos
+                                    : r.color == 1 ? VayrenPalette.amber
+                                    : r.color == 3 ? VayrenPalette.neg
+                                    : r.color == 4 ? VayrenPalette.strat-blue
+                                    : r.color == 5 ? VayrenPalette.strat-purple
+                                    : r.color == 6 ? VayrenPalette.strat-orange
+                                    : r.color == 0 ? VayrenPalette.text
+                                    : VayrenPalette.accent;
+                                property <length> lbl-w: 76px;
+                                property <length> lbl-h: 16px;
+                                x: (parent.width - self.lbl-w) / 2;
+                                y: Math.max(1px, Math.min(r.pos * parent.grid-h - self.lbl-h / 2, parent.grid-h - self.lbl-h - 1px));
+                                width: self.lbl-w;
+                                height: self.lbl-h;
+                                background: transparent;
+                                border-width: 1px;
+                                border-color: self.ink;
+                                border-radius: 3px;
+                                clip: true;
+
+                                Text {
+                                    text: r.label;
+                                    color: parent.ink;
+                                    font-size: VayrenDesign.fs-label;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
+                            }
+
+                            // volume-zone separator (continues the plot baseline)
+                            Rectangle {
+                                x: 0px;
+                                y: parent.grid-h;
+                                width: parent.width;
+                                height: 1px;
+                                background: VayrenPalette.hairline;
+                            }
+
+                            // TradingView parity: volume scale max (faint, top
+                            // of the volume zone) + latest bar volume pinned
+                            // at its own height in the bar's direction color.
+                            if root.has-data: Text {
+                                y: parent.grid-h + 2px;
+                                height: parent.tick-h;
+                                x: 6px;
+                                width: parent.width - 14px;
+                                text: root.volume-max-label;
+                                color: VayrenPalette.faint;
+                                font-size: VayrenDesign.fs-label;
+                                horizontal-alignment: right;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                            if root.has-data && root.has-last-volume: Text {
+                                y: parent.grid-h + (parent.height - parent.grid-h)
+                                    - root.last-volume-pos * (parent.height - parent.grid-h) - 8px;
+                                height: parent.tick-h;
+                                x: 6px;
+                                width: parent.width - 14px;
+                                text: root.last-volume;
+                                color: root.last-volume-up
+                                    ? VayrenPalette.pos : VayrenPalette.neg;
+                                font-size: VayrenDesign.fs-label;
+                                font-weight: 700;
+                                horizontal-alignment: right;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+
                             TouchArea {
                                 x: 0;
                                 y: 0;
@@ -2567,7 +2783,7 @@ export component MarketScreen inherits Rectangle {
 
                         // Active crosshair date/time label on bottom time axis
                         if root.has-hover && root.cross-visible: Rectangle {
-                            property <length> lbl-w: 168px;
+                            property <length> lbl-w: 140px;
                             property <length> lbl-h: 20px;
                             x: Math.max(4px, Math.min(root.hover-x * (parent.width - root.price-strip) - self.lbl-w / 2, parent.width - root.price-strip - self.lbl-w - 4px));
                             y: (parent.height - self.lbl-h) / 2;
@@ -2790,7 +3006,7 @@ export component MarketScreen inherits Rectangle {
         VerticalLayout {
             spacing: 0;
             MenuRow {
-                label: "↩ Reset chart view";
+                label: "Reset chart view";
                 picked => {
                     root.reset-view();
                     root.open-menu = "none";

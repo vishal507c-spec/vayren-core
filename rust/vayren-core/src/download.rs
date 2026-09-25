@@ -731,12 +731,6 @@ pub fn validate_range(from_date: &str, to_date: &str) -> Result<(Ts, Ts), &'stat
 // ── provider/contract.py: vocabulary ──────────────────────────────────────
 
 pub const ERR_AUTHENTICATION_FAILED: &str = "AUTHENTICATION_FAILED";
-pub const ERR_RATE_LIMITED: &str = "RATE_LIMITED";
-pub const ERR_INVALID_SYMBOL: &str = "INVALID_SYMBOL";
-pub const ERR_NETWORK_ERROR: &str = "NETWORK_ERROR";
-pub const ERR_PROVIDER_UNAVAILABLE: &str = "PROVIDER_UNAVAILABLE";
-pub const ERR_INVALID_REQUEST: &str = "INVALID_REQUEST";
-pub const ERR_UNKNOWN_PROVIDER_ERROR: &str = "UNKNOWN_PROVIDER_ERROR";
 
 /// Canonical broker-agnostic interval ids.
 pub const CANONICAL_INTERVALS: &[&str] = &["1m", "5m", "15m", "30m", "1h"];

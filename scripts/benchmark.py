@@ -212,6 +212,23 @@ DOMAIN_TESTS: dict[str, str] = {
     "app": "00_app/app/tests",
 }
 
+# Rust change-impact domains (Day-1 intelligence finding: tiny Rust edits
+# previously fell through to "unrecognized paths → full gate"). Conservative
+# mapping: kernels → vayren-core filter, shell/views/slint → shell filter.
+# View crates statically embed the shell lib, so a shell change implies the
+# view crates' tests; kernel changes never imply UI tests.
+RUST_DEPS: dict[str, tuple[str, ...]] = {
+    "rust-core": ("rust-core",),
+    "rust-ui": ("rust-ui",),
+}
+
+RUST_TESTS: dict[str, str] = {
+    "rust-core": "cargo test -p vayren-core",
+    "rust-ui": "cargo test -p vayren-shell",
+}
+
+RUST_ORDER = ("rust-core", "rust-ui")
+
 # Path fragments whose change may affect consumers beyond the own domain.
 PUBLIC_FRAGMENTS = ("__init__.py", "/events/", "/manifest.py", "/models/")
 
@@ -223,6 +240,19 @@ def _domain_of(path: str) -> str | None:
     part = path.replace("\\", "/").split("/")
     if len(part) >= 2 and part[1] in REVERSE_DEPS:
         return part[1]
+    return _rust_domain_of(path.replace("\\", "/"))
+
+
+def _rust_domain_of(path: str) -> str | None:
+    """Rust/Slint change domain: kernels vs shell/views/UI files."""
+    if path.endswith(".slint"):
+        return "rust-ui"
+    part = path.split("/")
+    if len(part) >= 2 and part[0] == "rust":
+        if part[1] == "vayren-core":
+            return "rust-core"
+        if part[1] == "vayren-shell" or part[1].endswith("-view"):
+            return "rust-ui"
     return None
 
 
@@ -290,6 +320,8 @@ def impact_plan(files: list[str]) -> dict:
             ],
         }
     domains = {d for f in flat if (d := _domain_of(f)) is not None}
+    py_domains = {d for d in domains if d in REVERSE_DEPS}
+    rust_domains = {d for d in domains if d in RUST_DEPS}
     if not domains:
         return {
             "level": 4,
@@ -308,7 +340,7 @@ def impact_plan(files: list[str]) -> dict:
         }
     public = any(frag in f for f in flat for frag in PUBLIC_FRAGMENTS if "/tests/" not in f)
     needed: set[str] = set()
-    for d in domains:
+    for d in py_domains:
         needed.update(REVERSE_DEPS[d])
     pytest_paths: list[str] = []
     for d in (
@@ -327,19 +359,32 @@ def impact_plan(files: list[str]) -> dict:
             pytest_paths.extend(DOMAIN_TESTS[d].split())
     if any(f.startswith("scripts/") for f in flat):
         pytest_paths.append("scripts/forensics/tests scripts/tests")
+    cargo_cmds = [RUST_TESTS[d] for d in RUST_ORDER if d in rust_domains]
+    pyright_scope = "files" if py_domains else "none"
     if public or len(domains) > 1:
         return {
             "level": 3,
             "reason": "public-surface or multi-domain change",
             "pytest": pytest_paths,
-            "pyright": "full",
+            "cargo": cargo_cmds,
+            "pyright": "full" if py_domains else "none",
+            "full_gate": False,
+        }
+    if rust_domains and not py_domains:
+        return {
+            "level": 2,
+            "reason": f"single-domain rust change ({sorted(rust_domains)[0]})",
+            "pytest": [],
+            "cargo": cargo_cmds,
+            "pyright": "none",
             "full_gate": False,
         }
     return {
         "level": 2,
-        "reason": f"single-domain src change ({sorted(domains)[0]})",
+        "reason": f"single-domain src change ({sorted(py_domains)[0]})",
         "pytest": pytest_paths,
-        "pyright": "files",
+        "cargo": cargo_cmds,
+        "pyright": pyright_scope,
         "full_gate": False,
     }
 
@@ -354,6 +399,8 @@ def cmd_impact(args: argparse.Namespace) -> int:
         print(f"  changed: {f}")
     if plan["pytest"]:
         print(f"pytest {' '.join(plan['pytest'])}")
+    for cmd in plan.get("cargo", []):
+        print(f"cargo: {cmd}")
     print(f"pyright: {plan['pyright']}")
     for cmd in plan.get("extra_cmds", []):
         print(f"also: {cmd}")

@@ -740,7 +740,7 @@ component InspectorColumn inherits Rectangle {
                     }
                     VButton {
                         height: 26px;
-                        label: "CONFIGURE BROKER ▸";
+                        label: "CONFIGURE BROKER >";
                         variant: 2;
                         clicked => { root.configure-broker(); }
                     }
@@ -1011,7 +1011,7 @@ export component LiveScreen inherits Rectangle {
                 }
                 VButton {
                     width: 92px;
-                    label: root.show-inspector ? "SESSION ▾" : "SESSION ▸";
+                    label: root.show-inspector ? "SESSION ^" : "SESSION v";
                     variant: 2;
                     clicked => { root.inspector-toggled(); }
                 }

@@ -763,16 +763,6 @@ def recover_memoized(raw: dict, store: dict) -> tuple[dict, str]:
 # --- safety (§10, §27) -----------------------------------------------------------
 
 
-def protected_snapshot(record: dict) -> dict:
-    return {
-        "route": record.get("route", ""),
-        "owner": record.get("owner", ""),
-        "language": record.get("language", ""),
-        "forbidden": record.get("forbidden", []),
-        "validation_commands": record.get("validation_commands", []),
-    }
-
-
 def snapshot_from_run(spec: dict, params: dict) -> dict:
     """Protected-field snapshot for one task under given params (read-only)."""
     record = run_task(spec, params)

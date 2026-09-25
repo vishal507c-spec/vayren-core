@@ -7,7 +7,7 @@
 import { VayrenPalette, VayrenDesign } from "palette.slint";
 import { VBadge, VButton } from "components.slint";
 import { StrategyLabScreen, LabHeader, LabLibraryRow, LabKpi, LabRankRow, LabTradeRow, LabPoint, LabParam, LabDetailMetric, LabBoardCell, LabMatrixRow, LabPreset } from "lab.slint";
-import { MarketScreen, MarketWatchRow, MarketCandle, MarketTick, MarketTimeframe, MarketIndicator, MarketStatusRow, MarketSettingsRow, MarketPopupRow, MarketPlotSeg, MarketMarker, MarketTradeContext, DlPlan, DlStatus, DlCalDay, DlCredField, DlStock } from "market.slint";
+import { MarketScreen, MarketWatchRow, MarketCandle, MarketTick, MarketRayLevel, MarketTimeframe, MarketIndicator, MarketStatusRow, MarketSettingsRow, MarketPopupRow, MarketPlotSeg, MarketMarker, MarketTradeContext, DlPlan, DlStatus, DlCalDay, DlCredField, DlStock } from "market.slint";
 import { ResearchScreen, ResearchMetric, ResearchSignalRow, ResearchTradeRow, ResearchRobustRow, ResearchKv, ResearchCompareRow, ResearchStrategyRow, ResearchExperimentRow, ResearchField, ResearchConfigGroup, ResearchEvidenceDim, ResearchEvidenceWhy, ResearchKvGroup } from "research.slint";
 import { PortfolioScreen, PortfolioKpi, PortfolioGate, PortfolioPosition, PortfolioAlloc, PortfolioOrder, PortfolioFill, PortfolioRisk } from "portfolio.slint";
 import { LiveScreen, LiveBar, LiveSetup, LiveMarket, LiveSymbolRow, LiveGate, LiveKv, LiveStat, LivePosition, LiveOrder, LiveFill, LiveEventRow, LiveCandle, LiveTiers } from "live.slint";
@@ -16,11 +16,6 @@ import { BrokerConnectionWorkspace, BrokerRowView, CredentialFieldView, Progress
 
 import { ShellScreen, VGlobalHeader, VGlobalNavItem } from "global_header.slint";
 export { ShellScreen }
-
-export struct NavItem {
-    label: string,
-    screen: ShellScreen,
-}
 
 export struct CapabilityRowView {
     id: string,
@@ -342,6 +337,7 @@ export component AppWindow inherits Window {
     in-out property <[MarketCandle]> market-candles;
     in-out property <[MarketTick]> market-price-ticks;
     in-out property <[MarketTick]> market-time-ticks;
+    in-out property <[MarketRayLevel]> market-ray-levels;
     in-out property <[MarketPlotSeg]> market-plot-segments;
     in-out property <[MarketMarker]> market-markers;
     in-out property <float> market-hover-x: 0.5;
@@ -349,8 +345,18 @@ export component AppWindow inherits Window {
     in-out property <string> market-hover-price: "";
     in-out property <string> market-hover-time: "";
     in-out property <string> market-hover-volume: "";
+    in-out property <float> market-hover-vol-pos: 0.0;
     in-out property <bool> market-hover-bull: true;
     in-out property <bool> market-has-hover: false;
+    in-out property <string> market-last-price: "";
+    in-out property <float> market-last-price-pos: 0.5;
+    in-out property <bool> market-last-price-up: true;
+    in-out property <bool> market-has-last-price: false;
+    in-out property <string> market-volume-max-label: "";
+    in-out property <string> market-last-volume: "";
+    in-out property <float> market-last-volume-pos: 0.0;
+    in-out property <bool> market-last-volume-up: true;
+    in-out property <bool> market-has-last-volume: false;
     in-out property <int> market-scale-mode: 0;
     in-out property <string> market-scale-label: "₹";
     in-out property <bool> market-grid-visible: true;
@@ -656,6 +662,7 @@ export component AppWindow inherits Window {
                     candles: root.market-candles;
                     price-ticks: root.market-price-ticks;
                     time-ticks: root.market-time-ticks;
+                    ray-levels: root.market-ray-levels;
                     plot-segments: root.market-plot-segments;
                     markers: root.market-markers;
                     hover-x: root.market-hover-x;
@@ -663,8 +670,18 @@ export component AppWindow inherits Window {
                     hover-price: root.market-hover-price;
                     hover-time: root.market-hover-time;
                     hover-volume: root.market-hover-volume;
+                    hover-vol-pos: root.market-hover-vol-pos;
                     hover-bull: root.market-hover-bull;
                     has-hover: root.market-has-hover;
+                    last-price: root.market-last-price;
+                    last-price-pos: root.market-last-price-pos;
+                    last-price-up: root.market-last-price-up;
+                    has-last-price: root.market-has-last-price;
+                    volume-max-label: root.market-volume-max-label;
+                    last-volume: root.market-last-volume;
+                    last-volume-pos: root.market-last-volume-pos;
+                    last-volume-up: root.market-last-volume-up;
+                    has-last-volume: root.market-has-last-volume;
                     scale-mode: root.market-scale-mode;
                     scale-label: root.market-scale-label;
                     grid-visible: root.market-grid-visible;
@@ -1074,41 +1091,6 @@ export component AppWindow inherits Window {
                     event-type-picked(i) => { root.live-event-type-picked(i); }
                     inspector-toggled() => { root.live-inspector-toggled(); }
                     configure-broker() => { root.live-configure-broker(); }
-                }
-            }
-
-            // Status bar (retained for non-chart screens; chart extends edge-to-edge).
-            if root.active-screen != ShellScreen.chart: Rectangle {
-                height: 24px;
-                background: VayrenPalette.surface;
-                border-width: 1px;
-                border-color: VayrenPalette.hairline;
-
-                HorizontalLayout {
-                    padding-left: 10px;
-                    padding-right: 10px;
-                    alignment: space-between;
-
-                    Text {
-                        text: "VAYREN • Native Shell";
-                        color: VayrenPalette.faint;
-                        font-size: VayrenDesign.fs-label;
-                        vertical-alignment: center;
-                    }
-                    if root.visual-check-label != "": Text {
-                        text: root.visual-check-label;
-                        color: VayrenPalette.amber;
-                        font-size: VayrenDesign.fs-label;
-                        font-weight: 700;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                    }
-                    Text {
-                        text: "SCREEN: " + root.screen-title;
-                        color: VayrenPalette.muted;
-                        font-size: VayrenDesign.fs-label;
-                        vertical-alignment: center;
-                    }
                 }
             }
     }

@@ -204,8 +204,3 @@ def pump_events(limit: int = 4096) -> int:
         _invoke(handlers, args)
         processed += 1
     return processed
-
-
-def pending_events() -> int:
-    """Queued-but-undelivered cross-thread emissions."""
-    return _QUEUE.qsize()

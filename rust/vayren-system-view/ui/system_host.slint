@@ -129,7 +129,7 @@ export component SystemHostWindow inherits Window {
                 TouchArea {
                     width: health-lbl.width + 8px;
                     health-lbl := Text {
-                        text: root.health-open ? "SYSTEM HEALTH ▾" : "SYSTEM HEALTH ▸";
+                        text: root.health-open ? "SYSTEM HEALTH ^" : "SYSTEM HEALTH v";
                         color: root.health-open ? VayrenPalette.text : VayrenPalette.muted;
                         font-size: VayrenDesign.fs-label;
                         font-weight: 600;
@@ -140,7 +140,7 @@ export component SystemHostWindow inherits Window {
                 TouchArea {
                     width: log-lbl.width + 8px;
                     log-lbl := Text {
-                        text: root.log-open ? "EVENT LOG ▾" : "EVENT LOG ▸";
+                        text: root.log-open ? "EVENT LOG ^" : "EVENT LOG v";
                         color: root.log-open ? VayrenPalette.text : VayrenPalette.muted;
                         font-size: VayrenDesign.fs-label;
                         font-weight: 600;
