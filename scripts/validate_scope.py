@@ -16,6 +16,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import functools
 import hashlib
 import importlib.metadata
 import json
@@ -88,10 +89,8 @@ class ScopeError(Exception):
     """Scope/cache failure — explicit status, never silent escalation."""
 
 
-def toolchain_identity() -> dict:
-    """Toolchain versions pinning cached results (overridable in tests)."""
-    if _TOOLCHAIN_OVERRIDE is not None:
-        return dict(_TOOLCHAIN_OVERRIDE)
+def _probe_toolchain() -> tuple[tuple[str, str], ...]:
+    """Shell out once per process (memoized below): binaries cannot change."""
     versions: dict[str, str] = {"python": sys.version.split()[0]}
     for dist, key in (("pytest", "pytest"), ("ruff", "ruff"), ("pyright", "pyright")):
         try:
@@ -106,7 +105,19 @@ def toolchain_identity() -> dict:
             )
         except (OSError, subprocess.TimeoutExpired):
             versions[key] = "missing"
-    return versions
+    return tuple(sorted(versions.items()))
+
+
+@functools.lru_cache(maxsize=1)
+def _memoized_toolchain() -> tuple[tuple[str, str], ...]:
+    return _probe_toolchain()
+
+
+def toolchain_identity() -> dict:
+    """Toolchain versions pinning cached results (overridable in tests)."""
+    if _TOOLCHAIN_OVERRIDE is not None:
+        return dict(_TOOLCHAIN_OVERRIDE)
+    return dict(_memoized_toolchain())
 
 
 def _sha_file(path: Path) -> str | None:

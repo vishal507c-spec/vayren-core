@@ -425,6 +425,36 @@ def test_toolchain_change_invalidates(graph: dict, monkeypatch: pytest.MonkeyPat
     assert cache_lookup(command, scope, graph) is None
 
 
+def test_toolchain_identity_memoized_per_process(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Version binaries cannot change mid-process: shell out once, copy on return."""
+    validate_scope._memoized_toolchain.cache_clear()
+    calls: list[list[str]] = []
+    real_run = validate_scope.subprocess.run
+
+    def _counting(argv: list[str], **kwargs: object) -> object:
+        calls.append(argv)
+        return real_run(argv, **kwargs)  # type: ignore[call-arg, arg-type]
+
+    monkeypatch.setattr(validate_scope.subprocess, "run", _counting)
+    try:
+        first = validate_scope.toolchain_identity()
+        second = validate_scope.toolchain_identity()
+        third = validate_scope.toolchain_identity()
+        assert first == second == third
+        assert first is not second  # independent copies, safe to mutate
+        first["cargo"] = "mutated"
+        assert validate_scope.toolchain_identity()["cargo"] != "mutated"
+        assert calls == [["cargo", "--version"], ["rustc", "--version"]]
+    finally:
+        validate_scope._memoized_toolchain.cache_clear()
+
+
+def test_toolchain_override_bypasses_memo(monkeypatch: pytest.MonkeyPatch) -> None:
+    validate_scope._memoized_toolchain.cache_clear()
+    monkeypatch.setattr(validate_scope, "_TOOLCHAIN_OVERRIDE", {"python": "0.0-fake"})
+    assert validate_scope.toolchain_identity() == {"python": "0.0-fake"}
+
+
 def test_cache_key_deterministic(graph: dict) -> None:
     scope = _scope_stub("L2")
     first = build_cache_key("pytest 09_broker/broker/tests -q", scope, graph)
