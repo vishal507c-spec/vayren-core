@@ -162,6 +162,7 @@ fn apply_state(ui: &LabHostWindow, state: &LabState) {
         sym_search: view.sym_search.into(),
         sym_button_line: view.sym_button_line.into(),
         sym_count_line: view.sym_count_line.into(),
+        sym_selected_line: view.sym_selected_line.into(),
         cfg_cost: view.cfg_cost.into(),
         cfg_cost_warn: view.cfg_cost_warn,
         run_id: view.run_id.into(),
