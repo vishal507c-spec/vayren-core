@@ -1416,6 +1416,7 @@ pub fn apply_lab(ui: &AppWindow, state: &LabState) {
         sym_search: view.sym_search.into(),
         sym_button_line: view.sym_button_line.into(),
         sym_count_line: view.sym_count_line.into(),
+        sym_selected_line: view.sym_selected_line.into(),
         cfg_cost: view.cfg_cost.into(),
         cfg_cost_warn: view.cfg_cost_warn,
         run_id: view.run_id.into(),
@@ -1706,6 +1707,9 @@ pub struct LabRunRequest {
     pub start: String,
     pub end: String,
     pub capital: f64,
+    /// Transaction cost in percent-per-side (backend commission units), None
+    /// when the field is empty/unparseable (backend default applies).
+    pub cost: Option<f64>,
     pub mode: String,
 }
 
@@ -1748,7 +1752,39 @@ impl LabRunRequest {
             start: state.cfg_dates_start.clone(),
             end: state.cfg_dates_end.clone(),
             capital,
+            cost: parse_cost_pct(&state.cfg_cost),
             mode,
+        })
+    }
+}
+
+/// Strategy-switch request: the strategy name PLUS the current workspace
+/// configuration. Sending name-only makes the backend echo an empty
+/// selection back, silently wiping the user's universe/dates/capital — the
+/// switch must carry what the user already configured.
+pub struct LabSelectRequest {
+    pub strategy: String,
+    pub symbols: Vec<String>,
+    pub timeframe: String,
+    pub start: String,
+    pub end: String,
+    pub capital: f64,
+    pub cost: Option<f64>,
+    pub mode: String,
+}
+
+impl LabSelectRequest {
+    pub fn gather(state: &LabState) -> Option<Self> {
+        let run = LabRunRequest::gather(state)?;
+        Some(LabSelectRequest {
+            strategy: run.strategy,
+            symbols: run.symbols,
+            timeframe: run.timeframe,
+            start: run.start,
+            end: run.end,
+            capital: run.capital,
+            cost: run.cost,
+            mode: run.mode,
         })
     }
 }
@@ -1765,10 +1801,29 @@ fn parse_capital(text: &str) -> Option<f64> {
     cleaned.parse::<f64>().ok()
 }
 
+/// Parse a transaction-cost echo ("0.05", "0.05%", " 0.10 %") into
+/// percent-per-side (backend commission units). Empty/unparseable/negative
+/// yields None so the backend default applies — never invent a cost.
+fn parse_cost_pct(text: &str) -> Option<f64> {
+    let trimmed = text.trim().trim_end_matches('%').trim();
+    // A leading minus survives digit-filtering, so reject negatives up front.
+    if trimmed.starts_with('-') {
+        return None;
+    }
+    let cleaned: String = trimmed
+        .chars()
+        .filter(|c| c.is_ascii_digit() || *c == '.')
+        .collect();
+    match cleaned.parse::<f64>() {
+        Ok(v) if v.is_finite() && v >= 0.0 => Some(v),
+        _ => None,
+    }
+}
+
 pub fn wire_lab(
     ui: &AppWindow,
     state: Rc<RefCell<LabState>>,
-    fetch_workspace: Rc<dyn Fn(String)>,
+    fetch_workspace: Rc<dyn Fn(LabSelectRequest)>,
     fetch_run: Rc<dyn Fn(LabRunRequest)>,
 ) {
     let bind = |ui: &AppWindow, state: &Rc<RefCell<LabState>>, handler: fn(&mut LabState, i32)| {
@@ -1800,18 +1855,20 @@ pub fn wire_lab(
         let fetch = fetch_workspace.clone();
         ui.on_lab_library_picked(move |i: i32| {
             let Some(ui) = weak.upgrade() else { return };
-            let name = {
+            let request = {
                 let mut guard = strong.borrow_mut();
                 if !guard.interaction_select(i.max(0) as usize) {
                     return;
                 }
-                guard
-                    .selected_strategy()
-                    .map(|s| s.name.clone())
-                    .unwrap_or_default()
+                // Carry the current workspace config: the backend resolves
+                // the workspace FROM this request, so a strategy switch must
+                // not reset the user's universe/dates/capital/cost/mode.
+                LabSelectRequest::gather(&guard)
             };
-            if !name.is_empty() {
-                fetch(name);
+            if let Some(request) = request {
+                if !request.strategy.is_empty() {
+                    fetch(request);
+                }
             }
             apply_lab(&ui, &strong.borrow());
         });
@@ -3503,7 +3560,7 @@ mod tests {
         assert_eq!(ui.get_lab_library().row_count(), 2);
         assert!(ui.get_lab_library().row_data(0).unwrap().selected);
 
-        let no_fetch: Rc<dyn Fn(String)> = Rc::new(|_| ());
+        let no_fetch: Rc<dyn Fn(LabSelectRequest)> = Rc::new(|_| ());
         let no_run: Rc<dyn Fn(LabRunRequest)> = Rc::new(|_| ());
         wire_lab(&ui, lab_state.clone(), no_fetch, no_run);
         ui.invoke_lab_library_picked(1);
@@ -4018,5 +4075,75 @@ mod tests {
         assert_eq!(parse_capital("1000000"), Some(1000000.0));
         assert_eq!(parse_capital(""), None);
         assert_eq!(parse_capital("—"), None);
+    }
+
+    #[test]
+    fn lab_cost_parses_percent_echoes() {
+        // Backend commission units: percent-per-side, same as the default.
+        assert_eq!(parse_cost_pct("0.05"), Some(0.05));
+        assert_eq!(parse_cost_pct("0.05%"), Some(0.05));
+        assert_eq!(parse_cost_pct("  0.10 % "), Some(0.10));
+        assert_eq!(parse_cost_pct(""), None);
+        assert_eq!(parse_cost_pct("—"), None);
+        assert_eq!(parse_cost_pct("abc"), None);
+        assert_eq!(parse_cost_pct("-0.05"), None);
+        // Gather carries the parsed cost; empty echoes keep backend default.
+        let mut state = demo_lab_state();
+        state.selected = Some(1);
+        state.engine_wired = true;
+        state.universe_symbols = vec!["RELIANCE".into()];
+        state.universe_selected = vec!["RELIANCE".into()];
+        state.cfg_cost = "0.05".into();
+        assert_eq!(
+            LabRunRequest::gather(&state).expect("request").cost,
+            Some(0.05)
+        );
+        state.cfg_cost = String::new();
+        assert_eq!(LabRunRequest::gather(&state).expect("request").cost, None);
+    }
+
+    #[test]
+    fn lab_select_request_preserves_workspace_config() {
+        // End-to-end user flow proof (Rust side): open Lab → pick strategy →
+        // universe search/select/apply → timeframe → dates → capital → cost →
+        // direction → the select AND run requests carry exactly that config,
+        // so neither a strategy switch nor the run can use stale values.
+        let mut state = demo_lab_state();
+        state.engine_wired = true;
+        state.universe_symbols = vec!["RELIANCE".into(), "TCS".into(), "INFY".into()];
+        state.universe_selected = vec!["RELIANCE".into()];
+        state.timeframes = vec!["5m".into(), "15m".into(), "1h".into()];
+        state.timeframe_index = 1;
+        assert!(state.interaction_select(1));
+        state.interaction_symopen();
+        state.interaction_symsearch("tcs");
+        state.interaction_symtoggle("TCS");
+        state.interaction_symsearch("");
+        state.interaction_symapply();
+        state.interaction_timeframe("1h");
+        state.interaction_dates("2024-01-01", "2024-03-31");
+        state.interaction_capital("500000");
+        state.interaction_cost("0.05");
+        state.interaction_mode(LabMode::Short);
+        let select = LabSelectRequest::gather(&state).expect("select request");
+        assert_eq!(select.strategy, "SMA");
+        assert_eq!(
+            select.symbols,
+            vec!["RELIANCE".to_string(), "TCS".to_string()]
+        );
+        assert_eq!(select.timeframe, "1h");
+        assert_eq!(select.start, "2024-01-01");
+        assert_eq!(select.end, "2024-03-31");
+        assert_eq!(select.capital, 500000.0);
+        assert_eq!(select.cost, Some(0.05));
+        assert_eq!(select.mode, "sell");
+        let run = LabRunRequest::gather(&state).expect("run request");
+        assert_eq!(run.symbols, select.symbols);
+        assert_eq!(run.timeframe, select.timeframe);
+        assert_eq!(run.start, select.start);
+        assert_eq!(run.end, select.end);
+        assert_eq!(run.capital, select.capital);
+        assert_eq!(run.cost, select.cost);
+        assert_eq!(run.mode, select.mode);
     }
 }

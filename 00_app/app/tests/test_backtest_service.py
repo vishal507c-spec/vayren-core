@@ -155,3 +155,76 @@ def test_describe_strategy_reports_params(tmp_path: Path) -> None:
         "min_volume",
     }
     assert "EmaCrossover" in detail["code"]
+
+
+def _run(store: Path, tmp_path: Path, **overrides):
+    args = {
+        "strategy_name": "SMA Crossover",
+        "symbols": ["TREND"],
+        "timeframe": "15m",
+        "start": None,
+        "end": None,
+        "capital": 1000000.0,
+        "mode": "buy",
+        "data_dir": store,
+        "strategy_dir": tmp_path,
+    }
+    args.update(overrides)
+    return run_backtest(**args)
+
+
+def test_cost_none_keeps_default_commission(store: Path, tmp_path: Path) -> None:
+    defaulted = _run(store, tmp_path)
+    explicit = _run(store, tmp_path, cost_pct=0.03)
+    assert defaulted["metrics"]["total_trades"] > 0
+    assert explicit["metrics"] == defaulted["metrics"]
+    assert [t["pnl"] for t in explicit["trades"]] == [t["pnl"] for t in defaulted["trades"]]
+
+
+def test_higher_cost_reduces_net_profit(store: Path, tmp_path: Path) -> None:
+    cheap = _run(store, tmp_path, cost_pct=0.0)
+    pricey = _run(store, tmp_path, cost_pct=0.50)
+    assert cheap["metrics"]["total_trades"] > 0
+    assert pricey["metrics"]["total_trades"] == cheap["metrics"]["total_trades"]
+    assert pricey["metrics"]["net_profit"] < cheap["metrics"]["net_profit"]
+
+
+def test_negative_cost_fails_closed(store: Path, tmp_path: Path) -> None:
+    with pytest.raises(BacktestError, match="non-negative"):
+        _run(store, tmp_path, cost_pct=-0.05)
+
+
+def test_lab_run_applies_full_command_config(store: Path, tmp_path: Path) -> None:
+    """End-to-end proof (backend side): the run command's universe, dates,
+    capital and cost reach the engine and echo back in the workspace config.
+    """
+    sys.path.insert(0, str(ROOT / "00_app"))
+    from app.headless import _lab_run
+    from app.services.market_data_service import MarketDataService
+
+    repository = MarketDataService(store)
+    symbols = repository.list_symbols()
+    assert "TREND" in symbols
+    first, last = repository.date_range("TREND")
+    command = {
+        "strategy": "SMA Crossover",
+        "symbols": ["TREND"],
+        "timeframe": "15m",
+        "start": first,
+        "end": last,
+        "capital": 500000.0,
+        "cost": 0.05,
+        "mode": "buy",
+    }
+    workspace = _lab_run(str(tmp_path), str(store), command, repository)
+    assert workspace["run"] == "complete"
+    assert workspace["config"]["universe"] == "TREND"
+    assert workspace["config"]["timeframe"] == "15m"
+    assert workspace["config"]["dates"] == f"{first} → {last}"
+    assert workspace["config"]["capital"] == "₹500,000"
+    assert workspace["results"]["metrics"]["total_trades"] > 0
+    # Stale-config guard: empty universe fails actionably, never silently.
+    bad = dict(command, symbols=[])
+    failed = _lab_run(str(tmp_path), str(store), bad, repository)
+    assert failed["run"] == "failed"
+    assert "No universe" in failed["cfg_edit"]["config_error"]

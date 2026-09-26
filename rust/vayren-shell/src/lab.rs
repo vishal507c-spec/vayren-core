@@ -404,6 +404,7 @@ impl LabState {
     pub fn interaction_mode(&mut self, mode: LabMode) {
         if mode != self.mode {
             self.set_mode(mode);
+            self.refresh_staleness();
             self.queue_action(format!("mode:{}", mode.kind()));
         }
     }
@@ -471,6 +472,13 @@ impl LabState {
 
     pub fn interaction_timeframe(&mut self, timeframe: &str) {
         if !timeframe.is_empty() {
+            // Optimistic echo: gather() resolves the timeframe by index, so
+            // the picked label must land in timeframe_index now (the queued
+            // backend action is future sync, not the run path).
+            if let Some(index) = self.timeframes.iter().position(|t| t == timeframe) {
+                self.timeframe_index = index as i32;
+                self.refresh_staleness();
+            }
             self.queue_action(format!("settimeframe:{timeframe}"));
         }
     }
@@ -478,12 +486,26 @@ impl LabState {
     pub fn interaction_capital(&mut self, value: &str) {
         let value = value.trim();
         if !value.is_empty() {
+            // Optimistic echo (documented LabState pattern): the backend owns
+            // business behavior, but the RUN request is gathered locally — so
+            // the committed value must be visible locally immediately, or the
+            // next run silently uses the previous capital.
+            self.cfg_capital = value.to_string();
+            self.refresh_staleness();
             self.queue_action(format!("capital:{value}"));
         }
     }
 
     pub fn interaction_dates(&mut self, start: &str, end: &str) {
-        self.queue_action(format!("dates:{}:{}", start.trim(), end.trim()));
+        let (start, end) = (start.trim(), end.trim());
+        // Same optimistic-echo contract as capital: gather() reads these, so
+        // committing them here is what makes Apply actually change the run.
+        // Order validation stays backend-owned (run_backtest fails closed on
+        // start > end); the picker already prevents inverted picks by swap.
+        self.cfg_dates_start = start.to_string();
+        self.cfg_dates_end = end.to_string();
+        self.refresh_staleness();
+        self.queue_action(format!("dates:{start}:{end}"));
     }
 
     pub fn interaction_ranksearch(&mut self, text: &str) {
@@ -541,6 +563,7 @@ impl LabState {
         let value = value.trim();
         if !value.is_empty() {
             self.cfg_cost = value.to_string();
+            self.refresh_staleness();
             self.queue_action(format!("cost:{value}"));
         }
     }
@@ -599,15 +622,26 @@ impl LabState {
     }
 
     pub fn interaction_symapply(&mut self) {
-        let csv = self
+        let selected: Vec<String> = self
             .sym_draft
             .iter()
             .filter(|s| self.universe_symbols.iter().any(|u| u == *s))
             .cloned()
-            .collect::<Vec<_>>()
-            .join(",");
+            .collect();
+        // Optimistic echo: gather() reads universe_selected/cfg_universe_csv,
+        // so Apply must commit them locally now — otherwise the next run
+        // backtests the pre-dialog selection while the button shows the new
+        // one. The queued action is future backend sync, not the run path.
+        self.universe_selected = selected.clone();
+        self.cfg_universe_csv = selected.join(",");
+        self.config.universe = if selected.is_empty() {
+            "NO UNIVERSE".to_string()
+        } else {
+            selected.join(", ")
+        };
+        self.refresh_staleness();
         self.sym_open = false;
-        self.queue_action(format!("symbols:{csv}"));
+        self.queue_action(format!("symbols:{}", self.cfg_universe_csv));
     }
 
     /// Visible universe rows under the current search (legacy popup rule:
@@ -665,13 +699,26 @@ impl LabState {
             self.outdated = false;
             return;
         };
-        self.outdated = fp != &self.config.fingerprint();
+        self.outdated = fp != &self.run_key();
+    }
+
+    /// Identity of the exact run inputs: display fingerprint plus direction
+    /// mode plus normalized transaction-cost echo. Cost and mode change
+    /// results, so they must mark a completed run outdated too — the display
+    /// `fingerprint()` alone cannot see them.
+    pub fn run_key(&self) -> String {
+        format!(
+            "{}|mode={}|cost={}",
+            self.config.fingerprint(),
+            self.mode.kind(),
+            self.cfg_cost.trim()
+        )
     }
 
     /// Engine bridge entry point: attach completed results for the CURRENT
     /// configuration fingerprint.
     pub fn apply_result(&mut self, results: LabResults) {
-        self.results_fingerprint = Some(self.config.fingerprint());
+        self.results_fingerprint = Some(self.run_key());
         self.results = Some(results);
         self.run = RunState::Complete;
         self.outdated = false;
@@ -880,6 +927,8 @@ pub struct LabView {
     pub sym_search: String,
     pub sym_button_line: String,
     pub sym_count_line: String,
+    /// Compact draft count for the dialog header ("3 selected").
+    pub sym_selected_line: String,
     pub sym_visible: Vec<String>,
     pub sym_visible_on: Vec<bool>,
     /// Applied-universe chips (split of `cfg_universe_csv`) — presentation
@@ -1383,6 +1432,16 @@ pub fn project(state: &LabState) -> LabView {
         format!("{sym_applied} STOCKS")
     };
     let sym_visible = state.sym_visible();
+    let sym_selected_line = {
+        let n = state.sym_draft.len();
+        if n == 0 {
+            "None selected".to_string()
+        } else if n == 1 {
+            "1 selected".to_string()
+        } else {
+            format!("{n} selected")
+        }
+    };
     let sym_count_line = {
         let noun = if sym_total == 1 { "stock" } else { "stocks" };
         let mut line = format!("{} of {sym_total} {noun} selected", state.sym_draft.len());
@@ -1420,7 +1479,7 @@ pub fn project(state: &LabState) -> LabView {
     let (stale_exec_line, stale_cur_line) = if state.outdated {
         (
             state.results_fingerprint.clone().unwrap_or_default(),
-            state.config.fingerprint(),
+            state.run_key(),
         )
     } else {
         (String::new(), String::new())
@@ -1428,10 +1487,20 @@ pub fn project(state: &LabState) -> LabView {
     let range_line = if state.config.dates.is_empty() {
         String::new()
     } else {
-        format!(
-            "{} · starting capital ₹{}",
-            state.config.dates, state.config.capital
-        )
+        // Reference 1:1 — the receipt range names the cost model too
+        // ("01 Jan 2023 — 18 Sep 2026 · starting capital ₹10,00,000 · cost 0.05%/side").
+        let cost = state.cfg_cost.trim().trim_end_matches('%');
+        if cost.is_empty() {
+            format!(
+                "{} · starting capital ₹{}",
+                state.config.dates, state.config.capital
+            )
+        } else {
+            format!(
+                "{} · starting capital ₹{} · cost {}%/side",
+                state.config.dates, state.config.capital, cost
+            )
+        }
     };
     let diag_show = show_single && !state.verdict_label.is_empty() && state.verdict_tone != 3;
     let risk_gate_show = show_single && !state.verdict_label.is_empty() && state.verdict_tone == 3;
@@ -1454,10 +1523,17 @@ pub fn project(state: &LabState) -> LabView {
             strategy.map_or_else(String::new, |s| s.name.clone())
         )
     };
-    let cfg_cost_warn = matches!(
-        state.cfg_cost.trim(),
-        "0" | "0.0" | "0.00" | "0.000" | "0.0%" | "0%"
-    );
+    // Reference 1:1 — numeric 0% guard (HTML parseNum): "0", "0.00",
+    // "0.0000", "0%" and whitespace variants all warn; non-numeric never warns.
+    let cfg_cost_warn = {
+        let kept: String = state
+            .cfg_cost
+            .trim()
+            .chars()
+            .filter(|c| c.is_ascii_digit() || *c == '.' || *c == '-')
+            .collect();
+        matches!(kept.parse::<f64>(), Ok(v) if v == 0.0)
+    };
 
     // Date-range display + validation (ISO in, human out; the commit path is
     // unchanged). A half-picked or unparseable range is flagged inline but
@@ -1613,6 +1689,7 @@ pub fn project(state: &LabState) -> LabView {
         sym_search: state.sym_search.clone(),
         sym_button_line,
         sym_count_line,
+        sym_selected_line,
         sym_visible,
         sym_visible_on,
         cfg_cost: state.cfg_cost.clone(),
@@ -2046,17 +2123,24 @@ mod tests {
         // Select-all-visible adds only the visible rows.
         st.interaction_symall();
         assert_eq!(st.sym_draft, vec!["TCS".to_string(), "INFY".to_string()]);
-        // Apply queues backend CSV in draft order; panel closes.
+        // Apply commits the draft to the applied echo (the run path reads
+        // the echo, not the draft) and queues backend CSV in draft order;
+        // panel closes.
         st.interaction_symsearch("");
         st.interaction_symapply();
         assert!(!st.sym_open);
+        assert_eq!(
+            st.universe_selected,
+            vec!["TCS".to_string(), "INFY".to_string()]
+        );
+        assert_eq!(st.cfg_universe_csv, "TCS,INFY");
         assert_eq!(st.pending_actions, vec!["symbols:TCS,INFY".to_string()]);
-        // Close discards local edits back to the echo.
+        // Close discards local edits back to the (newly applied) echo.
         st.interaction_symopen();
         st.interaction_symclear();
         assert!(st.sym_draft.is_empty());
         st.interaction_symclose();
-        assert_eq!(st.sym_draft, vec!["RELIANCE".to_string()]);
+        assert_eq!(st.sym_draft, vec!["TCS".to_string(), "INFY".to_string()]);
         // Button line vocabulary.
         st.universe_selected = vec![];
         st.sym_draft = vec![];
@@ -2064,6 +2148,49 @@ mod tests {
         st.universe_selected = vec!["A".into(), "B".into()];
         st.sym_draft = st.universe_selected.clone();
         assert_eq!(project(&st).sym_button_line, "A, B");
+    }
+
+    #[test]
+    fn config_commits_land_in_echoes_not_just_the_queue() {
+        // The run request is gathered locally: committed dates/capital/
+        // timeframe must be readable from the echoes immediately, because
+        // the queued backend actions are future sync, not the run path.
+        let mut st = state_with_obr();
+        st.timeframes = vec!["5m".into(), "15m".into(), "1h".into()];
+        st.interaction_dates("2024-01-01", "2024-03-31");
+        assert_eq!(st.cfg_dates_start, "2024-01-01");
+        assert_eq!(st.cfg_dates_end, "2024-03-31");
+        st.interaction_capital("500000");
+        assert_eq!(st.cfg_capital, "500000");
+        st.interaction_timeframe("1h");
+        assert_eq!(st.timeframe_index, 2);
+        // Unknown timeframe labels never corrupt the index.
+        st.interaction_timeframe("9m");
+        assert_eq!(st.timeframe_index, 2);
+        // Empty commits are ignored, never blank the echo.
+        st.interaction_capital("   ");
+        assert_eq!(st.cfg_capital, "500000");
+    }
+
+    #[test]
+    fn cost_or_mode_change_marks_completed_run_outdated() {
+        let mut st = state_with_obr();
+        st.select(0);
+        st.engine_wired = true;
+        st.cfg_cost = "0.05".into();
+        st.start_run();
+        st.apply_result(results());
+        assert!(!st.outdated);
+        // Same display fingerprint, different cost -> outdated.
+        st.interaction_cost("0.10");
+        assert!(st.outdated);
+        st.interaction_cost("0.05");
+        assert!(!st.outdated);
+        // Direction change -> outdated.
+        st.interaction_mode(LabMode::Short);
+        assert!(st.outdated);
+        st.interaction_mode(LabMode::Long);
+        assert!(!st.outdated);
     }
 
     #[test]
@@ -2595,7 +2722,7 @@ fn apply_parity_keys(state: &mut LabState, value: &serde_json::Value) {
             state.results_fingerprint = None;
         } else if results.is_object() {
             state.results = Some(block_to_results(results));
-            state.results_fingerprint = Some(state.config.fingerprint());
+            state.results_fingerprint = Some(state.run_key());
             if matches!(state.run, RunState::Running) {
                 state.run = RunState::Complete;
             }

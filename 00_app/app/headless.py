@@ -619,6 +619,11 @@ def _lab_run(strategy_dir: str, data_dir: str, command: dict, repository: Any = 
         capital = float(command.get("capital", 1000000))
     except (TypeError, ValueError):
         capital = 1000000.0
+    cost_raw = command.get("cost")
+    try:
+        cost_pct = None if cost_raw is None or cost_raw == "" else float(cost_raw)
+    except (TypeError, ValueError):
+        cost_pct = None
     mode = (command.get("mode") or workspace.get("mode") or "buy").strip().lower()
     try:
         from app.services.backtest_service import BacktestError, run_backtest
@@ -639,6 +644,7 @@ def _lab_run(strategy_dir: str, data_dir: str, command: dict, repository: Any = 
                 data_dir,
                 strategy_dir,
                 repository,
+                cost_pct,
             )
             sell_results = run_backtest(
                 strategy_name,
@@ -651,6 +657,7 @@ def _lab_run(strategy_dir: str, data_dir: str, command: dict, repository: Any = 
                 data_dir,
                 strategy_dir,
                 repository,
+                cost_pct,
             )
             workspace["results"] = buy_results
             workspace["buy"] = buy_results
@@ -667,6 +674,7 @@ def _lab_run(strategy_dir: str, data_dir: str, command: dict, repository: Any = 
                 data_dir,
                 strategy_dir,
                 repository,
+                cost_pct,
             )
     except BacktestError as exc:
         workspace["run"] = "failed"

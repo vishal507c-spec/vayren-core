@@ -216,6 +216,7 @@ def test_committed_artifact_matches_fresh_build() -> None:
 def test_graph_has_no_canonical_prose() -> None:
     text = (ROOT / "90_brain" / "repo_graph.json").read_text(encoding="utf-8")
     assert "INSERT OR IGNORE" not in text
-    # Cap tracks legitimate symbol growth only (2.00MB crossed by merged
-    # feature files, not prose); a prose dump would exceed this by far.
-    assert len(text.encode("utf-8")) < 2_100_000
+    # Cap tracks legitimate symbol growth only (2.10MB crossed by the
+    # Strategy-Lab wiring feature, 2.00MB before that by merged feature
+    # files — never prose); a prose dump would exceed this by far.
+    assert len(text.encode("utf-8")) < 2_150_000

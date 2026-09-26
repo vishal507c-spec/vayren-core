@@ -59,6 +59,17 @@ pub enum BackendCommand {
     GetLabSnapshot,
     SelectLabStrategy {
         strategy: String,
+        symbols: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timeframe: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        start: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        end: Option<String>,
+        capital: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cost: Option<f64>,
+        mode: String,
     },
     RunBacktest {
         strategy: String,
@@ -67,6 +78,8 @@ pub enum BackendCommand {
         start: Option<String>,
         end: Option<String>,
         capital: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cost: Option<f64>,
         mode: String,
     },
     Shutdown,
@@ -525,11 +538,18 @@ mod tests {
     fn test_select_lab_strategy_command_serialization() {
         let cmd = BackendCommand::SelectLabStrategy {
             strategy: "SMA Crossover".to_string(),
+            symbols: vec!["RELIANCE".to_string()],
+            timeframe: Some("15m".to_string()),
+            start: Some("2026-01-01".to_string()),
+            end: None,
+            capital: 1000000.0,
+            cost: Some(0.05),
+            mode: "buy".to_string(),
         };
         let json = serde_json::to_string(&cmd).unwrap();
         assert_eq!(
             json,
-            r#"{"type":"select_lab_strategy","strategy":"SMA Crossover"}"#
+            r#"{"type":"select_lab_strategy","strategy":"SMA Crossover","symbols":["RELIANCE"],"timeframe":"15m","start":"2026-01-01","capital":1000000.0,"cost":0.05,"mode":"buy"}"#
         );
     }
 
@@ -542,6 +562,7 @@ mod tests {
             start: Some("2026-01-01".to_string()),
             end: None,
             capital: 1000000.0,
+            cost: None,
             mode: "buy".to_string(),
         };
         let json = serde_json::to_string(&cmd).unwrap();
