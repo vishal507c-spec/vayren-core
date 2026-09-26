@@ -801,8 +801,12 @@ impl MarketState {
                 true
             }
             MarketAction::WheelZoom(x_frac, steps) => {
+                // No-op suppression: clamped zooms (already at min/max width)
+                // report false so the screen skips a full scene rebuild for
+                // zero viewport change (and keeps a valid hover instead of
+                // clearing it).
                 if self.bars.is_empty() || !x_frac.is_finite() || !steps.is_finite() {
-                    return true;
+                    return false;
                 }
                 // Inverted wheel direction: wheel UP zooms OUT, wheel DOWN
                 // zooms IN (deliberate divergence from legacy _zoom_at_px, which
@@ -810,8 +814,10 @@ impl MarketState {
                 // unchanged.
                 let scale = ZOOM_STEP.powf(f64::from(steps));
                 if scale <= 0.0 {
-                    return true;
+                    return false;
                 }
+                let (prev_first, prev_count, prev_follow) =
+                    (self.first, self.count, self.follow_latest);
                 let total = self.bars.len();
                 let count = self.window_size().max(1);
                 let fraction = f64::from(x_frac).clamp(0.0, 1.0);
@@ -827,23 +833,36 @@ impl MarketState {
                 self.first = new_first;
                 self.count = new_count;
                 self.follow_latest = new_first >= self.max_first();
+                if self.first == prev_first
+                    && self.count == prev_count
+                    && self.follow_latest == prev_follow
+                {
+                    return false;
+                }
                 self.refresh_crosshair();
                 true
             }
             MarketAction::WheelPanX(delta_frac) => {
+                // Same no-op contract as WheelZoom: panning against the
+                // clamped edge (oldest bar, or newest-bar pin) changes
+                // nothing and must not rebuild the scene.
                 if self.bars.is_empty() || !delta_frac.is_finite() {
-                    return true;
+                    return false;
                 }
                 let count = self.window_size().max(1);
                 let delta_bars = -f64::from(delta_frac) * count as f64;
                 if delta_bars == 0.0 {
-                    return true;
+                    return false;
                 }
+                let (prev_first, prev_follow) = (self.first, self.follow_latest);
                 let shifted = (self.first as f64 + round_py(delta_bars)).max(0.0) as usize;
                 self.first = self.clamp_first(shifted);
                 // Follow-latest only while sitting exactly on the live edge; a
                 // view shifted into the empty right space is a manual view.
                 self.follow_latest = self.first == self.max_first();
+                if self.first == prev_first && self.follow_latest == prev_follow {
+                    return false;
+                }
                 self.refresh_crosshair();
                 true
             }
@@ -861,7 +880,7 @@ impl MarketState {
                     return false;
                 };
                 if self.bars.is_empty() || !x.is_finite() || !y.is_finite() {
-                    return true;
+                    return false;
                 }
                 let count = self.window_size().max(1);
                 let delta_bars = -(f64::from(x) - f64::from(origin_x)) * count as f64;
@@ -889,13 +908,16 @@ impl MarketState {
                 true
             }
             MarketAction::PriceZoom(steps, y_frac) => {
+                // No-op contract (see WheelZoom): zero/invalid steps or a
+                // degenerate range change nothing and must not rebuild.
                 if !steps.is_finite() || steps == 0.0 || !y_frac.is_finite() {
-                    return true;
+                    return false;
                 }
+                let prev_manual = self.price_manual;
                 let (low, high) = self.price_range();
                 let span = high - low;
                 if span <= 0.0 {
-                    return true;
+                    return false;
                 }
                 let factor = PRICE_ZOOM_STEP.powf(-f64::from(steps));
                 let fraction = (1.0 - f64::from(y_frac)).clamp(0.0, 1.0);
@@ -903,17 +925,18 @@ impl MarketState {
                 let new_span = (span * factor).max(span * 0.01);
                 let new_low = anchor - fraction * new_span;
                 self.price_manual = Some((new_low, new_low + new_span));
-                true
+                self.price_manual != prev_manual
             }
             MarketAction::PriceDrag(notches, anchor_frac) => {
+                let (prev_active, prev_manual) = (self.price_drag_active, self.price_manual);
                 self.price_drag_active = true;
                 if !notches.is_finite() || !anchor_frac.is_finite() || notches == 0.0 {
-                    return true;
+                    return self.price_drag_active != prev_active;
                 }
                 let (low, high) = self.price_range();
                 let span = high - low;
                 if span <= 0.0 {
-                    return true;
+                    return self.price_drag_active != prev_active;
                 }
                 // legacy _drag_price_from -> _zoom_price_at(anchor_y, factor):
                 // the live range zooms around the fixed press point, so the
@@ -924,7 +947,7 @@ impl MarketState {
                 let new_span = (span * factor).max(span * 0.01);
                 let new_low = anchor - fraction * new_span;
                 self.price_manual = Some((new_low, new_low + new_span));
-                true
+                self.price_drag_active != prev_active || self.price_manual != prev_manual
             }
             MarketAction::PriceDragEnd => {
                 self.price_drag_active = false;
@@ -2014,6 +2037,25 @@ fn fmt_scale_dec(xform: ScaleXform, t_value: f64, dec: usize) -> String {
 
 /// Project state into the flat render view (pure; no I/O, no inference).
 pub fn project(state: &MarketState) -> MarketView {
+    project_inner(state, false)
+}
+
+/// Viewport-only projection for the pan/zoom fast path (pure; same helpers
+/// as [`project`], so geometry is byte-identical).
+///
+/// Only the fields `apply_market_viewport` consumes are populated: plot
+/// slots, candles, ticks, last-price/volume facts, ray levels, segments,
+/// markers, status message, data flag and scale flags. List panels
+/// (watchlist, timeframes, indicators, popup, settings), the download
+/// console, status rows, trade context and hover tags are left at their
+/// defaults — the viewport tier never reads them, and skipping them avoids
+/// re-formatting hundreds of discarded rows on every pointer event.
+/// Callers that need those fields must use [`project`].
+pub fn project_viewport(state: &MarketState) -> MarketView {
+    project_inner(state, true)
+}
+
+fn project_inner(state: &MarketState, viewport_only: bool) -> MarketView {
     let status_message = match state.status {
         MarketStatus::Loading => "Loading chart…".to_string(),
         MarketStatus::Empty => {
@@ -2038,39 +2080,51 @@ pub fn project(state: &MarketState) -> MarketView {
     };
     let has_data = state.has_data();
 
-    let watch_rows: Vec<WatchRow> = state
-        .listed_symbols()
-        .into_iter()
-        .map(|s| WatchRow {
-            symbol: s.symbol.clone(),
-            price: s.price.map(fmt_price).unwrap_or_else(|| "N/A".to_string()),
-            change: fmt_signed_pct(s.change_pct),
-            tone: tone_of_change(s.change_pct),
-            selected: s.symbol == state.selected_symbol,
-        })
-        .collect();
+    // Viewport fast path: list panels are never read by the viewport tier,
+    // so skip their sort/format work (527 watch rows dominate here).
+    let watch_rows: Vec<WatchRow> = if viewport_only {
+        Vec::new()
+    } else {
+        state
+            .listed_symbols()
+            .into_iter()
+            .map(|s| WatchRow {
+                symbol: s.symbol.clone(),
+                price: s.price.map(fmt_price).unwrap_or_else(|| "N/A".to_string()),
+                change: fmt_signed_pct(s.change_pct),
+                tone: tone_of_change(s.change_pct),
+                selected: s.symbol == state.selected_symbol,
+            })
+            .collect()
+    };
 
-    let visible_set: Vec<&str> = TIMEFRAME_VISIBLE_ORDER
-        .iter()
-        .copied()
-        .filter(|tf| state.timeframes.iter().any(|t| t == tf))
-        .collect();
-    let timeframes_visible: Vec<TimeframeRow> = visible_set
-        .iter()
-        .map(|t| TimeframeRow {
-            label: (*t).to_string(),
-            selected: *t == state.timeframe,
-        })
-        .collect();
-    let timeframes_overflow: Vec<TimeframeRow> = state
-        .timeframes
-        .iter()
-        .filter(|t| !visible_set.contains(&t.as_str()))
-        .map(|t| TimeframeRow {
-            label: t.clone(),
-            selected: *t == state.timeframe,
-        })
-        .collect();
+    let (timeframes_visible, timeframes_overflow): (Vec<TimeframeRow>, Vec<TimeframeRow>) =
+        if viewport_only {
+            (Vec::new(), Vec::new())
+        } else {
+            let visible_set: Vec<&str> = TIMEFRAME_VISIBLE_ORDER
+                .iter()
+                .copied()
+                .filter(|tf| state.timeframes.iter().any(|t| t == tf))
+                .collect();
+            let timeframes_visible: Vec<TimeframeRow> = visible_set
+                .iter()
+                .map(|t| TimeframeRow {
+                    label: (*t).to_string(),
+                    selected: *t == state.timeframe,
+                })
+                .collect();
+            let timeframes_overflow: Vec<TimeframeRow> = state
+                .timeframes
+                .iter()
+                .filter(|t| !visible_set.contains(&t.as_str()))
+                .map(|t| TimeframeRow {
+                    label: t.clone(),
+                    selected: *t == state.timeframe,
+                })
+                .collect();
+            (timeframes_visible, timeframes_overflow)
+        };
 
     let window = state.visible_window();
     // The plot's time grid is the LOGICAL window (`count` slots), not the
@@ -2231,16 +2285,45 @@ pub fn project(state: &MarketState) -> MarketView {
 
     // Crosshair tags from the snapped hover (hover-only fast path shares
     // this exact helper — one source of truth, never duplicated).
-    let hover = project_hover(state);
-    let hover_x = hover.hover_x;
-    let hover_y = hover.hover_y;
-    let hover_price = hover.hover_price;
-    let hover_time = hover.hover_time;
-    let hover_volume = hover.hover_volume;
-    let hover_vol_pos = hover.hover_vol_pos;
-    let hover_bull = hover.hover_bull;
-    let has_hover = hover.has_hover;
-    let header_ohlc = hover.header_ohlc;
+    // Viewport tier: hover props come from a single `project_hover` call in
+    // `apply_market_viewport`, so computing them here would run the helper
+    // twice per pan step for values the tier discards.
+    let (
+        hover_x,
+        hover_y,
+        hover_price,
+        hover_time,
+        hover_volume,
+        hover_vol_pos,
+        hover_bull,
+        has_hover,
+        header_ohlc,
+    ) = if viewport_only {
+        (
+            0.5f32,
+            0.5f32,
+            String::new(),
+            String::new(),
+            String::new(),
+            0.0f32,
+            true,
+            false,
+            "—".to_string(),
+        )
+    } else {
+        let hover = project_hover(state);
+        (
+            hover.hover_x,
+            hover.hover_y,
+            hover.hover_price,
+            hover.hover_time,
+            hover.hover_volume,
+            hover.hover_vol_pos,
+            hover.hover_bull,
+            hover.has_hover,
+            hover.header_ohlc,
+        )
+    };
 
     /// Horizontal ray emitter shared by extend series and store RAY records
     /// (legacy paint_overlay ray algorithm, same inputs): each origin extends to
@@ -2620,24 +2703,36 @@ pub fn project(state: &MarketState) -> MarketView {
         }
     }
 
-    let indicator_rows: Vec<IndicatorRow> = state
-        .indicators
-        .iter()
-        .map(|e| IndicatorRow {
-            name: e.name.clone(),
-            visible: e.visible,
-        })
-        .collect();
+    let indicator_rows: Vec<IndicatorRow> = if viewport_only {
+        Vec::new()
+    } else {
+        state
+            .indicators
+            .iter()
+            .map(|e| IndicatorRow {
+                name: e.name.clone(),
+                visible: e.visible,
+            })
+            .collect()
+    };
 
     // Settings panel rows for the open indicator (already seeded/edited in
     // state; empty list renders the honest "no parameters" note).
-    let settings_rows: Vec<SettingsRow> = state.settings_rows.clone();
-    let settings_name = state.settings_name.clone();
-    let settings_open = state.settings_open;
+    // Viewport tier never reads the panel — skip the clones.
+    let (settings_rows, settings_name, settings_open): (Vec<SettingsRow>, String, bool) =
+        if viewport_only {
+            (Vec::new(), String::new(), false)
+        } else {
+            (
+                state.settings_rows.clone(),
+                state.settings_name.clone(),
+                state.settings_open,
+            )
+        };
 
     // Indicator popup contents: sections per category + search, "No matches".
     let mut popup_rows: Vec<PopupRow> = Vec::new();
-    if state.popup_open {
+    if !viewport_only && state.popup_open {
         let query = state.popup_query.trim().to_lowercase();
         let cat = state.popup_category.as_str();
         let push_section = |popup_rows: &mut Vec<PopupRow>, label: &str, items: &[&str]| {
@@ -2759,13 +2854,38 @@ pub fn project(state: &MarketState) -> MarketView {
         }
     }
 
-    let active_label = state
-        .indicators
-        .last()
-        .map(|e| format!("Indicator: {}", e.name))
-        .unwrap_or_default();
+    let active_label = if viewport_only {
+        String::new()
+    } else {
+        state
+            .indicators
+            .last()
+            .map(|e| format!("Indicator: {}", e.name))
+            .unwrap_or_default()
+    };
 
     let (_change_text, _change_tone) = last_change(&state.bars);
+
+    // Viewport tier never reads the trade context, download console or
+    // status rows — leave them at their defaults instead of projecting
+    // (and cloning) hundreds of discarded rows per pointer event.
+    let trade_context = if viewport_only {
+        TradeContext::default()
+    } else {
+        state.trade_context.clone()
+    };
+    let download = if viewport_only {
+        mdownload::DownloadView::default()
+    } else {
+        mdownload::project_download(&state.download)
+    };
+    // Single call: the old code evaluated the same 8 rows twice (`.0` then
+    // `.1`); one evaluation feeds both sections on the full path.
+    let (market_status_regime, market_status_data) = if viewport_only {
+        (Vec::new(), Vec::new())
+    } else {
+        market_status_rows(&state.market_status)
+    };
 
     MarketView {
         panel_visible: state.panel_visible,
@@ -2815,15 +2935,15 @@ pub fn project(state: &MarketState) -> MarketView {
         settings_name,
         settings_rows,
         active_label,
-        trade_context: state.trade_context.clone(),
+        trade_context,
         scale_mode: state.scale_mode.kind(),
         scale_label: state.scale_mode.label().to_string(),
         grid_visible: state.grid_visible,
         cross_visible: state.cross_visible,
-        download: mdownload::project_download(&state.download),
+        download,
         market_status_open: state.market_status.open,
-        market_status_regime: market_status_rows(&state.market_status).0,
-        market_status_data: market_status_rows(&state.market_status).1,
+        market_status_regime,
+        market_status_data,
     }
 }
 
@@ -3277,6 +3397,195 @@ mod tests {
         assert!(st.price_manual.is_none());
     }
 
+    /// Viewport-only projection parity: the pan/zoom fast path must render
+    /// byte-identical geometry to the full projection (same helpers, list
+    /// panels skipped). Any divergence here is a chart-rendering regression.
+    #[test]
+    fn viewport_projection_matches_full_geometry() {
+        let mut st = MarketState::default();
+        st.symbols = (0..40)
+            .map(|i| WatchEntry {
+                symbol: format!("SYM{i:03}"),
+                price: Some(1000.0 + i as f64),
+                change_pct: Some(i as f64 * 0.1),
+            })
+            .collect();
+        st.set_bars("TEST", "15m", "NSE", bars(3000));
+        st.indicators = vec![IndicatorEntry {
+            name: "SMA".to_string(),
+            visible: true,
+        }];
+        st.plot_series = vec![PlotSeries {
+            owner: "SMA".to_string(),
+            title: "SMA".to_string(),
+            points: (st.first..st.first + 50)
+                .map(|i| (i, 100.0 + i as f64))
+                .collect(),
+            extend: "none".to_string(),
+            cap: 0,
+        }];
+        st.trade_markers = vec![TradeMarker {
+            side: "long".to_string(),
+            entry_price: 1500.0,
+            exit_price: 1600.0,
+            winning: true,
+            entry_pos: st.first as i32 + 10,
+            exit_pos: st.first as i32 + 60,
+            entry_covered: false,
+            exit_covered: false,
+            exit_reason: String::new(),
+        }];
+        st.strategy_rays = vec![StrategyRay {
+            start: st.first as i32,
+            price: 1500.0,
+            cap: 0,
+            layer: 0,
+            order: 0,
+        }];
+        st.popup_open = true;
+        st.settings_open = true;
+        st.settings_name = "SMA".to_string();
+        assert!(st.apply(MarketAction::HoverMoved(0.5, 0.5)));
+        let full = project(&st);
+        let vp = project_viewport(&st);
+        assert_eq!(vp.plot_slots, full.plot_slots);
+        assert_eq!(vp.candles, full.candles);
+        assert_eq!(vp.price_ticks, full.price_ticks);
+        assert_eq!(vp.time_ticks, full.time_ticks);
+        assert_eq!(vp.last_price, full.last_price);
+        assert_eq!(vp.last_price_pos, full.last_price_pos);
+        assert_eq!(vp.last_price_up, full.last_price_up);
+        assert_eq!(vp.has_last_price, full.has_last_price);
+        assert_eq!(vp.volume_max_label, full.volume_max_label);
+        assert_eq!(vp.last_volume, full.last_volume);
+        assert_eq!(vp.last_volume_pos, full.last_volume_pos);
+        assert_eq!(vp.last_volume_up, full.last_volume_up);
+        assert_eq!(vp.has_last_volume, full.has_last_volume);
+        assert_eq!(vp.ray_levels, full.ray_levels);
+        assert_eq!(vp.plot_segments, full.plot_segments);
+        assert_eq!(vp.markers, full.markers);
+        assert_eq!(vp.status_message, full.status_message);
+        assert_eq!(vp.has_data, full.has_data);
+        assert_eq!(vp.scale_mode, full.scale_mode);
+        assert_eq!(vp.scale_label, full.scale_label);
+        assert_eq!(vp.grid_visible, full.grid_visible);
+        assert_eq!(vp.cross_visible, full.cross_visible);
+        // List panels are skipped, never stale-copied: empty by contract.
+        assert!(vp.watch_rows.is_empty());
+        assert!(!full.watch_rows.is_empty());
+        assert!(vp.timeframes_visible.is_empty());
+        assert!(vp.indicator_rows.is_empty());
+        assert!(vp.popup_rows.is_empty());
+        assert!(vp.settings_rows.is_empty());
+        assert!(vp.market_status_regime.is_empty());
+        assert!(vp.market_status_data.is_empty());
+    }
+
+    /// Sustained-interaction stress (Phase 18, headless): thousands of mixed
+    /// pan/zoom/hover/drag/price gestures must never mutate bar data, never
+    /// leave the viewport out of range, and keep the viewport projection in
+    /// lockstep with the full projection throughout.
+    #[test]
+    fn sustained_interaction_stress_no_growth_no_drift() {
+        let mut st = MarketState::default();
+        st.set_bars("TEST", "15m", "NSE", bars(5000));
+        let fingerprint: Vec<(f64, f64, f64, f64, f64)> = st
+            .bars
+            .iter()
+            .map(|b| (b.open, b.high, b.low, b.close, b.volume))
+            .collect();
+        let mut ui_ops = 0usize;
+        for i in 0..2000 {
+            match i % 8 {
+                0 => {
+                    if st.apply(MarketAction::WheelPanX(0.01)) {
+                        ui_ops += 1;
+                    }
+                }
+                1 => {
+                    if st.apply(MarketAction::WheelPanX(-0.01)) {
+                        ui_ops += 1;
+                    }
+                }
+                2 => {
+                    if st.apply(MarketAction::WheelZoom(0.5, -0.5)) {
+                        ui_ops += 1;
+                    }
+                }
+                3 => {
+                    if st.apply(MarketAction::WheelZoom(0.5, 0.5)) {
+                        ui_ops += 1;
+                    }
+                }
+                4 => {
+                    st.apply(MarketAction::HoverMoved((i % 100) as f32 / 100.0, 0.5));
+                }
+                5 => {
+                    st.apply(MarketAction::DragStart(0.4, 0.5));
+                    if st.apply(MarketAction::DragMove(0.4 + (i % 20) as f32 * 0.001, 0.5)) {
+                        ui_ops += 1;
+                    }
+                    st.apply(MarketAction::DragEnd);
+                }
+                6 => {
+                    if st.apply(MarketAction::PriceZoom(0.5, 0.5)) {
+                        ui_ops += 1;
+                    }
+                }
+                _ => {
+                    st.apply(MarketAction::PriceReset);
+                }
+            }
+            assert!(st.first <= st.bars.len().saturating_sub(1));
+            assert!(st.count >= MIN_VISIBLE_BARS);
+            assert_eq!(st.bars.len(), fingerprint.len());
+            if i % 100 == 0 {
+                let full = project(&st);
+                let vp = project_viewport(&st);
+                assert_eq!(vp.candles, full.candles, "drift at op {i}");
+                assert_eq!(vp.plot_segments, full.plot_segments, "drift at op {i}");
+                assert_eq!(vp.price_ticks, full.price_ticks, "drift at op {i}");
+            }
+        }
+        // Bar data is immutable under interaction: same values, same order.
+        for (b, f) in st.bars.iter().zip(fingerprint.iter()) {
+            assert_eq!((b.open, b.high, b.low, b.close, b.volume), *f);
+        }
+        assert!(ui_ops > 1000, "stress must exercise real refreshes");
+    }
+
+    /// Clamped viewport gestures report no-op and preserve a valid hover:
+    /// rebuilding the whole scene (and dropping the crosshair) for zero
+    /// viewport change is the stutter path this guards.
+    #[test]
+    fn clamped_viewport_gestures_report_noop_and_keep_hover() {
+        let mut st = MarketState::default();
+        st.set_bars("TEST", "15m", "NSE", bars(3000));
+        assert!(st.apply(MarketAction::HoverMoved(0.5, 0.5)));
+        assert!(st.hover.is_some());
+        // Park at the oldest bar, then pan further into the past: clamped.
+        st.first = 0;
+        st.follow_latest = false;
+        assert!(!st.apply(MarketAction::WheelPanX(0.05)));
+        assert_eq!(st.first, 0);
+        assert!(
+            st.hover.is_some(),
+            "clamped pan must not drop the crosshair"
+        );
+        // Zero-delta gestures change nothing.
+        assert!(!st.apply(MarketAction::WheelPanX(0.0)));
+        assert!(!st.apply(MarketAction::PriceZoom(0.0, 0.5)));
+        assert!(!st.apply(MarketAction::PriceZoom(f32::NAN, 0.5)));
+        // Price drag with zero notches only flips the active flag once.
+        assert!(!st.price_drag_active);
+        assert!(st.apply(MarketAction::PriceDrag(0.0, 0.5)));
+        assert!(st.price_drag_active);
+        assert!(!st.apply(MarketAction::PriceDrag(0.0, 0.5)));
+        // Real gestures still report change.
+        assert!(st.apply(MarketAction::WheelPanX(-0.2)));
+        assert!(st.apply(MarketAction::PriceZoom(1.0, 0.5)));
+    }
+
     /// One-side free pan (the requested screenshot behavior): dragging the
     /// candles LEFT keeps moving past the live edge until the newest bar sits
     /// on the plot's left edge — everything to its right is real empty space.
@@ -3310,9 +3619,19 @@ mod tests {
     fn pan_toward_the_past_still_stops_at_the_oldest_bar() {
         let mut st = MarketState::default();
         st.set_bars("TEST", "15m", "NSE", bars(3000));
+        // Early pans move; once clamped at the oldest bar the action reports
+        // a no-op (false) so the screen skips rebuilding an unchanged scene.
+        let mut moved = 0;
+        let mut noop = 0;
         for _ in 0..20 {
-            assert!(st.apply(MarketAction::WheelPanX(0.5)));
+            if st.apply(MarketAction::WheelPanX(0.5)) {
+                moved += 1;
+            } else {
+                noop += 1;
+            }
         }
+        assert!(moved > 0, "pan must move before clamping");
+        assert!(noop > 0, "clamped pans must report no-op");
         assert_eq!(st.first, 0);
         assert!(!st.follow_latest);
         let slots = st.count;
@@ -3828,9 +4147,10 @@ mod tests {
     fn golden_zoom_pan_reset_match_golden() {
         let mut st = golden_state();
         // Zoom-in x3 at fx=0.5 (inverted wheel: steps=-1): already at the
-        // density cap, nothing changes (zoom-in cannot over-compress).
+        // density cap, nothing changes (zoom-in cannot over-compress) — the
+        // clamped no-ops report false so the screen skips the rebuild.
         for _ in 0..3 {
-            assert!(st.apply(MarketAction::WheelZoom(0.5, 1.0)));
+            assert!(!st.apply(MarketAction::WheelZoom(0.5, 1.0)));
         }
         assert_eq!((st.first, st.count), (1980, 1200));
         assert!(st.follow_latest);
