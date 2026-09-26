@@ -95,8 +95,14 @@ def run_backtest(
     data_dir=None,
     strategy_dir=None,
     market=None,
+    cost_pct: float | None = None,
 ) -> dict:
     """Execute one backtest over real historical bars.
+
+    ``cost_pct`` is the UI transaction-cost echo in percent-per-side (the
+    same units as ``_DEFAULT_COMMISSION_PCT``). ``None`` keeps the default;
+    negative values fail closed. Threaded into the native fill/close path,
+    never applied as a post-hoc haircut.
 
     Returns the Lab ``results`` block (metrics/ranking/trades/equity_curve/
     risk_notes) in the exact bridge contract the native Lab projection reads.
@@ -114,6 +120,15 @@ def run_backtest(
         raise BacktestError("No universe: select at least one symbol")
     if start is not None and end is not None and start > end:
         raise BacktestError(f"Start date is after end date ({start} > {end})")
+    if cost_pct is None:
+        commission_pct = _DEFAULT_COMMISSION_PCT
+    else:
+        try:
+            commission_pct = float(cost_pct)
+        except (TypeError, ValueError) as exc:
+            raise BacktestError(f"Invalid transaction cost {cost_pct!r}") from exc
+        if not commission_pct >= 0:
+            raise BacktestError(f"Transaction cost must be non-negative ({cost_pct!r})")
 
     if market is None:
         try:
@@ -144,6 +159,7 @@ def run_backtest(
             warmup,
             want_long,
             native_positions,
+            commission_pct,
         )
         all_trades.extend(trades)
         ranking.append(_rank_row(symbol, trades, capital))
@@ -180,6 +196,7 @@ def _run_symbol(
     warmup: int,
     want_long: bool,
     native_positions,
+    commission_pct: float = _DEFAULT_COMMISSION_PCT,
 ) -> list[dict]:
     """Single-symbol execution pass (mirrors ``execute_bars`` bar order)."""
     from strategy.models.parameters import StrategyParameters
@@ -218,7 +235,7 @@ def _run_symbol(
                     entry_price,
                     quantity,
                     commission_entry,
-                    _DEFAULT_COMMISSION_PCT,
+                    commission_pct,
                     False,
                 )
             except Exception as exc:
@@ -259,7 +276,7 @@ def _run_symbol(
                     bar.close,
                     equity + realized,
                     _DEFAULT_SLIPPAGE_PCT,
-                    _DEFAULT_COMMISSION_PCT,
+                    commission_pct,
                 )
             except Exception as exc:
                 raise BacktestError(f"Strategy failed: {exc}") from exc
@@ -290,7 +307,7 @@ def _run_symbol(
                     quantity,
                     commission_entry,
                     exit_px,
-                    _DEFAULT_COMMISSION_PCT,
+                    commission_pct,
                     stop_loss,
                 )
             except Exception as exc:
@@ -320,7 +337,7 @@ def _run_symbol(
                 quantity,
                 commission_entry,
                 exit_px,
-                _DEFAULT_COMMISSION_PCT,
+                commission_pct,
                 stop_loss,
             )
         except Exception as exc:

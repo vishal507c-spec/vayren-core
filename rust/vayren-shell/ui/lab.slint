@@ -84,6 +84,7 @@ export struct LabHeader {
     sym-search: string,
     sym-button-line: string,
     sym-count-line: string,
+    sym-selected-line: string,
     // ── Reference redesign additions ──
     cfg-cost: string,
     cfg-cost-warn: bool,
@@ -919,6 +920,23 @@ export component StrategyLabScreen inherits Rectangle {
                         }
                     }
                     Rectangle { horizontal-stretch: 1; background: transparent; }
+                    // Reference 1:1 — local-preview marker (HTML .preview-tag).
+                    Rectangle {
+                        height: 22px;
+                        width: pvtx.width + 20px;
+                        border-radius: 99px;
+                        background: LabPalette.amber-06;
+                        border-width: 1px;
+                        border-color: LabPalette.amber-30;
+                        pvtx := Text {
+                            text: "LOCAL PREVIEW";
+                            color: LabPalette.lab-amber;
+                            font-size: 9px;
+                            letter-spacing: 1px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
                     Rectangle {
                         width: 28px;
                         height: 28px;
@@ -1342,15 +1360,18 @@ export component StrategyLabScreen inherits Rectangle {
                                         }
                                     }
                                 }
-                                // Run bar — the culmination
+                                // Run bar — the culmination (reference 1:1 + cost-model note).
                                 Rectangle {
-                                    height: 46px;
+                                    height: 68px;
                                     background: LabPalette.panel2;
-                                    HorizontalLayout {
-                                        padding-left: 18px;
-                                        padding-right: 18px;
-                                        spacing: 18px;
-                                        alignment: center;
+                                    VerticalLayout {
+                                        spacing: 0;
+                                        HorizontalLayout {
+                                            height: 46px;
+                                            padding-left: 18px;
+                                            padding-right: 18px;
+                                            spacing: 18px;
+                                            alignment: center;
                                         Text {
                                             text: root.lab.summary-line;
                                             font-family: "monospace";
@@ -1405,6 +1426,17 @@ export component StrategyLabScreen inherits Rectangle {
                                             }
                                         }
                                     }
+                                    Text {
+                                        height: 22px;
+                                        text: "Real historical backtest over the selected universe and date range. The configured transaction cost applies to fills.";
+                                        font-size: 10px;
+                                        color: LabPalette.dim;
+                                        x: 18px;
+                                        width: parent.width - 36px;
+                                        vertical-alignment: center;
+                                        overflow: elide;
+                                    }
+                                    }
                                     Rectangle { y: 0; height: 1px; width: 100%; background: LabPalette.line; }
                                 }
                             }
@@ -1440,19 +1472,28 @@ export component StrategyLabScreen inherits Rectangle {
                                             border-radius: 99px;
                                             background: transparent;
                                             border-width: 1px;
-                                            border-color: root.lab.outdated ? LabPalette.amber-30 : LabPalette.green-30;
+                                            // Reference 1:1 flag priority: CHECK > RUNNING > STALE > CURRENT.
+                                            border-color: root.lab.config-error != "" ? LabPalette.red-35
+                                                : root.lab.run-stop ? LabPalette.amber-30
+                                                : root.lab.outdated ? LabPalette.amber-30 : LabPalette.green-30;
                                             Rectangle {
                                                 x: 11px;
                                                 y: (parent.height - self.height) / 2;
                                                 width: 6px;
                                                 height: 6px;
                                                 border-radius: 3px;
-                                                background: root.lab.outdated ? LabPalette.lab-amber : LabPalette.green;
+                                                background: root.lab.config-error != "" ? LabPalette.lab-red
+                                                    : root.lab.run-stop ? LabPalette.lab-amber
+                                                    : root.lab.outdated ? LabPalette.lab-amber : LabPalette.green;
                                             }
                                             flagtx := Text {
                                                 x: 24px;
-                                                text: root.lab.outdated ? "STALE — PREVIOUS CONFIG" : "CURRENT";
-                                                color: root.lab.outdated ? LabPalette.lab-amber : LabPalette.green;
+                                                text: root.lab.config-error != "" ? "CHECK INPUTS"
+                                                    : root.lab.run-stop ? "RUNNING"
+                                                    : root.lab.outdated ? "STALE — PREVIOUS CONFIG" : "CURRENT";
+                                                color: root.lab.config-error != "" ? LabPalette.lab-red
+                                                    : root.lab.run-stop ? LabPalette.lab-amber
+                                                    : root.lab.outdated ? LabPalette.lab-amber : LabPalette.green;
                                                 font-size: 9px;
                                                 letter-spacing: 1px;
                                                 vertical-alignment: center;
@@ -1503,17 +1544,35 @@ export component StrategyLabScreen inherits Rectangle {
                                     }
                                     Rectangle { y: parent.height - 1px; height: 1px; width: 100%; background: LabPalette.line; }
                                 }
-                                // stale banner
+                                // stale banner — reference 1:1 (Shown vs Yours now).
                                 if root.lab.outdated: Rectangle {
-                                    height: 34px;
+                                    height: (root.lab.stale-exec-line != "" || root.lab.stale-cur-line != "") ? 76px : 34px;
                                     background: LabPalette.amber-05;
-                                    Text {
-                                        text: "Configuration changed since this run — this result belongs to a previous configuration.";
-                                        font-size: 11px;
-                                        color: LabPalette.lab-amber;
-                                        x: 18px;
-                                        y: (parent.height - self.height) / 2;
-                                        width: parent.width - 36px;
+                                    VerticalLayout {
+                                        padding-left: 18px;
+                                        padding-right: 18px;
+                                        spacing: 2px;
+                                        alignment: center;
+                                        Text {
+                                            text: "Configuration changed since this run — this result belongs to a previous configuration.";
+                                            font-size: 11px;
+                                            color: LabPalette.lab-amber;
+                                            overflow: elide;
+                                        }
+                                        if root.lab.stale-exec-line != "": Text {
+                                            text: "Shown: " + root.lab.stale-exec-line;
+                                            font-family: "monospace";
+                                            font-size: 10px;
+                                            color: LabPalette.lab-amber;
+                                            overflow: elide;
+                                        }
+                                        if root.lab.stale-cur-line != "": Text {
+                                            text: "Yours now: " + root.lab.stale-cur-line;
+                                            font-family: "monospace";
+                                            font-size: 10px;
+                                            color: LabPalette.lab-amber;
+                                            overflow: elide;
+                                        }
                                     }
                                     Rectangle { y: parent.height - 1px; height: 1px; width: 100%; background: LabPalette.amber-25; }
                                 }
@@ -2188,8 +2247,10 @@ export component StrategyLabScreen inherits Rectangle {
                     height: 46px;
                     HorizontalLayout {
                         padding-left: 16px; padding-right: 16px;
+                        spacing: 10px;
                         alignment: center;
                         Text { text: "Universe"; font-size: 13px; font-weight: 650; color: LabPalette.lab-text; vertical-alignment: center; }
+                        Text { text: root.lab.sym-selected-line; font-size: 10.5px; color: LabPalette.lab-muted; vertical-alignment: center; }
                         Rectangle { horizontal-stretch: 1; background: transparent; }
                         Rectangle {
                             width: 22px; height: 22px;
@@ -2244,10 +2305,45 @@ export component StrategyLabScreen inherits Rectangle {
                     height: 54px;
                     HorizontalLayout {
                         padding-left: 16px; padding-right: 16px;
-                        spacing: 10px;
+                        spacing: 8px;
                         alignment: center;
-                        Text { text: root.lab.sym-count-line; font-family: "monospace"; font-size: 10.5px; color: LabPalette.lab-muted; vertical-alignment: center; }
-                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                        Text { text: root.lab.sym-count-line; font-family: "monospace"; font-size: 10.5px; color: LabPalette.lab-muted; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+                        Rectangle {
+                            width: 62px; height: 34px;
+                            border-radius: 8px;
+                            background: transparent;
+                            border-width: 1px;
+                            border-color: clta.has-hover ? LabPalette.white-16 : LabPalette.line;
+                            clta := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.sym-clear(); }
+                            }
+                            Text { text: "Clear"; color: LabPalette.lab-muted; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                        }
+                        Rectangle {
+                            width: 52px; height: 34px;
+                            border-radius: 8px;
+                            background: transparent;
+                            border-width: 1px;
+                            border-color: alta.has-hover ? LabPalette.white-16 : LabPalette.line;
+                            alta := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.sym-all-visible(); }
+                            }
+                            Text { text: "All"; color: LabPalette.lab-muted; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                        }
+                        Rectangle {
+                            width: 70px; height: 34px;
+                            border-radius: 8px;
+                            background: LabPalette.panel3;
+                            border-width: 1px;
+                            border-color: cnta.has-hover ? LabPalette.white-16 : LabPalette.line;
+                            cnta := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.sym-close(); }
+                            }
+                            Text { text: "Cancel"; color: LabPalette.lab-muted; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                        }
                         Rectangle {
                             width: 84px; height: 34px;
                             border-radius: 8px;

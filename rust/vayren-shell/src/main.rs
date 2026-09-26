@@ -240,17 +240,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
     // Lab refetch closures (same snapshot shape as startup; selection pulls
-    // the strategy workspace, RUN executes a real backend backtest).
-    let fetch_lab_workspace: Rc<dyn Fn(String)> = Rc::new({
+    // the strategy workspace WITH the current config, RUN executes a real
+    // backend backtest).
+    let fetch_lab_workspace: Rc<dyn Fn(shell::LabSelectRequest)> = Rc::new({
         let backend = Arc::clone(&backend);
         let tx = fetch_tx.clone();
         let seq = Arc::clone(&lab_select_seq);
-        move |name: String| {
+        move |request: shell::LabSelectRequest| {
             let id = seq.fetch_add(1, Ordering::SeqCst) + 1;
             spawn_fetch(
                 &backend,
                 &tx,
-                BackendCommand::SelectLabStrategy { strategy: name },
+                BackendCommand::SelectLabStrategy {
+                    strategy: request.strategy,
+                    symbols: request.symbols,
+                    timeframe: Some(request.timeframe).filter(|s| !s.is_empty()),
+                    start: Some(request.start).filter(|s| !s.is_empty()),
+                    end: Some(request.end).filter(|s| !s.is_empty()),
+                    capital: request.capital,
+                    cost: request.cost,
+                    mode: request.mode,
+                },
                 move |data| FetchResult::LabSelect(id, data),
             );
         }
@@ -268,6 +278,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 start: Some(request.start).filter(|s| !s.is_empty()),
                 end: Some(request.end).filter(|s| !s.is_empty()),
                 capital: request.capital,
+                cost: request.cost,
                 mode: request.mode,
             };
             spawn_fetch(&backend, &tx, command, move |data| {
