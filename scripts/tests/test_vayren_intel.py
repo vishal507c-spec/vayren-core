@@ -6,6 +6,7 @@ live `.repo_index/intel/` tree is never touched.
 
 from __future__ import annotations
 
+import datetime
 import json
 import sys
 from pathlib import Path
@@ -216,6 +217,129 @@ def test_learn_cli_rejects_confidence_text() -> None:
         vayren_intel.main(["--learn", "k9", "t", "OBSERVED", "ev", "high", ""])
 
 
+def _series(*values: float) -> list[dict]:
+    return [
+        {"ts": f"2026-09-2{i}T00:00:00+00:00", "value": v, "revision": f"r{i}"}
+        for i, v in enumerate(values, start=1)
+    ]
+
+
+def test_trend_up_detected() -> None:
+    result = vayren_intel.analyze_series(_series(420.0, 440.0, 460.0, 480.0))
+    assert result["classification"] == "TREND_UP"
+    assert result["swing_pct"] > 5.0
+    assert "monotone increase" in result["reason"]
+
+
+def test_trend_down_detected() -> None:
+    result = vayren_intel.analyze_series(_series(480.0, 460.0, 440.0, 420.0))
+    assert result["classification"] == "TREND_DOWN"
+    assert result["swing_pct"] < -5.0
+
+
+def test_stable_noisy_series_is_not_regression() -> None:
+    result = vayren_intel.analyze_series(_series(400.0, 402.0, 399.0, 405.0, 404.0))
+    assert result["classification"] == "STABLE"
+
+
+def test_single_spike_not_monotone_trend() -> None:
+    result = vayren_intel.analyze_series(_series(400.0, 400.0, 900.0, 402.0))
+    assert result["classification"] == "STABLE"
+
+
+def test_two_points_insufficient() -> None:
+    result = vayren_intel.analyze_series(_series(400.0, 500.0))
+    assert result["classification"] == "INSUFFICIENT"
+    assert result["current"] is None
+
+
+def test_empty_series_insufficient() -> None:
+    result = vayren_intel.analyze_series([])
+    assert result["classification"] == "INSUFFICIENT"
+    assert result["points"] == 0
+
+
+def test_variable_when_movement_not_monotone() -> None:
+    result = vayren_intel.analyze_series(_series(400.0, 430.0, 410.0, 440.0))
+    assert result["classification"] == "VARIABLE"
+    assert "not monotone" in result["reason"]
+
+
+def test_delta_exact() -> None:
+    result = vayren_intel.analyze_series(_series(100.0, 110.0, 120.0))
+    assert result["current"] == 120.0
+    assert result["previous"] == 110.0
+    assert result["first"] == 100.0
+    assert result["swing_pct"] == pytest.approx(20.0)
+
+
+def test_radar_blocked_when_store_broken() -> None:
+    # Empty store (no baseline at all) -> integrity gate BLOCKS analysis.
+    result = vayren_intel.radar()
+    assert result["status"] == "BLOCKED"
+    assert result["reason"] == "HISTORY UNTRUSTED"
+
+
+def test_radar_deterministic(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        vayren_intel,
+        "timed_check",
+        lambda crate: {"crate": crate, "rc": 0, "elapsed_s": 1.0, "measured": True},
+    )
+    vayren_intel.build_baseline()
+    vayren_intel.daily_report()
+    first = vayren_intel.radar()
+    second = vayren_intel.radar()
+    assert first["series"] == second["series"]
+    assert first["status"] == "OK" == second["status"]
+
+
+def test_radar_records_no_change_required_when_stable(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(
+        vayren_intel,
+        "timed_check",
+        lambda crate: {"crate": crate, "rc": 0, "elapsed_s": 1.0, "measured": True},
+    )
+    vayren_intel.build_baseline()
+    vayren_intel.daily_report()
+    rc = vayren_intel.main(["--trends"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "STABLE" in out or "INSUFFICIENT" in out
+    assert "TREND_UP" not in out and "TREND_DOWN" not in out
+
+
+def test_radar_persists_real_trend_knowledge(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        vayren_intel,
+        "timed_check",
+        lambda crate: {"crate": crate, "rc": 0, "elapsed_s": 1.0, "measured": True},
+    )
+    vayren_intel.build_baseline()
+    # Injected monotone series gets persisted as a knowledge item.
+    path = vayren_intel._path("history.jsonl")
+    with open(path, "a", encoding="utf-8", newline="\n") as fh:
+        for i, value in enumerate((10.0, 12.0, 14.0, 16.0), start=2):
+            fh.write(
+                json.dumps(
+                    {
+                        "kind": "daily",
+                        "ts": f"2026-09-2{i}T00:00:00+00:00",
+                        "today": {"py_files": value},
+                    }
+                )
+                + "\n"
+            )
+    result = vayren_intel.radar()
+    if result["status"] != "OK":
+        print("BLOCKED problems:", result)
+    assert result["status"] == "OK"
+    assert "py_files" in result["series"]
+    assert result["series"]["py_files"]["classification"] == "TREND_UP"
+
+
 def test_experiment_cli_keeps_record(capsys: pytest.CaptureFixture[str]) -> None:
     rc = vayren_intel.main(
         ["--experiment", "e9", "hyp", "exp", "low", "before", "after", "KEEP", "lesson"]
@@ -224,3 +348,283 @@ def test_experiment_cli_keeps_record(capsys: pytest.CaptureFixture[str]) -> None
     out = json.loads(capsys.readouterr().out)
     assert out == {"id": "e9", "decision": "KEEP"}
     assert vayren_intel.load_experiments()[0]["lesson"] == "lesson"
+
+
+def test_verify_fails_without_baseline() -> None:
+    result = vayren_intel.verify_store()
+    assert result["status"] == "FAIL"
+    assert any("baseline missing" in p for p in result["problems"])
+    assert result["baseline_present"] is False
+
+
+def test_verify_green_on_wellformed_store(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        vayren_intel,
+        "timed_check",
+        lambda crate: {"crate": crate, "rc": 0, "elapsed_s": 1.0, "measured": True},
+    )
+    vayren_intel.build_baseline()
+    vayren_intel.add_knowledge("k1", "t", "VERIFIED", "real evidence", 1.0)
+    vayren_intel.log_experiment("e1", "h", "e", "low", "b", "a", "KEEP", "l")
+    result = vayren_intel.verify_store()
+    assert result["status"] == "PASS", result["problems"]
+
+
+def test_verify_flags_foreign_repo_index_dirs() -> None:
+    (vayren_intel.STORE_DIR.parent / "repo_index_hold2").mkdir(parents=True)
+    result = vayren_intel.verify_store()
+    assert result["status"] == "FAIL"
+    assert result["stray_dirs"] == ["repo_index_hold2"]
+
+
+def test_verify_flags_invalid_knowledge_state() -> None:
+    store = vayren_intel.load_knowledge()
+    store["items"].append({"id": "bad", "state": "MAYBE", "evidence": "x"})
+    vayren_intel._store_json("knowledge.json", store)
+    result = vayren_intel.verify_store()
+    assert result["status"] == "FAIL"
+    assert any("bad" in p for p in result["problems"])
+
+
+# --- CI timing ingestion (Phase 9) -------------------------------------------
+
+JOB1 = {
+    "name": "build-test",
+    "conclusion": "success",
+    "startedAt": "2026-09-25T12:31:30Z",
+    "completedAt": "2026-09-25T12:41:33Z",
+    "steps": [
+        {
+            "name": "Run time python scripts/build_rust.py --lean-test",
+            "conclusion": "success",
+            "startedAt": "2026-09-25T12:32:00Z",
+            "completedAt": "2026-09-25T12:40:00Z",
+        }
+    ],
+}
+RUN1 = {
+    "databaseId": 42,
+    "headSha": "a" * 40,
+    "conclusion": "success",
+    "status": "completed",
+    "workflowName": "CI",
+    "headBranch": "main",
+    "event": "push",
+    "createdAt": "2026-09-25T12:29:18Z",
+    "updatedAt": "2026-09-25T12:41:33Z",
+    "jobs": [JOB1],
+}
+
+
+def test_ci_record_valid_build() -> None:
+    record = vayren_intel.build_ci_record(RUN1)
+    assert record["schema"] == "ci-timing/v1"
+    assert record["run_id"] == 42
+    assert record["metrics"]["ci.build-test.duration_s"] == 603.0
+    assert any("build_rust.py --lean-test" in _key for _key in record["metrics"])
+    assert record["measurement_method"] == "gh-api-job-step-durations"
+    assert vayren_intel.validate_ci_record(record) == []
+
+
+def test_ci_record_rejects_missing_timestamp() -> None:
+    bad = json.loads(json.dumps(RUN1))
+    del bad["updatedAt"]
+    with pytest.raises(vayren_intel.IntelError, match="updatedAt"):
+        vayren_intel.build_ci_record(bad)
+
+
+def test_ci_record_rejects_missing_commit() -> None:
+    bad = json.loads(json.dumps(RUN1))
+    bad["headSha"] = "abc"
+    with pytest.raises(vayren_intel.IntelError, match="headSha"):
+        vayren_intel.build_ci_record(bad)
+
+
+def test_ci_record_rejects_missing_run_id() -> None:
+    bad = json.loads(json.dumps(RUN1))
+    bad["databaseId"] = None
+    with pytest.raises(vayren_intel.IntelError, match="databaseId"):
+        vayren_intel.build_ci_record(bad)
+
+
+def test_ci_record_rejects_failed_run() -> None:
+    bad = json.loads(json.dumps(RUN1))
+    bad["conclusion"] = "failure"
+    with pytest.raises(vayren_intel.IntelError, match="conclusion"):
+        vayren_intel.build_ci_record(bad)
+
+
+def test_ci_record_skips_job_with_missing_timing() -> None:
+    # Missing timing on a single job raises (no measurable output at all).
+    job = json.loads(json.dumps(JOB1))
+    del job["completedAt"]
+    with pytest.raises(vayren_intel.IntelError, match="zero measurable"):
+        vayren_intel.build_ci_record({**json.loads(json.dumps(RUN1)), "jobs": [job]})
+
+
+def test_ci_record_rejects_empty_jobs() -> None:
+    with pytest.raises(vayren_intel.IntelError, match="missing jobs"):
+        vayren_intel.build_ci_record({**json.loads(json.dumps(RUN1)), "jobs": []})
+
+
+def test_validate_detects_bad_metric_value() -> None:
+    record = vayren_intel.build_ci_record(RUN1)
+    record["metrics"]["ci.build-test.duration_s"] = -1
+    problems = vayren_intel.validate_ci_record(record)
+    assert any("negative" in p for p in problems)
+
+
+def test_metric_intent_duration_lower_better() -> None:
+    assert vayren_intel._ci_intent("ci.build-test.duration_s") == "duration_s"
+    assert vayren_intel.METRIC_INTENT["duration_s"] == "lower-is-better"
+
+
+def test_metric_intent_unknown_for_counts() -> None:
+    assert vayren_intel._ci_intent("ci.test-count") == "UNKNOWN"
+
+
+def _baseline_without_cargo(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        vayren_intel,
+        "timed_check",
+        lambda crate: {"crate": crate, "rc": 0, "elapsed_s": 1.0, "measured": True},
+    )
+    vayren_intel.build_baseline()
+
+
+def test_ingest_rejects_duplicate(monkeypatch: pytest.MonkeyPatch) -> None:
+    _baseline_without_cargo(monkeypatch)
+    monkeypatch.setattr(vayren_intel, "fetch_run", lambda _rid: RUN1)
+    first = vayren_intel.ingest_ci_run(42)
+    second = vayren_intel.ingest_ci_run(42)
+    assert first["ingested"] is True
+    assert second["ingested"] is False
+    assert second["reason"].startswith("duplicate")
+
+
+def test_ingest_blocks_on_untrusted_store() -> None:
+    # Empty store: verify_store fails (baseline missing) -> ingestion blocks.
+    with pytest.raises(vayren_intel.IntelError):
+        vayren_intel.ingest_ci_run(42)
+
+
+def test_ingest_writes_exactly_one_record(monkeypatch: pytest.MonkeyPatch) -> None:
+    _baseline_without_cargo(monkeypatch)
+    monkeypatch.setattr(vayren_intel, "fetch_run", lambda _rid: RUN1)
+    first = vayren_intel.ingest_ci_run(42)
+    assert first["ingested"] is True
+    lines = vayren_intel._path("history.jsonl").read_text(encoding="utf-8").splitlines()
+    assert sum('"ci-timing/v1"' in ln for ln in lines) == 1
+
+
+def test_radar_consumes_ci_history(monkeypatch: pytest.MonkeyPatch) -> None:
+    _baseline_without_cargo(monkeypatch)
+    monkeypatch.setattr(vayren_intel, "fetch_run", lambda _rid: RUN1)
+    vayren_intel.ingest_ci_run(42)
+    radar = vayren_intel.radar()
+    assert "ci.build-test.duration_s" in radar["series"]
+    assert radar["series"]["ci.build-test.duration_s"]["classification"] == "INSUFFICIENT"
+
+
+def test_radar_no_fabricated_ci_runs(monkeypatch: pytest.MonkeyPatch) -> None:
+    _baseline_without_cargo(monkeypatch)
+    radar = vayren_intel.radar()
+    assert not any(m.startswith("ci.") for m in radar["series"])
+
+
+def test_ingest_skips_partial_failed_job() -> None:
+    record = vayren_intel.build_ci_record(RUN1)
+    assert record["metrics"].get("ci.build-test.duration_s") == 603.0
+    partial = json.loads(json.dumps(JOB1))
+    partial["conclusion"] = "failure"
+    record = vayren_intel.build_ci_record({**json.loads(json.dumps(RUN1)), "jobs": [partial]})
+    # Failed run rejected before mapping jobs; metrics stay empty.
+    with pytest.raises(vayren_intel.IntelError):
+        vayren_intel.build_ci_record(
+            {**json.loads(json.dumps(RUN1)), "conclusion": "failure", "jobs": [JOB1]}
+        )
+
+
+def _monotone_wall_runs(values: tuple[float, ...]) -> list[dict]:
+    runs = []
+    for i, wall_s in enumerate(values, start=1):
+        run = json.loads(json.dumps(RUN1))
+        run["databaseId"] = 90 + i
+        # Single date source: same day for start/end, durations exact in seconds.
+        start_dt = datetime.datetime(2026, 9, 1, tzinfo=datetime.UTC) + datetime.timedelta(days=i)
+        end_dt = start_dt + datetime.timedelta(seconds=wall_s)
+        run["jobs"] = [
+            {
+                "name": "build-test",
+                "conclusion": "success",
+                "startedAt": start_dt.isoformat(),
+                "completedAt": end_dt.isoformat(),
+                "steps": [],
+            }
+        ]
+        runs.append(run)
+    return runs
+
+
+def test_radar_ci_trend_up_classified(monkeypatch: pytest.MonkeyPatch) -> None:
+    _baseline_without_cargo(monkeypatch)
+    runs = _monotone_wall_runs((100.0, 120.0, 150.0))
+    monkeypatch.setattr(
+        vayren_intel,
+        "fetch_run",
+        lambda rid: next(r for r in runs if r["databaseId"] == rid),
+    )
+    for _run_id in (91, 92, 93):
+        vayren_intel.ingest_ci_run(_run_id)
+    radar = vayren_intel.radar()
+    series = radar["series"]["ci.build-test.duration_s"]
+    assert series["classification"] == "TREND_UP"
+    item = next(
+        i
+        for i in vayren_intel.load_knowledge()["items"]
+        if i["id"] == "trend-ci.build-test.duration_s"
+    )
+    assert item["state"] == "OBSERVED"
+
+
+def test_radar_ci_trend_down_classified(monkeypatch: pytest.MonkeyPatch) -> None:
+    _baseline_without_cargo(monkeypatch)
+    runs = _monotone_wall_runs((150.0, 120.0, 100.0))
+    monkeypatch.setattr(
+        vayren_intel,
+        "fetch_run",
+        lambda rid: next(r for r in runs if r["databaseId"] == rid),
+    )
+    for _run_id in (91, 92, 93):
+        vayren_intel.ingest_ci_run(_run_id)
+    radar = vayren_intel.radar()
+    series = radar["series"]["ci.build-test.duration_s"]
+    assert series["classification"] == "TREND_DOWN"
+
+
+def test_ingest_rejects_tampered_provenance() -> None:
+    record = vayren_intel.build_ci_record(RUN1)
+    record["revision"] = "short-sha"
+    problems = vayren_intel.validate_ci_record(record)
+    assert any("full SHA" in p for p in problems)
+
+
+def test_verify_flags_duplicate_ci_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    _baseline_without_cargo(monkeypatch)
+    record = vayren_intel.build_ci_record(RUN1)
+    vayren_intel._append_jsonl("history.jsonl", record)
+    vayren_intel._append_jsonl("history.jsonl", record)
+    result = vayren_intel.verify_store()
+    assert result["status"] == "FAIL"
+    assert any("duplicate CI run" in p for p in result["problems"])
+
+
+def test_verify_flags_malformed_ci_record(monkeypatch: pytest.MonkeyPatch) -> None:
+    _baseline_without_cargo(monkeypatch)
+    vayren_intel._append_jsonl(
+        "history.jsonl", {"kind": "ci", "schema": "ci-timing/v1", "run_id": 9}
+    )
+    result = vayren_intel.verify_store()
+    print("PROBLEMS:", result["problems"])
+    assert result["status"] == "FAIL"
+    assert any("ci record issue" in p for p in result["problems"])

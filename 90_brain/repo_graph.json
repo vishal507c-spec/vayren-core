@@ -942,7 +942,7 @@
       "to": "01_core/core/native"
     }
   ],
-  "entity_count": 3886,
+  "entity_count": 3943,
   "files": [
     {
       "domain": "APP_COMPOSITION",
@@ -5354,7 +5354,7 @@
       "required_language": "PYTHON"
     }
   ],
-  "relationship_count": 6157,
+  "relationship_count": 6278,
   "repository": {
     "name": "vayren-core",
     "root": "."
@@ -57131,7 +57131,7 @@
       "file": "scripts/tests/test_validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 541,
+      "line": 571,
       "module": "scripts",
       "name": "_assert_full_py_sane",
       "public": false,
@@ -57150,7 +57150,7 @@
       "file": "scripts/tests/test_validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 489,
+      "line": 519,
       "module": "scripts",
       "name": "_assert_valid_or_ambient",
       "public": false,
@@ -57197,7 +57197,7 @@
       "file": "scripts/tests/test_validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 514,
+      "line": 544,
       "module": "scripts",
       "name": "_compare_incremental_full",
       "public": false,
@@ -57246,7 +57246,7 @@
       "file": "scripts/tests/test_validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 497,
+      "line": 527,
       "module": "scripts",
       "name": "_probe_comment",
       "public": false,
@@ -57266,7 +57266,7 @@
       "file": "scripts/tests/test_validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 502,
+      "line": 532,
       "module": "scripts",
       "name": "_run_full_py",
       "public": false,
@@ -57355,7 +57355,7 @@
       "file": "scripts/tests/test_validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 614,
+      "line": 644,
       "module": "scripts",
       "name": "test_bench_cross_language_change",
       "public": true,
@@ -57374,7 +57374,7 @@
       "file": "scripts/tests/test_validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 605,
+      "line": 635,
       "module": "scripts",
       "name": "test_bench_cross_module_change",
       "public": true,
@@ -57393,7 +57393,7 @@
       "file": "scripts/tests/test_validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 660,
+      "line": 690,
       "module": "scripts",
       "name": "test_bench_docs_change",
       "public": true,
@@ -57411,7 +57411,7 @@
       "file": "scripts/tests/test_validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 588,
+      "line": 618,
       "module": "scripts",
       "name": "test_bench_market_rust_change",
       "public": true,
@@ -57434,7 +57434,7 @@
       "file": "scripts/tests/test_validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 551,
+      "line": 581,
       "module": "scripts",
       "name": "test_bench_private_py_change",
       "public": true,
@@ -57457,7 +57457,7 @@
       "file": "scripts/tests/test_validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 567,
+      "line": 597,
       "module": "scripts",
       "name": "test_bench_public_py_change",
       "public": true,
@@ -57478,7 +57478,7 @@
       "file": "scripts/tests/test_validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 640,
+      "line": 670,
       "module": "scripts",
       "name": "test_bench_stale_cache_miss",
       "public": true,
@@ -57496,7 +57496,7 @@
       "file": "scripts/tests/test_validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 580,
+      "line": 610,
       "module": "scripts",
       "name": "test_bench_strategy_change",
       "public": true,
@@ -57514,7 +57514,7 @@
       "file": "scripts/tests/test_validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 597,
+      "line": 627,
       "module": "scripts",
       "name": "test_bench_ui_slint_change",
       "public": true,
@@ -57531,7 +57531,7 @@
       "file": "scripts/tests/test_validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 633,
+      "line": 663,
       "module": "scripts",
       "name": "test_bench_unchanged_clean",
       "public": true,
@@ -57550,7 +57550,7 @@
       "file": "scripts/tests/test_validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 624,
+      "line": 654,
       "module": "scripts",
       "name": "test_bench_unexpected_file",
       "public": true,
@@ -57569,7 +57569,7 @@
       "file": "scripts/tests/test_validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 652,
+      "line": 682,
       "module": "scripts",
       "name": "test_bench_validator_change",
       "public": true,
@@ -57626,7 +57626,7 @@
       "file": "scripts/tests/test_validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 428,
+      "line": 458,
       "module": "scripts",
       "name": "test_cache_key_deterministic",
       "public": true,
@@ -57975,7 +57975,7 @@
       "file": "scripts/tests/test_validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 465,
+      "line": 495,
       "module": "scripts",
       "name": "test_stale_graph_unknown",
       "public": true,
@@ -57992,7 +57992,7 @@
       "file": "scripts/tests/test_validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 454,
+      "line": 484,
       "module": "scripts",
       "name": "test_stale_index_unknown",
       "public": true,
@@ -58009,7 +58009,7 @@
       "file": "scripts/tests/test_validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 441,
+      "line": 471,
       "module": "scripts",
       "name": "test_tampered_manifest_scoped_as_change",
       "public": true,
@@ -58050,6 +58050,36 @@
       "name": "test_toolchain_change_invalidates",
       "public": true,
       "qualified": "scripts.tests.test_validate_scope:test_toolchain_change_invalidates",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_validate_scope.test_toolchain_identity_memoized_per_process",
+      "file": "scripts/tests/test_validate_scope.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 428,
+      "module": "scripts",
+      "name": "test_toolchain_identity_memoized_per_process",
+      "public": true,
+      "qualified": "scripts.tests.test_validate_scope:test_toolchain_identity_memoized_per_process",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_validate_scope.test_toolchain_override_bypasses_memo",
+      "file": "scripts/tests/test_validate_scope.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 452,
+      "module": "scripts",
+      "name": "test_toolchain_override_bypasses_memo",
+      "public": true,
+      "qualified": "scripts.tests.test_validate_scope:test_toolchain_override_bypasses_memo",
       "tests": []
     },
     {
@@ -58144,6 +58174,30 @@
       "tests": []
     },
     {
+      "called_by": [
+        "scripts.tests.test_vayren_intel:test_ingest_rejects_duplicate",
+        "scripts.tests.test_vayren_intel:test_ingest_writes_exactly_one_record",
+        "scripts.tests.test_vayren_intel:test_radar_ci_trend_down_classified",
+        "scripts.tests.test_vayren_intel:test_radar_ci_trend_up_classified",
+        "scripts.tests.test_vayren_intel:test_radar_consumes_ci_history",
+        "scripts.tests.test_vayren_intel:test_radar_no_fabricated_ci_runs",
+        "scripts.tests.test_vayren_intel:test_verify_flags_duplicate_ci_run",
+        "scripts.tests.test_vayren_intel:test_verify_flags_malformed_ci_record"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel._baseline_without_cargo",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 486,
+      "module": "scripts",
+      "name": "_baseline_without_cargo",
+      "public": false,
+      "qualified": "scripts.tests.test_vayren_intel:_baseline_without_cargo",
+      "tests": []
+    },
+    {
       "called_by": [],
       "callers_complete": true,
       "calls": [],
@@ -58151,11 +58205,52 @@
       "file": "scripts/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 22,
+      "line": 23,
       "module": "scripts",
       "name": "_isolated_store",
       "public": false,
       "qualified": "scripts.tests.test_vayren_intel:_isolated_store",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "scripts.tests.test_vayren_intel:test_radar_ci_trend_down_classified",
+        "scripts.tests.test_vayren_intel:test_radar_ci_trend_up_classified"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel._monotone_wall_runs",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 548,
+      "module": "scripts",
+      "name": "_monotone_wall_runs",
+      "public": false,
+      "qualified": "scripts.tests.test_vayren_intel:_monotone_wall_runs",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "scripts.tests.test_vayren_intel:test_delta_exact",
+        "scripts.tests.test_vayren_intel:test_single_spike_not_monotone_trend",
+        "scripts.tests.test_vayren_intel:test_stable_noisy_series_is_not_regression",
+        "scripts.tests.test_vayren_intel:test_trend_down_detected",
+        "scripts.tests.test_vayren_intel:test_trend_up_detected",
+        "scripts.tests.test_vayren_intel:test_two_points_insufficient",
+        "scripts.tests.test_vayren_intel:test_variable_when_movement_not_monotone"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel._series",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 220,
+      "module": "scripts",
+      "name": "_series",
+      "public": false,
+      "qualified": "scripts.tests.test_vayren_intel:_series",
       "tests": []
     },
     {
@@ -58166,7 +58261,7 @@
       "file": "scripts/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 69,
+      "line": 70,
       "module": "scripts",
       "name": "test_baseline_roundtrip",
       "public": true,
@@ -58181,7 +58276,7 @@
       "file": "scripts/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 151,
+      "line": 152,
       "module": "scripts",
       "name": "test_bottleneck_unknown_when_no_evidence",
       "public": true,
@@ -58192,15 +58287,152 @@
       "called_by": [],
       "callers_complete": true,
       "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_ci_record_rejects_empty_jobs",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 465,
+      "module": "scripts",
+      "name": "test_ci_record_rejects_empty_jobs",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_ci_record_rejects_empty_jobs",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_ci_record_rejects_failed_run",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 450,
+      "module": "scripts",
+      "name": "test_ci_record_rejects_failed_run",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_ci_record_rejects_failed_run",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_ci_record_rejects_missing_commit",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 436,
+      "module": "scripts",
+      "name": "test_ci_record_rejects_missing_commit",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_ci_record_rejects_missing_commit",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_ci_record_rejects_missing_run_id",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 443,
+      "module": "scripts",
+      "name": "test_ci_record_rejects_missing_run_id",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_ci_record_rejects_missing_run_id",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_ci_record_rejects_missing_timestamp",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 429,
+      "module": "scripts",
+      "name": "test_ci_record_rejects_missing_timestamp",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_ci_record_rejects_missing_timestamp",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_ci_record_skips_job_with_missing_timing",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 457,
+      "module": "scripts",
+      "name": "test_ci_record_skips_job_with_missing_timing",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_ci_record_skips_job_with_missing_timing",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_ci_record_valid_build",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 419,
+      "module": "scripts",
+      "name": "test_ci_record_valid_build",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_ci_record_valid_build",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
       "dotted": "scripts.tests.test_vayren_intel.test_console_fallback_is_ascii",
       "file": "scripts/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 125,
+      "line": 126,
       "module": "scripts",
       "name": "test_console_fallback_is_ascii",
       "public": true,
       "qualified": "scripts.tests.test_vayren_intel:test_console_fallback_is_ascii",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "scripts.tests.test_vayren_intel:_series"
+      ],
+      "dotted": "scripts.tests.test_vayren_intel.test_delta_exact",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 268,
+      "module": "scripts",
+      "name": "test_delta_exact",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_delta_exact",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_empty_series_insufficient",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 256,
+      "module": "scripts",
+      "name": "test_empty_series_insufficient",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_empty_series_insufficient",
       "tests": []
     },
     {
@@ -58211,7 +58443,7 @@
       "file": "scripts/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 219,
+      "line": 343,
       "module": "scripts",
       "name": "test_experiment_cli_keeps_record",
       "public": true,
@@ -58226,7 +58458,7 @@
       "file": "scripts/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 97,
+      "line": 98,
       "module": "scripts",
       "name": "test_experiment_log_keeps_failures",
       "public": true,
@@ -58241,7 +58473,7 @@
       "file": "scripts/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 155,
+      "line": 156,
       "module": "scripts",
       "name": "test_goal_prefers_verified_bottleneck",
       "public": true,
@@ -58256,7 +58488,7 @@
       "file": "scripts/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 162,
+      "line": 163,
       "module": "scripts",
       "name": "test_goal_says_no_action_when_healthy",
       "public": true,
@@ -58271,7 +58503,7 @@
       "file": "scripts/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 168,
+      "line": 169,
       "module": "scripts",
       "name": "test_impact_reuses_benchmark_levels",
       "public": true,
@@ -58286,7 +58518,7 @@
       "file": "scripts/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 176,
+      "line": 177,
       "module": "scripts",
       "name": "test_impact_tiny_rust_change_avoids_full_gate",
       "public": true,
@@ -58301,7 +58533,7 @@
       "file": "scripts/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 185,
+      "line": 186,
       "module": "scripts",
       "name": "test_impact_ui_change_targets_shell",
       "public": true,
@@ -58312,11 +58544,90 @@
       "called_by": [],
       "callers_complete": true,
       "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_ingest_blocks_on_untrusted_store",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 505,
+      "module": "scripts",
+      "name": "test_ingest_blocks_on_untrusted_store",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_ingest_blocks_on_untrusted_store",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "scripts.tests.test_vayren_intel:_baseline_without_cargo"
+      ],
+      "dotted": "scripts.tests.test_vayren_intel.test_ingest_rejects_duplicate",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 495,
+      "module": "scripts",
+      "name": "test_ingest_rejects_duplicate",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_ingest_rejects_duplicate",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_ingest_rejects_tampered_provenance",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 605,
+      "module": "scripts",
+      "name": "test_ingest_rejects_tampered_provenance",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_ingest_rejects_tampered_provenance",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_ingest_skips_partial_failed_job",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 535,
+      "module": "scripts",
+      "name": "test_ingest_skips_partial_failed_job",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_ingest_skips_partial_failed_job",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "scripts.tests.test_vayren_intel:_baseline_without_cargo"
+      ],
+      "dotted": "scripts.tests.test_vayren_intel.test_ingest_writes_exactly_one_record",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 511,
+      "module": "scripts",
+      "name": "test_ingest_writes_exactly_one_record",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_ingest_writes_exactly_one_record",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
       "dotted": "scripts.tests.test_vayren_intel.test_knowledge_rejects_bad_state",
       "file": "scripts/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 83,
+      "line": 84,
       "module": "scripts",
       "name": "test_knowledge_rejects_bad_state",
       "public": true,
@@ -58331,7 +58642,7 @@
       "file": "scripts/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 39,
+      "line": 40,
       "module": "scripts",
       "name": "test_knowledge_states_cover_lifecycle",
       "public": true,
@@ -58346,7 +58657,7 @@
       "file": "scripts/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 88,
+      "line": 89,
       "module": "scripts",
       "name": "test_knowledge_transition_keeps_history",
       "public": true,
@@ -58361,7 +58672,7 @@
       "file": "scripts/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 204,
+      "line": 205,
       "module": "scripts",
       "name": "test_learn_cli_records_item",
       "public": true,
@@ -58376,7 +58687,7 @@
       "file": "scripts/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 214,
+      "line": 215,
       "module": "scripts",
       "name": "test_learn_cli_rejects_confidence_text",
       "public": true,
@@ -58391,7 +58702,7 @@
       "file": "scripts/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 200,
+      "line": 201,
       "module": "scripts",
       "name": "test_level_map_keeps_full_safety_net",
       "public": true,
@@ -58402,11 +58713,41 @@
       "called_by": [],
       "callers_complete": true,
       "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_metric_intent_duration_lower_better",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 477,
+      "module": "scripts",
+      "name": "test_metric_intent_duration_lower_better",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_metric_intent_duration_lower_better",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_metric_intent_unknown_for_counts",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 482,
+      "module": "scripts",
+      "name": "test_metric_intent_unknown_for_counts",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_metric_intent_unknown_for_counts",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
       "dotted": "scripts.tests.test_vayren_intel.test_progress_current_matches_active_stage",
       "file": "scripts/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 130,
+      "line": 131,
       "module": "scripts",
       "name": "test_progress_current_matches_active_stage",
       "public": true,
@@ -58421,7 +58762,7 @@
       "file": "scripts/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 113,
+      "line": 114,
       "module": "scripts",
       "name": "test_progress_reflects_real_state",
       "public": true,
@@ -58432,11 +58773,141 @@
       "called_by": [],
       "callers_complete": true,
       "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_radar_blocked_when_store_broken",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 276,
+      "module": "scripts",
+      "name": "test_radar_blocked_when_store_broken",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_radar_blocked_when_store_broken",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "scripts.tests.test_vayren_intel:_baseline_without_cargo",
+        "scripts.tests.test_vayren_intel:_monotone_wall_runs"
+      ],
+      "dotted": "scripts.tests.test_vayren_intel.test_radar_ci_trend_down_classified",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 590,
+      "module": "scripts",
+      "name": "test_radar_ci_trend_down_classified",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_radar_ci_trend_down_classified",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "scripts.tests.test_vayren_intel:_baseline_without_cargo",
+        "scripts.tests.test_vayren_intel:_monotone_wall_runs"
+      ],
+      "dotted": "scripts.tests.test_vayren_intel.test_radar_ci_trend_up_classified",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 569,
+      "module": "scripts",
+      "name": "test_radar_ci_trend_up_classified",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_radar_ci_trend_up_classified",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "scripts.tests.test_vayren_intel:_baseline_without_cargo"
+      ],
+      "dotted": "scripts.tests.test_vayren_intel.test_radar_consumes_ci_history",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 520,
+      "module": "scripts",
+      "name": "test_radar_consumes_ci_history",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_radar_consumes_ci_history",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_radar_deterministic",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 283,
+      "module": "scripts",
+      "name": "test_radar_deterministic",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_radar_deterministic",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "scripts.tests.test_vayren_intel:_baseline_without_cargo"
+      ],
+      "dotted": "scripts.tests.test_vayren_intel.test_radar_no_fabricated_ci_runs",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 529,
+      "module": "scripts",
+      "name": "test_radar_no_fabricated_ci_runs",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_radar_no_fabricated_ci_runs",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_radar_persists_real_trend_knowledge",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 314,
+      "module": "scripts",
+      "name": "test_radar_persists_real_trend_knowledge",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_radar_persists_real_trend_knowledge",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_radar_records_no_change_required_when_stable",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 297,
+      "module": "scripts",
+      "name": "test_radar_records_no_change_required_when_stable",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_radar_records_no_change_required_when_stable",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
       "dotted": "scripts.tests.test_vayren_intel.test_report_compares_against_baseline",
       "file": "scripts/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 138,
+      "line": 139,
       "module": "scripts",
       "name": "test_report_compares_against_baseline",
       "public": true,
@@ -58451,7 +58922,7 @@
       "file": "scripts/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 54,
+      "line": 55,
       "module": "scripts",
       "name": "test_scan_measures_live_tree",
       "public": true,
@@ -58466,11 +58937,45 @@
       "file": "scripts/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 64,
+      "line": 65,
       "module": "scripts",
       "name": "test_scan_never_fabricates",
       "public": true,
       "qualified": "scripts.tests.test_vayren_intel:test_scan_never_fabricates",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "scripts.tests.test_vayren_intel:_series"
+      ],
+      "dotted": "scripts.tests.test_vayren_intel.test_single_spike_not_monotone_trend",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 245,
+      "module": "scripts",
+      "name": "test_single_spike_not_monotone_trend",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_single_spike_not_monotone_trend",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "scripts.tests.test_vayren_intel:_series"
+      ],
+      "dotted": "scripts.tests.test_vayren_intel.test_stable_noisy_series_is_not_regression",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 240,
+      "module": "scripts",
+      "name": "test_stable_noisy_series_is_not_regression",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_stable_noisy_series_is_not_regression",
       "tests": []
     },
     {
@@ -58481,7 +58986,7 @@
       "file": "scripts/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 106,
+      "line": 107,
       "module": "scripts",
       "name": "test_stage_rejects_bad_transition",
       "public": true,
@@ -58496,7 +59001,7 @@
       "file": "scripts/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 26,
+      "line": 27,
       "module": "scripts",
       "name": "test_stages_cover_lifecycle",
       "public": true,
@@ -58511,11 +59016,188 @@
       "file": "scripts/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 193,
+      "line": 194,
       "module": "scripts",
       "name": "test_timed_check_reports_shape_without_compiling",
       "public": true,
       "qualified": "scripts.tests.test_vayren_intel:test_timed_check_reports_shape_without_compiling",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "scripts.tests.test_vayren_intel:_series"
+      ],
+      "dotted": "scripts.tests.test_vayren_intel.test_trend_down_detected",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 234,
+      "module": "scripts",
+      "name": "test_trend_down_detected",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_trend_down_detected",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "scripts.tests.test_vayren_intel:_series"
+      ],
+      "dotted": "scripts.tests.test_vayren_intel.test_trend_up_detected",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 227,
+      "module": "scripts",
+      "name": "test_trend_up_detected",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_trend_up_detected",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "scripts.tests.test_vayren_intel:_series"
+      ],
+      "dotted": "scripts.tests.test_vayren_intel.test_two_points_insufficient",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 250,
+      "module": "scripts",
+      "name": "test_two_points_insufficient",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_two_points_insufficient",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_validate_detects_bad_metric_value",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 470,
+      "module": "scripts",
+      "name": "test_validate_detects_bad_metric_value",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_validate_detects_bad_metric_value",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "scripts.tests.test_vayren_intel:_series"
+      ],
+      "dotted": "scripts.tests.test_vayren_intel.test_variable_when_movement_not_monotone",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 262,
+      "module": "scripts",
+      "name": "test_variable_when_movement_not_monotone",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_variable_when_movement_not_monotone",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_verify_fails_without_baseline",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 353,
+      "module": "scripts",
+      "name": "test_verify_fails_without_baseline",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_verify_fails_without_baseline",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "scripts.tests.test_vayren_intel:_baseline_without_cargo"
+      ],
+      "dotted": "scripts.tests.test_vayren_intel.test_verify_flags_duplicate_ci_run",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 612,
+      "module": "scripts",
+      "name": "test_verify_flags_duplicate_ci_run",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_verify_flags_duplicate_ci_run",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_verify_flags_foreign_repo_index_dirs",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 373,
+      "module": "scripts",
+      "name": "test_verify_flags_foreign_repo_index_dirs",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_verify_flags_foreign_repo_index_dirs",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_verify_flags_invalid_knowledge_state",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 380,
+      "module": "scripts",
+      "name": "test_verify_flags_invalid_knowledge_state",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_verify_flags_invalid_knowledge_state",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "scripts.tests.test_vayren_intel:_baseline_without_cargo"
+      ],
+      "dotted": "scripts.tests.test_vayren_intel.test_verify_flags_malformed_ci_record",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 622,
+      "module": "scripts",
+      "name": "test_verify_flags_malformed_ci_record",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_verify_flags_malformed_ci_record",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.tests.test_vayren_intel.test_verify_green_on_wellformed_store",
+      "file": "scripts/tests/test_vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 360,
+      "module": "scripts",
+      "name": "test_verify_green_on_wellformed_store",
+      "public": true,
+      "qualified": "scripts.tests.test_vayren_intel:test_verify_green_on_wellformed_store",
       "tests": []
     },
     {
@@ -59424,7 +60106,7 @@
       "file": "scripts/validate_scope.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 87,
+      "line": 88,
       "module": "scripts",
       "name": "ScopeError",
       "public": true,
@@ -59446,7 +60128,7 @@
       "file": "scripts/validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 455,
+      "line": 466,
       "module": "scripts",
       "name": "_affected_suites",
       "public": false,
@@ -59466,7 +60148,7 @@
       "file": "scripts/validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 754,
+      "line": 765,
       "module": "scripts",
       "name": "_cache_path",
       "public": false,
@@ -59487,7 +60169,7 @@
       "file": "scripts/validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 689,
+      "line": 700,
       "module": "scripts",
       "name": "_canonical_digest",
       "public": false,
@@ -59507,7 +60189,7 @@
       "file": "scripts/validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 317,
+      "line": 328,
       "module": "scripts",
       "name": "_canonical_kind",
       "public": false,
@@ -59529,7 +60211,7 @@
       "file": "scripts/validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 586,
+      "line": 597,
       "module": "scripts",
       "name": "_cargo_for_file",
       "public": false,
@@ -59548,7 +60230,7 @@
       "file": "scripts/validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 703,
+      "line": 714,
       "module": "scripts",
       "name": "_command_validator_files",
       "public": false,
@@ -59571,7 +60253,7 @@
       "file": "scripts/validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 486,
+      "line": 497,
       "module": "scripts",
       "name": "_commands_for_levels",
       "public": false,
@@ -59590,7 +60272,7 @@
       "file": "scripts/validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 199,
+      "line": 210,
       "module": "scripts",
       "name": "_file_import_targets",
       "public": false,
@@ -59610,7 +60292,7 @@
       "file": "scripts/validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 133,
+      "line": 144,
       "module": "scripts",
       "name": "_filemeta",
       "public": false,
@@ -59631,7 +60313,7 @@
       "file": "scripts/validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 119,
+      "line": 130,
       "module": "scripts",
       "name": "_graph_data",
       "public": false,
@@ -59652,7 +60334,7 @@
       "file": "scripts/validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 710,
+      "line": 721,
       "module": "scripts",
       "name": "_live_tree_digest",
       "public": false,
@@ -59672,7 +60354,7 @@
       "file": "scripts/validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 618,
+      "line": 629,
       "module": "scripts",
       "name": "_load_routes_safe",
       "public": false,
@@ -59693,11 +60375,32 @@
       "file": "scripts/validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 809,
+      "line": 820,
       "module": "scripts",
       "name": "_locked_for",
       "public": false,
       "qualified": "scripts.validate_scope:_locked_for",
+      "tests": [
+        "scripts/tests/test_validate_scope.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.validate_scope:toolchain_identity"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "scripts.validate_scope:_probe_toolchain"
+      ],
+      "dotted": "scripts.validate_scope._memoized_toolchain",
+      "file": "scripts/validate_scope.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 112,
+      "module": "scripts",
+      "name": "_memoized_toolchain",
+      "public": false,
+      "qualified": "scripts.validate_scope:_memoized_toolchain",
       "tests": [
         "scripts/tests/test_validate_scope.py"
       ]
@@ -59712,11 +60415,30 @@
       "file": "scripts/validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 334,
+      "line": 345,
       "module": "scripts",
       "name": "_policy_rules",
       "public": false,
       "qualified": "scripts.validate_scope:_policy_rules",
+      "tests": [
+        "scripts/tests/test_validate_scope.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.validate_scope:_memoized_toolchain"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.validate_scope._probe_toolchain",
+      "file": "scripts/validate_scope.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 92,
+      "module": "scripts",
+      "name": "_probe_toolchain",
+      "public": false,
+      "qualified": "scripts.validate_scope:_probe_toolchain",
       "tests": [
         "scripts/tests/test_validate_scope.py"
       ]
@@ -59735,7 +60457,7 @@
       "file": "scripts/validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 628,
+      "line": 639,
       "module": "scripts",
       "name": "_relevant_files",
       "public": false,
@@ -59754,7 +60476,7 @@
       "file": "scripts/validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1106,
+      "line": 1117,
       "module": "scripts",
       "name": "_result",
       "public": false,
@@ -59775,7 +60497,7 @@
       "file": "scripts/validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 608,
+      "line": 619,
       "module": "scripts",
       "name": "_route_suite",
       "public": false,
@@ -59799,7 +60521,7 @@
       "file": "scripts/validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 112,
+      "line": 123,
       "module": "scripts",
       "name": "_sha_file",
       "public": false,
@@ -59818,7 +60540,7 @@
       "file": "scripts/validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 306,
+      "line": 317,
       "module": "scripts",
       "name": "_symbol_summary",
       "public": false,
@@ -59839,7 +60561,7 @@
       "file": "scripts/validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 656,
+      "line": 667,
       "module": "scripts",
       "name": "_transitive_closure",
       "public": false,
@@ -59861,7 +60583,7 @@
       "file": "scripts/validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1123,
+      "line": 1134,
       "module": "scripts",
       "name": "_verify_scope_fresh",
       "public": false,
@@ -59885,7 +60607,7 @@
       "file": "scripts/validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 207,
+      "line": 218,
       "module": "scripts",
       "name": "analyze_impact",
       "public": true,
@@ -59906,7 +60628,7 @@
       "file": "scripts/validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1143,
+      "line": 1154,
       "module": "scripts",
       "name": "benchmark",
       "public": true,
@@ -59934,7 +60656,7 @@
       "file": "scripts/validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 728,
+      "line": 739,
       "module": "scripts",
       "name": "build_cache_key",
       "public": true,
@@ -59956,7 +60678,7 @@
       "file": "scripts/validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 758,
+      "line": 769,
       "module": "scripts",
       "name": "cache_lookup",
       "public": true,
@@ -59978,7 +60700,7 @@
       "file": "scripts/validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 775,
+      "line": 786,
       "module": "scripts",
       "name": "cache_store",
       "public": true,
@@ -60002,7 +60724,7 @@
       "file": "scripts/validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 343,
+      "line": 354,
       "module": "scripts",
       "name": "compute_scope",
       "public": true,
@@ -60023,7 +60745,7 @@
       "file": "scripts/validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 138,
+      "line": 149,
       "module": "scripts",
       "name": "detect_changes",
       "public": true,
@@ -60045,7 +60767,7 @@
       "file": "scripts/validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1164,
+      "line": 1175,
       "module": "scripts",
       "name": "main",
       "public": true,
@@ -60064,7 +60786,7 @@
       "file": "scripts/validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1222,
+      "line": 1233,
       "module": "scripts",
       "name": "render_text",
       "public": true,
@@ -60088,7 +60810,7 @@
       "file": "scripts/validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 839,
+      "line": 850,
       "module": "scripts",
       "name": "run_cached",
       "public": true,
@@ -60103,12 +60825,14 @@
         "scripts.validate_scope:validate_manifest"
       ],
       "callers_complete": true,
-      "calls": [],
+      "calls": [
+        "scripts.validate_scope:_memoized_toolchain"
+      ],
       "dotted": "scripts.validate_scope.toolchain_identity",
       "file": "scripts/validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 91,
+      "line": 116,
       "module": "scripts",
       "name": "toolchain_identity",
       "public": true,
@@ -60142,7 +60866,7 @@
       "file": "scripts/validate_scope.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 962,
+      "line": 973,
       "module": "scripts",
       "name": "validate_manifest",
       "public": true,
@@ -60169,6 +60893,9 @@
     {
       "called_by": [
         "scripts.vayren_intel:add_knowledge",
+        "scripts.vayren_intel:build_ci_record",
+        "scripts.vayren_intel:fetch_run",
+        "scripts.vayren_intel:ingest_ci_run",
         "scripts.vayren_intel:set_stage"
       ],
       "callers_complete": true,
@@ -60190,7 +60917,9 @@
       "called_by": [
         "scripts.vayren_intel:build_baseline",
         "scripts.vayren_intel:daily_report",
-        "scripts.vayren_intel:log_experiment"
+        "scripts.vayren_intel:ingest_ci_run",
+        "scripts.vayren_intel:log_experiment",
+        "scripts.vayren_intel:main"
       ],
       "callers_complete": true,
       "calls": [
@@ -60211,6 +60940,44 @@
     },
     {
       "called_by": [
+        "scripts.vayren_intel:validate_ci_record"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.vayren_intel._ci_intent",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 818,
+      "module": "scripts",
+      "name": "_ci_intent",
+      "public": false,
+      "qualified": "scripts.vayren_intel:_ci_intent",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.vayren_intel:build_ci_record"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.vayren_intel._ci_metric_name",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 825,
+      "module": "scripts",
+      "name": "_ci_metric_name",
+      "public": false,
+      "qualified": "scripts.vayren_intel:_ci_metric_name",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
         "scripts.vayren_intel:daily_report",
         "scripts.vayren_intel:next_goal"
       ],
@@ -60220,7 +60987,7 @@
       "file": "scripts/vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 540,
+      "line": 1102,
       "module": "scripts",
       "name": "_current_bottleneck",
       "public": false,
@@ -60239,7 +61006,7 @@
       "file": "scripts/vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 501,
+      "line": 1061,
       "module": "scripts",
       "name": "_delta",
       "public": false,
@@ -60271,6 +61038,27 @@
     },
     {
       "called_by": [
+        "scripts.vayren_intel:ingest_ci_run"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "scripts.vayren_intel:_path"
+      ],
+      "dotted": "scripts.vayren_intel._history_run_ids",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 830,
+      "module": "scripts",
+      "name": "_history_run_ids",
+      "public": false,
+      "qualified": "scripts.vayren_intel:_history_run_ids",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
         "scripts.vayren_intel:daily_report"
       ],
       "callers_complete": true,
@@ -60281,7 +61069,7 @@
       "file": "scripts/vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 477,
+      "line": 1037,
       "module": "scripts",
       "name": "_history_since",
       "public": false,
@@ -60338,8 +61126,10 @@
         "scripts.vayren_intel:daily_report",
         "scripts.vayren_intel:log_experiment",
         "scripts.vayren_intel:next_goal",
+        "scripts.vayren_intel:radar",
         "scripts.vayren_intel:scan_repository",
-        "scripts.vayren_intel:set_stage"
+        "scripts.vayren_intel:set_stage",
+        "scripts.vayren_intel:verify_store"
       ],
       "callers_complete": true,
       "calls": [],
@@ -60359,10 +61149,14 @@
     {
       "called_by": [
         "scripts.vayren_intel:_append_jsonl",
+        "scripts.vayren_intel:_history_run_ids",
         "scripts.vayren_intel:_history_since",
         "scripts.vayren_intel:_load_json",
+        "scripts.vayren_intel:_series_points",
         "scripts.vayren_intel:_store_json",
-        "scripts.vayren_intel:load_experiments"
+        "scripts.vayren_intel:load_experiments",
+        "scripts.vayren_intel:radar",
+        "scripts.vayren_intel:verify_store"
       ],
       "callers_complete": true,
       "calls": [],
@@ -60375,6 +61169,48 @@
       "name": "_path",
       "public": false,
       "qualified": "scripts.vayren_intel:_path",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.vayren_intel:radar"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "scripts.vayren_intel:add_knowledge"
+      ],
+      "dotted": "scripts.vayren_intel._persist_trend",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 764,
+      "module": "scripts",
+      "name": "_persist_trend",
+      "public": false,
+      "qualified": "scripts.vayren_intel:_persist_trend",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.vayren_intel:radar"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "scripts.vayren_intel:_path"
+      ],
+      "dotted": "scripts.vayren_intel._series_points",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 592,
+      "module": "scripts",
+      "name": "_series_points",
+      "public": false,
+      "qualified": "scripts.vayren_intel:_series_points",
       "tests": [
         "scripts/tests/test_vayren_intel.py"
       ]
@@ -60423,6 +61259,7 @@
     },
     {
       "called_by": [
+        "scripts.vayren_intel:_persist_trend",
         "scripts.vayren_intel:main",
         "scripts.vayren_intel:seed_day1_knowledge"
       ],
@@ -60443,6 +61280,25 @@
       "name": "add_knowledge",
       "public": true,
       "qualified": "scripts.vayren_intel:add_knowledge",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.vayren_intel:radar"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.vayren_intel.analyze_series",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 653,
+      "module": "scripts",
+      "name": "analyze_series",
+      "public": true,
+      "qualified": "scripts.vayren_intel:analyze_series",
       "tests": [
         "scripts/tests/test_vayren_intel.py"
       ]
@@ -60473,6 +61329,28 @@
     },
     {
       "called_by": [
+        "scripts.vayren_intel:ingest_ci_run"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "scripts.vayren_intel:IntelError",
+        "scripts.vayren_intel:_ci_metric_name"
+      ],
+      "dotted": "scripts.vayren_intel.build_ci_record",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 875,
+      "module": "scripts",
+      "name": "build_ci_record",
+      "public": true,
+      "qualified": "scripts.vayren_intel:build_ci_record",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
         "scripts.vayren_intel:main"
       ],
       "callers_complete": true,
@@ -60485,17 +61363,40 @@
         "scripts.vayren_intel:load_baseline",
         "scripts.vayren_intel:load_experiments",
         "scripts.vayren_intel:load_knowledge",
+        "scripts.vayren_intel:radar",
+        "scripts.vayren_intel:render_radar",
         "scripts.vayren_intel:scan_repository"
       ],
       "dotted": "scripts.vayren_intel.daily_report",
       "file": "scripts/vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 509,
+      "line": 1069,
       "module": "scripts",
       "name": "daily_report",
       "public": true,
       "qualified": "scripts.vayren_intel:daily_report",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.vayren_intel:ingest_ci_run"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "scripts.vayren_intel:IntelError"
+      ],
+      "dotted": "scripts.vayren_intel.fetch_run",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 850,
+      "module": "scripts",
+      "name": "fetch_run",
+      "public": true,
+      "qualified": "scripts.vayren_intel:fetch_run",
       "tests": [
         "scripts/tests/test_vayren_intel.py"
       ]
@@ -60510,7 +61411,7 @@
       "file": "scripts/vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 636,
+      "line": 1202,
       "module": "scripts",
       "name": "impact_for",
       "public": true,
@@ -60521,8 +61422,36 @@
     },
     {
       "called_by": [
+        "scripts.vayren_intel:main"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "scripts.vayren_intel:IntelError",
+        "scripts.vayren_intel:_append_jsonl",
+        "scripts.vayren_intel:_history_run_ids",
+        "scripts.vayren_intel:build_ci_record",
+        "scripts.vayren_intel:fetch_run",
+        "scripts.vayren_intel:validate_ci_record",
+        "scripts.vayren_intel:verify_store"
+      ],
+      "dotted": "scripts.vayren_intel.ingest_ci_run",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 1008,
+      "module": "scripts",
+      "name": "ingest_ci_run",
+      "public": true,
+      "qualified": "scripts.vayren_intel:ingest_ci_run",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
         "scripts.vayren_intel:daily_report",
-        "scripts.vayren_intel:render_progress"
+        "scripts.vayren_intel:render_progress",
+        "scripts.vayren_intel:verify_store"
       ],
       "callers_complete": true,
       "calls": [
@@ -60544,7 +61473,8 @@
     {
       "called_by": [
         "scripts.vayren_intel:daily_report",
-        "scripts.vayren_intel:next_goal"
+        "scripts.vayren_intel:next_goal",
+        "scripts.vayren_intel:verify_store"
       ],
       "callers_complete": true,
       "calls": [
@@ -60568,7 +61498,8 @@
         "scripts.vayren_intel:add_knowledge",
         "scripts.vayren_intel:daily_report",
         "scripts.vayren_intel:main",
-        "scripts.vayren_intel:next_goal"
+        "scripts.vayren_intel:next_goal",
+        "scripts.vayren_intel:verify_store"
       ],
       "callers_complete": true,
       "calls": [
@@ -60590,7 +61521,8 @@
     {
       "called_by": [
         "scripts.vayren_intel:render_progress",
-        "scripts.vayren_intel:set_stage"
+        "scripts.vayren_intel:set_stage",
+        "scripts.vayren_intel:verify_store"
       ],
       "callers_complete": true,
       "calls": [
@@ -60636,25 +61568,30 @@
       "called_by": [],
       "callers_complete": true,
       "calls": [
+        "scripts.vayren_intel:_append_jsonl",
         "scripts.vayren_intel:_to_console",
         "scripts.vayren_intel:add_knowledge",
         "scripts.vayren_intel:build_baseline",
         "scripts.vayren_intel:daily_report",
         "scripts.vayren_intel:impact_for",
+        "scripts.vayren_intel:ingest_ci_run",
         "scripts.vayren_intel:load_knowledge",
         "scripts.vayren_intel:log_experiment",
         "scripts.vayren_intel:next_goal",
+        "scripts.vayren_intel:radar",
         "scripts.vayren_intel:render_progress",
+        "scripts.vayren_intel:render_radar",
         "scripts.vayren_intel:render_report",
         "scripts.vayren_intel:scan_repository",
         "scripts.vayren_intel:seed_day1_knowledge",
-        "scripts.vayren_intel:set_stage"
+        "scripts.vayren_intel:set_stage",
+        "scripts.vayren_intel:verify_store"
       ],
       "dotted": "scripts.vayren_intel.main",
       "file": "scripts/vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 646,
+      "line": 1212,
       "module": "scripts",
       "name": "main",
       "public": true,
@@ -60678,11 +61615,38 @@
       "file": "scripts/vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 602,
+      "line": 1168,
       "module": "scripts",
       "name": "next_goal",
       "public": true,
       "qualified": "scripts.vayren_intel:next_goal",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.vayren_intel:daily_report",
+        "scripts.vayren_intel:main"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "scripts.vayren_intel:_now_iso",
+        "scripts.vayren_intel:_path",
+        "scripts.vayren_intel:_persist_trend",
+        "scripts.vayren_intel:_series_points",
+        "scripts.vayren_intel:analyze_series",
+        "scripts.vayren_intel:verify_store"
+      ],
+      "dotted": "scripts.vayren_intel.radar",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 714,
+      "module": "scripts",
+      "name": "radar",
+      "public": true,
+      "qualified": "scripts.vayren_intel:radar",
       "tests": [
         "scripts/tests/test_vayren_intel.py"
       ]
@@ -60711,6 +61675,26 @@
     },
     {
       "called_by": [
+        "scripts.vayren_intel:daily_report",
+        "scripts.vayren_intel:main"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "scripts.vayren_intel.render_radar",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 782,
+      "module": "scripts",
+      "name": "render_radar",
+      "public": true,
+      "qualified": "scripts.vayren_intel:render_radar",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
         "scripts.vayren_intel:main"
       ],
       "callers_complete": true,
@@ -60719,7 +61703,7 @@
       "file": "scripts/vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 564,
+      "line": 1126,
       "module": "scripts",
       "name": "render_report",
       "public": true,
@@ -60813,6 +61797,57 @@
       "name": "timed_check",
       "public": true,
       "qualified": "scripts.vayren_intel:timed_check",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.vayren_intel:ingest_ci_run",
+        "scripts.vayren_intel:verify_store"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "scripts.vayren_intel:_ci_intent"
+      ],
+      "dotted": "scripts.vayren_intel.validate_ci_record",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 983,
+      "module": "scripts",
+      "name": "validate_ci_record",
+      "public": true,
+      "qualified": "scripts.vayren_intel:validate_ci_record",
+      "tests": [
+        "scripts/tests/test_vayren_intel.py"
+      ]
+    },
+    {
+      "called_by": [
+        "scripts.vayren_intel:ingest_ci_run",
+        "scripts.vayren_intel:main",
+        "scripts.vayren_intel:radar"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "scripts.vayren_intel:_now_iso",
+        "scripts.vayren_intel:_path",
+        "scripts.vayren_intel:load_baseline",
+        "scripts.vayren_intel:load_experiments",
+        "scripts.vayren_intel:load_knowledge",
+        "scripts.vayren_intel:load_state",
+        "scripts.vayren_intel:validate_ci_record"
+      ],
+      "dotted": "scripts.vayren_intel.verify_store",
+      "file": "scripts/vayren_intel.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 474,
+      "module": "scripts",
+      "name": "verify_store",
+      "public": true,
+      "qualified": "scripts.vayren_intel:verify_store",
       "tests": [
         "scripts/tests/test_vayren_intel.py"
       ]
