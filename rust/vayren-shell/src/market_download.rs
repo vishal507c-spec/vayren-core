@@ -377,7 +377,7 @@ pub struct CalDay {
     pub y: f32, // row 0..5
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct DownloadView {
     pub open: bool,
     pub busy: bool,

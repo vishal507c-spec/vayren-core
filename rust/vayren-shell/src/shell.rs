@@ -725,9 +725,11 @@ pub fn apply_market_hover(ui: &AppWindow, state: &market::MarketState) {
 
 /// VIEWPORT_DIRTY (+ crosshair): pan/zoom/scale ops rebuild the visible
 /// geometry lists only — watchlist, timeframes, indicators, popups, the
-/// download console and status panels are untouched.
+/// download console and status panels are untouched. Uses the viewport-only
+/// projection (same geometry helpers as the full path, list panels skipped),
+/// and the hover tags come from one `project_hover` call — never two.
 pub fn apply_market_viewport(ui: &AppWindow, state: &market::MarketState) {
-    let view = market::project(state);
+    let view = market::project_viewport(state);
     ui.set_market_plot_slots(view.plot_slots);
     ui.set_market_candles(candles_model(view.candles));
     ui.set_market_price_ticks(ticks_model(view.price_ticks));
@@ -1024,14 +1026,18 @@ pub fn wire_market(
         });
     }
     {
+        // No-op suppression: panning against the clamped edge changes
+        // nothing — skip the scene rebuild entirely.
         let strong = state.clone();
         let weak = ui.as_weak();
         ui.on_market_wheel_pan(move |frac: f32| {
             let Some(ui) = weak.upgrade() else { return };
-            strong
+            if strong
                 .borrow_mut()
-                .interact("", market::MarketAction::WheelPanX(frac));
-            refresh_viewport(&ui, &strong);
+                .interact("", market::MarketAction::WheelPanX(frac))
+            {
+                refresh_viewport(&ui, &strong);
+            }
         });
     }
     {
@@ -1039,10 +1045,12 @@ pub fn wire_market(
         let weak = ui.as_weak();
         ui.on_market_price_zoom(move |steps: f32, y: f32| {
             let Some(ui) = weak.upgrade() else { return };
-            strong
+            if strong
                 .borrow_mut()
-                .interact("", market::MarketAction::PriceZoom(steps, y));
-            refresh_viewport(&ui, &strong);
+                .interact("", market::MarketAction::PriceZoom(steps, y))
+            {
+                refresh_viewport(&ui, &strong);
+            }
         });
     }
     {
@@ -1050,10 +1058,12 @@ pub fn wire_market(
         let weak = ui.as_weak();
         ui.on_market_price_drag(move |notches: f32, anchor: f32| {
             let Some(ui) = weak.upgrade() else { return };
-            strong
+            if strong
                 .borrow_mut()
-                .interact("", market::MarketAction::PriceDrag(notches, anchor));
-            refresh_viewport(&ui, &strong);
+                .interact("", market::MarketAction::PriceDrag(notches, anchor))
+            {
+                refresh_viewport(&ui, &strong);
+            }
         });
     }
     {
