@@ -835,13 +835,14 @@ pub fn wire_market(
             ui.$cb(move |a: f32, b: f32| {
                 let Some(ui) = weak.upgrade() else { return };
                 let (wire, action) = $make(a, b);
-                let (prev_first, prev_count, prev_manual) = {
+                let (prev_origin, prev_first, prev_count, prev_manual) = {
                     let st = strong.borrow();
-                    (st.first, st.count, st.price_manual)
+                    (st.origin, st.first, st.count, st.price_manual)
                 };
                 if strong.borrow_mut().interact(&wire, action) {
                     let st = strong.borrow();
-                    if st.first != prev_first
+                    if (st.origin - prev_origin).abs() > 1e-6
+                        || st.first != prev_first
                         || st.count != prev_count
                         || st.price_manual != prev_manual
                     {

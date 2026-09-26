@@ -383,6 +383,55 @@ impl Default for MarketStatusFacts {
     }
 }
 
+/// Single source of truth for horizontal data <-> screen coordinate transforms.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PlotX {
+    pub origin: f64,
+    pub slots: f64,
+}
+
+impl PlotX {
+    pub fn new(origin: f64, slots: f64) -> Self {
+        Self {
+            origin,
+            slots: slots.max(1.0),
+        }
+    }
+
+    /// Normalized screen fraction [0.0, 1.0] for a continuous bar coordinate.
+    /// The center of candle `bar` sits at `frac_of(bar)`.
+    #[inline]
+    pub fn frac_of(&self, bar: f64) -> f64 {
+        (bar - self.origin + 0.5) / self.slots
+    }
+
+    /// Inverse transform: data coordinate (bar center) at normalized screen fraction.
+    #[inline]
+    pub fn bar_at(&self, frac: f64) -> f64 {
+        self.origin + frac * self.slots - 0.5
+    }
+
+    /// Nearest discrete bar index at normalized screen fraction.
+    #[inline]
+    pub fn bar_index_at(&self, frac: f64, total: usize) -> usize {
+        if total == 0 {
+            return 0;
+        }
+        let b = round_py(self.bar_at(frac));
+        b.clamp(0.0, (total - 1) as f64) as usize
+    }
+
+    /// Range of bar indices that overlap the visible screen [0.0, 1.0] plus a 1-bar margin.
+    pub fn slab(&self, total: usize) -> (usize, usize) {
+        if total == 0 {
+            return (0, 0);
+        }
+        let first = (self.origin.floor() as isize - 1).max(0) as usize;
+        let last = (round_py(self.origin + self.slots + 1.5) as usize).min(total);
+        (first.min(total), last.max(first).min(total))
+    }
+}
+
 /// Single source of Market presentation state.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MarketState {
@@ -402,13 +451,15 @@ pub struct MarketState {
     /// the generic message is the fallback, never the primary.
     pub notice: String,
     pub exchange: String,
+    /// Continuous fractional origin in bar index space.
+    pub origin: f64,
     /// Visible window: first bar index + count (legacy `_first`/`_last`).
     pub first: usize,
     pub count: usize,
     pub follow_latest: bool,
     pub price_manual: Option<(f64, f64)>,
     /// Drag origin (plot fractions) while a left-drag pans the viewport.
-    pub drag_origin: Option<(f32, f32, usize, (f64, f64))>,
+    pub drag_origin: Option<(f32, f32, f64, (f64, f64))>,
     pub price_drag_active: bool,
     pub hover: Option<MarketHover>,
     pub indicators: Vec<IndicatorEntry>,
@@ -469,6 +520,7 @@ impl Default for MarketState {
             status: MarketStatus::Loading,
             notice: String::new(),
             exchange: String::new(),
+            origin: 0.0,
             first: 0,
             count: INITIAL_BARS,
             follow_latest: true,
@@ -505,6 +557,19 @@ impl Default for MarketState {
 }
 
 impl MarketState {
+    pub fn plot_x(&self) -> PlotX {
+        let origin = if (self.first as f64 - self.origin).abs() > 1.5 {
+            self.first as f64
+        } else {
+            self.origin
+        };
+        PlotX::new(origin, self.count.max(1) as f64)
+    }
+
+    pub fn max_origin(&self) -> f64 {
+        self.bars.len().saturating_sub(1) as f64
+    }
+
     /// Maximum candles readable at the current plot width (legacy
     /// `max_visible_bars`): density cap bounded by the MAX_VISIBLE_BARS limit.
     pub fn max_visible_bars(&self) -> usize {
@@ -606,6 +671,7 @@ impl MarketState {
         if self.bars.is_empty() {
             self.status = MarketStatus::Empty;
             self.first = 0;
+            self.origin = 0.0;
             self.count = 0;
         } else {
             let total = self.bars.len();
@@ -619,11 +685,13 @@ impl MarketState {
                     self.initial_count(total)
                 };
                 self.first = self.anchor_first(total, count);
+                self.origin = self.first as f64;
                 self.count = count;
                 self.follow_latest = true;
             } else {
                 let added = total.saturating_sub(previous_total);
                 self.first = self.clamp_first(self.first + added);
+                self.origin = (self.origin + added as f64).min(self.max_origin());
             }
             self.status = MarketStatus::Ready;
         }
@@ -690,6 +758,9 @@ impl MarketState {
     /// Apply one explicit UI action. Returns false when the action names
     /// something unknown (never invents state for it).
     pub fn apply(&mut self, action: MarketAction) -> bool {
+        if (self.first as f64 - self.origin).abs() > 1.5 {
+            self.origin = self.first as f64;
+        }
         match action {
             MarketAction::PanelToggle => {
                 self.panel_visible = !self.panel_visible;
@@ -761,6 +832,7 @@ impl MarketState {
                 let total = self.bars.len();
                 let count = self.initial_count(total);
                 self.first = self.anchor_first(total, count);
+                self.origin = self.first as f64;
                 self.count = count;
                 self.follow_latest = true;
                 self.price_manual = None;
@@ -772,25 +844,18 @@ impl MarketState {
                     self.hover = None;
                     return true;
                 }
-                // legacy _snap_crosshair: slot math over the LOGICAL window
-                // (`_window_size()`), not the data-clamped slice — the right
-                // margin's empty slots still snap to their candle.
-                let count = self.window_size().max(1);
-                let rel = round_py(f64::from(x_frac) * count as f64 - 0.5).max(0.0) as usize;
-                // legacy clamps the snapped bar into [first, last-1].
+                let plot_x = self.plot_x();
                 let last = (self.first + self.count).min(self.bars.len());
-                let idx = rel
-                    .min(count.saturating_sub(1))
-                    .min(last.saturating_sub(1).saturating_sub(self.first));
+                let bar_continuous = plot_x.bar_at(f64::from(x_frac));
+                let snapped_bar = round_py(bar_continuous)
+                    .clamp(self.first as f64, last.saturating_sub(1) as f64)
+                    .max(0.0) as usize;
                 let (low, high) = self.price_range();
                 let span = high - low;
                 let frac = f64::from(y_frac).clamp(0.0, 1.0);
                 let price = if span > 0.0 { high - frac * span } else { high };
-                // ONE canonical clamp: the stored fraction feeds the line,
-                // the badge and the tag, so they can never diverge at the
-                // pane edges (no per-use-site re-clamping).
                 self.hover = Some(MarketHover {
-                    index: self.first + idx,
+                    index: snapped_bar,
                     y_frac: y_frac.clamp(0.0, 1.0),
                     price,
                 });
@@ -816,24 +881,27 @@ impl MarketState {
                 if scale <= 0.0 {
                     return false;
                 }
-                let (prev_first, prev_count, prev_follow) =
-                    (self.first, self.count, self.follow_latest);
+                let (prev_origin, prev_first, prev_count, prev_follow) =
+                    (self.origin, self.first, self.count, self.follow_latest);
                 let total = self.bars.len();
                 let count = self.window_size().max(1);
                 let fraction = f64::from(x_frac).clamp(0.0, 1.0);
-                let anchor_bar = (self.first as f64 + fraction * count as f64)
-                    .clamp(self.first as f64, (total - 1) as f64);
                 let new_count = round_py(count as f64 * scale)
                     .clamp(MIN_VISIBLE_BARS as f64, total as f64)
                     .min(self.max_visible_bars() as f64) as usize;
                 let new_count = new_count.max(MIN_VISIBLE_BARS);
-                let new_first_raw =
-                    round_py(anchor_bar - fraction * new_count as f64).max(0.0) as usize;
-                let new_first = new_first_raw.min(self.anchor_first(total, new_count));
+
+                let plot_x = self.plot_x();
+                let new_origin = (plot_x.origin + fraction * (count as f64 - new_count as f64))
+                    .clamp(0.0, self.max_origin());
+                let new_first = self.clamp_first(round_py(new_origin) as usize);
+
+                self.origin = new_origin;
                 self.first = new_first;
                 self.count = new_count;
-                self.follow_latest = new_first >= self.max_first();
-                if self.first == prev_first
+                self.follow_latest = self.first >= self.max_first();
+                if (self.origin - prev_origin).abs() < 1e-9
+                    && self.first == prev_first
                     && self.count == prev_count
                     && self.follow_latest == prev_follow
                 {
@@ -854,13 +922,19 @@ impl MarketState {
                 if delta_bars == 0.0 {
                     return false;
                 }
-                let (prev_first, prev_follow) = (self.first, self.follow_latest);
-                let shifted = (self.first as f64 + round_py(delta_bars)).max(0.0) as usize;
-                self.first = self.clamp_first(shifted);
+                let (prev_origin, prev_first, prev_follow) =
+                    (self.origin, self.first, self.follow_latest);
+                let new_origin = (self.origin + delta_bars).clamp(0.0, self.max_origin());
+                let new_first = self.clamp_first(round_py(new_origin) as usize);
+                self.origin = new_origin;
+                self.first = new_first;
                 // Follow-latest only while sitting exactly on the live edge; a
                 // view shifted into the empty right space is a manual view.
                 self.follow_latest = self.first == self.max_first();
-                if self.first == prev_first && self.follow_latest == prev_follow {
+                if (self.origin - prev_origin).abs() < 1e-9
+                    && self.first == prev_first
+                    && self.follow_latest == prev_follow
+                {
                     return false;
                 }
                 self.refresh_crosshair();
@@ -871,12 +945,13 @@ impl MarketState {
                 if window.is_empty() || !x.is_finite() || !y.is_finite() {
                     return false;
                 }
-                self.drag_origin = Some((x, y, self.first, self.price_range()));
+                self.drag_origin = Some((x, y, self.origin, self.price_range()));
                 self.hover = None;
                 true
             }
             MarketAction::DragMove(x, y) => {
-                let Some((origin_x, origin_y, drag_first, (low, high))) = self.drag_origin else {
+                let Some((origin_x, origin_y, drag_origin_bar, (low, high))) = self.drag_origin
+                else {
                     return false;
                 };
                 if self.bars.is_empty() || !x.is_finite() || !y.is_finite() {
@@ -884,8 +959,9 @@ impl MarketState {
                 }
                 let count = self.window_size().max(1);
                 let delta_bars = -(f64::from(x) - f64::from(origin_x)) * count as f64;
-                let shifted = (drag_first as f64 + round_py(delta_bars)).max(0.0) as usize;
-                self.first = self.clamp_first(shifted);
+                let new_origin = (drag_origin_bar + delta_bars).clamp(0.0, self.max_origin());
+                self.origin = new_origin;
+                self.first = self.clamp_first(round_py(new_origin) as usize);
                 // Free one-sided pan: the drag may continue past the live edge
                 // into the empty right space; follow-latest only ever holds at
                 // the edge itself.
@@ -1725,7 +1801,7 @@ pub struct HoverView {
 }
 
 pub fn project_hover(state: &MarketState) -> HoverView {
-    let plot_slots = state.count.max(1);
+    let plot_x = state.plot_x();
     let frame = scale_frame(state);
     let mut out = HoverView {
         hover_x: 0.5,
@@ -1752,8 +1828,7 @@ pub fn project_hover(state: &MarketState) -> HoverView {
     if let Some(hover) = state.hover {
         if let Some(bar) = state.bars.get(hover.index) {
             out.has_hover = true;
-            let rel = hover.index.saturating_sub(state.first);
-            out.hover_x = (rel as f64 + 0.5) as f32 / plot_slots as f32;
+            out.hover_x = plot_x.frac_of(hover.index as f64) as f32;
             out.hover_y = hover.y_frac;
             // Regular keeps the state-computed price verbatim (golden
             // parity) at axis precision; Percent/Log read the cursor
@@ -2127,6 +2202,7 @@ fn project_inner(state: &MarketState, viewport_only: bool) -> MarketView {
         };
 
     let window = state.visible_window();
+    let plot_x = state.plot_x();
     // The plot's time grid is the LOGICAL window (`count` slots), not the
     // number of bars the data-clamped slice happens to hold. Every x in the
     // view normalizes by these slots, so the candle slot width stays constant
@@ -2170,8 +2246,9 @@ fn project_inner(state: &MarketState, viewport_only: bool) -> MarketView {
             .max(1.0);
         for (i, bar) in window.iter().enumerate() {
             let (open, close) = (norm(bar.open), norm(bar.close));
+            let bar_idx = state.first + i;
             candles.push(CandlePoint {
-                x: (i as f64 + 0.5) as f32 / plot_slots as f32,
+                x: plot_x.frac_of(bar_idx as f64) as f32,
                 open,
                 high: norm(bar.high),
                 low: norm(bar.low),
@@ -2205,7 +2282,8 @@ fn project_inner(state: &MarketState, viewport_only: bool) -> MarketView {
             let idx =
                 ((k as f64 + 0.5) * visible as f64 / max_possible_ticks as f64).floor() as usize;
             let idx = idx.min(visible - 1);
-            let pos = (idx as f32 + 0.5) / plot_slots as f32;
+            let bar_idx = state.first + idx;
+            let pos = plot_x.frac_of(bar_idx as f64) as f32;
             if last_pos >= 0.0 && (pos - last_pos) < min_spacing_pos {
                 continue; // Skip rather than compress to collide
             }
@@ -2331,6 +2409,7 @@ fn project_inner(state: &MarketState, viewport_only: bool) -> MarketView {
     /// single-bar ray becomes a one-slot tick.
     #[allow(clippy::too_many_arguments)]
     fn emit_ray(
+        plot_x: &PlotX,
         segments: &mut Vec<PlotSegment>,
         norm: &dyn Fn(f64) -> f32,
         first: usize,
@@ -2355,11 +2434,11 @@ fn project_inner(state: &MarketState, viewport_only: bool) -> MarketView {
             return;
         }
         let y = norm(price);
-        let x1 = ((start_c - first) as f64 + 0.5) as f32 / count as f32;
+        let x1 = plot_x.frac_of(start_c as f64) as f32;
         let x2 = if end_c == start_c {
-            x1 + 1.0 / count as f32
+            x1 + (1.0 / plot_x.slots) as f32
         } else {
-            ((end_c - first) as f64 + 0.5) as f32 / count as f32
+            plot_x.frac_of(end_c as f64) as f32
         };
         segments.push(PlotSegment {
             x1,
@@ -2423,6 +2502,7 @@ fn project_inner(state: &MarketState, viewport_only: bool) -> MarketView {
                 for (i, (idx, value)) in sorted.iter().enumerate() {
                     let next_idx = sorted.get(i + 1).map(|(n, _)| *n).unwrap_or(total_bars);
                     emit_ray(
+                        &plot_x,
                         &mut plot_segments,
                         &norm,
                         state.first,
@@ -2443,7 +2523,7 @@ fn project_inner(state: &MarketState, viewport_only: bool) -> MarketView {
                     prev = None;
                     continue;
                 }
-                let x = ((*idx - state.first) as f64 + 0.5) as f32 / count as f32;
+                let x = plot_x.frac_of(*idx as f64) as f32;
                 let y = norm(*value);
                 if let Some((px, py)) = prev {
                     seg(px, py, x, y);
@@ -2470,10 +2550,7 @@ fn project_inner(state: &MarketState, viewport_only: bool) -> MarketView {
             if pos < 0 || (pos as usize) < state.first || (pos as usize) >= state.first + count {
                 return None;
             }
-            Some((
-                (((pos as usize) - state.first) as f64 + 0.5) as f32 / count as f32,
-                norm(price),
-            ))
+            Some((plot_x.frac_of(pos as f64) as f32, norm(price)))
         };
         let mut dashed = |x1: f32, y1: f32, x2: f32, y2: f32, color: i32, wide: bool| {
             // legacy DashLine ~4px on/off at 1px width; view-space chunks match
@@ -2626,6 +2703,7 @@ fn project_inner(state: &MarketState, viewport_only: bool) -> MarketView {
                 continue;
             }
             emit_ray(
+                &plot_x,
                 &mut plot_segments,
                 &norm,
                 state.first,
@@ -2667,7 +2745,7 @@ fn project_inner(state: &MarketState, viewport_only: bool) -> MarketView {
             {
                 continue;
             }
-            let x = (((sm.bar as usize) - state.first) as f64 + 0.5) as f32 / count as f32;
+            let x = plot_x.frac_of(sm.bar as f64) as f32;
             let y = norm(sm.price);
             // Glyph colors are fixed per kind (legacy `_marker_color`); only
             // line/ray spans use the layer rotation.
@@ -4921,5 +4999,153 @@ mod tests {
             "16 Sep 2026"
         );
         assert_eq!(format_crosshair_time("garbage", "15m"), "garbage");
+    }
+
+    #[test]
+    fn zoom_anchor_preserves_coordinate_at_left_center_right() {
+        let mut st = MarketState::default();
+        st.set_bars("TEST", "15m", "NSE", bars(3000));
+        // Move to historical bars:
+        st.origin = 1000.0;
+        st.first = 1000;
+        st.count = 400;
+        st.follow_latest = false;
+
+        for &fx in &[0.05f32, 0.25f32, 0.5f32, 0.75f32, 0.95f32] {
+            let px_before = st.plot_x();
+            let data_coord_before = px_before.bar_at(f64::from(fx));
+
+            // Zoom in
+            assert!(st.apply(MarketAction::WheelZoom(fx, -1.0)));
+            let px_after = st.plot_x();
+            let data_coord_after = px_after.bar_at(f64::from(fx));
+            assert!(
+                (data_coord_after - data_coord_before).abs() < 1e-9,
+                "zoom in at fx {fx}: before {data_coord_before}, after {data_coord_after}"
+            );
+
+            // Zoom out
+            assert!(st.apply(MarketAction::WheelZoom(fx, 1.0)));
+            let px_out = st.plot_x();
+            let data_coord_out = px_out.bar_at(f64::from(fx));
+            assert!(
+                (data_coord_out - data_coord_before).abs() < 1e-9,
+                "zoom out at fx {fx}: before {data_coord_before}, after {data_coord_out}"
+            );
+        }
+    }
+
+    #[test]
+    fn zoom_reversibility_zero_cumulative_drift() {
+        let mut st = MarketState::default();
+        st.set_bars("TEST", "15m", "NSE", bars(3000));
+        st.origin = 1200.0;
+        st.first = 1200;
+        st.count = 500;
+        st.follow_latest = false;
+
+        let initial_origin = st.origin;
+        let initial_count = st.count;
+        let fx = 0.37f32;
+
+        // 10 zoom-in steps followed by 10 zoom-out steps
+        for _ in 0..10 {
+            assert!(st.apply(MarketAction::WheelZoom(fx, -0.2)));
+        }
+        for _ in 0..10 {
+            assert!(st.apply(MarketAction::WheelZoom(fx, 0.2)));
+        }
+
+        assert_eq!(
+            st.count, initial_count,
+            "count must restore after symmetric zoom"
+        );
+        assert!(
+            (st.origin - initial_origin).abs() < 1e-6,
+            "cumulative drift must be virtually zero: initial {initial_origin}, final {}",
+            st.origin
+        );
+    }
+
+    #[test]
+    fn historical_zoom_does_not_snap_to_live_edge() {
+        let mut st = MarketState::default();
+        st.set_bars("TEST", "15m", "NSE", bars(3000));
+        // Deep historical view
+        st.origin = 500.0;
+        st.first = 500;
+        st.count = 300;
+        st.follow_latest = false;
+
+        let live_anchor = st.anchor_first(3000, 300); // ~2745
+        assert!(live_anchor > 2500);
+
+        // Zoom in at center
+        assert!(st.apply(MarketAction::WheelZoom(0.5, -1.0)));
+        assert!(
+            (st.origin - 500.0).abs() < 100.0,
+            "origin must remain around 500, not snap to live edge {live_anchor}; actual: {}",
+            st.origin
+        );
+        assert!(!st.follow_latest);
+
+        // Zoom out at center
+        assert!(st.apply(MarketAction::WheelZoom(0.5, 1.0)));
+        assert!(
+            (st.origin - 500.0).abs() < 50.0,
+            "origin must remain around 500; actual: {}",
+            st.origin
+        );
+        assert!(!st.follow_latest);
+    }
+
+    #[test]
+    fn live_edge_zoom_preserves_anchor_under_cursor() {
+        let mut st = MarketState::default();
+        st.set_bars("TEST", "15m", "NSE", bars(3000));
+        assert!(st.follow_latest);
+
+        // Zoom at cursor position fx = 0.85
+        let fx = 0.85f32;
+        let coord_before = st.plot_x().bar_at(f64::from(fx));
+        assert!(st.apply(MarketAction::WheelZoom(fx, -1.0)));
+        let coord_after = st.plot_x().bar_at(f64::from(fx));
+        assert!(
+            (coord_after - coord_before).abs() < 1e-9,
+            "live-edge zoom must preserve cursor anchor: before {coord_before}, after {coord_after}"
+        );
+    }
+
+    #[test]
+    fn continuous_sub_bar_panning_and_hover_alignment() {
+        let mut st = MarketState::default();
+        st.set_bars("TEST", "15m", "NSE", bars(1000));
+        st.origin = 100.0;
+        st.first = 100;
+        st.count = 100;
+
+        // Sub-bar pan (0.003 of 100 slots = 0.3 bars)
+        assert!(st.apply(MarketAction::WheelPanX(0.003)));
+        assert!((st.origin - 99.7).abs() < 1e-6);
+
+        // Hover over a bar center
+        let target_bar = 120.0;
+        let fx = st.plot_x().frac_of(target_bar) as f32;
+        assert!(st.apply(MarketAction::HoverMoved(fx, 0.5)));
+        let hover = st.hover.expect("hover must be active");
+        assert_eq!(hover.index, 120);
+
+        let view = project(&st);
+        let hover_view = project_hover(&st);
+        assert!(
+            (hover_view.hover_x - fx).abs() < 1e-6,
+            "crosshair x must match candle center exactly"
+        );
+        // Matching candle in view
+        let candle = view.candles.iter().find(|c| (c.x - fx).abs() < 1e-5);
+        assert!(
+            candle.is_some(),
+            "candle must exist at snapped crosshair location"
+        );
     }
 }

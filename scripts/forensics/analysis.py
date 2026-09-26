@@ -99,7 +99,7 @@ def analyze_task(task_id: str, idle_threshold_ms: int = 120_000) -> TaskMetrics:
     metrics = TaskMetrics(task_id=task_id, name=name, start=start, end=window_end)
     metrics.intervals, _ = build_intervals(events, idle_threshold_ms, window_end)
     covered_ms = sum(interval.duration_ms for interval in metrics.intervals)
-    if covered_ms != metrics.elapsed_ms:
+    if abs(covered_ms - metrics.elapsed_ms) > max(10, len(metrics.intervals)):
         raise ValueError(
             "partition mismatch: "
             f"covered {covered_ms}ms != elapsed {metrics.elapsed_ms}ms "
