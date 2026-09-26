@@ -4,7 +4,7 @@
 
 [project]
 name = "vayren-core"
-version = "1.25.0"
+version = "1.26.0"
 description = "Event-driven desktop charting platform"
 requires-python = ">=3.11"
 license = { text = "MIT" }
