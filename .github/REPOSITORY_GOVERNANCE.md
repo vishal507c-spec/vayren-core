@@ -8,6 +8,12 @@ developer → feature branch → Pull Request → required validation → review
 
 Direct pushes to `main` are not the normal path. No history rewrites, no force-pushes, no PRs merged with red CI.
 
+Existing public `main` history (including merge commits and short
+`fix:` subjects from earlier phases) is preserved as engineering
+evidence — it is never rewritten for appearance. Cleanliness applies
+forward: every new milestone reaches `main` as one conventional,
+squashed PR commit.
+
 ## Protected branches
 
 - `main` (default branch): protected **by policy**. Server-side branch
@@ -21,8 +27,59 @@ Direct pushes to `main` are not the normal path. No history rewrites, no force-p
 
 - Every change to `main` goes through a PR (see
   `.github/PULL_REQUEST_TEMPLATE.md`). Do not push directly to `main`.
+- One PR = one logical objective. A PR title answers "what meaningful
+  change reaches `main`?" using the commit convention below
+  (e.g. `feat: improve Strategy Lab universe selection`).
+- Feature branches may be messy during development (`fix`, `wip`,
+  `test`, `polish` commits are fine there) — the PR is squashed on
+  merge, so branch journals never reach `main`.
 - PRs must be mergeable (no conflicts) before merge.
 - Conversation threads should be resolved before merge.
+- The PR template checklist (testing, conventions, memory update) must be
+  honestly complete — never ticked blindly.
+
+## Commit convention (subjects on `main`)
+
+Conventional commits; one commit = one logical change
+(`AGENTS.md` §Commit Style is the working rule, extended here):
+
+- `feat:` user-visible feature or capability
+- `fix:` bug fix
+- `perf:` performance improvement with measured evidence
+- `refactor:` behavior-preserving restructure
+- `test:` tests only
+- `docs:` documentation only
+- `build:` build system / packaging
+- `ci:` CI workflows and validation
+- `chore:` routine maintenance (graph regen, housekeeping)
+
+Rejected as `main` subjects: `fix`, `update`, `changes`, `test`,
+`final`, `snapshot`, `wip` and bare verbs with no object — they
+describe keystrokes, not milestones. They remain acceptable inside
+unmerged feature branches.
+
+## Local guardrail (opt-in)
+
+No server-side subject lint exists on this plan. To catch generic
+subjects before push, install the local hook (machine-only, never
+committed as enforcement):
+
+```powershell
+# .git/hooks/commit-msg  (chmod +x on Unix; exact filename, no extension)
+$text = Get-Content $args[0] -Raw
+if ($text -match '^(fix|update|changes|test|final|snapshot|wip)\s*$') {
+  Write-Error "Generic subject rejected by repository policy (see .github/REPOSITORY_GOVERNANCE.md)."
+  exit 1
+}
+if ($text -notmatch '^(feat|fix|perf|refactor|test|docs|build|ci|chore)(\(.+\))?: .+') {
+  Write-Error "Subject must be '<type>: <object>' (see .github/REPOSITORY_GOVERNANCE.md)."
+  exit 1
+}
+```
+
+The hook is advisory process, not CI: squash-merge titles are set in
+the GitHub UI at merge time, where the PR title (already conventional)
+is reused verbatim.
 
 ## Required checks
 
@@ -34,8 +91,17 @@ Direct pushes to `main` are not the normal path. No history rewrites, no force-p
 
 ## Merge strategy
 
-- Allowed methods (unchanged): merge commit, squash, rebase. History is
-  linear conventional commits plus merge commits for PRs; keep it that way.
+- Preferred method for feature/fix/perf PRs: **squash merge** — the PR
+  becomes exactly one logical commit on `main`, whatever the branch
+  history looked like during development.
+- Merge commits remain allowed for exceptional cases only (e.g. release
+  trains joining long-lived lines); they must not be the normal path for
+  feature work. Rebase-merge is discouraged for the same reason: `main`
+  should read as logical milestones, not workstation journals.
+- Server toggles (`allow_squash_merge`, `allow_merge_commit`,
+  `allow_rebase_merge`) are all ON and stay ON: with a single maintainer
+  and no server-side protection on this plan, the preference is enforced
+  by this policy + review, never by disabling methods outright.
 - `delete_branch_on_merge` is ON (merged heads auto-deleted).
 - `allow_update_branch` is ON ("Update branch" button available).
 - Never rewrite published history. Never rebase `main`.

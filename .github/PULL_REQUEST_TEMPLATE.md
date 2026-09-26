@@ -15,6 +15,9 @@ Link to relevant doc in `90_brain/` (e.g. `architecture.md`, `module_contracts.m
 - [ ] Tests pass (`make check` — lint+format+typecheck+test+validators)
 
 ## Checklist
+- [ ] One logical objective (see `.github/REPOSITORY_GOVERNANCE.md`)
+- [ ] PR title follows the commit convention (`type: object`)
+- [ ] Merge method: squash (feature/fix/perf PRs)
 - [ ] Followed domain conventions (`AGENTS.md`)
 - [ ] Updated relevant READMEs / `90_brain/` if public API changed
 - [ ] `make check` passes
