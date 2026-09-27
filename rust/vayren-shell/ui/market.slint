@@ -1717,7 +1717,6 @@ export component MarketScreen inherits Rectangle {
     // Chart display settings (Rust-owned ChartScaleMode + visibility flags).
     in property <int> scale-mode: 0;
     in property <string> scale-label: "₹";
-    in property <bool> grid-visible: true;
     in property <bool> cross-visible: true;
     in property <[MarketIndicator]> indicator-rows;
     in property <bool> popup-open: false;
@@ -1838,7 +1837,7 @@ export component MarketScreen inherits Rectangle {
     callback trade-next();
     callback trade-open();
     // Chart-settings pick from the INDICATORS popup CHART section (stable
-    // row id: "scale" | "grid" | "cross"). The popup stays the single
+    // row id: "scale" | "cross"). The popup stays the single
     // entry point so the toolbar keeps its v1.25.0 pixel inventory.
     callback chart-opt-picked(string);
 
@@ -2206,33 +2205,6 @@ export component MarketScreen inherits Rectangle {
                                 Math.max(root.plot-slots, root.candles.length), 1
                             );
                             property <length> slot: self.width / n;
-
-                            // horizontal grid lines (price ticks)
-                            for t in root.price-ticks: Rectangle {
-                                visible: root.grid-visible;
-                                x: 0;
-                                width: plot.width;
-                                height: 1px;
-                                y: t.pos * plot.grid-h;
-                                background: VayrenPalette.hairline-soft;
-                            }
-                            // vertical grid lines (time ticks, same transform)
-                            for t in root.time-ticks: Rectangle {
-                                visible: root.grid-visible;
-                                y: 0;
-                                height: plot.height;
-                                width: 1px;
-                                x: t.pos * plot.width;
-                                background: VayrenPalette.hairline-soft;
-                            }
-                            // volume baseline
-                            Rectangle {
-                                x: 0;
-                                width: plot.width;
-                                height: 1px;
-                                y: plot.grid-h;
-                                background: VayrenPalette.hairline;
-                            }
 
                             // candles + volume (absolute, clipped)
                             Rectangle {

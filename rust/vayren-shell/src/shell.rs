@@ -413,7 +413,6 @@ pub fn apply_market(ui: &AppWindow, state: &market::MarketState) {
         ui,
         view.scale_mode,
         view.scale_label.as_str(),
-        view.grid_visible,
         view.cross_visible,
     );
     apply_hover_props(
@@ -752,16 +751,14 @@ pub fn apply_market_viewport(ui: &AppWindow, state: &market::MarketState) {
         ui,
         view.scale_mode,
         view.scale_label.as_str(),
-        view.grid_visible,
         view.cross_visible,
     );
     apply_hover_props(ui, &market::project_hover(state));
 }
 
-fn apply_flags_props(ui: &AppWindow, scale_mode: i32, scale_label: &str, grid: bool, cross: bool) {
+fn apply_flags_props(ui: &AppWindow, scale_mode: i32, scale_label: &str, cross: bool) {
     ui.set_market_scale_mode(scale_mode);
     ui.set_market_scale_label(scale_label.into());
-    ui.set_market_grid_visible(grid);
     ui.set_market_cross_visible(cross);
 }
 
@@ -835,14 +832,13 @@ pub fn wire_market(
             ui.$cb(move |a: f32, b: f32| {
                 let Some(ui) = weak.upgrade() else { return };
                 let (wire, action) = $make(a, b);
-                let (prev_origin, prev_first, prev_count, prev_manual) = {
+                let (prev_first, prev_count, prev_manual) = {
                     let st = strong.borrow();
-                    (st.origin, st.first, st.count, st.price_manual)
+                    (st.first, st.count, st.price_manual)
                 };
                 if strong.borrow_mut().interact(&wire, action) {
                     let st = strong.borrow();
-                    if (st.origin - prev_origin).abs() > 1e-6
-                        || st.first != prev_first
+                    if st.first != prev_first
                         || st.count != prev_count
                         || st.price_manual != prev_manual
                     {
@@ -903,7 +899,6 @@ pub fn wire_market(
             let name = name.to_string();
             let action = match name.as_str() {
                 "scale" => market::MarketAction::CycleScaleMode,
-                "grid" => market::MarketAction::ToggleGrid,
                 "cross" => market::MarketAction::ToggleCrosshair,
                 _ => return,
             };

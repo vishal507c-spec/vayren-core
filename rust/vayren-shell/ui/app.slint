@@ -359,7 +359,6 @@ export component AppWindow inherits Window {
     in-out property <bool> market-has-last-volume: false;
     in-out property <int> market-scale-mode: 0;
     in-out property <string> market-scale-label: "₹";
-    in-out property <bool> market-grid-visible: true;
     in-out property <bool> market-cross-visible: true;
     in-out property <[MarketIndicator]> market-indicator-rows;
     in-out property <bool> market-popup-open: false;
@@ -684,7 +683,6 @@ export component AppWindow inherits Window {
                     has-last-volume: root.market-has-last-volume;
                     scale-mode: root.market-scale-mode;
                     scale-label: root.market-scale-label;
-                    grid-visible: root.market-grid-visible;
                     cross-visible: root.market-cross-visible;
                     indicator-rows: root.market-indicator-rows;
                     popup-open: root.market-popup-open;

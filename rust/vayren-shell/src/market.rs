@@ -286,15 +286,17 @@ pub enum MarketAction {
     ToggleStatus,
     /// Cycle the price-scale mode Regular → Percent → Logarithmic.
     CycleScaleMode,
-    /// Toggle grid-line visibility (display only, no geometry rebuild).
-    ToggleGrid,
     /// Toggle crosshair visibility (display only, no geometry rebuild).
     ToggleCrosshair,
 }
 
 // Viewport numbers ported 1:1 from `CandleChartWidget` (behavior parity).
 pub const MIN_VISIBLE_BARS: usize = 10;
-pub const MAX_VISIBLE_BARS: usize = 10000;
+/// HARD VIEWPORT CAP: never more than 1600 candle slots on screen at once.
+/// This bounds rendering only — the full historical dataset always stays in
+/// memory and is reachable by horizontal panning; nothing is deleted,
+/// truncated, downsampled or aggregated to enforce it.
+pub const MAX_VISIBLE_BARS: usize = 1600;
 pub const INITIAL_BARS: usize = 1400;
 /// One candle's full horizontal budget in px (legacy `MIN_CANDLE_SLOT`).
 pub const MIN_CANDLE_SLOT_PX: f32 = 1.0;
@@ -383,55 +385,6 @@ impl Default for MarketStatusFacts {
     }
 }
 
-/// Single source of truth for horizontal data <-> screen coordinate transforms.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct PlotX {
-    pub origin: f64,
-    pub slots: f64,
-}
-
-impl PlotX {
-    pub fn new(origin: f64, slots: f64) -> Self {
-        Self {
-            origin,
-            slots: slots.max(1.0),
-        }
-    }
-
-    /// Normalized screen fraction [0.0, 1.0] for a continuous bar coordinate.
-    /// The center of candle `bar` sits at `frac_of(bar)`.
-    #[inline]
-    pub fn frac_of(&self, bar: f64) -> f64 {
-        (bar - self.origin + 0.5) / self.slots
-    }
-
-    /// Inverse transform: data coordinate (bar center) at normalized screen fraction.
-    #[inline]
-    pub fn bar_at(&self, frac: f64) -> f64 {
-        self.origin + frac * self.slots - 0.5
-    }
-
-    /// Nearest discrete bar index at normalized screen fraction.
-    #[inline]
-    pub fn bar_index_at(&self, frac: f64, total: usize) -> usize {
-        if total == 0 {
-            return 0;
-        }
-        let b = round_py(self.bar_at(frac));
-        b.clamp(0.0, (total - 1) as f64) as usize
-    }
-
-    /// Range of bar indices that overlap the visible screen [0.0, 1.0] plus a 1-bar margin.
-    pub fn slab(&self, total: usize) -> (usize, usize) {
-        if total == 0 {
-            return (0, 0);
-        }
-        let first = (self.origin.floor() as isize - 1).max(0) as usize;
-        let last = (round_py(self.origin + self.slots + 1.5) as usize).min(total);
-        (first.min(total), last.max(first).min(total))
-    }
-}
-
 /// Single source of Market presentation state.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MarketState {
@@ -451,14 +404,18 @@ pub struct MarketState {
     /// the generic message is the fallback, never the primary.
     pub notice: String,
     pub exchange: String,
-    /// Continuous fractional origin in bar index space.
-    pub origin: f64,
-    /// Visible window: first bar index + count (legacy `_first`/`_last`).
-    pub first: usize,
+    /// Visible window origin in bar-space + slot count (legacy `_first`/
+    /// `_last`). `first` is FLOATING-POINT: it is the exact data coordinate
+    /// at the plot's left edge, so panning moves continuously with the
+    /// pointer instead of snapping bar-to-bar. Single source of truth —
+    /// every screen x goes through `x_of`, every screen→data lookup through
+    /// `index_at`.
+    pub first: f64,
     pub count: usize,
     pub follow_latest: bool,
     pub price_manual: Option<(f64, f64)>,
-    /// Drag origin (plot fractions) while a left-drag pans the viewport.
+    /// Drag origin (plot fractions + fractional viewport origin) while a
+    /// left-drag pans the viewport.
     pub drag_origin: Option<(f32, f32, f64, (f64, f64))>,
     pub price_drag_active: bool,
     pub hover: Option<MarketHover>,
@@ -496,12 +453,11 @@ pub struct MarketState {
     /// `LabState::pending_actions`).
     pub pending_actions: Vec<String>,
     /// Chart display settings (engine-owned, Slint renders them verbatim):
-    /// price-scale mode plus grid/crosshair visibility. Toggles never touch
+    /// price-scale mode plus crosshair visibility. Toggles never touch
     /// data, viewport or caches — geometry rebuilds only for scale changes.
     pub scale_mode: ChartScaleMode,
-    pub grid_visible: bool,
     pub cross_visible: bool,
-    pub cached_price_range: std::cell::Cell<Option<(usize, usize, usize, (f64, f64))>>,
+    pub cached_price_range: std::cell::Cell<Option<(f64, usize, usize, (f64, f64))>>,
 }
 
 impl Default for MarketState {
@@ -520,8 +476,7 @@ impl Default for MarketState {
             status: MarketStatus::Loading,
             notice: String::new(),
             exchange: String::new(),
-            origin: 0.0,
-            first: 0,
+            first: 0.0,
             count: INITIAL_BARS,
             follow_latest: true,
             price_manual: None,
@@ -549,7 +504,6 @@ impl Default for MarketState {
             market_status: MarketStatusFacts::default(),
             pending_actions: Vec::new(),
             scale_mode: ChartScaleMode::Regular,
-            grid_visible: true,
             cross_visible: true,
             cached_price_range: std::cell::Cell::new(None),
         }
@@ -557,19 +511,6 @@ impl Default for MarketState {
 }
 
 impl MarketState {
-    pub fn plot_x(&self) -> PlotX {
-        let origin = if (self.first as f64 - self.origin).abs() > 1.5 {
-            self.first as f64
-        } else {
-            self.origin
-        };
-        PlotX::new(origin, self.count.max(1) as f64)
-    }
-
-    pub fn max_origin(&self) -> f64 {
-        self.bars.len().saturating_sub(1) as f64
-    }
-
     /// Maximum candles readable at the current plot width (legacy
     /// `max_visible_bars`): density cap bounded by the MAX_VISIBLE_BARS limit.
     pub fn max_visible_bars(&self) -> usize {
@@ -608,8 +549,39 @@ impl MarketState {
         self.bars.len().saturating_sub(1)
     }
 
-    fn clamp_first(&self, first: usize) -> usize {
-        first.min(self.max_pan_first())
+    /// Continuous viewport clamp: `first` is fractional bar-space, so the
+    /// bounds are exact — no integer rounding ever shifts the viewport.
+    fn clamp_first(&self, first: f64) -> f64 {
+        first.clamp(0.0, self.max_pan_first() as f64)
+    }
+
+    /// Leftmost whole bar index the viewport touches (`first` is fractional).
+    fn first_floor(&self) -> usize {
+        self.first.floor().max(0.0) as usize
+    }
+
+    /// THE canonical data→screen transform: bar index → horizontal plot
+    /// fraction. Candles, overlays, markers, ticks and the crosshair all
+    /// position through this one formula (single source of truth — a second
+    /// formula anywhere is a zoom-anchor drift bug).
+    pub fn x_of(&self, idx: usize) -> f32 {
+        let slots = self.window_size().max(1) as f64;
+        (((idx as f64 - self.first) + 0.5) / slots) as f32
+    }
+
+    /// THE canonical screen→data inverse: horizontal plot fraction → bar
+    /// index under that point (clamped into real data).
+    pub fn index_at(&self, x_frac: f64) -> usize {
+        let slots = self.window_size().max(1) as f64;
+        let idx = (self.first + x_frac.clamp(0.0, 1.0) * slots).floor();
+        (idx.max(0.0) as usize).min(self.bars.len().saturating_sub(1))
+    }
+
+    /// Follow-latest re-engages only at the live edge; with a fractional
+    /// viewport "at the edge" means within a quarter bar of the anchor
+    /// (sub-pixel at every zoom level — no visible snap).
+    fn at_live_edge(&self) -> bool {
+        (self.first - self.max_first() as f64).abs() <= 0.25
     }
 
     pub fn window_size(&self) -> usize {
@@ -670,8 +642,7 @@ impl MarketState {
         }
         if self.bars.is_empty() {
             self.status = MarketStatus::Empty;
-            self.first = 0;
-            self.origin = 0.0;
+            self.first = 0.0;
             self.count = 0;
         } else {
             let total = self.bars.len();
@@ -684,14 +655,12 @@ impl MarketState {
                 } else {
                     self.initial_count(total)
                 };
-                self.first = self.anchor_first(total, count);
-                self.origin = self.first as f64;
+                self.first = self.anchor_first(total, count) as f64;
                 self.count = count;
                 self.follow_latest = true;
             } else {
                 let added = total.saturating_sub(previous_total);
-                self.first = self.clamp_first(self.first + added);
-                self.origin = (self.origin + added as f64).min(self.max_origin());
+                self.first = self.clamp_first(self.first + added as f64);
             }
             self.status = MarketStatus::Ready;
         }
@@ -707,13 +676,18 @@ impl MarketState {
             .max(MIN_VISIBLE_BARS)
     }
 
-    /// Visible slice for rendering: the `count` bars from `first`.
+    /// Visible slice for rendering: every bar the fractional viewport
+    /// `[first, first + count)` touches. With a fractional origin this is at
+    /// most `count + 1` bars — the two edge bars render partially and the
+    /// plot's `clip: true` cuts them at the border (no overscan pass needed,
+    /// nothing outside the viewport is ever processed).
     pub fn visible_window(&self) -> &[MarketBar] {
         if self.bars.is_empty() {
             return &[];
         }
-        let first = self.first.min(self.bars.len().saturating_sub(1));
-        let last = (first + self.count.max(1)).min(self.bars.len());
+        let first = self.first_floor().min(self.bars.len().saturating_sub(1));
+        let last =
+            ((self.first + self.count.max(1) as f64).ceil() as usize).clamp(first, self.bars.len());
         &self.bars[first..last]
     }
 
@@ -758,9 +732,6 @@ impl MarketState {
     /// Apply one explicit UI action. Returns false when the action names
     /// something unknown (never invents state for it).
     pub fn apply(&mut self, action: MarketAction) -> bool {
-        if (self.first as f64 - self.origin).abs() > 1.5 {
-            self.origin = self.first as f64;
-        }
         match action {
             MarketAction::PanelToggle => {
                 self.panel_visible = !self.panel_visible;
@@ -831,8 +802,7 @@ impl MarketState {
                 }
                 let total = self.bars.len();
                 let count = self.initial_count(total);
-                self.first = self.anchor_first(total, count);
-                self.origin = self.first as f64;
+                self.first = self.anchor_first(total, count) as f64;
                 self.count = count;
                 self.follow_latest = true;
                 self.price_manual = None;
@@ -844,18 +814,20 @@ impl MarketState {
                     self.hover = None;
                     return true;
                 }
-                let plot_x = self.plot_x();
-                let last = (self.first + self.count).min(self.bars.len());
-                let bar_continuous = plot_x.bar_at(f64::from(x_frac));
-                let snapped_bar = round_py(bar_continuous)
-                    .clamp(self.first as f64, last.saturating_sub(1) as f64)
-                    .max(0.0) as usize;
+                // Inverse of the ONE canonical transform (`index_at`): the
+                // bar under the cursor is the floor of its data coordinate,
+                // clamped into the real data (right-margin empty slots snap
+                // to the newest bar, left edge to the oldest visible).
+                let idx = self.index_at(f64::from(x_frac));
                 let (low, high) = self.price_range();
                 let span = high - low;
                 let frac = f64::from(y_frac).clamp(0.0, 1.0);
                 let price = if span > 0.0 { high - frac * span } else { high };
+                // ONE canonical clamp: the stored fraction feeds the line,
+                // the badge and the tag, so they can never diverge at the
+                // pane edges (no per-use-site re-clamping).
                 self.hover = Some(MarketHover {
-                    index: snapped_bar,
+                    index: idx,
                     y_frac: y_frac.clamp(0.0, 1.0),
                     price,
                 });
@@ -881,27 +853,32 @@ impl MarketState {
                 if scale <= 0.0 {
                     return false;
                 }
-                let (prev_origin, prev_first, prev_count, prev_follow) =
-                    (self.origin, self.first, self.count, self.follow_latest);
+                let (prev_first, prev_count, prev_follow) =
+                    (self.first, self.count, self.follow_latest);
                 let total = self.bars.len();
                 let count = self.window_size().max(1);
                 let fraction = f64::from(x_frac).clamp(0.0, 1.0);
+                // Cursor-anchored zoom in exact bar-space: the data coordinate
+                // under the pointer is preserved, so the same candle stays
+                // under the cursor while the slot width changes. No rounding
+                // of `first` — fractional precision kills cumulative drift.
+                let anchor_bar =
+                    (self.first + fraction * count as f64).clamp(self.first, (total - 1) as f64);
+                // HARD CAP: zoom-out never exposes more than the viewport
+                // maximum (1600 slots), regardless of dataset size.
                 let new_count = round_py(count as f64 * scale)
                     .clamp(MIN_VISIBLE_BARS as f64, total as f64)
                     .min(self.max_visible_bars() as f64) as usize;
                 let new_count = new_count.max(MIN_VISIBLE_BARS);
-
-                let plot_x = self.plot_x();
-                let new_origin = (plot_x.origin + fraction * (count as f64 - new_count as f64))
-                    .clamp(0.0, self.max_origin());
-                let new_first = self.clamp_first(round_py(new_origin) as usize);
-
-                self.origin = new_origin;
+                let new_first_raw = (anchor_bar - fraction * new_count as f64).max(0.0);
+                // Same right boundary as panning (never yank a view parked in
+                // the empty right space back to the live-edge anchor — that
+                // re-anchor WAS the "chart slides during zoom" jump).
+                let new_first = self.clamp_first(new_first_raw);
                 self.first = new_first;
                 self.count = new_count;
-                self.follow_latest = self.first >= self.max_first();
-                if (self.origin - prev_origin).abs() < 1e-9
-                    && self.first == prev_first
+                self.follow_latest = self.at_live_edge();
+                if self.first == prev_first
                     && self.count == prev_count
                     && self.follow_latest == prev_follow
                 {
@@ -922,19 +899,15 @@ impl MarketState {
                 if delta_bars == 0.0 {
                     return false;
                 }
-                let (prev_origin, prev_first, prev_follow) =
-                    (self.origin, self.first, self.follow_latest);
-                let new_origin = (self.origin + delta_bars).clamp(0.0, self.max_origin());
-                let new_first = self.clamp_first(round_py(new_origin) as usize);
-                self.origin = new_origin;
-                self.first = new_first;
-                // Follow-latest only while sitting exactly on the live edge; a
-                // view shifted into the empty right space is a manual view.
-                self.follow_latest = self.first == self.max_first();
-                if (self.origin - prev_origin).abs() < 1e-9
-                    && self.first == prev_first
-                    && self.follow_latest == prev_follow
-                {
+                let (prev_first, prev_follow) = (self.first, self.follow_latest);
+                // Continuous pan: the exact fractional delta moves the
+                // viewport (no integer rounding — sub-bar wheel steps still
+                // track the gesture instead of accumulating into jumps).
+                self.first = self.clamp_first(self.first + delta_bars);
+                // Follow-latest only while sitting on the live edge; a view
+                // shifted into the empty right space is a manual view.
+                self.follow_latest = self.at_live_edge();
+                if self.first == prev_first && self.follow_latest == prev_follow {
                     return false;
                 }
                 self.refresh_crosshair();
@@ -945,27 +918,27 @@ impl MarketState {
                 if window.is_empty() || !x.is_finite() || !y.is_finite() {
                     return false;
                 }
-                self.drag_origin = Some((x, y, self.origin, self.price_range()));
+                self.drag_origin = Some((x, y, self.first, self.price_range()));
                 self.hover = None;
                 true
             }
             MarketAction::DragMove(x, y) => {
-                let Some((origin_x, origin_y, drag_origin_bar, (low, high))) = self.drag_origin
-                else {
+                let Some((origin_x, origin_y, drag_first, (low, high))) = self.drag_origin else {
                     return false;
                 };
                 if self.bars.is_empty() || !x.is_finite() || !y.is_finite() {
                     return false;
                 }
                 let count = self.window_size().max(1);
+                // Continuous drag: exact fractional bar-space delta from the
+                // gesture ORIGIN (never per-move rounding, so no candle-to-
+                // candle snapping and no accumulated integer error).
                 let delta_bars = -(f64::from(x) - f64::from(origin_x)) * count as f64;
-                let new_origin = (drag_origin_bar + delta_bars).clamp(0.0, self.max_origin());
-                self.origin = new_origin;
-                self.first = self.clamp_first(round_py(new_origin) as usize);
+                self.first = self.clamp_first(drag_first + delta_bars);
                 // Free one-sided pan: the drag may continue past the live edge
                 // into the empty right space; follow-latest only ever holds at
                 // the edge itself.
-                self.follow_latest = self.first == self.max_first();
+                self.follow_latest = self.at_live_edge();
                 let span = high - low;
                 if span > 0.0 {
                     let shift = span * (f64::from(y) - f64::from(origin_y));
@@ -975,10 +948,10 @@ impl MarketState {
             }
             MarketAction::DragEnd => {
                 self.drag_origin = None;
-                // Dropping exactly on the live edge re-engages follow; a view
+                // Dropping on the live edge re-engages follow; a view
                 // parked in the empty right space stays exactly where the user
                 // released it (no snap-back, no re-centering).
-                if self.first == self.max_first() {
+                if self.at_live_edge() {
                     self.follow_latest = true;
                 }
                 true
@@ -1138,10 +1111,6 @@ impl MarketState {
             MarketAction::TradePrev | MarketAction::TradeNext | MarketAction::TradeOpen => true,
             MarketAction::CycleScaleMode => {
                 self.scale_mode = self.scale_mode.cycle();
-                true
-            }
-            MarketAction::ToggleGrid => {
-                self.grid_visible = !self.grid_visible;
                 true
             }
             MarketAction::ToggleCrosshair => {
@@ -1732,7 +1701,6 @@ pub struct MarketView {
     /// Chart display settings echo (Slint binds visibility + scale label).
     pub scale_mode: i32,
     pub scale_label: String,
-    pub grid_visible: bool,
     pub cross_visible: bool,
     pub download: DownloadView,
     /// Market-status strip (legacy `MarketStatusPanel` parity): open flag +
@@ -1801,7 +1769,6 @@ pub struct HoverView {
 }
 
 pub fn project_hover(state: &MarketState) -> HoverView {
-    let plot_x = state.plot_x();
     let frame = scale_frame(state);
     let mut out = HoverView {
         hover_x: 0.5,
@@ -1828,7 +1795,9 @@ pub fn project_hover(state: &MarketState) -> HoverView {
     if let Some(hover) = state.hover {
         if let Some(bar) = state.bars.get(hover.index) {
             out.has_hover = true;
-            out.hover_x = plot_x.frac_of(hover.index as f64) as f32;
+            // Same canonical transform the candles use — crosshair and chart
+            // can never disagree about where a bar sits.
+            out.hover_x = state.x_of(hover.index);
             out.hover_y = hover.y_frac;
             // Regular keeps the state-computed price verbatim (golden
             // parity) at axis precision; Percent/Log read the cursor
@@ -2202,7 +2171,6 @@ fn project_inner(state: &MarketState, viewport_only: bool) -> MarketView {
         };
 
     let window = state.visible_window();
-    let plot_x = state.plot_x();
     // The plot's time grid is the LOGICAL window (`count` slots), not the
     // number of bars the data-clamped slice happens to hold. Every x in the
     // view normalizes by these slots, so the candle slot width stays constant
@@ -2239,6 +2207,7 @@ fn project_inner(state: &MarketState, viewport_only: bool) -> MarketView {
         // Bars the data actually holds: the tick labels are sampled from
         // these, while their positions come from the slot grid above.
         let visible = window.len().max(1);
+        let window_first = state.first_floor();
         let vol_max = window
             .iter()
             .map(|b| if b.volume.is_finite() { b.volume } else { 0.0 })
@@ -2246,9 +2215,8 @@ fn project_inner(state: &MarketState, viewport_only: bool) -> MarketView {
             .max(1.0);
         for (i, bar) in window.iter().enumerate() {
             let (open, close) = (norm(bar.open), norm(bar.close));
-            let bar_idx = state.first + i;
             candles.push(CandlePoint {
-                x: plot_x.frac_of(bar_idx as f64) as f32,
+                x: state.x_of(window_first + i),
                 open,
                 high: norm(bar.high),
                 low: norm(bar.low),
@@ -2282,8 +2250,7 @@ fn project_inner(state: &MarketState, viewport_only: bool) -> MarketView {
             let idx =
                 ((k as f64 + 0.5) * visible as f64 / max_possible_ticks as f64).floor() as usize;
             let idx = idx.min(visible - 1);
-            let bar_idx = state.first + idx;
-            let pos = plot_x.frac_of(bar_idx as f64) as f32;
+            let pos = state.x_of(window_first + idx);
             if last_pos >= 0.0 && (pos - last_pos) < min_spacing_pos {
                 continue; // Skip rather than compress to collide
             }
@@ -2409,10 +2376,9 @@ fn project_inner(state: &MarketState, viewport_only: bool) -> MarketView {
     /// single-bar ray becomes a one-slot tick.
     #[allow(clippy::too_many_arguments)]
     fn emit_ray(
-        plot_x: &PlotX,
         segments: &mut Vec<PlotSegment>,
         norm: &dyn Fn(f64) -> f32,
-        first: usize,
+        origin: f64,
         count: usize,
         start: usize,
         price: f64,
@@ -2421,6 +2387,7 @@ fn project_inner(state: &MarketState, viewport_only: bool) -> MarketView {
         series: i32,
         horizon: usize,
     ) {
+        let first = origin.floor().max(0.0) as usize;
         let mut end = horizon.saturating_sub(1);
         if cap > 0 {
             end = end.min(start.saturating_add(cap as usize).saturating_sub(1));
@@ -2434,11 +2401,12 @@ fn project_inner(state: &MarketState, viewport_only: bool) -> MarketView {
             return;
         }
         let y = norm(price);
-        let x1 = plot_x.frac_of(start_c as f64) as f32;
+        let x_of = |idx: usize| (((idx as f64 - origin) + 0.5) / count as f64) as f32;
+        let x1 = x_of(start_c);
         let x2 = if end_c == start_c {
-            x1 + (1.0 / plot_x.slots) as f32
+            x1 + 1.0 / count as f32
         } else {
-            plot_x.frac_of(end_c as f64) as f32
+            x_of(end_c)
         };
         segments.push(PlotSegment {
             x1,
@@ -2502,7 +2470,6 @@ fn project_inner(state: &MarketState, viewport_only: bool) -> MarketView {
                 for (i, (idx, value)) in sorted.iter().enumerate() {
                     let next_idx = sorted.get(i + 1).map(|(n, _)| *n).unwrap_or(total_bars);
                     emit_ray(
-                        &plot_x,
                         &mut plot_segments,
                         &norm,
                         state.first,
@@ -2519,11 +2486,14 @@ fn project_inner(state: &MarketState, viewport_only: bool) -> MarketView {
             }
             let mut prev: Option<(f32, f32)> = None;
             for (idx, value) in &series.points {
-                if *idx < state.first || *idx >= state.first + count {
+                // A bar belongs to the viewport when its slot intersects
+                // `[first, first + count)`; edge bars render partially and
+                // the plot clip cuts them (no duplicate transform — x_of).
+                if (*idx as f64 + 1.0) <= state.first || *idx as f64 >= state.first + count as f64 {
                     prev = None;
                     continue;
                 }
-                let x = plot_x.frac_of(*idx as f64) as f32;
+                let x = state.x_of(*idx);
                 let y = norm(*value);
                 if let Some((px, py)) = prev {
                     seg(px, py, x, y);
@@ -2547,10 +2517,13 @@ fn project_inner(state: &MarketState, viewport_only: bool) -> MarketView {
         let count = plot_slots;
         let total_bars = state.bars.len();
         let at = |pos: i32, price: f64| -> Option<(f32, f32)> {
-            if pos < 0 || (pos as usize) < state.first || (pos as usize) >= state.first + count {
+            if pos < 0
+                || (pos as f64 + 1.0) <= state.first
+                || pos as f64 >= state.first + count as f64
+            {
                 return None;
             }
-            Some((plot_x.frac_of(pos as f64) as f32, norm(price)))
+            Some((state.x_of(pos as usize), norm(price)))
         };
         let mut dashed = |x1: f32, y1: f32, x2: f32, y2: f32, color: i32, wide: bool| {
             // legacy DashLine ~4px on/off at 1px width; view-space chunks match
@@ -2703,7 +2676,6 @@ fn project_inner(state: &MarketState, viewport_only: bool) -> MarketView {
                 continue;
             }
             emit_ray(
-                &plot_x,
                 &mut plot_segments,
                 &norm,
                 state.first,
@@ -2716,36 +2688,17 @@ fn project_inner(state: &MarketState, viewport_only: bool) -> MarketView {
                 total_bars,
             );
         }
-        // TradingView parity: the last-price line is a subtle dash run, not
-        // a divider — overlay segments so it honors the same transform.
-        if has_last_price {
-            let (dash, gap) = (0.014f32, 0.010f32);
-            let mut x = 0.0f32;
-            while x < 1.0 {
-                let x2 = (x + dash).min(1.0);
-                plot_segments.push(PlotSegment {
-                    x1: x,
-                    y1: last_price_pos,
-                    x2,
-                    y2: last_price_pos,
-                    color: if last_price_up { 2 } else { 3 },
-                    series: -2,
-                    wide: false,
-                });
-                x += dash + gap;
-            }
-        }
         // Strategy-owned markers (entries, exits, EOD pills): glyph + pill
         // on the exact bar; UP-family pills below, DOWN-family above — the
         // painter's placement rule, no pill de-collision in Slint (noted).
         for sm in &state.strategy_markers {
             if sm.bar < 0
-                || (sm.bar as usize) < state.first
-                || (sm.bar as usize) >= state.first + count
+                || (sm.bar as f64 + 1.0) <= state.first
+                || sm.bar as f64 >= state.first + count as f64
             {
                 continue;
             }
-            let x = plot_x.frac_of(sm.bar as f64) as f32;
+            let x = state.x_of(sm.bar as usize);
             let y = norm(sm.price);
             // Glyph colors are fixed per kind (legacy `_marker_color`); only
             // line/ray spans use the layer rotation.
@@ -2870,7 +2823,7 @@ fn project_inner(state: &MarketState, viewport_only: bool) -> MarketView {
             }
         }
         // Chart display settings section (own implementation of the
-        // chart-settings grouping): shown on ALL so scale/grid/crosshair
+        // chart-settings grouping): shown on ALL so scale/crosshair
         // stay one click away without toolbar clutter. Rows carry stable
         // ids; selection routes by category, never by label text.
         if cat == "ALL" {
@@ -2881,14 +2834,6 @@ fn project_inner(state: &MarketState, viewport_only: bool) -> MarketView {
                         ChartScaleMode::Regular => "Scale: Regular (₹)",
                         ChartScaleMode::Percent => "Scale: Percent (%)",
                         ChartScaleMode::Logarithmic => "Scale: Logarithmic (log)",
-                    },
-                ),
-                (
-                    "grid",
-                    if state.grid_visible {
-                        "Grid lines: On"
-                    } else {
-                        "Grid lines: Off"
                     },
                 ),
                 (
@@ -3016,7 +2961,6 @@ fn project_inner(state: &MarketState, viewport_only: bool) -> MarketView {
         trade_context,
         scale_mode: state.scale_mode.kind(),
         scale_label: state.scale_mode.label().to_string(),
-        grid_visible: state.grid_visible,
         cross_visible: state.cross_visible,
         download,
         market_status_open: state.market_status.open,
@@ -3416,6 +3360,192 @@ mod tests {
             .collect()
     }
 
+    /// Interaction bench (§23 measurement): worst-case zoom-out on a
+    /// production-scale dataset, then timed pan/zoom loops through the
+    /// viewport projection. Prints timings under `--nocapture`; asserts only
+    /// generous ceilings so CI machines never flake.
+    #[test]
+    fn bench_viewport_interactions() {
+        let mut st = MarketState::default();
+        st.set_bars("S", "15m", "", bars(62_800));
+        for _ in 0..40 {
+            st.apply(MarketAction::WheelZoom(0.5, 1.0));
+        }
+        let max_count = st.count;
+        assert!(max_count <= MAX_VISIBLE_BARS);
+        let t0 = std::time::Instant::now();
+        for _ in 0..200 {
+            st.apply(MarketAction::WheelPanX(0.0005));
+            std::hint::black_box(project_viewport(&st));
+        }
+        let pan200 = t0.elapsed();
+        let t1 = std::time::Instant::now();
+        for i in 0..100 {
+            st.apply(MarketAction::WheelZoom(
+                0.5,
+                if i % 2 == 0 { -0.5 } else { 0.5 },
+            ));
+            std::hint::black_box(project_viewport(&st));
+        }
+        let zoom100 = t1.elapsed();
+        println!("bench: max_count={max_count} pan200={pan200:?} zoom100={zoom100:?}");
+        assert!(pan200.as_secs() < 20);
+        assert!(zoom100.as_secs() < 20);
+    }
+
+    /// Hard viewport cap (§2A-D/F): whatever the dataset size, zooming out
+    /// can never expose more than MAX_VISIBLE_BARS slots — and the dataset
+    /// itself is never touched to enforce it.
+    #[test]
+    fn viewport_cap_holds_for_every_dataset_size() {
+        for total in [500usize, MAX_VISIBLE_BARS, 5000, 10_000] {
+            let mut st = MarketState::default();
+            st.set_bars("TEST", "15m", "NSE", bars(total));
+            for _ in 0..60 {
+                st.apply(MarketAction::WheelZoom(0.5, 1.0));
+            }
+            assert!(
+                st.count <= MAX_VISIBLE_BARS,
+                "total {total}: count {}",
+                st.count
+            );
+            assert_eq!(st.bars.len(), total, "data must never shrink");
+            let view = project_viewport(&st);
+            assert!(
+                view.candles.len() <= MAX_VISIBLE_BARS + 1,
+                "total {total}: rendered {}",
+                view.candles.len()
+            );
+            if total <= MAX_VISIBLE_BARS {
+                // Whole dataset fits: all of it may be visible at once.
+                assert_eq!(st.count, total);
+            }
+        }
+    }
+
+    /// Cursor-anchored zoom (§3/§22G-J): the data coordinate under the
+    /// pointer stays under the pointer at left, center and right anchors,
+    /// for both zoom directions. Beyond the newest bar (empty right margin)
+    /// the anchor is the last data bar — there is nothing else to anchor to.
+    #[test]
+    fn zoom_keeps_the_data_under_the_cursor() {
+        for x in [0.05f32, 0.5, 0.95] {
+            for steps in [-1.0f32, 1.0] {
+                let mut st = MarketState::default();
+                st.set_bars("TEST", "15m", "NSE", bars(5000));
+                let last = (st.bars.len() - 1) as f64;
+                let before = (st.first + f64::from(x) * st.count as f64).min(last);
+                assert!(st.apply(MarketAction::WheelZoom(x, steps)));
+                let after = (st.first + f64::from(x) * st.count as f64).min(last);
+                assert!(
+                    (after - before).abs() <= 0.5,
+                    "x={x} steps={steps}: anchor {before} -> {after}"
+                );
+            }
+        }
+    }
+
+    /// No cumulative drift (§22K): repeated in/out zoom cycles at a fixed
+    /// cursor keep the anchored data coordinate within one bar.
+    #[test]
+    fn repeated_zoom_cycles_do_not_drift() {
+        let mut st = MarketState::default();
+        st.set_bars("TEST", "15m", "NSE", bars(8000));
+        let last = (st.bars.len() - 1) as f64;
+        for x in [0.1f32, 0.5, 0.9] {
+            let anchor = (st.first + f64::from(x) * st.count as f64).min(last);
+            for i in 0..40 {
+                st.apply(MarketAction::WheelZoom(
+                    x,
+                    if i % 2 == 0 { -1.0 } else { 1.0 },
+                ));
+            }
+            let after = (st.first + f64::from(x) * st.count as f64).min(last);
+            assert!(
+                (after - anchor).abs() <= 1.0,
+                "x={x}: anchor {anchor} -> {after}"
+            );
+        }
+    }
+
+    /// Continuous pan (§8/§22L-M): sub-bar gestures move the viewport by the
+    /// exact fractional delta (integer rounding used to swallow them — the
+    /// chart felt stuck, then jumped), and both boundaries stop naturally.
+    #[test]
+    fn pan_is_continuous_and_stops_at_boundaries() {
+        let mut st = MarketState::default();
+        st.set_bars("TEST", "15m", "NSE", bars(5000));
+        st.follow_latest = false;
+        st.first = 2000.0;
+        // Sub-bar wheel step: 0.0001 * 1400 slots ≈ 0.14 bars of movement
+        // (f32 gesture precision — the exact delta the wheel reported).
+        let before = st.first;
+        assert!(st.apply(MarketAction::WheelPanX(0.0001)));
+        assert!((st.first - (before - 0.14)).abs() < 1e-6);
+        // Sub-bar drag step tracks the gesture origin exactly (f32 gesture
+        // precision: 0.5001f32 - 0.5f32 is not exactly 1e-4).
+        let before = st.first;
+        assert!(st.apply(MarketAction::DragStart(0.5, 0.5)));
+        assert!(st.apply(MarketAction::DragMove(0.5001, 0.5)));
+        assert!((st.first - (before - 0.0001 * st.count as f64)).abs() < 1e-4);
+        assert!(st.apply(MarketAction::DragEnd));
+        // Oldest-bar boundary: clamps to exactly 0 and reports no-op after.
+        for _ in 0..40 {
+            st.apply(MarketAction::WheelPanX(0.5));
+        }
+        assert_eq!(st.first, 0.0);
+        assert!(!st.apply(MarketAction::WheelPanX(0.5)));
+        // Newest-bar boundary (one-sided free pan pin): clamps and no-ops.
+        for _ in 0..80 {
+            st.apply(MarketAction::WheelPanX(-0.5));
+        }
+        assert_eq!(st.first, st.max_pan_first() as f64);
+        assert!(!st.apply(MarketAction::WheelPanX(-0.5)));
+    }
+
+    /// Symbol/timeframe switches (§19/§20/§22O-P): the new series always
+    /// opens on a valid, capped viewport — no stale indices from the old one.
+    #[test]
+    fn symbol_and_timeframe_switches_keep_a_valid_capped_viewport() {
+        let mut st = MarketState::default();
+        st.set_bars("AAA", "15m", "NSE", bars(5000));
+        st.apply(MarketAction::WheelZoom(0.5, -1.0));
+        st.apply(MarketAction::WheelPanX(0.3));
+        // Symbol switch onto a SMALLER dataset.
+        st.set_bars("BBB", "15m", "NSE", bars(300));
+        assert!(st.count <= MAX_VISIBLE_BARS.min(300));
+        assert!(st.first >= 0.0 && st.first <= st.max_pan_first() as f64);
+        assert!(st.follow_latest);
+        assert!(!st.visible_window().is_empty());
+        // Timeframe switch onto a LARGER dataset.
+        st.set_bars("BBB", "1h", "NSE", bars(9000));
+        assert!(st.count <= MAX_VISIBLE_BARS);
+        assert!(st.first >= 0.0 && st.first <= st.max_pan_first() as f64);
+        assert!(st.follow_latest);
+        assert!(!st.visible_window().is_empty());
+    }
+
+    /// Viewport-based rendering (§7/§22Q): the projection processes only the
+    /// bars the viewport touches — never the full history — and zooming in
+    /// shrinks the processed set one-for-one.
+    #[test]
+    fn projection_processes_only_viewport_bars() {
+        let mut st = MarketState::default();
+        st.set_bars("TEST", "15m", "NSE", bars(62_800));
+        for _ in 0..40 {
+            st.apply(MarketAction::WheelZoom(0.5, 1.0));
+        }
+        assert_eq!(st.count, MAX_VISIBLE_BARS);
+        let view = project_viewport(&st);
+        assert_eq!(view.candles.len(), st.visible_window().len());
+        assert!(view.candles.len() <= MAX_VISIBLE_BARS + 1);
+        let wide = view.candles.len();
+        st.apply(MarketAction::WheelZoom(0.5, -1.0));
+        let view2 = project_viewport(&st);
+        assert_eq!(view2.candles.len(), st.visible_window().len());
+        assert!(view2.candles.len() < wide);
+    }
+
     #[test]
     fn initial_window_matches_legacy_anchor() {
         let mut st = MarketState::default();
@@ -3426,10 +3556,10 @@ mod tests {
         // Latest bar sits at (1 - RIGHT_MARGIN) across the window.
         // Python `round` (half-to-even) — the legacy widget's own rule.
         let target = round_py((1.0 - RIGHT_MARGIN_FRACTION) * INITIAL_BARS as f64 + 0.5) as usize;
-        assert_eq!(st.first, st.bars.len() - target);
+        assert_eq!(st.first, (st.bars.len() - target) as f64);
         assert!(st.has_data());
         // Anchor keeps the window inside the data (clamped visible slice).
-        assert_eq!(st.visible_window().len(), st.bars.len() - st.first);
+        assert_eq!(st.visible_window().len(), st.bars.len() - st.first as usize);
         assert!(st.visible_window().len() <= INITIAL_BARS);
     }
 
@@ -3437,7 +3567,7 @@ mod tests {
     fn small_history_opens_whole_and_empty_is_honest() {
         let mut st = MarketState::default();
         st.set_bars("TEST", "15m", "NSE", bars(5));
-        assert_eq!(st.first, 0);
+        assert_eq!(st.first, 0.0);
         assert_eq!(st.visible_window().len(), 5);
         st.set_bars("TEST", "15m", "NSE", Vec::new());
         assert_eq!(st.status, MarketStatus::Empty);
@@ -3458,7 +3588,7 @@ mod tests {
         // pan resets follow at left
         assert!(st.apply(MarketAction::WheelPanX(-0.2)));
         assert!(st.first > mid_before || st.first < mid_before);
-        assert!(!st.follow_latest || st.first >= st.max_first());
+        assert!(!st.follow_latest || st.first >= st.max_first() as f64);
     }
 
     #[test]
@@ -3496,7 +3626,7 @@ mod tests {
         st.plot_series = vec![PlotSeries {
             owner: "SMA".to_string(),
             title: "SMA".to_string(),
-            points: (st.first..st.first + 50)
+            points: (st.first as usize..st.first as usize + 50)
                 .map(|i| (i, 100.0 + i as f64))
                 .collect(),
             extend: "none".to_string(),
@@ -3546,7 +3676,6 @@ mod tests {
         assert_eq!(vp.has_data, full.has_data);
         assert_eq!(vp.scale_mode, full.scale_mode);
         assert_eq!(vp.scale_label, full.scale_label);
-        assert_eq!(vp.grid_visible, full.grid_visible);
         assert_eq!(vp.cross_visible, full.cross_visible);
         // List panels are skipped, never stale-copied: empty by contract.
         assert!(vp.watch_rows.is_empty());
@@ -3614,7 +3743,7 @@ mod tests {
                     st.apply(MarketAction::PriceReset);
                 }
             }
-            assert!(st.first <= st.bars.len().saturating_sub(1));
+            assert!(st.first <= st.bars.len().saturating_sub(1) as f64);
             assert!(st.count >= MIN_VISIBLE_BARS);
             assert_eq!(st.bars.len(), fingerprint.len());
             if i % 100 == 0 {
@@ -3642,10 +3771,10 @@ mod tests {
         assert!(st.apply(MarketAction::HoverMoved(0.5, 0.5)));
         assert!(st.hover.is_some());
         // Park at the oldest bar, then pan further into the past: clamped.
-        st.first = 0;
+        st.first = 0.0;
         st.follow_latest = false;
         assert!(!st.apply(MarketAction::WheelPanX(0.05)));
-        assert_eq!(st.first, 0);
+        assert_eq!(st.first, 0.0);
         assert!(
             st.hover.is_some(),
             "clamped pan must not drop the crosshair"
@@ -3673,14 +3802,14 @@ mod tests {
         st.set_bars("TEST", "15m", "NSE", bars(3000));
         let total = st.bars.len();
         let slots = st.count;
-        assert_eq!(st.first, st.max_first());
+        assert_eq!(st.first, st.max_first() as f64);
         // One long gesture: the pointer leaves the plot, the chart still owns
         // the drag (same as the legacy widget's mouse grab).
         assert!(st.apply(MarketAction::DragStart(0.95, 0.5)));
         assert!(st.apply(MarketAction::DragMove(-1.5, 0.5)));
         assert!(st.apply(MarketAction::DragEnd));
         // Newest bar on the left edge: one slot filled, the rest empty.
-        assert_eq!(st.first, total - 1);
+        assert_eq!(st.first, (total - 1) as f64);
         assert_eq!(st.visible_window().len(), 1);
         assert!(!st.follow_latest);
         let view = project(&st);
@@ -3710,7 +3839,7 @@ mod tests {
         }
         assert!(moved > 0, "pan must move before clamping");
         assert!(noop > 0, "clamped pans must report no-op");
-        assert_eq!(st.first, 0);
+        assert_eq!(st.first, 0.0);
         assert!(!st.follow_latest);
         let slots = st.count;
         let view = project(&st);
@@ -3730,13 +3859,13 @@ mod tests {
         assert!(st.apply(MarketAction::DragEnd));
         let parked = st.first;
         assert!(
-            parked > st.max_first(),
+            parked > st.max_first() as f64,
             "parked past the live edge: {parked}"
         );
         assert!(!st.follow_latest);
         // Same series, one more bar: the window keeps the same bars in view.
         st.set_bars("TEST", "15m", "NSE", bars(3001));
-        assert_eq!(st.first, parked + 1);
+        assert_eq!(st.first, parked + 1.0);
         assert!(!st.follow_latest);
     }
 
@@ -3933,7 +4062,7 @@ mod tests {
         let mut st = MarketState::default();
         st.set_bars("TEST", "15m", "NSE", bars(100));
         // Use indices inside the anchored visible window (first > 0).
-        let first = st.first;
+        let first = st.first as usize;
         st.plot_series = vec![PlotSeries {
             owner: "SMA".to_string(),
             title: "SMA20".to_string(),
@@ -3972,7 +4101,7 @@ mod tests {
     fn covered_bars_suppress_signal_markers_but_keep_lines() {
         let mut st = MarketState::default();
         st.set_bars("TEST", "15m", "NSE", bars(100));
-        let first = st.first;
+        let first = st.first as usize;
         st.trade_markers = vec![TradeMarker {
             side: "LONG".to_string(),
             entry_price: 110.0,
@@ -4000,7 +4129,7 @@ mod tests {
     fn sparse_extend_series_draw_rays_not_diagonals() {
         let mut st = MarketState::default();
         st.set_bars("TEST", "15m", "NSE", bars(100));
-        let first = st.first;
+        let first = st.first as usize;
         st.plot_series = vec![PlotSeries {
             owner: "OBR".to_string(),
             title: "REF HIGH".to_string(),
@@ -4020,7 +4149,7 @@ mod tests {
     fn strategy_markers_map_kinds_and_eod_pills() {
         let mut st = MarketState::default();
         st.set_bars("TEST", "15m", "NSE", bars(100));
-        let first = st.first;
+        let first = st.first as usize;
         st.strategy_markers = vec![
             StrategyMarker {
                 bar: first as i32,
@@ -4188,7 +4317,7 @@ mod tests {
         let st = golden_state();
         // legacy: first 1980, logical count 1200 (visible 1020 — clamped by the
         // data end), follow-latest on, price span over the visible window.
-        assert_eq!(st.first, 1980);
+        assert_eq!(st.first, 1980.0);
         assert_eq!(st.count, 1200);
         assert_eq!(st.visible_window().len(), 1020);
         assert!(st.follow_latest);
@@ -4230,28 +4359,30 @@ mod tests {
         for _ in 0..3 {
             assert!(!st.apply(MarketAction::WheelZoom(0.5, 1.0)));
         }
-        assert_eq!((st.first, st.count), (1980, 1200));
+        assert_eq!((st.first, st.count), (1980.0, 1200));
         assert!(st.follow_latest);
         // Horizontal pan +300px x4 (delta_frac = 0.25): first 780.
         for _ in 0..4 {
             assert!(st.apply(MarketAction::WheelPanX(0.25)));
         }
-        assert_eq!((st.first, st.count), (780, 1200));
+        assert_eq!((st.first, st.count), (780.0, 1200));
         assert!(!st.follow_latest);
         let (lo, hi) = st.price_range();
         assert!((lo - 1001.5455).abs() < 5e-4 && (hi - 1030.0245).abs() < 5e-4);
-        // Zoom-out x3 (inverted wheel: steps=-2 per notch pair): first 1222,
-        // count 315. The final anchor lands on an exact .5 (1222.5): Python
-        // rounds it to 1222 (half-to-even); Rust must not drift to 1223.
+        // Zoom-out x3 (inverted wheel: steps=-2 per notch pair): count 315.
+        // The viewport origin is now EXACT bar-space (1222.5, not the legacy
+        // integer 1222): the cursor anchor is preserved without the
+        // half-to-even rounding that made zoom drift bar-to-bar. Deliberate
+        // divergence — the fractional origin is what makes pan continuous.
         for _ in 0..3 {
             assert!(st.apply(MarketAction::WheelZoom(0.5, -2.0)));
         }
-        assert_eq!((st.first, st.count), (1222, 315));
+        assert_eq!((st.first, st.count), (1222.5, 315));
         let (lo, hi) = st.price_range();
         assert!((lo - 1006.386).abs() < 5e-4 && (hi - 1025.174).abs() < 5e-4);
         // legacy reset → the fresh-chart viewport.
         assert!(st.apply(MarketAction::ResetView));
-        assert_eq!((st.first, st.count), (1980, 1200));
+        assert_eq!((st.first, st.count), (1980.0, 1200));
         assert!(st.follow_latest);
     }
 
@@ -4264,7 +4395,13 @@ mod tests {
         let y1 = 360.0 / GOLD_CHART_H as f64;
         assert!(st.apply(MarketAction::DragStart(0.5, y0 as f32)));
         assert!(st.apply(MarketAction::DragMove(0.6, y1 as f32)));
-        assert_eq!(st.first, 1860);
+        // f32 gesture precision: 0.6f32 - 0.5f32 is not exactly 0.1, so the
+        // fractional origin lands within a millionth of the legacy integer.
+        assert!(
+            (st.first - 1860.0).abs() < 1e-3,
+            "drag time shift: first {}",
+            st.first
+        );
         assert!(!st.follow_latest);
         let (lo, hi) = st.price_range();
         assert!((lo - 1016.421295).abs() < 5e-4, "drag price low {lo}");
@@ -4278,9 +4415,16 @@ mod tests {
         assert!((lo - 1012.124986).abs() < 5e-4, "price zoom low {lo}");
         assert!((hi - 1045.276236).abs() < 5e-4, "price zoom high {hi}");
         // legacy price double-click reset (auto-fit over the current window).
+        // Divergence from the legacy integers (1012.3745/1040.2155): the f32
+        // drag lands at first=1859.99997…, so the fractional viewport
+        // legitimately includes a sliver of bar 1859 in the auto-fit — one
+        // extra real bar at the left edge, exactly what the user sees.
         assert!(st.apply(MarketAction::PriceReset));
         let (lo, hi) = st.price_range();
-        assert!((lo - 1012.3745).abs() < 5e-4 && (hi - 1040.2155).abs() < 5e-4);
+        assert!(
+            (lo - 1012.322).abs() < 5e-4 && (hi - 1040.218).abs() < 5e-4,
+            "price reset: lo {lo} hi {hi}"
+        );
 
         // Drag toward the latest bar: ONE-SIDE FREE PAN (requested behavior —
         // deliberate divergence from the legacy clamp at the live edge). The
@@ -4293,7 +4437,7 @@ mod tests {
         assert!(st.apply(MarketAction::DragMove(x1 as f32, y0 as f32)));
         assert!(st.apply(MarketAction::DragEnd));
         assert!(
-            (2859..=2861).contains(&st.first),
+            (2859.0..=2861.0).contains(&st.first),
             "free pan left: first {}",
             st.first
         );
@@ -4469,9 +4613,7 @@ mod tests {
         assert_eq!(st.scale_mode, ChartScaleMode::Regular);
         assert_eq!(ChartScaleMode::Percent.label(), "%");
         assert_eq!(ChartScaleMode::Logarithmic.kind(), 2);
-        assert!(st.grid_visible && st.cross_visible);
-        assert!(st.apply(MarketAction::ToggleGrid));
-        assert!(!st.grid_visible);
+        assert!(st.cross_visible);
         assert!(st.apply(MarketAction::ToggleCrosshair));
         assert!(!st.cross_visible);
     }
@@ -4674,27 +4816,6 @@ mod tests {
     }
 
     #[test]
-    fn last_price_line_is_a_subtle_dash_run() {
-        let mut st = MarketState::default();
-        st.width_cap = 200;
-        st.set_bars("S", "15m", "", scale_bars());
-        let view = project(&st);
-        assert!(view.has_last_price);
-        let dashes: Vec<_> = view
-            .plot_segments
-            .iter()
-            .filter(|s| s.series == -2 && (s.x2 - s.x1) > 0.0)
-            .collect();
-        // ~40 dashes span the full width on one shared y (up = pos code).
-        assert!((30..=60).contains(&dashes.len()));
-        for d in &dashes {
-            assert_eq!((d.y1, d.y2), (view.last_price_pos, view.last_price_pos));
-            assert_eq!(d.color, 2);
-        }
-        assert!(!view.plot_segments.iter().any(|s| s.series == 0));
-    }
-
-    #[test]
     fn time_ticks_never_repeat_a_stamp() {
         // Fifty bars inside one minute on a 15m frame: every raw label is
         // "09:15" — the axis must collapse to exactly one tick.
@@ -4790,16 +4911,14 @@ mod tests {
     fn settings_project_into_view() {
         let mut st = MarketState::default();
         st.set_bars("S", "15m", "", scale_bars());
-        assert!(st.apply(MarketAction::ToggleGrid));
         let view = project(&st);
         assert_eq!(view.scale_mode, 0);
         assert_eq!(view.scale_label, "₹");
-        assert!(!view.grid_visible);
         assert!(view.cross_visible);
     }
 
     #[test]
-    fn popup_chart_section_lists_scale_grid_cross() {
+    fn popup_chart_section_lists_scale_cross() {
         let mut st = MarketState::default();
         st.set_bars("S", "15m", "", scale_bars());
         assert!(st.apply(MarketAction::IndicatorPopup(true)));
@@ -4812,15 +4931,10 @@ mod tests {
             .collect();
         assert_eq!(
             rows,
-            vec![
-                ("scale", "Scale: Regular (₹)"),
-                ("grid", "Grid lines: On"),
-                ("cross", "Crosshair: On"),
-            ]
+            vec![("scale", "Scale: Regular (₹)"), ("cross", "Crosshair: On"),]
         );
         // Labels follow state; ids stay stable for routing.
         assert!(st.apply(MarketAction::CycleScaleMode));
-        assert!(st.apply(MarketAction::ToggleGrid));
         let view = project(&st);
         let rows: Vec<(&str, &str)> = view
             .popup_rows
@@ -4830,11 +4944,7 @@ mod tests {
             .collect();
         assert_eq!(
             rows,
-            vec![
-                ("scale", "Scale: Percent (%)"),
-                ("grid", "Grid lines: Off"),
-                ("cross", "Crosshair: On"),
-            ]
+            vec![("scale", "Scale: Percent (%)"), ("cross", "Crosshair: On"),]
         );
     }
 
@@ -4999,153 +5109,5 @@ mod tests {
             "16 Sep 2026"
         );
         assert_eq!(format_crosshair_time("garbage", "15m"), "garbage");
-    }
-
-    #[test]
-    fn zoom_anchor_preserves_coordinate_at_left_center_right() {
-        let mut st = MarketState::default();
-        st.set_bars("TEST", "15m", "NSE", bars(3000));
-        // Move to historical bars:
-        st.origin = 1000.0;
-        st.first = 1000;
-        st.count = 400;
-        st.follow_latest = false;
-
-        for &fx in &[0.05f32, 0.25f32, 0.5f32, 0.75f32, 0.95f32] {
-            let px_before = st.plot_x();
-            let data_coord_before = px_before.bar_at(f64::from(fx));
-
-            // Zoom in
-            assert!(st.apply(MarketAction::WheelZoom(fx, -1.0)));
-            let px_after = st.plot_x();
-            let data_coord_after = px_after.bar_at(f64::from(fx));
-            assert!(
-                (data_coord_after - data_coord_before).abs() < 1e-9,
-                "zoom in at fx {fx}: before {data_coord_before}, after {data_coord_after}"
-            );
-
-            // Zoom out
-            assert!(st.apply(MarketAction::WheelZoom(fx, 1.0)));
-            let px_out = st.plot_x();
-            let data_coord_out = px_out.bar_at(f64::from(fx));
-            assert!(
-                (data_coord_out - data_coord_before).abs() < 1e-9,
-                "zoom out at fx {fx}: before {data_coord_before}, after {data_coord_out}"
-            );
-        }
-    }
-
-    #[test]
-    fn zoom_reversibility_zero_cumulative_drift() {
-        let mut st = MarketState::default();
-        st.set_bars("TEST", "15m", "NSE", bars(3000));
-        st.origin = 1200.0;
-        st.first = 1200;
-        st.count = 500;
-        st.follow_latest = false;
-
-        let initial_origin = st.origin;
-        let initial_count = st.count;
-        let fx = 0.37f32;
-
-        // 10 zoom-in steps followed by 10 zoom-out steps
-        for _ in 0..10 {
-            assert!(st.apply(MarketAction::WheelZoom(fx, -0.2)));
-        }
-        for _ in 0..10 {
-            assert!(st.apply(MarketAction::WheelZoom(fx, 0.2)));
-        }
-
-        assert_eq!(
-            st.count, initial_count,
-            "count must restore after symmetric zoom"
-        );
-        assert!(
-            (st.origin - initial_origin).abs() < 1e-6,
-            "cumulative drift must be virtually zero: initial {initial_origin}, final {}",
-            st.origin
-        );
-    }
-
-    #[test]
-    fn historical_zoom_does_not_snap_to_live_edge() {
-        let mut st = MarketState::default();
-        st.set_bars("TEST", "15m", "NSE", bars(3000));
-        // Deep historical view
-        st.origin = 500.0;
-        st.first = 500;
-        st.count = 300;
-        st.follow_latest = false;
-
-        let live_anchor = st.anchor_first(3000, 300); // ~2745
-        assert!(live_anchor > 2500);
-
-        // Zoom in at center
-        assert!(st.apply(MarketAction::WheelZoom(0.5, -1.0)));
-        assert!(
-            (st.origin - 500.0).abs() < 100.0,
-            "origin must remain around 500, not snap to live edge {live_anchor}; actual: {}",
-            st.origin
-        );
-        assert!(!st.follow_latest);
-
-        // Zoom out at center
-        assert!(st.apply(MarketAction::WheelZoom(0.5, 1.0)));
-        assert!(
-            (st.origin - 500.0).abs() < 50.0,
-            "origin must remain around 500; actual: {}",
-            st.origin
-        );
-        assert!(!st.follow_latest);
-    }
-
-    #[test]
-    fn live_edge_zoom_preserves_anchor_under_cursor() {
-        let mut st = MarketState::default();
-        st.set_bars("TEST", "15m", "NSE", bars(3000));
-        assert!(st.follow_latest);
-
-        // Zoom at cursor position fx = 0.85
-        let fx = 0.85f32;
-        let coord_before = st.plot_x().bar_at(f64::from(fx));
-        assert!(st.apply(MarketAction::WheelZoom(fx, -1.0)));
-        let coord_after = st.plot_x().bar_at(f64::from(fx));
-        assert!(
-            (coord_after - coord_before).abs() < 1e-9,
-            "live-edge zoom must preserve cursor anchor: before {coord_before}, after {coord_after}"
-        );
-    }
-
-    #[test]
-    fn continuous_sub_bar_panning_and_hover_alignment() {
-        let mut st = MarketState::default();
-        st.set_bars("TEST", "15m", "NSE", bars(1000));
-        st.origin = 100.0;
-        st.first = 100;
-        st.count = 100;
-
-        // Sub-bar pan (0.003 of 100 slots = 0.3 bars)
-        assert!(st.apply(MarketAction::WheelPanX(0.003)));
-        assert!((st.origin - 99.7).abs() < 1e-6);
-
-        // Hover over a bar center
-        let target_bar = 120.0;
-        let fx = st.plot_x().frac_of(target_bar) as f32;
-        assert!(st.apply(MarketAction::HoverMoved(fx, 0.5)));
-        let hover = st.hover.expect("hover must be active");
-        assert_eq!(hover.index, 120);
-
-        let view = project(&st);
-        let hover_view = project_hover(&st);
-        assert!(
-            (hover_view.hover_x - fx).abs() < 1e-6,
-            "crosshair x must match candle center exactly"
-        );
-        // Matching candle in view
-        let candle = view.candles.iter().find(|c| (c.x - fx).abs() < 1e-5);
-        assert!(
-            candle.is_some(),
-            "candle must exist at snapped crosshair location"
-        );
     }
 }
