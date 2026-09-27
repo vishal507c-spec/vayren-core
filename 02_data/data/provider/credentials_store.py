@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import ctypes
 import json
+import os
 import sys
 from ctypes import wintypes
 from pathlib import Path
@@ -52,7 +53,15 @@ class FileCredentialStore:
 
     def save(self, service: str, values: dict[str, str]) -> None:
         self._dir.mkdir(parents=True, exist_ok=True)
-        self._path(service).write_text(json.dumps(values), encoding="utf-8")
+        path = self._path(service)
+        # Owner-read/write from the first byte: a plaintext secret must never
+        # exist in a world-readable window (umask is not a boundary). On
+        # Windows modes are advisory (NTFS ACLs rule) — harmless no-op there.
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(values))
+        if os.name == "posix":
+            os.chmod(path, 0o600)
 
     def load(self, service: str) -> dict[str, str] | None:
         path = self._path(service)

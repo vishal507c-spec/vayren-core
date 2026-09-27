@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ctypes
 import json
+import os
 
 import pytest
 
@@ -23,6 +24,26 @@ def test_file_store_save_load_roundtrip(tmp_path) -> None:
     store = FileCredentialStore(tmp_path)
     store.save("vayren:zerodha", _VALUES)
     assert store.load("vayren:zerodha") == _VALUES
+
+
+@pytest.mark.skipif(os.name != "posix", reason="modes are advisory on Windows")
+def test_file_store_written_secret_is_owner_only(tmp_path) -> None:
+    store = FileCredentialStore(tmp_path)
+    store.save("vayren:zerodha", {"api_key": "k"})
+    path = tmp_path / "credentials" / "vayren.zerodha.json"
+    assert path.stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.skipif(os.name != "posix", reason="modes are advisory on Windows")
+def test_file_store_tightens_preexisting_loose_file(tmp_path) -> None:
+    store = FileCredentialStore(tmp_path)
+    (tmp_path / "credentials").mkdir()
+    path = tmp_path / "credentials" / "vayren.zerodha.json"
+    path.write_text('{"api_key": "old"}', encoding="utf-8")
+    os.chmod(path, 0o644)
+    store.save("vayren:zerodha", {"api_key": "new"})
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert store.load("vayren:zerodha") == {"api_key": "new"}
 
 
 def test_file_store_load_missing_returns_none(tmp_path) -> None:
