@@ -17,6 +17,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -114,12 +115,22 @@ def _failure_summary(output: str, limit: int = 40) -> list[str]:
 
 def _run(argv: list[str]) -> int:
     print(f"+ {' '.join(argv)}", flush=True)
+    started = time.monotonic()
     proc = subprocess.run(argv, cwd=ROOT, capture_output=True, text=True)
+    elapsed = time.monotonic() - started
     if proc.returncode != 0:
         tail = (proc.stderr or proc.stdout or "")[-3000:]
         print(f"cargo failed (rc={proc.returncode}):\n{tail}")
         for line in _failure_summary(proc.stderr or proc.stdout or ""):
             print(f"  ! {line.strip()[:200]}", flush=True)
+    else:
+        # Success-side observability (mission Phase 13): cargo test counts and
+        # per-stage wall time were invisible on green runs, so regressions in
+        # build time or test counts could not be attributed after the fact.
+        for line in (proc.stdout + proc.stderr).splitlines():
+            if line.startswith("test result:"):
+                print(line, flush=True)
+        print(f"[build-rust] {argv[0]} {argv[1]} ok in {elapsed:.1f}s", flush=True)
     return proc.returncode
 
 
