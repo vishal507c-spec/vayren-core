@@ -258,7 +258,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     start: Some(request.start).filter(|s| !s.is_empty()),
                     end: Some(request.end).filter(|s| !s.is_empty()),
                     capital: request.capital,
-                    cost: request.cost,
                     mode: request.mode,
                 },
                 move |data| FetchResult::LabSelect(id, data),
@@ -278,7 +277,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 start: Some(request.start).filter(|s| !s.is_empty()),
                 end: Some(request.end).filter(|s| !s.is_empty()),
                 capital: request.capital,
-                cost: request.cost,
                 mode: request.mode,
             };
             spawn_fetch(&backend, &tx, command, move |data| {

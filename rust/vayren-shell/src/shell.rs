@@ -25,7 +25,7 @@ use crate::{
     MarketPopupRow, MarketRayLevel, MarketSettingsRow, MarketStatusRow, MarketTick,
     MarketTimeframe, MarketTradeContext, MarketWatchRow, PortfolioAlloc, PortfolioFill,
     PortfolioGate, PortfolioKpi, PortfolioOrder, PortfolioPosition, PortfolioRisk,
-    ProgressStepView, ResearchCompareRow, ResearchConfigGroup, ResearchEvidenceDim,
+    ProgressStepView, RankWindow, ResearchCompareRow, ResearchConfigGroup, ResearchEvidenceDim,
     ResearchEvidenceWhy, ResearchExperimentRow, ResearchField, ResearchKv, ResearchKvGroup,
     ResearchMetric, ResearchRobustRow, ResearchSignalRow, ResearchStrategyRow, ResearchTradeRow,
     ShellScreen,
@@ -1413,8 +1413,6 @@ pub fn apply_lab(ui: &AppWindow, state: &LabState) {
         sym_button_line: view.sym_button_line.into(),
         sym_count_line: view.sym_count_line.into(),
         sym_selected_line: view.sym_selected_line.into(),
-        cfg_cost: view.cfg_cost.into(),
-        cfg_cost_warn: view.cfg_cost_warn,
         run_id: view.run_id.into(),
         run_ts: view.run_ts.into(),
         cfg_hash: view.cfg_hash.into(),
@@ -1442,6 +1440,25 @@ pub fn apply_lab(ui: &AppWindow, state: &LabState) {
         today_days: view.today_days,
         dates_start_days: view.dates_start_days,
         dates_end_days: view.dates_end_days,
+    });
+    // Signature of the band the UI currently shows — captured BEFORE the window
+    // prop is overwritten, so the model-push guard below compares against what
+    // is really on screen.
+    let rendered_rank_signature = ui.get_lab_rank_window().signature_hi;
+    ui.set_lab_rank_window(RankWindow {
+        total: view.rank_window.total,
+        first: view.rank_window.first,
+        count: view.rank_window.count,
+        row_h: view.rank_window.row_h as f32,
+        viewport_h: view.rank_window.viewport_h as f32,
+        scroll_px: view.rank_window.scroll_px as f32,
+        max_scroll_px: view.rank_window.max_scroll_px as f32,
+        thumb_h: view.rank_window.thumb_h as f32,
+        thumb_y: view.rank_window.thumb_y as f32,
+        scrollable: view.rank_window.scrollable,
+        signature_hi: view.rank_window.signature.0,
+        signature_lo: view.rank_window.signature.1,
+        overscan: view.rank_window.overscan,
     });
     ui.set_lab_date_presets(
         Rc::new(slint::VecModel::from(
@@ -1486,28 +1503,34 @@ pub fn apply_lab(ui: &AppWindow, state: &LabState) {
         ))
         .into(),
     );
-    ui.set_lab_ranking(
-        Rc::new(slint::VecModel::from(
-            view.ranking
-                .into_iter()
-                .map(|r| LabRankRow {
-                    rank: r.rank.into(),
-                    symbol: r.symbol.into(),
-                    pnl: r.pnl.into(),
-                    ret: r.ret.into(),
-                    trades: r.trades.into(),
-                    win: r.win.into(),
-                    pf: r.pf.into(),
-                    dd: r.dd.into(),
-                    sharpe: r.sharpe.into(),
-                    pnl_tone: r.pnl_tone.cell(),
-                    pf_tone: r.pf_tone.cell(),
-                    unranked: r.unranked,
-                })
-                .collect::<Vec<_>>(),
-        ))
-        .into(),
-    );
+    // Zero full-table re-render (`spec §3`): the ranking band is a virtual
+    // window, and an unrelated state change (a KPI, a code edit, a hover) must
+    // not rebuild its model. The Rust side signs the band; an equal signature
+    // means the rows on screen are already correct.
+    if rendered_rank_signature != view.rank_window.signature.0 {
+        ui.set_lab_ranking(
+            Rc::new(slint::VecModel::from(
+                view.ranking
+                    .into_iter()
+                    .map(|r| LabRankRow {
+                        rank: r.rank.into(),
+                        symbol: r.symbol.into(),
+                        pnl: r.pnl.into(),
+                        ret: r.ret.into(),
+                        trades: r.trades.into(),
+                        win: r.win.into(),
+                        pf: r.pf.into(),
+                        dd: r.dd.into(),
+                        sharpe: r.sharpe.into(),
+                        pnl_tone: r.pnl_tone.cell(),
+                        pf_tone: r.pf_tone.cell(),
+                        unranked: r.unranked,
+                    })
+                    .collect::<Vec<_>>(),
+            ))
+            .into(),
+        );
+    }
     ui.set_lab_trades(
         Rc::new(slint::VecModel::from(
             view.trades
@@ -1703,9 +1726,6 @@ pub struct LabRunRequest {
     pub start: String,
     pub end: String,
     pub capital: f64,
-    /// Transaction cost in percent-per-side (backend commission units), None
-    /// when the field is empty/unparseable (backend default applies).
-    pub cost: Option<f64>,
     pub mode: String,
 }
 
@@ -1748,7 +1768,6 @@ impl LabRunRequest {
             start: state.cfg_dates_start.clone(),
             end: state.cfg_dates_end.clone(),
             capital,
-            cost: parse_cost_pct(&state.cfg_cost),
             mode,
         })
     }
@@ -1765,7 +1784,6 @@ pub struct LabSelectRequest {
     pub start: String,
     pub end: String,
     pub capital: f64,
-    pub cost: Option<f64>,
     pub mode: String,
 }
 
@@ -1779,7 +1797,6 @@ impl LabSelectRequest {
             start: run.start,
             end: run.end,
             capital: run.capital,
-            cost: run.cost,
             mode: run.mode,
         })
     }
@@ -1795,25 +1812,6 @@ fn parse_capital(text: &str) -> Option<f64> {
         return None;
     }
     cleaned.parse::<f64>().ok()
-}
-
-/// Parse a transaction-cost echo ("0.05", "0.05%", " 0.10 %") into
-/// percent-per-side (backend commission units). Empty/unparseable/negative
-/// yields None so the backend default applies — never invent a cost.
-fn parse_cost_pct(text: &str) -> Option<f64> {
-    let trimmed = text.trim().trim_end_matches('%').trim();
-    // A leading minus survives digit-filtering, so reject negatives up front.
-    if trimmed.starts_with('-') {
-        return None;
-    }
-    let cleaned: String = trimmed
-        .chars()
-        .filter(|c| c.is_ascii_digit() || *c == '.')
-        .collect();
-    match cleaned.parse::<f64>() {
-        Ok(v) if v.is_finite() && v >= 0.0 => Some(v),
-        _ => None,
-    }
 }
 
 pub fn wire_lab(
@@ -1949,12 +1947,53 @@ pub fn wire_lab(
     ui.on_lab_rank_picked(move |symbol| {
         {
             let mut guard = strong.borrow_mut();
-            guard.interaction_simple(&format!("ranksel:{}", symbol.as_str()));
+            guard.interaction_rank_picked(symbol.as_str());
         }
         if let Some(ui) = handle.upgrade() {
             apply_lab(&ui, &strong.borrow());
         }
     });
+    // Ranking scroll surface: the whole virtual-window path. Each notch is O(1)
+    // window arithmetic (`spec §8`), so a flick never blocks the frame.
+    {
+        let strong = state.clone();
+        let handle = ui.as_weak();
+        ui.on_lab_rank_scrolled(move |px: f32| {
+            {
+                let mut guard = strong.borrow_mut();
+                guard.interaction_rank_scroll(px);
+            }
+            if let Some(ui) = handle.upgrade() {
+                apply_lab(&ui, &strong.borrow());
+            }
+        });
+    }
+    {
+        let strong = state.clone();
+        let handle = ui.as_weak();
+        ui.on_lab_rank_scroll_to(move |px: f32| {
+            {
+                let mut guard = strong.borrow_mut();
+                guard.interaction_rank_scroll_to(px);
+            }
+            if let Some(ui) = handle.upgrade() {
+                apply_lab(&ui, &strong.borrow());
+            }
+        });
+    }
+    {
+        let strong = state.clone();
+        let handle = ui.as_weak();
+        ui.on_lab_rank_viewport_reported(move |height: f32| {
+            {
+                let mut guard = strong.borrow_mut();
+                guard.interaction_rank_viewport(height);
+            }
+            if let Some(ui) = handle.upgrade() {
+                apply_lab(&ui, &strong.borrow());
+            }
+        });
+    }
     macro_rules! on_lab_text {
         ($on:ident, $act:expr) => {{
             let strong = state.clone();
@@ -1980,7 +2019,6 @@ pub fn wire_lab(
         on_lab_trade_filter_changed,
         LabState::interaction_tradefilter
     );
-    on_lab_text!(on_lab_cost_committed, LabState::interaction_cost);
     {
         let strong = state.clone();
         let handle = ui.as_weak();
@@ -2129,6 +2167,7 @@ pub fn visual_fixture(kind: &str) -> LabState {
                         },
                         pf_tone: lab::Tone::Positive,
                         unranked: false,
+                        sort: [99_999.0, 9.99, 99.0, 99.9, 9.99, 9.99, 9.99],
                     })
                     .collect(),
                 trades: (1..=14)
@@ -4074,34 +4113,9 @@ mod tests {
     }
 
     #[test]
-    fn lab_cost_parses_percent_echoes() {
-        // Backend commission units: percent-per-side, same as the default.
-        assert_eq!(parse_cost_pct("0.05"), Some(0.05));
-        assert_eq!(parse_cost_pct("0.05%"), Some(0.05));
-        assert_eq!(parse_cost_pct("  0.10 % "), Some(0.10));
-        assert_eq!(parse_cost_pct(""), None);
-        assert_eq!(parse_cost_pct("—"), None);
-        assert_eq!(parse_cost_pct("abc"), None);
-        assert_eq!(parse_cost_pct("-0.05"), None);
-        // Gather carries the parsed cost; empty echoes keep backend default.
-        let mut state = demo_lab_state();
-        state.selected = Some(1);
-        state.engine_wired = true;
-        state.universe_symbols = vec!["RELIANCE".into()];
-        state.universe_selected = vec!["RELIANCE".into()];
-        state.cfg_cost = "0.05".into();
-        assert_eq!(
-            LabRunRequest::gather(&state).expect("request").cost,
-            Some(0.05)
-        );
-        state.cfg_cost = String::new();
-        assert_eq!(LabRunRequest::gather(&state).expect("request").cost, None);
-    }
-
-    #[test]
     fn lab_select_request_preserves_workspace_config() {
         // End-to-end user flow proof (Rust side): open Lab → pick strategy →
-        // universe search/select/apply → timeframe → dates → capital → cost →
+        // universe search/select/apply → timeframe → dates → capital →
         // direction → the select AND run requests carry exactly that config,
         // so neither a strategy switch nor the run can use stale values.
         let mut state = demo_lab_state();
@@ -4119,7 +4133,6 @@ mod tests {
         state.interaction_timeframe("1h");
         state.interaction_dates("2024-01-01", "2024-03-31");
         state.interaction_capital("500000");
-        state.interaction_cost("0.05");
         state.interaction_mode(LabMode::Short);
         let select = LabSelectRequest::gather(&state).expect("select request");
         assert_eq!(select.strategy, "SMA");
@@ -4131,7 +4144,6 @@ mod tests {
         assert_eq!(select.start, "2024-01-01");
         assert_eq!(select.end, "2024-03-31");
         assert_eq!(select.capital, 500000.0);
-        assert_eq!(select.cost, Some(0.05));
         assert_eq!(select.mode, "sell");
         let run = LabRunRequest::gather(&state).expect("run request");
         assert_eq!(run.symbols, select.symbols);
@@ -4139,7 +4151,6 @@ mod tests {
         assert_eq!(run.start, select.start);
         assert_eq!(run.end, select.end);
         assert_eq!(run.capital, select.capital);
-        assert_eq!(run.cost, select.cost);
         assert_eq!(run.mode, select.mode);
     }
 }

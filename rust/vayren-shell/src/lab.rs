@@ -172,6 +172,10 @@ pub struct RankRow {
     pub pf_tone: Tone,
     /// legacy dims rows with no valid result ("— = no valid result").
     pub unranked: bool,
+    /// Raw sort keys in `RANK_HEADERS` metric order (net P&L, return %,
+    /// trades, win %, profit factor, max DD, Sharpe) — the display strings
+    /// cannot be compared honestly ("—" vs "+4.2%"), so the numbers are kept.
+    pub sort: [f64; 7],
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -332,6 +336,13 @@ pub struct LabState {
     pub rankby_current: i32,
     pub rank_search: String,
     pub rank_desc: bool,
+    /// Virtual window over the ranking rows (index layer + scroll state).
+    /// Rebuilt on data/filter/sort changes; the frame path only reads it.
+    pub rank: RankWindow,
+    /// Symbol count of `cfg_universe_csv`, counted where the CSV is adopted.
+    /// Re-splitting a 50k-symbol CSV on every frame was the second O(N) cost in
+    /// the projection (`spec §7`: derive once, invalidate on change).
+    pub cfg_universe_count: usize,
     /// Drill-down + compare echoes.
     pub detail: Option<DetailView>,
     pub compare: Option<CompareView>,
@@ -359,7 +370,6 @@ pub struct LabState {
     pub sym_search: String,
     pub sym_draft: Vec<String>,
     /// Reference-layout echoes (view-local until the backend supplies them).
-    pub cfg_cost: String,
     pub lens: i32,
     pub equity_select: i32,
 }
@@ -472,12 +482,13 @@ impl LabState {
 
     pub fn interaction_timeframe(&mut self, timeframe: &str) {
         if !timeframe.is_empty() {
-            // Optimistic echo: gather() resolves the timeframe by index, so
-            // the picked label must land in timeframe_index now (the queued
-            // backend action is future sync, not the run path).
+            // Optimistic echo: the run request resolves the timeframe by
+            // index, the field label, run summary and staleness fingerprint
+            // read config.timeframe — so the pick must land in BOTH now (the
+            // queued backend action is future sync, not the run path).
             if let Some(index) = self.timeframes.iter().position(|t| t == timeframe) {
                 self.timeframe_index = index as i32;
-                self.refresh_staleness();
+                self.edit_config(|c| c.timeframe = timeframe.to_string());
             }
             self.queue_action(format!("settimeframe:{timeframe}"));
         }
@@ -489,9 +500,19 @@ impl LabState {
             // Optimistic echo (documented LabState pattern): the backend owns
             // business behavior, but the RUN request is gathered locally — so
             // the committed value must be visible locally immediately, or the
-            // next run silently uses the previous capital.
+            // next run silently uses the previous capital. The receipt line
+            // and the staleness fingerprint read config.capital, so the
+            // formatted echo follows here too.
             self.cfg_capital = value.to_string();
-            self.refresh_staleness();
+            let label = value
+                .parse::<f64>()
+                .ok()
+                .filter(|n| n.is_finite() && *n > 0.0)
+                .map(|n| format!("₹{}", grouped_whole(n)));
+            match label {
+                Some(label) => self.edit_config(|c| c.capital = label),
+                None => self.refresh_staleness(),
+            }
             self.queue_action(format!("capital:{value}"));
         }
     }
@@ -510,19 +531,65 @@ impl LabState {
 
     pub fn interaction_ranksearch(&mut self, text: &str) {
         self.rank_search = text.to_string();
+        self.rebuild_rank_view();
         self.queue_action(format!("ranksearch:{text}"));
+    }
+
+    /// Rebuild the ranking index layer from the current data + filter + sort
+    /// (`spec §5`). The only place the index is built — scroll/frame never is.
+    pub fn rebuild_rank_view(&mut self) {
+        let criterion = rankby_sort_field(self);
+        let rows: &[RankRow] = match self.compare.as_ref() {
+            Some(cmp) if cmp.ranking.len() > 0 => &cmp.ranking,
+            _ => match self.results.as_ref() {
+                Some(results) => &results.ranking,
+                None => &[],
+            },
+        };
+        self.rank
+            .rebuild(rows, &self.rank_search, criterion, self.rank_desc);
     }
 
     pub fn interaction_rankby(&mut self, label: &str) {
         // The Slint ComboBox reports the selected label (legacy box order is
         // echoed verbatim, so the position is the legacy box index).
         if let Some(index) = self.rankby_labels.iter().position(|l| l == label) {
+            // Optimistic echo (documented LabState pattern): the sort control
+            // drives the index layer locally, so the label must land now —
+            // the queued backend action is future sync, not the render path.
+            self.rankby_current = index as i32;
+            self.rebuild_rank_view();
             self.queue_action(format!("rankby:{index}"));
         }
     }
 
     pub fn interaction_ranktoggle(&mut self) {
+        self.rank_desc = !self.rank_desc;
+        self.rebuild_rank_view();
         self.queue_action("ranktoggle".to_string());
+    }
+
+    /// Wheel / drag scrolling in px (`spec §1/§11`): O(1), clamped, adaptive
+    /// overscan from the measured velocity.
+    pub fn interaction_rank_scroll(&mut self, delta_px: f32) {
+        self.rank.scroll_by(delta_px);
+    }
+
+    /// Absolute scroll — scrollbar drag, Home/End, focus restore.
+    pub fn interaction_rank_scroll_to(&mut self, px: f32) {
+        self.rank.scroll_to(px);
+    }
+
+    /// Viewport height in px, pushed by the UI whenever the window resizes.
+    pub fn interaction_rank_viewport(&mut self, height: f32) {
+        self.rank.set_viewport(height);
+    }
+
+    /// Frame-time decay for the adaptive overscan: an idle table shrinks its
+    /// pre-rendered band back to the minimum (`spec §2`).
+    pub fn interaction_rank_idle(&mut self) {
+        self.rank.velocity = 0.0;
+        self.rank.layout();
     }
 
     pub fn interaction_trade_pick(&mut self, index: i32) {
@@ -545,10 +612,10 @@ impl LabState {
     }
 
     /// Reference-layout interactions. Perspectives lens + equity view are
-    /// view-local presentation filters (never queued); the cost field and
-    /// inspector close go through the existing pending-actions bridge.
+    /// view-local presentation filters (never queued); the inspector close
+    /// goes through the existing pending-actions bridge.
     pub fn interaction_lens(&mut self, lens: i32) {
-        if (0..6).contains(&lens) {
+        if (0..5).contains(&lens) {
             self.lens = lens;
         }
     }
@@ -559,17 +626,58 @@ impl LabState {
         }
     }
 
-    pub fn interaction_cost(&mut self, value: &str) {
-        let value = value.trim();
-        if !value.is_empty() {
-            self.cfg_cost = value.to_string();
-            self.refresh_staleness();
-            self.queue_action(format!("cost:{value}"));
-        }
-    }
-
     pub fn interaction_detail_close(&mut self) {
         self.detail = None;
+    }
+
+    /// Ranking row click opens the inspector. Every fact the drawer shows is
+    /// already in the table row, so the detail is derived here — the bridge
+    /// has no per-stock detail command, and a stale-echo round-trip would
+    /// open an empty drawer.
+    pub fn interaction_rank_picked(&mut self, symbol: &str) {
+        let row = self
+            .results
+            .as_ref()
+            .and_then(|results| results.ranking.iter().find(|row| row.symbol == symbol))
+            .or_else(|| {
+                self.compare
+                    .as_ref()
+                    .and_then(|cmp| cmp.ranking.iter().find(|row| row.symbol == symbol))
+            })
+            .cloned();
+        self.detail = row.map(|row| {
+            let metric = |label: &str, value: String| DetailMetric {
+                label: label.to_string(),
+                value,
+            };
+            DetailView {
+                symbol: row.symbol.clone(),
+                title: row.symbol.clone(),
+                stats: row.pnl.clone(),
+                caption: format!(
+                    "{} · {} · {}",
+                    self.mode.label(),
+                    self.config.timeframe,
+                    row.ret
+                ),
+                metrics: vec![
+                    metric("RETURN", row.ret.clone()),
+                    metric(
+                        "TRADES",
+                        if row.unranked {
+                            "—".to_string()
+                        } else {
+                            row.trades.clone()
+                        },
+                    ),
+                    metric("WIN RATE", row.win.clone()),
+                    metric("PROFIT FACTOR", row.pf.clone()),
+                    metric("MAX DRAWDOWN", row.dd.clone()),
+                    metric("SHARPE", row.sharpe.clone()),
+                ],
+                equity: Vec::new(),
+            }
+        });
     }
 
     /// Reset = discard the editor working copy back to the last backend echo
@@ -634,6 +742,7 @@ impl LabState {
         // one. The queued action is future backend sync, not the run path.
         self.universe_selected = selected.clone();
         self.cfg_universe_csv = selected.join(",");
+        self.cfg_universe_count = self.universe_selected.len();
         self.config.universe = if selected.is_empty() {
             "NO UNIVERSE".to_string()
         } else {
@@ -703,16 +812,10 @@ impl LabState {
     }
 
     /// Identity of the exact run inputs: display fingerprint plus direction
-    /// mode plus normalized transaction-cost echo. Cost and mode change
-    /// results, so they must mark a completed run outdated too — the display
-    /// `fingerprint()` alone cannot see them.
+    /// mode. The mode changes results, so it must mark a completed run
+    /// outdated too — the display `fingerprint()` alone cannot see it.
     pub fn run_key(&self) -> String {
-        format!(
-            "{}|mode={}|cost={}",
-            self.config.fingerprint(),
-            self.mode.kind(),
-            self.cfg_cost.trim()
-        )
+        format!("{}|mode={}", self.config.fingerprint(), self.mode.kind())
     }
 
     /// Engine bridge entry point: attach completed results for the CURRENT
@@ -722,6 +825,8 @@ impl LabState {
         self.results = Some(results);
         self.run = RunState::Complete;
         self.outdated = false;
+        // New data invalidates the index layer (same contract as a snapshot).
+        self.rebuild_rank_view();
     }
 
     pub fn start_run(&mut self) -> bool {
@@ -767,8 +872,14 @@ impl LabState {
         }
     }
 
-    pub fn results_or_default(&self) -> LabResults {
-        self.results.clone().unwrap_or_default()
+    /// Borrow the results block for projection. Returning a reference (not a
+    /// clone) is what keeps a frame O(viewport): a 50k-row ranking clone per
+    /// frame cost more than the entire render (`spec §1/§13`).
+    pub fn results_or_default(&self) -> &LabResults {
+        static EMPTY: std::sync::OnceLock<LabResults> = std::sync::OnceLock::new();
+        self.results
+            .as_ref()
+            .unwrap_or_else(|| EMPTY.get_or_init(LabResults::default))
     }
 }
 
@@ -859,6 +970,34 @@ pub struct CompareViewState {
     pub has_sides: bool,
 }
 
+/// Flat projection of the virtual window for the UI (`spec §12/§17`): the row
+/// band, the scrollbar geometry and the observability counters. Every value is
+/// derived in Rust so the UI never re-derives layout maths.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct RankWindowView {
+    /// Rows in the filtered+sorted dataset (the TRUE count — nothing hidden).
+    pub total: i32,
+    /// First rendered row (0-based into the dataset order).
+    pub first: i32,
+    /// Rendered rows (visible + overscan).
+    pub count: i32,
+    pub row_h: f32,
+    pub viewport_h: f32,
+    pub scroll_px: f32,
+    pub max_scroll_px: f32,
+    /// Scrollbar thumb size/offset in px (0 offset = hidden track).
+    pub thumb_h: f32,
+    pub thumb_y: f32,
+    /// True when the dataset is taller than the viewport (draw the scrollbar).
+    pub scrollable: bool,
+    /// Cheap identity of the rendered band — the shell skips the model push
+    /// when it is unchanged (`spec §3`: zero full-table re-render). Split in
+    /// two 32-bit halves because Slint's `int` is i32.
+    pub signature: (i32, i32),
+    /// `dataset / rendered` ratio, the virtualization proof (`spec §18`).
+    pub overscan: i32,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct LabView {
     pub has_strategy: bool,
@@ -882,7 +1021,9 @@ pub struct LabView {
     pub tabs_enabled: bool,
     pub tab: usize,
     pub kpis: Vec<KpiView>,
+    /// The virtual window — the ONLY ranking rows the UI receives.
     pub ranking: Vec<RankRow>,
+    pub rank_window: RankWindowView,
     pub trades: Vec<TradeRow>,
     pub equity: Vec<(f32, f32)>,
     pub drawdown: Vec<(f32, f32)>,
@@ -935,8 +1076,6 @@ pub struct LabView {
     /// projection only; Slint strings have no split, so it happens here.
     pub universe_chips: Vec<String>,
     // Reference-layout projection (see project() derivations).
-    pub cfg_cost: String,
-    pub cfg_cost_warn: bool,
     pub run_id: String,
     pub run_ts: String,
     pub cfg_hash: String,
@@ -1106,10 +1245,278 @@ fn date_presets_for(today: i64) -> Vec<LabPresetData> {
     ]
 }
 
-/// Ranking rows displayed before the presentation cap (the label always
-/// states the true analyzed count — the cap is a viewport policy, same as
-/// the legacy blotter precedent).
-pub const RANKING_VIEW_CAP: usize = 50;
+/// Fixed ranking-row height in logical pixels. The stable-layout contract
+/// (`spec §12`): with a constant height the virtual scroll height is exact and
+/// the window arithmetic is integer, so no row can ever be half-drawn.
+pub const RANK_ROW_H: f32 = 40.0;
+/// Viewport height in logical pixels — the ~10-row initial window the spec
+/// asks for. Rows beyond it are reachable by scrolling, never hidden.
+pub const RANK_VIEWPORT_H: f32 = RANK_ROW_H * 10.0;
+/// Overscan bounds (`spec §2`): idle keeps 2 rows of slack, a fast flick
+/// pre-renders up to 8 so the frame never waits for a row.
+const RANK_OVERSCAN_MIN: usize = 2;
+const RANK_OVERSCAN_MAX: usize = 8;
+
+/// The ranking table's virtual window — the whole point of the table layer.
+///
+/// Pipeline (`spec §5`):
+/// ```text
+/// results.ranking (FULL DATA, owned by the snapshot)
+///   -> view: Vec<u32>            (filter + sort as INDICES, never row clones)
+///   -> first/count               (VISIBLE RANGE + ADAPTIVE OVERSCAN)
+///   -> LabView.ranking           (the only rows the UI ever receives)
+/// ```
+/// The index layer is rebuilt on data/filter/sort changes only — never per
+/// frame, never per scroll notch — so scrolling is pure arithmetic.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RankWindow {
+    /// Sorted+filtered order over `results.ranking` (row indices).
+    pub view: Vec<u32>,
+    /// Rows in `view` (the true analyzed count, never a truncated one).
+    pub total: usize,
+    /// First rendered row (into `view`).
+    pub first: usize,
+    /// Rendered rows (visible + overscan).
+    pub count: usize,
+    /// Scroll offset in px, always inside `[0, max_scroll]`.
+    pub scroll_px: f32,
+    /// Viewport height in px (updated by the UI on resize).
+    pub viewport_h: f32,
+    /// Smoothed last-frame delta (px) — drives the adaptive overscan.
+    velocity: f32,
+    /// Identity of the data the index layer was built from; a mismatch forces a
+    /// rebuild (`spec §7` invalidation instead of eager recompute).
+    key: RankViewKey,
+}
+
+/// What the index layer was built from. Cheap to compare, complete enough that
+/// a stale view is impossible.
+#[derive(Debug, Clone, Default, PartialEq)]
+struct RankViewKey {
+    rows: usize,
+    search: String,
+    criterion: i32,
+    desc: bool,
+}
+
+impl Default for RankWindow {
+    fn default() -> Self {
+        Self {
+            view: Vec::new(),
+            total: 0,
+            first: 0,
+            count: 0,
+            scroll_px: 0.0,
+            viewport_h: RANK_VIEWPORT_H,
+            velocity: 0.0,
+            key: RankViewKey::default(),
+        }
+    }
+}
+
+/// Chips shown next to the universe control. A presentation cap only — every
+/// symbol stays in the data layer, the selector and the run request; the count
+/// next to the chips states the true total.
+pub const UNIVERSE_CHIP_CAP: usize = 6;
+
+/// Count the symbols in a comma CSV ("", "A", "A,B" -> 0, 1, 2). Done where
+/// the CSV is adopted, never in the frame path.
+fn count_symbols(csv: &str) -> usize {
+    csv.split(',')
+        .filter(|symbol| !symbol.trim().is_empty())
+        .count()
+}
+
+/// ASCII case-insensitive substring test without allocating. Tickers are ASCII
+/// by contract (the whole market vocabulary is), and this keeps a keystroke's
+/// filter pass allocation-free over 100k rows.
+fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    let hay = haystack.as_bytes();
+    let pat = needle.as_bytes();
+    if pat.len() > hay.len() {
+        return false;
+    }
+    hay.windows(pat.len()).any(|window| {
+        window
+            .iter()
+            .zip(pat)
+            .all(|(a, b)| a.eq_ignore_ascii_case(b))
+    })
+}
+
+impl RankWindow {
+    /// Rebuild the index layer for the current data/filter/sort. O(N) over
+    /// INDICES with cached keys — no row clone, no display-string compare
+    /// (`spec §6/§7`). Called on data arrival and on filter/sort edits, never
+    /// from the frame path.
+    pub fn rebuild(
+        &mut self,
+        rows: &[RankRow],
+        search: &str,
+        criterion: Option<usize>,
+        desc: bool,
+    ) {
+        let previous = self.key.clone();
+        let key = RankViewKey {
+            rows: rows.len(),
+            search: search.trim().to_string(),
+            criterion: criterion.map_or(-1, |c| c as i32),
+            desc,
+        };
+        // The order only changes when the DATA or the SORT changes. A keystroke
+        // filters the existing order instead of re-sorting it (`spec §15/§16`),
+        // so typing never reorders what the user is reading.
+        let order_changed = previous.rows != key.rows
+            || previous.criterion != key.criterion
+            || previous.desc != key.desc;
+        let same_shape = previous.rows == key.rows && !order_changed;
+        let needle = key.search.as_str();
+        // The sorted order survives a search edit: filtering walks the existing
+        // order so a keystroke can never reorder what the user is reading.
+        let base: Vec<u32> = if same_shape && !self.view.is_empty() {
+            if needle.is_empty() {
+                self.view.clone()
+            } else {
+                self.view
+                    .iter()
+                    .copied()
+                    .filter(|index| {
+                        contains_ignore_ascii_case(&rows[*index as usize].symbol, needle)
+                    })
+                    .collect()
+            }
+        } else {
+            (0..rows.len() as u32).collect()
+        };
+        let mut view = base;
+        if order_changed {
+            if let Some(field) = criterion {
+                // Sort a (key, index) array, not row objects (`spec §6`): one pass
+                // to read the cached keys, then a compare that never chases a
+                // pointer back into the dataset. "—" rows get a sentinel so they
+                // sink without a per-comparison branch. The index is the tiebreaker,
+                // so the result is deterministic even though the sort is unstable.
+                let descending = desc;
+                let mut keyed: Vec<(f64, u32)> = view
+                    .iter()
+                    .filter_map(|index| {
+                        let row = rows.get(*index as usize)?;
+                        let raw = row.sort[field];
+                        let key = if row.unranked {
+                            if descending {
+                                f64::NEG_INFINITY
+                            } else {
+                                f64::INFINITY
+                            }
+                        } else {
+                            raw
+                        };
+                        Some((key, *index))
+                    })
+                    .collect();
+                keyed.sort_unstable_by(|a, b| {
+                    let order = a.0.total_cmp(&b.0).then(a.1.cmp(&b.1));
+                    if descending {
+                        order.reverse()
+                    } else {
+                        order
+                    }
+                });
+                view = keyed.into_iter().map(|(_, index)| index).collect();
+            }
+        }
+        self.view = view;
+        self.total = self.view.len();
+        self.key = key;
+        self.clamp_scroll();
+        // Lay the window out immediately: a fresh dataset (or a filter edit)
+        // must be VISIBLE without waiting for the first scroll notch.
+        self.layout();
+    }
+
+    /// Largest legal scroll offset for the current window.
+    pub fn max_scroll(&self) -> f32 {
+        let content = self.total as f32 * RANK_ROW_H;
+        (content - self.viewport_h).max(0.0)
+    }
+
+    fn clamp_scroll(&mut self) {
+        self.scroll_px = self.scroll_px.clamp(0.0, self.max_scroll());
+    }
+
+    /// Recompute `first`/`count` for the current scroll offset and velocity.
+    /// O(1) — this is the only per-frame work the table does.
+    pub fn layout(&mut self) {
+        let visible_rows = (self.viewport_h / RANK_ROW_H).ceil().max(1.0) as usize;
+        // Adaptive overscan from scroll speed: a flick pre-renders more rows so
+        // a fast scroll never waits, and an idle table shrinks back (`spec §2`).
+        // The speed term is clamped BEFORE the add: a huge velocity (an
+        // End-key jump) must not overflow the band arithmetic.
+        let speed_rows =
+            ((self.velocity.abs() / RANK_ROW_H).ceil().max(0.0) as usize).min(RANK_OVERSCAN_MAX);
+        let overscan = (RANK_OVERSCAN_MIN + speed_rows).min(RANK_OVERSCAN_MAX);
+        let anchor = (self.scroll_px / RANK_ROW_H).floor().max(0.0) as usize;
+        let first = anchor.saturating_sub(overscan);
+        let last = (anchor + visible_rows + overscan).min(self.total);
+        self.first = first.min(self.total);
+        self.count = last.saturating_sub(self.first);
+    }
+
+    /// Scroll by a delta in px (wheel notch or drag). Clamped, so rapid
+    /// TOP -> BOTTOM -> TOP can never leave the window outside the data
+    /// (`spec §11`).
+    pub fn scroll_by(&mut self, delta_px: f32) {
+        if !delta_px.is_finite() {
+            return;
+        }
+        self.velocity = delta_px;
+        self.scroll_px += delta_px;
+        self.clamp_scroll();
+        self.layout();
+    }
+
+    /// Absolute scroll (scrollbar drag, keyboard Home/End).
+    pub fn scroll_to(&mut self, px: f32) {
+        if !px.is_finite() {
+            return;
+        }
+        self.velocity = 0.0;
+        self.scroll_px = px;
+        self.clamp_scroll();
+        self.layout();
+    }
+
+    /// Viewport height changed (window resize): re-clamp so the content can
+    /// never leave a gap under the header.
+    pub fn set_viewport(&mut self, height: f32) {
+        if !height.is_finite() || height <= 0.0 {
+            return;
+        }
+        self.viewport_h = height;
+        self.clamp_scroll();
+        self.layout();
+    }
+
+    /// Scrollbar thumb geometry in px (`spec §12`: stable, derived, never
+    /// guessed by the UI).
+    pub fn thumb(&self) -> (f32, f32) {
+        let content = self.total as f32 * RANK_ROW_H;
+        if content <= self.viewport_h || self.total == 0 {
+            return (self.viewport_h, 0.0);
+        }
+        let size = (self.viewport_h * self.viewport_h / content).max(24.0);
+        let travel = self.viewport_h - size;
+        let offset = if self.max_scroll() > 0.0 {
+            travel * (self.scroll_px / self.max_scroll())
+        } else {
+            0.0
+        };
+        (size, offset)
+    }
+}
 
 fn placeholder_kpis() -> Vec<KpiView> {
     // legacy MetricsTiles keys (no SORTINO — the tile grid never had one) and
@@ -1132,6 +1539,26 @@ fn placeholder_kpis() -> Vec<KpiView> {
         emphasized: *label == "NET P&L",
     })
     .collect()
+}
+
+/// Whole rupees with thousands separators, e.g. 10000.0 → "10,000" (mirrors
+/// the backend's `f"₹{capital:,.0f}"` echo — Rust format strings have no
+/// numeric grouping).
+fn grouped_whole(value: f64) -> String {
+    let whole = value.round();
+    let digits = whole.abs().to_string();
+    let mut grouped = String::new();
+    for (i, ch) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i) % 3 == 0 {
+            grouped.push(',');
+        }
+        grouped.push(ch);
+    }
+    if whole < 0.0 {
+        format!("-{grouped}")
+    } else {
+        grouped
+    }
 }
 
 /// legacy `t.semantic`: positive → Positive, negative → Negative, zero →
@@ -1158,6 +1585,48 @@ fn compare_cell(kind: &str, value: Option<f64>) -> String {
             _ => format!("{v:.2}"),
         },
     }
+}
+
+/// Identity of a rendered band. The shell compares it with the value the UI
+/// currently holds and skips the whole model push when nothing changed
+/// (`spec §3`: an unrelated state change must not re-render the table). Returned
+/// as two 32-bit halves because Slint's `int` is i32 and a 64-bit signature must
+/// survive the trip exactly.
+fn ranking_signature(rows: &[RankRow], total: usize, scroll_px: f32) -> (i32, i32) {
+    let mut hash = 0xcbf2_9ce4_8422_2325u64 ^ total as u64;
+    hash ^= (scroll_px * 64.0) as u64;
+    for row in rows {
+        for part in [
+            row.symbol.as_str(),
+            row.pnl.as_str(),
+            row.ret.as_str(),
+            row.trades.as_str(),
+            row.win.as_str(),
+            row.pf.as_str(),
+            row.dd.as_str(),
+            row.sharpe.as_str(),
+        ] {
+            for byte in part.as_bytes() {
+                hash ^= *byte as u64;
+                hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+            }
+        }
+    }
+    ((hash >> 32) as i32, hash as i32)
+}
+
+/// Criterion index -> `RankRow::sort` field. `RANKBY_HEADER` already maps the
+/// criterion box to its `RANK_HEADERS` column, and the two leading columns
+/// ("#", "SYMBOL") are not sortable metrics, so the mapping is derived instead
+/// of duplicated. `None` = an out-of-range box (honest no-sort, never a panic).
+fn rankby_sort_field(state: &LabState) -> Option<usize> {
+    if state.rankby_current < 0 {
+        return None;
+    }
+    RANKBY_HEADER
+        .get(state.rankby_current as usize)
+        .map(|column| column.saturating_sub(2))
+        .filter(|field| *field < 7)
 }
 
 pub fn project(state: &LabState) -> LabView {
@@ -1241,24 +1710,38 @@ pub fn project(state: &LabState) -> LabView {
         })
         .collect();
 
-    // Ranking source: single-mode engine rows, compare-mode board rows.
+    // Ranking rows: the data layer owns every row; the index layer owns the
+    // order; the UI only ever receives the VIRTUAL WINDOW (`spec §1/§5/§22` —
+    // nothing is truncated, every row is reachable by scrolling).
     let rank_source: &[RankRow] = if is_compare {
         &cmp.ranking
     } else {
         &results.ranking
     };
-    let shown_ranking: Vec<RankRow> = if show_results {
-        rank_source.iter().take(RANKING_VIEW_CAP).cloned().collect()
+    let window = &state.rank;
+    let total_rows = if show_results { window.total } else { 0 };
+    let (visible_first, visible_count) = if show_results {
+        (window.first, window.count)
     } else {
-        Vec::new()
+        (0, 0)
     };
-    // legacy scope vocabulary ("3 stocks analyzed"), counted from the echoed
-    // universe CSV — the same count the config toolbar shows.
-    let universe_count = state
-        .cfg_universe_csv
-        .split(',')
-        .filter(|s| !s.trim().is_empty())
-        .count();
+    // Re-number inside the window so the "#" column is continuous from the top
+    // of the current view, exactly like the reference table.
+    let shown_ranking: Vec<RankRow> = window
+        .view
+        .iter()
+        .skip(visible_first)
+        .take(visible_count)
+        .enumerate()
+        .filter_map(|(offset, index)| {
+            let mut row = rank_source.get(*index as usize)?.clone();
+            row.rank = (visible_first + offset + 1).to_string();
+            Some(row)
+        })
+        .collect();
+    // legacy scope vocabulary ("3 stocks analyzed"), counted where the universe
+    // CSV is adopted (the frame path must never re-split it).
+    let universe_count = state.cfg_universe_count;
     let ranking_count = if show_results && universe_count > 0 {
         format!(
             "{} {} analyzed",
@@ -1272,8 +1755,32 @@ pub fn project(state: &LabState) -> LabView {
     } else {
         String::new()
     };
-
-    // Criterion arrow on the active header (legacy appends ▼/▲ to the sorted
+    // Reference footer: "6 stocks · inspecting MESOLAR" while the drawer is up.
+    let ranking_count = match state.detail.as_ref() {
+        Some(detail) if !ranking_count.is_empty() => {
+            format!("{} · inspecting {}", ranking_count, detail.symbol)
+        }
+        _ => ranking_count,
+    };
+    // Flat window projection: geometry, scrollbar and the observability
+    // counters the perf benches assert on (`spec §12/§17`).
+    let (thumb_h, thumb_y) = window.thumb();
+    let rank_window = RankWindowView {
+        total: total_rows as i32,
+        first: visible_first as i32,
+        count: visible_count as i32,
+        row_h: RANK_ROW_H,
+        viewport_h: window.viewport_h,
+        scroll_px: window.scroll_px,
+        max_scroll_px: window.max_scroll(),
+        thumb_h,
+        thumb_y,
+        scrollable: window.max_scroll() > 0.0,
+        signature: ranking_signature(&shown_ranking, total_rows, window.scroll_px),
+        overscan: (visible_count as i32)
+            - ((window.viewport_h / RANK_ROW_H).ceil().max(1.0) as i32)
+            + 1,
+    };
     // column; box order == RANKBY_HEADER order).
     let mut rank_heads: Vec<String> = RANK_HEADERS.iter().map(|s| s.to_string()).collect();
     if show_results
@@ -1291,13 +1798,14 @@ pub fn project(state: &LabState) -> LabView {
     let shown_trades: Vec<TradeRow> = if show_results {
         results
             .trades
-            .into_iter()
+            .iter()
             .filter(|t| {
                 !is_compare
                     || state.compare_side == 0
                     || (state.compare_side == 1 && t.side == "LONG")
                     || (state.compare_side == 2 && t.side == "SHORT")
             })
+            .cloned()
             .map(|mut t| {
                 t.selected = t.abs_index == state.selected_trade && !state.trade_filters_active;
                 t
@@ -1308,12 +1816,12 @@ pub fn project(state: &LabState) -> LabView {
     };
 
     let shown_equity: Vec<(f32, f32)> = if show_results {
-        results.equity
+        results.equity.clone()
     } else {
         Vec::new()
     };
     let shown_drawdown: Vec<(f32, f32)> = if show_results {
-        results.drawdown
+        results.drawdown.clone()
     } else {
         Vec::new()
     };
@@ -1487,20 +1995,12 @@ pub fn project(state: &LabState) -> LabView {
     let range_line = if state.config.dates.is_empty() {
         String::new()
     } else {
-        // Reference 1:1 — the receipt range names the cost model too
-        // ("01 Jan 2023 — 18 Sep 2026 · starting capital ₹10,00,000 · cost 0.05%/side").
-        let cost = state.cfg_cost.trim().trim_end_matches('%');
-        if cost.is_empty() {
-            format!(
-                "{} · starting capital ₹{}",
-                state.config.dates, state.config.capital
-            )
-        } else {
-            format!(
-                "{} · starting capital ₹{} · cost {}%/side",
-                state.config.dates, state.config.capital, cost
-            )
-        }
+        // Reference 1:1 — the receipt range names the starting capital
+        // ("01 Jan 2023 — 18 Sep 2026 · starting capital ₹10,00,000").
+        format!(
+            "{} · starting capital ₹{}",
+            state.config.dates, state.config.capital
+        )
     };
     let diag_show = show_single && !state.verdict_label.is_empty() && state.verdict_tone != 3;
     let risk_gate_show = show_single && !state.verdict_label.is_empty() && state.verdict_tone == 3;
@@ -1518,23 +2018,8 @@ pub fn project(state: &LabState) -> LabView {
             strategy.map_or_else(String::new, |s| s.name.clone())
         )
     } else {
-        format!(
-            "{} is the current working strategy.",
-            strategy.map_or_else(String::new, |s| s.name.clone())
-        )
+        String::new()
     };
-    // Reference 1:1 — numeric 0% guard (HTML parseNum): "0", "0.00",
-    // "0.0000", "0%" and whitespace variants all warn; non-numeric never warns.
-    let cfg_cost_warn = {
-        let kept: String = state
-            .cfg_cost
-            .trim()
-            .chars()
-            .filter(|c| c.is_ascii_digit() || *c == '.' || *c == '-')
-            .collect();
-        matches!(kept.parse::<f64>(), Ok(v) if v == 0.0)
-    };
-
     // Date-range display + validation (ISO in, human out; the commit path is
     // unchanged). A half-picked or unparseable range is flagged inline but
     // whatever the user selected stays visible — never silently reset.
@@ -1592,16 +2077,13 @@ pub fn project(state: &LabState) -> LabView {
         tabs_enabled: show_results,
         tab: state.tab,
         kpis,
-        ranking: if is_compare {
-            Vec::new()
-        } else {
-            shown_ranking
-        },
+        ranking: shown_ranking,
+        rank_window,
         trades: shown_trades,
         equity: shown_equity,
         drawdown: shown_drawdown,
         risk_notes: if show_results {
-            results.risk_notes
+            results.risk_notes.clone()
         } else {
             Vec::new()
         },
@@ -1648,11 +2130,14 @@ pub fn project(state: &LabState) -> LabView {
             })
             .collect(),
         cfg_universe_csv: state.cfg_universe_csv.clone(),
+        // Chips are a PRESENTATION cap, not a data cap: the row band shows the
+        // first few symbols and the count carries the rest. Splitting a 50k
+        // CSV per frame was the projection's last O(N) cost (`spec §7/§13`).
         universe_chips: state
-            .cfg_universe_csv
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
+            .universe_selected
+            .iter()
+            .take(UNIVERSE_CHIP_CAP)
+            .cloned()
             .collect(),
         timeframes: state.timeframes.clone(),
         timeframe_index: state.timeframe_index,
@@ -1692,8 +2177,6 @@ pub fn project(state: &LabState) -> LabView {
         sym_selected_line,
         sym_visible,
         sym_visible_on,
-        cfg_cost: state.cfg_cost.clone(),
-        cfg_cost_warn: cfg_cost_warn,
         run_id: String::new(),
         run_ts: if show_single {
             strategy.map_or(String::new(), |s| s.last_backtest.clone())
@@ -1766,6 +2249,7 @@ mod tests {
                 pnl_tone: Tone::Positive,
                 pf_tone: Tone::Positive,
                 unranked: false,
+                sort: [185236.0, 18.5, 71.0, 52.1, 1.42, 8.3, 1.15],
             }],
             trades: vec![TradeRow {
                 no: "1".into(),
@@ -1978,16 +2462,6 @@ mod tests {
     }
 
     #[test]
-    fn cost_mirrors_locally_and_queues_the_backend_commit() {
-        let mut st = state_with_obr();
-        st.interaction_cost(" 0.05 ");
-        assert_eq!(st.cfg_cost, "0.05");
-        assert_eq!(st.pending_actions, vec!["cost:0.05".to_string()]);
-        st.interaction_cost("");
-        assert_eq!(st.pending_actions.len(), 1); // empty never queued
-    }
-
-    #[test]
     fn inspector_close_and_reset_stay_local() {
         let mut st = state_with_obr();
         st.interaction_detail_close();
@@ -2051,6 +2525,329 @@ mod tests {
         assert_eq!(view.trades[0].abs_index, 0);
         // legacy scope vocabulary from the echoed universe.
         assert_eq!(view.ranking_count, "2 stocks analyzed");
+    }
+
+    #[test]
+    fn empty_universe_echo_never_wipes_the_local_selection() {
+        // The bridge only re-sends symbols on a strategy SELECT, so every
+        // other snapshot echoes an empty universe. Adopting it would drop the
+        // user's picks and the next RUN would gather no symbols at all
+        // (a failed run with an empty ranking table).
+        let mut st = state_with_obr();
+        st.universe_symbols = vec!["RELIANCE".into(), "TCS".into()];
+        st.interaction_symopen();
+        st.interaction_symtoggle("RELIANCE");
+        st.interaction_symapply();
+        assert_eq!(st.universe_selected, vec!["RELIANCE".to_string()]);
+        assert_eq!(st.cfg_universe_csv, "RELIANCE");
+        let empty_echo: serde_json::Value = serde_json::from_str(
+            r#"{"cfg_edit":{"universe_csv":"","capital":10000.0},
+                "universe":{"symbols":["RELIANCE","TCS"],"selected":[]}}"#,
+        )
+        .unwrap();
+        apply_snapshot_json(&mut st, &empty_echo);
+        assert_eq!(st.universe_selected, vec!["RELIANCE".to_string()]);
+        assert_eq!(st.cfg_universe_csv, "RELIANCE");
+        assert_eq!(st.sym_draft, vec!["RELIANCE".to_string()]);
+        // A NON-empty echo is the backend truth and still wins.
+        let real_echo: serde_json::Value = serde_json::from_str(
+            r#"{"cfg_edit":{"universe_csv":"TCS"},
+                "universe":{"symbols":["RELIANCE","TCS"],"selected":["TCS"]}}"#,
+        )
+        .unwrap();
+        apply_snapshot_json(&mut st, &real_echo);
+        assert_eq!(st.universe_selected, vec!["TCS".to_string()]);
+        assert_eq!(st.cfg_universe_csv, "TCS");
+        // An explicit local clear still clears (absence is not a clear).
+        st.interaction_symopen();
+        st.interaction_symclear();
+        st.interaction_symapply();
+        assert!(st.universe_selected.is_empty());
+        assert!(st.cfg_universe_csv.is_empty());
+    }
+
+    #[test]
+    fn ranking_search_filters_and_criterion_sorts_then_renumbers() {
+        let mut st = state_with_obr();
+        st.select(0);
+        st.engine_wired = true;
+        st.start_run();
+        let mut ranked = results();
+        ranked.ranking = vec![
+            RankRow {
+                rank: "1".into(),
+                symbol: "MESOLAR".into(),
+                pnl: "+4,930".into(),
+                ret: "+0.49%".into(),
+                trades: "102".into(),
+                win: "46.1%".into(),
+                pf: "1.01".into(),
+                dd: "-5.70%".into(),
+                sharpe: "0.20".into(),
+                pnl_tone: Tone::Positive,
+                pf_tone: Tone::Neutral,
+                unranked: false,
+                sort: [4_930.0, 0.49, 102.0, 46.1, 1.01, 5.7, 0.20],
+            },
+            RankRow {
+                rank: "2".into(),
+                symbol: "ACUTAAS".into(),
+                pnl: "-2,95,316".into(),
+                ret: "-29.53%".into(),
+                trades: "239".into(),
+                win: "36.4%".into(),
+                pf: "0.75".into(),
+                dd: "-37.39%".into(),
+                sharpe: "-1.93".into(),
+                pnl_tone: Tone::Negative,
+                pf_tone: Tone::Negative,
+                unranked: false,
+                sort: [-295_316.0, -29.53, 239.0, 36.4, 0.75, 37.39, -1.93],
+            },
+            RankRow {
+                rank: "3".into(),
+                symbol: "ACE".into(),
+                pnl: "-2,00,461".into(),
+                ret: "-20.05%".into(),
+                trades: "213".into(),
+                win: "35.7%".into(),
+                pf: "0.84".into(),
+                dd: "-23.74%".into(),
+                sharpe: "-1.32".into(),
+                pnl_tone: Tone::Negative,
+                pf_tone: Tone::Negative,
+                unranked: false,
+                sort: [-200_461.0, -20.05, 213.0, 35.7, 0.84, 23.74, -1.32],
+            },
+        ];
+        st.apply_result(ranked);
+        st.cfg_universe_csv = "MESOLAR,ACUTAAS,ACE".into();
+        st.cfg_universe_count = 3;
+        st.rankby_labels = vec![
+            "Net P&L".into(),
+            "Return %".into(),
+            "Trades".into(),
+            "Win %".into(),
+            "Profit Factor".into(),
+            "Max DD".into(),
+        ];
+        st.rank_desc = true; // backend default: best first
+                             // Backend order (net P&L desc) is the default.
+        st.rebuild_rank_view();
+        let view = project(&st);
+        assert_eq!(
+            view.ranking
+                .iter()
+                .map(|r| r.symbol.as_str())
+                .collect::<Vec<_>>(),
+            vec!["MESOLAR", "ACE", "ACUTAAS"]
+        );
+        // Trades criterion (box 2 → TRADES column): ACUTAAS leads on count.
+        st.interaction_rankby("Trades");
+        let view = project(&st);
+        assert_eq!(
+            view.ranking
+                .iter()
+                .map(|r| r.symbol.as_str())
+                .collect::<Vec<_>>(),
+            vec!["ACUTAAS", "ACE", "MESOLAR"]
+        );
+        // Re-numbered after the reorder (reference renumbers on sort).
+        assert_eq!(
+            view.ranking
+                .iter()
+                .map(|r| r.rank.as_str())
+                .collect::<Vec<_>>(),
+            vec!["1", "2", "3"]
+        );
+        // Ascending flips the leader.
+        st.interaction_ranktoggle();
+        assert!(!st.rank_desc);
+        let view = project(&st);
+        assert_eq!(view.ranking[0].symbol, "MESOLAR");
+        // Search filters, case-insensitively, and never renumbers away.
+        // The Trades criterion still decides the order inside the filter.
+        st.interaction_ranktoggle();
+        st.interaction_ranksearch("ac");
+        let view = project(&st);
+        assert_eq!(
+            view.ranking
+                .iter()
+                .map(|r| r.symbol.as_str())
+                .collect::<Vec<_>>(),
+            vec!["ACUTAAS", "ACE"]
+        );
+        assert_eq!(view.ranking[0].rank, "1");
+        st.interaction_ranksearch("zzz");
+        assert!(project(&st).ranking.is_empty());
+    }
+
+    #[test]
+    fn virtual_window_shows_every_row_without_rendering_them_all() {
+        // `spec §18/§22`: virtualization may never become truncation. Walk a
+        // 500-row dataset one viewport at a time and prove the union of the
+        // windows is EXACTLY the dataset, in order, with no gap and no repeat.
+        let mut st = state_with_obr();
+        st.select(0);
+        st.engine_wired = true;
+        st.rankby_labels = vec![
+            "Net P&L".into(),
+            "Return %".into(),
+            "Trades".into(),
+            "Win %".into(),
+            "Profit Factor".into(),
+            "Max DD".into(),
+        ];
+        let rows: Vec<RankRow> = (0..500)
+            .map(|i| RankRow {
+                rank: (i + 1).to_string(),
+                symbol: format!("SYM{i:04}"),
+                pnl: format!("₹{}", 1000 - i),
+                ret: format!("-{}.00%", i),
+                trades: (i + 1).to_string(),
+                win: "50.0%".into(),
+                pf: "1.00".into(),
+                dd: "-1.00%".into(),
+                sharpe: "0.00".into(),
+                pnl_tone: Tone::Negative,
+                pf_tone: Tone::Neutral,
+                unranked: false,
+                sort: [-(i as f64), -(i as f64), i as f64, 50.0, 1.0, 1.0, 0.0],
+            })
+            .collect();
+        let total = rows.len();
+        st.apply_result(LabResults {
+            ranking: rows,
+            ..LabResults::default()
+        });
+        st.cfg_universe_count = total;
+        let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        let mut first_seen: Option<String> = None;
+        let mut last_seen: Option<String> = None;
+        loop {
+            let view = project(&st);
+            assert!(
+                view.ranking.len() <= 40,
+                "a 10-row viewport must never render {} rows",
+                view.ranking.len()
+            );
+            assert_eq!(view.rank_window.total as usize, total, "true count");
+            for row in &view.ranking {
+                if first_seen.is_none() {
+                    first_seen = Some(row.symbol.clone());
+                }
+                last_seen = Some(row.symbol.clone());
+                seen.insert(row.symbol.clone());
+            }
+            if st.rank.scroll_px >= st.rank.max_scroll() {
+                break;
+            }
+            st.interaction_rank_scroll(RANK_ROW_H);
+            assert!(!seen.is_empty());
+        }
+        assert_eq!(
+            seen.len(),
+            total,
+            "every row must be reachable by scrolling"
+        );
+        // Sorted by net P&L desc, so the order runs 0499 -> 0000.
+        assert_eq!(first_seen.as_deref(), Some("SYM0499"));
+        assert_eq!(last_seen.as_deref(), Some("SYM0000"));
+    }
+
+    #[test]
+    fn virtual_window_geometry_is_exact_and_never_negative() {
+        // `spec §11/§12`: scroll offsets clamp, the thumb stays inside the
+        // track, and the window never reads before the dataset.
+        let mut st = state_with_obr();
+        st.select(0);
+        st.engine_wired = true;
+        st.rankby_labels = vec!["Net P&L".into()];
+        st.apply_result(LabResults {
+            ranking: (0..100)
+                .map(|i| RankRow {
+                    rank: (i + 1).to_string(),
+                    symbol: format!("SYM{i:03}"),
+                    pnl: format!("₹{}", i),
+                    ret: "+1.00%".into(),
+                    trades: "1".into(),
+                    win: "50.0%".into(),
+                    pf: "1.00".into(),
+                    dd: "-1.00%".into(),
+                    sharpe: "0.00".into(),
+                    pnl_tone: Tone::Positive,
+                    pf_tone: Tone::Neutral,
+                    unranked: false,
+                    sort: [i as f64, 1.0, 1.0, 50.0, 1.0, 1.0, 0.0],
+                })
+                .collect(),
+            ..LabResults::default()
+        });
+        // A dataset shorter than the viewport is not scrollable and renders whole.
+        let view = project(&st);
+        assert_eq!(view.rank_window.total, 100);
+        assert!(view.rank_window.max_scroll_px > 0.0);
+        // Overscrolling backwards clamps at the top.
+        st.interaction_rank_scroll(-10_000.0);
+        let view = project(&st);
+        assert_eq!(view.rank_window.scroll_px, 0.0);
+        assert_eq!(view.rank_window.first, 0);
+        // A huge forward notch clamps at the end, no overshoot, no empty band.
+        st.interaction_rank_scroll(f32::MAX);
+        let view = project(&st);
+        assert_eq!(view.rank_window.scroll_px, view.rank_window.max_scroll_px);
+        assert!(!view.ranking.is_empty(), "the last page must have rows");
+        assert!(view.rank_window.thumb_h > 0.0);
+        assert!(
+            view.rank_window.thumb_y + view.rank_window.thumb_h
+                <= view.rank_window.viewport_h + 1.0
+        );
+        // A viewport taller than the content: everything renders, nothing scrolls.
+        st.interaction_rank_viewport(RANK_ROW_H * 500.0);
+        let view = project(&st);
+        assert_eq!(view.rank_window.max_scroll_px, 0.0);
+        assert_eq!(view.ranking.len(), 100);
+        assert!(!view.rank_window.scrollable);
+    }
+
+    #[test]
+    fn rank_pick_opens_the_inspector_from_the_row_itself() {
+        let mut st = state_with_obr();
+        st.select(0);
+        st.engine_wired = true;
+        st.start_run();
+        st.apply_result(results());
+        st.cfg_universe_csv = "RELIANCE,TCS".into();
+        st.cfg_universe_count = 2;
+        assert!(project(&st).detail.is_none());
+        st.interaction_rank_picked("RELIANCE");
+        let view = project(&st);
+        let detail = view.detail.expect("inspector");
+        assert_eq!(detail.symbol, "RELIANCE");
+        assert_eq!(detail.stats, "₹1,85,236.00");
+        // The six reference facts, in drawer order.
+        let labels: Vec<&str> = detail.metrics.iter().map(|m| m.label.as_str()).collect();
+        assert_eq!(
+            labels,
+            vec![
+                "RETURN",
+                "TRADES",
+                "WIN RATE",
+                "PROFIT FACTOR",
+                "MAX DRAWDOWN",
+                "SHARPE"
+            ]
+        );
+        assert_eq!(detail.metrics[0].value, "+18.50%");
+        assert_eq!(detail.metrics[1].value, "71");
+        // Footer names the inspected stock (reference drawer affordance).
+        assert!(view.ranking_count.ends_with("· inspecting RELIANCE"));
+        // Unknown symbol opens nothing — never an empty drawer.
+        st.interaction_rank_picked("NOPE");
+        assert!(project(&st).detail.is_none());
+        st.interaction_rank_picked("RELIANCE");
+        st.interaction_detail_close();
+        assert!(project(&st).detail.is_none());
     }
 
     #[test]
@@ -2164,27 +2961,31 @@ mod tests {
         assert_eq!(st.cfg_capital, "500000");
         st.interaction_timeframe("1h");
         assert_eq!(st.timeframe_index, 2);
+        // The displayed label/summary read config.timeframe, not the index —
+        // a pick that leaves the echo stale shows the old timeframe forever.
+        assert_eq!(st.config.timeframe, "1h");
         // Unknown timeframe labels never corrupt the index.
         st.interaction_timeframe("9m");
         assert_eq!(st.timeframe_index, 2);
+        assert_eq!(st.config.timeframe, "1h");
         // Empty commits are ignored, never blank the echo.
         st.interaction_capital("   ");
         assert_eq!(st.cfg_capital, "500000");
     }
 
     #[test]
-    fn cost_or_mode_change_marks_completed_run_outdated() {
+    fn capital_and_mode_change_mark_completed_run_outdated() {
         let mut st = state_with_obr();
         st.select(0);
         st.engine_wired = true;
-        st.cfg_cost = "0.05".into();
         st.start_run();
         st.apply_result(results());
+        let base = st.config.capital.clone();
         assert!(!st.outdated);
-        // Same display fingerprint, different cost -> outdated.
-        st.interaction_cost("0.10");
+        // Capital edit -> outdated (the run request really reads cfg_capital).
+        st.interaction_capital("250000");
         assert!(st.outdated);
-        st.interaction_cost("0.05");
+        st.edit_config(|c| c.capital = base);
         assert!(!st.outdated);
         // Direction change -> outdated.
         st.interaction_mode(LabMode::Short);
@@ -2571,6 +3372,15 @@ fn parse_rank_row(r: &serde_json::Value) -> RankRow {
             Some(_) => Tone::Negative,
         },
         unranked: r.get("status").and_then(|v| v.as_str()) != Some("ranked"),
+        sort: [
+            net.unwrap_or(f64::NAN),
+            ret.unwrap_or(f64::NAN),
+            opt_f64(r, "total_trades").unwrap_or(f64::NAN),
+            win.unwrap_or(f64::NAN),
+            pf.unwrap_or(f64::NAN),
+            dd.unwrap_or(f64::NAN),
+            sharpe.unwrap_or(f64::NAN),
+        ],
     }
 }
 
@@ -2726,6 +3536,9 @@ fn apply_parity_keys(state: &mut LabState, value: &serde_json::Value) {
             if matches!(state.run, RunState::Running) {
                 state.run = RunState::Complete;
             }
+            // New data invalidates the index layer: rebuild it here (once per
+            // snapshot), never in the frame path.
+            state.rebuild_rank_view();
         }
     }
     // Editor buffer: adopt the backend echo (typing never triggers a
@@ -2752,7 +3565,18 @@ fn apply_parity_keys(state: &mut LabState, value: &serde_json::Value) {
             .collect();
     }
     if let Some(cfg) = value.get("cfg_edit") {
-        state.cfg_universe_csv = opt_str(cfg, "universe_csv");
+        // A workspace echo only carries the symbols the backend was told
+        // about, and the bridge only re-sends them on a strategy SELECT.
+        // Adopting an EMPTY universe echo would wipe a selection the user
+        // just made (queued `symbols:` is not applied backend-side yet), and
+        // the next RUN would then gather no symbols at all — a failed run
+        // with an empty ranking table. Explicit clears already land locally,
+        // so an empty echo is absence, not truth.
+        let echoed_csv = opt_str(cfg, "universe_csv");
+        if !echoed_csv.trim().is_empty() {
+            state.cfg_universe_csv = echoed_csv;
+            state.cfg_universe_count = count_symbols(&state.cfg_universe_csv);
+        }
         state.timeframes = cfg
             .get("timeframes")
             .and_then(|v| v.as_array())
@@ -2947,7 +3771,9 @@ fn apply_parity_keys(state: &mut LabState, value: &serde_json::Value) {
                     .collect()
             })
             .unwrap_or_default();
-        state.universe_selected = universe
+        // Same rule as cfg_edit.universe_csv: an empty `selected` echo is
+        // absence (the backend was never told), never a clear.
+        let echoed_selected: Vec<String> = universe
             .get("selected")
             .and_then(|v| v.as_array())
             .map(|arr| {
@@ -2957,6 +3783,9 @@ fn apply_parity_keys(state: &mut LabState, value: &serde_json::Value) {
                     .collect()
             })
             .unwrap_or_default();
+        if !echoed_selected.is_empty() {
+            state.universe_selected = echoed_selected;
+        }
         // Draft tracks the applied echo while the panel is closed, so the
         // selector always opens on the truth (never stale).
         if !state.sym_open {

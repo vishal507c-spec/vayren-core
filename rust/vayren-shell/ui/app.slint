@@ -6,7 +6,7 @@
 
 import { VayrenPalette, VayrenDesign } from "palette.slint";
 import { VBadge, VButton } from "components.slint";
-import { StrategyLabScreen, LabHeader, LabLibraryRow, LabKpi, LabRankRow, LabTradeRow, LabPoint, LabParam, LabDetailMetric, LabBoardCell, LabMatrixRow, LabPreset } from "lab.slint";
+import { StrategyLabScreen, LabHeader, LabLibraryRow, LabKpi, LabRankRow, LabTradeRow, LabPoint, LabParam, LabDetailMetric, LabBoardCell, LabMatrixRow, LabPreset, RankWindow } from "lab.slint";
 import { MarketScreen, MarketWatchRow, MarketCandle, MarketTick, MarketRayLevel, MarketTimeframe, MarketIndicator, MarketStatusRow, MarketSettingsRow, MarketPopupRow, MarketPlotSeg, MarketMarker, MarketTradeContext, DlPlan, DlStatus, DlCalDay, DlCredField, DlStock } from "market.slint";
 import { ResearchScreen, ResearchMetric, ResearchSignalRow, ResearchTradeRow, ResearchRobustRow, ResearchKv, ResearchCompareRow, ResearchStrategyRow, ResearchExperimentRow, ResearchField, ResearchConfigGroup, ResearchEvidenceDim, ResearchEvidenceWhy, ResearchKvGroup } from "research.slint";
 import { PortfolioScreen, PortfolioKpi, PortfolioGate, PortfolioPosition, PortfolioAlloc, PortfolioOrder, PortfolioFill, PortfolioRisk } from "portfolio.slint";
@@ -102,6 +102,9 @@ export component AppWindow inherits Window {
     callback lab-new-requested();
     callback lab-row-menu(int);
     callback lab-rank-picked(string);
+    callback lab-rank-scrolled(float);
+    callback lab-rank-scroll-to(float);
+    callback lab-rank-viewport-reported(length);
     callback lab-trade-picked(int);
     callback lab-export-trades-requested();
     callback lab-code-changed(string);
@@ -126,7 +129,6 @@ export component AppWindow inherits Window {
     callback lab-run-all-requested();
     // Strategy Lab redesign — reference-layout callbacks.
     callback lab-lens-picked(int);
-    callback lab-cost-committed(string);
     callback lab-inspector-close();
     callback lab-diag-link-clicked();
     callback lab-equity-select-picked(int);
@@ -413,7 +415,8 @@ export component AppWindow inherits Window {
     in-out property <[LabLibraryRow]> lab-library;
     in-out property <[LabKpi]> lab-kpis;
     in-out property <[LabRankRow]> lab-ranking;
-    in-out property <[LabTradeRow]> lab-trades;
+    // Ranking virtual-window geometry (Rust-derived, never recomputed in UI).
+    in-out property <RankWindow> lab-rank-window;    in-out property <[LabTradeRow]> lab-trades;
     in-out property <[LabPoint]> lab-equity;
     in-out property <[LabPoint]> lab-drawdown;
     in-out property <[LabParam]> lab-params;
@@ -890,6 +893,7 @@ export component AppWindow inherits Window {
                     library: root.lab-library;
                     kpis: root.lab-kpis;
                     ranking: root.lab-ranking;
+            lab-rank-window: root.lab-rank-window;
                     trades: root.lab-trades;
                     equity: root.lab-equity;
                     drawdown: root.lab-drawdown;
@@ -927,6 +931,9 @@ export component AppWindow inherits Window {
                     new-requested() => { root.lab-new-requested(); }
                     row-menu(idx) => { root.lab-row-menu(idx); }
                     rank-picked(symbol) => { root.lab-rank-picked(symbol); }
+                    rank-scrolled(px) => { root.lab-rank-scrolled(px); }
+                    rank-scroll-to(px) => { root.lab-rank-scroll-to(px); }
+                    rank-viewport-reported(h) => { root.lab-rank-viewport-reported(h); }
                     trade-picked(idx) => { root.lab-trade-picked(idx); }
                     export-trades-requested() => { root.lab-export-trades-requested(); }
                     code-changed(text) => { root.lab-code-changed(text); }
@@ -950,7 +957,6 @@ export component AppWindow inherits Window {
                     run-sell-requested() => { root.lab-run-sell-requested(); }
                     run-all-requested() => { root.lab-run-all-requested(); }
                     lens-picked(idx) => { root.lab-lens-picked(idx); }
-                    cost-committed(text) => { root.lab-cost-committed(text); }
                     inspector-close() => { root.lab-inspector-close(); }
                     diag-link-clicked() => { root.lab-diag-link-clicked(); }
                     equity-select-picked(idx) => { root.lab-equity-select-picked(idx); }

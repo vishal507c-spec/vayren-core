@@ -19,6 +19,27 @@ export struct LabPoint {
     y: length,
 }
 
+// Ranking-table window geometry, derived in Rust (the UI never re-computes
+// layout maths) — `spec §12/§17`.
+export struct RankWindow {
+    total: int,
+    first: int,
+    count: int,
+    row-h: length,
+    viewport-h: length,
+    scroll-px: length,
+    max-scroll-px: length,
+    thumb-h: length,
+    thumb-y: length,
+    scrollable: bool,
+    // Band identity split in two 32-bit halves: Slint's `int` is i32, and a
+    // 64-bit signature must survive the trip exactly (a false "unchanged" would
+    // leave a stale table on screen).
+    signature-hi: int,
+    signature-lo: int,
+    overscan: int,
+}
+
 export struct LabHeader {
     has-strategy: bool,
     name: string,
@@ -86,8 +107,6 @@ export struct LabHeader {
     sym-count-line: string,
     sym-selected-line: string,
     // ── Reference redesign additions ──
-    cfg-cost: string,
-    cfg-cost-warn: bool,
     run-id: string,
     run-ts: string,
     cfg-hash: string,
@@ -387,13 +406,24 @@ component LabCtlSearch inherits Rectangle {
     }
 }
 
+// Ranking-table drag state. Kept in the UI (not the data layer) because it is
+// pure gesture bookkeeping: where the press started and what the scroll offset
+// was at that moment. `press-y` (not `y`) — `y` is Rectangle's own property.
+component RankScrollState inherits Rectangle {
+    in-out property <bool> pressed;
+    in-out property <float> offset;
+    in-out property <length> press-y;
+}
+
 component LabTh inherits Rectangle {
     in property <string> th;
     in property <length> tw: 0px;
     in property <int> stretch: 0;
     in property <bool> ta-left: false;
     height: 30px;
-    width: root.tw;
+    // preferred-width (not width): a bound `width` would pin the cell and
+    // defeat `horizontal-stretch`, collapsing every metric column to 0px.
+    preferred-width: root.tw;
     horizontal-stretch: root.stretch;
     Text {
         text: root.th;
@@ -417,7 +447,9 @@ component LabTd inherits Rectangle {
     in property <bool> no-mono: false;
     in property <color> tc: LabPalette.soft;
     height: 40px;
-    width: root.tw;
+    // preferred-width (not width): see LabTh — a bound width collapses the
+    // stretched metric columns.
+    preferred-width: root.tw;
     horizontal-stretch: root.stretch;
     Text {
         text: root.td;
@@ -753,6 +785,7 @@ export component StrategyLabScreen inherits Rectangle {
     }
 
     in property <LabHeader> lab;
+    in property <RankWindow> lab-rank-window;
     in property <[LabLibraryRow]> library;
     in property <[LabKpi]> kpis;
     in property <[LabRankRow]> ranking;
@@ -829,6 +862,11 @@ export component StrategyLabScreen inherits Rectangle {
     callback new-requested();
     callback row-menu(int);
     callback rank-picked(string);
+    // Virtual-window scroll surface (spec §8: the frame path is O(1) window
+    // arithmetic, never a data re-sort).
+    callback rank-scrolled(float);
+    callback rank-scroll-to(float);
+    callback rank-viewport-reported(length);
     callback trade-picked(int);
     callback export-trades-requested();
     callback code-changed(string);
@@ -853,7 +891,6 @@ export component StrategyLabScreen inherits Rectangle {
     callback run-all-requested();
     // Reference redesign callbacks.
     callback lens-picked(int);
-    callback cost-committed(string);
     callback inspector-close();
     callback diag-link-clicked();
     callback equity-select-picked(int);
@@ -875,105 +912,6 @@ export component StrategyLabScreen inherits Rectangle {
 
     VerticalLayout {
         spacing: 0;
-
-        // ── TOP: location first, everything else quiet ──
-        Rectangle {
-            height: LabPalette.topbar-h;
-            background: LabPalette.lab-bg;
-            VerticalLayout {
-                padding-left: 22px;
-                padding-right: 22px;
-                alignment: center;
-                HorizontalLayout {
-                    spacing: 16px;
-                    Text {
-                        text: "VAYREN";
-                        color: LabPalette.lab-text;
-                        font-size: 14px;
-                        font-weight: 700;
-                        letter-spacing: 3.5px;
-                        vertical-alignment: center;
-                    }
-                    Text {
-                        text: "/  Strategy Lab";
-                        color: LabPalette.lab-text;
-                        font-size: 11px;
-                        font-weight: 600;
-                        vertical-alignment: center;
-                    }
-                    Rectangle { width: 8px; background: transparent; }
-                    HorizontalLayout {
-                        spacing: 4px;
-                        for navlbl in ["Market", "Research", "Portfolio", "Live", "System"]: Rectangle {
-                            height: 28px;
-                            width: navtx.width + 20px;
-                            border-radius: 7px;
-                            background: nta.has-hover ? LabPalette.white-04 : transparent;
-                            nta := TouchArea { }
-                            navtx := Text {
-                                text: navlbl;
-                                color: nta.has-hover ? LabPalette.soft : LabPalette.dim;
-                                font-size: 11px;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
-                            }
-                        }
-                    }
-                    Rectangle { horizontal-stretch: 1; background: transparent; }
-                    // Reference 1:1 — local-preview marker (HTML .preview-tag).
-                    Rectangle {
-                        height: 22px;
-                        width: pvtx.width + 20px;
-                        border-radius: 99px;
-                        background: LabPalette.amber-06;
-                        border-width: 1px;
-                        border-color: LabPalette.amber-30;
-                        pvtx := Text {
-                            text: "LOCAL PREVIEW";
-                            color: LabPalette.lab-amber;
-                            font-size: 9px;
-                            letter-spacing: 1px;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                    }
-                    Rectangle {
-                        width: 28px;
-                        height: 28px;
-                        border-radius: 14px;
-                        background: LabPalette.hover2;
-                        border-width: 1px;
-                        border-color: LabPalette.line;
-                        Text {
-                            text: "V";
-                            color: LabPalette.soft;
-                            font-size: 10px;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                    }
-                }
-            }
-            Rectangle { y: parent.height - 1px; height: 1px; width: 100%; background: LabPalette.line; }
-        }
-
-        // ── FLOW RAIL: the research process, made visible ──
-        Rectangle {
-            height: LabPalette.rail-h;
-            background: LabPalette.lab-bg;
-            HorizontalLayout {
-                padding-left: 22px;
-                spacing: 10px;
-                alignment: start;
-                LabRailStep { num: "01"; name: "DEFINE"; step-on: root.rail-active == 0; }
-                LabRailStep { num: "02"; name: "CONFIGURE"; step-on: root.rail-active == 1; }
-                LabRailStep { num: "03"; name: "RUN"; step-on: root.rail-active == 2; }
-                LabRailStep { num: "04"; name: "READ"; step-on: root.rail-active == 3; }
-                LabRailStep { num: "05"; name: "INVESTIGATE"; step-on: root.rail-active == 4; }
-                LabRailStep { num: "06"; name: "MODIFY"; step-on: root.rail-active == 5; }
-            }
-            Rectangle { y: parent.height - 1px; height: 1px; width: 100%; background: LabPalette.line; }
-        }
 
         // ── WORKSPACE (scrollable page) ──
         ScrollView {
@@ -1018,13 +956,6 @@ export component StrategyLabScreen inherits Rectangle {
                                         color: LabPalette.lab-muted;
                                     }
                                     Rectangle { height: 10px; }
-                                    Text {
-                                        text: root.lab.summary-line;
-                                        font-family: "monospace";
-                                        font-size: 10.5px;
-                                        color: LabPalette.dim;
-                                        letter-spacing: 0.3px;
-                                    }
                                     Rectangle { height: 18px; }
                                     HorizontalLayout {
                                         spacing: 12px;
@@ -1337,28 +1268,6 @@ export component StrategyLabScreen inherits Rectangle {
                                             }
                                         }
                                     }
-                                    LabFieldDivider {}
-                                    // Transaction cost
-                                    Rectangle {
-                                        horizontal-stretch: 1;
-                                        VerticalLayout {
-                                            padding: 16px;
-                                            spacing: 0;
-                                            LabFieldLabel { lbl: "TRANSACTION COST"; }
-                                            LabCtlInput {
-                                                post-fix: "%";
-                                                val: root.lab.cfg-cost;
-                                                committed(t) => { root.cost-committed(t); }
-                                            }
-                                            Rectangle { visible: root.lab.cfg-cost-warn; height: 7px; }
-                                            Text {
-                                                visible: root.lab.cfg-cost-warn;
-                                                text: "0% = unreal. Institutional preview uses ≥0.05%.";
-                                                font-size: 10px;
-                                                color: LabPalette.lab-amber;
-                                            }
-                                        }
-                                    }
                                 }
                                 // Run bar — the culmination (reference 1:1 + cost-model note).
                                 Rectangle {
@@ -1372,14 +1281,6 @@ export component StrategyLabScreen inherits Rectangle {
                                             padding-right: 18px;
                                             spacing: 18px;
                                             alignment: center;
-                                        Text {
-                                            text: root.lab.summary-line;
-                                            font-family: "monospace";
-                                            font-size: 11.5px;
-                                            color: LabPalette.lab-text;
-                                            vertical-alignment: center;
-                                            overflow: elide;
-                                        }
                                         Text {
                                             visible: root.lab.outdated;
                                             text: "· edited — rerun to refresh";
@@ -1426,16 +1327,6 @@ export component StrategyLabScreen inherits Rectangle {
                                             }
                                         }
                                     }
-                                    Text {
-                                        height: 22px;
-                                        text: "Real historical backtest over the selected universe and date range. The configured transaction cost applies to fills.";
-                                        font-size: 10px;
-                                        color: LabPalette.dim;
-                                        x: 18px;
-                                        width: parent.width - 36px;
-                                        vertical-alignment: center;
-                                        overflow: elide;
-                                    }
                                     }
                                     Rectangle { y: 0; height: 1px; width: 100%; background: LabPalette.line; }
                                 }
@@ -1463,8 +1354,6 @@ export component StrategyLabScreen inherits Rectangle {
                                         padding-right: 18px;
                                         spacing: 14px;
                                         alignment: center;
-                                        Text { text: "RESULT OF"; font-size: 10px; letter-spacing: 1.4px; color: LabPalette.dim; vertical-alignment: center; }
-                                        Text { text: root.lab.result-exec-line; font-family: "monospace"; font-size: 11.5px; color: LabPalette.lab-text; vertical-alignment: center; overflow: elide; }
                                         Rectangle { horizontal-stretch: 1; background: transparent; }
                                         Rectangle {
                                             height: 24px;
@@ -1514,13 +1403,6 @@ export component StrategyLabScreen inherits Rectangle {
                                         padding-right: 18px;
                                         spacing: 12px;
                                         alignment: center;
-                                        Text {
-                                            text: root.lab.empty-reason;
-                                            font-size: 11.5px;
-                                            color: LabPalette.lab-muted;
-                                            vertical-alignment: center;
-                                            overflow: elide;
-                                        }
                                         Rectangle { horizontal-stretch: 1; background: transparent; }
                                         if root.lab.name == "": Rectangle {
                                             height: 26px;
@@ -1754,7 +1636,7 @@ export component StrategyLabScreen inherits Rectangle {
                                 spacing: 4px;
                                 padding-left: 2px;
                                 alignment: center;
-                                for lens[idx] in ["Performance", "Trades", "Equity", "Drawdown", "Analytics", "Strategy"]: Rectangle {
+                                for lens[idx] in ["Performance", "Trades", "Equity", "Drawdown", "Analytics"]: Rectangle {
                                     height: 100%;
                                     width: lntx.width + 28px;
                                     lsta := TouchArea {
@@ -1777,11 +1659,6 @@ export component StrategyLabScreen inherits Rectangle {
                             Rectangle { y: 0; height: 1px; width: 100%; background: LabPalette.line; }
                         }
                         Rectangle { height: 4px; }
-                        Text {
-                            text: "Same run, different perspective · " + (root.lab.outdated ? "rerun needed" : "selection preserved");
-                            font-size: 10px;
-                            color: LabPalette.lab-faint;
-                        }
                     }
 
                     // ════ 05 INVESTIGATE ════
@@ -1831,73 +1708,144 @@ export component StrategyLabScreen inherits Rectangle {
                                 border-width: 1px;
                                 border-color: LabPalette.line;
                                 clip: true;
-                                height: 74px + Math.max(1, root.ranking.length) * 40px + 34px;
-                                VerticalLayout {
-                                    spacing: 0;
-                                    // grouped header row
+                                // Bounded viewport (spec §1/§12): the table never
+                                // grows with the dataset, the header stays
+                                // sticky, and the row band is positioned by the
+                                // Rust-side window instead of a layout.
+                                height: root.lab-rank-window.viewport-h;
+                                init => { root.rank-viewport-reported(root.lab-rank-window.viewport-h); }
+                                // Wheel + drag scrolling (`spec §8`: the frame
+                                // path only re-lays the window).
+                                rank-scroll-area := TouchArea {
+                                    scroll-event(ev) => {
+                                        if (ev.delta-y == 0px) { return reject; }
+                                        let notches = (ev.delta-y / 1px) / 120.0;
+                                        root.rank-scrolled(-notches * (root.lab-rank-window.row-h / 1px));
+                                        return accept;
+                                    }
+                                    pointer-event(ev) => {
+                                        if (ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left) {
+                                            rank-press.pressed = true;
+                                            rank-press.offset = root.lab-rank-window.scroll-px / 1px;
+                                            rank-press.press-y = self.mouse-y;
+                                        } else if (ev.kind == PointerEventKind.move && rank-press.pressed) {
+                                            root.rank-scrolled(rank-press.offset - (rank-press.press-y - self.mouse-y) / 1px);
+                                        } else if (ev.kind == PointerEventKind.up) {
+                                            rank-press.pressed = false;
+                                        }
+                                    }
+                                }
+                                rank-press := RankScrollState {
+                                    pressed: false;
+                                    offset: 0;
+                                    press-y: 0px;
+                                }
+                                // grouped header row
+                                Rectangle {
+                                    height: 20px;
+                                    y: 0;
+                                    HorizontalLayout {
+                                        spacing: 0;
+                                        Rectangle { width: 34px; }
+                                        Rectangle { width: 110px; }
+                                        Text { text: "OUTCOME"; horizontal-stretch: 2; font-size: 8.5px; letter-spacing: 0.8px; color: LabPalette.lab-faint; horizontal-alignment: center; vertical-alignment: center; }
+                                        Text { text: "ACTIVITY"; horizontal-stretch: 2; font-size: 8.5px; letter-spacing: 0.8px; color: LabPalette.lab-faint; horizontal-alignment: center; vertical-alignment: center; }
+                                        Text { text: "QUALITY"; horizontal-stretch: 1; font-size: 8.5px; letter-spacing: 0.8px; color: LabPalette.lab-faint; horizontal-alignment: center; vertical-alignment: center; }
+                                        Text { text: "RISK"; horizontal-stretch: 2; font-size: 8.5px; letter-spacing: 0.8px; color: LabPalette.lab-faint; horizontal-alignment: center; vertical-alignment: center; }
+                                    }
+                                }
+                                // header row (sticky: outside the scrolled band)
+                                Rectangle {
+                                    height: 30px;
+                                    y: 20px;
+                                    HorizontalLayout {
+                                        spacing: 0;
+                                        LabTh { th: "#"; tw: 34px; }
+                                        LabTh { th: "STOCK"; tw: 110px; ta-left: true; }
+                                        LabTh { th: "NET P&L"; stretch: 1; }
+                                        LabTh { th: "RETURN"; stretch: 1; }
+                                        LabTh { th: "TRADES"; stretch: 1; }
+                                        LabTh { th: "WIN %"; stretch: 1; }
+                                        LabTh { th: "PF"; stretch: 1; }
+                                        LabTh { th: "MAX DD"; stretch: 1; }
+                                        LabTh { th: "SHARPE"; stretch: 1; }
+                                    }
+                                    Rectangle { y: parent.height - 1px; height: 1px; width: 100%; background: LabPalette.line; }
+                                }
+                                if root.ranking.length == 0: Text {
+                                    text: "No rows yet — run the experiment to investigate per-stock results.";
+                                    font-size: 11px;
+                                    color: LabPalette.dim;
+                                    height: 40px;
+                                    y: 50px;
+                                    x: 14px;
+                                    vertical-alignment: center;
+                                }
+                                // The row band: `root.ranking` holds ONLY the
+                                // virtual window (visible + adaptive overscan),
+                                // so the rendered element count tracks the
+                                // viewport, not the dataset.
+                                for rrow[rindex] in root.ranking: Rectangle {
+                                    height: root.lab-rank-window.row-h;
+                                    y: 50px + rindex * root.lab-rank-window.row-h - root.lab-rank-window.scroll-px;
+                                    width: parent.width - (root.lab-rank-window.scrollable ? 10px : 0px);
+                                    background: root.lab.detail-symbol == rrow.symbol ? LabPalette.teal-06 : rrta.has-hover ? LabPalette.white-02 : transparent;
+                                    rrta := TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => { root.rank-picked(rrow.symbol); }
+                                    }
                                     Rectangle {
-                                        height: 20px;
-                                        HorizontalLayout {
-                                            spacing: 0;
-                                            Rectangle { width: 34px; }
-                                            Rectangle { width: 110px; }
-                                            Text { text: "OUTCOME"; horizontal-stretch: 2; font-size: 8.5px; letter-spacing: 0.8px; color: LabPalette.lab-faint; horizontal-alignment: center; vertical-alignment: center; }
-                                            Text { text: "ACTIVITY"; horizontal-stretch: 2; font-size: 8.5px; letter-spacing: 0.8px; color: LabPalette.lab-faint; horizontal-alignment: center; vertical-alignment: center; }
-                                            Text { text: "QUALITY"; horizontal-stretch: 1; font-size: 8.5px; letter-spacing: 0.8px; color: LabPalette.lab-faint; horizontal-alignment: center; vertical-alignment: center; }
-                                            Text { text: "RISK"; horizontal-stretch: 2; font-size: 8.5px; letter-spacing: 0.8px; color: LabPalette.lab-faint; horizontal-alignment: center; vertical-alignment: center; }
-                                        }
+                                        visible: root.lab.detail-symbol == rrow.symbol;
+                                        x: 0; y: 0; width: 2px; height: 100%;
+                                        background: LabPalette.lab-teal;
                                     }
-                                    // header row
+                                    HorizontalLayout {
+                                        spacing: 0;
+                                        LabTd { td: rrow.rank; tw: 34px; tc: LabPalette.lab-faint; }
+                                        LabTd { td: rrow.symbol; tw: 110px; ta-left: true; tc: LabPalette.lab-text; bold: true; no-mono: true; }
+                                        LabTd { td: rrow.pnl; stretch: 1; tc: rrow.pnl-tone == 2 ? LabPalette.green : rrow.pnl-tone == 3 ? LabPalette.lab-red : LabPalette.soft; }
+                                        LabTd { td: rrow.ret; stretch: 1; tc: rrow.pnl-tone == 2 ? LabPalette.green : rrow.pnl-tone == 3 ? LabPalette.lab-red : LabPalette.soft; }
+                                        LabTd { td: rrow.trades; stretch: 1; }
+                                        LabTd { td: rrow.win; stretch: 1; }
+                                        LabTd { td: rrow.pf; stretch: 1; tc: rrow.pf-tone == 2 ? LabPalette.green : rrow.pf-tone == 3 ? LabPalette.lab-red : LabPalette.soft; }
+                                        LabTd { td: rrow.dd; stretch: 1; }
+                                        LabTd { td: rrow.sharpe; stretch: 1; }
+                                    }
+                                    Rectangle { y: parent.height - 1px; height: 1px; width: 100%; background: LabPalette.line2; }
+                                }
+                                // Scrollbar (`spec §12`): geometry comes from
+                                // Rust, drawn only when the data is taller than
+                                // the viewport.
+                                Rectangle {
+                                    visible: root.lab-rank-window.scrollable;
+                                    x: parent.width - 6px;
+                                    y: 50px;
+                                    width: 3px;
+                                    height: parent.height - 50px;
+                                    background: LabPalette.line2;
                                     Rectangle {
-                                        height: 30px;
-                                        HorizontalLayout {
-                                            spacing: 0;
-                                            LabTh { th: "#"; tw: 34px; }
-                                            LabTh { th: "STOCK"; tw: 110px; ta-left: true; }
-                                            LabTh { th: "NET P&L"; stretch: 1; }
-                                            LabTh { th: "RETURN"; stretch: 1; }
-                                            LabTh { th: "TRADES"; stretch: 1; }
-                                            LabTh { th: "WIN %"; stretch: 1; }
-                                            LabTh { th: "PF"; stretch: 1; }
-                                            LabTh { th: "MAX DD"; stretch: 1; }
-                                            LabTh { th: "SHARPE"; stretch: 1; }
-                                        }
-                                        Rectangle { y: parent.height - 1px; height: 1px; width: 100%; background: LabPalette.line; }
+                                        y: root.lab-rank-window.thumb-y;
+                                        width: 3px;
+                                        height: Math.min(root.lab-rank-window.thumb-h, parent.height - 50px);
+                                        border-radius: 2px;
+                                        background: LabPalette.white-20;
                                     }
-                                    if root.ranking.length == 0: Text {
-                                        text: "No rows yet — run the experiment to investigate per-stock results.";
-                                        font-size: 11px;
-                                        color: LabPalette.dim;
-                                        height: 40px;
-                                        x: 14px;
-                                        vertical-alignment: center;
+                                    sba := TouchArea {
+                                        width: 10px;
+                                        x: -7px;
+                                        pointer-event(ev) => {
+                                            if (ev.kind == PointerEventKind.down) {
+                                                sbd.pressed = true;
+                                                sbd.press-y = self.mouse-y;
+                                            } else if (ev.kind == PointerEventKind.move && sbd.pressed) {
+                                                root.rank-scrolled((sbd.press-y - self.mouse-y) / 1px);
+                                                sbd.press-y = self.mouse-y;
+                                            } else if (ev.kind == PointerEventKind.up) {
+                                                sbd.pressed = false;
+                                            }
+                                        }
                                     }
-                                    for rrow in root.ranking: Rectangle {
-                                        height: 40px;
-                                        background: root.lab.detail-symbol == rrow.symbol ? LabPalette.teal-06 : rrta.has-hover ? LabPalette.white-02 : transparent;
-                                        rrta := TouchArea {
-                                            mouse-cursor: pointer;
-                                            clicked => { root.rank-picked(rrow.symbol); }
-                                        }
-                                        Rectangle {
-                                            visible: root.lab.detail-symbol == rrow.symbol;
-                                            x: 0; y: 0; width: 2px; height: 100%;
-                                            background: LabPalette.lab-teal;
-                                        }
-                                        HorizontalLayout {
-                                            spacing: 0;
-                                            LabTd { td: rrow.rank; tw: 34px; tc: LabPalette.lab-faint; }
-                                            LabTd { td: rrow.symbol; tw: 110px; ta-left: true; tc: LabPalette.lab-text; bold: true; no-mono: true; }
-                                            LabTd { td: rrow.pnl; stretch: 1; tc: rrow.pnl-tone == 2 ? LabPalette.green : rrow.pnl-tone == 3 ? LabPalette.lab-red : LabPalette.soft; }
-                                            LabTd { td: rrow.ret; stretch: 1; tc: rrow.pnl-tone == 2 ? LabPalette.green : rrow.pnl-tone == 3 ? LabPalette.lab-red : LabPalette.soft; }
-                                            LabTd { td: rrow.trades; stretch: 1; }
-                                            LabTd { td: rrow.win; stretch: 1; }
-                                            LabTd { td: rrow.pf; stretch: 1; tc: rrow.pf-tone == 2 ? LabPalette.green : rrow.pf-tone == 3 ? LabPalette.lab-red : LabPalette.soft; }
-                                            LabTd { td: rrow.dd; stretch: 1; }
-                                            LabTd { td: rrow.sharpe; stretch: 1; }
-                                        }
-                                        Rectangle { y: parent.height - 1px; height: 1px; width: 100%; background: LabPalette.line2; }
-                                    }
+                                    sbd := RankScrollState { pressed: false; offset: 0; press-y: 0px; }
                                 }
                             }
                             // inspector (in-flow pane on desktop)
@@ -1937,8 +1885,9 @@ export component StrategyLabScreen inherits Rectangle {
                                     Text {
                                         text: root.lab.detail-stats;
                                         font-family: "monospace";
-                                        font-size: 13.5px;
-                                        color: LabPalette.lab-text;
+                                        font-size: 26px;
+                                        font-weight: 600;
+                                        color: root.lab.detail-symbol == "" ? LabPalette.dim : LabPalette.lab-text;
                                         overflow: elide;
                                     }
                                     Rectangle { height: 14px; }
@@ -2062,47 +2011,6 @@ export component StrategyLabScreen inherits Rectangle {
                             clip: true;
                             VerticalLayout {
                                 spacing: 0;
-                                // studio top
-                                Rectangle {
-                                    height: 46px;
-                                    HorizontalLayout {
-                                        padding-left: 16px;
-                                        padding-right: 16px;
-                                        spacing: 12px;
-                                        alignment: center;
-                                        Rectangle {
-                                            height: 30px;
-                                            width: fttx.width + 28px;
-                                            border-radius: 8px;
-                                            background: LabPalette.inset;
-                                            border-width: 1px;
-                                            border-color: LabPalette.line;
-                                            fttx := Text {
-                                                text: (root.lab.name == "" ? "STRATEGY" : root.lab.name) + " · " + (root.lab.version == "" ? "—" : root.lab.version);
-                                                font-family: "monospace";
-                                                font-size: 11.5px;
-                                                color: LabPalette.lab-text;
-                                                horizontal-alignment: center;
-                                                vertical-alignment: center;
-                                            }
-                                        }
-                                        Text { text: root.lab.summary-line; font-family: "monospace"; font-size: 10px; color: LabPalette.dim; vertical-alignment: center; overflow: elide; }
-                                        Rectangle { horizontal-stretch: 1; background: transparent; }
-                                        Rectangle {
-                                            width: 6px; height: 6px; border-radius: 3px;
-                                            background: root.lab.dirty ? LabPalette.lab-amber : LabPalette.green;
-                                            
-                                        }
-                                        Text {
-                                            text: root.lab.dirty ? "UNSAVED CHANGES" : "SAVED";
-                                            font-size: 9.5px;
-                                            letter-spacing: 0.8px;
-                                            color: root.lab.dirty ? LabPalette.lab-amber : LabPalette.lab-muted;
-                                            vertical-alignment: center;
-                                        }
-                                    }
-                                    Rectangle { y: parent.height - 1px; height: 1px; width: 100%; background: LabPalette.line; }
-                                }
                                 // studio meta strip
                                 Rectangle {
                                     height: 44px;
@@ -2192,14 +2100,6 @@ export component StrategyLabScreen inherits Rectangle {
                                         }
                                     }
                                 }
-                                Text {
-                                    text: "Local workspace. Editing changes the working copy; Save stores it in the strategy library. Rerun the experiment above to test changes.";
-                                    font-size: 10.5px;
-                                    color: LabPalette.dim;
-                                    x: 16px; width: parent.width - 32px;
-                                    height: 32px;
-                                    wrap: word-wrap;
-                                }
                             }
                         }
                     }
@@ -2210,8 +2110,6 @@ export component StrategyLabScreen inherits Rectangle {
                         HorizontalLayout {
                             spacing: 14px;
                             alignment: center;
-                            Text { text: "VAYREN · STRATEGY LAB"; font-family: "monospace"; font-size: 10px; letter-spacing: 0.5px; color: LabPalette.lab-faint; vertical-alignment: center; }
-                            Text { text: "Research workspace — real strategy layer, native rendering."; font-size: 10px; color: LabPalette.lab-faint; vertical-alignment: center; }
                             Rectangle { horizontal-stretch: 1; background: transparent; }
                             Text { text: root.lab.progress-label; font-size: 10px; color: LabPalette.dim; vertical-alignment: center; }
                         }

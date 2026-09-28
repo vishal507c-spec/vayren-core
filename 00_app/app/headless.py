@@ -132,7 +132,7 @@ def _market_repository(data_dir: str | Path) -> Any | None:
         return None
 
 
-def _empty_market_snapshot(notice: str = "") -> dict:
+def _empty_market_snapshot(notice: str = "", strategies: list[str] | None = None) -> dict:
     """Honest-empty market snapshot (never invented bars)."""
     return {
         "symbols": [],
@@ -141,28 +141,31 @@ def _empty_market_snapshot(notice: str = "") -> dict:
         "timeframe": "",
         "exchange": "",
         "bars": [],
+        "strategies": list(strategies or []),
         "notice": notice,
     }
 
 
-def _market_snapshot(repository: Any, command: dict) -> dict:
+def _market_snapshot(repository: Any, command: dict, strategy_dir: str) -> dict:
     """Build the native Market snapshot from real SQLite data.
 
     Single round-trip feeding Rust ``apply_snapshot_json``: watchlist rows
     with live quotes, the selected symbol's bars (base or kernel-aggregated
-    timeframe), and the detected timeframe ladder. Honest emptiness with an
-    actionable ``notice`` when the store has nothing — never invented bars.
+    timeframe), the detected timeframe ladder, and the strategy library names
+    the chart's INDICATORS popup lists under STRATEGIES. Honest emptiness with
+    an actionable ``notice`` when the store has nothing — never invented bars.
     """
+    strategies = _strategy_names(strategy_dir)
     if repository is None:
-        return _empty_market_snapshot("Data directory not found or unreadable")
+        return _empty_market_snapshot("Data directory not found or unreadable", strategies)
     symbols = repository.list_symbols()
     if not symbols:
-        return _empty_market_snapshot("No symbols discovered")
+        return _empty_market_snapshot("No symbols discovered", strategies)
     requested = (command.get("symbol") or "").strip().upper()
     if requested and requested not in symbols:
         notice = f"Unknown symbol {requested} ({len(symbols)} symbols available)"
         return {
-            **_empty_market_snapshot(notice),
+            **_empty_market_snapshot(notice, strategies),
             "selected_symbol": requested,
         }
     symbol = requested or symbols[0]
@@ -191,6 +194,7 @@ def _market_snapshot(repository: Any, command: dict) -> dict:
             "timeframe": timeframe,
             "exchange": "",
             "bars": [],
+            "strategies": strategies,
             "notice": notice,
         }
     quotes = repository.get_quotes(symbols)
@@ -206,6 +210,7 @@ def _market_snapshot(repository: Any, command: dict) -> dict:
             "timeframe": timeframe,
             "exchange": "",
             "bars": [],
+            "strategies": strategies,
             "notice": str(exc),
         }
     return {
@@ -217,6 +222,7 @@ def _market_snapshot(repository: Any, command: dict) -> dict:
         "timeframe": timeframe,
         "exchange": "",
         "bars": [_bar_to_dict(bar) for bar in bars],
+        "strategies": strategies,
         "notice": "",
     }
 
@@ -458,6 +464,23 @@ def _lab_library_rows(strategy_dir: str) -> list[dict]:
     return rows
 
 
+_LAB_DEFAULT_CAPITAL = 10000.0
+
+
+def _strategy_names(strategy_dir: str) -> list[str]:
+    """Strategy library names shared by the Lab library and the chart popup.
+
+    One source for both workspaces, so the INDICATORS popup's STRATEGIES
+    section names exactly the strategies the Lab lists. Honest-empty on
+    failure — never invented names.
+    """
+    try:
+        return [str(row["name"]) for row in _lab_library_rows(strategy_dir)]
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Strategy names unavailable: %s", exc)
+        return []
+
+
 def _lab_universe(repository: Any) -> tuple[list[str], str]:
     """Canonical universe symbols (same market-data service as Chart)."""
     if repository is None:
@@ -509,11 +532,11 @@ def _lab_workspace(
         dates_start = first_date
     if not dates_end:
         dates_end = last_date
-    capital_raw = command.get("capital", 1000000)
+    capital_raw = command.get("capital", _LAB_DEFAULT_CAPITAL)
     try:
         capital_value = float(capital_raw)
     except (TypeError, ValueError):
-        capital_value = 1000000.0
+        capital_value = _LAB_DEFAULT_CAPITAL
     mode = (command.get("mode") or "buy").strip().lower()
     if mode not in ("buy", "sell", "compare"):
         mode = "buy"
@@ -616,14 +639,9 @@ def _lab_run(strategy_dir: str, data_dir: str, command: dict, repository: Any = 
     if end is None:
         end = workspace.get("cfg_edit", {}).get("dates_end") or None
     try:
-        capital = float(command.get("capital", 1000000))
+        capital = float(command.get("capital", _LAB_DEFAULT_CAPITAL))
     except (TypeError, ValueError):
-        capital = 1000000.0
-    cost_raw = command.get("cost")
-    try:
-        cost_pct = None if cost_raw is None or cost_raw == "" else float(cost_raw)
-    except (TypeError, ValueError):
-        cost_pct = None
+        capital = _LAB_DEFAULT_CAPITAL
     mode = (command.get("mode") or workspace.get("mode") or "buy").strip().lower()
     try:
         from app.services.backtest_service import BacktestError, run_backtest
@@ -644,7 +662,6 @@ def _lab_run(strategy_dir: str, data_dir: str, command: dict, repository: Any = 
                 data_dir,
                 strategy_dir,
                 repository,
-                cost_pct,
             )
             sell_results = run_backtest(
                 strategy_name,
@@ -657,7 +674,6 @@ def _lab_run(strategy_dir: str, data_dir: str, command: dict, repository: Any = 
                 data_dir,
                 strategy_dir,
                 repository,
-                cost_pct,
             )
             workspace["results"] = buy_results
             workspace["buy"] = buy_results
@@ -674,7 +690,6 @@ def _lab_run(strategy_dir: str, data_dir: str, command: dict, repository: Any = 
                 data_dir,
                 strategy_dir,
                 repository,
-                cost_pct,
             )
     except BacktestError as exc:
         workspace["run"] = "failed"
@@ -853,7 +868,7 @@ def run_headless_backend(args: argparse.Namespace) -> int:
                         break
 
                 elif cmd_type == "get_market_snapshot":
-                    snapshot = _market_snapshot(repository, command)
+                    snapshot = _market_snapshot(repository, command, str(strategy_dir))
                     result = {"type": "market_snapshot", "data": snapshot}
                     if not _emit(result):
                         break
