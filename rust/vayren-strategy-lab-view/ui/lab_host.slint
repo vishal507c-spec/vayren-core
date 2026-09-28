@@ -46,6 +46,7 @@ export component LabHostWindow inherits Window {
     in-out property <[LabPreset]> date-presets;
     // Ranking virtual-window geometry (pass-through, same as `app.slint`).
     in-out property <RankWindow> lab-rank-window;
+    in-out property <RankWindow> lab-trade-window;
 
     callback library-picked(int);
     callback filter-picked(int);
@@ -59,6 +60,13 @@ export component LabHostWindow inherits Window {
     callback row-menu(int);
     callback rank-picked(string);
     callback trade-picked(int);
+    callback trade-scrolled(float);
+    callback trade-search-changed(string);
+    callback trade-sort-picked(int);
+    callback trade-side-picked(int);
+    callback trade-result-picked(int);
+    callback trade-viewport-reported(length);
+    callback trade-detail-close();
     callback export-trades-requested();
     callback code-changed(string);
     callback param-committed(string, string);
@@ -136,6 +144,13 @@ export component LabHostWindow inherits Window {
         row-menu(idx) => { root.row-menu(idx); }
         rank-picked(symbol) => { root.rank-picked(symbol); }
         trade-picked(idx) => { root.trade-picked(idx); }
+        trade-scrolled(px) => { root.trade-scrolled(px); }
+        trade-search-changed(text) => { root.trade-search-changed(text); }
+        trade-sort-picked(idx) => { root.trade-sort-picked(idx); }
+        trade-side-picked(idx) => { root.trade-side-picked(idx); }
+        trade-result-picked(idx) => { root.trade-result-picked(idx); }
+        trade-viewport-reported(h) => { root.trade-viewport-reported(h); }
+        trade-detail-close() => { root.trade-detail-close(); }
         export-trades-requested() => { root.export-trades-requested(); }
         code-changed(text) => { root.code-changed(text); }
         param-committed(key, text) => { root.param-committed(key, text); }
