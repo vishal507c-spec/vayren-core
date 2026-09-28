@@ -19,16 +19,16 @@ use crate::viewport::ChartViewportZoom;
 use crate::{
     AppWindow, BrokerCheckRow, BrokerRowView, CapabilityRowView, CredentialFieldView, DlCalDay,
     DlCredField, DlPlan, DlStatus, DlStock, LabBoardCell, LabDetailMetric, LabHeader, LabKpi,
-    LabLibraryRow, LabMatrixRow, LabParam, LabPoint, LabPreset, LabRankRow, LabTradeRow, LiveBar,
-    LiveCandle, LiveEventRow, LiveFill, LiveGate, LiveKv, LiveMarket, LiveOrder, LivePosition,
-    LiveSetup, LiveStat, LiveSymbolRow, MarketCandle, MarketIndicator, MarketMarker, MarketPlotSeg,
-    MarketPopupRow, MarketRayLevel, MarketSettingsRow, MarketStatusRow, MarketTick,
-    MarketTimeframe, MarketTradeContext, MarketWatchRow, PortfolioAlloc, PortfolioFill,
-    PortfolioGate, PortfolioKpi, PortfolioOrder, PortfolioPosition, PortfolioRisk,
-    ProgressStepView, RankWindow, ResearchCompareRow, ResearchConfigGroup, ResearchEvidenceDim,
-    ResearchEvidenceWhy, ResearchExperimentRow, ResearchField, ResearchKv, ResearchKvGroup,
-    ResearchMetric, ResearchRobustRow, ResearchSignalRow, ResearchStrategyRow, ResearchTradeRow,
-    ShellScreen,
+    LabLibraryRow, LabMatrixRow, LabParam, LabPoint, LabPreset, LabRankRow, LabTradeMetric,
+    LabTradeRow, LiveBar, LiveCandle, LiveEventRow, LiveFill, LiveGate, LiveKv, LiveMarket,
+    LiveOrder, LivePosition, LiveSetup, LiveStat, LiveSymbolRow, MarketCandle, MarketIndicator,
+    MarketMarker, MarketPlotSeg, MarketPopupRow, MarketRayLevel, MarketSettingsRow,
+    MarketStatusRow, MarketTick, MarketTimeframe, MarketTradeContext, MarketWatchRow,
+    PortfolioAlloc, PortfolioFill, PortfolioGate, PortfolioKpi, PortfolioOrder, PortfolioPosition,
+    PortfolioRisk, ProgressStepView, RankWindow, ResearchCompareRow, ResearchConfigGroup,
+    ResearchEvidenceDim, ResearchEvidenceWhy, ResearchExperimentRow, ResearchField, ResearchKv,
+    ResearchKvGroup, ResearchMetric, ResearchRobustRow, ResearchSignalRow, ResearchStrategyRow,
+    ResearchTradeRow, ShellScreen,
 };
 use slint::ComponentHandle;
 #[cfg(test)]
@@ -1374,7 +1374,6 @@ pub fn apply_lab(ui: &AppWindow, state: &LabState) {
         rank_search: view.rank_search.into(),
         rank_desc: view.rank_desc,
         rankby_current: view.rankby_current,
-        trade_needle: view.trade_needle.into(),
         trade_symbol: view.trade_symbol.into(),
         trade_filters_active: view.trade_filters_active,
         selected_trade: view.selected_trade,
@@ -1413,6 +1412,35 @@ pub fn apply_lab(ui: &AppWindow, state: &LabState) {
         sym_button_line: view.sym_button_line.into(),
         sym_count_line: view.sym_count_line.into(),
         sym_selected_line: view.sym_selected_line.into(),
+        // Trade blotter: honest counters, filter/sort state and the ONE
+        // selected trade's facts (`spec §2/§27`).
+        trade_summary: view.trade_summary.into(),
+        trade_needle: view.trade_needle.clone().into(),
+        trade_side_filter: view.trade_side_filter,
+        trade_result_filter: view.trade_result_filter,
+        trade_sort: view.trade_sort,
+        trade_sort_labels: Rc::new(slint::VecModel::from(
+            view.trade_sort_labels
+                .into_iter()
+                .map(slint::SharedString::from)
+                .collect::<Vec<_>>(),
+        ))
+        .into(),
+        trade_total: view.trade_total,
+        trade_detail_symbol: view.trade_detail.symbol.into(),
+        trade_detail_side: view.trade_detail.side.into(),
+        trade_detail_metrics: Rc::new(slint::VecModel::from(
+            view.trade_detail
+                .metrics
+                .into_iter()
+                .map(|m| LabTradeMetric {
+                    label: m.label.into(),
+                    value: m.value.into(),
+                    tone: m.tone,
+                })
+                .collect::<Vec<_>>(),
+        ))
+        .into(),
         run_id: view.run_id.into(),
         run_ts: view.run_ts.into(),
         cfg_hash: view.cfg_hash.into(),
@@ -1459,6 +1487,24 @@ pub fn apply_lab(ui: &AppWindow, state: &LabState) {
         signature_hi: view.rank_window.signature.0,
         signature_lo: view.rank_window.signature.1,
         overscan: view.rank_window.overscan,
+    });
+    // Signature of the trade band the UI currently shows — captured BEFORE the
+    // window prop is overwritten, so the guard below compares against the truth.
+    let rendered_trade_signature = ui.get_lab_trade_window().signature_hi;
+    ui.set_lab_trade_window(RankWindow {
+        total: view.trade_window.total,
+        first: view.trade_window.first,
+        count: view.trade_window.count,
+        row_h: view.trade_window.row_h as f32,
+        viewport_h: view.trade_window.viewport_h as f32,
+        scroll_px: view.trade_window.scroll_px as f32,
+        max_scroll_px: view.trade_window.max_scroll_px as f32,
+        thumb_h: view.trade_window.thumb_h as f32,
+        thumb_y: view.trade_window.thumb_y as f32,
+        scrollable: view.trade_window.scrollable,
+        signature_hi: view.trade_window.signature.0,
+        signature_lo: view.trade_window.signature.1,
+        overscan: view.trade_window.overscan,
     });
     ui.set_lab_date_presets(
         Rc::new(slint::VecModel::from(
@@ -1531,30 +1577,35 @@ pub fn apply_lab(ui: &AppWindow, state: &LabState) {
             .into(),
         );
     }
-    ui.set_lab_trades(
-        Rc::new(slint::VecModel::from(
-            view.trades
-                .into_iter()
-                .map(|t| LabTradeRow {
-                    no: t.no.into(),
-                    abs_index: t.abs_index,
-                    symbol: t.symbol.into(),
-                    side: t.side.into(),
-                    entry: t.entry.into(),
-                    entry_px: t.entry_px.into(),
-                    exit: t.exit.into(),
-                    exit_px: t.exit_px.into(),
-                    pnl: t.pnl.into(),
-                    r: t.r.into(),
-                    bars: t.bars.into(),
-                    reason: t.reason.into(),
-                    pnl_tone: t.pnl_tone.cell(),
-                    selected: t.selected,
-                })
-                .collect::<Vec<_>>(),
-        ))
-        .into(),
-    );
+    // Zero full-table re-render for the blotter (`spec §3`): same signature
+    // guard as the ranking grid, so a KPI change or a code edit never rebuilds
+    // the trade model.
+    if rendered_trade_signature != view.trade_window.signature.0 {
+        ui.set_lab_trades(
+            Rc::new(slint::VecModel::from(
+                view.trades
+                    .into_iter()
+                    .map(|t| LabTradeRow {
+                        no: t.no.into(),
+                        abs_index: t.abs_index,
+                        symbol: t.symbol.into(),
+                        side: t.side.into(),
+                        entry: t.entry.into(),
+                        entry_px: t.entry_px.into(),
+                        exit: t.exit.into(),
+                        exit_px: t.exit_px.into(),
+                        pnl: t.pnl.into(),
+                        r: t.r.into(),
+                        bars: t.bars.into(),
+                        reason: t.reason.into(),
+                        pnl_tone: t.pnl_tone.cell(),
+                        selected: t.selected,
+                    })
+                    .collect::<Vec<_>>(),
+            ))
+            .into(),
+        );
+    }
     // view coordinates scaled to the fixed 1000x300 chart box (presentation
     // transform only — the engine data itself is untouched).
     let to_points = |series: &Vec<(f32, f32)>| -> Vec<LabPoint> {
@@ -1924,6 +1975,76 @@ pub fn wire_lab(
     ui.on_lab_trade_picked(bind(ui, &state, |s, i| {
         s.interaction_trade_pick(i);
     }));
+    // Trade blotter surface. The scroll binding is the hot path, so it stays a
+    // bare borrow + `apply_lab` — no allocation, no formatting (`spec §19`).
+    {
+        let strong = state.clone();
+        let handle = ui.as_weak();
+        ui.on_lab_trade_scrolled(move |px: f32| {
+            {
+                let mut guard = strong.borrow_mut();
+                guard.interaction_trade_scroll(px);
+            }
+            if let Some(ui) = handle.upgrade() {
+                apply_lab(&ui, &strong.borrow());
+            }
+        });
+    }
+    {
+        let strong = state.clone();
+        let handle = ui.as_weak();
+        ui.on_lab_trade_viewport_reported(move |height: f32| {
+            {
+                let mut guard = strong.borrow_mut();
+                guard.interaction_trade_viewport(height);
+            }
+            if let Some(ui) = handle.upgrade() {
+                apply_lab(&ui, &strong.borrow());
+            }
+        });
+    }
+    {
+        let strong = state.clone();
+        let handle = ui.as_weak();
+        ui.on_lab_trade_sort_picked(move |field: i32| {
+            {
+                let mut guard = strong.borrow_mut();
+                guard.interaction_tradesort(field);
+            }
+            if let Some(ui) = handle.upgrade() {
+                apply_lab(&ui, &strong.borrow());
+            }
+        });
+    }
+    {
+        let strong = state.clone();
+        let handle = ui.as_weak();
+        ui.on_lab_trade_side_picked(move |side: i32| {
+            {
+                let mut guard = strong.borrow_mut();
+                guard.interaction_trade_side(side);
+            }
+            if let Some(ui) = handle.upgrade() {
+                apply_lab(&ui, &strong.borrow());
+            }
+        });
+    }
+    {
+        let strong = state.clone();
+        let handle = ui.as_weak();
+        ui.on_lab_trade_result_picked(move |result: i32| {
+            {
+                let mut guard = strong.borrow_mut();
+                guard.interaction_trade_result(result);
+            }
+            if let Some(ui) = handle.upgrade() {
+                apply_lab(&ui, &strong.borrow());
+            }
+        });
+    }
+    ui.on_lab_trade_detail_close(bind0(ui, &state, |s| {
+        s.interaction_trade_detail_close();
+    }));
     ui.on_lab_cmp_side_picked(bind(ui, &state, |s, i| {
         s.interaction_cmpside(i);
     }));
@@ -2017,6 +2138,12 @@ pub fn wire_lab(
     on_lab_text!(on_lab_rankby_picked, LabState::interaction_rankby);
     on_lab_text!(
         on_lab_trade_filter_changed,
+        LabState::interaction_tradefilter
+    );
+    // The blotter's own search box feeds the same filter path (it is the one
+    // control the new page binds to).
+    on_lab_text!(
+        on_lab_trade_search_changed,
         LabState::interaction_tradefilter
     );
     {
@@ -2202,6 +2329,12 @@ pub fn visual_fixture(kind: &str) -> LabState {
                             lab::Tone::Positive
                         },
                         selected: false,
+                        sort: [
+                            i as f64,
+                            if i % 4 == 0 { -99.99 } else { 99.99 },
+                            if i % 4 == 0 { -0.99 } else { 0.99 },
+                            9.0,
+                        ],
                     })
                     .collect(),
                 equity: (0..=60)

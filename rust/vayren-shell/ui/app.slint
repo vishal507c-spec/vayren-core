@@ -106,6 +106,13 @@ export component AppWindow inherits Window {
     callback lab-rank-scroll-to(float);
     callback lab-rank-viewport-reported(length);
     callback lab-trade-picked(int);
+    callback lab-trade-scrolled(float);
+    callback lab-trade-search-changed(string);
+    callback lab-trade-sort-picked(int);
+    callback lab-trade-side-picked(int);
+    callback lab-trade-result-picked(int);
+    callback lab-trade-viewport-reported(length);
+    callback lab-trade-detail-close();
     callback lab-export-trades-requested();
     callback lab-code-changed(string);
     callback lab-param-committed(string, string);
@@ -416,7 +423,8 @@ export component AppWindow inherits Window {
     in-out property <[LabKpi]> lab-kpis;
     in-out property <[LabRankRow]> lab-ranking;
     // Ranking virtual-window geometry (Rust-derived, never recomputed in UI).
-    in-out property <RankWindow> lab-rank-window;    in-out property <[LabTradeRow]> lab-trades;
+    in-out property <RankWindow> lab-rank-window;
+    in-out property <RankWindow> lab-trade-window;    in-out property <[LabTradeRow]> lab-trades;
     in-out property <[LabPoint]> lab-equity;
     in-out property <[LabPoint]> lab-drawdown;
     in-out property <[LabParam]> lab-params;
@@ -894,6 +902,7 @@ export component AppWindow inherits Window {
                     kpis: root.lab-kpis;
                     ranking: root.lab-ranking;
             lab-rank-window: root.lab-rank-window;
+            lab-trade-window: root.lab-trade-window;
                     trades: root.lab-trades;
                     equity: root.lab-equity;
                     drawdown: root.lab-drawdown;
@@ -935,6 +944,13 @@ export component AppWindow inherits Window {
                     rank-scroll-to(px) => { root.lab-rank-scroll-to(px); }
                     rank-viewport-reported(h) => { root.lab-rank-viewport-reported(h); }
                     trade-picked(idx) => { root.lab-trade-picked(idx); }
+                    trade-scrolled(px) => { root.lab-trade-scrolled(px); }
+                    trade-search-changed(text) => { root.lab-trade-search-changed(text); }
+                    trade-sort-picked(idx) => { root.lab-trade-sort-picked(idx); }
+                    trade-side-picked(idx) => { root.lab-trade-side-picked(idx); }
+                    trade-result-picked(idx) => { root.lab-trade-result-picked(idx); }
+                    trade-viewport-reported(h) => { root.lab-trade-viewport-reported(h); }
+                    trade-detail-close() => { root.lab-trade-detail-close(); }
                     export-trades-requested() => { root.lab-export-trades-requested(); }
                     code-changed(text) => { root.lab-code-changed(text); }
                     param-committed(key, text) => { root.lab-param-committed(key, text); }
