@@ -14,15 +14,15 @@ name = "vayren-shell"
 path = "src/main.rs"
 
 [dependencies]
-vayren-core = { path = "../vayren-core" }
-slint = "1.17"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-clipboard-win = "5"
+vayren-core = { workspace = true }
+slint = { workspace = true, default-features = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+clipboard-win = { workspace = true }
 
 [build-dependencies]
-slint-build = "1.17"
+slint-build = { workspace = true }
 
 [dev-dependencies]
-i-slint-backend-testing = "1.17"
-slint = { version = "1.17", features = ["renderer-software"] }
+i-slint-backend-testing = { workspace = true }
+slint = { workspace = true, features = ["renderer-software"] }
