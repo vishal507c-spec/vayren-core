@@ -40,9 +40,17 @@ export struct RankWindow {
     overscan: int,
 }
 
+// Trade detail fact: label, value and the P&L tone. Declared before LabHeader
+// (Slint resolves types in declaration order) and separate from
+// `LabDetailMetric`, which the ranking inspector uses.
+export struct LabTradeMetric {
+    label: string,
+    value: string,
+    tone: int,
+}
+
 export struct LabHeader {
-    has-strategy: bool,
-    name: string,
+    has-strategy: bool,    name: string,
     description: string,
     tags: string,
     version: string,
@@ -97,6 +105,18 @@ export struct LabHeader {
     cmp-reason: string,
     cmp-tone: int,
     cmp-trade-summary: string,
+    // Trade blotter state (`spec §2`): honest counts, the filter/sort state and
+    // the ONE selected trade's facts.
+    trade-summary: string,
+    trade-needle: string,
+    trade-side-filter: int,
+    trade-result-filter: int,
+    trade-sort: int,
+    trade-sort-labels: [string],
+    trade-total: int,
+    trade-detail-symbol: string,
+    trade-detail-side: string,
+    trade-detail-metrics: [LabTradeMetric],
     cmp-stale: string,
     cmp-scope: string,
     cmp-leader: string,
@@ -786,6 +806,8 @@ export component StrategyLabScreen inherits Rectangle {
 
     in property <LabHeader> lab;
     in property <RankWindow> lab-rank-window;
+    // Trade blotter window — the same engine, its own geometry.
+    in property <RankWindow> lab-trade-window;
     in property <[LabLibraryRow]> library;
     in property <[LabKpi]> kpis;
     in property <[LabRankRow]> ranking;
@@ -868,6 +890,15 @@ export component StrategyLabScreen inherits Rectangle {
     callback rank-scroll-to(float);
     callback rank-viewport-reported(length);
     callback trade-picked(int);
+    // Trade blotter surface: scroll, search, sort, filters and the detail close.
+    // `spec §19`: the scroll path only re-lays the window.
+    callback trade-scrolled(float);
+    callback trade-search-changed(string);
+    callback trade-sort-picked(int);
+    callback trade-side-picked(int);
+    callback trade-result-picked(int);
+    callback trade-viewport-reported(length);
+    callback trade-detail-close();
     callback export-trades-requested();
     callback code-changed(string);
     callback param-committed(string, string);
@@ -1662,7 +1693,11 @@ export component StrategyLabScreen inherits Rectangle {
                     }
 
                     // ════ 05 INVESTIGATE ════
-                    VerticalLayout {
+                    // The lens selects the perspective: on Trades the stock-level
+                    // summary gives way to the individual trade blotter (they are
+                    // two different questions, and the blotter is a different
+                    // page, not a filter of this table).
+                    if root.lab.lens != 1: VerticalLayout {
                         spacing: 0;
                         LabEyebrow { eyebrow-text: "04 · INVESTIGATE WHERE THE RESULT CAME FROM"; }
                         // tools row
@@ -1994,6 +2029,232 @@ export component StrategyLabScreen inherits Rectangle {
                                         LabEqStat { es-label: "MAX DRAWDOWN"; es-value: root.lab.drawdown-caption == "" ? "--" : root.lab.drawdown-caption; es-tone: 3; }
                                     }
                                     Rectangle { y: 0; height: 1px; width: 100%; background: LabPalette.line; }
+                                }
+                            }
+                        }
+                    }
+
+                    // ════ TRADE BLOTTER (lens: Trades) ════
+                    // Individual trade records — the real engine trades, one row
+                    // each. Virtualized: the model handed to this page holds only
+                    // the visible band, while the scrollbar and the count reflect
+                    // the COMPLETE trade list.
+                    if root.lab.lens == 1: VerticalLayout {
+                        spacing: 0;
+                        LabEyebrow { eyebrow-text: "04 · TRADE BLOTTER — EVERY INDIVIDUAL TRADE"; }
+                        // tools row: honest count, search, sort, side + result filters
+                        HorizontalLayout {
+                            height: 34px;
+                            spacing: 9px;
+                            Text {
+                                text: root.lab.trade-summary;
+                                font-size: 10.5px;
+                                font-family: "monospace";
+                                color: LabPalette.dim;
+                                vertical-alignment: center;
+                            }
+                            Rectangle { horizontal-stretch: 1; background: transparent; }
+                            LabCtlSearch {
+                                width: 170px;
+                                ctl-h: 32px;
+                                ph: "Search stock or reason…";
+                                val: root.lab.trade-needle;
+                                changed(t) => { root.trade-search-changed(t); }
+                            }
+                            sidectl := LabCtlButton {
+                                ctl-h: 32px;
+                                width: 110px;
+                                ctl-label: root.lab.trade-side-filter == 1 ? "Long only" : root.lab.trade-side-filter == 2 ? "Short only" : "All sides";
+                                clicked => { root.trade-side-picked(root.lab.trade-side-filter == 2 ? 0 : root.lab.trade-side-filter + 1); }
+                            }
+                            resultctl := LabCtlButton {
+                                ctl-h: 32px;
+                                width: 118px;
+                                ctl-label: root.lab.trade-result-filter == 1 ? "Winners" : root.lab.trade-result-filter == 2 ? "Losers" : "All results";
+                                clicked => { root.trade-result-picked(root.lab.trade-result-filter == 2 ? 0 : root.lab.trade-result-filter + 1); }
+                            }
+                            sortctl := LabCtlButton {
+                                ctl-h: 32px;
+                                width: 150px;
+                                ctl-label: "Sort · " + (root.lab.trade-sort-labels.length > 0 ? root.lab.trade-sort-labels[Math.min(root.lab.trade-sort, root.lab.trade-sort-labels.length - 1)] : "Entry time");
+                                clicked => { root.trade-sort-picked(root.lab.trade-sort + 1 >= root.lab.trade-sort-labels.length ? 0 : root.lab.trade-sort + 1); }
+                            }
+                        }
+                        Rectangle { height: 12px; }
+                        // The blotter viewport: bounded, sticky header, windowed
+                        // rows, real scrollbar. Same engine as the ranking grid.
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            min-width: 0;
+                            border-radius: LabPalette.section-radius;
+                            background: LabPalette.panel;
+                            border-width: 1px;
+                            border-color: LabPalette.line;
+                            clip: true;
+                            height: root.lab-trade-window.viewport-h;
+                            init => { root.trade-viewport-reported(root.lab-trade-window.viewport-h); }
+                            trade-scroll-area := TouchArea {
+                                scroll-event(ev) => {
+                                    if (ev.delta-y == 0px) { return reject; }
+                                    let notches = (ev.delta-y / 1px) / 120.0;
+                                    root.trade-scrolled(-notches * (root.lab-trade-window.row-h / 1px));
+                                    return accept;
+                                }
+                                pointer-event(ev) => {
+                                    if (ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left) {
+                                        trade-press.pressed = true;
+                                        trade-press.offset = root.lab-trade-window.scroll-px / 1px;
+                                        trade-press.press-y = self.mouse-y;
+                                    } else if (ev.kind == PointerEventKind.move && trade-press.pressed) {
+                                        root.trade-scrolled(trade-press.offset - (trade-press.press-y - self.mouse-y) / 1px);
+                                    } else if (ev.kind == PointerEventKind.up) {
+                                        trade-press.pressed = false;
+                                    }
+                                }
+                            }
+                            trade-press := RankScrollState { pressed: false; offset: 0; press-y: 0px; }
+                            // grouped header (sticky: outside the scrolled band)
+                            Rectangle {
+                                height: 20px;
+                                y: 0;
+                                HorizontalLayout {
+                                    spacing: 0;
+                                    Rectangle { width: 46px; }
+                                    Rectangle { width: 110px; }
+                                    Text { text: "TIMING"; horizontal-stretch: 2; font-size: 8.5px; letter-spacing: 0.8px; color: LabPalette.lab-faint; horizontal-alignment: center; vertical-alignment: center; }
+                                    Text { text: "PRICES"; horizontal-stretch: 2; font-size: 8.5px; letter-spacing: 0.8px; color: LabPalette.lab-faint; horizontal-alignment: center; vertical-alignment: center; }
+                                    Text { text: "OUTCOME"; horizontal-stretch: 1; font-size: 8.5px; letter-spacing: 0.8px; color: LabPalette.lab-faint; horizontal-alignment: center; vertical-alignment: center; }
+                                    Text { text: "HOLD"; horizontal-stretch: 1; font-size: 8.5px; letter-spacing: 0.8px; color: LabPalette.lab-faint; horizontal-alignment: center; vertical-alignment: center; }
+                                    Text { text: "EXIT"; horizontal-stretch: 1; font-size: 8.5px; letter-spacing: 0.8px; color: LabPalette.lab-faint; horizontal-alignment: center; vertical-alignment: center; }
+                                }
+                            }
+                            Rectangle {
+                                height: 26px;
+                                y: 20px;
+                                HorizontalLayout {
+                                    spacing: 0;
+                                    LabTh { th: "#"; tw: 46px; height: 26px; }
+                                    LabTh { th: "STOCK"; tw: 110px; ta-left: true; height: 26px; }
+                                    LabTh { th: "SIDE"; tw: 64px; height: 26px; }
+                                    LabTh { th: "ENTRY"; stretch: 1; height: 26px; }
+                                    LabTh { th: "ENTRY PX"; stretch: 1; height: 26px; }
+                                    LabTh { th: "EXIT"; stretch: 1; height: 26px; }
+                                    LabTh { th: "EXIT PX"; stretch: 1; height: 26px; }
+                                    LabTh { th: "P&L"; stretch: 1; height: 26px; }
+                                    LabTh { th: "R"; tw: 62px; height: 26px; }
+                                    LabTh { th: "BARS"; tw: 58px; height: 26px; }
+                                    LabTh { th: "REASON"; tw: 104px; ta-left: true; height: 26px; }
+                                }
+                                Rectangle { y: parent.height - 1px; height: 1px; width: 100%; background: LabPalette.line; }
+                            }
+                            if root.lab.trade-total == 0: Text {
+                                text: "No trades yet — run the backtest to record individual trades.";
+                                font-size: 11px;
+                                color: LabPalette.dim;
+                                height: 30px;
+                                y: 46px;
+                                x: 14px;
+                                vertical-alignment: center;
+                            }
+                            // The window: `root.trades` carries ONLY the visible
+                            // band (viewport + adaptive overscan), so the element
+                            // count tracks the viewport, never the trade count.
+                            for trow[tindex] in root.trades: Rectangle {
+                                height: root.lab-trade-window.row-h;
+                                y: 46px + tindex * root.lab-trade-window.row-h - root.lab-trade-window.scroll-px;
+                                width: parent.width - (root.lab-trade-window.scrollable ? 10px : 0px);
+                                background: trow.selected ? LabPalette.teal-06 : tta.has-hover ? LabPalette.white-02 : transparent;
+                                tta := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { root.trade-picked(trow.abs-index); }
+                                }
+                                Rectangle {
+                                    visible: trow.selected;
+                                    x: 0; y: 0; width: 2px; height: 100%;
+                                    background: LabPalette.lab-teal;
+                                }
+                                HorizontalLayout {
+                                    spacing: 0;
+                                    LabTd { td: trow.no; tw: 46px; tc: LabPalette.lab-faint; }
+                                    LabTd { td: trow.symbol; tw: 110px; ta-left: true; tc: LabPalette.lab-text; bold: true; no-mono: true; }
+                                    LabTd { td: trow.side; tw: 64px; tc: trow.side == "LONG" ? LabPalette.green : LabPalette.lab-red; }
+                                    LabTd { td: trow.entry; stretch: 1; }
+                                    LabTd { td: trow.entry-px; stretch: 1; }
+                                    LabTd { td: trow.exit; stretch: 1; }
+                                    LabTd { td: trow.exit-px; stretch: 1; }
+                                    LabTd { td: trow.pnl; stretch: 1; tc: trow.pnl-tone == 2 ? LabPalette.green : trow.pnl-tone == 3 ? LabPalette.lab-red : LabPalette.soft; }
+                                    LabTd { td: trow.r; tw: 62px; }
+                                    LabTd { td: trow.bars; tw: 58px; }
+                                    LabTd { td: trow.reason; tw: 104px; ta-left: true; tc: LabPalette.soft; no-mono: true; }
+                                }
+                                Rectangle { y: parent.height - 1px; height: 1px; width: 100%; background: LabPalette.line2; }
+                            }
+                            // scrollbar (geometry from Rust, drawn only when needed)
+                            Rectangle {
+                                visible: root.lab-trade-window.scrollable;
+                                x: parent.width - 6px;
+                                y: 46px;
+                                width: 3px;
+                                height: parent.height - 46px;
+                                background: LabPalette.line2;
+                                Rectangle {
+                                    y: root.lab-trade-window.thumb-y;
+                                    width: 3px;
+                                    height: Math.min(root.lab-trade-window.thumb-h, parent.height - 46px);
+                                    border-radius: 2px;
+                                    background: LabPalette.white-20;
+                                }
+                                tsba := TouchArea {
+                                    width: 10px;
+                                    x: -7px;
+                                    pointer-event(ev) => {
+                                        if (ev.kind == PointerEventKind.down) {
+                                            tsbd.pressed = true;
+                                            tsbd.press-y = self.mouse-y;
+                                        } else if (ev.kind == PointerEventKind.move && tsbd.pressed) {
+                                            root.trade-scrolled((tsbd.press-y - self.mouse-y) / 1px);
+                                            tsbd.press-y = self.mouse-y;
+                                        } else if (ev.kind == PointerEventKind.up) {
+                                            tsbd.pressed = false;
+                                        }
+                                    }
+                                }
+                                tsbd := RankScrollState { pressed: false; offset: 0; press-y: 0px; }
+                            }
+                        }
+                        Rectangle { height: 12px; }
+                        // Selected trade detail — built for the ONE clicked trade
+                        // (`spec §27`): nothing is precomputed per row.
+                        if root.lab.trade-detail-symbol != "": Rectangle {
+                            horizontal-stretch: 1;
+                            border-radius: LabPalette.section-radius;
+                            background: LabPalette.panel3;
+                            border-width: 1px;
+                            border-color: LabPalette.teal-25;
+                            padding: 16px;
+                            VerticalLayout {
+                                spacing: 0;
+                                HorizontalLayout {
+                                    spacing: 0;
+                                    Text { text: root.lab.trade-detail-symbol; font-size: 16px; font-weight: 600; color: LabPalette.lab-text; vertical-alignment: center; }
+                                    Text { text: "  " + root.lab.trade-detail-side; font-size: 10.5px; font-family: "monospace"; color: LabPalette.lab-muted; vertical-alignment: center; }
+                                    Rectangle { horizontal-stretch: 1; background: transparent; }
+                                    dtx := LabCtlButton {
+                                        ctl-h: 26px;
+                                        width: 26px;
+                                        ctl-label: "×";
+                                        clicked => { root.trade-detail-close(); }
+                                    }
+                                }
+                                Rectangle { height: 12px; }
+                                HorizontalLayout {
+                                    spacing: 0;
+                                    for dmetric in root.lab.trade-detail-metrics: VerticalLayout {
+                                        horizontal-stretch: 1;
+                                        spacing: 4px;
+                                        Text { text: dmetric.label; font-size: 8.5px; letter-spacing: 0.8px; color: LabPalette.dim; }
+                                        Text { text: dmetric.value; font-family: "monospace"; font-size: 12.5px; color: dmetric.tone == 2 ? LabPalette.green : dmetric.tone == 3 ? LabPalette.lab-red : LabPalette.lab-text; }
+                                    }
                                 }
                             }
                         }

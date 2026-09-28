@@ -124,8 +124,35 @@ fn apply_state(ui: &LabHostWindow, state: &LabState) {
         rank_search: view.rank_search.into(),
         rank_desc: view.rank_desc,
         rankby_current: view.rankby_current,
-        trade_needle: view.trade_needle.into(),
+        trade_needle: view.trade_needle.clone().into(),
         trade_symbol: view.trade_symbol.into(),
+        // Trade blotter: counters, filter/sort state and the selected trade.
+        trade_summary: view.trade_summary.into(),
+        trade_side_filter: view.trade_side_filter,
+        trade_result_filter: view.trade_result_filter,
+        trade_sort: view.trade_sort,
+        trade_sort_labels: Rc::new(slint::VecModel::from(
+            view.trade_sort_labels
+                .into_iter()
+                .map(slint::SharedString::from)
+                .collect::<Vec<_>>(),
+        ))
+        .into(),
+        trade_total: view.trade_total,
+        trade_detail_symbol: view.trade_detail.symbol.into(),
+        trade_detail_side: view.trade_detail.side.into(),
+        trade_detail_metrics: Rc::new(slint::VecModel::from(
+            view.trade_detail
+                .metrics
+                .into_iter()
+                .map(|m| LabTradeMetric {
+                    label: m.label.into(),
+                    value: m.value.into(),
+                    tone: m.tone,
+                })
+                .collect::<Vec<_>>(),
+        ))
+        .into(),
         trade_filters_active: view.trade_filters_active,
         selected_trade: view.selected_trade,
         compare_side: view.compare_side,
@@ -207,6 +234,23 @@ fn apply_state(ui: &LabHostWindow, state: &LabState) {
         signature_hi: view.rank_window.signature.0,
         signature_lo: view.rank_window.signature.1,
         overscan: view.rank_window.overscan,
+    });
+    // Trade blotter window: same Rust-derived geometry as the shell pushes, so
+    // the host stays a faithful pass-through of the screen.
+    ui.set_lab_trade_window(RankWindow {
+        total: view.trade_window.total,
+        first: view.trade_window.first,
+        count: view.trade_window.count,
+        row_h: view.trade_window.row_h as f32,
+        viewport_h: view.trade_window.viewport_h as f32,
+        scroll_px: view.trade_window.scroll_px as f32,
+        max_scroll_px: view.trade_window.max_scroll_px as f32,
+        thumb_h: view.trade_window.thumb_h as f32,
+        thumb_y: view.trade_window.thumb_y as f32,
+        scrollable: view.trade_window.scrollable,
+        signature_hi: view.trade_window.signature.0,
+        signature_lo: view.trade_window.signature.1,
+        overscan: view.trade_window.overscan,
     });
     ui.set_date_presets(
         Rc::new(slint::VecModel::from(
