@@ -195,8 +195,8 @@ def test_negative_cost_fails_closed(store: Path, tmp_path: Path) -> None:
 
 
 def test_lab_run_applies_full_command_config(store: Path, tmp_path: Path) -> None:
-    """End-to-end proof (backend side): the run command's universe, dates,
-    capital and cost reach the engine and echo back in the workspace config.
+    """End-to-end proof (backend side): the run command's universe, dates and
+    capital reach the engine and echo back in the workspace config.
     """
     sys.path.insert(0, str(ROOT / "00_app"))
     from app.headless import _lab_run
@@ -213,7 +213,6 @@ def test_lab_run_applies_full_command_config(store: Path, tmp_path: Path) -> Non
         "start": first,
         "end": last,
         "capital": 500000.0,
-        "cost": 0.05,
         "mode": "buy",
     }
     workspace = _lab_run(str(tmp_path), str(store), command, repository)
@@ -228,3 +227,30 @@ def test_lab_run_applies_full_command_config(store: Path, tmp_path: Path) -> Non
     failed = _lab_run(str(tmp_path), str(store), bad, repository)
     assert failed["run"] == "failed"
     assert "No universe" in failed["cfg_edit"]["config_error"]
+
+
+def test_lab_run_defaults_capital_to_ten_thousand(store: Path, tmp_path: Path) -> None:
+    """The Lab has no capital control of its own, so an omitted/unparseable
+    capital must land on the ₹10,000 default instead of a stale big number.
+    """
+    sys.path.insert(0, str(ROOT / "00_app"))
+    from app.headless import _lab_run
+    from app.services.market_data_service import MarketDataService
+
+    repository = MarketDataService(store)
+    first, last = repository.date_range("TREND")
+    command = {
+        "strategy": "SMA Crossover",
+        "symbols": ["TREND"],
+        "timeframe": "15m",
+        "start": first,
+        "end": last,
+        "mode": "buy",
+    }
+    default_run = _lab_run(str(tmp_path), str(store), dict(command), repository)
+    assert default_run["config"]["capital"] == "₹10,000"
+    assert default_run["cfg_edit"]["capital"] == 10000.0
+    junk_run = _lab_run(
+        str(tmp_path), str(store), dict(command, capital="not-a-number"), repository
+    )
+    assert junk_run["config"]["capital"] == "₹10,000"

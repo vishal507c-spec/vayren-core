@@ -99,9 +99,10 @@ def run_backtest(
 ) -> dict:
     """Execute one backtest over real historical bars.
 
-    ``cost_pct`` is the UI transaction-cost echo in percent-per-side (the
-    same units as ``_DEFAULT_COMMISSION_PCT``). ``None`` keeps the default;
-    negative values fail closed. Threaded into the native fill/close path,
+    ``cost_pct`` is percent-per-side commission (same units as
+    ``_DEFAULT_COMMISSION_PCT``). The Lab no longer exposes a cost control, so
+    callers pass nothing and the default applies; ``None`` keeps the default
+    and negative values fail closed. Threaded into the native fill/close path,
     never applied as a post-hoc haircut.
 
     Returns the Lab ``results`` block (metrics/ranking/trades/equity_curve/

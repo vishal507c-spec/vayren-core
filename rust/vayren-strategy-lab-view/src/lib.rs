@@ -163,8 +163,6 @@ fn apply_state(ui: &LabHostWindow, state: &LabState) {
         sym_button_line: view.sym_button_line.into(),
         sym_count_line: view.sym_count_line.into(),
         sym_selected_line: view.sym_selected_line.into(),
-        cfg_cost: view.cfg_cost.into(),
-        cfg_cost_warn: view.cfg_cost_warn,
         run_id: view.run_id.into(),
         run_ts: view.run_ts.into(),
         cfg_hash: view.cfg_hash.into(),
@@ -192,6 +190,23 @@ fn apply_state(ui: &LabHostWindow, state: &LabState) {
         today_days: view.today_days,
         dates_start_days: view.dates_start_days,
         dates_end_days: view.dates_end_days,
+    });
+    // Ranking virtual-window geometry: the host is a pass-through, so the same
+    // Rust-derived window the shell pushes must land here too.
+    ui.set_lab_rank_window(RankWindow {
+        total: view.rank_window.total,
+        first: view.rank_window.first,
+        count: view.rank_window.count,
+        row_h: view.rank_window.row_h as f32,
+        viewport_h: view.rank_window.viewport_h as f32,
+        scroll_px: view.rank_window.scroll_px as f32,
+        max_scroll_px: view.rank_window.max_scroll_px as f32,
+        thumb_h: view.rank_window.thumb_h as f32,
+        thumb_y: view.rank_window.thumb_y as f32,
+        scrollable: view.rank_window.scrollable,
+        signature_hi: view.rank_window.signature.0,
+        signature_lo: view.rank_window.signature.1,
+        overscan: view.rank_window.overscan,
     });
     ui.set_date_presets(
         Rc::new(slint::VecModel::from(
@@ -599,7 +614,6 @@ fn wire_view(ui: &LabHostWindow, state: Rc<RefCell<LabState>>) {
     on_text!(on_rankby_picked, LabState::interaction_rankby);
     on_text!(on_trade_filter_changed, LabState::interaction_tradefilter);
     on_text!(on_sym_search_changed, LabState::interaction_symsearch);
-    on_text!(on_cost_committed, LabState::interaction_cost);
     {
         let strong = state.clone();
         let weak = ui.as_weak();

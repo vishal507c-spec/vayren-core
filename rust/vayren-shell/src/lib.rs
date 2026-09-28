@@ -10,6 +10,8 @@ pub mod market;
 pub mod market_download;
 #[cfg(test)]
 pub mod perf;
+#[cfg(test)]
+pub mod perf_table;
 pub mod portfolio;
 pub mod python_bridge;
 pub mod research_state;

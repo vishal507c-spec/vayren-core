@@ -133,11 +133,6 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                 font-size: VayrenDesign.fs-small;
                 font-weight: 700;
             }
-            Text {
-                text: "Connect to trade";
-                color: VayrenPalette.muted;
-                font-size: VayrenDesign.fs-small;
-            }
             Rectangle { height: VayrenDesign.sp-sm; background: transparent; }
 
             for row in root.brokers: Rectangle {
@@ -263,25 +258,6 @@ export component BrokerConnectionWorkspace inherits Rectangle {
             }
 
             Rectangle { vertical-stretch: 1; background: transparent; }
-
-            VerticalLayout {
-                spacing: 2px;
-                Text {
-                    text: "SIMPLE";
-                    color: VayrenPalette.faint;
-                    font-size: VayrenDesign.fs-label;
-                }
-                Text {
-                    text: "POWERFUL";
-                    color: VayrenPalette.faint;
-                    font-size: VayrenDesign.fs-label;
-                }
-                Text {
-                    text: "DISCIPLINED";
-                    color: VayrenPalette.faint;
-                    font-size: VayrenDesign.fs-label;
-                }
-            }
         }
 
         // ── MAIN: connection workspace card ──
@@ -475,17 +451,6 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                                 }
                             }
 
-                            Text {
-                                text: "Enter Your Credentials";
-                                color: VayrenPalette.text;
-                                font-size: VayrenDesign.fs-body;
-                                font-weight: 700;
-                            }
-                            Text {
-                                text: root.is-connected ? "Credentials are encrypted and saved in the OS vault." : "Your credentials are encrypted and stored securely.";
-                                color: VayrenPalette.muted;
-                                font-size: VayrenDesign.fs-small;
-                            }
                             Rectangle { height: VayrenDesign.sp-xs; background: transparent; }
 
                             for f[i] in root.fields: HorizontalLayout {
@@ -767,12 +732,6 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                                 color: VayrenPalette.text;
                                 font-size: VayrenDesign.fs-body;
                                 font-weight: 700;
-                            }
-                            Text {
-                                text: "Authentication happens automatically.";
-                                color: VayrenPalette.muted;
-                                font-size: VayrenDesign.fs-label;
-                                wrap: word-wrap;
                             }
                             Rectangle { height: VayrenDesign.sp-sm; background: transparent; }
 

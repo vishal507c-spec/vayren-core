@@ -115,31 +115,37 @@ fn research_object_rows_are_fully_visible_and_unobstructed() {
     let frame = render(&ui, &win, w, h);
     save_ppm("top", &frame);
 
-    // Centre of the "+ New strategy" button is ~150px lower than the rows; scan
-    // a generous window and take the runs.
-    let runs = bright_runs(&frame, 1050, 150, 320);
-    // The two strategy rows read as two distinct bright bands on the centre
-    // line (the button text is not on this exact column).
-    assert!(
-        runs.len() >= 2,
-        "expected at least two research-object rows, got {runs:?}"
-    );
+    // The Lab's own chrome moved (its 58px top bar was removed in favour of the
+    // global shell header), so absolute scan positions are no longer stable. The
+    // assertion is about ROW GEOMETRY, not a pixel offset: scan a wide band and
+    // find the first two adjacent FULL-height bands separated by a dark gap.
+    let runs = bright_runs(&frame, 1050, 40, 400);
+    let pair = runs.windows(2).find(|pair| {
+        let (first, second) = (pair[0], pair[1]);
+        first.1 - first.0 >= 40
+            && second.1 - second.0 >= 40
+            && second.0.saturating_sub(first.1) >= 4
+    });
+    let (row0, row1) = match pair {
+        Some(found) => (found[0], found[1]),
+        None => panic!("no two full research-object rows found in the objects column: {runs:?}"),
+    };
 
-    // Each strategy row must be a full ~46px band — not clipped down to a
-    // sliver by the layout squeeze that caused the bug.
-    let row0_h = runs[0].1 - runs[0].0;
-    let row1_h = runs[1].1 - runs[1].0;
+    // Each strategy row is a full ~46px band — not clipped down to a sliver by
+    // the layout squeeze that caused the original bug (a 15px sliver).
     assert!(
-        row0_h >= 40 && row1_h >= 40,
-        "a research-object row is clipped (heights {row0_h}, {row1_h}; runs {runs:?})"
+        row0.1 - row0.0 >= 40 && row1.1 - row1.0 >= 40,
+        "a research-object row is clipped (heights {}, {}; runs {runs:?})",
+        row0.1 - row0.0,
+        row1.1 - row1.0
     );
 
     // The rows must be separated by a dark gap, i.e. the second row is not
     // merged into / overlapped by whatever sits below it.
-    let gap = runs[1].0.saturating_sub(runs[0].1);
+    let gap = row1.0.saturating_sub(row0.1);
     assert!(
         gap >= 4,
-        "research-object rows are not separated (gap {gap}px; runs {runs:?})"
+        "research-object rows are not separated (gap {gap}px; rows {row0:?} {row1:?})"
     );
 
     // Sanity: the demo really has two selectable strategies.

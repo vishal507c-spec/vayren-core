@@ -67,8 +67,6 @@ pub enum BackendCommand {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         end: Option<String>,
         capital: f64,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        cost: Option<f64>,
         mode: String,
     },
     RunBacktest {
@@ -78,8 +76,6 @@ pub enum BackendCommand {
         start: Option<String>,
         end: Option<String>,
         capital: f64,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        cost: Option<f64>,
         mode: String,
     },
     Shutdown,
@@ -542,14 +538,13 @@ mod tests {
             timeframe: Some("15m".to_string()),
             start: Some("2026-01-01".to_string()),
             end: None,
-            capital: 1000000.0,
-            cost: Some(0.05),
+            capital: 10000.0,
             mode: "buy".to_string(),
         };
         let json = serde_json::to_string(&cmd).unwrap();
         assert_eq!(
             json,
-            r#"{"type":"select_lab_strategy","strategy":"SMA Crossover","symbols":["RELIANCE"],"timeframe":"15m","start":"2026-01-01","capital":1000000.0,"cost":0.05,"mode":"buy"}"#
+            r#"{"type":"select_lab_strategy","strategy":"SMA Crossover","symbols":["RELIANCE"],"timeframe":"15m","start":"2026-01-01","capital":10000.0,"mode":"buy"}"#
         );
     }
 
@@ -561,14 +556,13 @@ mod tests {
             timeframe: Some("15m".to_string()),
             start: Some("2026-01-01".to_string()),
             end: None,
-            capital: 1000000.0,
-            cost: None,
+            capital: 10000.0,
             mode: "buy".to_string(),
         };
         let json = serde_json::to_string(&cmd).unwrap();
         assert_eq!(
             json,
-            r#"{"type":"run_backtest","strategy":"SMA Crossover","symbols":["RELIANCE"],"timeframe":"15m","start":"2026-01-01","end":null,"capital":1000000.0,"mode":"buy"}"#
+            r#"{"type":"run_backtest","strategy":"SMA Crossover","symbols":["RELIANCE"],"timeframe":"15m","start":"2026-01-01","end":null,"capital":10000.0,"mode":"buy"}"#
         );
     }
 

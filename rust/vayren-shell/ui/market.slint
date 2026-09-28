@@ -1885,11 +1885,6 @@ export component MarketScreen inherits Rectangle {
                         active: root.dl-open;
                         picked => { root.dl-toggle(); }
                     }
-                    RailButton {
-                        code: "MS";
-                        active: root.market-status-open;
-                        picked => { root.status-toggle(); }
-                    }
                     Rectangle { vertical-stretch: 1; background: transparent; }
                 }
             }
@@ -1986,11 +1981,6 @@ export component MarketScreen inherits Rectangle {
                                     : wta.has-hover ? VayrenPalette.hover : transparent;
                                 wta := TouchArea {
                                     clicked => { root.symbol-selected(row.symbol); }
-                                }
-                                if row.selected: Rectangle {
-                                    width: 2px;
-                                    height: 100%;
-                                    background: VayrenPalette.accent;
                                 }
                                 VerticalLayout {
                                     padding-left: 8px;
@@ -2129,66 +2119,6 @@ export component MarketScreen inherits Rectangle {
                             }
                         }
                     }
-
-            // ── market-status strip (legacy MarketStatusPanel parity) ──
-            if root.market-status-open: Rectangle {
-                background: VayrenPalette.surface;
-                VerticalLayout {
-                    padding: VayrenDesign.sp-md;
-                    spacing: VayrenDesign.sp-sm;
-                    Text {
-                        text: "MARKET STATUS";
-                        color: VayrenPalette.faint;
-                        font-size: VayrenDesign.fs-label;
-                        font-weight: 600;
-                    }
-                    HorizontalLayout {
-                        spacing: VayrenDesign.sp-xl;
-                        // legacy "MARKET REGIME" section.
-                        VerticalLayout {
-                            horizontal-stretch: 1;
-                            spacing: VayrenDesign.sp-xs;
-                            for row in root.market-status-regime: HorizontalLayout {
-                                Text {
-                                    text: row.key;
-                                    color: VayrenPalette.muted;
-                                    font-size: VayrenDesign.fs-label;
-                                    vertical-alignment: center;
-                                }
-                                Rectangle { horizontal-stretch: 1; background: transparent; }
-                                Text {
-                                    text: row.value;
-                                    color: row.muted ? VayrenPalette.muted : VayrenPalette.text;
-                                    font-size: VayrenDesign.fs-label;
-                                    font-weight: 600;
-                                    vertical-alignment: center;
-                                }
-                            }
-                        }
-                        // legacy "DATA STATUS" section.
-                        VerticalLayout {
-                            horizontal-stretch: 1;
-                            spacing: VayrenDesign.sp-xs;
-                            for row in root.market-status-data: HorizontalLayout {
-                                Text {
-                                    text: row.key;
-                                    color: VayrenPalette.muted;
-                                    font-size: VayrenDesign.fs-label;
-                                    vertical-alignment: center;
-                                }
-                                Rectangle { horizontal-stretch: 1; background: transparent; }
-                                Text {
-                                    text: row.value;
-                                    color: row.muted ? VayrenPalette.muted : VayrenPalette.text;
-                                    font-size: VayrenDesign.fs-label;
-                                    font-weight: 600;
-                                    vertical-alignment: center;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
 
             // plot column + price strip
             HorizontalLayout {
@@ -2496,12 +2426,6 @@ export component MarketScreen inherits Rectangle {
                                             }
                                         }
                                     }
-                                    Text {
-                                        text: "Indicators and strategies from a single control";
-                                        color: VayrenPalette.faint;
-                                        font-size: VayrenDesign.fs-label;
-                                        horizontal-alignment: center;
-                                    }
                                     SmallButton {
                                         label: "CLOSE";
                                         picked => { root.indicator-popup(false); }
@@ -2634,18 +2558,6 @@ export component MarketScreen inherits Rectangle {
                             // TradingView parity: volume scale max (faint, top
                             // of the volume zone) + latest bar volume pinned
                             // at its own height in the bar's direction color.
-                            if root.has-data: Text {
-                                y: parent.grid-h + 2px;
-                                height: parent.tick-h;
-                                x: 6px;
-                                width: parent.width - 14px;
-                                text: root.volume-max-label;
-                                color: VayrenPalette.faint;
-                                font-size: VayrenDesign.fs-label;
-                                horizontal-alignment: right;
-                                vertical-alignment: center;
-                                overflow: elide;
-                            }
                             if root.has-data && root.has-last-volume: Text {
                                 y: parent.grid-h + (parent.height - parent.grid-h)
                                     - root.last-volume-pos * (parent.height - parent.grid-h) - 8px;
