@@ -196,7 +196,29 @@ pub struct TradeRow {
     pub reason: String,
     pub pnl_tone: Tone,
     pub selected: bool,
+    /// Cached sort keys, in the blotter's sort order: entry time (minutes since
+    /// epoch), P&L, R multiple, bars held. Stored so sorting and filtering are
+    /// numeric and never touch the display strings (`spec §6/§7/§10`).
+    pub sort: [f64; 4],
 }
+
+/// Which column the blotter sorts by (`spec §10`). Order is the UI dropdown
+/// order and maps 1:1 onto `TradeRow::sort`.
+pub const TRADE_SORT_FIELDS: [(&str, usize); 4] = [
+    ("Entry time", 0),
+    ("Net P&L", 1),
+    ("R multiple", 2),
+    ("Bars held", 3),
+];
+/// Sort by symbol is a string column, handled separately from the numeric keys.
+pub const TRADE_SORT_SYMBOL: i32 = 4;
+/// Blotter filters (`spec §26`): side and result, over the COMPLETE dataset.
+pub const TRADE_SIDE_ALL: i32 = 0;
+pub const TRADE_SIDE_LONG: i32 = 1;
+pub const TRADE_SIDE_SHORT: i32 = 2;
+pub const TRADE_RESULT_ALL: i32 = 0;
+pub const TRADE_RESULT_WIN: i32 = 1;
+pub const TRADE_RESULT_LOSS: i32 = 2;
 
 /// One strategy parameter (spec label + current value, both backend-owned).
 #[derive(Debug, Clone, PartialEq)]
@@ -356,6 +378,16 @@ pub struct LabState {
     pub trade_filters_active: bool,
     pub trade_needle: String,
     pub trade_symbol: String,
+    /// Trade blotter (`spec §2`): its own window over the FULL trade list, plus
+    /// the sort/filter state its index layer is keyed on. Same engine as the
+    /// ranking grid — no second windowing implementation.
+    pub trade_win: VirtualWindow,
+    pub trade_sort: i32,
+    pub trade_sort_desc: bool,
+    pub trade_side_filter: i32,
+    pub trade_result_filter: i32,
+    /// The ONE selected trade's facts, built on click (`spec §27`).
+    pub trade_detail: Option<TradeDetailState>,
     /// The real topbar RUN button text, echoed verbatim.
     pub run_label: String,
     pub equity_summary: String,
@@ -593,14 +625,193 @@ impl LabState {
     }
 
     pub fn interaction_trade_pick(&mut self, index: i32) {
-        // legacy click = highlight the row AND focus the trade downstream.
+        // Optimistic echo (same precedent as every other Lab commit): the
+        // highlight and the detail panel are pure presentation over a row we
+        // already hold, and the backend has no trade-selection command — so
+        // waiting for an echo would leave the click with no visible effect.
+        self.selected_trade = index;
+        self.trade_filters_active = false;
+        self.trade_detail = self.trade_detail_for(index);
         self.queue_action(format!("tradesel:{index}"));
         self.queue_action(format!("tradefocus:{index}"));
     }
 
+    /// Build the detail panel for ONE trade, straight from the record
+    /// (`spec §27`): nothing is precomputed for rows the user never clicks.
+    fn trade_detail_for(&self, index: i32) -> Option<TradeDetailState> {
+        let row = self.results.as_ref()?.trades.get(index.max(0) as usize)?;
+        let metric = |label: &str, value: String, tone: Tone| DetailMetricView {
+            label: label.to_string(),
+            value,
+            tone: match tone {
+                Tone::Positive => 2,
+                Tone::Negative => 3,
+                _ => 0,
+            },
+        };
+        Some(TradeDetailState {
+            symbol: row.symbol.clone(),
+            side: row.side.clone(),
+            metrics: vec![
+                metric("TRADE", format!("#{}", row.no), Tone::Neutral),
+                metric("ENTRY", row.entry.clone(), Tone::Neutral),
+                metric("ENTRY PX", row.entry_px.clone(), Tone::Neutral),
+                metric("EXIT", row.exit.clone(), Tone::Neutral),
+                metric("EXIT PX", row.exit_px.clone(), Tone::Neutral),
+                metric("P&L", row.pnl.clone(), row.pnl_tone),
+                metric("R", row.r.clone(), row.pnl_tone),
+                metric("BARS HELD", row.bars.clone(), Tone::Neutral),
+                metric("REASON", row.reason.clone(), Tone::Neutral),
+            ],
+        })
+    }
+
+    /// Close the trade detail panel.
+    pub fn interaction_trade_detail_close(&mut self) {
+        self.trade_detail = None;
+        self.selected_trade = -1;
+    }
+
     pub fn interaction_tradefilter(&mut self, text: &str) {
         self.trade_needle = text.to_string();
+        self.rebuild_trade_view();
         self.queue_action(format!("tradefilter:{text}"));
+    }
+
+    /// Trade blotter sort (`spec §16`): reorders the complete dataset through
+    /// the index layer, preserving the scroll position logically.
+    pub fn interaction_tradesort(&mut self, field: i32) {
+        if !(0..=TRADE_SORT_SYMBOL).contains(&field) {
+            return;
+        }
+        if self.trade_sort == field {
+            self.trade_sort_desc = !self.trade_sort_desc;
+        } else {
+            self.trade_sort = field;
+            // Time reads best oldest-first; every metric best-first.
+            self.trade_sort_desc = field != 0;
+        }
+        self.rebuild_trade_view();
+    }
+
+    /// Side filter: all / long / short, over the complete dataset.
+    pub fn interaction_trade_side(&mut self, side: i32) {
+        if (0..=2).contains(&side) {
+            self.trade_side_filter = side;
+            self.rebuild_trade_view();
+        }
+    }
+
+    /// Result filter: all / winners / losers, over the complete dataset.
+    pub fn interaction_trade_result(&mut self, result: i32) {
+        if (0..=2).contains(&result) {
+            self.trade_result_filter = result;
+            self.rebuild_trade_view();
+        }
+    }
+
+    /// Blotter scroll surface (`spec §19`): O(1) window arithmetic, clamped.
+    pub fn interaction_trade_scroll(&mut self, delta_px: f32) {
+        self.trade_win.scroll_by(delta_px);
+    }
+
+    /// Absolute blotter scroll (scrollbar drag, Home/End).
+    pub fn interaction_trade_scroll_to(&mut self, px: f32) {
+        self.trade_win.scroll_to(px);
+    }
+
+    /// Blotter viewport height, pushed by the UI on mount/resize.
+    pub fn interaction_trade_viewport(&mut self, height: f32) {
+        self.trade_win.set_viewport(height);
+    }
+
+    /// Rebuild the blotter index layer (`spec §9/§10`): filter and sort over
+    /// INDICES with cached numeric keys, never row clones. The only O(N) work
+    /// in the blotter, and it happens on a data/filter/sort edit — never per
+    /// frame and never per scroll notch.
+    pub fn rebuild_trade_view(&mut self) {
+        // The blotter is a denser table than the ranking grid: give the shared
+        // engine the blotter's own geometry once, so `LabState::default()` (which
+        // derives) can stay a plain derive.
+        if (self.trade_win.row_h - TRADE_ROW_H).abs() > f32::EPSILON {
+            self.trade_win.row_h = TRADE_ROW_H;
+            self.trade_win.viewport_h = TRADE_VIEWPORT_H;
+        }
+        let rows: &[TradeRow] = match self.results.as_ref() {
+            Some(results) => &results.trades,
+            None => &[],
+        };
+        let needle = self.trade_needle.trim().to_lowercase();
+        let side = self.trade_side_filter;
+        let result = self.trade_result_filter;
+        let sort = self.trade_sort;
+        let desc = self.trade_sort_desc;
+        // COMPARE keeps its own side filter (view-local, existing contract).
+        let compare_side = self.compare_side;
+
+        let key = ViewKey {
+            rows: rows.len(),
+            search: needle.clone(),
+            criterion: sort,
+            desc,
+            filter_a: side,
+            filter_b: result,
+            filter_c: compare_side,
+        };
+        let previous = self.trade_win.key();
+        let order_changed = previous.rows != key.rows
+            || previous.criterion != key.criterion
+            || previous.desc != key.desc;
+        // How many filters are ACTIVE. If the new set is LESS restrictive than
+        // the previous one, the current view is a strict subset and cannot be
+        // the base — a cleared search must bring the whole dataset back, not
+        // just the rows that already matched.
+        let restrictiveness = |k: &ViewKey, needle: &str| {
+            usize::from(!needle.is_empty())
+                + usize::from(k.filter_a > 0)
+                + usize::from(k.filter_b > 0)
+                + usize::from(k.filter_c > 0)
+        };
+        let relaxed = restrictiveness(&key, &needle) < restrictiveness(&previous, &previous.search);
+        let filters_changed = relaxed
+            || side != previous.filter_a
+            || result != previous.filter_b
+            || compare_side != previous.filter_c
+            || needle != previous.search;
+        // A keystroke or a filter edit filters the EXISTING order instead of
+        // re-sorting it: typing never reorders what the user is reading
+        // (`spec §15`), and it is the difference between O(N) and O(N log N)
+        // per character.
+        let base: Vec<u32> = if previous.rows == key.rows
+            && !order_changed
+            && !relaxed
+            && !self.trade_win.view.is_empty()
+        {
+            if !filters_changed {
+                self.trade_win.view.clone()
+            } else {
+                self.trade_win
+                    .view
+                    .iter()
+                    .copied()
+                    .filter(|index| {
+                        trade_matches(&rows[*index as usize], &needle, side, result, compare_side)
+                    })
+                    .collect()
+            }
+        } else {
+            (0..rows.len() as u32)
+                .filter(|index| {
+                    trade_matches(&rows[*index as usize], &needle, side, result, compare_side)
+                })
+                .collect()
+        };
+
+        let mut view = base;
+        if order_changed {
+            view = sort_trade_indices(view, rows, sort, desc);
+        }
+        self.trade_win.set_view(view, key);
     }
 
     /// COMPARE side filter is view-local (pure filtering of engine trades,
@@ -608,6 +819,10 @@ impl LabState {
     pub fn interaction_cmpside(&mut self, side: i32) {
         if (0..=2).contains(&side) {
             self.compare_side = side;
+            // The blotter index is keyed on the compare side too, so the
+            // view-local filter has to rebuild it (still O(N) over indices,
+            // still never in the frame path).
+            self.rebuild_trade_view();
         }
     }
 
@@ -827,6 +1042,7 @@ impl LabState {
         self.outdated = false;
         // New data invalidates the index layer (same contract as a snapshot).
         self.rebuild_rank_view();
+        self.rebuild_trade_view();
     }
 
     pub fn start_run(&mut self) -> bool {
@@ -916,6 +1132,8 @@ pub struct ParamView {
 pub struct DetailMetricView {
     pub label: String,
     pub value: String,
+    /// Tone for the panel colour (0 neutral, 2 positive, 3 negative).
+    pub tone: i32,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -970,11 +1188,12 @@ pub struct CompareViewState {
     pub has_sides: bool,
 }
 
-/// Flat projection of the virtual window for the UI (`spec §12/§17`): the row
+/// Flat projection of a virtual window for the UI (`spec §12/§17`): the row
 /// band, the scrollbar geometry and the observability counters. Every value is
-/// derived in Rust so the UI never re-derives layout maths.
+/// derived in Rust so the UI never re-derives layout maths. Shared by the
+/// ranking grid and the trade blotter — one projection shape, one engine.
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct RankWindowView {
+pub struct VirtualWindowView {
     /// Rows in the filtered+sorted dataset (the TRUE count — nothing hidden).
     pub total: i32,
     /// First rendered row (0-based into the dataset order).
@@ -994,8 +1213,48 @@ pub struct RankWindowView {
     /// when it is unchanged (`spec §3`: zero full-table re-render). Split in
     /// two 32-bit halves because Slint's `int` is i32.
     pub signature: (i32, i32),
-    /// `dataset / rendered` ratio, the virtualization proof (`spec §18`).
+    /// Rows rendered beyond the visible band — the overscan counter
+    /// (`spec §18`).
     pub overscan: i32,
+}
+
+/// Backwards-compatible name for the ranking grid's projection.
+pub type RankWindowView = VirtualWindowView;
+
+/// Project any window into the flat UI shape, for ANY row type. The caller
+/// supplies the signature function for its own row type (the ranking grid signs
+/// symbols/P&L, the blotter signs the trade identity) — that is what makes the
+/// engine shared without inventing a trait for two callers.
+fn window_view<R>(
+    window: &VirtualWindow,
+    rendered: &[R],
+    sign: impl Fn(&[R]) -> (i32, i32),
+) -> VirtualWindowView {
+    let (thumb_h, thumb_y) = window.thumb();
+    let visible_rows = (window.viewport_h / window.row_h).ceil().max(1.0) as i32;
+    VirtualWindowView {
+        total: window.total as i32,
+        first: window.first as i32,
+        count: rendered.len() as i32,
+        row_h: window.row_h,
+        viewport_h: window.viewport_h,
+        scroll_px: window.scroll_px,
+        max_scroll_px: window.max_scroll(),
+        thumb_h,
+        thumb_y,
+        scrollable: window.max_scroll() > 0.0,
+        signature: sign(rendered),
+        overscan: rendered.len() as i32 - visible_rows,
+    }
+}
+
+/// The selected trade, flattened for the detail panel. Every field comes from
+/// the real record (`spec §2`: no invented facts).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct TradeDetailState {
+    pub symbol: String,
+    pub side: String,
+    pub metrics: Vec<DetailMetricView>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1024,6 +1283,24 @@ pub struct LabView {
     /// The virtual window — the ONLY ranking rows the UI receives.
     pub ranking: Vec<RankRow>,
     pub rank_window: RankWindowView,
+    /// Trade blotter window: geometry, scrollbar and the band signature.
+    pub trade_window: VirtualWindowView,
+    /// Dataset position of the first rendered trade — the blotter numbers rows
+    /// from the dataset, not from the window, so scrolling never renumbers.
+    pub trade_number_offset: i32,
+    /// True trade count in the current filter view (the blotter's honest total;
+    /// never the rendered band).
+    pub trade_total: i32,
+    /// Blotter counter line ("412 trades · showing 401-427").
+    pub trade_summary: String,
+    pub trade_needle: String,
+    pub trade_side_filter: i32,
+    pub trade_result_filter: i32,
+    pub trade_sort: i32,
+    pub trade_sort_labels: Vec<String>,
+    /// The ONE selected trade's facts, built on click (`spec §27`) — flattened
+    /// for the panel, empty when nothing is selected.
+    pub trade_detail: TradeDetailState,
     pub trades: Vec<TradeRow>,
     pub equity: Vec<(f32, f32)>,
     pub drawdown: Vec<(f32, f32)>,
@@ -1060,7 +1337,6 @@ pub struct LabView {
     pub compare_side: i32,
     pub selected_trade: i32,
     pub trade_filters_active: bool,
-    pub trade_needle: String,
     pub trade_symbol: String,
     pub run_label: String,
     pub is_compare: bool,
@@ -1252,27 +1528,34 @@ pub const RANK_ROW_H: f32 = 40.0;
 /// Viewport height in logical pixels — the ~10-row initial window the spec
 /// asks for. Rows beyond it are reachable by scrolling, never hidden.
 pub const RANK_VIEWPORT_H: f32 = RANK_ROW_H * 10.0;
+/// Trade-row height: one line, so the blotter is denser than the ranking grid.
+pub const TRADE_ROW_H: f32 = 28.0;
+/// Trade viewport — ~14 rows, the window the spec asks for.
+pub const TRADE_VIEWPORT_H: f32 = TRADE_ROW_H * 14.0;
 /// Overscan bounds (`spec §2`): idle keeps 2 rows of slack, a fast flick
 /// pre-renders up to 8 so the frame never waits for a row.
 const RANK_OVERSCAN_MIN: usize = 2;
 const RANK_OVERSCAN_MAX: usize = 8;
 
-/// The ranking table's virtual window — the whole point of the table layer.
+/// ONE windowing engine for every large table in the Lab (`spec §36/§40`:
+/// reuse the existing data layer instead of a second bespoke implementation).
 ///
-/// Pipeline (`spec §5`):
+/// Pipeline:
 /// ```text
-/// results.ranking (FULL DATA, owned by the snapshot)
-///   -> view: Vec<u32>            (filter + sort as INDICES, never row clones)
-///   -> first/count               (VISIBLE RANGE + ADAPTIVE OVERSCAN)
-///   -> LabView.ranking           (the only rows the UI ever receives)
+/// FULL DATA (owned by the snapshot: results.ranking / results.trades)
+///   -> view: Vec<u32>       (filter + sort as INDICES, never row clones)
+///   -> first/count          (VISIBLE RANGE + ADAPTIVE OVERSCAN)
+///   -> LabView rows         (the only rows the UI ever receives)
 /// ```
 /// The index layer is rebuilt on data/filter/sort changes only — never per
-/// frame, never per scroll notch — so scrolling is pure arithmetic.
+/// frame, never per scroll notch — so scrolling is pure arithmetic. One engine
+/// now serves the ranking grid AND the trade blotter, so both share the same
+/// window arithmetic, overscan policy and scrollbar maths.
 #[derive(Debug, Clone, PartialEq)]
-pub struct RankWindow {
-    /// Sorted+filtered order over `results.ranking` (row indices).
+pub struct VirtualWindow {
+    /// Sorted+filtered order over the dataset (row indices).
     pub view: Vec<u32>,
-    /// Rows in `view` (the true analyzed count, never a truncated one).
+    /// Rows in `view` (the true count, never a truncated one).
     pub total: usize,
     /// First rendered row (into `view`).
     pub first: usize,
@@ -1282,24 +1565,36 @@ pub struct RankWindow {
     pub scroll_px: f32,
     /// Viewport height in px (updated by the UI on resize).
     pub viewport_h: f32,
+    /// Row height in px — fixed per table, the stable-layout contract.
+    pub row_h: f32,
     /// Smoothed last-frame delta (px) — drives the adaptive overscan.
     velocity: f32,
     /// Identity of the data the index layer was built from; a mismatch forces a
     /// rebuild (`spec §7` invalidation instead of eager recompute).
-    key: RankViewKey,
+    key: ViewKey,
 }
 
 /// What the index layer was built from. Cheap to compare, complete enough that
-/// a stale view is impossible.
+/// a stale view is impossible. `criterion`/`desc` are the sort; `filter_a` and
+/// `filter_b` carry the two extra dimensions a table may filter on (the trade
+/// blotter's side and result filters leave them at -1).
 #[derive(Debug, Clone, Default, PartialEq)]
-struct RankViewKey {
-    rows: usize,
-    search: String,
-    criterion: i32,
-    desc: bool,
+pub struct ViewKey {
+    pub rows: usize,
+    pub search: String,
+    pub criterion: i32,
+    pub desc: bool,
+    pub filter_a: i32,
+    pub filter_b: i32,
+    /// Third filter dimension (the blotter's COMPARE side segment); -1 when the
+    /// table has no such dimension.
+    pub filter_c: i32,
 }
 
-impl Default for RankWindow {
+/// Backwards-compatible name: the ranking grid was the first table to need it.
+pub type RankWindow = VirtualWindow;
+
+impl Default for VirtualWindow {
     fn default() -> Self {
         Self {
             view: Vec::new(),
@@ -1308,10 +1603,117 @@ impl Default for RankWindow {
             count: 0,
             scroll_px: 0.0,
             viewport_h: RANK_VIEWPORT_H,
+            row_h: RANK_ROW_H,
             velocity: 0.0,
-            key: RankViewKey::default(),
+            key: ViewKey::default(),
         }
     }
+}
+
+/// Does this trade belong in the current filter view? One allocation-free pass
+/// per row, over the COMPLETE dataset (`spec §9`). The needle matches the stock
+/// and the exit reason — the two fields a user actually searches a blotter by.
+/// `compare_side` is the COMPARE segment filter (view-local, existing contract).
+fn trade_matches(row: &TradeRow, needle: &str, side: i32, result: i32, compare_side: i32) -> bool {
+    if side == TRADE_SIDE_LONG && !row.side.eq_ignore_ascii_case("LONG") {
+        return false;
+    }
+    if side == TRADE_SIDE_SHORT && !row.side.eq_ignore_ascii_case("SHORT") {
+        return false;
+    }
+    if compare_side == 1 && !row.side.eq_ignore_ascii_case("LONG") {
+        return false;
+    }
+    if compare_side == 2 && !row.side.eq_ignore_ascii_case("SHORT") {
+        return false;
+    }
+    if result == TRADE_RESULT_WIN && row.pnl_tone != Tone::Positive {
+        return false;
+    }
+    if result == TRADE_RESULT_LOSS && row.pnl_tone == Tone::Positive {
+        return false;
+    }
+    needle.is_empty()
+        || contains_ignore_ascii_case(&row.symbol, needle)
+        || contains_ignore_ascii_case(&row.reason, needle)
+}
+
+/// Sort trade INDICES by the chosen column. The numeric path builds a
+/// `(key, index)` array so the compare never chases a pointer into the dataset
+/// and the index acts as a deterministic tiebreaker (`spec §6/§10`). The
+/// symbol column is a string sort, so it is separate by nature.
+fn sort_trade_indices(view: Vec<u32>, rows: &[TradeRow], sort: i32, desc: bool) -> Vec<u32> {
+    if sort == TRADE_SORT_SYMBOL {
+        let mut sorted = view;
+        sorted.sort_by(|a, b| {
+            let order = rows[*a as usize]
+                .symbol
+                .cmp(&rows[*b as usize].symbol)
+                .then(a.cmp(b));
+            if desc {
+                order.reverse()
+            } else {
+                order
+            }
+        });
+        return sorted;
+    }
+    let field = sort.max(0) as usize;
+    let mut keyed: Vec<(f64, u32)> = view
+        .into_iter()
+        .filter_map(|index| {
+            let row = rows.get(index as usize)?;
+            // NaN (a missing value) sinks in BOTH directions, so a row with no
+            // recorded value never outranks a real one.
+            let raw = row.sort.get(field).copied().unwrap_or(f64::NAN);
+            let key = if raw.is_nan() {
+                if desc {
+                    f64::NEG_INFINITY
+                } else {
+                    f64::INFINITY
+                }
+            } else {
+                raw
+            };
+            Some((key, index))
+        })
+        .collect();
+    keyed.sort_unstable_by(|a, b| {
+        let order = a.0.total_cmp(&b.0).then(a.1.cmp(&b.1));
+        if desc {
+            order.reverse()
+        } else {
+            order
+        }
+    });
+    keyed.into_iter().map(|(_, index)| index).collect()
+}
+
+/// Identity of a rendered trade band, so the shell can skip the model push when
+/// the blotter did not change (`spec §3`).
+fn trade_signature(rows: &[TradeRow], total: usize, scroll_px: f32) -> (i32, i32) {
+    let mut hash = 0x9e37_79b9_7f4a_7c15u64 ^ total as u64;
+    hash ^= (scroll_px * 64.0) as u64;
+    for row in rows {
+        for part in [
+            row.symbol.as_str(),
+            row.side.as_str(),
+            row.entry.as_str(),
+            row.exit.as_str(),
+            row.entry_px.as_str(),
+            row.exit_px.as_str(),
+            row.pnl.as_str(),
+            row.r.as_str(),
+            row.bars.as_str(),
+            row.reason.as_str(),
+        ] {
+            for byte in part.as_bytes() {
+                hash ^= *byte as u64;
+                hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+            }
+        }
+    }
+    ((hash >> 32) as i32, hash as i32)
 }
 
 /// Chips shown next to the universe control. A presentation cap only — every
@@ -1347,7 +1749,7 @@ fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
     })
 }
 
-impl RankWindow {
+impl VirtualWindow {
     /// Rebuild the index layer for the current data/filter/sort. O(N) over
     /// INDICES with cached keys — no row clone, no display-string compare
     /// (`spec §6/§7`). Called on data arrival and on filter/sort edits, never
@@ -1360,11 +1762,14 @@ impl RankWindow {
         desc: bool,
     ) {
         let previous = self.key.clone();
-        let key = RankViewKey {
+        let key = ViewKey {
             rows: rows.len(),
             search: search.trim().to_string(),
             criterion: criterion.map_or(-1, |c| c as i32),
             desc,
+            filter_a: -1,
+            filter_b: -1,
+            filter_c: -1,
         };
         // The order only changes when the DATA or the SORT changes. A keystroke
         // filters the existing order instead of re-sorting it (`spec §15/§16`),
@@ -1373,10 +1778,21 @@ impl RankWindow {
             || previous.criterion != key.criterion
             || previous.desc != key.desc;
         let same_shape = previous.rows == key.rows && !order_changed;
+        // A RELAXED filter (cleared search, side/result back to "all") must
+        // rebuild from identity: the current view is a strict subset, so
+        // filtering it could only ever narrow further. Narrowing keeps the
+        // existing order, so typing never re-sorts what the user reads.
+        let restrictiveness = |k: &ViewKey, needle: &str| {
+            usize::from(!needle.is_empty())
+                + usize::from(k.filter_a > 0)
+                + usize::from(k.filter_b > 0)
+        };
+        let relaxed = restrictiveness(&key, key.search.as_str())
+            < restrictiveness(&previous, previous.search.as_str());
         let needle = key.search.as_str();
         // The sorted order survives a search edit: filtering walks the existing
         // order so a keystroke can never reorder what the user is reading.
-        let base: Vec<u32> = if same_shape && !self.view.is_empty() {
+        let base: Vec<u32> = if same_shape && !relaxed && !self.view.is_empty() {
             if needle.is_empty() {
                 self.view.clone()
             } else {
@@ -1428,18 +1844,29 @@ impl RankWindow {
                 view = keyed.into_iter().map(|(_, index)| index).collect();
             }
         }
+        self.set_view(view, key);
+    }
+
+    /// What the current index layer was built from — the caller compares this
+    /// to decide whether a filter/sort edit needs a re-sort or only a re-filter.
+    pub fn key(&self) -> ViewKey {
+        self.key.clone()
+    }
+
+    /// Adopt a freshly built index layer (shared by every table's rebuild).
+    pub fn set_view(&mut self, view: Vec<u32>, key: ViewKey) {
         self.view = view;
         self.total = self.view.len();
         self.key = key;
         self.clamp_scroll();
-        // Lay the window out immediately: a fresh dataset (or a filter edit)
-        // must be VISIBLE without waiting for the first scroll notch.
+        // Lay out immediately: a fresh dataset or a filter edit must be VISIBLE
+        // without waiting for a scroll notch.
         self.layout();
     }
 
     /// Largest legal scroll offset for the current window.
     pub fn max_scroll(&self) -> f32 {
-        let content = self.total as f32 * RANK_ROW_H;
+        let content = self.total as f32 * self.row_h;
         (content - self.viewport_h).max(0.0)
     }
 
@@ -1450,15 +1877,15 @@ impl RankWindow {
     /// Recompute `first`/`count` for the current scroll offset and velocity.
     /// O(1) — this is the only per-frame work the table does.
     pub fn layout(&mut self) {
-        let visible_rows = (self.viewport_h / RANK_ROW_H).ceil().max(1.0) as usize;
+        let visible_rows = (self.viewport_h / self.row_h).ceil().max(1.0) as usize;
         // Adaptive overscan from scroll speed: a flick pre-renders more rows so
         // a fast scroll never waits, and an idle table shrinks back (`spec §2`).
         // The speed term is clamped BEFORE the add: a huge velocity (an
         // End-key jump) must not overflow the band arithmetic.
         let speed_rows =
-            ((self.velocity.abs() / RANK_ROW_H).ceil().max(0.0) as usize).min(RANK_OVERSCAN_MAX);
+            ((self.velocity.abs() / self.row_h).ceil().max(0.0) as usize).min(RANK_OVERSCAN_MAX);
         let overscan = (RANK_OVERSCAN_MIN + speed_rows).min(RANK_OVERSCAN_MAX);
-        let anchor = (self.scroll_px / RANK_ROW_H).floor().max(0.0) as usize;
+        let anchor = (self.scroll_px / self.row_h).floor().max(0.0) as usize;
         let first = anchor.saturating_sub(overscan);
         let last = (anchor + visible_rows + overscan).min(self.total);
         self.first = first.min(self.total);
@@ -1503,7 +1930,7 @@ impl RankWindow {
     /// Scrollbar thumb geometry in px (`spec §12`: stable, derived, never
     /// guessed by the UI).
     pub fn thumb(&self) -> (f32, f32) {
-        let content = self.total as f32 * RANK_ROW_H;
+        let content = self.total as f32 * self.row_h;
         if content <= self.viewport_h || self.total == 0 {
             return (self.viewport_h, 0.0);
         }
@@ -1764,23 +2191,9 @@ pub fn project(state: &LabState) -> LabView {
     };
     // Flat window projection: geometry, scrollbar and the observability
     // counters the perf benches assert on (`spec §12/§17`).
-    let (thumb_h, thumb_y) = window.thumb();
-    let rank_window = RankWindowView {
-        total: total_rows as i32,
-        first: visible_first as i32,
-        count: visible_count as i32,
-        row_h: RANK_ROW_H,
-        viewport_h: window.viewport_h,
-        scroll_px: window.scroll_px,
-        max_scroll_px: window.max_scroll(),
-        thumb_h,
-        thumb_y,
-        scrollable: window.max_scroll() > 0.0,
-        signature: ranking_signature(&shown_ranking, total_rows, window.scroll_px),
-        overscan: (visible_count as i32)
-            - ((window.viewport_h / RANK_ROW_H).ceil().max(1.0) as i32)
-            + 1,
-    };
+    let rank_window = window_view(window, &shown_ranking, |rows| {
+        ranking_signature(rows, total_rows, window.scroll_px)
+    });
     // column; box order == RANKBY_HEADER order).
     let mut rank_heads: Vec<String> = RANK_HEADERS.iter().map(|s| s.to_string()).collect();
     if show_results
@@ -1793,27 +2206,69 @@ pub fn project(state: &LabState) -> LabView {
         }
     }
 
-    // Trades: single mode shows all; compare mode filters by the side
-    // segment (absolute indices survive the filter for focus parity).
-    let shown_trades: Vec<TradeRow> = if show_results {
-        results
-            .trades
-            .iter()
-            .filter(|t| {
-                !is_compare
-                    || state.compare_side == 0
-                    || (state.compare_side == 1 && t.side == "LONG")
-                    || (state.compare_side == 2 && t.side == "SHORT")
-            })
-            .cloned()
-            .map(|mut t| {
-                t.selected = t.abs_index == state.selected_trade && !state.trade_filters_active;
-                t
-            })
-            .collect()
+    // Trade blotter (`spec §1/§3/§4`): the UI receives ONLY the virtual window —
+    // the full trade list stays in the data layer, and this line no longer
+    // clones it per frame (that was O(trades) on every single state change).
+    let trade_total = if show_results {
+        state.trade_win.total
     } else {
-        Vec::new()
+        0
     };
+    let (trade_first, trade_count) = if show_results {
+        (state.trade_win.first, state.trade_win.count)
+    } else {
+        (0, 0)
+    };
+    let shown_trades: Vec<TradeRow> = state
+        .trade_win
+        .view
+        .iter()
+        .skip(trade_first)
+        .take(trade_count)
+        .filter_map(|index| {
+            let mut row = results.trades.get(*index as usize)?.clone();
+            row.selected = row.abs_index == state.selected_trade && !state.trade_filters_active;
+            Some(row)
+        })
+        .collect();
+    // The blotter's own counters: true total, filtered count, and the window
+    // (`spec §30`, dev/test only — never rendered as production telemetry).
+    let trade_window = window_view(&state.trade_win, &shown_trades, |rows| {
+        trade_signature(rows, trade_total, state.trade_win.scroll_px)
+    });
+    // Visible row numbers are continuous with the dataset position, not the
+    // window position, so scrolling never renumbers the blotter.
+    let trade_number_offset = trade_first;
+    // Honest blotter counters: the true trade count in the current filter view,
+    // and how many of them the window is showing (`spec §30`).
+    let trade_summary = if show_results {
+        let total = state.trade_win.total;
+        if total == 0 {
+            format!(
+                "no trades match the filter · {} recorded",
+                results.trades.len()
+            )
+        } else {
+            format!(
+                "{} trade{} · showing {}-{}",
+                total,
+                if total == 1 { "" } else { "s" },
+                trade_first + 1,
+                (trade_first + shown_trades.len()).min(total)
+            )
+        }
+    } else {
+        String::new()
+    };
+    let trade_sort_labels: Vec<String> = TRADE_SORT_FIELDS
+        .iter()
+        .map(|(label, _)| label.to_string())
+        .chain(std::iter::once("Stock".to_string()))
+        .collect();
+    let trade_detail = state
+        .trade_detail
+        .clone()
+        .filter(|detail| !detail.symbol.is_empty());
 
     let shown_equity: Vec<(f32, f32)> = if show_results {
         results.equity.clone()
@@ -1924,6 +2379,7 @@ pub fn project(state: &LabState) -> LabView {
             .map(|m| DetailMetricView {
                 label: m.label,
                 value: m.value,
+                tone: 0,
             })
             .collect(),
         equity: d.equity,
@@ -2080,6 +2536,16 @@ pub fn project(state: &LabState) -> LabView {
         ranking: shown_ranking,
         rank_window,
         trades: shown_trades,
+        trade_window,
+        trade_number_offset: trade_number_offset as i32,
+        trade_total: trade_total as i32,
+        trade_summary,
+        trade_needle: state.trade_needle.clone(),
+        trade_side_filter: state.trade_side_filter,
+        trade_result_filter: state.trade_result_filter,
+        trade_sort: state.trade_sort,
+        trade_sort_labels,
+        trade_detail: trade_detail.unwrap_or_default(),
         equity: shown_equity,
         drawdown: shown_drawdown,
         risk_notes: if show_results {
@@ -2162,7 +2628,6 @@ pub fn project(state: &LabState) -> LabView {
         compare_side: state.compare_side,
         selected_trade: state.selected_trade,
         trade_filters_active: state.trade_filters_active,
-        trade_needle: state.trade_needle.clone(),
         trade_symbol: state.trade_symbol.clone(),
         run_label: if state.run_label.is_empty() {
             "▶  RUN BACKTEST".to_string()
@@ -2266,6 +2731,7 @@ mod tests {
                 reason: "TARGET".into(),
                 pnl_tone: Tone::Positive,
                 selected: false,
+                sort: [29_000.0, 11_230.4, 0.42, 5.0],
             }],
             equity: vec![(0.0, 0.5), (1.0, 0.9)],
             drawdown: vec![],
@@ -2525,6 +2991,286 @@ mod tests {
         assert_eq!(view.trades[0].abs_index, 0);
         // legacy scope vocabulary from the echoed universe.
         assert_eq!(view.ranking_count, "2 stocks analyzed");
+    }
+
+    #[test]
+    fn trade_blotter_renders_individual_trades_and_stays_virtual() {
+        // The bug this fixes: the Trades lens showed STOCK-level summary rows
+        // because nothing ever rendered `results.trades`. The blotter must show
+        // real trade records — and only a viewport of them.
+        let mut st = LabState::default();
+        st.engine_wired = true;
+        st.strategies = vec![strategy_fixture()];
+        st.selected = Some(0);
+        st.rankby_labels = vec!["Net P&L".into()];
+        st.results = Some(LabResults {
+            trades: synthetic_trades(500),
+            ..LabResults::default()
+        });
+        st.run = RunState::Complete;
+        st.rebuild_trade_view();
+        let view = project(&st);
+        // Individual records, not per-stock rows.
+        assert!(!view.trades.is_empty());
+        assert_eq!(view.trade_total, 500, "the honest total is the full list");
+        assert!(
+            view.trades.len() <= 40,
+            "a 14-row viewport rendered {} rows",
+            view.trades.len()
+        );
+        // Every rendered row is a distinct trade with its own identity.
+        let symbols: Vec<&str> = view.trades.iter().map(|t| t.symbol.as_str()).collect();
+        assert!(symbols.iter().all(|s| s.starts_with("SYM")));
+        let numbers: Vec<&str> = view.trades.iter().map(|t| t.no.as_str()).collect();
+        assert_eq!(numbers[0], "1", "rows are numbered from the dataset");
+        // The lens is what routes the page; the projection is lens-agnostic, so
+        // assert the routing decision instead (lens 1 == trades).
+        st.interaction_lens(1);
+        assert_eq!(project(&st).lens, 1);
+    }
+
+    #[test]
+    fn trade_blotter_never_changes_a_trade_under_virtualization() {
+        // Spec §34: virtualization must not alter order, identity or values.
+        // Walk a 1000-trade list to the end, collecting what the window showed,
+        // and compare against the engine order itself.
+        let mut st = LabState::default();
+        st.engine_wired = true;
+        st.strategies = vec![strategy_fixture()];
+        st.selected = Some(0);
+        st.rankby_labels = vec!["Net P&L".into()];
+        st.results = Some(LabResults {
+            trades: synthetic_trades(1_000),
+            ..LabResults::default()
+        });
+        st.run = RunState::Complete;
+        st.rebuild_trade_view();
+        let truth: Vec<(String, String, String)> = st
+            .results
+            .as_ref()
+            .expect("results")
+            .trades
+            .iter()
+            .map(|t| (t.no.clone(), t.symbol.clone(), t.pnl.clone()))
+            .collect();
+        let mut seen: Vec<(String, String, String)> = Vec::new();
+        loop {
+            let view = project(&st);
+            assert!(view.trades.len() <= 40, "window stayed bounded");
+            for row in &view.trades {
+                seen.push((row.no.clone(), row.symbol.clone(), row.pnl.clone()));
+            }
+            if st.trade_win.scroll_px >= st.trade_win.max_scroll() {
+                break;
+            }
+            st.interaction_trade_scroll(28.0);
+        }
+        // Overlapping bands repeat rows; the UNION must equal the engine list.
+        let mut unique: Vec<(String, String, String)> = Vec::new();
+        for row in seen {
+            if !unique.contains(&row) {
+                unique.push(row);
+            }
+        }
+        assert_eq!(unique, truth, "every trade, in engine order, exactly once");
+        // Top, middle and bottom are all reachable and non-empty.
+        st.interaction_trade_scroll_to(0.0);
+        assert!(!project(&st).trades.is_empty());
+        st.interaction_trade_scroll_to(f32::MAX);
+        assert!(!project(&st).trades.is_empty());
+        assert_eq!(
+            project(&st).trades.last().map(|t| t.no.clone()),
+            Some("1000".into())
+        );
+    }
+
+    #[test]
+    fn trade_blotter_filters_and_sorts_over_the_complete_dataset() {
+        // Spec §9/§10/§16: search and filters narrow the COMPLETE list, sorting
+        // reorders it, and a keystroke never re-sorts what the user is reading.
+        let mut st = LabState::default();
+        st.engine_wired = true;
+        st.strategies = vec![strategy_fixture()];
+        st.selected = Some(0);
+        st.rankby_labels = vec!["Net P&L".into()];
+        st.results = Some(LabResults {
+            trades: synthetic_trades(300),
+            ..LabResults::default()
+        });
+        st.run = RunState::Complete;
+        st.rebuild_trade_view();
+        // Symbol search: a real subset, and the count is honest about it.
+        st.interaction_tradefilter("SYM0001");
+        let view = project(&st);
+        let expected = st
+            .results
+            .as_ref()
+            .expect("results")
+            .trades
+            .iter()
+            .filter(|t| t.symbol.contains("SYM0001"))
+            .count();
+        assert_eq!(
+            view.trade_total as usize, expected,
+            "filter ran over every trade"
+        );
+        assert!(view.trades.iter().all(|t| t.symbol.contains("SYM0001")));
+        // Side filter: LONG only.
+        st.interaction_tradefilter("");
+        st.interaction_trade_side(1);
+        let view = project(&st);
+        assert!(view.trades.iter().all(|t| t.side == "LONG"));
+        assert!(view.trade_total > 0);
+        // Result filter: losers only.
+        st.interaction_trade_side(0);
+        st.interaction_trade_result(2);
+        let view = project(&st);
+        assert!(view.trades.iter().all(|t| t.pnl_tone == Tone::Negative));
+        st.interaction_trade_result(0);
+        // Sort by P&L descending: the best trade leads the window.
+        st.interaction_tradesort(1);
+        let view = project(&st);
+        let best = st
+            .results
+            .as_ref()
+            .expect("results")
+            .trades
+            .iter()
+            .map(|t| t.sort[1])
+            .fold(f64::NEG_INFINITY, f64::max);
+        assert_eq!(view.trades.first().map(|t| t.sort[1]), Some(best));
+        // Sorting by a different column then flips the direction on re-pick.
+        st.interaction_tradesort(3);
+        assert!(st.trade_sort_desc);
+    }
+
+    #[test]
+    fn trade_pick_opens_only_the_selected_trade() {
+        // Spec §27: the detail is built for the ONE clicked trade.
+        let mut st = LabState::default();
+        st.engine_wired = true;
+        st.strategies = vec![strategy_fixture()];
+        st.selected = Some(0);
+        st.rankby_labels = vec!["Net P&L".into()];
+        st.results = Some(LabResults {
+            trades: synthetic_trades(50),
+            ..LabResults::default()
+        });
+        st.run = RunState::Complete;
+        st.rebuild_trade_view();
+        assert!(project(&st).trade_detail.symbol.is_empty());
+        st.interaction_trade_pick(7);
+        let view = project(&st);
+        assert_eq!(view.trade_detail.symbol, "SYM0007");
+        assert_eq!(view.trade_detail.side, "SHORT");
+        // Real fields only — no invented ones.
+        let labels: Vec<&str> = view
+            .trade_detail
+            .metrics
+            .iter()
+            .map(|m| m.label.as_str())
+            .collect();
+        assert_eq!(
+            labels,
+            vec![
+                "TRADE",
+                "ENTRY",
+                "ENTRY PX",
+                "EXIT",
+                "EXIT PX",
+                "P&L",
+                "R",
+                "BARS HELD",
+                "REASON"
+            ]
+        );
+        assert!(view.trades.iter().any(|t| t.selected));
+        st.interaction_trade_detail_close();
+        let view = project(&st);
+        assert!(view.trade_detail.symbol.is_empty());
+        assert!(view.trades.iter().all(|t| !t.selected));
+    }
+
+    #[test]
+    fn trade_blotter_window_geometry_is_exact() {
+        // Same clamp/no-overshoot contract as the ranking grid (`spec §11/§12`).
+        let mut st = LabState::default();
+        st.engine_wired = true;
+        st.strategies = vec![strategy_fixture()];
+        st.selected = Some(0);
+        st.rankby_labels = vec!["Net P&L".into()];
+        st.results = Some(LabResults {
+            trades: synthetic_trades(400),
+            ..LabResults::default()
+        });
+        st.run = RunState::Complete;
+        st.rebuild_trade_view();
+        st.interaction_trade_scroll(-100_000.0);
+        let view = project(&st);
+        assert_eq!(view.trade_window.scroll_px, 0.0);
+        assert_eq!(view.trade_window.first, 0);
+        st.interaction_trade_scroll(f32::MAX);
+        let view = project(&st);
+        assert_eq!(view.trade_window.scroll_px, view.trade_window.max_scroll_px);
+        assert!(!view.trades.is_empty());
+        assert!(view.trade_window.thumb_h > 0.0);
+        // A viewport taller than the data: no scrollbar, everything renders.
+        st.interaction_trade_viewport(28.0 * 1_000.0);
+        let view = project(&st);
+        assert_eq!(view.trade_window.max_scroll_px, 0.0);
+        assert!(!view.trade_window.scrollable);
+        assert_eq!(view.trades.len(), 400);
+    }
+
+    fn strategy_fixture() -> LabStrategy {
+        LabStrategy {
+            name: "FIX".into(),
+            description: "fixture".into(),
+            tags: vec![],
+            version: "v1".into(),
+            modified: "2026-09-28".into(),
+            favorite: false,
+            last_backtest: "—".into(),
+        }
+    }
+
+    /// Real-shaped synthetic trades for the state-level tests (the perf module
+    /// builds its own, larger, sets).
+    fn synthetic_trades(n: usize) -> Vec<TradeRow> {
+        (0..n)
+            .map(|i| {
+                let net = 100.0 + i as f64 * 0.5;
+                TradeRow {
+                    no: (i + 1).to_string(),
+                    abs_index: i as i32,
+                    symbol: format!("SYM{:04}", i),
+                    side: if i % 2 == 0 {
+                        "LONG".into()
+                    } else {
+                        "SHORT".into()
+                    },
+                    entry: format!("2026-01-{:02} 09:{:02}", (i % 28) + 1, i % 60),
+                    entry_px: format!("{:.2}", 100.0 + i as f64 * 0.01),
+                    exit: format!("2026-01-{:02} 15:{:02}", (i % 28) + 1, i % 60),
+                    exit_px: format!("{:.2}", 100.0 + i as f64 * 0.02),
+                    pnl: format!("{net:+.2}"),
+                    r: format!("{:.2}", net / 100.0),
+                    bars: (1 + i % 20).to_string(),
+                    reason: if i % 3 == 0 {
+                        "TARGET".into()
+                    } else {
+                        "STOP".into()
+                    },
+                    pnl_tone: if i % 3 == 0 {
+                        Tone::Positive
+                    } else {
+                        Tone::Negative
+                    },
+                    selected: false,
+                    sort: [29_000.0 + i as f64, net, net / 100.0, 1.0 + (i % 20) as f64],
+                }
+            })
+            .collect()
     }
 
     #[test]
@@ -2882,7 +3628,9 @@ mod tests {
         st.results_sell = Some(results());
         // In COMPARE the backend keeps _full_result at one side (workspace
         // lines 3995-3997) — the trades tab filters it by the side segment.
-        st.results = Some(results());
+        // `apply_result` is the real arrival path (it also builds the blotter
+        // index), so the fixture must go through it.
+        st.apply_result(results());
         let view = project(&st);
         assert!(view.show_results);
         assert_eq!(view.compare.banner_tone, 4);
@@ -3421,7 +4169,42 @@ fn parse_trade_row(i: usize, t: &serde_json::Value) -> TradeRow {
             Tone::Negative
         },
         selected: false,
+        sort: [
+            iso_minutes(opt_str(t, "entry_time")),
+            pnl.unwrap_or(f64::NAN),
+            opt_f64(t, "r_multiple").unwrap_or(f64::NAN),
+            opt_i64(t, "bars").map(|v| v as f64).unwrap_or(f64::NAN),
+        ],
     }
+}
+
+/// Minutes since the epoch for an ISO timestamp ("2026-01-02T09:15:00"), or
+/// NaN when absent/unparseable. The blotter sorts by time numerically (NaN
+/// sinks), never by comparing formatted strings.
+fn iso_minutes(iso: String) -> f64 {
+    if iso.len() < 16 {
+        return f64::NAN;
+    }
+    let bytes = iso.as_bytes();
+    let num = |range: std::ops::Range<usize>| -> Option<i64> {
+        std::str::from_utf8(&bytes[range.clone()])
+            .ok()
+            .and_then(|text| text.parse::<i64>().ok())
+    };
+    let (Some(year), Some(month), Some(day), Some(hour), Some(minute)) =
+        (num(0..4), num(5..7), num(8..10), num(11..13), num(14..16))
+    else {
+        return f64::NAN;
+    };
+    // Days from the civil date (Howard Hinnant's algorithm), then minutes.
+    let year = if month <= 2 { year - 1 } else { year };
+    let era = if year >= 0 { year } else { year - 399 } / 400;
+    let year_of_era = year - era * 400;
+    let month_shift = if month > 2 { month - 3 } else { month + 9 };
+    let day_of_year = (153 * month_shift + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    let days = era * 146_097 + day_of_era - 719_468;
+    (days * 24 * 60 + hour * 60 + minute) as f64
 }
 
 fn parse_curve(value: &serde_json::Value) -> Vec<(f64, f64)> {
@@ -3539,6 +4322,9 @@ fn apply_parity_keys(state: &mut LabState, value: &serde_json::Value) {
             // New data invalidates the index layer: rebuild it here (once per
             // snapshot), never in the frame path.
             state.rebuild_rank_view();
+            // Same for the trade blotter: the new trade list invalidates its
+            // index layer once, here.
+            state.rebuild_trade_view();
         }
     }
     // Editor buffer: adopt the backend echo (typing never triggers a
