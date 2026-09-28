@@ -7,7 +7,7 @@
 // view-model. Nothing here may add, restyle, or recompose content — compare
 // against the `app.slint` StrategyLabScreen block (identical bindings).
 
-import { StrategyLabScreen, LabHeader, LabLibraryRow, LabKpi, LabRankRow, LabTradeRow, LabPoint, LabParam, LabDetailMetric, LabBoardCell, LabMatrixRow, LabPreset } from "../../vayren-shell/ui/lab.slint";
+import { StrategyLabScreen, LabHeader, LabLibraryRow, LabKpi, LabRankRow, LabTradeRow, LabPoint, LabParam, LabDetailMetric, LabBoardCell, LabMatrixRow, LabPreset, RankWindow } from "../../vayren-shell/ui/lab.slint";
 
 export component LabHostWindow inherits Window {
     title: "VAYREN \u{2014} Strategy Lab";
@@ -44,6 +44,8 @@ export component LabHostWindow inherits Window {
     in-out property <[bool]> sym-visible-on;
     in-out property <int> filter-active: 0;
     in-out property <[LabPreset]> date-presets;
+    // Ranking virtual-window geometry (pass-through, same as `app.slint`).
+    in-out property <RankWindow> lab-rank-window;
 
     callback library-picked(int);
     callback filter-picked(int);
@@ -79,7 +81,9 @@ export component LabHostWindow inherits Window {
     callback sym-clear();
     callback sym-apply();
     callback lens-picked(int);
-    callback cost-committed(string);
+    callback rank-scrolled(float);
+    callback rank-scroll-to(float);
+    callback rank-viewport-reported(length);
     callback inspector-close();
     callback diag-link-clicked();
     callback equity-select-picked(int);
@@ -117,6 +121,7 @@ export component LabHostWindow inherits Window {
         sym-visible: root.sym-visible;
         sym-visible-on: root.sym-visible-on;
         date-presets: root.date-presets;
+        lab-rank-window: root.lab-rank-window;
         filter-active: root.filter-active;
         head-roomy: root.width >= 1210px;
         library-picked(idx) => { root.library-picked(idx); }
@@ -153,7 +158,9 @@ export component LabHostWindow inherits Window {
         sym-clear() => { root.sym-clear(); }
         sym-apply() => { root.sym-apply(); }
         lens-picked(idx) => { root.lens-picked(idx); }
-        cost-committed(text) => { root.cost-committed(text); }
+        rank-scrolled(px) => { root.rank-scrolled(px); }
+        rank-scroll-to(px) => { root.rank-scroll-to(px); }
+        rank-viewport-reported(h) => { root.rank-viewport-reported(h); }
         inspector-close() => { root.inspector-close(); }
         diag-link-clicked() => { root.diag-link-clicked(); }
         equity-select-picked(idx) => { root.equity-select-picked(idx); }
