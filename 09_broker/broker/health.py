@@ -46,7 +46,9 @@ class BrokerHealth:
         if not isinstance(self.reason, str):
             raise ValueError(f"health reason must be a string, got {self.reason!r}")
         if self.latency_ms is not None and (
-            not isinstance(self.latency_ms, (int, float)) or self.latency_ms < 0
+            isinstance(self.latency_ms, bool)
+            or not isinstance(self.latency_ms, (int, float))
+            or self.latency_ms < 0
         ):
             raise ValueError(f"health latency_ms must be non-negative, got {self.latency_ms!r}")
 

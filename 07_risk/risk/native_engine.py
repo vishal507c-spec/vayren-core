@@ -13,17 +13,75 @@ from __future__ import annotations
 import contextlib
 import ctypes
 import json
+from dataclasses import dataclass
 from typing import Any
 
 from core.native.loader import NativeBridgeError, load_vayren_core
 
-# DEBT: retained unwired import (see 90_brain/ai_memory.md).
-from risk.models import (  # pyright: ignore
-    RiskCheck,
-    RiskDecision,
-    RiskPolicy,
-    RiskRequest,
-)
+
+@dataclass(frozen=True)
+class RiskPolicy:
+    """Risk policy value object (bridge-local; kernel owns the rules)."""
+
+    max_position_qty: float = 0.0
+    max_order_qty: float = 0.0
+    cooldown_seconds: float = 0.0
+    max_notional: float | None = None
+    max_exposure_pct: float | None = None
+    daily_loss_limit: float | None = None
+    strategy_loss_limit: float | None = None
+    spread_limit_pct: float | None = None
+    require_fresh_data_seconds: float | None = None
+    max_orders_per_day: int | None = None
+    session_start: str = ""
+    session_end: str = ""
+    allowed_symbols: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class RiskRequest:
+    """One order intent asking for a risk verdict (data only)."""
+
+    intent_id: str = ""
+    strategy_id: str = ""
+    symbol: str = ""
+    side: str = ""
+    timestamp: str = ""
+    quantity: float = 0.0
+    price: float = 0.0
+    position_qty: float = 0.0
+    day_pnl: float = 0.0
+    strategy_day_pnl: float = 0.0
+    equity: float = 0.0
+    available_capital: float = 0.0
+    now_epoch: float = 0.0
+    orders_today: int = 0
+    spread_pct: float | None = None
+    data_age_seconds: float | None = None
+    last_order_epoch: float | None = None
+    broker_healthy: bool = False
+
+
+@dataclass(frozen=True)
+class RiskCheck:
+    """One named gate outcome from the kernel decision document."""
+
+    name: str = ""
+    passed: bool = False
+    detail: str = ""
+
+
+@dataclass(frozen=True)
+class RiskDecision:
+    """Kernel verdict (approved + reasons + per-gate checks)."""
+
+    approved: bool = False
+    intent_id: str = ""
+    reasons: tuple[str, ...] = ()
+    checks: tuple[RiskCheck, ...] = ()
+
+
+__all__ = ["RiskCheck", "RiskDecision", "RiskPolicy", "RiskRequest", "NativeRiskEngine"]
 
 _lib = load_vayren_core()
 

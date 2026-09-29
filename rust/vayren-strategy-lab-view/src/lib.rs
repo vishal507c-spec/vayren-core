@@ -217,6 +217,49 @@ fn apply_state(ui: &LabHostWindow, state: &LabState) {
         today_days: view.today_days,
         dates_start_days: view.dates_start_days,
         dates_end_days: view.dates_end_days,
+        // §02 CONFIGURE — same fields the shell pushes, so the standalone
+        // view and the embedded screen render identically.
+        tf_short_idx: view.tf_short_idx,
+        range_preset_idx: view.range_preset_idx,
+        range_from_human: view.range_from_human.into(),
+        range_to_human: view.range_to_human.into(),
+        range_to_live: view.range_to_live,
+        range_span_line: view.range_span_line.into(),
+        timeframe_label: view.timeframe_label.into(),
+        capital_label: view.capital_label.into(),
+        capital_ok: view.capital_ok,
+        chips_more_line: view.chips_more_line.into(),
+        cfg_checks: Rc::new(slint::VecModel::from(
+            view.cfg_checks
+                .into_iter()
+                .map(|c| LabCheckData {
+                    label: c.label.into(),
+                    kind: c.kind,
+                })
+                .collect::<Vec<_>>(),
+        ))
+        .into(),
+        cov_pct: view.coverage.pct,
+        cov_note: view.coverage.note.into(),
+        cov_kind: view.coverage.kind,
+        cov_on: view.coverage.on,
+        cov_caption: view.cov_caption.into(),
+        // Live run progress — same fields the shell pushes.
+        prog_active: view.prog_active,
+        prog_headline: view.prog_headline.into(),
+        prog_counts: view.prog_counts.into(),
+        prog_current: view.prog_current.into(),
+        prog_stage: view.prog_stage.into(),
+        prog_stage_pct: view.prog_stage_pct,
+        prog_elapsed: view.prog_elapsed.into(),
+        prog_eta: view.prog_eta.into(),
+        prog_speed: view.prog_speed.into(),
+        prog_throughput: view.prog_throughput.into(),
+        prog_failed_line: view.prog_failed_line.into(),
+        prog_pct: view.prog_pct,
+        prog_cancelled: view.prog_cancelled,
+        prog_long: view.prog_long,
+        prog_watchdog: view.prog_watchdog.into(),
     });
     // Ranking virtual-window geometry: the host is a pass-through, so the same
     // Rust-derived window the shell pushes must land here too.
@@ -261,6 +304,24 @@ fn apply_state(ui: &LabHostWindow, state: &LabState) {
                     start_days: p.start_days,
                     end_days: p.end_days,
                 })
+                .collect::<Vec<_>>(),
+        ))
+        .into(),
+    );
+    ui.set_range_preset_labels(
+        Rc::new(slint::VecModel::from(
+            view.range_presets
+                .into_iter()
+                .map(|p| slint::SharedString::from(p.label))
+                .collect::<Vec<_>>(),
+        ))
+        .into(),
+    );
+    ui.set_tf_short(
+        Rc::new(slint::VecModel::from(
+            view.tf_short
+                .into_iter()
+                .map(slint::SharedString::from)
                 .collect::<Vec<_>>(),
         ))
         .into(),
@@ -697,6 +758,36 @@ fn wire_view(ui: &LabHostWindow, state: Rc<RefCell<LabState>>) {
             }
         });
     }
+    {
+        // A range preset is the same commit contract as the picker's Apply.
+        let strong = state.clone();
+        let weak = ui.as_weak();
+        ui.on_range_preset_picked(move |index: i32| {
+            {
+                let mut guard = strong.borrow_mut();
+                guard.interaction_range_preset(index);
+            }
+            if let Some(ui) = weak.upgrade() {
+                apply_state(&ui, &strong.borrow());
+            }
+        });
+    }
+    {
+        // Progress events arrive through the same JSON the snapshot uses.
+        let strong = state.clone();
+        let weak = ui.as_weak();
+        ui.on_run_cancel_requested(move || {
+            strong.borrow_mut().interaction_run_cancel();
+            if let Some(ui) = weak.upgrade() {
+                apply_state(&ui, &strong.borrow());
+            }
+        });
+    }
+}
+
+/// Adopt a measured progress event (shared by every host that renders the Lab).
+pub fn apply_progress_json(state: &mut LabState, value: &serde_json::Value) {
+    state.apply_progress(value);
 }
 
 fn view_of<'a>(ptr: *mut LabView) -> Result<&'a mut LabView, i32> {
@@ -827,7 +918,7 @@ pub extern "C" fn vayren_strategy_lab_view_next_action(
             return Err(-2);
         }
         let action = {
-            let mut state = view.state.borrow_mut();
+            let state = view.state.borrow_mut();
             state.pending_actions.first().cloned()
         };
         let Some(action) = action else { return Ok(0) };

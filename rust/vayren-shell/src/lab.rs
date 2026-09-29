@@ -14,6 +14,103 @@
 //! - config changes are fingerprint-compared to the last run and surfaced as
 //!   a compact OUTDATED notice — stale results never appear as current.
 
+use vayren_core::backtest_validation as validation;
+use vayren_core::lab_coverage::{self, CoverageFacts, CoverageInput};
+use vayren_core::market::timeframe_seconds;
+
+/// Live execution facts for an in-flight run.
+///
+/// Every field is a MEASURED value pushed by the backend after real work
+/// finished. There is no local ticker and no interpolation: if the backend
+/// stops sending, the numbers freeze exactly where they were, which is what
+/// lets the UI tell "slow" apart from "stuck".
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct RunProgress {
+    pub active: bool,
+    /// `starting | data | calculate | trades | aggregate | done | failed | cancelled`
+    pub stage: String,
+    pub stage_pct: f32,
+    pub total: i32,
+    pub completed: i32,
+    pub failed: Vec<String>,
+    pub skipped: Vec<String>,
+    pub remaining: i32,
+    pub pct: f32,
+    /// `(done, total)` for the stage actually on screen — the load stage
+    /// counts symbols READ, the run stage counts symbols RUN. The bar shows
+    /// this pair, so it can never claim "0 / 527" while work is landing.
+    pub done: i32,
+    pub headline_total: i32,
+    pub current: String,
+    pub current_secs: f32,
+    pub elapsed_secs: f32,
+    /// `None` until enough samples exist — the UI shows a dash, never a guess.
+    pub eta_secs: Option<f64>,
+    pub mean_secs: Option<f64>,
+    pub throughput: f32,
+    pub trades: i32,
+    pub bars: i64,
+    pub net_pnl: f32,
+    pub long_running: bool,
+    pub quiet: bool,
+    pub cancelled: bool,
+}
+
+impl RunProgress {
+    /// Adopt a `lab_progress` payload. An unmeasurable field becomes `None`
+    /// rather than a zero, so "we don't know yet" never reads as "0 seconds".
+    pub fn from_json(value: &serde_json::Value) -> Self {
+        let num = |key: &str| value.get(key).and_then(|v| v.as_f64());
+        let strings = |key: &str| -> Vec<String> {
+            value
+                .get(key)
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|s| s.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        Self {
+            active: true,
+            stage: opt_str(value, "stage"),
+            stage_pct: num("stage_pct").unwrap_or(0.0) as f32,
+            total: num("total").unwrap_or(0.0) as i32,
+            completed: num("completed").unwrap_or(0.0) as i32,
+            failed: strings("failed"),
+            skipped: strings("skipped"),
+            remaining: num("remaining").unwrap_or(0.0) as i32,
+            pct: num("pct").unwrap_or(0.0) as f32,
+            done: num("done").unwrap_or(0.0) as i32,
+            headline_total: num("headline_total")
+                .or_else(|| num("total"))
+                .unwrap_or(0.0) as i32,
+            current: opt_str(value, "current"),
+            current_secs: num("current_secs").unwrap_or(0.0) as f32,
+            elapsed_secs: num("elapsed_secs").unwrap_or(0.0) as f32,
+            eta_secs: num("eta_secs"),
+            mean_secs: num("mean_secs"),
+            throughput: num("throughput").unwrap_or(0.0) as f32,
+            trades: num("trades").unwrap_or(0.0) as i32,
+            bars: num("bars").unwrap_or(0.0) as i64,
+            net_pnl: num("net_pnl").unwrap_or(0.0) as f32,
+            long_running: value
+                .get("long_running")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+            quiet: value
+                .get("quiet")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+            cancelled: value
+                .get("cancelled")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+        }
+    }
+}
+
 /// Direction mode — lives in the header ONLY (no floating indicators).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LabMode {
@@ -353,6 +450,25 @@ pub struct LabState {
     pub cfg_dates_end: String,
     pub cfg_capital: String,
     pub config_error: String,
+    /// Active entry of the §02 date-range preset row (-1 = a custom range
+    /// picked by hand). Derived in `project`, never stored: a stale index
+    /// would light up a cell the committed range does not match.
+    pub range_preset_idx: i32,
+    /// Real store history bounds reported by the backend (`first_date` /
+    /// `last_date` of the anchor symbol). The §02 `MAX` preset is exactly
+    /// this pair — NOT the current selection, which would collapse `MAX` onto
+    /// whatever the user last picked. -1 = not reported yet.
+    pub data_bounds_start_days: i32,
+    pub data_bounds_end_days: i32,
+    /// The symbol whose bar count the coverage probe actually read. The strip
+    /// names it, because a bar count for one symbol must never be printed as a
+    /// total for the whole selection.
+    pub coverage_anchor: String,
+    /// Measured data completeness (`lab_coverage` kernel facts). `None` until a
+    /// probe actually measured something — the strip stays hidden then.
+    pub coverage: Option<CoverageFacts>,
+    /// Live execution facts for an in-flight run. Inactive outside a run.
+    pub progress: RunProgress,
     /// Ranking criterion dropdown (legacy box order echoed verbatim).
     pub rankby_labels: Vec<String>,
     pub rankby_current: i32,
@@ -561,6 +677,66 @@ impl LabState {
         self.queue_action(format!("dates:{start}:{end}"));
     }
 
+    /// §02 preset row: rewrite the committed ISO bounds from the real store
+    /// bounds and hand them to the EXISTING date commit path. There is no
+    /// second date pipeline — a preset is a preset of `interaction_dates`.
+    pub fn interaction_range_preset(&mut self, index: i32) {
+        let presets = range_presets_for(
+            self.data_bounds_start_days as i64,
+            self.data_bounds_end_days as i64,
+        );
+        let Some(preset) = usize::try_from(index).ok().and_then(|i| presets.get(i)) else {
+            return;
+        };
+        let (start, end) = (preset.start_days as i64, preset.end_days as i64);
+        if end < start {
+            return;
+        }
+        self.interaction_dates(&iso_from_days(start), &iso_from_days(end));
+    }
+
+    /// Adopt a `lab_progress` payload from the backend. The numbers on screen
+    /// are exactly the ones that were measured.
+    pub fn apply_progress(&mut self, value: &serde_json::Value) {
+        self.progress = RunProgress::from_json(value);
+    }
+
+    /// A run has ended (or never started): freeze the panel out of view. The
+    /// final snapshot carries the results, so nothing is lost by hiding it.
+    pub fn clear_progress(&mut self) {
+        self.progress = RunProgress::default();
+    }
+
+    /// User asked to stop the in-flight run. The host forwards the queued
+    /// action; the backend polls it between symbols, so the stop is graceful.
+    pub fn interaction_run_cancel(&mut self) {
+        self.queue_action("cancelrun".to_string());
+    }
+
+    /// Adopt a measured coverage probe (the `lab_coverage` backend command).
+    /// The counts come from the store; the expectation and the percentage are
+    /// derived HERE, in the kernel, from the same window the probe measured.
+    pub fn apply_coverage(&mut self, measured: CoverageMeasurement) {
+        let start = measured.start_days;
+        let end = measured.end_days;
+        let tf_secs = measured.tf_secs;
+        if start < 0 || end < 0 || tf_secs <= 0 {
+            self.coverage = None;
+            return;
+        }
+        let expected = lab_coverage::expected_bars(start as i64, end as i64, tf_secs);
+        self.coverage = Some(lab_coverage::coverage_facts(&CoverageInput {
+            symbols_total: measured.symbols_total,
+            symbols_covering: measured.symbols_covering,
+            bars_present: measured.bars_present,
+            bars_expected: expected,
+            gaps: 0,
+            sampled: measured.sampled,
+            symbols_probed: measured.symbols_probed,
+        }));
+        self.coverage_anchor = measured.anchor;
+    }
+
     pub fn interaction_ranksearch(&mut self, text: &str) {
         self.rank_search = text.to_string();
         self.rebuild_rank_view();
@@ -639,7 +815,10 @@ impl LabState {
     /// Build the detail panel for ONE trade, straight from the record
     /// (`spec §27`): nothing is precomputed for rows the user never clicks.
     fn trade_detail_for(&self, index: i32) -> Option<TradeDetailState> {
-        let row = self.results.as_ref()?.trades.get(index.max(0) as usize)?;
+        if index < 0 {
+            return None;
+        }
+        let row = self.results.as_ref()?.trades.get(index as usize)?;
         let metric = |label: &str, value: String, tone: Tone| DetailMetricView {
             label: label.to_string(),
             value,
@@ -1387,6 +1566,59 @@ pub struct LabView {
     pub dates_start_days: i32,
     pub dates_end_days: i32,
     pub date_presets: Vec<LabPresetData>,
+    // ── §02 CONFIGURE (three-row structured config) ──
+    /// First ≤5 real timeframe labels for the segmented control; the rest stay
+    /// reachable through the existing dropdown menu. Never hardcoded.
+    pub tf_short: Vec<String>,
+    /// Index of the selected timeframe inside `tf_short` (-1 = not in the
+    /// short list, i.e. it lives behind the `▾ MORE` menu).
+    pub tf_short_idx: i32,
+    /// Range presets anchored on the real store bounds.
+    pub range_presets: Vec<LabRangePresetData>,
+    pub range_preset_idx: i32,
+    /// "19 Sep 2019" / "18 Aug 2026" — formatted HERE so Slint never parses a
+    /// date (`ai_memory.md` §22 single authority for date logic).
+    pub range_from_human: String,
+    pub range_to_human: String,
+    /// True when the range ends at the last available bar (the live edge).
+    pub range_to_live: bool,
+    /// "1,684 DAYS" — the real span of the committed range.
+    pub range_span_line: String,
+    /// The timeframe the control shows. Resolved from the ladder + index, so
+    /// the dropdown, the segmented cells and the control can never disagree
+    /// about which granularity is selected.
+    pub timeframe_label: String,
+    /// The capital the run will use, formatted from the committed input — the
+    /// same number the CAPITAL field shows, never a stale config echo.
+    pub capital_label: String,
+    /// `validate_form` bit 4 (capital > 0), surfaced next to the sub-row so
+    /// the capital cell states the rule the kernel actually enforces.
+    pub capital_ok: bool,
+    /// "+522" when chips are capped, empty when every symbol is shown.
+    pub chips_more_line: String,
+    /// Validation rows for the run bar (pass / warn / fail), all from state.
+    pub cfg_checks: Vec<LabCheckData>,
+    pub coverage: CoverageView,
+    /// What the completeness probe actually read. "VERIFIED" would overstate a
+    /// bounded sample, so a sampled probe says so in the caption itself.
+    pub cov_caption: String,
+    // ── live run progress (every field derived from a measured event) ──
+    pub prog_active: bool,
+    pub prog_headline: String,
+    pub prog_counts: String,
+    pub prog_current: String,
+    pub prog_stage: String,
+    pub prog_stage_pct: f32,
+    pub prog_elapsed: String,
+    pub prog_eta: String,
+    pub prog_speed: String,
+    pub prog_throughput: String,
+    pub prog_failed_line: String,
+    pub prog_pct: f32,
+    pub prog_cancelled: bool,
+    pub prog_long: bool,
+    /// "LONG-RUNNING" / "TAKING LONGER THAN USUAL" / "" — a state, not a verdict.
+    pub prog_watchdog: String,
 }
 
 /// One quick-select preset for the date-range picker. Ranges are day anchors
@@ -1396,6 +1628,46 @@ pub struct LabPresetData {
     pub label: String,
     pub start_days: i32,
     pub end_days: i32,
+}
+
+/// §02 date-range preset (`1Y 3Y 5Y 10Y MAX`), anchored on the real store
+/// bounds. Same shape as the picker's [`LabPresetData`] — one struct, two
+/// surfaces, so the two rows can never disagree about what a range means.
+pub type LabRangePresetData = LabPresetData;
+
+/// One §02 validation row. `kind` is the tone the screen paints:
+/// 0 pass, 1 warning, 2 failure.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LabCheckData {
+    pub label: String,
+    pub kind: i32,
+}
+
+/// A measured coverage probe, before the kernel derives the percentage. The
+/// window travels with the counts so `expected_bars` is computed against the
+/// same window the backend counted.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CoverageMeasurement {
+    pub symbols_total: u32,
+    pub symbols_covering: u32,
+    pub symbols_probed: u32,
+    pub bars_present: u64,
+    pub start_days: i32,
+    pub end_days: i32,
+    pub tf_secs: i64,
+    pub sampled: bool,
+    /// The symbol the bar count belongs to.
+    pub anchor: String,
+}
+
+/// §02 completeness strip, flattened for the screen. `on == false` means
+/// "not measured" — the strip is hidden, never painted at 0%.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CoverageView {
+    pub pct: i32,
+    pub note: String,
+    pub kind: i32,
+    pub on: bool,
 }
 
 // Civil-date arithmetic (Howard Hinnant's algorithm, std-only). Date math is
@@ -1519,6 +1791,89 @@ fn date_presets_for(today: i64) -> Vec<LabPresetData> {
         p("Last 1Y", sub_months(today, 12)),
         p("YTD", year_start_days(today)),
     ]
+}
+
+/// §02 date-range presets, anchored on the REAL store bounds.
+///
+/// Five entries, every one ending at the last available bar, so switching
+/// presets never moves the END of the experiment behind the user's back:
+/// `1Y 3Y 5Y 10Y MAX`. A preset whose nominal span reaches before the first
+/// available bar is CLAMPED to it, and its label states the span the data
+/// actually has (`"3.2 YRS"`) instead of a year count the store cannot back.
+///
+/// `first_avail`/`last_avail` are day anchors from the backend's real
+/// `date_range()`; unknown bounds (`<= 0`) yield no presets at all, because a
+/// preset that cannot be placed against real data is an invented control.
+pub fn range_presets_for(first_avail: i64, last_avail: i64) -> Vec<LabRangePresetData> {
+    if first_avail <= 0 || last_avail < first_avail {
+        return Vec::new();
+    }
+    let end = last_avail;
+    let mut presets: Vec<LabRangePresetData> = [(1i64, "1Y"), (3, "3Y"), (5, "5Y"), (10, "10Y")]
+        .iter()
+        .map(|(years, label)| {
+            let want = sub_months(end, years * 12);
+            let (start, label) = if want < first_avail {
+                (first_avail, span_label(first_avail, end))
+            } else {
+                (want, (*label).to_string())
+            };
+            LabRangePresetData {
+                label,
+                start_days: start as i32,
+                end_days: end as i32,
+            }
+        })
+        .collect();
+    presets.push(LabRangePresetData {
+        label: "MAX".to_string(),
+        start_days: first_avail as i32,
+        end_days: end as i32,
+    });
+    presets
+}
+
+/// Honest label for a clamped span: years with one decimal while the span is
+/// under ten years, whole years beyond that. A 3.2-year store says "3.2 YRS",
+/// never "5Y".
+fn span_label(start: i64, end: i64) -> String {
+    let days = (end - start).max(0) as f64;
+    let years = days / 365.25;
+    if years >= 10.0 {
+        format!("{:.0} YRS", years)
+    } else {
+        format!("{years:.1} YRS")
+    }
+}
+
+/// `seconds` → `MM:SS` (or `HH:MM:SS`). A dash for an unknown duration —
+/// "we have no measurement" must never render as `00:00`.
+pub fn clock_label(seconds: f64) -> String {
+    if !seconds.is_finite() || seconds < 0.0 {
+        return "—".to_string();
+    }
+    let total = seconds.round() as u64;
+    let (h, m, s) = (total / 3600, (total % 3600) / 60, total % 60);
+    if h > 0 {
+        format!("{h}:{m:02}:{s:02}")
+    } else {
+        format!("{m:02}:{s:02}")
+    }
+}
+
+/// Day anchor → `YYYY-MM-DD` (the inverse of [`parse_iso_days`]).
+fn iso_from_days(z: i64) -> String {
+    let (y, m, d) = civil_from_days(z);
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+/// Days in an inclusive range, for the honest `N DAYS` span caption.
+pub fn span_days(start: i64, end: i64) -> i64 {
+    if start < 0 || end < start {
+        0
+    } else {
+        end - start + 1
+    }
 }
 
 /// Fixed ranking-row height in logical pixels. The stable-layout contract
@@ -1720,6 +2075,17 @@ fn trade_signature(rows: &[TradeRow], total: usize, scroll_px: f32) -> (i32, i32
 /// symbol stays in the data layer, the selector and the run request; the count
 /// next to the chips states the true total.
 pub const UNIVERSE_CHIP_CAP: usize = 6;
+
+/// Cells in the §02 timeframe segmented control. The rest of the REAL ladder
+/// stays reachable through the existing dropdown — a cap on the row, never on
+/// the data. Four (not five) because the TIMEFRAME column physically cannot
+/// fit six cells without eliding every label, which is the layout bug this
+/// cap exists to prevent.
+pub const TF_SHORT_CAP: usize = 4;
+
+/// Symbols a coverage probe reads by default. A full 527-symbol bar count is a
+/// full store scan, so the default is bounded and the screen says so.
+pub const COVERAGE_SAMPLE_SYMBOLS: usize = 24;
 
 /// Count the symbols in a comma CSV ("", "A", "A,B" -> 0, 1, 2). Done where
 /// the CSV is adopted, never in the frame path.
@@ -2511,6 +2877,267 @@ pub fn project(state: &LabState) -> LabView {
     };
     let dates_human = dates_human.to_string();
 
+    // ── §02 CONFIGURE: everything below is a DERIVATION of state already in
+    // hand (selection, timeframe, committed dates, store bounds, coverage).
+    // Nothing here invents a number, and Slint never does date math.
+    let tf_short: Vec<String> = state
+        .timeframes
+        .iter()
+        .take(TF_SHORT_CAP)
+        .cloned()
+        .collect();
+    let tf_short_idx = state
+        .timeframes
+        .get(state.timeframe_index.max(0) as usize)
+        .and_then(|current| tf_short.iter().position(|t| t == current))
+        .map_or(-1, |i| i as i32);
+    // One authority for "which timeframe": the resolved ladder entry. The
+    // config echo is only the fallback for a store that reported no ladder.
+    let timeframe_label = state
+        .timeframes
+        .get(state.timeframe_index.max(0) as usize)
+        .cloned()
+        .unwrap_or_else(|| state.config.timeframe.clone());
+    let range_presets = range_presets_for(
+        state.data_bounds_start_days as i64,
+        state.data_bounds_end_days as i64,
+    );
+    // A clamped preset can land on the same bounds as MAX, so the LAST match
+    // wins: the cell that lights up is always the widest range the user can
+    // select, never a narrower one that happens to share its window.
+    let range_preset_idx = range_presets
+        .iter()
+        .rposition(|p| {
+            p.start_days == start_days.map(|v| v as i32).unwrap_or(-1)
+                && p.end_days == end_days.map(|v| v as i32).unwrap_or(-1)
+        })
+        .map_or(-1, |i| i as i32);
+    let range_from_human = start_days.map_or_else(String::new, human_from_days);
+    let range_to_human = end_days.map_or_else(String::new, human_from_days);
+    let range_to_live = state.data_bounds_end_days > 0
+        && end_days.map(|v| v as i32) == Some(state.data_bounds_end_days);
+    let range_span_line = match (start_days, end_days) {
+        (Some(a), Some(b)) if b >= a => format!("{} DAYS", grouped_whole(span_days(a, b) as f64)),
+        _ => String::new(),
+    };
+    let chips_more_line = sym_applied
+        .checked_sub(UNIVERSE_CHIP_CAP)
+        .filter(|rest| *rest > 0)
+        .map_or_else(String::new, |rest| format!("+{rest}"));
+
+    // Validation rows. Every one of them reuses an existing signal: the
+    // `validate_form` bitmask, the real selection against the real symbol
+    // list, and the existing config/date error strings verbatim.
+    let capital_value = state
+        .cfg_capital
+        .parse::<f64>()
+        .ok()
+        .filter(|n| n.is_finite())
+        .unwrap_or(0.0);
+    let timeframe_ok = state
+        .timeframes
+        .get(state.timeframe_index.max(0) as usize)
+        .map(|t| !t.is_empty())
+        .unwrap_or(false);
+    let bits = validation::validate_form(
+        sym_applied > 0,
+        has_strategy,
+        timeframe_ok,
+        dates_error.is_empty() && start_days.is_some() && end_days.is_some(),
+        capital_value,
+        None,
+    );
+    // The CAPITAL cell states the one rule the kernel enforces — the mock's
+    // "MIN ₹5,000" had no minimum anywhere in the product.
+    let capital_ok = bits & (1 << 4) == 0;
+    let capital_label = match state.cfg_capital.trim().parse::<f64>() {
+        Ok(amount) if amount.is_finite() => format!("₹{}", grouped_whole(amount)),
+        _ => state.cfg_capital.trim().to_string(),
+    };
+    // A backend failure reason is the one row the user MUST see. The card
+    // border and the red RUN button say "something is wrong" without saying
+    // what — the reason itself is the message the backend produced, verbatim.
+    let config_reason = state.config_error.trim().to_string();
+    let mut cfg_checks = Vec::new();
+    if !config_reason.is_empty() {
+        cfg_checks.push(LabCheckData {
+            label: config_reason,
+            kind: 2,
+        });
+    }
+    cfg_checks.push(LabCheckData {
+        label: format!("Data available {sym_applied}/{sym_total}"),
+        kind: i32::from(bits & 1 != 0) * 2,
+    });
+    cfg_checks.push(LabCheckData {
+        label: if bits & (1 << 2) == 0 {
+            "Timeframe selected".to_string()
+        } else {
+            validation::MESSAGES[2].to_string()
+        },
+        kind: if bits & (1 << 2) == 0 { 0 } else { 2 },
+    });
+    cfg_checks.push(LabCheckData {
+        label: if bits & (1 << 4) == 0 {
+            "Capital positive".to_string()
+        } else {
+            validation::MESSAGES[4].to_string()
+        },
+        kind: if bits & (1 << 4) == 0 { 0 } else { 2 },
+    });
+    if !dates_error.is_empty() {
+        cfg_checks.push(LabCheckData {
+            label: dates_error.clone(),
+            kind: 2,
+        });
+    }
+    if let Some(facts) = state.coverage {
+        if facts.measured && facts.short_history > 0 {
+            // Only symbols with NO bars at all in the requested window land
+            // here. A stock listed in 2021 is not a defect when the window
+            // starts in 2019, so "reached the window start" is NOT this count.
+            cfg_checks.push(LabCheckData {
+                label: format!(
+                    "{} symbols have no data in this window",
+                    facts.short_history
+                ),
+                kind: 1,
+            });
+        }
+    }
+    if state.outdated {
+        cfg_checks.push(LabCheckData {
+            label: "edited — rerun to refresh".to_string(),
+            kind: 1,
+        });
+    }
+
+    // Completeness strip: hidden unless the kernel actually measured. The
+    // percentage is an integer (Slint 1.17 cannot format a float), so the
+    // mock's "94.2%" becomes an honest "94%".
+    //
+    // The bar count belongs to the ANCHOR symbol the backend counted, NOT to
+    // the whole selection — saying "22,196 BARS IN 527 STOCKS" would be a
+    // number this code never measured. The note names the anchor, and the
+    // caption states whether the probe was the full selection or a sample.
+    let coverage = match state.coverage {
+        Some(facts) if facts.measured => {
+            let note = match state.coverage_anchor.trim() {
+                "" if facts.sampled => format!(
+                    "{} BARS  ·  {} OF {} PROBED",
+                    grouped_whole(facts.present as f64),
+                    COVERAGE_SAMPLE_SYMBOLS,
+                    facts.symbols_covered_of()
+                ),
+                "" => format!("{} BARS", grouped_whole(facts.present as f64)),
+                anchor => format!(
+                    "{} BARS IN {anchor}{}",
+                    grouped_whole(facts.present as f64),
+                    if facts.sampled {
+                        format!(
+                            "  ·  {} OF {} PROBED",
+                            COVERAGE_SAMPLE_SYMBOLS,
+                            facts.symbols_covered_of()
+                        )
+                    } else {
+                        String::new()
+                    }
+                ),
+            };
+            let cov_caption = if facts.sampled {
+                "SAMPLED".to_string()
+            } else {
+                "VERIFIED".to_string()
+            };
+            CoverageView {
+                pct: i32::from(facts.pct),
+                note,
+                kind: if facts.pct >= 99 {
+                    0
+                } else if facts.pct >= 90 {
+                    1
+                } else {
+                    2
+                },
+                on: true,
+            }
+        }
+        _ => CoverageView::default(),
+    };
+    let cov_caption = match state.coverage {
+        Some(facts) if facts.measured && facts.sampled => "SAMPLED".to_string(),
+        Some(facts) if facts.measured => "VERIFIED".to_string(),
+        _ => String::new(),
+    };
+
+    // ── live run progress ──
+    // Every string here is FORMATTED from a measured event. The UI never
+    // computes, smooths or guesses: if the backend stopped sending, these
+    // simply stop changing, which is what "stuck" must look like.
+    let progress = &state.progress;
+    let prog_active = progress.active;
+    let prog_headline = format!("{} / {} stocks", progress.done, progress.headline_total);
+    let prog_counts = format!(
+        "Completed {}   Failed {}   Skipped {}   Remaining {}",
+        progress.completed,
+        progress.failed.len(),
+        progress.skipped.len(),
+        progress.remaining
+    );
+    let prog_current = if progress.current.is_empty() {
+        "—".to_string()
+    } else {
+        progress.current.clone()
+    };
+    let prog_stage = match progress.stage.as_str() {
+        "data" => "Loading bars",
+        "calculate" => "Strategy calculation",
+        "trades" => "Trade generation",
+        "aggregate" => "Aggregating results",
+        "failed" => "Stopped",
+        other => other,
+    }
+    .to_string();
+    // Outside a run nothing is measured, so every duration is a dash — a bare
+    // "00:00" would be a fabricated elapsed time.
+    let prog_elapsed = if prog_active {
+        clock_label(f64::from(progress.elapsed_secs))
+    } else {
+        "—".to_string()
+    };
+    // No samples yet → a dash, never a fabricated ETA.
+    let prog_eta = match progress.eta_secs {
+        Some(eta) if progress.remaining > 0 => format!("~{}", clock_label(eta)),
+        _ => "—".to_string(),
+    };
+    let prog_speed = match progress.mean_secs {
+        Some(mean) if mean > 0.0 => format!("{:.2} s/stock", mean),
+        _ => "—".to_string(),
+    };
+    let prog_throughput = if progress.throughput > 0.0 {
+        format!("{:.2} stocks/s", progress.throughput)
+    } else {
+        "—".to_string()
+    };
+    let prog_failed_line = if progress.failed.is_empty() {
+        String::new()
+    } else {
+        format!("Failed: {}", progress.failed.join(", "))
+    };
+    let prog_pct = progress.pct;
+    let prog_watchdog = if progress.cancelled {
+        "CANCELLED".to_string()
+    } else if progress.long_running {
+        format!(
+            "LONG-RUNNING — {}",
+            clock_label(f64::from(progress.current_secs))
+        )
+    } else if progress.quiet {
+        "Processing is taking longer than usual…".to_string()
+    } else {
+        String::new()
+    };
+
     LabView {
         has_strategy,
         name: strategy.map_or_else(|| "No strategy".to_string(), |s| s.name.clone()),
@@ -2674,6 +3301,36 @@ pub fn project(state: &LabState) -> LabView {
         dates_start_days: start_days.map_or(-1, |v| v as i32),
         dates_end_days: end_days.map_or(-1, |v| v as i32),
         date_presets: date_presets_for(today),
+        tf_short,
+        tf_short_idx,
+        range_presets,
+        range_preset_idx,
+        range_from_human,
+        range_to_human,
+        range_to_live,
+        range_span_line,
+        timeframe_label,
+        capital_label,
+        capital_ok,
+        chips_more_line,
+        cfg_checks,
+        coverage,
+        cov_caption,
+        prog_active,
+        prog_headline,
+        prog_counts,
+        prog_current,
+        prog_stage,
+        prog_stage_pct: progress.stage_pct,
+        prog_elapsed,
+        prog_eta,
+        prog_speed,
+        prog_throughput,
+        prog_failed_line,
+        prog_pct,
+        prog_cancelled: progress.cancelled,
+        prog_long: progress.long_running,
+        prog_watchdog,
     }
 }
 
@@ -3803,6 +4460,473 @@ mod tests {
         assert_eq!(v.date_presets[0].label, "Last 1M");
         assert_eq!(v.date_presets[4].label, "YTD");
     }
+
+    // ── §02 range presets: real bounds, honest labels, one commit path ──
+
+    /// 2019-09-19 … 2026-08-18 as day anchors (the bounds the mock shows).
+    const LONG_FIRST: i64 = 18_158;
+    const LONG_LAST: i64 = 20_683;
+
+    fn state_with_bounds(first: i64, last: i64) -> LabState {
+        let mut st = state_with_obr();
+        st.data_bounds_start_days = first as i32;
+        st.data_bounds_end_days = last as i32;
+        st
+    }
+
+    #[test]
+    fn range_presets_are_five_and_all_end_at_the_last_available_bar() {
+        let presets = range_presets_for(LONG_FIRST, LONG_LAST);
+        assert_eq!(presets.len(), 5);
+        for p in &presets {
+            assert_eq!(p.end_days as i64, LONG_LAST);
+            assert!(p.start_days <= p.end_days);
+        }
+        // A 6.9-year store cannot offer a 10Y range, so that cell states the
+        // span the data actually has. The honest label replaces the claim.
+        assert_eq!(
+            presets.iter().map(|p| p.label.as_str()).collect::<Vec<_>>(),
+            vec!["1Y", "3Y", "5Y", "6.9 YRS", "MAX"]
+        );
+        // A store long enough for the label keeps it.
+        let deep = range_presets_for(14_000, LONG_LAST);
+        assert_eq!(deep[3].label, "10Y");
+        // The row WIDENS left to right, so starts only ever move earlier. A
+        // clamped cell may EQUAL the one beside it (both mean "everything the
+        // store has"), but the row must never narrow as it goes right.
+        for pair in presets.windows(2) {
+            assert!(pair[1].start_days <= pair[0].start_days, "{pair:?}");
+        }
+    }
+
+    #[test]
+    fn max_preset_is_exactly_the_reported_store_bounds() {
+        let presets = range_presets_for(LONG_FIRST, LONG_LAST);
+        let max = presets.last().expect("five presets");
+        assert_eq!(max.label, "MAX");
+        assert_eq!(max.start_days as i64, LONG_FIRST);
+        assert_eq!(max.end_days as i64, LONG_LAST);
+    }
+
+    #[test]
+    fn a_short_history_store_clamps_the_label_instead_of_lying() {
+        // Only 3.2 years of history: 5Y and 10Y cannot exist, so they collapse
+        // onto the real first bar and SAY SO rather than claiming five years.
+        let first = LONG_LAST - 1_168; // ≈3.2 years
+        let presets = range_presets_for(first, LONG_LAST);
+        assert_eq!(presets.len(), 5);
+        let five = &presets[2];
+        assert_eq!(five.start_days as i64, first);
+        assert!(!five.label.contains('5'), "label claims 5Y: {}", five.label);
+        assert!(
+            five.label.ends_with("YRS"),
+            "label is not a span: {}",
+            five.label
+        );
+        // MAX is still the full store, and still the widest cell.
+        assert_eq!(presets[4].start_days as i64, first);
+        assert_eq!(presets[4].end_days as i64, LONG_LAST);
+    }
+
+    #[test]
+    fn unknown_bounds_produce_no_presets_at_all() {
+        assert!(range_presets_for(-1, LONG_LAST).is_empty());
+        assert!(range_presets_for(0, 0).is_empty());
+        // Inverted bounds are not a range.
+        assert!(range_presets_for(LONG_LAST, LONG_FIRST).is_empty());
+    }
+
+    #[test]
+    fn a_preset_rewrites_the_committed_iso_bounds_through_the_date_path() {
+        let mut st = state_with_bounds(LONG_FIRST, LONG_LAST);
+        st.interaction_range_preset(4); // MAX
+        assert_eq!(st.cfg_dates_start, "2019-09-19");
+        assert_eq!(st.cfg_dates_end, "2026-08-18");
+        // It is the SAME commit as the picker: one queued `dates:` action.
+        assert_eq!(st.pending_actions, vec!["dates:2019-09-19:2026-08-18"]);
+    }
+
+    #[test]
+    fn an_out_of_range_preset_click_commits_nothing() {
+        let mut st = state_with_bounds(LONG_FIRST, LONG_LAST);
+        st.cfg_dates_start = "2020-01-01".into();
+        st.interaction_range_preset(9);
+        assert_eq!(st.cfg_dates_start, "2020-01-01");
+        assert!(st.pending_actions.is_empty());
+    }
+
+    #[test]
+    fn the_active_preset_cell_is_derived_from_the_committed_range() {
+        let mut st = state_with_bounds(LONG_FIRST, LONG_LAST);
+        st.cfg_dates_start = "2019-09-19".into();
+        st.cfg_dates_end = "2026-08-18".into();
+        assert_eq!(project(&st).range_preset_idx, 4);
+        // A hand-picked range matches no cell — the row shows nothing selected.
+        st.cfg_dates_start = "2024-06-03".into();
+        assert_eq!(project(&st).range_preset_idx, -1);
+    }
+
+    // ── §02 config checks: kernel facts only ──
+
+    #[test]
+    fn checks_stay_safe_when_nothing_is_configured_yet() {
+        let st = LabState::default();
+        let v = project(&st);
+        // No universe, no strategy: the failing rows must SAY SO, not panic and
+        // not invent a passing row.
+        assert!(v.cfg_checks.iter().any(|c| c.kind == 2));
+        assert!(
+            v.cfg_checks
+                .iter()
+                .all(|c| !c.label.is_empty() && !c.label.contains("MIN ")),
+            "{:?}",
+            v.cfg_checks
+        );
+    }
+
+    #[test]
+    fn a_complete_config_produces_only_passing_rows() {
+        let mut st = state_with_obr();
+        st.universe_symbols = vec!["A".into(), "B".into(), "C".into()];
+        st.universe_selected = vec!["A".into(), "B".into(), "C".into()];
+        st.timeframes = vec!["15m".into()];
+        st.timeframe_index = 0;
+        st.cfg_capital = "10000".into();
+        st.cfg_dates_start = "2026-01-05".into();
+        st.cfg_dates_end = "2026-09-22".into();
+        let v = project(&st);
+        assert!(
+            v.cfg_checks.iter().all(|c| c.kind == 0),
+            "{:?}",
+            v.cfg_checks
+        );
+        assert!(v.cfg_checks.iter().any(|c| c.label == "Data available 3/3"));
+    }
+
+    #[test]
+    fn the_capital_row_reuses_the_kernel_message_verbatim() {
+        let mut st = state_with_obr();
+        st.engine_wired = true;
+        st.cfg_capital = "0".into();
+        let v = project(&st);
+        let capital = v
+            .cfg_checks
+            .iter()
+            .find(|c| c.label.contains("capital") || c.label.contains("Capital"))
+            .expect("a capital row");
+        assert_eq!(capital.label, "Initial capital must be positive.");
+        assert_eq!(capital.kind, 2);
+    }
+
+    #[test]
+    fn an_outdated_run_surfaces_as_a_warning_row() {
+        let mut st = state_with_obr();
+        st.outdated = true;
+        let v = project(&st);
+        assert!(
+            v.cfg_checks
+                .iter()
+                .any(|c| c.kind == 1 && c.label.contains("rerun")),
+            "{:?}",
+            v.cfg_checks
+        );
+    }
+
+    // ── §02 coverage strip: hidden unless measured ──
+
+    #[test]
+    fn no_probe_means_no_strip_and_no_zero_percent() {
+        let st = LabState::default();
+        let v = project(&st);
+        assert!(!v.coverage.on);
+        assert_eq!(v.coverage.pct, 0);
+        assert_eq!(v.coverage.note, "");
+        // And nothing anywhere claims a measured percentage.
+        assert!(!v.cfg_checks.iter().any(|c| c.label.contains('%')));
+    }
+
+    #[test]
+    fn a_measured_probe_reaches_the_strip_with_an_integer_percent() {
+        let mut st = state_with_bounds(LONG_FIRST, LONG_LAST);
+        st.apply_coverage(CoverageMeasurement {
+            symbols_total: 527,
+            symbols_covering: 524,
+            bars_present: 94_000,
+            start_days: LONG_FIRST as i32,
+            end_days: LONG_LAST as i32,
+            tf_secs: 1800,
+            sampled: true,
+            symbols_probed: 24,
+            anchor: "AAA".into(),
+        });
+        let v = project(&st);
+        assert!(v.coverage.on);
+        assert!(v.coverage.pct > 0 && v.coverage.pct <= 100);
+        // A bounded probe must SAY it is bounded, in the caption and the note.
+        assert_eq!(v.cov_caption, "SAMPLED");
+        assert!(v.coverage.note.contains("PROBED"), "{}", v.coverage.note);
+        // The bar count belongs to the ANCHOR, and the note must name it
+        // rather than implying a total for the whole selection.
+        assert!(
+            v.coverage.note.contains("IN AAA"),
+            "note must name the measured symbol: {}",
+            v.coverage.note
+        );
+        // Three symbols have no data in the window — a real, counted warning.
+        assert!(
+            v.cfg_checks
+                .iter()
+                .any(|c| c.kind == 1 && c.label == "3 symbols have no data in this window"),
+            "{:?}",
+            v.cfg_checks
+        );
+    }
+
+    #[test]
+    fn an_unmeasurable_window_clears_the_strip_rather_than_showing_zero() {
+        let mut st = state_with_bounds(LONG_FIRST, LONG_LAST);
+        st.apply_coverage(CoverageMeasurement {
+            symbols_total: 3,
+            symbols_covering: 3,
+            bars_present: 500,
+            start_days: -1,
+            end_days: LONG_LAST as i32,
+            tf_secs: 1800,
+            sampled: false,
+            symbols_probed: 3,
+            anchor: "AAA".into(),
+        });
+        let v = project(&st);
+        assert!(!v.coverage.on, "an unmeasurable window must hide the strip");
+        assert_eq!(v.coverage.note, "");
+    }
+
+    #[test]
+    fn coverage_json_derives_the_percentage_in_rust_not_in_python() {
+        let mut st = LabState::default();
+        let payload = serde_json::json!({
+            "symbols_total": 4,
+            "symbols_covering": 4,
+            "symbols_probed": 4,
+            "bars_present": 1000,
+            "start": "2019-09-19",
+            "end": "2026-08-18",
+            "timeframe": "30m",
+            "sampled": false
+        });
+        apply_coverage_json(&mut st, &payload);
+        let v = project(&st);
+        assert!(v.coverage.on);
+        // The kernel's own session grid decides the expectation, so the number
+        // is reproducible from the window alone.
+        let expected = vayren_core::lab_coverage::expected_bars(
+            LONG_FIRST,
+            LONG_LAST,
+            vayren_core::market::timeframe_seconds("30m").expect("ladder"),
+        );
+        assert!(expected > 1000);
+    }
+
+    // ── §02 chips / timeframe cells: presentation caps, not data caps ──
+
+    #[test]
+    fn the_chip_overflow_count_comes_from_rust_not_from_slint() {
+        let mut st = state_with_obr();
+        for i in 0..9 {
+            st.universe_selected.push(format!("SYM{i}"));
+        }
+        let v = project(&st);
+        assert_eq!(v.universe_chips.len(), UNIVERSE_CHIP_CAP);
+        assert_eq!(v.chips_more_line, "+3");
+        st.universe_selected = vec!["A".into()];
+        assert_eq!(project(&st).chips_more_line, "");
+    }
+
+    #[test]
+    fn the_timeframe_cells_are_the_real_ladder_prefix_never_a_hardcoded_one() {
+        let mut st = state_with_obr();
+        st.timeframes = vec![
+            "5m".into(),
+            "15m".into(),
+            "30m".into(),
+            "1h".into(),
+            "1D".into(),
+            "1W".into(),
+        ];
+        st.timeframe_index = 2;
+        let v = project(&st);
+        assert_eq!(v.tf_short.len(), TF_SHORT_CAP);
+        assert_eq!(v.tf_short[2], "30m");
+        assert_eq!(v.tf_short_idx, 2);
+        // A timeframe behind the cap is reachable but not shown as a cell.
+        st.timeframe_index = 5;
+        assert_eq!(project(&st).tf_short_idx, -1);
+    }
+
+    #[test]
+    fn the_universe_button_line_counts_the_real_selection() {
+        let mut st = state_with_obr();
+        assert_eq!(project(&st).sym_button_line, "NO UNIVERSE");
+        st.universe_selected = vec!["A".into()];
+        assert_eq!(project(&st).sym_button_line, "A");
+        st.universe_selected = vec!["A".into(), "B".into()];
+        assert_eq!(project(&st).sym_button_line, "A, B");
+        st.universe_selected = (0..527).map(|i| format!("S{i}")).collect();
+        assert_eq!(project(&st).sym_button_line, "527 STOCKS");
+    }
+
+    #[test]
+    fn the_live_edge_flag_follows_the_real_last_available_bar() {
+        let mut st = state_with_bounds(LONG_FIRST, LONG_LAST);
+        st.cfg_dates_start = "2019-09-19".into();
+        st.cfg_dates_end = "2026-08-18".into();
+        assert!(project(&st).range_to_live);
+        st.cfg_dates_end = "2024-01-02".into();
+        assert!(!project(&st).range_to_live);
+    }
+
+    #[test]
+    fn the_span_line_is_the_real_number_of_days() {
+        let mut st = state_with_bounds(LONG_FIRST, LONG_LAST);
+        st.cfg_dates_start = "2019-09-19".into();
+        st.cfg_dates_end = "2026-08-18".into();
+        let v = project(&st);
+        assert_eq!(v.range_span_line, "2,526 DAYS");
+        assert_eq!(v.range_from_human, "19 Sep 2019");
+        assert_eq!(v.range_to_human, "18 Aug 2026");
+    }
+
+    // ── live run progress: measured facts, never an estimate ──
+
+    fn progress_event(over: serde_json::Value) -> serde_json::Value {
+        let mut base = serde_json::json!({
+            "stage": "calculate",
+            "stage_pct": 0.0,
+            "total": 527,
+            "done": 127,
+            "headline_total": 527,
+            "completed": 127,
+            "failed": ["BAD1", "BAD2"],
+            "skipped": [],
+            "remaining": 398,
+            "pct": 24.1,
+            "current": "AARTIIND",
+            "current_secs": 4.2,
+            "elapsed_secs": 134.0,
+            "eta_secs": 392.0,
+            "mean_secs": 1.054,
+            "throughput": 0.948,
+            "trades": 124520,
+            "bars": 2800000,
+            "net_pnl": 4211.5,
+            "long_running": false,
+            "quiet": false,
+            "cancelled": false
+        });
+        if let (Some(base_map), Some(extra)) = (base.as_object_mut(), over.as_object()) {
+            for (key, value) in extra {
+                base_map.insert(key.clone(), value.clone());
+            }
+        }
+        base
+    }
+
+    #[test]
+    fn progress_reports_the_measured_run_state() {
+        let mut st = LabState::default();
+        st.run = RunState::Running;
+        st.apply_progress(&progress_event(serde_json::json!({})));
+        let v = project(&st);
+        assert!(v.prog_active);
+        assert_eq!(v.prog_headline, "127 / 527 stocks");
+        assert_eq!(v.prog_current, "AARTIIND");
+        assert_eq!(v.prog_stage, "Strategy calculation");
+        assert_eq!(v.prog_elapsed, "02:14");
+        assert_eq!(v.prog_eta, "~06:32");
+        assert_eq!(v.prog_throughput, "0.95 stocks/s");
+        assert_eq!(v.prog_speed, "1.05 s/stock");
+        assert!(v.prog_counts.contains("Failed 2"));
+        assert!(v.prog_counts.contains("Remaining 398"));
+        assert!(v.prog_failed_line.contains("BAD1"));
+        assert!(!v.prog_cancelled);
+        assert_eq!(v.prog_watchdog, "", "a healthy run shows no warning");
+    }
+
+    #[test]
+    fn an_unmeasured_eta_renders_a_dash_never_a_zero() {
+        let mut st = LabState::default();
+        st.run = RunState::Running;
+        st.apply_progress(&progress_event(
+            serde_json::json!({"eta_secs": serde_json::Value::Null, "mean_secs": serde_json::Value::Null}),
+        ));
+        let v = project(&st);
+        assert_eq!(v.prog_eta, "—");
+        assert_eq!(v.prog_speed, "—");
+    }
+
+    #[test]
+    fn the_load_stage_shows_symbols_read_not_symbols_run() {
+        let mut st = LabState::default();
+        st.run = RunState::Running;
+        st.apply_progress(&progress_event(serde_json::json!({
+            "stage": "data", "loaded": 120, "done": 120, "headline_total": 527,
+            "completed": 0, "pct": 22.8, "eta_secs": 640.0, "elapsed_secs": 300.0
+        })));
+        let v = project(&st);
+        // The bar must not read 0 / 527 while a fifth of the load is done.
+        assert_eq!(v.prog_headline, "120 / 527 stocks");
+        assert_eq!(v.prog_stage, "Loading bars");
+    }
+
+    #[test]
+    fn a_long_symbol_is_flagged_without_claiming_progress() {
+        let mut st = LabState::default();
+        st.run = RunState::Running;
+        st.apply_progress(&progress_event(serde_json::json!({
+            "current_secs": 47.0, "long_running": true, "completed": 12, "done": 12
+        })));
+        let v = project(&st);
+        assert!(v.prog_long);
+        assert!(v.prog_watchdog.starts_with("LONG-RUNNING"));
+        assert!(v.prog_watchdog.contains("00:47"));
+        assert_eq!(
+            v.prog_headline, "12 / 527 stocks",
+            "progress must not advance"
+        );
+    }
+
+    #[test]
+    fn a_cancelled_run_says_cancelled_and_retires() {
+        let mut st = LabState::default();
+        st.run = RunState::Running;
+        st.apply_progress(&progress_event(
+            serde_json::json!({"cancelled": true, "stage": "cancelled"}),
+        ));
+        let v = project(&st);
+        assert!(v.prog_cancelled);
+        assert_eq!(v.prog_watchdog, "CANCELLED");
+        st.clear_progress();
+        let done = project(&st);
+        assert!(!done.prog_active, "a finished run must retire the panel");
+    }
+
+    #[test]
+    fn no_run_means_no_progress_panel() {
+        let v = project(&LabState::default());
+        assert!(!v.prog_active);
+        assert_eq!(v.prog_eta, "—");
+        assert_eq!(v.prog_elapsed, "—");
+    }
+
+    #[test]
+    fn clock_label_never_renders_a_bogus_zero_duration() {
+        assert_eq!(clock_label(-1.0), "—");
+        assert_eq!(clock_label(f64::NAN), "—");
+        assert_eq!(clock_label(0.0), "00:00");
+        assert_eq!(clock_label(134.0), "02:14");
+        assert_eq!(clock_label(392.0), "06:32");
+        assert_eq!(clock_label(3_671.0), "1:01:11");
+    }
 }
 
 // ── bridge: Python backend snapshot -> canonical state (embedded view) ────
@@ -3915,6 +5039,47 @@ fn normalized_series(points: &[(f64, f64)], take_abs: bool) -> Vec<(f32, f32)> {
 /// (schema documented on `strategy_lab_snapshot_dict` Python side). Local UI
 /// fields (search/filter/tab/pending actions) are preserved. Missing or
 /// mistyped sections degrade to honest absence, never invented values.
+/// Adopt a `lab_coverage` probe payload from the Python backend.
+///
+/// The payload carries COUNTS plus the window that produced them; the
+/// expectation and the percentage are derived here in the Rust kernel, so the
+/// number on screen has exactly one owner. An empty payload means "not
+/// measurable" and clears the facts — the strip then stays hidden instead of
+/// showing a fabricated `0%`.
+pub fn apply_coverage_json(state: &mut LabState, value: &serde_json::Value) {
+    let measured = CoverageMeasurement {
+        symbols_total: value
+            .get("symbols_total")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as u32,
+        symbols_covering: value
+            .get("symbols_covering")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as u32,
+        bars_present: value
+            .get("bars_present")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0),
+        start_days: parse_iso_days(opt_str(value, "start").trim())
+            .map(|v| v as i32)
+            .unwrap_or(-1),
+        end_days: parse_iso_days(opt_str(value, "end").trim())
+            .map(|v| v as i32)
+            .unwrap_or(-1),
+        tf_secs: timeframe_seconds(opt_str(value, "timeframe").trim()).unwrap_or(0),
+        sampled: value
+            .get("sampled")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        symbols_probed: value
+            .get("symbols_probed")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as u32,
+        anchor: opt_str(value, "anchor"),
+    };
+    state.apply_coverage(measured);
+}
+
 pub fn apply_snapshot_json(state: &mut LabState, value: &serde_json::Value) {
     if let Some(rows) = value.get("strategies").and_then(|v| v.as_array()) {
         let previous_selected = state
@@ -4383,6 +5548,18 @@ fn apply_parity_keys(state: &mut LabState, value: &serde_json::Value) {
         state.cfg_dates_end = opt_str(cfg, "dates_end");
         state.cfg_capital = parse_capital(cfg);
         state.config_error = opt_str(cfg, "config_error");
+    }
+    // Real store history bounds. These are the ANCHOR symbol's actual
+    // first/last available dates, which is what the §02 `MAX` preset means —
+    // the committed `cfg_edit` dates are the user's SELECTION, and deriving
+    // `MAX` from those would shrink the preset onto whatever was last picked.
+    if let Some(bounds) = value.get("data_bounds") {
+        state.data_bounds_start_days = parse_iso_days(opt_str(bounds, "first").trim())
+            .map(|v| v as i32)
+            .unwrap_or(-1);
+        state.data_bounds_end_days = parse_iso_days(opt_str(bounds, "last").trim())
+            .map(|v| v as i32)
+            .unwrap_or(-1);
     }
     if let Some(rankby) = value.get("rankby") {
         state.rankby_labels = rankby

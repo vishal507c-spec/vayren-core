@@ -42,8 +42,6 @@ if _missing_exports:
         "Rebuild: `python scripts/build_rust.py`"
     )
 
-_CHAR_OUT = ctypes.POINTER(ctypes.c_char)
-
 
 @dataclass(frozen=True)
 class NativeStreamStats:

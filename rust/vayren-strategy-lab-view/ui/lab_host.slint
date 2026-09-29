@@ -7,7 +7,7 @@
 // view-model. Nothing here may add, restyle, or recompose content — compare
 // against the `app.slint` StrategyLabScreen block (identical bindings).
 
-import { StrategyLabScreen, LabHeader, LabLibraryRow, LabKpi, LabRankRow, LabTradeRow, LabPoint, LabParam, LabDetailMetric, LabBoardCell, LabMatrixRow, LabPreset, RankWindow } from "../../vayren-shell/ui/lab.slint";
+import { StrategyLabScreen, LabHeader, LabLibraryRow, LabKpi, LabRankRow, LabTradeRow, LabPoint, LabParam, LabDetailMetric, LabBoardCell, LabMatrixRow, LabPreset, LabCheckData, RankWindow } from "../../vayren-shell/ui/lab.slint";
 
 export component LabHostWindow inherits Window {
     title: "VAYREN \u{2014} Strategy Lab";
@@ -44,6 +44,9 @@ export component LabHostWindow inherits Window {
     in-out property <[bool]> sym-visible-on;
     in-out property <int> filter-active: 0;
     in-out property <[LabPreset]> date-presets;
+    // §02 config row (pass-through, same as `app.slint`).
+    in-out property <[string]> tf-short;
+    in-out property <[string]> range-preset-labels;
     // Ranking virtual-window geometry (pass-through, same as `app.slint`).
     in-out property <RankWindow> lab-rank-window;
     in-out property <RankWindow> lab-trade-window;
@@ -54,6 +57,7 @@ export component LabHostWindow inherits Window {
     callback mode-picked(int);
     callback tab-picked(int);
     callback run-requested();
+    callback run-cancel-requested();
     callback save-requested();
     callback compile-requested();
     callback new-requested();
@@ -71,6 +75,7 @@ export component LabHostWindow inherits Window {
     callback code-changed(string);
     callback param-committed(string, string);
     callback timeframe-picked(string);
+    callback range-preset-picked(int);
     callback capital-committed(string);
     callback dates-committed(string, string);
     callback rank-search-changed(string);
@@ -129,6 +134,8 @@ export component LabHostWindow inherits Window {
         sym-visible: root.sym-visible;
         sym-visible-on: root.sym-visible-on;
         date-presets: root.date-presets;
+        tf-short: root.tf-short;
+        range-preset-labels: root.range-preset-labels;
         lab-rank-window: root.lab-rank-window;
         filter-active: root.filter-active;
         head-roomy: root.width >= 1210px;
@@ -138,6 +145,7 @@ export component LabHostWindow inherits Window {
         mode-picked(idx) => { root.mode-picked(idx); }
         tab-picked(idx) => { root.tab-picked(idx); }
         run-requested() => { root.run-requested(); }
+        run-cancel-requested() => { root.run-cancel-requested(); }
         save-requested() => { root.save-requested(); }
         compile-requested() => { root.compile-requested(); }
         new-requested() => { root.new-requested(); }
@@ -155,6 +163,7 @@ export component LabHostWindow inherits Window {
         code-changed(text) => { root.code-changed(text); }
         param-committed(key, text) => { root.param-committed(key, text); }
         timeframe-picked(text) => { root.timeframe-picked(text); }
+        range-preset-picked(idx) => { root.range-preset-picked(idx); }
         capital-committed(text) => { root.capital-committed(text); }
         dates-committed(start, end) => { root.dates-committed(start, end); }
         rank-search-changed(text) => { root.rank-search-changed(text); }

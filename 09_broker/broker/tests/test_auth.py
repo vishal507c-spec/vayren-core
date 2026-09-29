@@ -168,8 +168,9 @@ def test_mask_secret_never_echoes_values() -> None:
     assert mask_secret("") == ""
     assert mask_secret("short") == "••••"
     masked = mask_secret("SUPER-SECRET-VALUE-12345")
-    assert "SUPER-SECRET-VALUE-12345" not in masked
-    assert masked.startswith("SUPE") and masked.endswith("45")
+    assert masked == "••••"
+    for fragment in ("SUPE", "45", "SECRET", "12345"):
+        assert fragment not in masked
 
 
 def test_schema_helpers_carry_no_values() -> None:

@@ -34,7 +34,6 @@ RATE_LIMITED = object()  # consecutive rate-limit hits → emergency stop
 
 # Normalized provider error codes — the only error vocabulary the engine sees.
 ERR_AUTHENTICATION_FAILED = "AUTHENTICATION_FAILED"
-ERR_RATE_LIMITED = "RATE_LIMITED"
 ERR_INVALID_SYMBOL = "INVALID_SYMBOL"
 ERR_NETWORK_ERROR = "NETWORK_ERROR"
 ERR_PROVIDER_UNAVAILABLE = "PROVIDER_UNAVAILABLE"

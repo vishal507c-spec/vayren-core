@@ -83,19 +83,6 @@ _DEFAULT_LAYER: dict[PlotType, RenderLayer] = {
     PlotType.VERTICAL_MARK: RenderLayer.OVERLAY,
 }
 
-_POINT_TYPES = frozenset({PlotType.MARKER, PlotType.SHAPE, PlotType.LABEL})
-_SPAN_TYPES = frozenset(
-    {
-        PlotType.LINE,
-        PlotType.RAY,
-        PlotType.SEGMENT,
-        PlotType.ZONE,
-        PlotType.HORIZONTAL_LEVEL,
-        PlotType.VERTICAL_MARK,
-        PlotType.AREA,
-    }
-)
-
 
 class PlotValidationError(ValueError):
     """A plot instruction violates the universal contract."""

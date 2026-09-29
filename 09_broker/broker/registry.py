@@ -129,3 +129,11 @@ def default_registry() -> BrokerRegistry:
     if _default_registry is None:
         _default_registry = BrokerRegistry()
     return _default_registry
+
+
+def _phase6_probe() -> int:
+    return 1
+
+
+def phase6_probe_api() -> str:
+    return "probe"

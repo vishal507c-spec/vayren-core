@@ -73,7 +73,7 @@ impl EventBus {
             }
         });
 
-        let mut subs = self.subscribers.write().unwrap();
+        let mut subs = self.subscribers.write().unwrap_or_else(|e| e.into_inner());
         subs.entry(type_id)
             .or_insert_with(Vec::new)
             .push((id, boxed));
@@ -90,7 +90,7 @@ impl EventBus {
         E: Event + 'static,
     {
         let type_id = TypeId::of::<E>();
-        let mut subs = self.subscribers.write().unwrap();
+        let mut subs = self.subscribers.write().unwrap_or_else(|e| e.into_inner());
         if let Some(handlers) = subs.get_mut(&type_id) {
             let before = handlers.len();
             handlers.retain(|(hid, _)| *hid != id);
@@ -108,7 +108,7 @@ impl EventBus {
         E: Event + 'static,
     {
         let type_id = TypeId::of::<E>();
-        let subs = self.subscribers.read().unwrap();
+        let subs = self.subscribers.read().unwrap_or_else(|e| e.into_inner());
 
         if let Some(handlers) = subs.get(&type_id) {
             for (_, handler) in handlers {
@@ -129,12 +129,12 @@ impl EventBus {
 
     /// Remove all subscriptions.
     pub fn clear(&self) {
-        self.subscribers.write().unwrap().clear();
+        self.subscribers.write().unwrap_or_else(|e| e.into_inner()).clear();
     }
 
     /// Count of event types with active subscriptions.
     pub fn event_type_count(&self) -> usize {
-        self.subscribers.read().unwrap().len()
+        self.subscribers.read().unwrap_or_else(|e| e.into_inner()).len()
     }
 
     /// Count of handlers for a specific event type.

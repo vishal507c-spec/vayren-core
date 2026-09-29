@@ -27,6 +27,7 @@ pub mod execution_engine;
 pub mod execution_events;
 pub mod indicator;
 pub mod kill_switch;
+pub mod lab_coverage;
 pub mod live_readiness;
 pub mod live_session;
 pub mod market;

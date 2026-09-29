@@ -127,6 +127,13 @@ def aggregate(
     session_start: int,
 ) -> list[tuple[int, int, float, float, float, float, float]]:
     """Group ascending base rows into `(day, index, o, h, l, c, v)` buckets."""
+    lens = {len(days), len(secs), len(opens), len(highs), len(lows), len(closes), len(volumes)}
+    if len(lens) != 1:
+        raise NativeBridgeError(f"aggregation inputs have mismatched lengths: {sorted(lens)}")
+    if int(timeframe_seconds) <= 0:
+        raise NativeBridgeError(f"invalid timeframe_seconds: {timeframe_seconds}")
+    if ctypes.sizeof(_AggBucket) != _BUCKET_SIZE:
+        raise RuntimeError("native AggBucket layout drift")
     n = len(days)
     if n == 0:
         return []
@@ -157,8 +164,6 @@ def aggregate(
     if count > n:
         raise RuntimeError(f"native aggregation overflow: {count} buckets from {n} rows")
     # Buckets come back in one C-speed unpack (no per-field Python loop).
-    if ctypes.sizeof(_AggBucket) != _BUCKET_SIZE:
-        raise RuntimeError("native AggBucket layout drift")
     return list(struct.iter_unpack(_BUCKET_FORMAT, bytes(out)[: count * _BUCKET_SIZE]))
 
 
@@ -199,6 +204,10 @@ def session_anchor_seconds(anchor: str) -> int:
 
 def bucket_start(stamp: str, size_s: int, anchor_s: int) -> str:
     """Bucket start a `"YYYY-MM-DD HH:MM:SS"` quote stamp falls into."""
+    if not isinstance(stamp, str):
+        raise NativeBridgeError(f"invalid stamp type: {type(stamp).__name__}")
+    if int(size_s) <= 0:
+        raise NativeBridgeError(f"invalid size_s: {size_s}")
     payload = stamp.encode("utf-8")
     return _read(
         lambda b, c: _lib.vy_agg_bucket_start(

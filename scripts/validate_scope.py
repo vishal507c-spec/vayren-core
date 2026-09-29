@@ -37,7 +37,6 @@ import repo_index  # noqa: E402
 ROOT = SCRIPTS_DIR.parent
 VALID_DIR = repo_index.INDEX_DIR / "validations"
 
-SCOPE_SCHEMA = "validation-scope/v1"
 CACHE_SCHEMA = "validation-cache/v1"
 LEVELS = ("L0", "L1", "L2", "L3", "L4", "L5")
 LOCK_TIMEOUT_S = 30.0

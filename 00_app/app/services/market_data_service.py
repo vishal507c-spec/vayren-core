@@ -85,15 +85,49 @@ def resolve_data_dir(explicit: str | Path | None = None) -> Path:
 
 
 def _parse_stamp(raw: object) -> datetime | None:
+    """Parse a store timestamp to a ``datetime`` (``None`` when unparseable).
+
+    HOT PATH. A 527-symbol backtest parses ~500k stamps, and
+    ``datetime.strptime`` was 57% of the whole run (it re-reads the locale for
+    every call). The fixed-shape ISO stamps this store writes are sliced
+    directly; anything else still goes through ``strptime`` so a non-standard
+    row keeps parsing exactly as before. The returned value is identical either
+    way — this is a speed change, never a semantic one.
+    """
     if not isinstance(raw, str):
         return None
     text = raw.strip()
     if len(text) == 16:  # "YYYY-MM-DD HH:MM" → pad seconds
         text += ":00"
+    if len(text) == 19 and text[4] == "-" and text[7] == "-" and text[13] == ":":
+        try:
+            return datetime(
+                int(text[0:4]),
+                int(text[5:7]),
+                int(text[8:10]),
+                int(text[11:13]),
+                int(text[14:16]),
+                int(text[17:19]),
+            )
+        except ValueError:
+            return None
     try:
         return datetime.strptime(text, _STAMP_FORMAT)
     except ValueError:
         return None
+
+
+def _format_stamp(moment: datetime) -> str:
+    """``datetime`` → the store's stamp format (the inverse of `_parse_stamp`).
+
+    HOT PATH companion to `_parse_stamp`: ``date.strftime`` was the third
+    hottest frame when rebuilding aggregated bar stamps, and slicing is both
+    faster and locale-independent.
+    """
+    return (
+        f"{moment.year:04d}-{moment.month:02d}-{moment.day:02d} "
+        f"{moment.hour:02d}:{moment.minute:02d}:{moment.second:02d}"
+    )
 
 
 def _epoch(date_value: date) -> int:
@@ -156,7 +190,7 @@ class MarketDataService:
         if not path.is_file():
             return None, (path.name, "not a regular file")
         stem = path.stem.strip().upper()
-        if not stem or stem != path.stem.strip():
+        if not stem or any(ch.isspace() for ch in path.stem.strip()):
             return None, (path.name, "symbol name is empty or has whitespace")
         try:
             with open(path, "rb") as handle:
@@ -219,6 +253,27 @@ class MarketDataService:
                 "ORDER BY candle_time DESC LIMIT ?"
             )
             params: tuple = (int(limit),)
+        elif start is not None or end is not None:
+            # Push the window into SQLite. `candle_time` is ISO TEXT, so the
+            # comparison is lexicographic and identical to the row filter below
+            # ("YYYY-MM-DD" bounds, day granularity) — but it stops reading
+            # (and Python-parsing) the years outside the experiment.
+            clauses = []
+            window: list[str] = []
+            if start is not None:
+                clauses.append("candle_time >= ?")
+                window.append(f"{start} 00:00:00")
+            if end is not None:
+                clauses.append("candle_time <= ?")
+                window.append(f"{end} 23:59:59")
+            where = " AND ".join(clauses)
+            tail = " ORDER BY candle_time ASC"
+            if limit is not None:
+                tail = f"{tail} LIMIT {int(limit)}"
+            query = (
+                f"SELECT candle_time, open, high, low, close, volume FROM ohlcv WHERE {where}{tail}"
+            )
+            params = tuple(window)
         else:
             query = (
                 "SELECT candle_time, open, high, low, close, volume FROM ohlcv "
@@ -397,9 +452,11 @@ class MarketDataService:
         days: list[int] = []
         secs: list[int] = []
         for stamp, _o, _h, _l, _c, _v in rows:
-            moment = datetime.strptime(stamp, _STAMP_FORMAT)
-            days.append(_epoch(moment.date()))
-            secs.append(moment.hour * 3600 + moment.minute * 60 + moment.second)
+            # `_read_rows` already normalised every stamp to the fixed
+            # "%Y-%m-%d %H:%M:%S" shape, so the kernel's two inputs are integer
+            # slices — a full `strptime` per row was 40% of the run.
+            days.append(date(int(stamp[0:4]), int(stamp[5:7]), int(stamp[8:10])).toordinal())
+            secs.append(int(stamp[11:13]) * 3600 + int(stamp[14:16]) * 60 + int(stamp[17:19]))
         buckets = native_aggregate.aggregate(
             days,
             secs,
@@ -434,11 +491,10 @@ class MarketDataService:
             total = int(anchor) + int(index) * int(tf)
             total %= 86_400
             stamp = stamp.replace(hour=total // 3600, minute=(total % 3600) // 60)
-            text = stamp.strftime(_STAMP_FORMAT)
-        elif tf == 86_400:
-            text = date.fromordinal(int(day)).strftime("%Y-%m-%d 00:00:00")
+            text = _format_stamp(stamp)
         else:
-            text = date.fromordinal(int(day)).strftime("%Y-%m-%d 00:00:00")
+            day_text = f"{date.fromordinal(int(day)).isoformat()} 00:00:00"
+            text = day_text
         return Bar(
             symbol=symbol.upper(),
             open=float(o),

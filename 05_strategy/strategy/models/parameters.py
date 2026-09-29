@@ -1,5 +1,6 @@
 """StrategyParameters — immutable, validated parameter set for a strategy."""
 
+import math
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 
@@ -30,6 +31,10 @@ class ParameterSpec:
 
     def validate(self, value: float) -> float:
         """Return the value rounded to `decimals`, clamped to the bounds."""
+        if not isinstance(value, (int, float)) or not math.isfinite(value):
+            raise ParameterError(f"{self.label} must be a finite number")
+        if not isinstance(self.decimals, int) or self.decimals < 0:
+            raise ParameterError(f"{self.label} has invalid decimals")
         step = 10**self.decimals
         rounded = round(value * step) / step
         if rounded < self.minimum or rounded > self.maximum:

@@ -164,6 +164,11 @@ export global LabPalette {
     out property <length> section-radius: 14px;
     out property <length> section-gap: 44px;
     out property <length> field-h:  36px;
+    // §02 CONFIGURE column rhythm: the three fixed rows (label 19 + control 36
+    // + sub 30) must land on identical baselines in all four columns, so the
+    // body height is one token, never four hand-tuned paddings.
+    out property <length> cfg-col-h: 112px;
+    out property <length> cfg-sub-h: 30px;
     out property <length> insp-w:   330px;
     out property <length> dialog-w: 460px;
     // Breakpoints.
@@ -189,6 +194,11 @@ export global LabPalette {
     out property <color> soft2:        #dfe6ea;
     out property <color> run-ink:      #e8eef1;
     out property <color> red-soft:     #fca5a5;
+    // §02 CONFIGURE: segmented-control + data-completeness roles. The mock's
+    // blue becomes the lab teal (palette authority) and the progress track is
+    // a surface, not an input field — hence its own role.
+    out property <color> seg-on-bg:    #dfe6ea;
+    out property <color> track-bg:     #0d141b;
     // Alpha tints (reference rgba values, CSS #RRGGBBAA order — Slint
     // parses 8-digit hex like CSS; pixel-verified: wrong order painted
     // white-06 as opaque cyan).

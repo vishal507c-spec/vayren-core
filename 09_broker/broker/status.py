@@ -28,7 +28,6 @@ class BrokerStatus(Enum):
 
 READY_STATES = frozenset(
     {
-        BrokerStatus.CONNECTED,
         BrokerStatus.LIVE_READY,
     }
 )

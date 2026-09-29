@@ -281,6 +281,8 @@ def native_plan_order(
     size_multiplier: float,
 ) -> tuple[float, str, float | None]:
     """Execute order planning in the Rust kernel."""
+    if order_type not in ("MARKET", "LIMIT"):
+        raise ValueError(f"invalid order_type: {order_type!r}")
     ot_code = 1 if order_type == "LIMIT" else 0
     out_qty = ctypes.c_double()
     out_order_type = ctypes.c_int32()
@@ -318,6 +320,8 @@ def native_ledger_apply_fill(
     commission: float,
 ) -> tuple[float, float, float, float]:
     """Execute position ledger fill folding in the Rust kernel."""
+    if side not in ("BUY", "SELL"):
+        raise ValueError(f"invalid side: {side!r}")
     side_code = 0 if side == "BUY" else 1
     out_qty = ctypes.c_double()
     out_avg_price = ctypes.c_double()

@@ -33,8 +33,6 @@ PHASES = frozenset(
     }
 )
 
-_ANCHOR_ACTIONS = {"run_start", "run_end"}
-
 
 @dataclass
 class Interval:

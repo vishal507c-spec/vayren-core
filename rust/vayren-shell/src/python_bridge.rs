@@ -78,6 +78,22 @@ pub enum BackendCommand {
         capital: f64,
         mode: String,
     },
+    /// Measured data-completeness probe for the Lab config strip. The backend
+    /// counts real rows; the percentage is derived in `lab_coverage` (Rust).
+    LabCoverage {
+        symbols: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timeframe: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        start: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        end: Option<String>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        full: bool,
+    },
+    /// Cooperative stop of an in-flight run. The backend polls the flag
+    /// between symbols, so a cancel can never leave a half-written result.
+    CancelBacktest,
     Shutdown,
 }
 
@@ -93,6 +109,7 @@ pub enum BackendResponse {
     LiveSnapshot { data: serde_json::Value },
     ResearchSnapshot { data: serde_json::Value },
     LabSnapshot { data: serde_json::Value },
+    LabCoverage { data: serde_json::Value },
     Error { data: ErrorData },
 }
 
@@ -160,8 +177,18 @@ impl PythonBackend {
     /// Spawn one backend child process with no console window ever.
     fn spawn_child(program: &str, data_dir: &str, strategy_dir: &str) -> BridgeResult<Child> {
         let mut command = Command::new(program);
-        if let Some(paths) = Self::chapter_paths() {
-            command.env("PYTHONPATH", paths);
+        match Self::chapter_paths() {
+            Some(paths) => {
+                command.env("PYTHONPATH", paths);
+            }
+            None => {
+                return Err(crate::BridgeError(format!(
+                    "chapter layout unresolvable from {} — refusing to start a possibly stale backend",
+                    std::env::current_exe()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|_| "<unknown exe>".to_string())
+                )));
+            }
         }
         #[cfg(target_os = "windows")]
         {
@@ -291,6 +318,58 @@ impl PythonBackend {
         Ok(response)
     }
 
+    /// Send a command that STREAMS while it runs, handing every intermediate
+    /// `lab_progress` message to `on_progress` and returning the terminal
+    /// response.
+    ///
+    /// A 500+ symbol run occupies the backend for minutes; a plain round-trip
+    /// would leave the UI with a dead "RUNNING" and nothing to show. Progress
+    /// is read as it arrives so the screen tracks real completed work.
+    pub fn send_command_streaming(
+        &self,
+        command: BackendCommand,
+        mut on_progress: impl FnMut(serde_json::Value),
+    ) -> BridgeResult<BackendResponse> {
+        let json =
+            serde_json::to_string(&command).map_err(|e| bridge_error(format!("encode: {e}")))?;
+        {
+            let mut stdin = self
+                .stdin
+                .lock()
+                .map_err(|e| bridge_error(format!("stdin lock: {e}")))?;
+            writeln!(stdin, "{json}").map_err(|e| bridge_error(format!("write: {e}")))?;
+            stdin
+                .flush()
+                .map_err(|e| bridge_error(format!("flush: {e}")))?;
+        }
+        loop {
+            let mut line = String::new();
+            let read = {
+                let mut stdout = self
+                    .stdout
+                    .lock()
+                    .map_err(|e| bridge_error(format!("stdout lock: {e}")))?;
+                stdout
+                    .read_line(&mut line)
+                    .map_err(|e| bridge_error(format!("read: {e}")))?
+            };
+            if read == 0 {
+                return Err(bridge_error("backend closed the stream mid-run"));
+            }
+            let value: serde_json::Value =
+                serde_json::from_str(&line).map_err(|e| bridge_error(format!("decode: {e}")))?;
+            if value.get("type").and_then(|t| t.as_str()) == Some("lab_progress") {
+                if let Some(data) = value.get("data") {
+                    on_progress(data.clone());
+                }
+                continue;
+            }
+            let response: BackendResponse =
+                serde_json::from_value(value).map_err(|e| bridge_error(format!("decode: {e}")))?;
+            return Ok(response);
+        }
+    }
+
     /// One serialized command round-trip through a shared handle. A poisoned
     /// mutex means a worker died mid-command — fail closed, never guess.
     pub fn lock_send(
@@ -301,6 +380,19 @@ impl PythonBackend {
             .lock()
             .map_err(|e| bridge_error(format!("backend lock: {e}")))?;
         guard.send_command(command)
+    }
+
+    /// Streaming round-trip through a shared handle, forwarding every
+    /// intermediate progress event to `on_progress`.
+    pub fn lock_send_streaming(
+        backend: &std::sync::Mutex<PythonBackend>,
+        command: BackendCommand,
+        on_progress: impl FnMut(serde_json::Value),
+    ) -> BridgeResult<BackendResponse> {
+        let guard = backend
+            .lock()
+            .map_err(|e| bridge_error(format!("backend lock: {e}")))?;
+        guard.send_command_streaming(command, on_progress)
     }
 
     /// Shut the backend down gracefully (shared handle: waits via the lock).
@@ -546,6 +638,29 @@ mod tests {
             json,
             r#"{"type":"select_lab_strategy","strategy":"SMA Crossover","symbols":["RELIANCE"],"timeframe":"15m","start":"2026-01-01","capital":10000.0,"mode":"buy"}"#
         );
+    }
+
+    #[test]
+    fn test_lab_coverage_command_serialization() {
+        let cmd = BackendCommand::LabCoverage {
+            symbols: vec!["RELIANCE".to_string(), "TCS".to_string()],
+            timeframe: Some("30m".to_string()),
+            start: Some("2019-09-19".to_string()),
+            end: Some("2026-08-18".to_string()),
+            full: false,
+        };
+        let json = serde_json::to_string(&cmd).unwrap();
+        assert_eq!(
+            json,
+            r#"{"type":"lab_coverage","symbols":["RELIANCE","TCS"],"timeframe":"30m","start":"2019-09-19","end":"2026-08-18"}"#
+        );
+    }
+
+    #[test]
+    fn test_lab_coverage_response_is_its_own_kind() {
+        let parsed: BackendResponse =
+            serde_json::from_str(r#"{"type":"lab_coverage","data":{"bars_present":10}}"#).unwrap();
+        assert!(matches!(parsed, BackendResponse::LabCoverage { .. }));
     }
 
     #[test]

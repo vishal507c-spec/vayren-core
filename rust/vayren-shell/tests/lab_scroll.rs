@@ -45,7 +45,7 @@ fn render(
 }
 
 fn pixel(buffer: &SharedPixelBuffer<Rgb8Pixel>, x: u32, y: u32) -> [u8; 3] {
-    let p = &buffer.as_slice()[(y as usize * buffer.size().width as usize + x as usize)];
+    let p = &buffer.as_slice()[y as usize * buffer.size().width as usize + x as usize];
     [p.r, p.g, p.b]
 }
 

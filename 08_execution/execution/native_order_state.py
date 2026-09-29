@@ -43,7 +43,6 @@ for _index, _name in enumerate(_STATE_CODES):
         raise RuntimeError(f"native order-state vocabulary drift: {exc}") from exc
 if len(_code_by_state) != len(_STATE_CODES) or len(OrderState) != len(_STATE_CODES):
     raise RuntimeError("native order-state vocabulary drift: enum/code mismatch")
-_state_by_code: dict[int, OrderState] = {code: state for state, code in _code_by_state.items()}
 
 
 def _code(state: OrderState) -> int:

@@ -204,9 +204,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Market(u64, Option<serde_json::Value>),
         LabSelect(u64, Option<serde_json::Value>),
         LabRun(u64, Option<serde_json::Value>),
+        LabCoverage(u64, Option<serde_json::Value>),
+        /// A measured progress event, applied on the UI thread as it arrives.
+        LabProgress(serde_json::Value),
     }
     let (fetch_tx, fetch_rx) = mpsc::channel::<FetchResult>();
     let market_seq = Arc::new(AtomicU64::new(0));
+    let lab_coverage_seq = Arc::new(AtomicU64::new(0));
     let lab_select_seq = Arc::new(AtomicU64::new(0));
     let lab_run_seq = Arc::new(AtomicU64::new(0));
     fn spawn_fetch(
@@ -221,7 +225,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let data = match PythonBackend::lock_send(&backend, command) {
                 Ok(response) => match response {
                     BackendResponse::MarketSnapshot { data }
-                    | BackendResponse::LabSnapshot { data } => Some(data),
+                    | BackendResponse::LabSnapshot { data }
+                    | BackendResponse::LabCoverage { data } => Some(data),
                     BackendResponse::Error { data } => {
                         eprintln!("Fetch backend error: {}", data.message);
                         None
@@ -264,6 +269,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
     });
+    // RUN is the one command that STREAMS: a 500+ symbol run occupies the
+    // backend for minutes, so every measured `lab_progress` event is pushed
+    // straight to the UI instead of the screen sitting on a dead "RUNNING".
     let fetch_lab_run: Rc<dyn Fn(shell::LabRunRequest)> = Rc::new({
         let backend = Arc::clone(&backend);
         let tx = fetch_tx.clone();
@@ -279,9 +287,64 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 capital: request.capital,
                 mode: request.mode,
             };
-            spawn_fetch(&backend, &tx, command, move |data| {
-                FetchResult::LabRun(id, data)
+            let backend = Arc::clone(&backend);
+            let tx = tx.clone();
+            std::thread::spawn(move || {
+                let progress_tx = tx.clone();
+                let data = PythonBackend::lock_send_streaming(&backend, command, move |event| {
+                    let _ = progress_tx.send(FetchResult::LabProgress(event));
+                });
+                let payload = match data {
+                    Ok(BackendResponse::LabSnapshot { data })
+                    | Ok(BackendResponse::MarketSnapshot { data }) => Some(data),
+                    Ok(BackendResponse::Error { data }) => {
+                        eprintln!("Run failed: {}", data.message);
+                        None
+                    }
+                    Ok(other) => {
+                        eprintln!("Run unexpected response ({other:?})");
+                        None
+                    }
+                    Err(err) => {
+                        eprintln!("Run failed: {err}");
+                        None
+                    }
+                };
+                let _ = tx.send(FetchResult::LabRun(id, payload));
             });
+        }
+    });
+    // Data-completeness probe for the §02 strip: the backend counts real rows
+    // for the current selection, `lab.rs` turns the counts plus the window into
+    // the percentage. Absent measurement leaves the strip hidden.
+    let fetch_lab_coverage: Rc<dyn Fn(shell::LabCoverageRequest)> = Rc::new({
+        let backend = Arc::clone(&backend);
+        let tx = fetch_tx.clone();
+        let seq = Arc::clone(&lab_coverage_seq);
+        move |request: shell::LabCoverageRequest| {
+            let id = seq.fetch_add(1, Ordering::SeqCst) + 1;
+            spawn_fetch(
+                &backend,
+                &tx,
+                BackendCommand::LabCoverage {
+                    symbols: request.symbols,
+                    timeframe: Some(request.timeframe).filter(|s| !s.is_empty()),
+                    start: Some(request.start).filter(|s| !s.is_empty()),
+                    end: Some(request.end).filter(|s| !s.is_empty()),
+                    full: request.full,
+                },
+                move |data| FetchResult::LabCoverage(id, data),
+            );
+        }
+    });
+    // CANCEL: the backend polls this flag between symbols, so the stop is
+    // graceful and a partial run is reported as cancelled, never as complete.
+    let fetch_lab_cancel: Rc<dyn Fn()> = Rc::new({
+        let backend = Arc::clone(&backend);
+        move || {
+            if let Err(err) = PythonBackend::lock_send(&backend, BackendCommand::CancelBacktest) {
+                eprintln!("Cancel request failed: {err}");
+            }
         }
     });
     // Portfolio production wiring (SLICE 4b): the idle trading service
@@ -371,7 +434,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let live_state = Rc::new(RefCell::new(live_state));
     shell::wire(&ui);
     shell::wire_zoom(&ui, zoom.clone());
-    shell::wire_lab(&ui, lab_state.clone(), fetch_lab_workspace, fetch_lab_run);
+    shell::wire_lab(
+        &ui,
+        lab_state.clone(),
+        fetch_lab_workspace,
+        fetch_lab_run,
+        fetch_lab_coverage,
+        fetch_lab_cancel,
+    );
     shell::wire_portfolio(&ui, portfolio_state.clone());
     shell::wire_research(&ui, research_state.clone());
     shell::wire_live(&ui, live_state.clone());
@@ -438,6 +508,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut last_market: u64 = 0;
         let mut last_select: u64 = 0;
         let mut last_run: u64 = 0;
+        let mut last_coverage: u64 = 0;
         fetch_timer.start(
             slint::TimerMode::Repeated,
             std::time::Duration::from_millis(50),
@@ -446,6 +517,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let mut latest_market: Option<(u64, Option<serde_json::Value>)> = None;
                 let mut latest_lab_select: Option<(u64, Option<serde_json::Value>)> = None;
                 let mut latest_lab_run: Option<(u64, Option<serde_json::Value>)> = None;
+                let mut latest_lab_coverage: Option<(u64, Option<serde_json::Value>)> = None;
 
                 for result in fetch_rx.try_iter() {
                     match result {
@@ -476,6 +548,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 latest_lab_run = Some((id, data));
                             }
                         }
+                        FetchResult::LabCoverage(id, data) => {
+                            if id > last_coverage
+                                && latest_lab_coverage
+                                    .as_ref()
+                                    .map_or(true, |(prev_id, _)| id > *prev_id)
+                            {
+                                latest_lab_coverage = Some((id, data));
+                            }
+                        }
+                        // Progress is applied as it arrives: throttled by the
+                        // backend's own 100ms publish, so the UI thread is
+                        // never flooded and the panel still tracks reality.
+                        FetchResult::LabProgress(event) => {
+                            lab_state.borrow_mut().apply_progress(&event);
+                            shell::apply_lab(&ui, &lab_state.borrow());
+                        }
                     }
                 }
 
@@ -501,7 +589,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         None => lab_state.borrow_mut().fail_run(),
                     }
+                    // The run is over: the panel retires and the results take
+                    // its place. A cancelled run is NOT a complete run, and
+                    // the snapshot says so.
+                    lab_state.borrow_mut().clear_progress();
                     shell::apply_lab(&ui, &lab_state.borrow());
+                }
+                if let Some((id, data)) = latest_lab_coverage {
+                    last_coverage = id;
+                    if let Some(data) = data {
+                        // An empty payload means "not measurable" — the strip
+                        // stays hidden rather than showing a 0%.
+                        if !data.is_null() {
+                            lab::apply_coverage_json(&mut lab_state.borrow_mut(), &data);
+                            shell::apply_lab(&ui, &lab_state.borrow());
+                        }
+                    }
                 }
             },
         );

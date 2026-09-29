@@ -119,10 +119,10 @@ class AuthResult:
 
 
 def mask_secret(value: str) -> str:
-    """Mask a secret for display (first 4 + last 2, else bullets)."""
+    """Mask a secret for display (full redaction — no characters leak)."""
     if not value:
         return ""
-    return f"{value[:4]}…{value[-2:]}" if len(value) > 8 else "••••"
+    return "••••"
 
 
 @runtime_checkable

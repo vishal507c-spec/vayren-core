@@ -7,7 +7,6 @@ import struct
 import zlib
 from pathlib import Path
 
-SIZE = 256
 OUT = Path(__file__).resolve().parents[2] / "scripts" / "assets" / "vayren.ico"
 
 BG = (18, 22, 30, 255)

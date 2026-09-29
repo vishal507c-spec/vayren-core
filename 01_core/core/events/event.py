@@ -1,6 +1,9 @@
 """Base class for every event flowing through the EventBus."""
 
+from dataclasses import dataclass
 
+
+@dataclass(frozen=True, slots=True)
 class Event:
     """Marker base class for all events.
 

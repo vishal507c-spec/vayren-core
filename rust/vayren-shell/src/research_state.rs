@@ -2835,17 +2835,6 @@ mod tests {
         assert!(!view.log_expanded);
     }
 
-    // Test helper (restores the pre-rename `field("symbols")` reader the
-    // assertions below were written against).
-    fn st_symbols(state: &ResearchState) -> String {
-        state
-            .fields
-            .iter()
-            .find(|f| f.key == "symbols")
-            .map(|f| f.value.clone())
-            .unwrap_or_default()
-    }
-
     #[test]
     fn host_snapshot_maps_facts_without_inventing_them() {
         let mut st = ResearchState::default();

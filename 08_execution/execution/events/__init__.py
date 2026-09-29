@@ -118,6 +118,8 @@ class OrderFill(Event):
     fill_qty: float
     fill_price: float
     partial: bool = False
+    fill_id: str = ""
+    seq: int = -1
 
 
 @dataclass(frozen=True)

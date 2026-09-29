@@ -45,22 +45,20 @@ const FYERS_READY: &str = r#"{
 
 #[test]
 fn workspace_shot_fyers_ready() {
-    unsafe {
-        let view = vayren_system_view_create(W as u32, H as u32, 1.0);
-        assert!(!view.is_null());
-        let c = std::ffi::CString::new(FYERS_READY).unwrap();
-        assert_eq!(vayren_system_view_set_snapshot(view, c.as_ptr()), 0);
-        assert_eq!(vayren_system_view_tick(view), 0);
-        let mut buf = vec![0u8; W * H * 3];
-        assert_eq!(
-            vayren_system_view_render(view, buf.as_mut_ptr(), buf.len()),
-            1
-        );
-        std::fs::write(
-            r"C:\Users\visha\AppData\Local\Temp\opencode\conn_1440x900.rgb",
-            &buf,
-        )
-        .unwrap();
-        vayren_system_view_destroy(view);
-    }
+    let view = vayren_system_view_create(W as u32, H as u32, 1.0);
+    assert!(!view.is_null());
+    let c = std::ffi::CString::new(FYERS_READY).unwrap();
+    assert_eq!(vayren_system_view_set_snapshot(view, c.as_ptr()), 0);
+    assert_eq!(vayren_system_view_tick(view), 0);
+    let mut buf = vec![0u8; W * H * 3];
+    assert_eq!(
+        vayren_system_view_render(view, buf.as_mut_ptr(), buf.len()),
+        1
+    );
+    std::fs::write(
+        r"C:\Users\visha\AppData\Local\Temp\opencode\conn_1440x900.rgb",
+        &buf,
+    )
+    .unwrap();
+    vayren_system_view_destroy(view);
 }

@@ -12,6 +12,7 @@ import contextlib
 import json
 import logging
 import sys
+import threading
 from contextlib import suppress
 from datetime import datetime
 from logging import getLogger
@@ -171,7 +172,12 @@ def _market_snapshot(repository: Any, command: dict, strategy_dir: str) -> dict:
     symbol = requested or symbols[0]
     limit = command.get("limit")
     if limit is not None:
-        limit = int(limit)
+        try:
+            limit = int(limit)
+        except (TypeError, ValueError):
+            limit = None
+        if limit is not None and limit < 0:
+            limit = None
     try:
         timeframes = list(repository.available_timeframes(symbol))
     except Exception as exc:  # noqa: BLE001
@@ -491,6 +497,116 @@ def _lab_universe(repository: Any) -> tuple[list[str], str]:
         return [], str(exc)
 
 
+# ── live run control ───────────────────────────────────────────────────────
+# A 500+ symbol run blocks the command loop for minutes, so CANCEL and the
+# progress stream need their own channel. The flag is a plain Event: setting it
+# can only ever make the run stop EARLIER, never change a result.
+_LAB_CANCEL = threading.Event()
+_LAB_DEFERRED: list[dict] = []
+
+
+def _progress_emitter():
+    """Write one `lab_progress` line per real event, straight to stdout."""
+
+    def emit(event: dict) -> None:
+        payload = {"type": "lab_progress", "data": event}
+        try:
+            sys.stdout.write(json.dumps(payload, separators=(",", ":")) + "\n")
+            sys.stdout.flush()
+        except (OSError, ValueError):
+            pass
+
+    return emit
+
+
+def _watch_for_cancel(stdin) -> threading.Thread:
+    """Drain stdin while a run blocks, honouring CANCEL and deferring the rest.
+
+    The normal loop is not reading during a run, so nothing is stolen: a cancel
+    sets the flag, and any other command is parked for the main loop to run once
+    the run finishes.
+    """
+
+    def reader() -> None:
+        for raw in stdin:
+            text = raw.strip()
+            if not text:
+                continue
+            try:
+                cmd = json.loads(text)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(cmd, dict) and cmd.get("type") == "cancel_backtest":
+                _LAB_CANCEL.set()
+                continue
+            _LAB_DEFERRED.append(cmd)
+
+    thread = threading.Thread(target=reader, name="lab-cancel-watch", daemon=True)
+    thread.start()
+    return thread
+
+
+# Coverage probes the ANCHOR symbol's bar count plus the selected symbols'
+# history bounds. Counting every bar of a 527-symbol universe is a full scan of
+# the store, so the default probe is bounded and says so; a full scan only
+# happens on an explicit request. The percentage itself is computed by the
+# Rust kernel (``lab_coverage``) — this side only counts real rows.
+_LAB_COVERAGE_SAMPLE = 24
+
+
+def _lab_coverage(
+    repository: Any,
+    symbols: list[str],
+    start: str,
+    end: str,
+    timeframe: str,
+    full: bool = False,
+) -> dict | None:
+    """Measured data-completeness counts for the Lab config strip.
+
+    Returns only counts this process actually read from the store: how many
+    selected symbols reach back to ``start`` and how many bars the anchor
+    symbol holds inside the window. No percentage, no expectation — the Rust
+    kernel owns that math, and an unmeasurable probe reports
+    ``bars_expected = 0`` so the UI hides the strip instead of painting a 0%.
+    """
+    if repository is None or not start or not end:
+        return None
+    selected = [s for s in symbols if s]
+    if not selected:
+        return None
+    probed = selected if full else selected[:_LAB_COVERAGE_SAMPLE]
+    covering = 0
+    for symbol in probed:
+        try:
+            first, _last = repository.date_range(symbol)
+        except Exception:  # noqa: BLE001
+            continue
+        # "Covers the window" means it has AT LEAST ONE bar inside it. A stock
+        # listed in 2021 is not a defect when the window starts in 2019, so
+        # requiring the full history here would warn about nothing.
+        if first and first <= end:
+            covering += 1
+    try:
+        present = len(repository.get_bars(probed[0], timeframe, start=start, end=end))
+    except Exception:  # noqa: BLE001
+        present = 0
+    # The window, the timeframe and the ANCHOR travel with the counts: the Rust
+    # kernel derives the expected bar count from the window, and the screen can
+    # only name the symbol the bar count actually belongs to.
+    return {
+        "symbols_total": len(selected),
+        "symbols_covering": covering,
+        "symbols_probed": len(probed),
+        "anchor": probed[0],
+        "bars_present": present,
+        "start": start,
+        "end": end,
+        "timeframe": timeframe,
+        "sampled": len(probed) < len(selected),
+    }
+
+
 def _lab_workspace(
     strategy_dir: str,
     command: dict,
@@ -540,12 +656,17 @@ def _lab_workspace(
     mode = (command.get("mode") or "buy").strip().lower()
     if mode not in ("buy", "sell", "compare"):
         mode = "buy"
+    # Real store bounds of the ANCHOR symbol. The Lab's MAX date-range preset
+    # is exactly this pair, so it needs the store's own facts, not the user's
+    # current selection (which would collapse MAX onto whatever was picked).
+    data_bounds: dict = {"first": first_date, "last": last_date} if first_date and last_date else {}
     snapshot: dict = {
         "selected_name": selected,
         "mode": mode,
         "run": "ready",
         "engine_wired": True,
         "outdated": False,
+        "data_bounds": data_bounds,
         "config": {
             "universe": ", ".join(selected_symbols) if selected_symbols else "NO UNIVERSE",
             "timeframe": timeframe or "—",
@@ -610,8 +731,20 @@ def _lab_snapshot(
     return snapshot
 
 
-def _lab_run(strategy_dir: str, data_dir: str, command: dict, repository: Any = None) -> dict:
-    """Execute a real historical backtest and return the Lab snapshot."""
+def _lab_run(
+    strategy_dir: str,
+    data_dir: str,
+    command: dict,
+    repository: Any = None,
+    progress=None,
+    should_cancel=None,
+) -> dict:
+    """Execute a real historical backtest and return the Lab snapshot.
+
+    ``progress`` receives every real execution event while the run happens, and
+    ``should_cancel`` is polled between symbols. Both are optional and neither
+    can change a result — turning reporting off changes no number of the run.
+    """
     try:
         rows = _lab_library_rows(strategy_dir)
     except Exception as exc:  # noqa: BLE001
@@ -642,13 +775,28 @@ def _lab_run(strategy_dir: str, data_dir: str, command: dict, repository: Any = 
         capital = float(command.get("capital", _LAB_DEFAULT_CAPITAL))
     except (TypeError, ValueError):
         capital = _LAB_DEFAULT_CAPITAL
-    mode = (command.get("mode") or workspace.get("mode") or "buy").strip().lower()
+    mode = str(command.get("mode") or workspace.get("mode") or "buy").strip().lower()
     try:
+        from app.progress import RunProgress
         from app.services.backtest_service import BacktestError, run_backtest
     except Exception as exc:  # noqa: BLE001
         workspace["run"] = "failed"
         workspace["cfg_edit"]["config_error"] = f"lab backend unavailable: {exc}"
         return workspace
+    # The command loop hands us a bare emit callable; the engine needs the
+    # real RunProgress object (counts/cancel). Wrap once per run — never pass
+    # a raw function into run_backtest.
+    if progress is None or (callable(progress) and not isinstance(progress, RunProgress)):
+        emit = progress if callable(progress) else None
+        progress = RunProgress(max(1, len(symbols)), emit, should_cancel)
+    if not isinstance(progress, RunProgress):
+        workspace["run"] = "failed"
+        workspace["cfg_edit"]["config_error"] = "lab progress channel unavailable"
+        return workspace
+
+    def _fresh_progress() -> RunProgress:
+        return RunProgress(max(1, len(symbols)), progress._emit, should_cancel)  # noqa: SLF001
+
     try:
         if mode == "compare":
             buy_results = run_backtest(
@@ -662,7 +810,16 @@ def _lab_run(strategy_dir: str, data_dir: str, command: dict, repository: Any = 
                 data_dir,
                 strategy_dir,
                 repository,
+                progress=_fresh_progress(),
+                should_cancel=should_cancel,
             )
+            if progress.cancel_requested():
+                workspace["results"] = None
+                workspace["run"] = "cancelled"
+                workspace["cfg_edit"]["config_error"] = (
+                    f"Run cancelled after {progress.completed} of {progress.total} symbols"
+                )
+                return workspace
             sell_results = run_backtest(
                 strategy_name,
                 [str(s) for s in symbols],
@@ -674,6 +831,8 @@ def _lab_run(strategy_dir: str, data_dir: str, command: dict, repository: Any = 
                 data_dir,
                 strategy_dir,
                 repository,
+                progress=_fresh_progress(),
+                should_cancel=should_cancel,
             )
             workspace["results"] = buy_results
             workspace["buy"] = buy_results
@@ -690,6 +849,8 @@ def _lab_run(strategy_dir: str, data_dir: str, command: dict, repository: Any = 
                 data_dir,
                 strategy_dir,
                 repository,
+                progress=progress,
+                should_cancel=should_cancel,
             )
     except BacktestError as exc:
         workspace["run"] = "failed"
@@ -699,13 +860,24 @@ def _lab_run(strategy_dir: str, data_dir: str, command: dict, repository: Any = 
         workspace["run"] = "failed"
         workspace["cfg_edit"]["config_error"] = f"Strategy failed: {exc}"
         return workspace
-    workspace["run"] = "complete"
+    # A cancelled run is reported as CANCELLED, never as a complete one: the
+    # partial result set is not a result for the requested universe.
+    was_cancelled = isinstance(progress, RunProgress) and progress.cancelled
+    if was_cancelled:
+        workspace["results"] = None
+        workspace.pop("buy", None)
+        workspace.pop("sell", None)
+    workspace["run"] = "cancelled" if was_cancelled else "complete"
     workspace["config"] = {
         "universe": ", ".join(str(s) for s in symbols),
         "timeframe": timeframe or "—",
         "dates": f"{start} → {end}" if start and end else "—",
         "capital": f"₹{capital:,.0f}",
     }
+    if was_cancelled:
+        workspace["cfg_edit"]["config_error"] = (
+            f"Run cancelled after {progress.completed} of {progress.total} symbols"
+        )
     return workspace
 
 
@@ -854,8 +1026,13 @@ def run_headless_backend(args: argparse.Namespace) -> int:
     # Command loop
     try:
         for line in sys.stdin:
+            if not line.strip():
+                continue
             try:
                 command = json.loads(line.strip())
+                if not isinstance(command, dict):
+                    _emit({"type": "error", "data": {"error": "Invalid command shape"}})
+                    continue
                 cmd_type = command.get("type")
 
                 if cmd_type == "list_symbols":
@@ -906,11 +1083,43 @@ def run_headless_backend(args: argparse.Namespace) -> int:
                     if not _emit(result):
                         break
 
+                elif cmd_type == "lab_coverage":
+                    requested = command.get("symbols") or []
+                    if isinstance(requested, str):
+                        requested = [s.strip() for s in requested.split(",") if s.strip()]
+                    coverage = _lab_coverage(
+                        repository,
+                        list(requested),
+                        str(command.get("start") or "").strip(),
+                        str(command.get("end") or "").strip(),
+                        str(command.get("timeframe") or "").strip(),
+                        bool(command.get("full")),
+                    )
+                    result = {
+                        "type": "lab_coverage",
+                        "data": coverage if coverage is not None else {},
+                    }
+                    if not _emit(result):
+                        break
+
                 elif cmd_type == "run_backtest":
-                    snapshot = _lab_run(str(strategy_dir), str(data_dir), command, repository)
+                    # The run streams real progress while it executes; the
+                    # terminal line is still the snapshot the shell consumes.
+                    _LAB_CANCEL.clear()
+                    watcher = _watch_for_cancel(sys.stdin)
+                    snapshot = _lab_run(
+                        str(strategy_dir),
+                        str(data_dir),
+                        command,
+                        repository,
+                        progress=_progress_emitter(),
+                        should_cancel=_LAB_CANCEL.is_set,
+                    )
+                    watcher.join(timeout=1.0)
                     result = {"type": "lab_snapshot", "data": snapshot}
                     if not _emit(result):
                         break
+                    _LAB_CANCEL.clear()
 
                 elif cmd_type == "connect_broker":
                     broker_id = str(command.get("broker_id") or "fyers").strip()
