@@ -40,6 +40,31 @@ RETENTION_PATH = ROOT / "90_brain" / "language_retention.json"
 ROUTES_PATH = ROOT / "90_brain" / "task_routes.json"
 CONTRACTS_PATH = ROOT / "90_brain" / "module_contracts.md"
 
+
+def _normalise_eol(raw: bytes) -> bytes:
+    """CRLF and lone CR → LF (no other transformation)."""
+    return raw.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+
+
+def _canonical_inputs_hash() -> str:
+    """sha256 over the canonical inputs, NORMALISED for line endings.
+
+    Raw bytes are not a stable identity. A Windows checkout with
+    ``core.autocrlf=true`` reads these JSON/MD/PY inputs back with CRLF, while a
+    CI Linux checkout reads the SAME committed content with LF — so hashing raw
+    bytes made this artifact permanently report "stale" on CI no matter how
+    many times it was rebuilt on Windows. The hash answers "did the CONTENT
+    change", so EOL style must not be part of the answer: normalise CRLF/CR to
+    LF first and both platforms agree byte-for-byte.
+    """
+    parts = [
+        _normalise_eol(p.read_bytes())
+        for p in (POLICY_PATH, RETENTION_PATH, ROUTES_PATH, CONTRACTS_PATH)
+    ]
+    parts.append(_normalise_eol((SCRIPTS_DIR / "validate_imports.py").read_bytes()))
+    return hashlib.sha256(b"".join(parts)).hexdigest()
+
+
 SCHEMA_VERSION = 1
 LANGUAGES = ("RUST", "PYTHON", "RUST_SLINT")
 INDEX_EXTENSIONS = {".py", ".rs", ".slint"}
@@ -971,11 +996,7 @@ def build_graph() -> tuple[dict, list[dict]]:
         key=lambda v: v["path"],
     )
 
-    canonical_bytes = (
-        b"".join(p.read_bytes() for p in (POLICY_PATH, RETENTION_PATH, ROUTES_PATH, CONTRACTS_PATH))
-        + (SCRIPTS_DIR / "validate_imports.py").read_bytes()
-    )
-    inputs_hash = hashlib.sha256(canonical_bytes).hexdigest()
+    inputs_hash = _canonical_inputs_hash()
 
     entity_count, relationship_count = graph_counts(
         len(domains),

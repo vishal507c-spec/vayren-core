@@ -11,7 +11,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import sys
 from pathlib import Path
@@ -47,19 +46,15 @@ def _independent_classify(relpath: str, rules: list[dict]) -> str | None:
 
 
 def _expected_inputs_hash() -> str:
-    canonical = (
-        b"".join(
-            path.read_bytes()
-            for path in (
-                repo_graph.POLICY_PATH,
-                repo_graph.RETENTION_PATH,
-                repo_graph.ROUTES_PATH,
-                repo_graph.CONTRACTS_PATH,
-            )
-        )
-        + (SCRIPTS_DIR / "validate_imports.py").read_bytes()
-    )
-    return hashlib.sha256(canonical).hexdigest()
+    """Recompute the canonical inputs hash the same way the builder did.
+
+    Delegates to `repo_graph._canonical_inputs_hash` so the two can never drift,
+    and inherits its CRLF/CR → LF normalisation: a Windows checkout
+    (`core.autocrlf=true`) reads these inputs with CRLF and a CI Linux checkout
+    reads the same committed content with LF, so an EOL-sensitive hash would
+    report "stale" on one platform forever.
+    """
+    return repo_graph._canonical_inputs_hash()  # noqa: SLF001
 
 
 def validate_graph(graph: dict, root: Path | None = None) -> list[str]:
