@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import math
 from collections import deque
 from contextlib import suppress
+from dataclasses import replace
+from datetime import datetime
+from logging import getLogger
 
 from strategy.models.parameters import StrategyParameters
 from strategy.models.plot_event import (
@@ -11,6 +15,7 @@ from strategy.models.plot_event import (
     PlotEvent,
     PlotLifecycle,
     PlotType,
+    PlotValidationError,
     RenderLayer,
     default_layer,
     make_event_id,
@@ -18,21 +23,74 @@ from strategy.models.plot_event import (
 from strategy.models.signal import Signal, SignalKind
 from strategy.runtime import BarView, StrategyLogic
 
+logger = getLogger(__name__)
+
+_DEFAULT_MAX_HISTORY = 200
+_DEFAULT_WARMUP = 20
+_WARMUP_PERIOD_KEYS = ("slow_period", "fast_period", "rsi_period")
+
+
+def _parse_bar_time(stamp: object) -> datetime | None:
+    """Parse a bar timestamp; None when unparseable (caller ignores)."""
+    if not isinstance(stamp, str) or not stamp.strip():
+        return None
+    text = stamp.strip()
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        pass
+    try:
+        return datetime.strptime(text[:19], "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+
+
+def _parse_exit_time(time_str: object) -> tuple[int, int] | None:
+    """Parse an ``HH:MM`` exit time; None when malformed (caller ignores)."""
+    if not isinstance(time_str, str):
+        return None
+    parts = time_str.strip().split(":")
+    if len(parts) != 2:
+        return None
+    try:
+        hour, minute = int(parts[0]), int(parts[1])
+    except ValueError:
+        return None
+    if not 0 <= hour <= 23 or not 0 <= minute <= 59:
+        return None
+    return hour, minute
+
 
 class PythonStrategy(StrategyLogic):
     """Base for all native Python strategies — maintains indicator history."""
 
     def __init__(self, params: StrategyParameters | dict[str, float] | None = None) -> None:
-        self.params: dict[str, float] = {}
+        parsed: dict[str, float] = {}
         if params is not None:
             try:
-                self.params = {k: float(v) for k, v in dict(params).items()}
-            except Exception:
-                self.params = {}
-        self.closes: deque[float] = deque(maxlen=100)
-        self.highs: deque[float] = deque(maxlen=100)
-        self.lows: deque[float] = deque(maxlen=100)
-        self.volumes: deque[int] = deque(maxlen=100)
+                source = dict(params)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"invalid strategy params mapping: {exc}") from exc
+            for key, value in source.items():
+                try:
+                    parsed[key] = float(value)  # type: ignore[arg-type]
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(
+                        f"invalid strategy param {key!r}: {value!r} is not a number"
+                    ) from exc
+        self.params: dict[str, float] = parsed
+        raw_history = self.params.get("max_history", _DEFAULT_MAX_HISTORY)
+        try:
+            max_history = int(raw_history)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"max_history must be an int >= 1, got {raw_history!r}") from exc
+        if max_history < 1:
+            raise ValueError(f"max_history must be >= 1, got {max_history!r}")
+        self._max_history = max_history
+        self.closes: deque[float] = deque(maxlen=max_history)
+        self.highs: deque[float] = deque(maxlen=max_history)
+        self.lows: deque[float] = deque(maxlen=max_history)
+        self.volumes: deque[int] = deque(maxlen=max_history)
         self._pending_kind: SignalKind | None = None
         self._pending_sl: float | None = None
         self._pending_tp: float | None = None
@@ -48,12 +106,28 @@ class PythonStrategy(StrategyLogic):
         self._plot_events: dict[str, PlotEvent] = {}
         self._plot_auto_seq: dict[str, int] = {}
         self._muted_signal_bars: set[int] = set()
+        self._history_warned = False
 
     def warmup(self) -> int:
-        return 20
+        """Derive warmup from indicator periods (slow/fast/RSI), default 20."""
+        periods: list[int] = []
+        for key in _WARMUP_PERIOD_KEYS:
+            if key in self.params:
+                try:
+                    periods.append(int(self.params[key]))
+                except (TypeError, ValueError):
+                    continue
+        candidates = [p for p in periods if p > 0]
+        return max(candidates) if candidates else _DEFAULT_WARMUP
 
     def on_bar(self, view: BarView) -> Signal | None:
         bar = view.bar
+        if len(self.closes) >= self._max_history and not self._history_warned:
+            logger.warning(
+                "indicator history truncated at max_history=%d — oldest bars dropped",
+                self._max_history,
+            )
+            self._history_warned = True
         self.closes.append(bar.close)
         self.highs.append(bar.high)
         self.lows.append(bar.low)
@@ -66,23 +140,32 @@ class PythonStrategy(StrategyLogic):
 
         signal = self.on_bar_logic(view)
 
-        # Handle time_exit if set
-        if self._pending_time_exit:
-            try:
-                hhmm = bar.timestamp[11:16]
-                if hhmm >= self._pending_time_exit and not view.state.flat:
-                    self._pending_kind = (
-                        SignalKind.BUY if view.state.side == "SHORT" else SignalKind.SELL
-                    )
-            except Exception:
-                pass
+        if signal is not None:
+            # Merge pending SL/TP into a directly returned signal instead of
+            # dropping them — stop_loss()/take_profit() accompany either path.
+            stop_loss = signal.stop_loss if signal.stop_loss is not None else self._pending_sl
+            take_profit = signal.take_profit if signal.take_profit is not None else self._pending_tp
+            if stop_loss is not signal.stop_loss or take_profit is not signal.take_profit:
+                signal = replace(signal, stop_loss=stop_loss, take_profit=take_profit)
+            return signal
+
+        # Time exit fires only when logic produced no signal — it never
+        # overwrites a logic decision (returned Signal or pending buy/sell).
+        if self._pending_time_exit and self._pending_kind is None and not view.state.flat:
+            exit_time = _parse_exit_time(self._pending_time_exit)
+            bar_time = _parse_bar_time(bar.timestamp)
+            if (
+                exit_time is not None
+                and bar_time is not None
+                and (bar_time.hour, bar_time.minute) >= exit_time
+            ):
+                self._pending_kind = (
+                    SignalKind.BUY if view.state.side == "SHORT" else SignalKind.SELL
+                )
 
         if self._pending_kind is None:
-            return signal
+            return None
 
-        # If logic already returned a signal, prefer pending from logic; else use time_exit signal
-        if signal is not None:
-            return signal
         return Signal(
             index=view.index,
             timestamp=bar.timestamp,
@@ -190,10 +273,18 @@ class PythonStrategy(StrategyLogic):
 
         Data is stored as {bar_index: value} so the backtest runner can
         package it into ChartSeries and the chart renderer can draw
-        persistent lines across the relevant bars.
+        persistent lines across the relevant bars. Non-finite values
+        raise :class:`PlotValidationError` instead of being silently dropped.
         """
-        with suppress(Exception):
-            self._plot_series.setdefault(title, {})[self._current_bar_index] = float(value)
+        if not isinstance(title, str) or not title:
+            raise PlotValidationError("plot title must be a non-empty string")
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError) as exc:
+            raise PlotValidationError(f"plot value must be numeric, got {value!r}") from exc
+        if not math.isfinite(numeric):
+            raise PlotValidationError(f"plot value must be finite, got {value!r}")
+        self._plot_series.setdefault(title, {})[self._current_bar_index] = numeric
 
     # ── universal strategy-owned plot API (visual only, never trades) ──
 
@@ -444,31 +535,57 @@ class PythonStrategy(StrategyLogic):
         )
 
     def update_plot(self, event_id: str, **changes: object) -> str | None:
-        """Version a live plot (price/bar/text); renderer uses latest valid."""
-        with suppress(Exception):
-            current = self._plot_events.get(str(event_id))
-            if current is None:
-                return None
-            allowed = {
-                "bar_index",
-                "start_bar",
-                "end_bar",
-                "price",
-                "start_price",
-                "end_price",
-                "timestamp",
-                "text",
-                "lifecycle",
-                "extend_bars",
-                "layer",
-                "marker_type",
-                "dependencies",
-                "metadata",
-            }
-            safe = {key: value for key, value in changes.items() if key in allowed}
-            updated = current.with_update(**safe)
-            return self._store_plot_event(updated)
-        return None
+        """Version a live plot (price/bar/text); renderer uses latest valid.
+
+        When the change moves the anchor bar (``bar_index``/``start_bar``),
+        the deterministic ``event_id`` is recomputed from the new anchor —
+        the old key is retired and the new id is returned. A target bar
+        beyond the current bar raises :class:`ValueError` (future plots are
+        forbidden); unknown ids return None.
+        """
+        current = self._plot_events.get(str(event_id))
+        if current is None:
+            return None
+        allowed = {
+            "bar_index",
+            "start_bar",
+            "end_bar",
+            "price",
+            "start_price",
+            "end_price",
+            "timestamp",
+            "text",
+            "lifecycle",
+            "extend_bars",
+            "layer",
+            "marker_type",
+            "dependencies",
+            "metadata",
+        }
+        safe = {key: value for key, value in changes.items() if key in allowed}
+        for bar_key in ("bar_index", "start_bar", "end_bar"):
+            if bar_key in safe and safe[bar_key] is not None:
+                target = safe[bar_key]
+                if isinstance(target, bool) or not isinstance(target, int):
+                    raise PlotValidationError(f"{bar_key} must be an int, got {target!r}")
+                if target < 0:
+                    raise PlotValidationError(f"{bar_key} must be >= 0, got {target!r}")
+                if target > self._current_bar_index:
+                    raise ValueError(
+                        f"{bar_key} {target} is beyond current bar {self._current_bar_index}"
+                    )
+        updated = current.with_update(**safe)
+        new_anchor = updated.anchor_bar
+        if new_anchor != current.anchor_bar:
+            name = self._strategy_name()
+            new_id = make_event_id(
+                name, updated.symbol, updated.timeframe, new_anchor, updated.plot_id
+            )
+            del self._plot_events[current.event_id]
+            updated = replace(updated, event_id=new_id)
+            self._plot_events[new_id] = updated
+            return new_id
+        return self._store_plot_event(updated)
 
     def remove_plot(self, event_id: str) -> bool:
         """Mark a plot REMOVED (historical record kept, renderer skips)."""
@@ -517,6 +634,19 @@ class PythonStrategy(StrategyLogic):
     def get_chart_series(self) -> dict[str, dict[int, float]]:
         """Return chart plot series in legacy title-keyed format."""
         return {k: dict(v) for k, v in self._plot_series.items()}
+
+    def set_chart_series_meta(self, title: str, meta: dict[str, str]) -> None:
+        """Attach metadata for one plot series title (read back via ``get_*``).
+
+        The companion ``get_chart_series_meta*`` accessors were previously
+        dead (nothing ever populated ``_plot_meta``); this setter closes
+        that gap so strategies can label their series.
+        """
+        if not isinstance(title, str) or not title:
+            raise PlotValidationError("series title must be a non-empty string")
+        if not isinstance(meta, dict):
+            raise PlotValidationError(f"series meta must be a dict, got {meta!r}")
+        self._plot_meta[title] = {str(k): str(v) for k, v in meta.items()}
 
     def get_chart_series_with_owner(self) -> dict[tuple[str, str], dict[int, float]]:
         """Return chart plot series keyed by (owner_id, title)."""

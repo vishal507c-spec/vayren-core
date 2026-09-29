@@ -8,7 +8,9 @@ discovery paths.
 
 from __future__ import annotations
 
-from broker.capabilities import CapabilitySet, Domain
+import threading
+
+from broker.capabilities import DOMAIN_ITEMS, CapabilitySet, Domain
 from broker.faces import PluginLike
 from broker.vocab import (
     BrokerError,
@@ -47,6 +49,13 @@ class BrokerRecord:
             raise ValueError("broker display_name must be non-empty")
         if not faces:
             raise ValueError(f"broker {name!r} must serve at least one domain")
+        for face in faces:
+            face_items = set(DOMAIN_ITEMS.get(face, ()))
+            if not (set(capabilities.items) & face_items):
+                raise ValueError(
+                    f"broker {name!r} serves {face.value!r} but advertises no "
+                    f"{face.value} capability (faces vs capabilities split-brain)"
+                )
         self.name = name
         self.display_name = display_name
         self.plugin = plugin
@@ -69,38 +78,45 @@ class BrokerRegistry:
     """Single source of registered brokers. Registration order independent."""
 
     def __init__(self) -> None:
+        self._lock = threading.Lock()
         self._records: dict[str, BrokerRecord] = {}
 
     def register(self, record: BrokerRecord) -> None:
         """Register one venue; a duplicate name raises DuplicateBrokerError."""
-        if record.name in self._records:
-            raise DuplicateBrokerError(record.name)
-        self._records[record.name] = record
+        with self._lock:
+            if record.name in self._records:
+                raise DuplicateBrokerError(record.name)
+            self._records[record.name] = record
 
     def unregister(self, name: str) -> None:
         """Remove a registration; unknown names fail closed."""
-        if name not in self._records:
-            raise BrokerNotRegisteredError(
-                f"cannot unregister unknown broker {name!r} — registered: {sorted(self._records)}"
-            )
-        del self._records[name]
+        with self._lock:
+            if name not in self._records:
+                known = sorted(self._records)
+                raise BrokerNotRegisteredError(
+                    f"cannot unregister unknown broker {name!r} — registered: {known}"
+                )
+            del self._records[name]
 
     def get(self, name: str) -> BrokerRecord:
         """Resolve a name; unknown → BrokerNotRegisteredError (fail-closed)."""
-        record = self._records.get(name)
-        if record is None:
-            raise BrokerNotRegisteredError(
-                f"no broker registered under {name!r} — registered: {sorted(self._records)}"
-            )
-        return record
+        with self._lock:
+            record = self._records.get(name)
+            if record is None:
+                raise BrokerNotRegisteredError(
+                    f"no broker registered under {name!r} — registered: {sorted(self._records)}"
+                )
+            return record
 
     def list(self) -> tuple[BrokerRecord, ...]:
         """All records, name-sorted (deterministic for UI/tests)."""
-        return tuple(self._records[name] for name in sorted(self._records))
+        with self._lock:
+            return tuple(self._records[name] for name in sorted(self._records))
 
     def names(self) -> tuple[str, ...]:
         """Registered names, sorted."""
-        return tuple(sorted(self._records))
+        with self._lock:
+            return tuple(sorted(self._records))
 
     def find_with(self, cap: str) -> tuple[BrokerRecord, ...]:
         """Every broker advertising the exact capability id."""
@@ -111,21 +127,26 @@ class BrokerRegistry:
         return tuple(record for record in self.list() if domain in record.faces)
 
     def __contains__(self, name: object) -> bool:
-        return isinstance(name, str) and name in self._records
+        return isinstance(name, str) and name in self.names()
 
     def __iter__(self):  # type: ignore[no-untyped-def]
-        return iter(self._records)
+        return iter(self.list())
 
     def __len__(self) -> int:
-        return len(self._records)
+        with self._lock:
+            return len(self._records)
 
 
 _default_registry: BrokerRegistry | None = None
+_default_lock = threading.Lock()
 
 
 def default_registry() -> BrokerRegistry:
     """Process-wide registry (lazy). Composition roots and shims use this."""
     global _default_registry
     if _default_registry is None:
-        _default_registry = BrokerRegistry()
+        with _default_lock:
+            if _default_registry is None:
+                _default_registry = BrokerRegistry()
+    assert _default_registry is not None
     return _default_registry

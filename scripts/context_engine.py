@@ -86,8 +86,71 @@ def resolve_symbol(name: str, source: str) -> int | None:
     return None
 
 
+def _git_available(root: Path) -> bool:
+    """Is `root` a git work tree? (never raises; drives the degraded path)"""
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return False
+    return proc.returncode == 0 and proc.stdout.strip() == "true"
+
+
+_FALLBACK_CALLERS: dict[tuple[str, str, str], list[str]] = {}
+
+
+def _scan_callers(name: str, defining_file: str, root: Path, limit: int = 10) -> list[str]:
+    """Full-tree text scan for callers — the no-git fallback for `git grep -l`.
+
+    Same product-chapter scope and same exclusions as the git path, so the
+    caller list is not silently EMPTY (an empty list reads as "nobody calls
+    this", which under-scopes every downstream decision).
+    """
+    key = (name, defining_file, str(root))
+    cached = _FALLBACK_CALLERS.get(key)
+    if cached is not None:
+        return cached
+    needle = re.compile(rf"\b{re.escape(name)}\b")
+    hits: list[str] = []
+    for chapter in CHAPTERS:
+        base = root / chapter
+        if not base.is_dir():
+            continue
+        for path in sorted(base.rglob("*")):
+            if not path.is_file() or path.suffix not in (".py", ".rs", ".slint"):
+                continue
+            rel = path.relative_to(root).as_posix()
+            if rel == defining_file or "/tests/" in rel:
+                continue
+            try:
+                text = path.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            if needle.search(text):
+                hits.append(rel)
+    result = sorted(hits)[:limit]
+    _FALLBACK_CALLERS[key] = result
+    return result
+
+
 def find_callers(name: str, defining_file: str, root: Path = ROOT) -> list[str]:
-    """Targeted single-grep caller lookup (product chapters only, def file excluded)."""
+    """Targeted single-grep caller lookup (product chapters only, def file excluded).
+
+    Degrades to a full-tree scan when git is unavailable: a warning plus a real
+    answer, never a silent `[]`.
+    """
+    if not _git_available(root):
+        print(
+            f"warn: no git work tree at {root}; caller scan for '{name}' falls back "
+            "to a full-tree text scan",
+            file=sys.stderr,
+        )
+        return _scan_callers(name, defining_file, root)
     try:
         proc = subprocess.run(
             ["git", "grep", "-l", "-E", "-e", name, "--", *CHAPTERS],
@@ -96,9 +159,20 @@ def find_callers(name: str, defining_file: str, root: Path = ROOT) -> list[str]:
             text=True,
             check=False,
         )
-    except OSError:
-        return []
+    except OSError as exc:
+        print(
+            f"warn: git grep failed for '{name}' ({exc}); using a full-tree scan",
+            file=sys.stderr,
+        )
+        return _scan_callers(name, defining_file, root)
     if proc.returncode != 0:
+        # rc 1 = no match (a real answer); anything else is a broken probe.
+        if proc.returncode != 1:
+            print(
+                f"warn: git grep exited {proc.returncode} for '{name}'; using a full-tree scan",
+                file=sys.stderr,
+            )
+            return _scan_callers(name, defining_file, root)
         return []
     return sorted(
         line.strip()

@@ -45,7 +45,11 @@ pub struct StatusViewFacts {
     pub chunk: String,
     pub rows: String,
     pub coverage: String,
-    pub progress_pct: f32,
+    /// Run progress as an f64. A `f32` here would chop a 16,777,217-scale
+    /// percentage (or a `bars/done` ratio above 2^24) to a value that no
+    /// longer matches the number the backend measured; the label would then
+    /// disagree with the row it describes.
+    pub progress_pct: f64,
     pub progress_note: String,
     pub perf_rows: String,
     pub perf_elapsed: String,
@@ -100,8 +104,14 @@ pub struct DownloadState {
     pub filter: String,
     pub from_display: String,
     pub to_display: String,
-    pub from_ymd: (i32, i32, i32),
-    pub to_ymd: (i32, i32, i32),
+    /// Calendar bounds as `(year, month, day)`, or `None` when the backend has
+    /// not reported them. They used to default to the invented
+    /// `(2017, 1, 1)`, which rendered a January-2017 calendar and let the
+    /// user "pick" a date they never had data for. `None` is honest absence:
+    /// the console shows the display strings the backend sent and no calendar
+    /// opens until real bounds arrive.
+    pub from_ymd: Option<(i32, i32, i32)>,
+    pub to_ymd: Option<(i32, i32, i32)>,
     pub plan: PlanView,
     pub status: StatusViewFacts,
     pub brokers: Vec<BrokerChoice>,
@@ -133,8 +143,8 @@ impl Default for DownloadState {
             filter: String::new(),
             from_display: String::new(),
             to_display: String::new(),
-            from_ymd: (2017, 1, 1),
-            to_ymd: (2017, 1, 1),
+            from_ymd: None,
+            to_ymd: None,
             plan: PlanView::default(),
             status: StatusViewFacts::default(),
             brokers: Vec::new(),
@@ -142,8 +152,8 @@ impl Default for DownloadState {
             log: Vec::new(),
             log_expanded: false,
             cal_field: String::new(),
-            cal_year: 2017,
-            cal_month: 1,
+            cal_year: 0,
+            cal_month: 0,
             cred_open: false,
             cred_fields: Vec::new(),
             cred_has_stored: false,
@@ -258,14 +268,18 @@ impl DownloadState {
                 None
             }
             DownloadAction::OpenCal(which) => {
-                let (y, m, _) = if which == "to" {
+                // No reported bounds → no calendar. Inventing a month to draw
+                // is exactly the "2017-01-01" lie this state used to carry.
+                let bounds = if which == "to" {
                     self.to_ymd
                 } else {
                     self.from_ymd
                 };
-                self.cal_year = y;
-                self.cal_month = m;
-                self.cal_field = which;
+                if let Some((y, m, _)) = bounds {
+                    self.cal_year = y;
+                    self.cal_month = m;
+                    self.cal_field = which.to_string();
+                }
                 None
             }
             DownloadAction::CloseCal => {
@@ -285,6 +299,17 @@ impl DownloadState {
                 // the retained QDateEdit (which refreshes the plan); close the
                 // calendar optimistically like a popup commit.
                 let field = std::mem::take(&mut self.cal_field);
+                // No calendar open (or a month the calendar never set) means
+                // there is no date to pick: emitting `day::0:0:15` would tell
+                // the backend to set the date to year 0, month 0, day 15.
+                if field.is_empty()
+                    || self.cal_month < 1
+                    || self.cal_month > 12
+                    || day < 1
+                    || day > days_in_month(self.cal_year, self.cal_month)
+                {
+                    return None;
+                }
                 Some(format!(
                     "dl:day:{field}:{}:{}:{}",
                     self.cal_year, self.cal_month, day
@@ -564,8 +589,13 @@ fn dl_str(v: &serde_json::Value, key: &str) -> String {
         .to_string()
 }
 
-fn dl_f32(v: &serde_json::Value, key: &str) -> f32 {
-    v.get(key).and_then(|x| x.as_f64()).unwrap_or(0.0) as f32
+/// f64 read with an explicit non-finite guard: a `NaN` percentage would render
+/// as "NaN%" in the run card and would compare false against every threshold.
+fn dl_f64(v: &serde_json::Value, key: &str) -> f64 {
+    v.get(key)
+        .and_then(|x| x.as_f64())
+        .filter(|x| x.is_finite())
+        .unwrap_or(0.0)
 }
 
 fn dl_bool(v: &serde_json::Value, key: &str) -> bool {
@@ -606,10 +636,20 @@ pub fn apply_download_snapshot(state: &mut DownloadState, value: &serde_json::Va
     if let Some(cal) = value.get("calendar").and_then(|x| x.as_object()) {
         for (key, slot) in [("from", &mut state.from_ymd), ("to", &mut state.to_ymd)] {
             if let Some(f) = cal.get(key) {
-                let y = f.get("year").and_then(|x| x.as_i64()).unwrap_or(2017) as i32;
-                let m = f.get("month").and_then(|x| x.as_i64()).unwrap_or(1) as i32;
-                let d = f.get("day").and_then(|x| x.as_i64()).unwrap_or(1) as i32;
-                *slot = (y, m, d);
+                // All three parts or nothing: a partial calendar must not
+                // fabricate the missing bound (the old code defaulted to
+                // 2017/1/1, inventing a date the user never chose).
+                let parsed = (
+                    f.get("year").and_then(|x| x.as_i64()),
+                    f.get("month").and_then(|x| x.as_i64()),
+                    f.get("day").and_then(|x| x.as_i64()),
+                );
+                if let (Some(y), Some(m), Some(d)) = parsed {
+                    if (1970..=2099).contains(&y) && (1..=12).contains(&m) && (1..=31).contains(&d)
+                    {
+                        *slot = Some((y as i32, m as i32, d as i32));
+                    }
+                }
             }
         }
     }
@@ -633,7 +673,7 @@ pub fn apply_download_snapshot(state: &mut DownloadState, value: &serde_json::Va
         s.chunk = dl_str(st, "run_chunk");
         s.rows = dl_str(st, "run_rows");
         s.coverage = dl_str(st, "run_coverage");
-        s.progress_pct = dl_f32(st, "progress_pct");
+        s.progress_pct = dl_f64(st, "progress_pct");
         s.progress_note = dl_str(st, "progress_note");
         s.perf_rows = dl_str(st, "perf_rows");
         s.perf_elapsed = dl_str(st, "perf_elapsed");
@@ -733,10 +773,21 @@ mod tests {
         let mut st = DownloadState::default();
         assert_eq!(st.apply(DownloadAction::Toggle), None);
         assert!(st.open);
+        // Re-pinned: the calendar only opens once the backend has REPORTED
+        // bounds. The old default `(2017, 1, 1)` let the picker open on a
+        // January-2017 month the user never chose, and picking a day there
+        // would request data outside any real range. With no reported bounds
+        // the honest answer is "no calendar".
+        assert_eq!(st.apply(DownloadAction::OpenCal("from".to_string())), None);
+        assert_eq!(st.cal_field, "");
+        assert_eq!(st.apply(DownloadAction::PickDay(15)), None);
+
+        // Real bounds arrive from the snapshot → the calendar works as before.
+        st.from_ymd = Some((2024, 1, 1));
+        st.to_ymd = Some((2026, 9, 15));
         assert_eq!(st.apply(DownloadAction::OpenCal("from".to_string())), None);
         assert_eq!(st.cal_field, "from");
-        st.cal_year = 2024;
-        st.cal_month = 1;
+        assert_eq!((st.cal_year, st.cal_month), (2024, 1));
         assert_eq!(st.apply(DownloadAction::CalPrevMonth), None);
         assert_eq!((st.cal_year, st.cal_month), (2023, 12));
         assert_eq!(
@@ -744,6 +795,9 @@ mod tests {
             Some("dl:day:from:2023:12:15".to_string())
         );
         assert!(st.cal_field.is_empty());
+        // "to" opens its own bound, not the "from" one.
+        assert_eq!(st.apply(DownloadAction::OpenCal("to".to_string())), None);
+        assert_eq!((st.cal_year, st.cal_month), (2026, 9));
     }
 
     #[test]
@@ -807,6 +861,55 @@ mod tests {
             st.apply(DownloadAction::CredConfirmClear(true)),
             Some("dl:creds-clear".to_string())
         );
+    }
+
+    #[test]
+    fn calendar_bounds_come_from_the_snapshot_or_are_absent_never_invented() {
+        let mut st = DownloadState::default();
+        // No calendar object at all → no bounds, no invented 2017-01-01.
+        apply_download_snapshot(&mut st, &serde_json::json!({"busy": false}));
+        assert_eq!(st.from_ymd, None);
+        assert_eq!(st.to_ymd, None);
+
+        // A PARTIAL calendar must not fabricate the missing parts.
+        apply_download_snapshot(
+            &mut st,
+            &serde_json::json!({"calendar": {"from": {"year": 2024, "month": 5}}}),
+        );
+        assert_eq!(st.from_ymd, None, "a partial calendar is not a bound");
+        assert_eq!(st.to_ymd, None);
+
+        // An impossible calendar is rejected, not clamped into a real date.
+        apply_download_snapshot(
+            &mut st,
+            &serde_json::json!({"calendar": {"from": {"year": 2024, "month": 13, "day": 1}}}),
+        );
+        assert_eq!(st.from_ymd, None);
+
+        // A complete, valid calendar lands.
+        apply_download_snapshot(
+            &mut st,
+            &serde_json::json!({
+                "calendar": {
+                    "from": {"year": 2019, "month": 9, "day": 19},
+                    "to": {"year": 2026, "month": 8, "day": 18}
+                },
+                "status": {"progress_pct": 16777217.0}
+            }),
+        );
+        assert_eq!(st.from_ymd, Some((2019, 9, 19)));
+        assert_eq!(st.to_ymd, Some((2026, 8, 18)));
+        // Progress keeps full f64 precision: 16777217 is exactly
+        // representable in f64 but NOT in f32 (which would round to 16777216).
+        assert_eq!(st.status.progress_pct, 16777217.0);
+        assert_eq!(st.status.progress_pct as f32, 16777216.0);
+
+        // A non-finite percentage is honest zero, not NaN.
+        apply_download_snapshot(
+            &mut st,
+            &serde_json::json!({"status": {"progress_pct": null}}),
+        );
+        assert_eq!(st.status.progress_pct, 0.0);
     }
 
     #[test]

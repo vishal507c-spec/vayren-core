@@ -5,6 +5,7 @@ base, data-only payloads (no widgets, connections or callables).
 """
 
 from dataclasses import dataclass
+from datetime import datetime
 
 from core import Event
 
@@ -19,6 +20,22 @@ class MarketEvent(Event):
     timestamp: str  # UTC ISO-8601, normalized at ingestion
     seq: int
     source: str = ""  # provider name that produced it
+
+    def __post_init__(self) -> None:
+        if isinstance(self.seq, bool) or not isinstance(self.seq, int):
+            raise ValueError(f"market event seq must be an int, got {self.seq!r}")
+        if self.seq < 0:
+            raise ValueError(f"market event seq must be >= 0, got {self.seq}")
+        if not isinstance(self.timestamp, str) or not self.timestamp.strip():
+            raise ValueError(f"market event timestamp must be ISO-8601, got {self.timestamp!r}")
+        try:
+            datetime.fromisoformat(self.timestamp)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"market event timestamp must be ISO-8601, got {self.timestamp!r}"
+            ) from exc
+        if not isinstance(self.source, str) or not self.source.strip():
+            raise ValueError(f"market event source must be non-empty, got {self.source!r}")
 
 
 @dataclass(frozen=True)
@@ -118,6 +135,8 @@ class OrderFill(Event):
     fill_qty: float
     fill_price: float
     partial: bool = False
+    fill_id: str = ""
+    seq: int = -1
 
 
 @dataclass(frozen=True)
@@ -139,3 +158,4 @@ class KillSwitchEngaged(Event):
     request_id: str
     level: str
     reason: str
+    timestamp: str = ""

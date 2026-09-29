@@ -43,6 +43,20 @@ class ResearchDataset:
         histories: list[ExecutionHistory],
         parameters: dict[str, Any] | None = None,
     ) -> ResearchDataset:
+        for history in histories:
+            snapshot = getattr(history, "snapshot", None)
+            hist_strategy = getattr(snapshot, "strategy_id", None) if snapshot else None
+            hist_version = getattr(snapshot, "version_id", None) if snapshot else None
+            if hist_strategy not in (None, "") and str(hist_strategy) != str(strategy_id):
+                raise ValueError(
+                    f"history {getattr(snapshot, 'execution_id', '?')} belongs to strategy "
+                    f"{hist_strategy!r}, not {strategy_id!r} — refusing mixed merge"
+                )
+            if hist_version not in (None, "") and str(hist_version) != str(version_id):
+                raise ValueError(
+                    f"history {getattr(snapshot, 'execution_id', '?')} belongs to version "
+                    f"{hist_version!r}, not {version_id!r} — refusing mixed merge"
+                )
         execution_ids = tuple(h.snapshot.execution_id for h in histories)
         # Pull actual TradeRecord objects from execution histories.
         # Previously signals were incorrectly used as a proxy for trades.

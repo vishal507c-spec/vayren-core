@@ -8,6 +8,8 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+_CONFIDENCE_LEVELS = frozenset({"low", "medium", "high"})
+
 
 @dataclass(frozen=True)
 class Discovery:
@@ -22,6 +24,21 @@ class Discovery:
     confidence: str
     status: str
     created_at: str
+
+    def __post_init__(self) -> None:
+        """Reject empty identity fields and unknown confidence levels."""
+        for field_name in ("discovery_id", "strategy_id", "version_id", "experiment_id"):
+            value = getattr(self, field_name)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"Discovery {field_name} must be a non-empty string")
+        if not isinstance(self.confidence, str):
+            raise ValueError(f"confidence must be one of {sorted(_CONFIDENCE_LEVELS)}")
+        normalized = self.confidence.strip().lower()
+        if normalized not in _CONFIDENCE_LEVELS:
+            raise ValueError(
+                f"confidence must be one of {sorted(_CONFIDENCE_LEVELS)}, got {self.confidence!r}"
+            )
+        object.__setattr__(self, "confidence", normalized)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -93,7 +94,9 @@ def load_events(task_id: str) -> list[dict]:
         return [json.loads(line) for line in fh if line.strip()]
 
 
-def save_json(task_id: str, name: str, data: dict) -> None:
+def save_json(task_id: str, name: str, data: dict | None) -> None:
+    """Persist one evidence record. `None` is stored as JSON null, which means
+    UNMEASURABLE (not zero) — load_json maps it back to the caller's default."""
     with (task_dir(task_id) / name).open("w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=2)
 
@@ -103,7 +106,10 @@ def load_json(task_id: str, name: str, default: dict) -> dict:
     if not path.exists():
         return default
     with path.open(encoding="utf-8") as fh:
-        return json.load(fh)
+        data = json.load(fh)
+    # A stored `null` (evidence deliberately unmeasurable, e.g. no git) must
+    # not leak through as `None` to callers that expect a mapping.
+    return data if isinstance(data, dict) else default
 
 
 def tree_scan(root: Path = ROOT) -> dict[str, tuple[float, int]]:
@@ -122,8 +128,48 @@ def tree_scan(root: Path = ROOT) -> dict[str, tuple[float, int]]:
     return result
 
 
-def git_numstat() -> dict[str, tuple[int, int]]:
-    """Working-tree diff vs HEAD: {path: (added, removed)}. Empty on failure."""
+def git_available() -> bool:
+    """Is ROOT a git work tree? (never raises)"""
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return proc.returncode == 0 and proc.stdout.strip() == "true"
+
+
+_GIT_WARNED = False
+
+
+def _warn_no_git(what: str) -> None:
+    """Warn once per process: absent git evidence is NOT 'zero changes'."""
+    global _GIT_WARNED
+    if _GIT_WARNED:
+        return
+    _GIT_WARNED = True
+    print(
+        f"warn: no git work tree at {ROOT}; {what} is UNMEASURABLE (not zero changes)",
+        file=sys.stderr,
+    )
+
+
+def git_numstat() -> dict[str, tuple[int, int]] | None:
+    """Working-tree diff vs HEAD: {path: (added, removed)}.
+
+    Returns None when the evidence is UNMEASURABLE (no git checkout, git
+    failed, or it timed out) and warns once. An empty dict is reserved for the
+    real measurement 'the tree is clean' — conflating the two recorded a
+    fabricated zero against a tree the tool never looked at.
+    """
+    if not git_available():
+        _warn_no_git("git diff --numstat evidence")
+        return None
     try:
         proc = subprocess.run(
             ["git", "diff", "--numstat", "HEAD"],
@@ -131,11 +177,14 @@ def git_numstat() -> dict[str, tuple[int, int]]:
             capture_output=True,
             text=True,
             timeout=30,
+            check=False,
         )
-    except (OSError, subprocess.TimeoutExpired):
-        return {}
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        _warn_no_git(f"git diff --numstat evidence ({exc})")
+        return None
     if proc.returncode != 0:
-        return {}
+        _warn_no_git(f"git diff --numstat evidence (git exited {proc.returncode})")
+        return None
     result: dict[str, tuple[int, int]] = {}
     for line in proc.stdout.splitlines():
         parts = line.split("\t")

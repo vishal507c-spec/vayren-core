@@ -70,13 +70,16 @@ def run_parameter_sensitivity(
             )
         else:
             # Structured variant for later backtest execution.
-            # trades=() signals that a backtest must be run separately.
+            # trades=() AND signals=() mark that a backtest must be run
+            # separately — baseline signals are never mixed into a variant,
+            # and the variant owns only its own execution id (no baseline
+            # lineage is carried over).
             variant_dataset = ResearchDataset(
                 strategy_id=dataset.strategy_id,
                 version_id=dataset.version_id,
-                execution_ids=(variant_execution_id,) + dataset.execution_ids,
+                execution_ids=(variant_execution_id,),
                 trades=(),  # Real trades from new backtest; not reused from baseline
-                signals=dataset.signals,
+                signals=(),  # Baseline signals never leak into a variant
                 parameters=variant_params,
                 data_identity=dataset.data_identity,
                 metadata={

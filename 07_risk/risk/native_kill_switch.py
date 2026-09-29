@@ -44,6 +44,48 @@ if _missing_exports:
         "Rebuild: `python scripts/build_rust.py`"
     )
 
+# Handle-based kill-switch ABI (loader `_configure_kill_switch` pattern):
+# strings cross as UTF-8 buffer pairs; reads use the two-call probe protocol.
+_char_out = ctypes.POINTER(ctypes.c_char)
+_lib.vy_ks_new.argtypes = []
+_lib.vy_ks_new.restype = ctypes.c_int64
+_lib.vy_ks_free.argtypes = [ctypes.c_int64]
+_lib.vy_ks_free.restype = ctypes.c_int32
+_lib.vy_ks_level_count.argtypes = []
+_lib.vy_ks_level_count.restype = ctypes.c_int32
+_lib.vy_ks_level_name.argtypes = [ctypes.c_int32, _char_out, ctypes.c_size_t]
+_lib.vy_ks_level_name.restype = ctypes.c_int32
+_lib.vy_ks_engage.argtypes = [
+    ctypes.c_int64,
+    ctypes.c_char_p,
+    ctypes.c_size_t,
+    ctypes.c_char_p,
+    ctypes.c_size_t,
+]
+_lib.vy_ks_engage.restype = ctypes.c_int32
+_lib.vy_ks_disengage.argtypes = [ctypes.c_int64, ctypes.c_char_p, ctypes.c_size_t]
+_lib.vy_ks_disengage.restype = ctypes.c_int32
+_lib.vy_ks_is_halted.argtypes = [ctypes.c_int64, ctypes.c_char_p, ctypes.c_size_t]
+_lib.vy_ks_is_halted.restype = ctypes.c_int32
+_lib.vy_ks_state_engaged.argtypes = [ctypes.c_int64, ctypes.c_char_p, ctypes.c_size_t]
+_lib.vy_ks_state_engaged.restype = ctypes.c_int32
+_lib.vy_ks_state_reason.argtypes = [
+    ctypes.c_int64,
+    ctypes.c_char_p,
+    ctypes.c_size_t,
+    _char_out,
+    ctypes.c_size_t,
+]
+_lib.vy_ks_state_reason.restype = ctypes.c_int32
+_lib.vy_ks_state_engaged_at.argtypes = _lib.vy_ks_state_reason.argtypes
+_lib.vy_ks_state_engaged_at.restype = ctypes.c_int32
+_lib.vy_ks_serialize.argtypes = [ctypes.c_int64, _char_out, ctypes.c_size_t]
+_lib.vy_ks_serialize.restype = ctypes.c_int32
+_lib.vy_ks_load.argtypes = [ctypes.c_int64, ctypes.c_char_p, ctypes.c_size_t]
+_lib.vy_ks_load.restype = ctypes.c_int32
+_lib.vy_ks_last_message.argtypes = [ctypes.c_int64, _char_out, ctypes.c_size_t]
+_lib.vy_ks_last_message.restype = ctypes.c_int32
+
 
 def _encode(value: str, what: str) -> tuple[bytes, int]:
     """UTF-8 payload + length for an inbound string argument."""
@@ -128,14 +170,21 @@ class NativeKillSwitch:
     def load(self, text: str) -> None:
         """Restore latches from persisted text.
 
-        Unparseable text changes nothing (the historical silent
-        `except Exception: return`); a document that parses but cannot be
-        walked raises `AttributeError` after the levels it reached applied.
+        Corrupt text (`_GARBAGE`) raises `NativeBridgeError` — the persisted
+        state is untrusted input, so a silent return would leave the caller
+        believing a halt was restored when nothing applied. A document that
+        parses but cannot be walked raises `AttributeError` after the levels
+        it reached applied.
         """
         payload, length = _encode(text, "saved state")
         code = int(_lib.vy_ks_load(self._handle, payload, length))
-        if code in (_APPLIED, _GARBAGE):
+        if code == _APPLIED:
             return
+        if code == _GARBAGE:
+            raise NativeBridgeError(
+                "native kill-switch state is corrupt: "
+                f"{self.last_message() or 'unparseable document'}"
+            )
         if code == -1:
             raise AttributeError(self.last_message())
         raise NativeBridgeError(f"native kill-switch handle error: {code}")

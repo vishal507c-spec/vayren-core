@@ -206,7 +206,7 @@ fn parse_generated_label(name: &str) -> Option<i64> {
         "W" | "w" => 604800,
         _ => return None,
     };
-    Some(number * factor)
+    number.checked_mul(factor)
 }
 
 /// Ladder label for a granularity, or None if it is not in the ladder.

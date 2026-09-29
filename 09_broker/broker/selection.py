@@ -53,6 +53,37 @@ class BrokerSelection:
         )
 
 
+def _serves(record_capabilities: CapabilitySet, domain: Domain) -> bool:
+    """Capability query that never raises: unhashable domains are not served."""
+    try:
+        return bool(record_capabilities.supports_domain(domain))
+    except TypeError:
+        return False
+
+
+def _verdict(
+    selection: BrokerSelection | None,
+    record_capabilities: CapabilitySet | None,
+    domain: Domain,
+) -> tuple[bool, str]:
+    """Single authoritative-broker verdict both surfaces share (one language)."""
+    try:
+        domain_value = domain.value if isinstance(domain, Domain) else str(domain)
+    except Exception:
+        domain_value = str(domain)
+    if selection is None:
+        return False, "no broker selected"
+    if record_capabilities is None or not record_capabilities.items:
+        return False, f"broker {selection.name!r} capabilities are undeclared"
+    if not _serves(record_capabilities, domain):
+        return (
+            False,
+            f"broker {selection.name!r} does not provide {domain_value} capability "
+            f"(explicit override required for this surface)",
+        )
+    return True, f"broker {selection.name!r} serves {domain_value}"
+
+
 def surface_resolution(
     selection: BrokerSelection | None,
     record_capabilities: CapabilitySet | None,
@@ -65,18 +96,7 @@ def surface_resolution(
     allowed for that surface — for trading the caller applies the existing
     PAPER downgrade using the returned reason.
     """
-    domain_value = domain.value if isinstance(domain, Domain) else str(domain)
-    if selection is None:
-        return False, "no broker selected"
-    if record_capabilities is None:
-        return False, f"broker {selection.name!r} capabilities are undeclared"
-    if not record_capabilities.supports_domain(domain):
-        return (
-            False,
-            f"broker {selection.name!r} does not provide {domain_value} capability "
-            f"(explicit override required for this surface)",
-        )
-    return True, f"broker {selection.name!r} serves {domain_value}"
+    return _verdict(selection, record_capabilities, domain)
 
 
 def surface_status(
@@ -86,26 +106,18 @@ def surface_status(
 ) -> tuple[CapabilityStatus, str]:
     """Tri-state authoritative-broker rule (M8 §3).
 
-    Same fail-closed matrix as :func:`surface_resolution`, but the verdict
-    is a :class:`CapabilityStatus`: no selection or undeclared capabilities
-    → ``NOT_CONFIGURED``; broker lacking the domain → ``NOT_SUPPORTED``;
-    broker serving the domain → ``SUPPORTED``. Never raises.
+    Same fail-closed matrix as :func:`surface_resolution`, same reason
+    language — only the verdict shape differs: no selection or undeclared
+    capabilities → ``NOT_CONFIGURED``; broker lacking the domain →
+    ``NOT_SUPPORTED``; broker serving the domain → ``SUPPORTED``.
+    Never raises.
     """
-    domain_value = domain.value if isinstance(domain, Domain) else str(domain)
-    if selection is None:
-        return CapabilityStatus.NOT_CONFIGURED, "no broker selected"
-    if record_capabilities is None or not record_capabilities.items:
-        return (
-            CapabilityStatus.NOT_CONFIGURED,
-            f"broker {selection.name!r} capabilities are undeclared",
-        )
-    if not record_capabilities.supports_domain(domain):
-        return (
-            CapabilityStatus.NOT_SUPPORTED,
-            f"broker {selection.name!r} does not provide {domain_value} capability "
-            f"(explicit override required for this surface)",
-        )
-    return CapabilityStatus.SUPPORTED, f"broker {selection.name!r} serves {domain_value}"
+    allowed, reason = _verdict(selection, record_capabilities, domain)
+    if allowed:
+        return CapabilityStatus.SUPPORTED, reason
+    if selection is None or record_capabilities is None or not record_capabilities.items:
+        return CapabilityStatus.NOT_CONFIGURED, reason
+    return CapabilityStatus.NOT_SUPPORTED, reason
 
 
 class SelectionStore(Protocol):

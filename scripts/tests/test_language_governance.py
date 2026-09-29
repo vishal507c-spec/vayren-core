@@ -24,9 +24,11 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 from validate_architecture_gate import (  # noqa: E402
     _is_first_party_root,
     _required_language,
+    check_changes,
     check_new_file_extension,
 )
 from validate_language_ownership import (  # noqa: E402
+    NO_REINTRODUCE,
     _classify_file,
     _defines,
     _imports_core_native,
@@ -55,6 +57,35 @@ def test_unauthorized_programming_extension_fails() -> None:
         violation = check_new_file_extension(rel)
         assert violation is not None, rel
         assert violation.rule == "unauthorized-language", rel
+
+
+def test_script_shell_and_binary_extensions_fail() -> None:
+    for rel in (
+        "scripts/deploy.sh",
+        "scripts/setup.ps1",
+        "scripts/run.bat",
+        "scripts/run.cmd",
+        "rust/vayren-core/prebuilt/vayren.dll",
+        "tools/vayren.exe",
+        "tools/vayren.jar",
+    ):
+        violation = check_new_file_extension(rel)
+        assert violation is not None, rel
+        assert violation.rule == "unauthorized-language", rel
+
+
+def test_udf_like_extensions_still_pass() -> None:
+    for rel in (
+        "05_strategy/strategy/ok.py",
+        "rust/vayren-core/src/kernel.rs",
+        "rust/vayren-shell/ui/screen.slint",
+        "90_brain/note.md",
+        "scripts/data.jsonl",
+        "scripts/config.yaml",
+        "pyproject.toml",
+        "Makefile",
+    ):
+        assert check_new_file_extension(rel) is None, rel
 
 
 def test_allowed_languages_and_non_languages_pass() -> None:
@@ -132,6 +163,54 @@ def test_reintroduced_authority_detected(tmp_path: Path) -> None:
     assert _defines(good, "TRANSITIONS", "no-assign") is False
 
 
+def test_no_assign_catches_every_store_shape(tmp_path: Path) -> None:
+    for label, source in (
+        ("annotated", "TRANSITIONS: dict = {}\n"),
+        ("attribute", "self.TRANSITIONS = {}\n"),
+        ("annotated-attribute", "state.TRANSITIONS: dict = {}\n"),
+        ("subscript", "TABLE['TRANSITIONS'] = {}\n"),
+        ("tuple-unpack", "TRANSITIONS, other = {}, None\n"),
+        ("nested-unpack", "first, (TRANSITIONS, x) = 1, ({}, 2)\n"),
+    ):
+        path = _write(tmp_path / f"{label}.py", source)
+        assert _defines(path, "TRANSITIONS", "no-assign") is True, label
+
+
+def test_no_loop_catches_comprehensions(tmp_path: Path) -> None:
+    for label, source in (
+        ("list", "def _sharpe(x):\n    return [r for r in x]\n"),
+        ("set", "def _sharpe(x):\n    return {r for r in x}\n"),
+        ("dict", "def _sharpe(x):\n    return {r: r for r in x}\n"),
+        ("generator", "def _sharpe(x):\n    return (r for r in x)\n"),
+        ("for", "def _sharpe(x):\n    for r in x:\n        pass\n    return 0.0\n"),
+    ):
+        path = _write(tmp_path / f"{label}.py", source)
+        assert _defines(path, "_sharpe", "no-loop") is True, label
+
+
+def test_no_loop_ignores_helper_calls(tmp_path: Path) -> None:
+    # A helper call is a different symbol: not this guard's business.
+    path = _write(tmp_path / "helper.py", "def _sharpe(x):\n    return _mean(x) / _std(x)\n")
+    assert _defines(path, "_sharpe", "no-loop") is False
+
+
+def test_every_no_reintroduce_guard_targets_a_live_file() -> None:
+    # A guard pointing at a deleted/renamed file silently enforces nothing,
+    # which is how the order-state table became re-introducible again.
+    for name, (files, _kind) in NO_REINTRODUCE.items():
+        assert files, f"{name} has no guard target"
+        for rel in files:
+            assert (ROOT / rel).is_file(), f"dead NO_REINTRODUCE guard: {name} -> {rel}"
+
+
+def test_order_state_vocabulary_carries_no_transition_table() -> None:
+    # The file language_retention.json describes as "enum vocabulary only".
+    order_state = ROOT / "08_execution" / "execution" / "models" / "order_state.py"
+    assert order_state.is_file()
+    for name in ("TRANSITIONS", "TERMINAL_STATES"):
+        assert _defines(order_state, name, "no-assign") is False
+
+
 def test_rust_must_not_absorb_python_owned_modules() -> None:
     assert rust_module_forbidden("rust/vayren-core/src/strategy.rs") is True
     assert rust_module_forbidden("rust/vayren-core/src/research.rs") is True
@@ -163,3 +242,35 @@ def test_core_native_importer_boundary(tmp_path: Path) -> None:
     assert _imports_core_native(importer) is True
     clean = _write(tmp_path / "plain.py", "from core import Event\n")
     assert _imports_core_native(clean) is False
+
+
+def test_core_native_dynamic_import_detected(tmp_path: Path) -> None:
+    for label, source in (
+        ("importlib", "import importlib\nimportlib.import_module('core.native.loader')\n"),
+        ("dunder", "__import__('core.native.loader')\n"),
+    ):
+        path = _write(tmp_path / f"{label}.py", source)
+        assert _imports_core_native(path) is True, label
+    for label, source in (
+        ("importlib-other", "import importlib\nimportlib.import_module('market.models.bar')\n"),
+        ("dunder-other", "__import__('json')\n"),
+    ):
+        path = _write(tmp_path / f"{label}.py", source)
+        assert _imports_core_native(path) is False, label
+
+
+def test_declared_test_tooling_is_not_third_party() -> None:
+    # Test tooling is checked against pyproject, never blanket-exempt, and
+    # never mislabelled "third-party".
+    assert _is_first_party_root("pytest", set()) is False
+    assert _is_first_party_root("coverage", set()) is False
+
+
+def test_gate_without_git_warns_instead_of_erroring(monkeypatch) -> None:
+    import validate_architecture_gate as gate
+
+    monkeypatch.setattr(gate, "_git_available", lambda: False)
+    monkeypatch.setattr(gate, "_working_tree", lambda **_kwargs: ["05_strategy/strategy/sma.py"])
+    report = check_changes()
+    assert report.verdict == "PASS"
+    assert any("no git work tree" in warning for warning in report.warnings)

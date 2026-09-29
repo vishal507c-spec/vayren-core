@@ -1,7 +1,7 @@
 """AEOS benchmark harness — stdlib only.
 
 Subcommands:
-  gate        time each validation-gate step N times (sample 1 = cold)
+  gate        time each step of the `make check` gate N times (sample 1 = cold)
   begin       mark task start (wall-clock); `record` computes wall_s from it
   record      append one task-execution sample to the runs log
   record-action  append one bracket-timed action to the runs log
@@ -9,6 +9,12 @@ Subcommands:
   replay      re-run a recorded task's validation commands (no reset, no edits)
   phases      backfill agent-work breakdown for an already-recorded task
   scoreboard  regenerate scripts/benchmark_scoreboard.md from the runs log
+
+GATE_STEPS mirrors the `make check` prerequisite list, step for step and in the
+same order (Makefile: rust -> lint -> typecheck -> test -> validate-* ->
+context-check). Keep the two in sync: a step added to one and not the other
+makes this a measurement of a gate nobody runs. Timings are per step, so the
+sum of the medians is the honest cost of a full local `make check`.
 
 Runs log: scripts/benchmark_runs.jsonl (append-only evidence, never rewrite).
 Unmeasurable metrics are stored as null and rendered as NOT MEASURED.
@@ -32,13 +38,28 @@ ROOT = Path(__file__).resolve().parent.parent
 RUNS_LOG = ROOT / "scripts" / "benchmark_runs.jsonl"
 SCOREBOARD = ROOT / "scripts" / "benchmark_scoreboard.md"
 
+CARGO = "rust"
 GATE_STEPS: tuple[tuple[str, list[str]], ...] = (
+    # make rust
+    ("rust-build-test", [sys.executable, "scripts/build_rust.py", "--test"]),
+    ("rust-fmt-check", ["cargo", "fmt", "--manifest-path", f"{CARGO}/Cargo.toml", "--", "--check"]),
+    # make lint
     ("ruff-check", ["ruff", "check", "."]),
     ("ruff-format-check", ["ruff", "format", "--check", "."]),
+    # make typecheck
     ("pyright", ["pyright"]),
+    # make test
     ("pytest", [sys.executable, "-m", "pytest", "-q", "--no-header", "-p", "no:cacheprovider"]),
+    # make validate-*
     ("validate-structure", [sys.executable, "scripts/validate_structure.py"]),
     ("validate-imports", [sys.executable, "scripts/validate_imports.py"]),
+    ("validate-language-ownership", [sys.executable, "scripts/validate_language_ownership.py"]),
+    ("validate-architecture-gate", [sys.executable, "scripts/validate_architecture_gate.py"]),
+    ("validate-authority", [sys.executable, "scripts/validate_authority.py"]),
+    ("validate-routes", [sys.executable, "scripts/validate_routes.py"]),
+    ("validate-repo-graph", [sys.executable, "scripts/validate_repo_graph.py"]),
+    # make context-check
+    ("context-check", [sys.executable, "scripts/context_engine.py", "--check"]),
 )
 
 

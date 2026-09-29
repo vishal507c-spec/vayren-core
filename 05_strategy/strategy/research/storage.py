@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 from .experiment import Experiment
@@ -15,6 +16,29 @@ def _research_dir(data_dir: Path | str | None, sub: str) -> Path:
         d = Path.cwd() / ".vayren" / "research" / sub
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def _backup_corrupt(path: Path) -> Path:
+    """Rename a corrupt file aside (never delete evidence) and return the backup path."""
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
+    backup = path.with_name(f"{path.name}.corrupt-{stamp}")
+    counter = 0
+    while backup.exists():
+        counter += 1
+        backup = path.with_name(f"{path.name}.corrupt-{stamp}-{counter}")
+    path.rename(backup)
+    return backup
+
+
+def _decode_experiment_file(path: Path) -> Experiment:
+    """Read one experiment file; corrupt content is backed up, then raises."""
+    try:
+        return Experiment.from_dict(json.loads(path.read_text(encoding="utf-8")))
+    except FileNotFoundError:
+        raise
+    except Exception as exc:
+        backup = _backup_corrupt(path)
+        raise ValueError(f"corrupt experiment file {path} (backed up to {backup})") from exc
 
 
 def _record_lineage_for_experiment(exp: Experiment, data_dir: Path | str | None) -> None:
@@ -45,17 +69,13 @@ def _record_lineage_for_experiment(exp: Experiment, data_dir: Path | str | None)
 
 def save_experiment(exp: Experiment, data_dir: Path | str | None = None) -> Path:
     p = _research_dir(data_dir, "experiments") / f"{exp.experiment_id}.json"
-    # Immutable check — if exists and identical, return; otherwise collision error
+    # Immutable check — if exists and identical, return; otherwise collision error.
+    # A corrupt existing file is backed up, never silently overwritten.
     if p.exists():
-        try:
-            existing = Experiment.from_dict(json.loads(p.read_text(encoding="utf-8")))
-            if existing.to_dict() == exp.to_dict():
-                return p
-            raise FileExistsError(f"experiment id collision: {exp.experiment_id}")
-        except FileExistsError:
-            raise
-        except Exception:
-            pass
+        existing = _decode_experiment_file(p)
+        if existing.to_dict() == exp.to_dict():
+            return p
+        raise FileExistsError(f"experiment id collision: {exp.experiment_id}")
     p.write_text(exp.to_json(), encoding="utf-8")
     _record_lineage_for_experiment(exp, data_dir)
     return p
@@ -73,20 +93,15 @@ def save_experiment_update(exp: Experiment, data_dir: Path | str | None = None) 
 
     p = _research_dir(data_dir, "experiments") / f"{exp.experiment_id}.json"
     if p.exists():
-        try:
-            existing = Experiment.from_dict(json.loads(p.read_text(encoding="utf-8")))
-            terminal = existing.status in TERMINAL_STATUSES and bool(existing.result_fingerprint)
-            if existing.to_dict() == exp.to_dict():
-                return p
-            if terminal:
-                raise FileExistsError(
-                    f"immutable experiment already completed: {exp.experiment_id} "
-                    "— create a new experiment to re-run"
-                )
-        except FileExistsError:
-            raise
-        except Exception:
-            pass
+        existing = _decode_experiment_file(p)
+        terminal = existing.status in TERMINAL_STATUSES and bool(existing.result_fingerprint)
+        if existing.to_dict() == exp.to_dict():
+            return p
+        if terminal:
+            raise FileExistsError(
+                f"immutable experiment already completed: {exp.experiment_id} "
+                "— create a new experiment to re-run"
+            )
     p.write_text(exp.to_json(), encoding="utf-8")
     _record_lineage_for_experiment(exp, data_dir)
     return p
@@ -96,19 +111,21 @@ def load_experiment(experiment_id: str, data_dir: Path | str | None = None) -> E
     p = _research_dir(data_dir, "experiments") / f"{experiment_id}.json"
     if not p.exists():
         return None
-    try:
-        return Experiment.from_dict(json.loads(p.read_text(encoding="utf-8")))
-    except Exception:
-        return None
+    return _decode_experiment_file(p)
 
 
 def list_experiments(data_dir: Path | str | None = None) -> list[Experiment]:
     d = _research_dir(data_dir, "experiments")
     exps: list[Experiment] = []
     for p in d.glob("*.json"):
-        e = load_experiment(p.stem, data_dir)
-        if e:
-            exps.append(e)
+        if ".corrupt-" in p.name:
+            continue
+        try:
+            exps.append(_decode_experiment_file(p))
+        except Exception:
+            # _decode_experiment_file already backed the corrupt file aside;
+            # listing stays robust while direct loads raise.
+            continue
     exps.sort(key=lambda x: x.created_at)
     return exps
 
@@ -139,13 +156,16 @@ def save_run_artifacts(
     path = d / "run.json"
     if path.exists():
         try:
-            if path.read_text(encoding="utf-8") == text:
-                return path
-            raise FileExistsError(f"immutable run already exists: {experiment_id}")
-        except FileExistsError:
-            raise
-        except Exception:
-            pass
+            existing_text = path.read_text(encoding="utf-8")
+            json.loads(existing_text)
+        except Exception as exc:
+            backup = _backup_corrupt(path)
+            raise ValueError(
+                f"corrupt run file {path} (backed up to {backup}) — refusing overwrite"
+            ) from exc
+        if existing_text == text:
+            return path
+        raise FileExistsError(f"immutable run already exists: {experiment_id}")
     path.write_text(text, encoding="utf-8")
     return path
 
@@ -153,14 +173,23 @@ def save_run_artifacts(
 def load_run_artifacts(
     experiment_id: str, data_dir: Path | str | None = None
 ) -> tuple[list[dict], list[dict]]:
-    """Return (signals, trades) for an executed experiment (empty when none)."""
+    """Return (signals, trades) for an executed experiment (empty when none).
+
+    Raises :class:`ValueError` on corrupt content (after backing it up) —
+    a corrupt run is never mistaken for "no run".
+    """
     path = _run_dir(data_dir, experiment_id) / "run.json"
     if not path.exists():
         return [], []
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        backup = _backup_corrupt(path)
+        raise ValueError(f"corrupt run file {path} (backed up to {backup})") from exc
+    try:
         signals = list(data.get("signals", []))
         trades = list(data.get("trades", []))
-        return signals, trades
-    except Exception:
-        return [], []
+    except Exception as exc:
+        backup = _backup_corrupt(path)
+        raise ValueError(f"malformed run payload in {path} (backed up to {backup})") from exc
+    return signals, trades

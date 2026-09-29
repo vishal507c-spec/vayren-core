@@ -25,6 +25,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Protocol, runtime_checkable
 
+from broker.vocab import Environment
+
 
 class AuthCapability(StrEnum):
     """Authentication building blocks a broker may declare.
@@ -84,7 +86,8 @@ class AuthField:
     values that must always be masked and never logged; ``required``
     enables empty-value validation; ``default`` pre-fills honest broker
     defaults (e.g. a localhost redirect URI); ``capabilities`` names the
-    :class:`AuthCapability` values this field satisfies.
+    :class:`AuthCapability` values this field satisfies (plain strings are
+    normalized to :class:`AuthCapability`; unknown names raise).
     """
 
     key: str
@@ -93,7 +96,29 @@ class AuthField:
     required: bool = False
     help: str = ""
     default: str = ""
-    capabilities: tuple[str, ...] = ()
+    capabilities: tuple[AuthCapability | str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.key or not self.key.strip():
+            raise ValueError("auth field requires a non-empty key")
+        if not self.label or not self.label.strip():
+            raise ValueError("auth field requires a non-empty label")
+        normalized: list[AuthCapability] = []
+        for cap in self.capabilities:
+            if isinstance(cap, AuthCapability):
+                normalized.append(cap)
+            elif isinstance(cap, str):
+                try:
+                    normalized.append(AuthCapability(cap))
+                except ValueError as exc:
+                    raise ValueError(
+                        f"auth field {self.key!r} has unknown capability {cap!r}"
+                    ) from exc
+            else:
+                raise ValueError(
+                    f"auth field {self.key!r} capability must be AuthCapability, got {cap!r}"
+                )
+        object.__setattr__(self, "capabilities", tuple(normalized))
 
 
 @dataclass(frozen=True)
@@ -103,7 +128,27 @@ class AccountIdentity:
     broker_id: str
     account_id: str
     display_name: str = ""
-    environment: str = "paper"
+    environment: Environment = Environment.PAPER
+
+    def __post_init__(self) -> None:
+        if not self.broker_id or not self.broker_id.strip():
+            raise ValueError("account identity requires a non-empty broker_id")
+        if not isinstance(self.account_id, str):
+            raise ValueError(
+                f"account identity account_id must be a string, got {self.account_id!r}"
+            )
+        env: Environment | str = self.environment
+        if isinstance(env, Environment):
+            return
+        if isinstance(env, str):
+            try:
+                object.__setattr__(self, "environment", Environment(env))
+            except ValueError as exc:
+                raise ValueError(
+                    f"account identity environment must be an Environment, got {env!r}"
+                ) from exc
+        else:
+            raise ValueError(f"account identity environment must be an Environment, got {env!r}")
 
 
 @dataclass(frozen=True)
@@ -119,10 +164,10 @@ class AuthResult:
 
 
 def mask_secret(value: str) -> str:
-    """Mask a secret for display (first 4 + last 2, else bullets)."""
+    """Mask a secret for display (full redaction — no characters leak)."""
     if not value:
         return ""
-    return f"{value[:4]}…{value[-2:]}" if len(value) > 8 else "••••"
+    return "••••"
 
 
 @runtime_checkable

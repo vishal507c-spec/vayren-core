@@ -214,9 +214,49 @@ def test_committed_artifact_matches_fresh_build() -> None:
 
 
 def test_graph_has_no_canonical_prose() -> None:
+    """The artifact is derived structure — never a copy of canonical prose.
+
+    Two guards, because the byte cap alone cannot tell the two apart:
+
+    1. Absolute cap on the pretty-printed artifact. Justification for the
+       2.15MB -> 2.40MB bump (2026-09-29): the artifact crossed the old cap
+       because the SYMBOL count grew (3,788 symbols / 4,288 entities over 356
+       files, 23 modules) — the Strategy-Lab feature work added product code,
+       not narrative. Regeneration was tried first (option (a) of the finding)
+       and produced a LARGER, valid artifact (2,306,560 B), so the cap moved
+       instead. `python scripts/repo_graph.py --stats` prints graph_bytes.
+    2. Per-entity budget + a max-string-length budget. These are what make the
+       cap safe to raise: prose pasted into any field would blow the string
+       budget long before it filled the entity budget, so a future dump cannot
+       hide behind a bigger absolute number.
+    """
     text = (ROOT / "90_brain" / "repo_graph.json").read_text(encoding="utf-8")
     assert "INSERT OR IGNORE" not in text
-    # Cap tracks legitimate symbol growth only (2.10MB crossed by the
-    # Strategy-Lab wiring feature, 2.00MB before that by merged feature
-    # files — never prose); a prose dump would exceed this by far.
-    assert len(text.encode("utf-8")) < 2_150_000
+    graph = json.loads(text)
+    size = len(text.encode("utf-8"))
+    assert size < 2_400_000, f"graph artifact grew past the cap: {size} B"
+
+    entities = graph["entity_count"]
+    assert entities > 0
+    per_entity = size / entities
+    assert per_entity < 700, (
+        f"bytes per entity jumped to {per_entity:.0f} (was ~538 at 2.15MB, "
+        "~460 at 2.00MB): the artifact is growing by something other than entities"
+    )
+
+    longest = 0
+
+    def walk(node: object) -> None:
+        nonlocal longest
+        if isinstance(node, dict):
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+        elif isinstance(node, str):
+            longest = max(longest, len(node))
+
+    walk(graph)
+    # 110 B observed (a dotted symbol path). Anything longer is narrative.
+    assert longest < 200, f"derived graph holds a {longest}-char string: prose leaked in"

@@ -294,7 +294,9 @@ fn set_dl(ui: &MarketHostWindow, d: &mdownload::DownloadView) {
         chunk: s.chunk.clone().into(),
         rows: s.rows.clone().into(),
         coverage: s.coverage.clone().into(),
-        progress_pct: s.progress_pct,
+        // Slint's `float` is f32; the view-model keeps the full f64 so the
+        // narrowing happens exactly at this UI boundary.
+        progress_pct: s.progress_pct as f32,
         progress_note: s.progress_note.clone().into(),
         perf_rows: s.perf_rows.clone().into(),
         perf_elapsed: s.perf_elapsed.clone().into(),

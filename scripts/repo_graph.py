@@ -26,6 +26,7 @@ import argparse
 import ast
 import hashlib
 import json
+import os
 import re
 import sys
 import time
@@ -38,6 +39,31 @@ POLICY_PATH = ROOT / "90_brain" / "ownership_policy.json"
 RETENTION_PATH = ROOT / "90_brain" / "language_retention.json"
 ROUTES_PATH = ROOT / "90_brain" / "task_routes.json"
 CONTRACTS_PATH = ROOT / "90_brain" / "module_contracts.md"
+
+
+def _normalise_eol(raw: bytes) -> bytes:
+    """CRLF and lone CR → LF (no other transformation)."""
+    return raw.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+
+
+def _canonical_inputs_hash() -> str:
+    """sha256 over the canonical inputs, NORMALISED for line endings.
+
+    Raw bytes are not a stable identity. A Windows checkout with
+    ``core.autocrlf=true`` reads these JSON/MD/PY inputs back with CRLF, while a
+    CI Linux checkout reads the SAME committed content with LF — so hashing raw
+    bytes made this artifact permanently report "stale" on CI no matter how
+    many times it was rebuilt on Windows. The hash answers "did the CONTENT
+    change", so EOL style must not be part of the answer: normalise CRLF/CR to
+    LF first and both platforms agree byte-for-byte.
+    """
+    parts = [
+        _normalise_eol(p.read_bytes())
+        for p in (POLICY_PATH, RETENTION_PATH, ROUTES_PATH, CONTRACTS_PATH)
+    ]
+    parts.append(_normalise_eol((SCRIPTS_DIR / "validate_imports.py").read_bytes()))
+    return hashlib.sha256(b"".join(parts)).hexdigest()
+
 
 SCHEMA_VERSION = 1
 LANGUAGES = ("RUST", "PYTHON", "RUST_SLINT")
@@ -58,7 +84,10 @@ RUST_ITEM_RE = re.compile(
     r"^(pub\s+)?(fn|struct|enum|trait|mod|type|const|static)\s+([A-Za-z_][A-Za-z0-9_]*)"
 )
 SLINT_ITEM_RE = re.compile(r"^(export\s+)?(component|struct|global)\s+([A-Za-z_][A-Za-z0-9_]*)")
-RS_USE_RE = re.compile(r"^\s*use\s+(vayren_core|vayren_shell)\b")
+# Crate-level `use`: `use vayren_core::..`, `pub use vayren_core::{..}` and the
+# indented form inside an inline `mod` block. The `::{` (multi-line re-export)
+# shape matches on its opening line, which is where the edge is declared.
+RS_USE_RE = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?use\s+(vayren_core|vayren_shell)\b")
 CONTRACT_SECTION_RE = re.compile(r"^###\s+\S+\s+Module:\s+`([^`]+)`")
 
 # Synthetic owners for paths the ownership policy does not classify by prefix.
@@ -113,7 +142,66 @@ DOMAIN_MODULE_MAP = {
     "broker": "09_broker/broker",
 }
 
-UNRESOLVED_CAP = 200
+# Cap on the `unresolved` list carried in the artifact. Truncation is REPORTED,
+# never silent: the graph records how many findings were dropped and why the cap
+# exists (a runaway list would bloat the committed artifact), and the build
+# prints a warning. Override with VAYREN_UNRESOLVED_CAP when investigating.
+UNRESOLVED_CAP_DEFAULT = 200
+
+
+def unresolved_cap() -> int:
+    """Configurable cap on recorded unresolved findings (positive int only)."""
+    raw = os.environ.get("VAYREN_UNRESOLVED_CAP", "").strip()
+    if not raw:
+        return UNRESOLVED_CAP_DEFAULT
+    try:
+        value = int(raw)
+    except ValueError:
+        print(
+            f"warn: ignoring non-numeric VAYREN_UNRESOLVED_CAP={raw!r} "
+            f"(using {UNRESOLVED_CAP_DEFAULT})",
+            file=sys.stderr,
+        )
+        return UNRESOLVED_CAP_DEFAULT
+    return value if value > 0 else UNRESOLVED_CAP_DEFAULT
+
+
+class UnresolvedNotes:
+    """Bounded recorder: keeps the first `cap` findings, counts the rest."""
+
+    def __init__(self, cap: int) -> None:
+        self.cap = cap
+        self.kept: list[dict] = []
+        self.dropped = 0
+
+    def note(self, kind: str, ref: str, reason: str) -> None:
+        if len(self.kept) < self.cap:
+            self.kept.append({"kind": kind, "ref": ref, "reason": reason})
+        else:
+            self.dropped += 1
+
+    def append(self, entry: dict) -> None:
+        """List-compatible sink: helpers record through this and stay capped."""
+        self.note(
+            str(entry.get("kind", "")),
+            str(entry.get("ref", "")),
+            str(entry.get("reason", "")),
+        )
+
+    def record(self) -> list[dict]:
+        """Cap the list and append the truncation marker when anything was cut."""
+        if self.dropped:
+            self.kept.append(
+                {
+                    "kind": "truncated",
+                    "ref": "unresolved",
+                    "reason": (
+                        f"{self.dropped} further findings not recorded: the cap is "
+                        f"{self.cap} (raise VAYREN_UNRESOLVED_CAP to see them all)"
+                    ),
+                }
+            )
+        return self.kept
 
 
 class GraphError(Exception):
@@ -241,7 +329,7 @@ def dotted_name(relpath: str) -> str:
 
 
 def parse_python_symbols(
-    relpath: str, source: str, unresolved: list[dict]
+    relpath: str, source: str, unresolved: list[dict] | UnresolvedNotes
 ) -> tuple[list[dict], dict[str, str], dict[str, dict]]:
     """Top-level classes/functions + intra-file alias map + raw call refs."""
     try:
@@ -517,11 +605,10 @@ def normalize_route_dep(raw: str, modules: list[str]) -> str | None:
 
 def build_graph() -> tuple[dict, list[dict]]:
     started = time.perf_counter()
-    unresolved: list[dict] = []
+    unresolved = UnresolvedNotes(unresolved_cap())
 
     def note(kind: str, ref: str, reason: str) -> None:
-        if len(unresolved) < UNRESOLVED_CAP:
-            unresolved.append({"kind": kind, "ref": ref, "reason": reason})
+        unresolved.note(kind, ref, reason)
 
     policy = _read_json(POLICY_PATH, "ownership policy")
     retention = _read_json(RETENTION_PATH, "language retention")
@@ -909,11 +996,7 @@ def build_graph() -> tuple[dict, list[dict]]:
         key=lambda v: v["path"],
     )
 
-    canonical_bytes = (
-        b"".join(p.read_bytes() for p in (POLICY_PATH, RETENTION_PATH, ROUTES_PATH, CONTRACTS_PATH))
-        + (SCRIPTS_DIR / "validate_imports.py").read_bytes()
-    )
-    inputs_hash = hashlib.sha256(canonical_bytes).hexdigest()
+    inputs_hash = _canonical_inputs_hash()
 
     entity_count, relationship_count = graph_counts(
         len(domains),
@@ -942,7 +1025,7 @@ def build_graph() -> tuple[dict, list[dict]]:
         "drift": drift,
         "tests": sorted(tests, key=lambda t: t["path"]),
         "validators": validators,
-        "unresolved": sorted(unresolved, key=lambda u: (u["kind"], u["ref"])),
+        "unresolved": sorted(unresolved.record(), key=lambda u: (u["kind"], u["ref"])),
     }
     elapsed_ms = (time.perf_counter() - started) * 1000.0
     return graph, [{"kind": "build", "elapsed_ms": round(elapsed_ms, 1)}]
@@ -1128,6 +1211,9 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(report, indent=2, sort_keys=True))
         if graph["unresolved"]:
             print(f"unresolved: {len(graph['unresolved'])} (see graph.unresolved)")
+        for entry in graph["unresolved"]:
+            if entry.get("kind") == "truncated":
+                print(f"warn: {entry['reason']}", file=sys.stderr)
         return 0
     if args.query:
         if not args.name:

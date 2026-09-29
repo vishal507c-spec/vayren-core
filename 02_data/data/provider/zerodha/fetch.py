@@ -46,10 +46,16 @@ class FetchEngine:
 
             except Exception as exc:
                 msg = str(exc)
-                if "TokenException" in msg or "invalid" in msg.lower():
+                lowered = msg.lower()
+                token_dead = (
+                    "TokenException" in msg
+                    or "token expired" in lowered
+                    or "invalid token" in lowered
+                )
+                if token_dead:
                     log.error(f"[Fetch] Token expired chunk={chunk_num}: {exc}")
                     return TOKEN_EXPIRED
-                if "429" in msg or "rate" in msg.lower():
+                if "429" in msg or "too many requests" in lowered or "rate limit" in lowered:
                     self._consec_429 += 1
                     if self._consec_429 >= self._settings.max_consecutive_429:
                         log.error(
@@ -57,7 +63,7 @@ class FetchEngine:
                             f"({self._consec_429} consecutive 429 errors)."
                         )
                         return RATE_LIMITED
-                    time.sleep(self._settings.retry_delay_s * (2**attempt))
+                    time.sleep(min(self._settings.retry_delay_s * (2**attempt), 60))
                     continue
                 self._consec_429 = 0
                 wait = self._settings.retry_delay_s * attempt
@@ -66,5 +72,9 @@ class FetchEngine:
                     time.sleep(wait)
                 else:
                     log.error(f"[Fetch] All retries exhausted chunk={chunk_num}.")
-                    return []
-        return []
+                    from data.provider.contract import ProviderError
+
+                    raise ProviderError(f"fetch failed after {attempt} attempts: {exc}") from exc
+        from data.provider.contract import ProviderError
+
+        raise ProviderError("fetch failed: retries exhausted")

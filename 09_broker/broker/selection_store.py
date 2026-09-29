@@ -16,6 +16,7 @@ and carry no secret values — the schema has no field for them.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import tempfile
@@ -49,7 +50,7 @@ class FileSelectionStore:
             return None
         try:
             raw = json.loads(self._path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
             raise SelectionLoadError(f"selection file unreadable: {exc}") from exc
         if not isinstance(raw, dict):
             raise SelectionLoadError("selection file must contain a JSON object")
@@ -89,11 +90,24 @@ class FileSelectionStore:
             json.dump(payload, handle, indent=2)
             handle.flush()
             os.fsync(handle.fileno())
-            handle.close()
+        finally:
+            with contextlib.suppress(OSError):
+                handle.close()
+        try:
             os.replace(handle.name, self._path)
         except OSError:
             Path(handle.name).unlink(missing_ok=True)
             raise
+        try:
+            dir_fd = os.open(self._path.parent, os.O_RDONLY)
+        except OSError:
+            return
+        try:
+            os.fsync(dir_fd)
+        except OSError:
+            pass
+        finally:
+            os.close(dir_fd)
 
     def clear(self) -> None:
         """Remove the selection file (absent file is already cleared)."""

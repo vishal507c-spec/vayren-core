@@ -7,9 +7,10 @@ classified by rules, validated, and converted into a structured ``Intent``.
 from dataclasses import dataclass
 from enum import Enum
 
-# DEBT: retained unwired imports (see 90_brain/ai_memory.md).
-from core.contracts.capability import CapabilityId  # pyright: ignore[reportMissingImports]
-from core.system.change_impact import RiskLevel  # pyright: ignore[reportMissingImports]
+# Vocabulary lives behind core.ai._vocab: canonical core.contracts /
+# core.system modules win when they land; local fallbacks keep the Python-owned
+# AI layer importable until then.
+from core.ai._vocab import CapabilityId, RiskLevel
 
 
 class IntentKind(Enum):
@@ -55,8 +56,16 @@ class IntentValidationResult:
 
 
 def classify(goal: str) -> IntentKind:
-    """Classify a free-text goal by deterministic keyword rules."""
+    """Classify a free-text goal by deterministic keyword rules.
+
+    Rule order is the contract (first match wins): workflow before
+    performance before data-source before strategy before the generic
+    add/create catch-all. An empty goal classifies as OTHER here — emptiness
+    is a validation error, not a classification crash (see `validate_intent`).
+    """
     text = goal.lower().strip()
+    if not text:
+        return IntentKind.OTHER
     if "workflow" in text:
         return IntentKind.CREATE_WORKFLOW
     if any(word in text for word in ("performance", "latency", "faster", "slow")):

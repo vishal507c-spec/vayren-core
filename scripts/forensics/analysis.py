@@ -14,7 +14,6 @@ MISSING = "UNKNOWN"
 
 ACTION_READ = {"read_file", "read_dir", "read_doc", "inspect_file", "inspect_dir"}
 ACTION_SEARCH = {"search", "search_files", "search_symbol", "search_refs", "grep"}
-ACTION_WRITE = {"edit_file", "write_file", "create_file", "delete_file"}
 
 
 @dataclass

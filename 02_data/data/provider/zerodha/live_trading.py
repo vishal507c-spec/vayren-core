@@ -70,8 +70,10 @@ class BrokerError(RuntimeError):
 
 
 def _redact(text: str) -> str:
-    """Secrets never leave this module in readable form."""
-    return str(text or "")
+    """Secrets never leave this module in readable form (full redaction)."""
+    if not text:
+        return ""
+    return "••••"
 
 
 class ZerodhaTradingAdapter:

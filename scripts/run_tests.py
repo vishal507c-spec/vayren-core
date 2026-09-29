@@ -34,7 +34,9 @@ ROOT = Path(__file__).resolve().parent.parent
 # scripts/tests/test_gate_coverage.py only when they gain test files.
 PARTS = (
     "00_app/app/tests",
+    "01_core/core/tests",
     "02_data/data/tests",
+    "03_market/market/tests",
     "05_strategy/strategy/tests",
     "09_broker/broker/tests",
     "scripts/forensics/tests",

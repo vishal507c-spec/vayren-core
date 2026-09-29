@@ -76,10 +76,14 @@ def test_resolve_prefers_env_and_falls_back(
     monkeypatch.setenv("VAYREN_DATA_DIR", str(tmp_path))
     assert resolve_data_dir() == tmp_path
     assert resolve_data_dir(tmp_path) == tmp_path
-    # A missing explicit dir never crashes resolution: the next usable
-    # candidate (env, then legacy, then default) wins instead.
+    # A missing EXPLICIT dir fails closed: silently serving a different store's
+    # candles (env/legacy/home) is the worse bug — a typo'd --data-dir must
+    # never answer with someone else's data.
     monkeypatch.delenv("VAYREN_DATA_DIR")
-    assert resolve_data_dir(tmp_path / "missing-dir-xyz") != (tmp_path / "missing-dir-xyz")
+    with pytest.raises(MarketDataError):
+        resolve_data_dir(tmp_path / "missing-dir-xyz")
+    # With no explicit dir the fallback chain still resolves.
+    assert resolve_data_dir() != (tmp_path / "missing-dir-xyz")
 
 
 def test_discovery_lists_real_symbols_and_skips_invalid(store: Path) -> None:

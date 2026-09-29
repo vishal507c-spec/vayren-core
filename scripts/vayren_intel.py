@@ -586,8 +586,6 @@ def verify_store() -> dict:
 MIN_TREND_POINTS = 3
 MEANINGFUL_PCT = 5.0
 
-TREND_LABELS = ("TREND_UP", "TREND_DOWN", "STABLE", "VARIABLE", "INSUFFICIENT")
-
 
 def _series_points() -> dict[str, list[dict]]:
     """Extract comparable numeric series from real history (no fabrication).

@@ -46,12 +46,17 @@ class SmaCrossover(PythonStrategy):
     def on_bar_logic(self, view: BarView) -> None:
         fast_period = int(self.params.get("fast_period", 10))
         slow_period = int(self.params.get("slow_period", 30))
+        if fast_period >= slow_period:
+            raise ValueError(f"fast_period ({fast_period}) must be < slow_period ({slow_period})")
         min_volume = float(self.params.get("min_volume", 0))
-        if min_volume > 0 and view.bar.volume < min_volume:
-            # Skip thin bars: history (base) still records them, prev state untouched.
-            return None
         fast = calc_sma(self.closes, fast_period)
         slow = calc_sma(self.closes, slow_period)
+        if min_volume > 0 and view.bar.volume < min_volume:
+            # Thin bar: no signal, but prev tracks the current values so the
+            # next real bar compares against fresh state (no gap-cross).
+            self.prev_fast = fast
+            self.prev_slow = slow
+            return None
         prev_fast = self.prev_fast
         prev_slow = self.prev_slow
         # First bar: init prev (both are always set together)

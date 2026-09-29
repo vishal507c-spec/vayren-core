@@ -1,5 +1,6 @@
 """StrategyDefinition — immutable description of a registered strategy."""
 
+import math
 from dataclasses import dataclass
 
 from strategy.models.parameters import StrategyParameters
@@ -31,6 +32,21 @@ class StrategyDefinition:
     params: StrategyParameters
     allocation_pct: float = 100.0
     enabled: bool = True
+
+    def __post_init__(self) -> None:
+        """Reject empty identity fields and out-of-range allocations."""
+        for field_name in ("id", "name", "kind"):
+            value = getattr(self, field_name)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"StrategyDefinition {field_name} must be a non-empty string")
+        try:
+            allocation = float(self.allocation_pct)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"allocation_pct must be a number, got {self.allocation_pct!r}"
+            ) from exc
+        if not math.isfinite(allocation) or not 0.0 <= allocation <= 100.0:
+            raise ValueError(f"allocation_pct must be within [0, 100], got {allocation!r}")
 
     def with_params(self, params: StrategyParameters) -> "StrategyDefinition":
         """Return a copy with replaced parameters."""

@@ -53,18 +53,28 @@ class EmaCrossover(PythonStrategy):
         self._slow: float | None = None
         self._prev_fast: float | None = None
         self._prev_slow: float | None = None
+        self._bars_seen: int = 0
 
     def on_bar_logic(self, view: BarView) -> None:
         fast_period = int(self.params.get("fast_period", 12))
         slow_period = int(self.params.get("slow_period", 26))
+        if fast_period >= slow_period:
+            raise ValueError(f"fast_period ({fast_period}) must be < slow_period ({slow_period})")
         min_volume = float(self.params.get("min_volume", 0))
-        if min_volume > 0 and view.bar.volume < min_volume:
-            return None
+        self._bars_seen += 1
         self._fast = calc_ema(self._fast, view.bar.close, fast_period)
         self._slow = calc_ema(self._slow, view.bar.close, slow_period)
         prev_fast, prev_slow = self._prev_fast, self._prev_slow
         self._prev_fast, self._prev_slow = self._fast, self._slow
         if prev_fast is None or prev_slow is None:
+            return None
+        if min_volume > 0 and view.bar.volume < min_volume:
+            # Thin bar: EMAs (and prev) already advanced above, so state stays
+            # gap-free — only signal emission is suppressed.
+            return None
+        if self._bars_seen < slow_period:
+            # Both EMAs are still seeding from the first close; a cross here
+            # is startup noise, not a trend change.
             return None
         if self._fast > self._slow and prev_fast <= prev_slow:
             self.buy()

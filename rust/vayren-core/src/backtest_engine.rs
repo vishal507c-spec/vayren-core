@@ -168,7 +168,12 @@ pub fn execute_bars(
                 }
             }
         } else {
-            let view = positions.open_position().expect("checked non-flat above");
+            // Fail-closed: `!flat()` says a position exists, but the accessor
+            // is the only authority on what it IS. If they ever disagree, skip
+            // the bar rather than abort a multi-hour replay with a panic.
+            let Some(view) = positions.open_position() else {
+                continue;
+            };
             if closes_on_signal(view.side, signal.kind == SignalKind::Buy) {
                 let fill_price = slipped_exit_price(view.side, bar.close, config.slippage_pct);
                 if let Some(trade) = positions.close_signal(
@@ -186,7 +191,9 @@ pub fn execute_bars(
 
     if !positions.flat() && !bars.is_empty() {
         let last = &bars[bars.len() - 1];
-        let view = positions.open_position().expect("checked non-flat above");
+        let Some(view) = positions.open_position() else {
+            return journal.into_trades();
+        };
         let last_price = slipped_exit_price(view.side, last.close, config.slippage_pct);
         if let Some(trade) = positions.close_end(
             bars.len() - 1,

@@ -33,10 +33,21 @@ def _candidate_names() -> tuple[str, ...]:
 
 def find_library() -> Path:
     """Locate the built cdylib. Env `VAYREN_NATIVE_LIB` wins; otherwise the
-    release (then debug) target dir of the repo `rust/` workspace."""
-    override = os.environ.get("VAYREN_NATIVE_LIB", "").strip()
+    release (then debug) target dir of the repo `rust/` workspace.
+
+    A relative `VAYREN_NATIVE_LIB` is resolved against the process working
+    directory (``os.path.abspath``), so callers must not depend on it across
+    ``chdir``; ``~`` is expanded. A blank-but-present value (whitespace only)
+    is a configuration error and raises `ValueError`.
+    """
+    raw = os.environ.get("VAYREN_NATIVE_LIB", "")
+    if raw != "" and not raw.strip():
+        raise ValueError(
+            "VAYREN_NATIVE_LIB is blank (whitespace only); unset it or point it at a file"
+        )
+    override = raw.strip()
     if override:
-        path = Path(override)
+        path = Path(os.path.abspath(os.path.expanduser(override)))
         if path.is_file():
             return path
         raise NativeBridgeError(f"VAYREN_NATIVE_LIB points at a missing file: {override!r}")
@@ -53,49 +64,55 @@ def find_library() -> Path:
 
 
 def _configure(lib: ctypes.CDLL) -> ctypes.CDLL:
-    lib.vy_abi_version.restype = ctypes.c_uint32
-    lib.vy_abi_version.argtypes = []
-    lib.vy_order_state_count.restype = ctypes.c_int32
-    lib.vy_order_state_count.argtypes = []
-    lib.vy_order_transition_allowed.restype = ctypes.c_int32
-    lib.vy_order_transition_allowed.argtypes = [ctypes.c_int32, ctypes.c_int32]
-    lib.vy_order_is_terminal.restype = ctypes.c_int32
-    lib.vy_order_is_terminal.argtypes = [ctypes.c_int32]
-    lib.vy_order_transitions.restype = ctypes.c_uint32
-    lib.vy_order_transitions.argtypes = [ctypes.POINTER(ctypes.c_uint32), ctypes.c_uint32]
-    lib.vy_order_terminal_states.restype = ctypes.c_uint32
-    lib.vy_order_terminal_states.argtypes = [
-        ctypes.POINTER(ctypes.c_int32),
-        ctypes.c_uint32,
-    ]
-    lib.vy_max_drawdown.restype = None
-    lib.vy_max_drawdown.argtypes = [
-        ctypes.POINTER(ctypes.c_double),
-        ctypes.c_size_t,
-        ctypes.POINTER(ctypes.c_double),
-        ctypes.POINTER(ctypes.c_double),
-    ]
-    lib.vy_equity_curve.restype = ctypes.c_size_t
-    lib.vy_equity_curve.argtypes = [
-        ctypes.c_double,
-        ctypes.POINTER(ctypes.c_double),
-        ctypes.c_size_t,
-        ctypes.POINTER(ctypes.c_double),
-    ]
-    lib.vy_sharpe.restype = ctypes.c_int32
-    lib.vy_sharpe.argtypes = [
-        ctypes.POINTER(ctypes.c_double),
-        ctypes.POINTER(ctypes.c_double),
-        ctypes.c_size_t,
-        ctypes.c_double,
-        ctypes.POINTER(ctypes.c_double),
-    ]
-    lib.vy_mode.restype = ctypes.c_int32
-    lib.vy_mode.argtypes = [
-        ctypes.POINTER(ctypes.c_int64),
-        ctypes.c_size_t,
-        ctypes.POINTER(ctypes.c_int64),
-    ]
+    try:
+        lib.vy_abi_version.restype = ctypes.c_uint32
+        lib.vy_abi_version.argtypes = []
+        lib.vy_order_state_count.restype = ctypes.c_int32
+        lib.vy_order_state_count.argtypes = []
+        lib.vy_order_transition_allowed.restype = ctypes.c_int32
+        lib.vy_order_transition_allowed.argtypes = [ctypes.c_int32, ctypes.c_int32]
+        lib.vy_order_is_terminal.restype = ctypes.c_int32
+        lib.vy_order_is_terminal.argtypes = [ctypes.c_int32]
+        lib.vy_order_transitions.restype = ctypes.c_uint32
+        lib.vy_order_transitions.argtypes = [ctypes.POINTER(ctypes.c_uint32), ctypes.c_uint32]
+        lib.vy_order_terminal_states.restype = ctypes.c_uint32
+        lib.vy_order_terminal_states.argtypes = [
+            ctypes.POINTER(ctypes.c_int32),
+            ctypes.c_uint32,
+        ]
+        lib.vy_max_drawdown.restype = None
+        lib.vy_max_drawdown.argtypes = [
+            ctypes.POINTER(ctypes.c_double),
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.c_double),
+            ctypes.POINTER(ctypes.c_double),
+        ]
+        lib.vy_equity_curve.restype = ctypes.c_size_t
+        lib.vy_equity_curve.argtypes = [
+            ctypes.c_double,
+            ctypes.POINTER(ctypes.c_double),
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.c_double),
+        ]
+        lib.vy_sharpe.restype = ctypes.c_int32
+        lib.vy_sharpe.argtypes = [
+            ctypes.POINTER(ctypes.c_double),
+            ctypes.POINTER(ctypes.c_double),
+            ctypes.c_size_t,
+            ctypes.c_double,
+            ctypes.POINTER(ctypes.c_double),
+        ]
+        lib.vy_mode.restype = ctypes.c_int32
+        lib.vy_mode.argtypes = [
+            ctypes.POINTER(ctypes.c_int64),
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.c_int64),
+        ]
+    except AttributeError as exc:
+        raise NativeBridgeError(
+            f"native library is missing a required core export ({exc}); "
+            "rebuild: `python scripts/build_rust.py`"
+        ) from exc
     if hasattr(lib, "vy_exec_arm_transition"):
         lib.vy_exec_arm_transition.restype = ctypes.c_int32
         lib.vy_exec_arm_transition.argtypes = [ctypes.c_int32, ctypes.c_int32]
@@ -475,14 +492,14 @@ def load_vayren_core() -> ctypes.CDLL:
         lib = _configure(ctypes.CDLL(str(path)))
     except OSError as exc:
         raise NativeBridgeError(f"cannot load Rust native library {path}: {exc}") from exc
-    if lib.vy_abi_version() != ABI_VERSION:
+    if (version := int(lib.vy_abi_version())) != ABI_VERSION:
         raise NativeBridgeError(
-            f"native ABI mismatch at {path}: library={lib.vy_abi_version()} "
+            f"native ABI mismatch at {path}: library={version} "
             f"expected={ABI_VERSION} (rebuild: `python scripts/build_rust.py`)"
         )
-    if lib.vy_order_state_count() != ORDER_STATE_COUNT:
+    if (state_count := int(lib.vy_order_state_count())) != ORDER_STATE_COUNT:
         raise NativeBridgeError(
             f"native order-state vocabulary drift at {path}: "
-            f"library={lib.vy_order_state_count()} expected={ORDER_STATE_COUNT}"
+            f"library={state_count} expected={ORDER_STATE_COUNT}"
         )
     return lib

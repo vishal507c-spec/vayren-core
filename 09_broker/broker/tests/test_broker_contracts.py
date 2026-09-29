@@ -9,8 +9,10 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-BROKER_DIR = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(BROKER_DIR))
+ROOT = Path(__file__).resolve().parent.parent.parent.parent
+for entry in ("09_broker",):
+    if str(ROOT / entry) not in sys.path:
+        sys.path.insert(0, str(ROOT / entry))
 
 import pytest  # noqa: E402
 
@@ -191,16 +193,24 @@ def test_static_plugin_validation() -> None:
 
 
 def _record(name: str, domains: tuple[Domain, ...] = (Domain.TRADING,)) -> BrokerRecord:
+    # Faces vs capabilities stay consistent: every served domain advertises
+    # at least one of its items (BrokerRecord rejects split-brain records).
+    if Domain.TRADING in domains:
+        caps = trading_set_from_legacy(("orders.market",))
+        face_map: dict[Domain, object] = {Domain.TRADING: _FakeTrading()}
+    else:
+        caps = capability_set({Domain.HISTORICAL_DATA: (Caps.HIST_CANDLES,)})
+        face_map = {Domain.HISTORICAL_DATA: _FakeTrading()}
     return BrokerRecord(
         name=name,
         display_name=name.title(),
         plugin=StaticPlugin(
             name=name,
             display_name=name.title(),
-            face_map={Domain.TRADING: _FakeTrading()},
-            capabilities=trading_set_from_legacy(("orders.market",)),
+            face_map=face_map,
+            capabilities=caps,
         ),
-        capabilities=trading_set_from_legacy(("orders.market",)),
+        capabilities=caps,
         faces=domains,
     )
 
@@ -212,8 +222,13 @@ def test_registry_register_get_list_find() -> None:
     assert registry.names() == ("alpha", "beta")  # sorted, order independent
     assert registry.get("beta").name == "beta"
     assert "beta" in registry and "gamma" not in registry
-    assert [r.name for r in registry.find_with(Caps.ORDERS_MARKET)] == ["alpha", "beta"]
+    # Consistency fix: "alpha" serves history (history caps), so only "beta"
+    # advertises ORDERS_MARKET — find_with follows advertised caps, not faces.
+    assert [r.name for r in registry.find_with(Caps.ORDERS_MARKET)] == ["beta"]
+    assert [r.name for r in registry.find_with(Caps.HIST_CANDLES)] == ["alpha"]
     assert [r.name for r in registry.find_with_domain(Domain.HISTORICAL_DATA)] == ["alpha"]
+    # __iter__ yields records (not names), name-sorted like list().
+    assert [r.name for r in registry] == ["alpha", "beta"]
 
 
 def test_registry_duplicate_registration_fails_closed() -> None:
@@ -242,6 +257,25 @@ def test_registry_record_validation() -> None:
             plugin=object(),  # type: ignore[arg-type]
             capabilities=CapabilitySet(),
             faces=(),
+        )
+
+
+def test_registry_record_rejects_faces_without_capabilities() -> None:
+    """Faces vs capabilities split-brain: a served domain with zero advertised
+    items fails closed (every face needs at least one cap item)."""
+    trading_caps = trading_set_from_legacy(("orders.market",))
+    with pytest.raises(ValueError, match="split-brain"):
+        BrokerRecord(
+            name="split",
+            display_name="Split",
+            plugin=StaticPlugin(
+                name="split",
+                display_name="Split",
+                face_map={Domain.TRADING: _FakeTrading()},
+                capabilities=trading_caps,
+            ),
+            capabilities=trading_caps,
+            faces=(Domain.TRADING, Domain.MARKET_DATA),
         )
 
 

@@ -9,6 +9,8 @@ policy lives here — the gate answers, the engine decides what to do with it.
 
 from __future__ import annotations
 
+import ctypes
+
 from core.native.loader import NativeBridgeError, load_vayren_core
 
 _lib = load_vayren_core()
@@ -27,6 +29,26 @@ if _missing_exports:
         f"native library has no risk session kernel ({', '.join(_missing_exports)}). "
         "Rebuild: `python scripts/build_rust.py`"
     )
+
+# Bound lengths are `c_int64` because `-1` is the absent (`None`) sentinel;
+# plain `c_char_p` slots accept `None` as NULL (loader `_configure_risk_session`
+# pattern: native_engine.py declares the same way at import).
+_lib.vy_risk_within_session.argtypes = [
+    ctypes.c_char_p,
+    ctypes.c_int64,
+    ctypes.c_char_p,
+    ctypes.c_int64,
+    ctypes.c_char_p,
+    ctypes.c_int64,
+]
+_lib.vy_risk_within_session.restype = ctypes.c_int32
+_lib.vy_risk_clock_sane.argtypes = [
+    ctypes.c_char_p,
+    ctypes.c_int64,
+    ctypes.c_double,
+    ctypes.c_double,
+]
+_lib.vy_risk_clock_sane.restype = ctypes.c_int32
 
 
 def _encode(value: str, what: str) -> bytes:

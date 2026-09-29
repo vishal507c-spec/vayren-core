@@ -88,10 +88,20 @@ BRIDGE_IMPORT_EXCEPTIONS = {
 }
 
 # Module-level map names that may only live in the canonical registry file.
-REGISTRY_MAP_PATTERN = re.compile(r"(REGISTRY|_PROVIDERS|_ADAPTERS|_PLUGINS|_VENUES)$")
+# Case-insensitive: `venue_registry`, `Venue_Registry` and `VENUE_REGISTRY` are
+# the same shadow-map shape, and only the last spelling used to be caught.
+REGISTRY_MAP_PATTERN = re.compile(r"(REGISTRY|_PROVIDERS|_ADAPTERS|_PLUGINS|_VENUES)$", re.I)
 REGISTRY_MAP_OWNER = "09_broker/broker/registry.py"
 
-# Forbidden imports/calls inside */native_*.py bridges.
+# Authority tables that live in RUST. A module-level store of one of these
+# names in Python is a second authority (the exact failure a duplicated
+# TRANSITIONS-style order-state table would be) -> HARD FAIL.
+MIGRATED_TABLE_AUTHORITIES = {
+    "TRANSITIONS": "rust/vayren-core/src/order_state.rs",
+    "TERMINAL_STATES": "rust/vayren-core/src/order_state.rs",
+}
+
+# Forbidden imports/calls inside the FFI boundary.
 BRIDGE_DENIED_MODULES = {
     "socket",
     "subprocess",
@@ -103,7 +113,28 @@ BRIDGE_DENIED_MODULES = {
     "websocket",
     "urllib",
 }
-BRIDGE_DENIED_CALLS = {"open", "socket", "Popen", "urlopen"}
+# Bare names match on the final attribute too (`Popen`, `os.system`); qualified
+# names (`os.system`, `subprocess.popen`) match the full dotted call so
+# unrelated stdlib calls such as `platform.system()` stay legal.
+BRIDGE_DENIED_CALLS = {
+    "open",
+    "socket",
+    "Popen",
+    "urlopen",
+    "eval",
+    "exec",
+    "__import__",
+    "os.system",
+    "os.popen",
+    "subprocess.popen",
+    "subprocess.check_output",
+    "commands.getoutput",
+}
+
+# Content markers that make a file an FFI boundary even when it is not named
+# `native_*` (e.g. a bridge renamed, or the cdylib loader package itself).
+BRIDGE_CONTENT_MODULES = {"ctypes", "cffi"}
+BRIDGE_CONTENT_DOTTED = ("core.native",)
 
 # UI token authority: hex color literals live ONLY here.
 PALETTE_FILE = "rust/vayren-shell/ui/palette.slint"
@@ -295,8 +326,40 @@ def check_registries(files: dict[str, str]) -> list[AuthorityViolation]:
     return out
 
 
+def _module_level_targets(tree: ast.AST) -> set[str]:
+    """UPPER_CASE names stored at module level (the table-authority shape).
+
+    A domain authority expressed as a constant table (`TRANSITIONS = {...}`) is
+    invisible to a def/class scan, which is how a duplicated table slips past
+    the single-authority rule. Only module level counts: a same-named local
+    inside a function is not an authority.
+    """
+    if not isinstance(tree, ast.Module):
+        return set()
+    names: set[str] = set()
+    for node in tree.body:
+        targets: list[ast.expr] = []
+        if isinstance(node, ast.Assign):
+            targets = list(node.targets)
+        elif isinstance(node, ast.AnnAssign):
+            targets = [node.target]
+        for target in targets:
+            if (
+                isinstance(target, ast.Name)
+                and target.id.isupper()
+                and any(char.isalpha() for char in target.id)
+            ):
+                names.add(target.id)
+    return names
+
+
 def check_authorities(files: dict[str, str]) -> list[AuthorityViolation]:
-    """One canonical definition site per authority symbol (§3 output format)."""
+    """One canonical definition site per authority symbol (§3 output format).
+
+    Two shapes are collected, because an authority can be either: a class/def
+    (`BrokerRegistry`) and a module-level UPPER_CASE table (`TRANSITIONS`). A
+    second site for either shape is a duplicate authority.
+    """
     out: list[AuthorityViolation] = []
     sites: dict[str, list[str]] = {}
     for rel, source in files.items():
@@ -311,6 +374,8 @@ def check_authorities(files: dict[str, str]) -> list[AuthorityViolation]:
                 and node.name in AUTHORITIES
             ):
                 sites.setdefault(node.name, []).append(rel)
+        for name in _module_level_targets(tree) & set(AUTHORITIES):
+            sites.setdefault(name, []).append(rel)
     for name, canonical in AUTHORITIES.items():
         found = sorted(set(sites.get(name, [])))
         if not found:
@@ -335,6 +400,28 @@ def check_authorities(files: dict[str, str]) -> list[AuthorityViolation]:
                     reason="same authority implemented in multiple files",
                     canonical=canonical,
                     fix=f"keep exactly one implementation in {canonical}",
+                )
+            )
+    for rel, source in files.items():
+        if _is_test(rel):
+            continue
+        tree = _parse(source)
+        if tree is None:
+            continue
+        for name in sorted(_module_level_targets(tree) & set(MIGRATED_TABLE_AUTHORITIES)):
+            out.append(
+                AuthorityViolation(
+                    rule="duplicate-table-authority",
+                    domain="AUTHORITY",
+                    file=rel,
+                    symbol=name,
+                    reason=(
+                        "authority table redefined in Python; the table is owned by the Rust kernel"
+                    ),
+                    canonical=MIGRATED_TABLE_AUTHORITIES[name],
+                    fix=(
+                        f"read {name} through the FFI projection instead of restating it in Python"
+                    ),
                 )
             )
     return out
@@ -423,17 +510,59 @@ def check_contracts(files: dict[str, str]) -> list[AuthorityViolation]:
     return out
 
 
+def _dotted(func: ast.expr) -> str:
+    """Dotted call target (`os.system`, `subprocess.check_output`, `open`)."""
+    if isinstance(func, ast.Attribute):
+        base = _dotted(func.value)
+        return f"{base}.{func.attr}" if base else func.attr
+    if isinstance(func, ast.Name):
+        return func.id
+    return ""
+
+
+def _denied_call(func: ast.expr) -> str | None:
+    """Denied FFI-boundary call, matched on the full dotted name or its tail."""
+    name = _dotted(func)
+    if not name:
+        return None
+    if name in BRIDGE_DENIED_CALLS or name.rsplit(".", 1)[-1] in BRIDGE_DENIED_CALLS:
+        return name
+    return None
+
+
+def _is_bridge(rel: str, tree: ast.AST) -> bool:
+    """Content-based FFI-boundary test: name convention OR an FFI import.
+
+    A bridge renamed away from `native_*` (or the cdylib loader package) still
+    imports ctypes/cffi or reaches `core.native`; the filename alone let those
+    escape the boundary rules entirely.
+    """
+    if Path(rel).name.startswith("native_"):
+        return True
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            if any(alias.name.split(".")[0] in BRIDGE_CONTENT_MODULES for alias in node.names):
+                return True
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            if module.split(".")[0] in BRIDGE_CONTENT_MODULES:
+                return True
+            if any(module.startswith(prefix) for prefix in BRIDGE_CONTENT_DOTTED):
+                return True
+    return False
+
+
 def check_bridges(files: dict[str, str]) -> list[AuthorityViolation]:
-    """native_* bridges: restricted imports, no IO/threading/network."""
+    """FFI boundaries: restricted imports, no IO/threading/network/exec."""
     out: list[AuthorityViolation] = []
     stdlib = set(sys.stdlib_module_names)
     for rel, source in files.items():
         if _is_test(rel) or Path(rel).name.startswith("test_"):
             continue
-        if Path(rel).name.startswith("native_") is False:
-            continue
         tree = _parse(source)
         if tree is None:
+            continue
+        if not _is_bridge(rel, tree):
             continue
         chapter = rel.split("/")[0]
         own_package = CHAPTER_PACKAGE.get(chapter, "")
@@ -482,10 +611,7 @@ def check_bridges(files: dict[str, str]) -> list[AuthorityViolation]:
                     if alias.name.split(".")[0] in BRIDGE_DENIED_MODULES:
                         bad = alias.name
             elif isinstance(node, ast.Call):
-                func = node.func
-                name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
-                if name in BRIDGE_DENIED_CALLS:
-                    bad = name
+                bad = _denied_call(node.func)
             if bad:
                 out.append(
                     AuthorityViolation(
@@ -493,7 +619,7 @@ def check_bridges(files: dict[str, str]) -> list[AuthorityViolation]:
                         domain="BRIDGE",
                         file=rel,
                         symbol=str(bad),
-                        reason="IO/threading/network inside the FFI boundary",
+                        reason="IO/threading/network/exec inside the FFI boundary",
                         canonical="pure marshal-delegate-return",
                         fix="move IO out of the bridge into the owning domain",
                     )

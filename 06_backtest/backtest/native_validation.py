@@ -38,12 +38,18 @@ MESSAGES: tuple[str, ...] = (
 
 
 def pack_env(form: BacktestForm, symbol: str | None, enabled_ids: set[str]) -> dict[str, Any]:
-    """Marshal the form to kernel scalars with the exact original semantics."""
+    """Marshal the form to kernel scalars with the exact original semantics.
+
+    Whitespace-only symbols/timeframes are empty (stripped, like the symbol
+    check always was); non-string values are not-ok verdicts, never
+    `AttributeError` — the kernel decides validity, this only packs honestly.
+    """
     max_cap = form.max_position_size
+    timeframe = form.timeframe
     return {
-        "symbol_ok": 0 if (symbol is None or not symbol.strip()) else 1,
+        "symbol_ok": 0 if (not isinstance(symbol, str) or not symbol.strip()) else 1,
         "strategy_ok": (0 if (not form.strategy_id or form.strategy_id not in enabled_ids) else 1),
-        "timeframe_ok": 0 if not form.timeframe else 1,
+        "timeframe_ok": 0 if (not isinstance(timeframe, str) or not timeframe.strip()) else 1,
         "dates_ordered": 0 if form.start_date > form.end_date else 1,
         "initial_capital": float(form.initial_capital),
         "has_cap": 0 if max_cap is None else 1,

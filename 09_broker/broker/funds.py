@@ -43,10 +43,15 @@ FUNDS_EQUITY = "equity"
 _REQUIRED_KEYS: tuple[str, str, str] = (FUNDS_AVAILABLE, FUNDS_USED, FUNDS_EQUITY)
 
 
-def _check_money(name: str, value: object) -> float:
-    """Validate one monetary field; returns it as float. Rejects bool/NaN/inf/negative."""
+def _check_money(name: str, value: object) -> float | None:
+    """Validate one monetary field; `None` (UNKNOWN partial) passes through.
+
+    Returns the value as float. Rejects bool/NaN/inf/negative.
+    """
+    if value is None:
+        return None
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"funds field {name!r} must be a number, got {value!r}")
+        raise ValueError(f"funds field {name!r} must be a number or None, got {value!r}")
     amount = float(value)
     if math.isnan(amount) or math.isinf(amount):
         raise ValueError(f"funds field {name!r} must be finite, got {value!r}")
@@ -57,12 +62,14 @@ def _check_money(name: str, value: object) -> float:
 
 @dataclass(frozen=True)
 class FundsSnapshot:
-    """Immutable funds view. Numeric only — availability state travels via
-    the ``FUNDS_UNKNOWN`` / ``FUNDS_UNSUPPORTED`` sentinels, never via zeros."""
+    """Immutable funds view. `None` money fields are partial UNKNOWN — the
+    venue supports funds but has not reported that leg yet (UNKNOWN never
+    collapses into numeric `0.0`; venue-wide unknowns still travel via the
+    ``FUNDS_UNKNOWN`` / ``FUNDS_UNSUPPORTED`` sentinels)."""
 
-    available: float
-    used: float
-    equity: float
+    available: float | None = None
+    used: float | None = None
+    equity: float | None = None
     currency: str = "INR"
     account_id: str | None = None
     timestamp: str | None = None
@@ -82,29 +89,49 @@ class FundsSnapshot:
         ):
             raise ValueError(f"funds timestamp must be a string or None, got {self.timestamp!r}")
 
-    def to_dict(self) -> dict[str, float]:
-        """Exact ``TradingFace.funds()`` contract — money fields only."""
+    @property
+    def is_complete(self) -> bool:
+        """True when every money leg is known (no partial UNKNOWN)."""
+        return self.available is not None and self.used is not None and self.equity is not None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Full snapshot document — the exact inverse of :meth:`from_dict`.
+
+        Money legs carry `None` for partial UNKNOWN; `currency`/`account_id`/
+        `timestamp` are preserved so the round-trip is lossless. (The
+        ``TradingFace.funds()`` wire contract stays money-only floats; a
+        partial snapshot cannot cross it — callers must fail closed on
+        `None` legs instead of substituting zeros.)
+        """
         return {
-            FUNDS_AVAILABLE: float(self.available),
-            FUNDS_USED: float(self.used),
-            FUNDS_EQUITY: float(self.equity),
+            FUNDS_AVAILABLE: self.available,
+            FUNDS_USED: self.used,
+            FUNDS_EQUITY: self.equity,
+            "currency": self.currency,
+            "account_id": self.account_id,
+            "timestamp": self.timestamp,
         }
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> FundsSnapshot:
-        """Strict inverse of :meth:`to_dict` (extra/missing keys rejected)."""
+        """Strict inverse of :meth:`to_dict` (missing money keys / unexpected
+        keys rejected; `currency`/`account_id`/`timestamp` preserved)."""
         if not isinstance(payload, dict):
             raise ValueError(f"funds payload must be a dict, got {type(payload).__name__}")
         missing = [key for key in _REQUIRED_KEYS if key not in payload]
         if missing:
             raise ValueError(f"funds payload missing required keys: {missing}")
-        extra = sorted(key for key in payload if key not in _REQUIRED_KEYS)
+        allowed = set(_REQUIRED_KEYS) | {"currency", "account_id", "timestamp"}
+        extra = sorted(key for key in payload if key not in allowed)
         if extra:
             raise ValueError(f"funds payload has unexpected keys: {extra}")
         return cls(
             available=_check_money(FUNDS_AVAILABLE, payload[FUNDS_AVAILABLE]),
             used=_check_money(FUNDS_USED, payload[FUNDS_USED]),
             equity=_check_money(FUNDS_EQUITY, payload[FUNDS_EQUITY]),
+            currency=payload.get("currency", "INR"),
+            account_id=payload.get("account_id"),
+            timestamp=payload.get("timestamp"),
         )
 
 

@@ -3,12 +3,38 @@
 //! Spawns the headless Python backend process and communicates via newline-
 //! delimited JSON. The bridge is fail-closed: any protocol violation or
 //! backend crash is immediately visible (no silent fallback).
+//!
+//! Every blocking read is DEADLINE-BOUNDED. A plain `read_line` on a pipe
+//! blocks forever if the child wedges (deadlocked backend, hung worker
+//! thread, machine suspend), which froze the whole UI behind a permanent
+//! "RUNNING". A pipe read cannot be interrupted portably, so the read runs on
+//! its own thread and the caller waits on a channel with a timeout; on expiry
+//! the WATCHDOG KILLS the child (closing the pipe, which unblocks the reader)
+//! and returns an error. The child is never left running and the caller is
+//! never left waiting.
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+/// Deadline for a plain request/response round-trip (snapshot, connect).
+/// Generous enough for a cold multi-thousand-bar fetch, short enough that a
+/// wedged backend surfaces as an error instead of freezing the UI.
+const RESPONSE_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// Idle deadline while STREAMING a run. A 500+ symbol run legitimately takes
+/// minutes, so this bounds the gap BETWEEN messages, not the total: the
+/// backend publishes progress every ~100ms, so two minutes of silence means
+/// it is stuck, not slow.
+const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// How long a clean `shutdown` may take before the child is killed.
+const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
+const SHUTDOWN_POLL: Duration = Duration::from_millis(50);
 
 /// Bridge failure — carries the human-readable reason.
 ///
@@ -30,6 +56,68 @@ pub type BridgeResult<T> = Result<T, BridgeError>;
 
 fn bridge_error(message: impl fmt::Display) -> BridgeError {
     BridgeError(message.to_string())
+}
+
+/// Read ONE newline-terminated line from `reader` under a deadline.
+///
+/// The read itself is blocking and cannot be cancelled, so it runs on a
+/// detached thread that owns the lock and reports the line over a channel.
+/// The `Arc` is CLONED into the thread, never consumed, so the caller's
+/// handle (and the buffered stream behind it) stays usable afterwards. On
+/// expiry `on_timeout` is invoked (the caller kills the child, which closes
+/// the pipe and lets the reader finish) and the error is returned
+/// immediately — the UI thread is released either way.
+fn read_line_within<R>(
+    reader: &Arc<Mutex<R>>,
+    timeout: Duration,
+    on_timeout: impl FnOnce(),
+) -> BridgeResult<String>
+where
+    R: BufRead + Send + 'static,
+{
+    let (tx, rx) = mpsc::channel::<BridgeResult<String>>();
+    let mut on_timeout = Some(on_timeout);
+    let reader = Arc::clone(reader);
+    std::thread::spawn(move || {
+        let mut guard = match reader.lock() {
+            Ok(guard) => guard,
+            Err(err) => {
+                let _ = tx.send(Err(bridge_error(format!("reader lock: {err}"))));
+                return;
+            }
+        };
+        let mut line = String::new();
+        match guard.read_line(&mut line) {
+            Ok(0) => {
+                let _ = tx.send(Err(bridge_error("backend closed the stream")));
+            }
+            Ok(_) => {
+                let _ = tx.send(Ok(line));
+            }
+            Err(err) => {
+                let _ = tx.send(Err(bridge_error(format!("read: {err}"))));
+            }
+        }
+        // `line`/`tx` dropped here: the lock is released so a later call (or
+        // the next command after a kill) is not wedged behind this thread.
+    });
+    match rx.recv_timeout(timeout) {
+        Ok(result) => result,
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            if let Some(kill) = on_timeout.take() {
+                kill();
+            }
+            Err(bridge_error(format!(
+                "backend produced no response within {}s — watchdog killed it",
+                timeout.as_secs()
+            )))
+        }
+        // The reader thread died without answering (lock poisoned, thread
+        // panicked). Never fall back to blocking.
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            Err(bridge_error("backend reader stopped before responding"))
+        }
+    }
 }
 
 /// Command sent to the Python backend.
@@ -78,6 +166,22 @@ pub enum BackendCommand {
         capital: f64,
         mode: String,
     },
+    /// Measured data-completeness probe for the Lab config strip. The backend
+    /// counts real rows; the percentage is derived in `lab_coverage` (Rust).
+    LabCoverage {
+        symbols: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timeframe: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        start: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        end: Option<String>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        full: bool,
+    },
+    /// Cooperative stop of an in-flight run. The backend polls the flag
+    /// between symbols, so a cancel can never leave a half-written result.
+    CancelBacktest,
     Shutdown,
 }
 
@@ -93,6 +197,7 @@ pub enum BackendResponse {
     LiveSnapshot { data: serde_json::Value },
     ResearchSnapshot { data: serde_json::Value },
     LabSnapshot { data: serde_json::Value },
+    LabCoverage { data: serde_json::Value },
     Error { data: ErrorData },
 }
 
@@ -160,8 +265,18 @@ impl PythonBackend {
     /// Spawn one backend child process with no console window ever.
     fn spawn_child(program: &str, data_dir: &str, strategy_dir: &str) -> BridgeResult<Child> {
         let mut command = Command::new(program);
-        if let Some(paths) = Self::chapter_paths() {
-            command.env("PYTHONPATH", paths);
+        match Self::chapter_paths() {
+            Some(paths) => {
+                command.env("PYTHONPATH", paths);
+            }
+            None => {
+                return Err(bridge_error(format!(
+                    "chapter layout unresolvable from {} — refusing to start a possibly stale backend",
+                    std::env::current_exe()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|_| "<unknown exe>".to_string())
+                )));
+            }
         }
         #[cfg(target_os = "windows")]
         {
@@ -225,13 +340,21 @@ impl PythonBackend {
             .take()
             .ok_or_else(|| bridge_error("backend stdout not captured"))?;
 
-        let mut reader = BufReader::new(stdout);
+        let reader = Arc::new(Mutex::new(BufReader::new(stdout)));
 
-        // Wait for the "ready" message.
-        let mut line = String::new();
-        reader
-            .read_line(&mut line)
-            .map_err(|e| bridge_error(format!("read ready message: {e}")))?;
+        // Wait for the "ready" message, under the same deadline every other
+        // read uses: an interpreter that starts but never speaks the protocol
+        // (a `pythonw` stub) must fail fast instead of hanging startup.
+        let line = match read_line_within(&reader, RESPONSE_TIMEOUT, || {
+            let _ = child.kill();
+        }) {
+            Ok(line) => line,
+            Err(err) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(err);
+            }
+        };
 
         let response: BackendResponse = serde_json::from_str(&line)
             .map_err(|e| bridge_error(format!("parse ready message: {e}")))?;
@@ -241,7 +364,7 @@ impl PythonBackend {
                 let backend = Self {
                     process: Arc::new(Mutex::new(child)),
                     stdin: Arc::new(Mutex::new(stdin)),
-                    stdout: Arc::new(Mutex::new(reader)),
+                    stdout: reader,
                 };
                 Ok((backend, data))
             }
@@ -253,10 +376,11 @@ impl PythonBackend {
         }
     }
 
-    /// Send a command and wait for the response.
+    /// Send a command and wait for the response, under a deadline.
     ///
-    /// Blocks until the response arrives. Fail-closed: any error stops
-    /// the command.
+    /// Fail-closed: any error stops the command. A backend that never answers
+    /// is killed by the watchdog and reported as an error — the caller is
+    /// never left blocked on a dead child.
     pub fn send_command(&self, command: BackendCommand) -> BridgeResult<BackendResponse> {
         let json =
             serde_json::to_string(&command).map_err(|e| bridge_error(format!("encode: {e}")))?;
@@ -273,22 +397,72 @@ impl PythonBackend {
                 .map_err(|e| bridge_error(format!("flush: {e}")))?;
         }
 
-        // Read response.
-        let mut line = String::new();
-        {
-            let mut stdout = self
-                .stdout
-                .lock()
-                .map_err(|e| bridge_error(format!("stdout lock: {e}")))?;
-            stdout
-                .read_line(&mut line)
-                .map_err(|e| bridge_error(format!("read: {e}")))?;
-        }
+        let line = read_line_within(&self.stdout, RESPONSE_TIMEOUT, || {
+            self.kill_child("response timeout")
+        })?;
 
         let response: BackendResponse =
             serde_json::from_str(&line).map_err(|e| bridge_error(format!("decode: {e}")))?;
 
         Ok(response)
+    }
+
+    /// Send a command that STREAMS while it runs, handing every intermediate
+    /// `lab_progress` message to `on_progress` and returning the terminal
+    /// response.
+    ///
+    /// A 500+ symbol run occupies the backend for minutes; a plain round-trip
+    /// would leave the UI with a dead "RUNNING" and nothing to show. Progress
+    /// is read as it arrives so the screen tracks real completed work. Each
+    /// read carries its own idle deadline, so a run that keeps publishing
+    /// progress is never cut off, while one that goes silent is killed.
+    pub fn send_command_streaming(
+        &self,
+        command: BackendCommand,
+        mut on_progress: impl FnMut(serde_json::Value),
+    ) -> BridgeResult<BackendResponse> {
+        let json =
+            serde_json::to_string(&command).map_err(|e| bridge_error(format!("encode: {e}")))?;
+        {
+            let mut stdin = self
+                .stdin
+                .lock()
+                .map_err(|e| bridge_error(format!("stdin lock: {e}")))?;
+            writeln!(stdin, "{json}").map_err(|e| bridge_error(format!("write: {e}")))?;
+            stdin
+                .flush()
+                .map_err(|e| bridge_error(format!("flush: {e}")))?;
+        }
+        loop {
+            let line = read_line_within(&self.stdout, STREAM_IDLE_TIMEOUT, || {
+                self.kill_child("stream idle timeout")
+            })?;
+            let value: serde_json::Value =
+                serde_json::from_str(&line).map_err(|e| bridge_error(format!("decode: {e}")))?;
+            if value.get("type").and_then(|t| t.as_str()) == Some("lab_progress") {
+                if let Some(data) = value.get("data") {
+                    on_progress(data.clone());
+                }
+                continue;
+            }
+            let response: BackendResponse =
+                serde_json::from_value(value).map_err(|e| bridge_error(format!("decode: {e}")))?;
+            return Ok(response);
+        }
+    }
+
+    /// Force-kill the backend child. A kill closes its stdout pipe, which is
+    /// what unblocks any in-flight reader thread. Best-effort: an already-dead
+    /// child is not an error (there is nothing left to clean up).
+    pub fn kill_child(&self, reason: &str) {
+        if let Ok(mut process) = self.process.lock() {
+            match process.kill() {
+                Ok(()) => eprintln!("python bridge: killed backend ({reason})"),
+                // Already exited — nothing to kill, and the pending read will
+                // see EOF on its own.
+                Err(err) => eprintln!("python bridge: kill failed ({reason}): {err}"),
+            }
+        }
     }
 
     /// One serialized command round-trip through a shared handle. A poisoned
@@ -303,7 +477,27 @@ impl PythonBackend {
         guard.send_command(command)
     }
 
-    /// Shut the backend down gracefully (shared handle: waits via the lock).
+    /// Streaming round-trip through a shared handle, forwarding every
+    /// intermediate progress event to `on_progress`.
+    pub fn lock_send_streaming(
+        backend: &std::sync::Mutex<PythonBackend>,
+        command: BackendCommand,
+        on_progress: impl FnMut(serde_json::Value),
+    ) -> BridgeResult<BackendResponse> {
+        let guard = backend
+            .lock()
+            .map_err(|e| bridge_error(format!("backend lock: {e}")))?;
+        guard.send_command_streaming(command, on_progress)
+    }
+
+    /// Shut the backend down gracefully, then FORCE it down if it hangs.
+    ///
+    /// A bare `process.wait()` blocks forever when the backend ignores the
+    /// shutdown command (wedged worker thread, blocked native call). The app
+    /// window would already be closed at that point, so an infinite wait means
+    /// a process nobody can get rid of. After a bounded grace period the
+    /// child is killed and the shutdown is reported as an error — the caller
+    /// sees what happened instead of hanging.
     pub fn shutdown(&self) -> BridgeResult<()> {
         let _ = self.send_command(BackendCommand::Shutdown);
 
@@ -312,11 +506,24 @@ impl PythonBackend {
             .lock()
             .map_err(|e| bridge_error(format!("process lock: {e}")))?;
 
-        process
-            .wait()
-            .map_err(|e| bridge_error(format!("wait: {e}")))?;
-
-        Ok(())
+        let deadline = Instant::now() + SHUTDOWN_GRACE;
+        loop {
+            match process.try_wait() {
+                Ok(Some(_status)) => return Ok(()),
+                Ok(None) => {}
+                Err(err) => return Err(bridge_error(format!("wait: {err}"))),
+            }
+            if Instant::now() >= deadline {
+                let _ = process.kill();
+                // Reap the killed child so no zombie is left behind.
+                let _ = process.wait();
+                return Err(bridge_error(format!(
+                    "backend did not exit within {}s after shutdown — killed it",
+                    SHUTDOWN_GRACE.as_secs()
+                )));
+            }
+            std::thread::sleep(SHUTDOWN_POLL);
+        }
     }
 }
 
@@ -549,6 +756,29 @@ mod tests {
     }
 
     #[test]
+    fn test_lab_coverage_command_serialization() {
+        let cmd = BackendCommand::LabCoverage {
+            symbols: vec!["RELIANCE".to_string(), "TCS".to_string()],
+            timeframe: Some("30m".to_string()),
+            start: Some("2019-09-19".to_string()),
+            end: Some("2026-08-18".to_string()),
+            full: false,
+        };
+        let json = serde_json::to_string(&cmd).unwrap();
+        assert_eq!(
+            json,
+            r#"{"type":"lab_coverage","symbols":["RELIANCE","TCS"],"timeframe":"30m","start":"2019-09-19","end":"2026-08-18"}"#
+        );
+    }
+
+    #[test]
+    fn test_lab_coverage_response_is_its_own_kind() {
+        let parsed: BackendResponse =
+            serde_json::from_str(r#"{"type":"lab_coverage","data":{"bars_present":10}}"#).unwrap();
+        assert!(matches!(parsed, BackendResponse::LabCoverage { .. }));
+    }
+
+    #[test]
     fn test_run_backtest_command_serialization() {
         let cmd = BackendCommand::RunBacktest {
             strategy: "SMA Crossover".to_string(),
@@ -618,5 +848,61 @@ mod tests {
         let err = bridge_error("boom");
         let boxed: Box<dyn std::error::Error> = err.into();
         assert_eq!(boxed.to_string(), "python bridge: boom");
+    }
+
+    #[test]
+    fn a_reader_that_never_answers_is_cut_off_not_waited_on_forever() {
+        // The whole point of the deadline: a backend that stops talking must
+        // not freeze the caller. The watchdog fires and the error returns
+        // promptly instead of blocking on the pipe read.
+        use std::io::Read;
+        struct Silent;
+        impl Read for Silent {
+            fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
+                // Block long past the test's deadline; killing the reader is
+                // what normally ends this, and here the channel timeout does.
+                std::thread::sleep(std::time::Duration::from_secs(30));
+                Ok(0)
+            }
+        }
+        let reader = Arc::new(Mutex::new(std::io::BufReader::new(Silent)));
+        let started = std::time::Instant::now();
+        let killed = Arc::new(Mutex::new(false));
+        let flag = Arc::clone(&killed);
+        let result: BridgeResult<String> =
+            read_line_within(&reader, std::time::Duration::from_millis(100), move || {
+                *flag.lock().expect("flag lock") = true;
+            });
+        let elapsed = started.elapsed();
+        assert!(result.is_err(), "a silent backend is an error, not a hang");
+        assert!(
+            elapsed < std::time::Duration::from_secs(5),
+            "must return at the deadline, took {elapsed:?}"
+        );
+        assert!(*killed.lock().expect("flag lock"), "watchdog must fire");
+    }
+
+    #[test]
+    fn a_reader_that_answers_returns_the_line_within_the_deadline() {
+        let reader = Arc::new(Mutex::new(std::io::BufReader::new(std::io::Cursor::new(
+            b"{\"type\":\"ready\"}\n".to_vec(),
+        ))));
+        let line = read_line_within(&reader, std::time::Duration::from_secs(5), || {
+            panic!("the watchdog must not fire when the backend answers");
+        })
+        .expect("line");
+        assert_eq!(line, "{\"type\":\"ready\"}\n");
+    }
+
+    #[test]
+    fn a_closed_stream_is_reported_not_treated_as_a_timeout() {
+        let reader = Arc::new(Mutex::new(std::io::BufReader::new(std::io::Cursor::new(
+            Vec::new(),
+        ))));
+        let result = read_line_within(&reader, std::time::Duration::from_secs(5), || {
+            panic!("EOF is not a timeout")
+        });
+        assert!(result.is_err());
+        assert!(result.unwrap_err().0.contains("closed the stream"));
     }
 }

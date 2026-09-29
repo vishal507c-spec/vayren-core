@@ -86,6 +86,9 @@ export component BrokerConnectionWorkspace inherits Rectangle {
     callback connect-requested(string, string, string, string, string, string);
     callback retry-requested();
     callback disconnect-requested();
+    callback remove-requested();
+    callback config-saved(string, string);
+    callback copy-callback();
     callback refresh-requested();
     callback help-requested();
     callback add-broker-requested();
@@ -547,6 +550,14 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                                                 else if i == 3 { root.field-v3 = field-input.text; }
                                                 else if i == 4 { root.field-v4 = field-input.text; }
                                                 else { root.field-v5 = field-input.text; }
+                                                // A committed edit on a REVEALED
+                                                // field is a real save intent:
+                                                // report the venue's own key
+                                                // (never a guessed one) with the
+                                                // typed value.
+                                                if !f.secret || root.field-shown(i) {
+                                                    root.config-saved(f.key, field-input.text);
+                                                }
                                             }
                                         }
 
@@ -829,6 +840,61 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                             }
 
                             Rectangle { height: VayrenDesign.sp-xs; background: transparent; }
+
+                            // Destructive + copy actions. REMOVE routes to the
+                            // backend's real destructive command and reports
+                            // honestly what it could and could not delete;
+                            // COPY writes the broker identity to the clipboard.
+                            HorizontalLayout {
+                                spacing: VayrenDesign.sp-sm;
+                                Rectangle {
+                                    height: 32px;
+                                    horizontal-stretch: 1;
+                                    border-radius: VayrenDesign.radius;
+                                    background: copy-ta.has-hover ? VayrenPalette.hover : VayrenPalette.bg1;
+                                    border-width: 1px;
+                                    border-color: copy-ta.has-hover ? VayrenPalette.accent : VayrenPalette.hairline;
+                                    HorizontalLayout {
+                                        alignment: center;
+                                        spacing: VayrenDesign.sp-sm;
+                                        Text {
+                                            text: "COPY DETAILS";
+                                            color: copy-ta.has-hover ? VayrenPalette.accent : VayrenPalette.muted;
+                                            font-size: VayrenDesign.fs-label;
+                                            font-weight: 700;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                    copy-ta := TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => { root.copy-callback(); }
+                                    }
+                                }
+                                Rectangle {
+                                    height: 32px;
+                                    horizontal-stretch: 1;
+                                    border-radius: VayrenDesign.radius;
+                                    background: rm-ta.has-hover ? VayrenPalette.neg-dim : VayrenPalette.bg1;
+                                    border-width: 1px;
+                                    border-color: rm-ta.has-hover ? VayrenPalette.neg : VayrenPalette.hairline;
+                                    HorizontalLayout {
+                                        alignment: center;
+                                        spacing: VayrenDesign.sp-sm;
+                                        Text {
+                                            text: "REMOVE BROKER";
+                                            color: rm-ta.has-hover ? VayrenPalette.neg : VayrenPalette.muted;
+                                            font-size: VayrenDesign.fs-label;
+                                            font-weight: 700;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                    rm-ta := TouchArea {
+                                        enabled: root.broker-id != "";
+                                        mouse-cursor: pointer;
+                                        clicked => { root.remove-requested(); }
+                                    }
+                                }
+                            }
 
                             Rectangle {
                                 background: VayrenPalette.bg1;

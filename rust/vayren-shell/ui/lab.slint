@@ -49,6 +49,14 @@ export struct LabTradeMetric {
     tone: int,
 }
 
+// §02 validation row: the label plus its tone (0 pass, 1 warn, 2 fail). The
+// tone is a NUMBER, not a colour — the palette owns the mapping. Declared
+// before LabHeader because Slint resolves types in declaration order.
+export struct LabCheckData {
+    label: string,
+    kind: int,
+}
+
 export struct LabHeader {
     has-strategy: bool,    name: string,
     description: string,
@@ -157,6 +165,39 @@ export struct LabHeader {
     // Rust parses the ISO fields once — Slint never re-parses strings.
     dates-start-days: int,
     dates-end-days: int,
+    // ── §02 CONFIGURE (three-row structured config) ──
+    tf-short-idx: int,          // selected cell inside tf-short, -1 = behind MORE
+    range-preset-idx: int,      // active preset cell, -1 = a hand-picked range
+    range-from-human: string,   // "19 Sep 2019" (formatted in Rust)
+    range-to-human: string,     // "18 Aug 2026"
+    range-to-live: bool,        // range ends at the last available bar
+    range-span-line: string,    // "1,684 DAYS"
+    timeframe-label: string,    // resolved ladder entry (one authority)
+    capital-label: string,      // "₹10,000" from the committed input
+    capital-ok: bool,           // validate_form bit 4
+    chips-more-line: string,    // "+522" when the chip row is capped
+    cfg-checks: [LabCheckData],
+    cov-pct: int,               // integer percent; 0 when unmeasured
+    cov-note: string,
+    cov-kind: int,              // 0 pass, 1 warn, 2 fail
+    cov-on: bool,               // false = unmeasured → the strip is hidden
+    cov-caption: string,        // "SAMPLED" when the probe was bounded
+    // ── live run progress (formatted in Rust from measured events) ──
+    prog-active: bool,
+    prog-headline: string,      // "127 / 527 stocks"
+    prog-counts: string,        // "Completed 127   Failed 0   …   Remaining 398"
+    prog-current: string,       // "AARTIIND"
+    prog-stage: string,         // "Trade generation"
+    prog-stage-pct: float,
+    prog-elapsed: string,       // "02:14"
+    prog-eta: string,           // "~06:32" or "—" when not yet measurable
+    prog-speed: string,         // "0.95 s/stock"
+    prog-throughput: string,    // "0.95 stocks/s"
+    prog-failed-line: string,
+    prog-pct: float,
+    prog-cancelled: bool,
+    prog-long: bool,
+    prog-watchdog: string,      // "LONG-RUNNING — 00:47" / "" when healthy
 }
 
 export struct LabPreset {
@@ -261,15 +302,17 @@ component LabEyebrow inherits Rectangle {
     }
 }
 
+// Compact step chip for the section-02 rail (`✓ 01 DEFINE THE RESEARCH
+// OBJECT` / `● 03 READ ONE ANSWER`). State is passed in as text: the rail
+// must not invent step names or decide what is done.
 export component LabRailStep inherits Rectangle {
     in property <string> num;
     in property <string> name;
     in property <bool> step-on: false;
     height: 100%;
-    background: rsta.has-hover ? LabPalette.white-02 : transparent;
     HorizontalLayout {
-        padding-left: 14px;
-        padding-right: 14px;
+        padding-left: 12px;
+        padding-right: 12px;
         spacing: 7px;
         alignment: center;
         Text {
@@ -281,22 +324,22 @@ export component LabRailStep inherits Rectangle {
         }
         Text {
             text: root.name;
-            font-size: 10px;
+            font-size: 9px;
             letter-spacing: 0.8px;
             font-weight: root.step-on ? 650 : 400;
-            color: root.step-on ? LabPalette.lab-text : rsta.has-hover ? LabPalette.soft : LabPalette.dim;
+            color: root.step-on ? LabPalette.lab-text : LabPalette.dim;
             vertical-alignment: center;
         }
-    }
-    rsta := TouchArea { }
-    Rectangle {
-        x: 0; y: parent.height - 2px; width: 100%; height: 2px;
-        background: root.step-on ? LabPalette.lab-teal : transparent;
     }
 }
 
 component LabFieldLabel inherits Rectangle {
     in property <string> lbl;
+    in property <string> hint: "";
+    // A hint that OPENS something (the date-range "CUSTOM" door) rather than
+    // being a caption — the affordance has to be real, not painted.
+    in property <bool> hint-accent: false;
+    callback hint-clicked();
     height: 19px;
     Text {
         text: root.lbl;
@@ -305,6 +348,27 @@ component LabFieldLabel inherits Rectangle {
         color: LabPalette.lab-muted;
         vertical-alignment: center;
     }
+    if root.hint != "": Rectangle {
+        x: 0; y: 0;
+        width: parent.width; height: parent.height;
+        Text {
+            text: root.hint;
+            font-size: 9px;
+            letter-spacing: 1px;
+            color: root.hint-accent ? LabPalette.lab-teal : LabPalette.dim;
+            // The hint is right-aligned against the FULL label width, so it
+            // can never land on top of the label text.
+            x: 0;
+            width: parent.width;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+        }
+        hta := TouchArea {
+            enabled: root.hint-accent;
+            mouse-cursor: pointer;
+            clicked => { root.hint-clicked(); }
+        }
+    }
 }
 
 component LabFieldDivider inherits Rectangle {
@@ -312,15 +376,148 @@ component LabFieldDivider inherits Rectangle {
     background: LabPalette.line2;
 }
 
+// Segmented control: equal cells, one selected, click reports the cell index.
+// Equal widths are the point — a cell wider than its own label is the layout
+// bug this component exists to make impossible.
+component LabSegmented inherits Rectangle {
+    in property <[string]> items;
+    in property <int> selected-idx: -1;
+    in property <length> cell-h: LabPalette.cfg-sub-h;
+    // The ladder keeps going past the visible cells; the overflow is one
+    // explicit cell, never a silently truncated list.
+    in property <bool> more-cell: false;
+    callback picked(int);
+    callback more-picked();
+    height: root.cell-h;
+    border-radius: 8px;
+    background: LabPalette.field-bg;
+    border-width: 1px;
+    border-color: LabPalette.line;
+    clip: true;
+    HorizontalLayout {
+        spacing: 0;
+        for seglbl[segidx] in root.items: Rectangle {
+            horizontal-stretch: 1;
+            height: root.cell-h;
+            background: segidx == root.selected-idx ? LabPalette.seg-on-bg
+                : sgta.has-hover ? LabPalette.white-04 : transparent;
+            sgta := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.picked(segidx); }
+            }
+            Text {
+                text: seglbl;
+                font-size: 9.5px;
+                letter-spacing: 0.4px;
+                font-weight: segidx == root.selected-idx ? 650 : 400;
+                color: segidx == root.selected-idx ? LabPalette.chip-bg : LabPalette.dim;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                x: 3px;
+                width: parent.width - 6px;
+                overflow: elide;
+            }
+            Rectangle {
+                visible: segidx != root.items.length - 1;
+                x: parent.width - 1px; y: 0; width: 1px; height: parent.height;
+                background: LabPalette.line2;
+            }
+        }
+        if root.more-cell: Rectangle {
+            horizontal-stretch: 1;
+            height: root.cell-h;
+            background: sgta2.has-hover ? LabPalette.white-04 : transparent;
+            sgta2 := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.more-picked(); }
+            }
+            Text {
+                // "MORE", not "▾ MORE": the cell is ~41px wide at this
+                // column weight and the longer label elided to "M...".
+                text: "MORE";
+                font-size: 9.5px;
+                letter-spacing: 0.6px;
+                color: LabPalette.dim;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                x: 2px;
+                width: parent.width - 4px;
+                overflow: elide;
+            }
+        }
+    }
+}
+
+// Section rail: numbered badge + title + hairline + the neighbouring steps.
+// The step TEXT and its done/next marks come from real state (a research
+// object exists, the current section) — the rail never invents progress.
+component LabStepRail inherits Rectangle {
+    in property <string> num;
+    in property <string> title;
+    in property <string> prev-num: "";
+    in property <string> prev-name: "";
+    in property <string> next-num: "";
+    in property <string> next-name: "";
+    height: 20px;
+    width: 100%;
+    HorizontalLayout {
+        spacing: 10px;
+        alignment: center;
+        Rectangle {
+            width: raibtxt.width + 18px;
+            height: 20px;
+            border-radius: 6px;
+            background: LabPalette.inset;
+            border-width: 1px;
+            border-color: LabPalette.line;
+            raibtxt := Text {
+                text: root.num;
+                font-family: "monospace";
+                font-size: 10px;
+                color: LabPalette.lab-muted;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+        Text {
+            text: root.title;
+            font-size: 10px;
+            letter-spacing: 1.6px;
+            font-weight: 600;
+            color: LabPalette.dim;
+            vertical-alignment: center;
+        }
+        Rectangle {
+            horizontal-stretch: 1;
+            height: 1px;
+            background: LabPalette.line2;
+        }
+        if root.prev-name != "": LabRailStep {
+            num: root.prev-num;
+            name: root.prev-name;
+            step-on: false;
+        }
+        if root.next-name != "": LabRailStep {
+            num: root.next-num;
+            name: root.next-name;
+            step-on: false;
+        }
+    }
+}
+
 component LabCtlButton inherits Rectangle {
     in property <string> ctl-label;
     in property <length> ctl-h: LabPalette.field-h;
+    // Real focus (the surface this control opened is up) — not a painted
+    // affordance that lies about where the keyboard is.
+    in property <bool> ctl-focus: false;
     callback clicked();
     height: root.ctl-h;
     border-radius: 8px;
     background: LabPalette.field-bg;
     border-width: 1px;
-    border-color: cbta.has-hover ? LabPalette.white-16 : LabPalette.line;
+    border-color: root.ctl-focus ? LabPalette.teal-40
+        : cbta.has-hover ? LabPalette.white-16 : LabPalette.line;
     cbta := TouchArea {
         mouse-cursor: pointer;
         // Immediate action on press (brief §6): no release-wait latency.
@@ -334,8 +531,19 @@ component LabCtlButton inherits Rectangle {
         padding-left: 11px;
         padding-right: 11px;
         alignment: center;
-        Text { text: root.ctl-label; font-size: 12px; color: LabPalette.lab-text; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
-        Text { text: "⌄"; color: LabPalette.dim; font-size: 12px; vertical-alignment: center; }
+        Text { text: root.ctl-label; font-size: 12px; color: LabPalette.lab-text; horizontal-stretch: 1; min-width: 0; overflow: elide; vertical-alignment: center; }
+        if root.ctl-focus: Text {
+            text: "▌";
+            color: LabPalette.lab-teal;
+            font-size: 11px;
+            vertical-alignment: center;
+        }
+        if !root.ctl-focus: Text {
+            text: "▾";
+            color: LabPalette.dim;
+            font-size: 12px;
+            vertical-alignment: center;
+        }
     }
 }
 
@@ -802,6 +1010,9 @@ export component StrategyLabScreen inherits Rectangle {
     // must follow the app's dark system, not the workstation OS theme.
     init => {
         Palette.color-scheme = ColorScheme.dark;
+        // Arm the coverage count-up once, so the strip grows from 0 to the
+        // measured percent instead of appearing pre-filled.
+        root.cov-armed = true;
     }
 
     in property <LabHeader> lab;
@@ -837,6 +1048,16 @@ export component StrategyLabScreen inherits Rectangle {
     in property <[bool]> sym-visible-on;
     in property <int> filter-active: 0;
     in property <[LabPreset]> date-presets;
+    // §02: the first cells of the REAL timeframe ladder, and the real date
+    // range preset labels. Both are presentation caps — the rest of the ladder
+    // and the full range are still reachable (dropdown / MAX).
+    in property <[string]> tf-short;
+    in property <[string]> range-preset-labels;
+    // Coverage count-up. Armed once on creation so the strip animates from 0
+    // to the measured percent instead of appearing pre-filled.
+    property <bool> cov-armed: false;
+    property <int> cov-shown: root.cov-armed ? root.lab.cov-pct : 0;
+    animate cov-shown { duration: 900ms; easing: ease-out; }
 
     // ── Floating control surfaces (dropdown menus + date-range picker) ──
     // These are rendered as screen-level overlays: the section cards clip
@@ -879,6 +1100,7 @@ export component StrategyLabScreen inherits Rectangle {
     callback mode-picked(int);
     callback tab-picked(int);
     callback run-requested();
+    callback run-cancel-requested();
     callback save-requested();
     callback compile-requested();
     callback new-requested();
@@ -903,6 +1125,7 @@ export component StrategyLabScreen inherits Rectangle {
     callback code-changed(string);
     callback param-committed(string, string);
     callback timeframe-picked(string);
+    callback range-preset-picked(int);
     callback capital-committed(string);
     callback dates-committed(string, string);
     callback sym-open();
@@ -1159,11 +1382,23 @@ export component StrategyLabScreen inherits Rectangle {
                         }
                     }
 
-                    // ════ 02 CONFIGURE + 03 RUN ════
+                    // ════ 02 CONFIGURE THE EXPERIMENT ════
                     VerticalLayout {
                         spacing: 0;
-                        LabEyebrow { eyebrow-text: "02 · CONFIGURE THE EXPERIMENT YOU ARE ABOUT TO RUN"; }
-                        Rectangle {
+                        LabStepRail {
+                            num: "02";
+                            title: "CONFIGURE THE EXPERIMENT YOU ARE ABOUT TO RUN";
+                            prev-num: root.lab.has-strategy ? "✓ 01" : "○ 01";
+                            prev-name: "DEFINE THE RESEARCH OBJECT";
+                            next-num: "● 03";
+                            next-name: "READ ONE ANSWER";
+                        }
+                        // The card is the §02 width authority. Every block
+                        // inside it sizes off THIS width, never off a width
+                        // derived from its own row — a child measuring against
+                        // its own container is a self-reference, and Slint
+                        // resolves it to an ancestor's width instead.
+                        cfgcard := Rectangle {
                             border-radius: LabPalette.section-radius;
                             background: LabPalette.panel;
                             border-width: 1px;
@@ -1171,23 +1406,42 @@ export component StrategyLabScreen inherits Rectangle {
                             clip: true;
                             VerticalLayout {
                                 spacing: 0;
-                                HorizontalLayout {
+                                // ── four columns, ONE three-row baseline ──
+                                // Every column is label 19 / control 36 /
+                                // sub 30 with the same gaps, so the rows line
+                                // up across the card. The explicit row height
+                                // is what makes that structural, not a hope.
+                                cfgrow := HorizontalLayout {
                                     spacing: 0;
-                                    // Universe
+                                    height: LabPalette.cfg-col-h + 38px;
+                                    // Column widths are EXPLICIT fractions of the
+                                    // card, not stretch weights: a weight is only
+                                    // distributed over the space the controls do
+                                    // not demand, so a control with a wide
+                                    // minimum silently steals a column's share.
+                                    // 105 / 78 / 138 / 62 over 383 = the mock's
+                                    // 1.05 / 0.55 / 1.38 / 0.62.
+                                    // UNIVERSE
                                     Rectangle {
-                                        horizontal-stretch: 1.4;
+                                        width: cfgcard.width * 105 / 383;
                                         VerticalLayout {
-                                            padding: 16px;
+                                            padding-left: 22px; padding-right: 22px;
+                                            padding-top: 18px; padding-bottom: 20px;
                                             spacing: 0;
-                                            LabFieldLabel { lbl: "UNIVERSE"; }
-                                            LabCtlButton {
+                                            LabFieldLabel { lbl: "UNIVERSE"; hint: "EDIT"; }
+                                            Rectangle { height: 12px; }
+                                            // Real focus: the control carries the
+                                            // accent ring exactly while the
+                                            // selector it opens is up.
+                                            ucell := LabCtlButton {
+                                                ctl-focus: root.lab.sym-open;
                                                 ctl-label: root.lab.sym-button-line == "" ? root.lab.universe : root.lab.sym-button-line;
                                                 clicked => { root.sym-open(); }
                                             }
-                                            Rectangle { height: 9px; }
+                                            Rectangle { height: 15px; }
                                             HorizontalLayout {
                                                 spacing: 5px;
-                                                height: 20px;
+                                                height: LabPalette.cfg-sub-h;
                                                 for chiplbl in root.universe-chips: Rectangle {
                                                     visible: chiplbl != "";
                                                     height: 18px;
@@ -1205,162 +1459,578 @@ export component StrategyLabScreen inherits Rectangle {
                                                         vertical-alignment: center;
                                                     }
                                                 }
-                                            }
-                                            Rectangle { visible: root.lab.config-error != ""; height: 7px; }
-                                            Text {
-                                                visible: root.lab.config-error != "";
-                                                text: "Select at least 1 stock.";
-                                                font-size: 10px;
-                                                color: LabPalette.lab-red;
+                                                if root.lab.chips-more-line != "": Rectangle {
+                                                    height: 18px;
+                                                    width: moretx.width + 14px;
+                                                    border-radius: 6px;
+                                                    background: transparent;
+                                                    border-width: 1px;
+                                                    border-color: LabPalette.line;
+                                                    moretx := Text {
+                                                        text: root.lab.chips-more-line;
+                                                        font-family: "monospace";
+                                                        font-size: 9px;
+                                                        color: LabPalette.dim;
+                                                        horizontal-alignment: center;
+                                                        vertical-alignment: center;
+                                                    }
+                                                }
                                             }
                                         }
+                                        LabFieldDivider { x: parent.width - 1px; }
                                     }
-                                    LabFieldDivider {}
-                                    // Timeframe
+                                    // TIMEFRAME
                                     Rectangle {
-                                        horizontal-stretch: 1;
+                                        width: cfgcard.width * 78 / 383;
                                         VerticalLayout {
-                                            padding: 16px;
+                                            padding-left: 22px; padding-right: 22px;
+                                            padding-top: 18px; padding-bottom: 20px;
                                             spacing: 0;
-                                            LabFieldLabel { lbl: "TIMEFRAME"; }
+                                            LabFieldLabel { lbl: "TIMEFRAME"; hint: "EDIT"; }
+                                            Rectangle { height: 12px; }
                                             tfctl := LabCtlButton {
-                                                ctl-label: root.lab.timeframe;
+                                                ctl-label: root.lab.timeframe-label;
                                                 clicked => {
                                                     root.open-menu(0, self.absolute-position.x,
                                                         self.absolute-position.y + self.height + 4px,
                                                         Math.max(self.width, 140px));
                                                 }
                                             }
+                                            Rectangle { height: 15px; }
+                                            // Segmented control over the REAL
+                                            // ladder; anything past the cap stays
+                                            // one click away behind ▾ MORE.
+                                            LabSegmented {
+                                                items: root.tf-short;
+                                                selected-idx: root.lab.tf-short-idx;
+                                                more-cell: root.timeframes.length > root.tf-short.length;
+                                                picked(i) => {
+                                                    if (i >= 0 && i < root.tf-short.length) {
+                                                        root.timeframe-picked(root.tf-short[i]);
+                                                    }
+                                                }
+                                                more-picked() => {
+                                                    root.open-menu(0, tfctl.absolute-position.x,
+                                                        tfctl.absolute-position.y + tfctl.height + 4px,
+                                                        Math.max(tfctl.width, 140px));
+                                                }
+                                            }
                                         }
+                                        LabFieldDivider { x: parent.width - 1px; }
                                     }
-                                    LabFieldDivider {}
-                                    // Date range — one control family; the
-                                    // rich interaction lives inside the picker.
+                                    // DATE RANGE
                                     Rectangle {
-                                        horizontal-stretch: 1.6;
+                                        width: cfgcard.width * 138 / 383;
                                         VerticalLayout {
-                                            padding: 16px;
-                                            spacing: 7px;
-                                            LabFieldLabel { lbl: "DATE RANGE"; }
-                                            drctl := Rectangle {
+                                            padding-left: 22px; padding-right: 22px;
+                                            padding-top: 18px; padding-bottom: 20px;
+                                            spacing: 0;
+                                            LabFieldLabel {
+                                                lbl: "DATE RANGE";
+                                                hint: "CUSTOM";
+                                                hint-accent: true;
+                                                hint-clicked() => {
+                                                                                        root.dates-open = !root.dates-open;
+                                                    if (root.dates-open) {
+                                                        root.menu-src = -1;
+                                                        root.dates-x = drctl.absolute-position.x - root.absolute-position.x;
+                                                        root.dates-y = drctl.absolute-position.y - root.absolute-position.y + drctl.height + 4px;
+                                                    }
+                                                }
+                                            }
+                                            Rectangle { height: 12px; }
+                                            // One control, two halves. The TO
+                                            // half wears the accent only when the
+                                            // range really ends at the last
+                                            // available bar.
+                                            HorizontalLayout {
+                                                spacing: 8px;
                                                 height: LabPalette.field-h;
-                                                border-radius: 8px;
-                                                background: LabPalette.field-bg;
-                                                border-width: 1px;
-                                                border-color: root.lab.dates-error != "" ? LabPalette.red-35
-                                                    : drta.has-hover ? LabPalette.white-16 : LabPalette.line;
-                                                drta := TouchArea {
-                                                    mouse-cursor: pointer;
-                                                    clicked => {
-                                                        root.dates-open = !root.dates-open;
-                                                        if (root.dates-open) {
-                                                            root.menu-src = -1;
-                                                            root.dates-x = drctl.absolute-position.x - root.absolute-position.x;
-                                                            root.dates-y = drctl.absolute-position.y - root.absolute-position.y + drctl.height + 4px;
+                                                drctl := Rectangle {
+                                                    horizontal-stretch: 1;
+                                                    min-width: 90px;
+                                                    height: LabPalette.field-h;
+                                                    border-radius: 8px;
+                                                    background: LabPalette.field-bg;
+                                                    border-width: 1px;
+                                                    border-color: root.lab.dates-error != "" ? LabPalette.red-35
+                                                        : drta.has-hover ? LabPalette.white-16 : LabPalette.line;
+                                                    drta := TouchArea {
+                                                        mouse-cursor: pointer;
+                                                        clicked => {
+                                                            root.dates-open = !root.dates-open;
+                                                            if (root.dates-open) {
+                                                                root.menu-src = -1;
+                                                                root.dates-x = drctl.absolute-position.x - root.absolute-position.x;
+                                                                root.dates-y = drctl.absolute-position.y - root.absolute-position.y + drctl.height + 4px;
+                                                            }
+                                                        }
+                                                    }
+                                                    HorizontalLayout {
+                                                        padding-left: 11px; padding-right: 11px;
+                                                        spacing: 8px; alignment: center;
+                                                        Text { text: "FROM"; font-size: 8.5px; letter-spacing: 1.6px; color: LabPalette.dim; min-width: 0; vertical-alignment: center; }
+                                                        Text {
+                                                            text: root.lab.range-from-human == "" ? "—" : root.lab.range-from-human;
+                                                            font-family: "monospace";
+                                                            font-size: 11.5px;
+                                                            color: root.lab.range-from-human == "" ? LabPalette.lab-faint : LabPalette.lab-text;
+                                                            horizontal-stretch: 1; min-width: 0; overflow: elide; vertical-alignment: center;
                                                         }
                                                     }
                                                 }
-                                                HorizontalLayout {
-                                                    padding-left: 11px;
-                                                    padding-right: 11px;
-                                                    alignment: center;
-                                                    spacing: 8px;
-                                                    Text {
-                                                        text: root.lab.dates-human == "" ? "Select date range" : root.lab.dates-human;
-                                                        font-size: 11.5px;
-                                                        color: root.lab.dates-human == "" ? LabPalette.lab-faint : LabPalette.lab-text;
-                                                        horizontal-stretch: 1;
-                                                        overflow: elide;
-                                                        vertical-alignment: center;
+                                                Text { text: "→"; color: LabPalette.lab-faint; font-size: 12px; vertical-alignment: center; }
+                                                drectl := Rectangle {
+                                                    horizontal-stretch: 1;
+                                                    min-width: 90px;
+                                                    height: LabPalette.field-h;
+                                                    border-radius: 8px;
+                                                    background: LabPalette.field-bg;
+                                                    border-width: 1px;
+                                                    border-color: root.lab.dates-error != "" ? LabPalette.red-35
+                                                        : root.lab.range-to-live ? LabPalette.teal-40
+                                                        : drtta.has-hover ? LabPalette.white-16 : LabPalette.line;
+                                                    drtta := TouchArea {
+                                                        mouse-cursor: pointer;
+                                                        clicked => {
+                                                            root.dates-open = !root.dates-open;
+                                                            if (root.dates-open) {
+                                                                root.menu-src = -1;
+                                                                root.dates-x = drectl.absolute-position.x - root.absolute-position.x;
+                                                                root.dates-y = drectl.absolute-position.y - root.absolute-position.y + drectl.height + 4px;
+                                                            }
+                                                        }
                                                     }
-                                                    Text { text: "⌄"; color: LabPalette.dim; font-size: 12px; vertical-alignment: center; }
+                                                    HorizontalLayout {
+                                                        padding-left: 11px; padding-right: 11px;
+                                                        spacing: 8px; alignment: center;
+                                                        Text {
+                                                            text: "TO";
+                                                            font-size: 8.5px; letter-spacing: 1.6px;
+                                                            color: root.lab.range-to-live ? LabPalette.lab-teal : LabPalette.dim;
+                                                            min-width: 0;
+                                                            vertical-alignment: center;
+                                                        }
+                                                        Text {
+                                                            text: root.lab.range-to-human == "" ? "—" : root.lab.range-to-human;
+                                                            font-family: "monospace";
+                                                            font-size: 11.5px;
+                                                            color: root.lab.range-to-human == "" ? LabPalette.lab-faint : LabPalette.lab-text;
+                                                            horizontal-stretch: 1; min-width: 0; overflow: elide; vertical-alignment: center;
+                                                        }
+                                                    }
                                                 }
                                             }
-                                            Text {
-                                                visible: root.lab.dates-error != "";
-                                                text: root.lab.dates-error;
-                                                font-size: 10px;
-                                                color: LabPalette.lab-red;
+                                            Rectangle { height: 15px; }
+                                            HorizontalLayout {
+                                                spacing: 12px;
+                                                height: LabPalette.cfg-sub-h;
+                                                LabSegmented {
+                                                    items: root.range-preset-labels;
+                                                    selected-idx: root.lab.range-preset-idx;
+                                                    picked(i) => { root.range-preset-picked(i); }
+                                                }
+                                                Text {
+                                                    text: root.lab.range-span-line;
+                                                    font-family: "monospace";
+                                                    font-size: 9px;
+                                                    letter-spacing: 0.8px;
+                                                    color: LabPalette.dim;
+                                                    vertical-alignment: center;
+                                                }
                                             }
                                         }
+                                        LabFieldDivider { x: parent.width - 1px; }
                                     }
-                                    LabFieldDivider {}
-                                    // Capital
+                                    // CAPITAL
                                     Rectangle {
-                                        horizontal-stretch: 1;
+                                        width: cfgcard.width * 62 / 383;
                                         VerticalLayout {
-                                            padding: 16px;
+                                            padding-left: 22px; padding-right: 22px;
+                                            padding-top: 18px; padding-bottom: 20px;
                                             spacing: 0;
-                                            LabFieldLabel { lbl: "CAPITAL"; }
+                                            LabFieldLabel { lbl: "CAPITAL"; hint: "EDIT"; }
+                                            Rectangle { height: 12px; }
                                             LabCtlInput {
                                                 pre-fix: "₹";
                                                 val: root.lab.cfg-capital;
                                                 committed(t) => { root.capital-committed(t); }
                                             }
+                                            Rectangle { height: 15px; }
+                                            // The one honest capital rule the
+                                            // kernel enforces — the mock's
+                                            // "MIN ₹5,000 / NO LEVERAGE" had
+                                            // neither a minimum nor a leverage
+                                            // concept anywhere in the product.
+                                            HorizontalLayout {
+                                                spacing: 7px;
+                                                height: LabPalette.cfg-sub-h;
+                                                Text {
+                                                    text: root.lab.capital-ok ? "✓" : "✕";
+                                                    font-size: 9px;
+                                                    color: root.lab.capital-ok ? LabPalette.green : LabPalette.lab-red;
+                                                    vertical-alignment: center;
+                                                }
+                                                Text {
+                                                    text: "CAPITAL > 0";
+                                                    font-family: "monospace";
+                                                    font-size: 9px;
+                                                    letter-spacing: 0.8px;
+                                                    color: root.lab.capital-ok ? LabPalette.dim : LabPalette.lab-red;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
                                         }
                                     }
                                 }
-                                // Run bar — the culmination (reference 1:1 + cost-model note).
+                                // ── DATA COMPLETENESS ──
+                                // Hidden entirely unless the kernel actually
+                                // measured: a fake 0% bar is worse than no bar.
+                                //
+                                // Absolute placement off `cfgcard.width` — the
+                                // §02 width authority. This strip deliberately
+                                // avoids a layout: a `horizontal-stretch` weight
+                                // on a bare Rectangle child (and `width: 100%`
+                                // inside a stretched layout) both lay the track
+                                // out at ZERO in Slint 1.17, which silently
+                                // erased the whole bar.
+                                if root.lab.cov-on: Rectangle {
+                                    height: 44px;
+                                    background: LabPalette.panel2;
+                                    Rectangle {
+                                        x: 22px; y: 19px;
+                                        width: 6px; height: 6px;
+                                        border-radius: 3px;
+                                        background: LabPalette.lab-teal;
+                                    }
+                                    Text {
+                                        x: 40px; y: 13px;
+                                        width: 170px; height: 18px;
+                                        text: "DATA COMPLETENESS";
+                                        font-size: 9.5px; letter-spacing: 1.4px;
+                                        color: LabPalette.lab-muted;
+                                        vertical-alignment: center;
+                                        overflow: elide;
+                                    }
+                                    Rectangle {
+                                        x: 225px; y: 19px;
+                                        width: cfgcard.width * 40 / 100;
+                                        height: 6px;
+                                        border-radius: 3px;
+                                        background: LabPalette.track-bg;
+                                        border-width: 1px;
+                                        border-color: LabPalette.line2;
+                                        clip: true;
+                                        Rectangle {
+                                            height: 100%;
+                                            border-radius: 3px;
+                                            background: root.lab.cov-kind == 2 ? LabPalette.lab-red
+                                                : root.lab.cov-kind == 1 ? LabPalette.lab-amber : LabPalette.lab-teal;
+                                            width: parent.width * root.cov-shown / 100;
+                                            animate width { duration: 900ms; easing: ease-out; }
+                                        }
+                                    }
+                                    Text {
+                                        x: cfgcard.width * 40 / 100 + 249px; y: 13px;
+                                        width: 52px; height: 18px;
+                                        text: root.cov-shown + "%";
+                                        font-family: "monospace";
+                                        font-size: 13px;
+                                        color: LabPalette.lab-text;
+                                        horizontal-alignment: right;
+                                        vertical-alignment: center;
+                                    }
+                                    // "VERIFIED" would overstate a bounded
+                                    // probe, so the caption states what was read.
+                                    Text {
+                                        x: cfgcard.width * 40 / 100 + 311px; y: 15px;
+                                        width: 72px; height: 14px;
+                                        text: root.lab.cov-caption;
+                                        font-size: 8.5px; letter-spacing: 1.4px;
+                                        color: LabPalette.dim;
+                                        vertical-alignment: center;
+                                        overflow: elide;
+                                    }
+                                    Text {
+                                        x: cfgcard.width * 40 / 100 + 393px; y: 13px;
+                                        width: cfgcard.width * 60 / 100 - 415px; height: 18px;
+                                        text: root.lab.cov-note;
+                                        font-size: 9.5px;
+                                        color: LabPalette.lab-muted;
+                                        vertical-alignment: center;
+                                        overflow: elide;
+                                    }
+                                    Rectangle { y: 0; height: 1px; width: 100%; background: LabPalette.line2; }
+                                }
+                                // ── LIVE RUN PROGRESS ──
+                                // Every value below was measured by the
+                                // backend after real work finished. There is
+                                // no local ticker: if the backend stops
+                                // sending, the panel freezes exactly where it
+                                // was, which is what "stuck" must look like.
+                                if root.lab.prog-active: Rectangle {
+                                    height: 132px;
+                                    background: LabPalette.panel2;
+                                    VerticalLayout {
+                                        padding-left: 22px; padding-right: 22px;
+                                        padding-top: 14px; padding-bottom: 14px;
+                                        spacing: 9px;
+                                        HorizontalLayout {
+                                            spacing: 12px; alignment: center;
+                                            Text {
+                                                text: root.lab.prog-cancelled ? "CANCELLED" : "RUNNING";
+                                                font-size: 11px; letter-spacing: 2px; font-weight: 700;
+                                                color: root.lab.prog-cancelled ? LabPalette.lab-amber
+                                                    : root.lab.prog-long ? LabPalette.lab-amber : LabPalette.lab-teal;
+                                                vertical-alignment: center;
+                                            }
+                                            Text {
+                                                // Empty when healthy: a dash here would read as a
+                                                // status the run never reported.
+                                                text: root.lab.prog-watchdog;
+                                                font-size: 10px;
+                                                color: root.lab.prog-watchdog != "" ? LabPalette.lab-amber : LabPalette.lab-faint;
+                                                vertical-alignment: center;
+                                                horizontal-stretch: 1;
+                                                overflow: elide;
+                                            }
+                                            Text {
+                                                text: root.lab.prog-headline + "   " + (Math.round(root.lab.prog-pct * 10) / 10) + "%";
+                                                font-family: "monospace"; font-size: 11px;
+                                                color: LabPalette.lab-text; vertical-alignment: center;
+                                            }
+                                        }
+                                        // overall bar
+                                        progtrack := Rectangle {
+                                            horizontal-stretch: 1;
+                                            height: 6px;
+                                            border-radius: 3px;
+                                            background: LabPalette.track-bg;
+                                            border-width: 1px;
+                                            border-color: LabPalette.line2;
+                                            clip: true;
+                                            Rectangle {
+                                                height: 100%;
+                                                border-radius: 3px;
+                                                background: root.lab.prog-cancelled ? LabPalette.lab-amber : LabPalette.lab-teal;
+                                                width: parent.width * root.lab.prog-pct / 100;
+                                                animate width { duration: 300ms; easing: ease-out; }
+                                            }
+                                        }
+                                        // current symbol + its own sub-stage bar
+                                        HorizontalLayout {
+                                            spacing: 10px; alignment: center;
+                                            Text {
+                                                text: "CURRENT";
+                                                font-size: 8.5px; letter-spacing: 1.4px;
+                                                color: LabPalette.dim; vertical-alignment: center;
+                                            }
+                                            Text {
+                                                text: root.lab.prog-current;
+                                                font-family: "monospace"; font-size: 12px;
+                                                color: LabPalette.lab-text; vertical-alignment: center;
+                                            }
+                                            Text {
+                                                text: "STAGE";
+                                                font-size: 8.5px; letter-spacing: 1.4px;
+                                                color: LabPalette.dim; vertical-alignment: center;
+                                            }
+                                            Text {
+                                                text: root.lab.prog-stage;
+                                                font-size: 10.5px;
+                                                color: LabPalette.lab-muted; vertical-alignment: center;
+                                                horizontal-stretch: 1;
+                                                overflow: elide;
+                                            }
+                                            Rectangle {
+                                                width: stagetx.width + 16px;
+                                                height: 16px;
+                                                border-radius: 4px;
+                                                background: LabPalette.field-bg;
+                                                border-width: 1px;
+                                                border-color: LabPalette.line2;
+                                                stagetx := Text {
+                                                    text: Math.round(root.lab.prog-stage-pct) + "%";
+                                                    font-family: "monospace"; font-size: 9px;
+                                                    color: LabPalette.dim;
+                                                    horizontal-alignment: center; vertical-alignment: center;
+                                                }
+                                            }
+                                        }
+                                        HorizontalLayout {
+                                            spacing: 16px; alignment: center;
+                                            Text {
+                                                text: root.lab.prog-counts;
+                                                font-size: 10.5px;
+                                                color: LabPalette.lab-muted;
+                                                vertical-alignment: center;
+                                                horizontal-stretch: 1;
+                                                overflow: elide;
+                                            }
+                                            Text {
+                                                text: "Elapsed " + root.lab.prog-elapsed
+                                                    + "   ETA " + root.lab.prog-eta
+                                                    + "   " + root.lab.prog-throughput;
+                                                font-family: "monospace"; font-size: 10px;
+                                                color: LabPalette.dim; vertical-alignment: center;
+                                            }
+                                            Rectangle {
+                                                width: 116px;
+                                                height: 28px;
+                                                border-radius: 7px;
+                                                background: cbnta.has-hover ? LabPalette.run-error-bg : transparent;
+                                                border-width: 1px;
+                                                border-color: cbnta.has-hover ? LabPalette.red-35 : LabPalette.white-16;
+                                                cbnta := TouchArea {
+                                                    mouse-cursor: pointer;
+                                                    clicked => { root.run-cancel-requested(); }
+                                                }
+                                                Text {
+                                                    text: "CANCEL RUN";
+                                                    font-size: 10px; letter-spacing: 1.2px; font-weight: 650;
+                                                    color: cbnta.has-hover ? LabPalette.red-soft : LabPalette.soft;
+                                                    horizontal-alignment: center; vertical-alignment: center;
+                                                }
+                                            }
+                                        }
+                                        if root.lab.prog-failed-line != "": Text {
+                                            text: root.lab.prog-failed-line;
+                                            font-size: 9.5px;
+                                            color: LabPalette.lab-red;
+                                            vertical-alignment: center;
+                                            overflow: elide;
+                                        }
+                                    }
+                                    Rectangle { y: 0; height: 1px; width: 100%; background: LabPalette.line2; }
+                                }
+                                // ── RUN BAR: checks · action · real facts ──
                                 Rectangle {
                                     height: 68px;
                                     background: LabPalette.panel2;
-                                    VerticalLayout {
-                                        spacing: 0;
+                                    HorizontalLayout {
+                                        padding-left: 22px; padding-right: 22px;
+                                        spacing: 20px; alignment: center;
+                                        // left 1fr
                                         HorizontalLayout {
-                                            height: 46px;
-                                            padding-left: 18px;
-                                            padding-right: 18px;
-                                            spacing: 18px;
-                                            alignment: center;
-                                        Text {
-                                            visible: root.lab.outdated;
-                                            text: "· edited — rerun to refresh";
-                                            font-size: 10.5px;
-                                            color: LabPalette.lab-amber;
-                                            vertical-alignment: center;
-                                        }
-                                        Rectangle { horizontal-stretch: 1; background: transparent; }
-                                        Text {
-                                            text: root.lab.state-label;
-                                            font-size: 10.5px;
-                                            color: root.lab.state-tone == 2 ? LabPalette.lab-amber
-                                                : root.lab.state-tone == 3 ? LabPalette.lab-red
-                                                : root.lab.state-tone == 1 ? LabPalette.green : LabPalette.dim;
-                                            vertical-alignment: center;
-                                        }
-                                        Rectangle {
-                                            width: 170px;
-                                            height: 36px;
-                                            border-radius: 9px;
-                                            background: root.lab.config-error != "" ? LabPalette.run-error-bg
-                                                : root.lab.run-stop ? LabPalette.btn-idle-bg
-                                                : root.lab.show-results && !root.lab.outdated ? rta.pressed ? LabPalette.run-done-press
-                                                    : rta.has-hover ? LabPalette.run-done-hover : LabPalette.run-done-bg
-                                                : rta.pressed ? LabPalette.run-press
-                                                : rta.has-hover ? LabPalette.run-hover : LabPalette.run-ink;
-                                            border-width: 1px;
-                                            border-color: root.lab.show-results && !root.lab.outdated && !root.lab.run-stop ? LabPalette.green-35 : transparent;
-                                            rta := TouchArea {
-                                                enabled: root.lab.run-enabled;
-                                                mouse-cursor: pointer;
-                                                clicked => { root.run-requested(); }
+                                            horizontal-stretch: 1;
+                                            spacing: 16px; alignment: start;
+                                            for chk in root.lab.cfg-checks: HorizontalLayout {
+                                                spacing: 6px; alignment: center;
+                                                Text {
+                                                    text: chk.kind == 0 ? "✓" : chk.kind == 1 ? "●" : "✕";
+                                                    font-size: 10px;
+                                                    color: chk.kind == 0 ? LabPalette.green : chk.kind == 1 ? LabPalette.lab-amber : LabPalette.lab-red;
+                                                    vertical-alignment: center;
+                                                }
+                                                Text {
+                                                    text: chk.label;
+                                                    font-size: 10.5px;
+                                                    color: chk.kind == 2 ? LabPalette.red-soft : LabPalette.lab-muted;
+                                                    vertical-alignment: center;
+                                                }
                                             }
+                                        }
+                                        // centre auto — the whole run-button
+                                        // state matrix, unchanged.
+                                        HorizontalLayout {
+                                            spacing: 16px; alignment: center;
                                             Text {
-                                                text: root.lab.run-label;
-                                                color: root.lab.config-error != "" ? LabPalette.red-soft
-                                                    : root.lab.run-stop ? LabPalette.soft2
-                                                    : root.lab.show-results && !root.lab.outdated ? LabPalette.green-bright : LabPalette.chip-bg;
-                                                font-size: 12.5px;
-                                                font-weight: 700;
-                                                horizontal-alignment: center;
+                                                text: root.lab.state-label;
+                                                font-size: 10.5px;
+                                                color: root.lab.state-tone == 2 ? LabPalette.lab-amber
+                                                    : root.lab.state-tone == 3 ? LabPalette.lab-red
+                                                    : root.lab.state-tone == 1 ? LabPalette.green : LabPalette.dim;
                                                 vertical-alignment: center;
-                                                opacity: root.lab.run-enabled ? 1 : 0.6;
+                                            }
+                                            Rectangle {
+                                                width: 170px;
+                                                height: 36px;
+                                                border-radius: 9px;
+                                                background: root.lab.config-error != "" ? LabPalette.run-error-bg
+                                                    : root.lab.run-stop ? LabPalette.btn-idle-bg
+                                                    : root.lab.show-results && !root.lab.outdated ? rta.pressed ? LabPalette.run-done-press
+                                                        : rta.has-hover ? LabPalette.run-done-hover : LabPalette.run-done-bg
+                                                    : rta.pressed ? LabPalette.run-press
+                                                    : rta.has-hover ? LabPalette.run-hover : LabPalette.run-ink;
+                                                border-width: 1px;
+                                                border-color: root.lab.show-results && !root.lab.outdated && !root.lab.run-stop ? LabPalette.green-35 : transparent;
+                                                rta := TouchArea {
+                                                    // A run in flight owns the workspace: a second
+                                                    // RUN would race the first one's equity chain.
+                                                    enabled: root.lab.run-enabled && !root.lab.prog-active;
+                                                    mouse-cursor: pointer;
+                                                    clicked => { root.run-requested(); }
+                                                }
+                                                Text {
+                                                    text: root.lab.run-label;
+                                                    color: root.lab.config-error != "" ? LabPalette.red-soft
+                                                        : root.lab.run-stop ? LabPalette.soft2
+                                                        : root.lab.show-results && !root.lab.outdated ? LabPalette.green-bright : LabPalette.chip-bg;
+                                                    font-size: 12.5px;
+                                                    font-weight: 700;
+                                                    horizontal-alignment: center;
+                                                    vertical-alignment: center;
+                                                    opacity: root.lab.run-enabled && !root.lab.prog-active ? 1 : 0.6;
+                                                }
+                                            }
+                                            Rectangle {
+                                                width: ctrlkeytx.width + 12px;
+                                                height: 18px;
+                                                border-radius: 4px;
+                                                background: LabPalette.field-bg;
+                                                border-width: 1px;
+                                                border-color: LabPalette.line;
+                                                ctrlkeytx := Text {
+                                                    text: "CTRL + ⏎";
+                                                    font-family: "monospace";
+                                                    font-size: 9px;
+                                                    color: LabPalette.dim;
+                                                    horizontal-alignment: center;
+                                                    vertical-alignment: center;
+                                                }
                                             }
                                         }
-                                    }
+                                        // right 1fr — real facts only. The
+                                        // mock's "Est. runtime" is gone: nothing
+                                        // in this state ever measured one.
+                                        HorizontalLayout {
+                                            horizontal-stretch: 1;
+                                            spacing: 22px; alignment: center;
+                                            VerticalLayout {
+                                                spacing: 3px; alignment: center;
+                                                Text { text: "UNIVERSE"; font-size: 8.5px; letter-spacing: 1.4px; color: LabPalette.dim; }
+                                                Text {
+                                                    text: root.lab.sym-button-line;
+                                                    font-family: "monospace"; font-size: 11px;
+                                                    color: LabPalette.soft; vertical-alignment: center;
+                                                }
+                                            }
+                                            VerticalLayout {
+                                                spacing: 3px; alignment: center;
+                                                Text { text: "CAPITAL"; font-size: 8.5px; letter-spacing: 1.4px; color: LabPalette.dim; }
+                                                Text {
+                                                    text: root.lab.capital-label;
+                                                    font-family: "monospace"; font-size: 11px;
+                                                    color: LabPalette.soft; vertical-alignment: center;
+                                                }
+                                            }
+                                        }
                                     }
                                     Rectangle { y: 0; height: 1px; width: 100%; background: LabPalette.line; }
                                 }
+                            }
+                        }
+                        // Next-step anchor — reads as one system with the rail.
+                        HorizontalLayout {
+                            height: 34px;
+                            spacing: 10px; alignment: center;
+                            Rectangle { width: 34px; height: 1px; background: LabPalette.line; }
+                            Text {
+                                text: "NEXT → 03 · READ ONE ANSWER TO THE EXPERIMENT";
+                                font-size: 9.5px;
+                                letter-spacing: 1.6px;
+                                color: LabPalette.dim;
+                                vertical-alignment: center;
                             }
                         }
                     }
@@ -2231,7 +2901,6 @@ export component StrategyLabScreen inherits Rectangle {
                             background: LabPalette.panel3;
                             border-width: 1px;
                             border-color: LabPalette.teal-25;
-                            padding: 16px;
                             VerticalLayout {
                                 spacing: 0;
                                 HorizontalLayout {

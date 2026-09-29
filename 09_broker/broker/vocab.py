@@ -52,7 +52,10 @@ class BrokerError(RuntimeError):
 
     def __init__(self, message: str, code: ErrorCode = ErrorCode.UNKNOWN) -> None:
         super().__init__(message)
-        self.code = ErrorCode(code)
+        try:
+            self.code = ErrorCode(code)
+        except ValueError:
+            self.code = ErrorCode.UNKNOWN
 
 
 class BrokerNotRegisteredError(BrokerError):

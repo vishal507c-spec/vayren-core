@@ -304,6 +304,9 @@ pub const RIGHT_MARGIN_FRACTION: f64 = 0.15;
 pub const PRICE_EDGE_MARGIN: f64 = 0.05;
 pub const ZOOM_STEP: f64 = 1.25;
 pub const PRICE_ZOOM_STEP: f64 = 1.25;
+/// Backlog cap for queued backend wire strings. Overflow is counted and
+/// logged (never silently discarded) — see `MarketState::queue_pending`.
+pub const PENDING_ACTIONS_CAP: usize = 64;
 
 /// Canonical visible timeframe order (legacy `TimeframeToolbar._VISIBLE_ORDER`);
 /// timeframes outside it fall into the overflow dropdown.
@@ -403,6 +406,16 @@ pub struct MarketState {
     /// timeframe has no candles). Empty when there is nothing to report —
     /// the generic message is the fallback, never the primary.
     pub notice: String,
+    /// The header names a DIFFERENT series than the bars on screen.
+    ///
+    /// Set when a snapshot changed `selected_symbol` / `timeframe` but
+    /// carried no `bars` key (the backend is still loading them). Without
+    /// this, the header would claim RELIANCE while the candles were still
+    /// TCS — a chart that lies about what it is showing. The stale bars stay
+    /// on screen (blanking the chart on every symbol click is worse), and the
+    /// projection reports the mismatch instead of presenting old data as
+    /// new.
+    pub bars_stale: bool,
     pub exchange: String,
     /// Visible window origin in bar-space + slot count (legacy `_first`/
     /// `_last`). `first` is FLOATING-POINT: it is the exact data coordinate
@@ -452,6 +465,10 @@ pub struct MarketState {
     /// Queued backend intents for the embedded host to drain (mirrors
     /// `LabState::pending_actions`).
     pub pending_actions: Vec<String>,
+    /// How many backend intents were dropped because the queue was full.
+    /// Non-zero means the UI and the backend have diverged and the host is
+    /// not draining fast enough — never a silent loss.
+    pub dropped_pending_actions: u64,
     /// Chart display settings (engine-owned, Slint renders them verbatim):
     /// price-scale mode plus crosshair visibility. Toggles never touch
     /// data, viewport or caches — geometry rebuilds only for scale changes.
@@ -475,6 +492,7 @@ impl Default for MarketState {
             bars: Vec::new(),
             status: MarketStatus::Loading,
             notice: String::new(),
+            bars_stale: false,
             exchange: String::new(),
             first: 0.0,
             count: INITIAL_BARS,
@@ -503,6 +521,7 @@ impl Default for MarketState {
             download: DownloadState::default(),
             market_status: MarketStatusFacts::default(),
             pending_actions: Vec::new(),
+            dropped_pending_actions: 0,
             scale_mode: ChartScaleMode::Regular,
             cross_visible: true,
             cached_price_range: std::cell::Cell::new(None),
@@ -523,7 +542,15 @@ impl MarketState {
         if total == 0 {
             return 0;
         }
-        let target = round_py((1.0 - RIGHT_MARGIN_FRACTION) * count as f64 + 0.5) as usize;
+        // Clamp the computed target into `0..total` BEFORE the usize cast: an
+        // `as usize` cast of an out-of-range/negative f64 saturates silently
+        // and would pin the viewport to an unrelated edge.
+        let target = round_py((1.0 - RIGHT_MARGIN_FRACTION) * count as f64 + 0.5);
+        let target = if target.is_finite() {
+            (target as i64).clamp(0, total as i64) as usize
+        } else {
+            total
+        };
         total.saturating_sub(target).min(total - 1)
     }
 
@@ -660,6 +687,14 @@ impl MarketState {
                 self.follow_latest = true;
             } else {
                 let added = total.saturating_sub(previous_total);
+                // Shrinking dataset (e.g. a shorter history after a symbol or
+                // date-range change): a bare `first + added` keeps the OLD
+                // origin, which on a smaller dataset lands beyond the last
+                // bar. The viewport would then point past the data with no
+                // bar under the left edge at all. Clamp into the reachable pan
+                // range so the view stays honest: the newest bar sits on the
+                // left edge, which is exactly the real empty space the
+                // one-sided free pan already allows.
                 self.first = self.clamp_first(self.first + added as f64);
             }
             self.status = MarketStatus::Ready;
@@ -681,13 +716,16 @@ impl MarketState {
     /// most `count + 1` bars — the two edge bars render partially and the
     /// plot's `clip: true` cuts them at the border (no overscan pass needed,
     /// nothing outside the viewport is ever processed).
+    ///
+    /// A `count == 0` viewport is an EMPTY viewport: it renders nothing. The
+    /// old `count.max(1)` guard invented a phantom bar in that state (the
+    /// plot has zero slots, yet one candle was drawn into it).
     pub fn visible_window(&self) -> &[MarketBar] {
-        if self.bars.is_empty() {
+        if self.bars.is_empty() || self.count == 0 {
             return &[];
         }
         let first = self.first_floor().min(self.bars.len().saturating_sub(1));
-        let last =
-            ((self.first + self.count.max(1) as f64).ceil() as usize).clamp(first, self.bars.len());
+        let last = ((self.first + self.count as f64).ceil() as usize).clamp(first, self.bars.len());
         &self.bars[first..last]
     }
 
@@ -1129,24 +1167,30 @@ impl MarketState {
     /// Build the SAVE payload (indicator name, JSON object) from the local
     /// edit buffer. ``None`` when no settings panel is open. The JSON only
     /// carries numbers — keys/labels live in the specs, never here.
+    ///
+    /// The key is escaped through `serde_json::to_string`, never pasted raw
+    /// between quotes: a key containing `"` or `\` would otherwise produce
+    /// malformed JSON and the whole settings save would be rejected by the
+    /// backend parser. A value that cannot be represented as a JSON number
+    /// is omitted rather than written as `NaN` (which is not valid JSON).
     pub fn settings_payload(&self) -> Option<(String, String)> {
         if !self.settings_open || self.settings_name.is_empty() {
             return None;
         }
         let name = self.settings_name.clone();
-        let mut json = String::from("{");
-        for (index, row) in self.settings_rows.iter().enumerate() {
-            if index > 0 {
-                json.push(',');
+        let mut map = serde_json::Map::new();
+        for row in self.settings_rows.iter() {
+            if !row.value.is_finite() {
+                continue;
             }
-            json.push('"');
-            json.push_str(&row.key);
-            json.push_str("\":");
-            // shortest round-trip rendering; SpinBox values are finite and
-            // within range, so this is always valid JSON
-            json.push_str(&format!("{}", row.value));
+            // serde_json::Number::from_f64 is the only f64 → JSON conversion
+            // that stays valid for every finite value (it refuses inf/NaN).
+            if let Some(number) = serde_json::Number::from_f64(row.value) {
+                map.insert(row.key.clone(), serde_json::Value::Number(number));
+            }
         }
-        json.push('}');
+        let json = serde_json::to_string(&serde_json::Value::Object(map))
+            .unwrap_or_else(|_| "{}".to_string());
         Some((name, json))
     }
 
@@ -1174,10 +1218,29 @@ impl MarketState {
         if !self.apply(action) {
             return false;
         }
-        if backend_owned && self.pending_actions.len() < 64 {
-            self.pending_actions.push(wire.to_string());
+        if backend_owned {
+            self.queue_pending(wire);
         }
         true
+    }
+
+    /// Queue one backend wire string, honouring the queue cap.
+    ///
+    /// A full queue used to swallow the wire SILENTLY: the UI had already
+    /// applied its optimistic change, so the row appeared to toggle while the
+    /// backend never heard about it — a permanent, invisible divergence. The
+    /// drop is now counted in `dropped_pending_actions` and logged, so the
+    /// condition is observable instead of pretending success.
+    fn queue_pending(&mut self, wire: &str) {
+        if self.pending_actions.len() < PENDING_ACTIONS_CAP {
+            self.pending_actions.push(wire.to_string());
+            return;
+        }
+        self.dropped_pending_actions += 1;
+        eprintln!(
+            "market: pending-action queue full ({PENDING_ACTIONS_CAP} entries) — dropped '{wire}' ({} dropped total)",
+            self.dropped_pending_actions
+        );
     }
 
     /// Apply a Historical-Download console action; when it names backend
@@ -1186,9 +1249,7 @@ impl MarketState {
     /// toggles handled locally) produce no wire.
     pub fn interact_download(&mut self, action: DownloadAction) {
         if let Some(wire) = self.download.apply(action) {
-            if self.pending_actions.len() < 64 {
-                self.pending_actions.push(wire);
-            }
+            self.queue_pending(&wire);
         }
     }
 
@@ -1233,13 +1294,24 @@ fn round_py(value: f64) -> f64 {
     } else if diff > 0.5 {
         floor + 1.0
     } else {
-        // exact half → nearest even (matches Python round, incl. negatives)
-        if (floor as i64) & 1 == 0 {
+        // exact half → nearest even (matches Python round, incl. negatives).
+        // The parity test is done on the f64 (`floor % 2.0 == 0.0`) instead of
+        // a `floor as i64` cast: outside i64 range that cast SATURATES to
+        // i64::MAX/MIN, whose parity is an artifact of the clamp rather than
+        // of the value, and the answer silently flips to the wrong neighbour.
+        if is_even_f64(floor) {
             floor
         } else {
             floor + 1.0
         }
     }
+}
+
+/// True when this whole-valued f64 is an even integer. Only meaningful for
+/// integral values; parity is decided on the double itself so no integer cast
+/// (and therefore no saturation) can influence the result.
+fn is_even_f64(value: f64) -> bool {
+    value % 2.0 == 0.0
 }
 
 /// legacy name normalization: "Volume" renders as "Vol".
@@ -1314,13 +1386,17 @@ pub fn fmt_signed_pct(value: Option<f64>) -> String {
 }
 
 /// Grouped integer (`1,240,500`); used for counts.
+///
+/// A value that does not fit `i64` is NOT silently saturated (a saturated
+/// cast renders a plausible-looking but wrong number, e.g. 1e30 → a
+/// 19-digit constant). Such a value is unmeasurable as a count, so it renders
+/// the same honest `N/A` as a non-finite one.
 pub fn fmt_int(value: f64) -> String {
-    if !value.is_finite() {
+    let Some(rounded) = bounded_i64(value.round()) else {
         return "N/A".to_string();
-    }
-    let rounded = value.round() as i64;
+    };
     let negative = rounded < 0;
-    let digits: Vec<char> = rounded.abs().to_string().chars().collect();
+    let digits: Vec<char> = rounded.unsigned_abs().to_string().chars().collect();
     let mut grouped = String::new();
     for (i, ch) in digits.iter().enumerate() {
         if i > 0 && (digits.len() - i) % 3 == 0 {
@@ -1345,8 +1421,24 @@ pub fn fmt_volume(value: f64) -> String {
     } else if v >= 1e3 {
         format!("{:.2} K", value / 1e3)
     } else {
-        format!("{}", value.round() as i64)
+        // Below 1e3 the double is comfortably inside i64, but the cast is
+        // still bounded so no future threshold change can reintroduce a
+        // saturating cast here.
+        match bounded_i64(value.round()) {
+            Some(n) => format!("{n}"),
+            None => "N/A".to_string(),
+        }
     }
+}
+
+/// `f64 → i64` without saturation: `None` when the rounded value does not fit
+/// the integer range (a saturating `as i64` would report a plausible but
+/// wrong number, so callers render honest absence instead).
+fn bounded_i64(value: f64) -> Option<i64> {
+    if !value.is_finite() || value < i64::MIN as f64 || value > i64::MAX as f64 {
+        return None;
+    }
+    Some(value as i64)
 }
 
 /// Short axis timestamp (`2024-01-02 09:15` from ISO input, else passthrough).
@@ -1726,11 +1818,24 @@ fn last_change(bars: &[MarketBar]) -> (String, Tone) {
 }
 
 /// Western-grouped 2-decimals (legacy `f"{price:,.2f}"` in focused labels).
+///
+/// The fraction is CARRIED: an amount whose fractional part rounds to 100
+/// (`1.999`) increments the whole part instead of printing an impossible
+/// "1.100". A value outside `i64` renders `N/A` rather than a saturated
+/// 19-digit constant.
 fn western2(value: f64) -> String {
+    if !value.is_finite() {
+        return "N/A".to_string();
+    }
     let sign = if value < 0.0 { "-" } else { "" };
     let abs = value.abs();
-    let whole = abs.trunc() as i64;
-    let frac = ((abs - whole as f64) * 100.0).round() as i64;
+    let hundredths = abs * 100.0;
+    if !hundredths.is_finite() || hundredths > i64::MAX as f64 {
+        return "N/A".to_string();
+    }
+    let hundredths = hundredths.round() as i64;
+    let whole = hundredths / 100;
+    let frac = hundredths % 100;
     let mut digits = whole.to_string();
     if digits.len() > 3 {
         let mut out = String::new();
@@ -1910,7 +2015,15 @@ fn scale_frame(state: &MarketState) -> ScaleFrame {
     }
     let xform = match mode {
         ChartScaleMode::Percent => {
-            let anchor = window[0].close;
+            // Percent is measured against the FIRST BAR OF THE DATASET, not
+            // the first bar currently on screen. Anchoring on the visible
+            // window makes the whole % axis re-baseline on every pan: the same
+            // bar would read +0% at one scroll position and +40% at the next,
+            // so the series appears to change value while the user only moves
+            // the viewport. A dataset-anchored baseline is what "percent
+            // change" means, and it is stable under panning, zooming and
+            // re-fetching the same series.
+            let anchor = state.bars.first().map(|b| b.close).unwrap_or(f64::NAN);
             if !anchor.is_finite() || anchor == 0.0 {
                 return fallback();
             }
@@ -2100,28 +2213,48 @@ pub fn project_viewport(state: &MarketState) -> MarketView {
 }
 
 fn project_inner(state: &MarketState, viewport_only: bool) -> MarketView {
-    let status_message = match state.status {
-        MarketStatus::Loading => "Loading chart…".to_string(),
-        MarketStatus::Empty => {
-            if !state.notice.is_empty() {
-                state.notice.clone()
-            } else if state.bars.is_empty() {
-                if state.selected_symbol.is_empty() {
-                    "No data available".to_string()
-                } else if state.timeframe.is_empty() {
-                    format!("No candle data for {}", state.selected_symbol)
+    // A stale header is reported ABOVE the ordinary status: the candles on
+    // screen are real, but they belong to a DIFFERENT series than the one the
+    // header names, so "Ready" with no mention would be a lie. The bars stay
+    // rendered (blanking the chart on every symbol switch is worse UX than a
+    // labelled mismatch).
+    let status_message = if state.bars_stale {
+        let tf = if state.timeframe.is_empty() {
+            String::new()
+        } else {
+            format!(" on {}", state.timeframe)
+        };
+        format!(
+            "Loading {} candles{} — showing the previous series",
+            state.selected_symbol, tf
+        )
+    } else {
+        match state.status {
+            MarketStatus::Loading => "Loading chart…".to_string(),
+            MarketStatus::Empty => {
+                if !state.notice.is_empty() {
+                    state.notice.clone()
+                } else if state.bars.is_empty() {
+                    if state.selected_symbol.is_empty() {
+                        "No data available".to_string()
+                    } else if state.timeframe.is_empty() {
+                        format!("No candle data for {}", state.selected_symbol)
+                    } else {
+                        format!(
+                            "No candle data for {} on {} timeframe",
+                            state.selected_symbol, state.timeframe
+                        )
+                    }
                 } else {
-                    format!(
-                        "No candle data for {} on {} timeframe",
-                        state.selected_symbol, state.timeframe
-                    )
+                    "No data in viewport".to_string()
                 }
-            } else {
-                "No data in viewport".to_string()
             }
+            MarketStatus::Ready => String::new(),
         }
-        MarketStatus::Ready => String::new(),
     };
+    // Stale bars are NOT presented as the requested series: `has_data` stays
+    // true (the candles are real and must render) but the mismatch is visible
+    // through the status line above.
     let has_data = state.has_data();
 
     // Viewport fast path: list panels are never read by the viewport tier,
@@ -3039,6 +3172,11 @@ pub fn apply_snapshot_json(state: &mut MarketState, value: &serde_json::Value) {
             .filter(|s| !s.symbol.is_empty())
             .collect();
     }
+    // Series the CURRENT bars belong to — captured before the header fields
+    // are overwritten, so the no-bars branch below can tell "header still
+    // names the loaded series" from "header switched, candles did not".
+    let bars_owner_symbol = state.selected_symbol.clone();
+    let bars_owner_timeframe = state.timeframe.clone();
     let selected = snap_str(value, "selected_symbol");
     if !selected.is_empty() {
         state.selected_symbol = selected;
@@ -3083,7 +3221,17 @@ pub fn apply_snapshot_json(state: &mut MarketState, value: &serde_json::Value) {
         let timeframe = state.timeframe.clone();
         let exchange = state.exchange.clone();
         state.set_bars(&symbol, &timeframe, &exchange, bars);
+        // Bars for the series the header now names: the mismatch is resolved.
+        state.bars_stale = false;
     } else {
+        // No `bars` key in the payload. If the header just changed series, the
+        // candles on screen still belong to the PREVIOUS symbol/timeframe —
+        // mark the mismatch instead of presenting them as the new series. The
+        // bars themselves are kept (they are real data for a real series) and
+        // the projection reports the staleness.
+        let header_series = format!("{}\u{1}{}", state.selected_symbol, state.timeframe);
+        let previous_series = format!("{}\u{1}{}", bars_owner_symbol, bars_owner_timeframe);
+        state.bars_stale = !state.bars.is_empty() && header_series != previous_series;
         state.status = match snap_str(value, "status").as_str() {
             "ready" => {
                 if state.bars.is_empty() {
@@ -3100,17 +3248,24 @@ pub fn apply_snapshot_json(state: &mut MarketState, value: &serde_json::Value) {
     if !notice.is_empty() {
         state.notice = notice;
     }
-    // Indicator visibility: the retained panel ROWS (name -> bool). Only
-    // entries the backend confirms are kept; nothing is seeded or invented.
-    // A deleted indicator has no row, so it can never reappear here.
+    // Indicator visibility: the retained panel ROWS (name -> bool). Merged
+    // BY KEY, never wholesale-replaced: the user can add an indicator
+    // optimistically and the very next snapshot (fetched for an unrelated
+    // reason) does not yet carry that row — a wholesale replace would silently
+    // delete the just-added indicator from the panel, so the click appeared to
+    // do nothing. Merge keeps unknown-to-the-snapshot rows (still being
+    // persisted) and applies the backend's flag to every row it does report.
+    // Genuine removal still works: the panel has no delete gesture that does
+    // not also drop the row locally first.
     if let Some(map) = value.get("indicators").and_then(|v| v.as_object()) {
-        state.indicators = map
-            .iter()
-            .map(|(name, visible)| IndicatorEntry {
-                name: normalize_indicator_name(name),
-                visible: visible.as_bool().unwrap_or(true),
-            })
-            .collect();
+        for (name, visible) in map {
+            let name = normalize_indicator_name(name);
+            let visible = visible.as_bool().unwrap_or(true);
+            match state.indicators.iter_mut().find(|e| e.name == name) {
+                Some(entry) => entry.visible = visible,
+                None => state.indicators.push(IndicatorEntry { name, visible }),
+            }
+        }
     }
     // Editable parameter specs per indicator: {name: [{key,label,value,
     // min,max,step,decimals}]}. Feeds the native settings panel; the values
@@ -4026,9 +4181,28 @@ mod tests {
         assert_eq!(st.settings_rows[0].value, 2.0);
         assert!(st.indicators[0].visible);
         // SAVE payload is name + JSON over the buffer.
+        // Re-pinned: the payload is now built with `serde_json` (required to
+        // ESCAPE keys — a raw `"`/`\` in a key used to emit malformed JSON the
+        // backend could not parse). serde_json renders a whole double as
+        // "2.0" where the old hand-rolled `format!("{}", 2.0f64)` produced
+        // "2". The VALUE is the same JSON number either way; only its textual
+        // rendering changed, so the pin moves with it.
         let (name, json) = st.settings_payload().expect("payload");
         assert_eq!(name, "OBR");
-        assert_eq!(json, "{\"c1_thresh\":2}");
+        assert_eq!(json, "{\"c1_thresh\":2.0}");
+        // A key needing escapes stays valid JSON, and a non-finite value is
+        // dropped rather than written as the invalid literal `NaN`.
+        st.settings_rows[0].key = "we\"ird\\key".to_string();
+        st.settings_rows[0].value = f64::NAN;
+        let (name, json) = st.settings_payload().expect("payload");
+        assert_eq!(name, "OBR");
+        assert_eq!(json, "{}");
+        st.settings_rows[0].key = "we\"ird\\key".to_string();
+        st.settings_rows[0].value = 1.5;
+        let (_, json) = st.settings_payload().expect("payload");
+        assert_eq!(json, "{\"we\\\"ird\\\\key\":1.5}");
+        st.settings_rows[0].key = "c1_thresh".to_string();
+        st.settings_rows[0].value = 2.0;
         // Commit closes and stays backend-owned (wire queued by the view).
         let mut q = MarketState::default();
         assert!(q.apply(MarketAction::AddIndicator("OBR".to_string())));
@@ -4241,6 +4415,57 @@ mod tests {
         assert_eq!(normalize_indicator_name("Volume"), "Vol");
         assert_eq!(normalize_indicator_name("volume"), "Vol");
         assert_eq!(normalize_indicator_name("SMA"), "SMA");
+    }
+
+    #[test]
+    fn count_formatting_never_saturates_into_a_wrong_number() {
+        // A saturating `as i64` would render 1e30 as a plausible-looking
+        // 19-digit constant. Out-of-range is honest absence, not a wrong count.
+        assert_eq!(fmt_int(1e30), "N/A");
+        assert_eq!(fmt_int(f64::INFINITY), "N/A");
+        assert_eq!(fmt_int(f64::NEG_INFINITY), "N/A");
+        assert_eq!(fmt_int(f64::NAN), "N/A");
+        // In-range values keep their exact grouping.
+        assert_eq!(fmt_int(1_240_500.0), "1,240,500");
+        assert_eq!(fmt_int(0.0), "0");
+        assert_eq!(fmt_int(-1_240_500.4), "-1,240,500");
+        assert_eq!(fmt_int(i64::MAX as f64), "9,223,372,036,854,775,807");
+        assert_eq!(fmt_volume(f64::NAN), "N/A");
+        assert_eq!(fmt_volume(-950.0), "-950");
+    }
+
+    #[test]
+    fn money_split_carries_a_hundredth_that_rounds_to_one_hundred() {
+        // 1234.999 → 123499.9 hundredths → rounds to 123500 → whole 1235, frac
+        // 0. The old trunc()+round() pair produced the impossible ".100".
+        assert_eq!(western2(1.999), "2.00");
+        assert_eq!(western2(-1.999), "-2.00");
+        assert_eq!(western2(0.999), "1.00");
+        assert_eq!(western2(1234.5), "1,234.50");
+        assert_eq!(western2(0.0), "0.00");
+        assert_eq!(western2(f64::NAN), "N/A");
+        assert_eq!(western2(f64::INFINITY), "N/A");
+        assert_eq!(western2(1e30), "N/A");
+        assert!(!western2(9.999).contains(".100"));
+    }
+
+    #[test]
+    fn round_py_half_to_even_survives_values_outside_i64() {
+        // The old `floor as i64` cast SATURATED outside i64, so the parity test
+        // read the clamp's parity instead of the value's and picked the wrong
+        // neighbour. Decided on the f64 now, so the result is exact.
+        assert_eq!(round_py(0.5), 0.0);
+        assert_eq!(round_py(1.5), 2.0);
+        assert_eq!(round_py(2.5), 2.0);
+        assert_eq!(round_py(-0.5), -0.0);
+        assert_eq!(round_py(-1.5), -2.0);
+        assert_eq!(round_py(2.4), 2.0);
+        assert_eq!(round_py(2.6), 3.0);
+        // Far outside i64: the value is already integral, so the half case
+        // cannot arise; the result must be the value itself, not a clamped one.
+        let huge = 1e300;
+        assert_eq!(round_py(huge), huge);
+        assert!(is_even_f64(round_py(1e300 + 0.5)));
     }
 
     #[test]
@@ -4848,14 +5073,21 @@ mod tests {
     }
 
     #[test]
-    fn percent_scale_anchors_first_visible_bar_at_zero() {
+    fn percent_scale_anchors_the_first_dataset_bar_at_zero() {
+        // CONTRACT CHANGE (re-pinned): percent mode anchors on the FIRST BAR
+        // OF THE DATASET, not the first bar of the current viewport. The old
+        // anchor re-baselined the whole % axis on every pan, so the same bar
+        // read +0% at one scroll position and +40% at the next — the series
+        // looked like it was changing value when only the viewport moved.
+        // The assertions below (ordering, % ticks, OHLC header) are unchanged;
+        // the added pan check pins the stability that the dataset anchor buys.
         let mut st = MarketState::default();
         st.width_cap = 200;
         st.set_bars("S", "15m", "", scale_bars());
         assert!(st.apply(MarketAction::CycleScaleMode));
         let view = project(&st);
         assert!(view.has_data);
-        // First bar sits at ~0%, last near +99%: monotonic rise preserved.
+        // Price order still reads monotonically in percent space.
         assert!(view.candles.len() > 10);
         for w in view.candles.windows(2) {
             assert!(w[0].close >= w[1].close, "percent order must follow price");
@@ -4863,6 +5095,36 @@ mod tests {
         assert!(view.price_ticks.iter().all(|t| t.label.ends_with('%')));
         let proj = project_hover(&st);
         assert!(proj.header_ohlc.starts_with('O'));
+
+        // Panning must NOT re-baseline: the lowest % level on screen is the
+        // same before and after the viewport moves.
+        let frame_before = scale_frame(&st);
+        let before_ticks: Vec<String> = nice_price_ticks(
+            frame_before.xform,
+            frame_before.low,
+            frame_before.high,
+            axis_decimals(frame_before.xform, frame_before.low, frame_before.high),
+        )
+        .into_iter()
+        .map(|t| t.label)
+        .collect();
+        let total = st.bars.len();
+        st.first = (st.first - 5.0).clamp(0.0, st.max_pan_first() as f64);
+        assert!(st.first < (total as f64) - 1.0, "pan must actually move");
+        let frame_after = scale_frame(&st);
+        let after_ticks: Vec<String> = nice_price_ticks(
+            frame_after.xform,
+            frame_after.low,
+            frame_after.high,
+            axis_decimals(frame_after.xform, frame_after.low, frame_after.high),
+        )
+        .into_iter()
+        .map(|t| t.label)
+        .collect();
+        assert_eq!(
+            before_ticks, after_ticks,
+            "percent labels must not re-baseline while panning"
+        );
     }
 
     #[test]
@@ -5001,6 +5263,197 @@ mod tests {
         );
         assert!(state.notice.is_empty());
         assert!(project(&state).has_data);
+    }
+
+    #[test]
+    fn a_barless_snapshot_for_a_new_series_is_reported_as_stale() {
+        // The header switching series while the payload carries no bars used
+        // to leave the OLD candles on screen under the NEW symbol's name — a
+        // chart that silently lies about what it is showing. The bars stay
+        // (blanking on every click is worse) but the mismatch is reported.
+        let mut st = MarketState::default();
+        let with_bars = serde_json::json!({
+            "selected_symbol": "TCS", "timeframe": "15m",
+            "bars": [{"time": "2026-06-10T09:15:00", "open": 1.0, "high": 2.0,
+                      "low": 0.5, "close": 1.5, "volume": 100.0}],
+        });
+        apply_snapshot_json(&mut st, &with_bars);
+        assert!(!st.bars_stale);
+        assert_eq!(st.selected_symbol, "TCS");
+        assert_eq!(project(&st).status_message, "");
+
+        // Same series, no bars → nothing changed, so nothing is stale.
+        let same_series = serde_json::json!({
+            "selected_symbol": "TCS", "timeframe": "15m", "status": "ready"
+        });
+        apply_snapshot_json(&mut st, &same_series);
+        assert!(!st.bars_stale, "same series is not a mismatch");
+
+        // Series switched, still no bars → stale, and the status says so.
+        let switched = serde_json::json!({
+            "selected_symbol": "RELIANCE", "timeframe": "15m", "status": "loading"
+        });
+        apply_snapshot_json(&mut st, &switched);
+        assert!(st.bars_stale);
+        assert_eq!(st.selected_symbol, "RELIANCE");
+        // Real data of the previous series is still on screen (not invented
+        // away) but the status names the mismatch.
+        assert!(!st.bars.is_empty());
+        let view = project(&st);
+        assert!(view.status_message.contains("RELIANCE"));
+        assert!(view.status_message.contains("previous series"));
+
+        // A timeframe-only switch is the same mismatch.
+        apply_snapshot_json(
+            &mut st,
+            &serde_json::json!({"timeframe": "1h", "status": "loading"}),
+        );
+        assert!(st.bars_stale);
+
+        // Bars arriving for the new series clear the flag.
+        let resolved = serde_json::json!({
+            "selected_symbol": "RELIANCE", "timeframe": "1h",
+            "bars": [{"time": "2026-06-10T09:15:00", "open": 9.0, "high": 10.0,
+                      "low": 8.0, "close": 9.5, "volume": 50.0}],
+        });
+        apply_snapshot_json(&mut st, &resolved);
+        assert!(!st.bars_stale);
+        assert_eq!(project(&st).status_message, "");
+    }
+
+    #[test]
+    fn indicator_rows_merge_by_key_instead_of_being_replaced() {
+        // An optimistic add must survive the next snapshot: the panel has no
+        // row for it yet because the backend has not persisted it, and a
+        // wholesale replace deleted it again — the click looked broken.
+        let mut st = MarketState::default();
+        let value: serde_json::Value = serde_json::from_str(
+            r#"{"selected_symbol":"TEST","timeframe":"15m",
+               "bars":[{"time":"2024-01-02T09:15:00","open":100.0,"high":102.0,
+               "low":99.0,"close":101.5,"volume":1000.0}],
+               "indicators":{"SMA":true}}"#,
+        )
+        .unwrap();
+        apply_snapshot_json(&mut st, &value);
+        assert_eq!(st.indicators.len(), 1);
+        assert_eq!(st.indicators[0].name, "SMA");
+
+        // Optimistic local add (this is what the toolbar does).
+        assert!(st.apply(MarketAction::AddIndicator("RSI".to_string())));
+        assert_eq!(st.indicators.len(), 2);
+
+        // A snapshot that still lacks RSI must not delete it.
+        apply_snapshot_json(&mut st, &value);
+        assert!(
+            st.indicators.iter().any(|e| e.name == "RSI"),
+            "optimistic add must survive a snapshot lacking it"
+        );
+        assert!(st.indicators.iter().any(|e| e.name == "SMA"));
+
+        // A snapshot that DOES report RSI updates it in place (no duplicate).
+        let with_rsi: serde_json::Value = serde_json::from_str(
+            r#"{"selected_symbol":"TEST","timeframe":"15m","indicators":{"SMA":true,"RSI":false}}"#,
+        )
+        .unwrap();
+        apply_snapshot_json(&mut st, &with_rsi);
+        assert_eq!(st.indicators.len(), 2);
+        assert!(
+            !st.indicators
+                .iter()
+                .find(|e| e.name == "RSI")
+                .unwrap()
+                .visible
+        );
+
+        // Volume still normalizes through the shared merge path.
+        let with_vol: serde_json::Value =
+            serde_json::from_str(r#"{"indicators":{"volume":true}}"#).unwrap();
+        apply_snapshot_json(&mut st, &with_vol);
+        assert!(st.indicators.iter().any(|e| e.name == "Vol"));
+    }
+
+    #[test]
+    fn an_empty_window_renders_nothing_instead_of_a_phantom_bar() {
+        // `count == 0` is a zero-slot viewport. The old `count.max(1)` guard
+        // drew one candle into a plot with no slots.
+        let mut st = MarketState::default();
+        st.set_bars("S", "15m", "", bars(40));
+        assert!(!st.visible_window().is_empty());
+        st.count = 0;
+        assert!(st.visible_window().is_empty(), "no phantom bar at count 0");
+        assert!(!st.has_data());
+        let view = project(&st);
+        assert!(view.candles.is_empty());
+        assert!(!view.has_data);
+        // The data is untouched — the user is not punished for an empty window.
+        assert_eq!(st.bars.len(), 40);
+    }
+
+    #[test]
+    fn a_shrinking_dataset_clamps_the_viewport_instead_of_pointing_past_the_data() {
+        // Same series, but the backend returns far fewer bars. The viewport
+        // used to keep its old `first`, landing beyond the last bar: nothing
+        // to render and no way to reason about it.
+        let mut st = MarketState::default();
+        st.set_bars("S", "15m", "", bars(2000));
+        // Free-pan to the far left of a large history, then stop following.
+        st.first = st.max_pan_first() as f64;
+        st.follow_latest = false;
+        assert!(st.first > 0.0);
+
+        // Same symbol/timeframe, but only 20 bars come back.
+        st.set_bars("S", "15m", "", bars(20));
+        assert_eq!(st.bars.len(), 20);
+        // The old origin (past the end of a 20-bar dataset) is clamped into
+        // the reachable pan range, so a real bar is under the left edge.
+        assert!(
+            st.first <= st.max_pan_first() as f64,
+            "viewport must stay inside the data"
+        );
+        // Every rendered bar is real data from the new dataset — the slice
+        // itself is bounds-clamped, so nothing outside the bars is reachable.
+        let window = st.visible_window();
+        assert!(!window.is_empty(), "a real bar stays visible");
+        assert_eq!(window.last().unwrap().time, st.bars[st.bars.len() - 1].time);
+        assert!(st.first + st.count as f64 > st.bars.len() as f64 - 1.0);
+    }
+
+    #[test]
+    fn a_full_pending_queue_counts_and_logs_the_drop() {
+        // The queue used to swallow wires silently past 64: the UI had already
+        // applied the optimistic change, so the row looked toggled while the
+        // backend never heard about it — a permanent invisible divergence.
+        let mut st = MarketState::default();
+        for i in 0..PENDING_ACTIONS_CAP {
+            st.interact(
+                &format!("select:SYM{i}"),
+                MarketAction::SelectSymbol(format!("SYM{i}")),
+            );
+        }
+        assert_eq!(st.pending_actions.len(), PENDING_ACTIONS_CAP);
+        assert_eq!(st.dropped_pending_actions, 0);
+
+        st.interact(
+            "select:OVERFLOW",
+            MarketAction::SelectSymbol("OVERFLOW".into()),
+        );
+        assert_eq!(
+            st.pending_actions.len(),
+            PENDING_ACTIONS_CAP,
+            "the queue never grows past the cap"
+        );
+        assert_eq!(st.dropped_pending_actions, 1, "the drop is counted");
+        assert!(
+            !st.pending_actions.iter().any(|w| w == "select:OVERFLOW"),
+            "the dropped wire is honestly absent"
+        );
+
+        // The download console shares the same counter.
+        st.interact_download(mdownload::DownloadAction::Toggle);
+        for _ in 0..PENDING_ACTIONS_CAP {
+            st.interact_download(mdownload::DownloadAction::ClearLog);
+        }
+        assert_eq!(st.dropped_pending_actions, 1 + PENDING_ACTIONS_CAP as u64);
     }
 
     #[test]

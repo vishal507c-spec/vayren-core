@@ -174,6 +174,7 @@ _TRADING_LEGACY_MAP: dict[str, str] = {
     "orders.modify": Caps.ORDERS_MODIFY,
     "account.positions": Caps.ACCOUNT_POSITIONS,
     "account.open_orders": Caps.ACCOUNT_OPEN_ORDERS,
+    "account.funds": Caps.ACCOUNT_FUNDS,
     "stream.events": Caps.STREAM_FILLS,
 }
 
@@ -190,11 +191,15 @@ _MARKET_DATA_LEGACY_MAP: dict[str, str] = {
 
 def trading_set_from_legacy(legacy: Iterable[str]) -> CapabilitySet:
     """Translate execution-layer legacy trading caps into a CapabilitySet."""
-    items = tuple(_TRADING_LEGACY_MAP[cap] for cap in legacy)
+    items = tuple(_TRADING_LEGACY_MAP[cap] for cap in legacy if cap in _TRADING_LEGACY_MAP)
+    if not items:
+        return CapabilitySet(domains=(), items=frozenset())
     return CapabilitySet(domains=(Domain.TRADING,), items=frozenset(items))
 
 
 def market_data_set_from_legacy(legacy: Iterable[str]) -> CapabilitySet:
     """Translate execution-layer legacy market-data caps into a CapabilitySet."""
     items = tuple(_MARKET_DATA_LEGACY_MAP[cap] for cap in legacy if cap in _MARKET_DATA_LEGACY_MAP)
+    if not items:
+        return CapabilitySet(domains=(), items=frozenset())
     return CapabilitySet(domains=(Domain.MARKET_DATA,), items=frozenset(items))

@@ -62,11 +62,43 @@ class ComparisonResult:
 
 
 def _number(value: Any) -> float | None:
+    # Bools are never numbers here — True must not compare as 1.0.
+    if isinstance(value, bool):
+        return None
     try:
         number = float(value)
     except (TypeError, ValueError):
         return None
     return number
+
+
+def _config_key(value: Any) -> Any:
+    """Comparison key where bools compare as strings, not numbers.
+
+    Plain ``!=`` treats ``True == 1`` as equal, which would hide a real
+    bool-vs-number configuration difference — normalize bools first.
+    """
+    if isinstance(value, bool):
+        return f"bool:{value}"
+    if isinstance(value, list):
+        return tuple(_config_key(v) for v in value)
+    if isinstance(value, dict):
+        return tuple(sorted((k, _config_key(v)) for k, v in value.items()))
+    return value
+
+
+#: Top-level experiment fields compared directly (legacy records carry
+#: identity here instead of inside ``configuration``).
+_TOP_LEVEL_DIMS = (
+    "strategy_id",
+    "version_id",
+    "symbols",
+    "timeframe",
+    "start_date",
+    "end_date",
+)
+
+_TOP_LEVEL_RENAME = {"version_id": "strategy_version"}
 
 
 def compare_experiments(left: dict[str, Any], right: dict[str, Any]) -> ComparisonResult:
@@ -79,12 +111,20 @@ def compare_experiments(left: dict[str, Any], right: dict[str, Any]) -> Comparis
     )
     differences: list[str] = []
     for dim in _CONFIG_DIMS:
-        if left_cfg.get(dim) != right_cfg.get(dim):
+        if _config_key(left_cfg.get(dim)) != _config_key(right_cfg.get(dim)):
             differences.append(dim)
     # Legacy records carry strategy identity top-level; treat mismatch as difference.
     for dim in ("strategy_id", "version_id"):
-        if left.get(dim) != right.get(dim):
+        if _config_key(left.get(dim)) != _config_key(right.get(dim)):
             name = "strategy_id" if dim == "strategy_id" else "strategy_version"
+            if name not in differences:
+                differences.append(name)
+    # Top-level execution dimensions (never only inside configuration).
+    for dim in _TOP_LEVEL_DIMS:
+        if dim in ("strategy_id", "version_id"):
+            continue  # handled above
+        if _config_key(left.get(dim)) != _config_key(right.get(dim)):
+            name = _TOP_LEVEL_RENAME.get(dim, dim)
             if name not in differences:
                 differences.append(name)
 

@@ -64,6 +64,15 @@ pub fn aggregate(
     session_start: i64,
 ) -> Vec<AggBucket> {
     let n = days.len();
+    assert!(
+        secs.len() == n
+            && opens.len() == n
+            && highs.len() == n
+            && lows.len() == n
+            && closes.len() == n
+            && volumes.len() == n,
+        "aggregate: parallel input arrays have mismatched lengths"
+    );
     let mut order: Vec<(i32, i32)> = Vec::new();
     let mut acc: Vec<AggBucket> = Vec::new();
     // HashMap for O(1) bucket lookup (a linear scan degrades to O(n*buckets)

@@ -22,43 +22,6 @@ class Strategy(PythonStrategy):
 
 # Python-native built-in strategies
 LEGACY_OBR_NAME = "OBR SELL v1.0"
-LEGACY_OBR_CODE = """from strategy.strategies.base import PythonStrategy
-from strategy.strategies.indicators import calc_range, calc_rsi
-
-class Strategy(PythonStrategy):
-    @staticmethod
-    def param_specs():
-        from strategy.models.parameters import ParameterSpec
-        return (
-            ParameterSpec(
-                key="c1_thresh", label="C1 Range", default=1.25, minimum=0.1, maximum=5.0,
-                decimals=2,
-            ),
-            ParameterSpec(
-                key="c4_thresh", label="C4 Range", default=0.56, minimum=0.1, maximum=5.0,
-                decimals=2,
-            ),
-            ParameterSpec(
-                key="rsi_thr", label="RSI Threshold", default=65, minimum=30, maximum=90,
-                decimals=0,
-            ),
-        )
-    def on_bar_logic(self, view):
-        bar = view.bar
-        c1 = float(self.params.get("c1_thresh", 1.25))
-        rsi_thr = float(self.params.get("rsi_thr", 65))
-        rsi = calc_rsi(self.closes, 14)
-        ch_range = calc_range(self.highs, self.lows, 20)
-        if bar.close >= (bar.high - ch_range * 0.15 * c1) and rsi >= rsi_thr and bar.volume >= 1000:
-            self.sell()
-            self.stop_loss(bar.close + c1 * (bar.high - bar.low))
-            self.take_profit(bar.close - 2 * c1 * (bar.high - bar.low))
-            return
-        if bar.close < (bar.high + bar.low) / 2 and rsi < 50:
-            self.close_position(view)
-            return
-        self.time_exit("15:15")
-"""
 
 
 def _library_root() -> Path:

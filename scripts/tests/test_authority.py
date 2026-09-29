@@ -89,6 +89,11 @@ def test_shadow_registry_map_fails() -> None:
     assert "shadow-registry-map" in _rule_ids(check_registries(files))
 
 
+def test_shadow_registry_map_is_case_insensitive() -> None:
+    files = _full_registries({"02_data/data/provider/shadow.py": "venue_registry = {}\n"})
+    assert "shadow-registry-map" in _rule_ids(check_registries(files))
+
+
 def test_unauthorized_register_writer_fails() -> None:
     files = _full_registries(
         {
@@ -120,6 +125,32 @@ def test_duplicate_authority_fails_with_canonical() -> None:
     violation = next(v for v in violations if v.rule == "duplicate-authority")
     assert violation.canonical == FACTORY
     assert violation.symbol == "build_provider"
+
+
+def test_migrated_table_authority_redefined_fails() -> None:
+    files = _full_authorities(
+        {"08_execution/execution/models/order_state.py": "TRANSITIONS = {}\n"}
+    )
+    violations = check_authorities(files)
+    assert "duplicate-table-authority" in _rule_ids(violations)
+    violation = next(v for v in violations if v.rule == "duplicate-table-authority")
+    assert violation.symbol == "TRANSITIONS"
+    assert violation.canonical == "rust/vayren-core/src/order_state.rs"
+
+
+def test_clean_tree_has_no_table_authority() -> None:
+    assert check_authorities(_full_authorities()) == []
+
+
+def test_function_local_constant_is_not_a_table_authority() -> None:
+    files = _full_authorities(
+        {
+            "08_execution/execution/models/order_state.py": (
+                "def build():\n    TRANSITIONS = {}\n    return TRANSITIONS\n"
+            )
+        }
+    )
+    assert "duplicate-table-authority" not in _rule_ids(check_authorities(files))
 
 
 # ── selection single writer ────────────────────────────────────────────
@@ -205,6 +236,45 @@ def test_bridge_documented_exception_passes() -> None:
 def test_bridge_io_call_fails() -> None:
     files = {"07_risk/risk/native_x.py": "fh = open('x')\n"}
     assert "bridge-io-violation" in _rule_ids(check_bridges(files))
+
+
+def test_renamed_bridge_is_scanned_by_content() -> None:
+    files = {
+        "03_market/market/kernel_shim.py": (
+            "import ctypes\nimport requests\nfrom core.native.loader import load_vayren_core\n"
+        )
+    }
+    assert "bridge-import-violation" in _rule_ids(check_bridges(files))
+
+
+def test_loader_package_is_scanned_by_content() -> None:
+    files = {"01_core/core/native/loader.py": "import ctypes\nfrom strategy import Signal\n"}
+    assert "bridge-import-violation" in _rule_ids(check_bridges(files))
+
+
+def test_exec_call_in_bridge_fails() -> None:
+    files = {"07_risk/risk/native_x.py": "exec('x = 1')\n"}
+    assert "bridge-io-violation" in _rule_ids(check_bridges(files))
+
+
+def test_os_system_in_bridge_fails() -> None:
+    files = {"07_risk/risk/native_x.py": "import os\nos.system('ls')\n"}
+    assert "bridge-io-violation" in _rule_ids(check_bridges(files))
+
+
+def test_stdlib_system_call_in_bridge_passes() -> None:
+    # Regression guard: only `os.system` is denied, `platform.system()` is not.
+    files = {
+        "01_core/core/native/loader.py": (
+            "import ctypes\nimport platform\nif platform.system().lower() == 'win':\n    pass\n"
+        )
+    }
+    assert check_bridges(files) == []
+
+
+def test_non_ffi_module_is_not_treated_as_bridge() -> None:
+    files = {"05_strategy/strategy/sma.py": "import ctypes\nfrom strategy.models import Signal\n"}
+    assert check_bridges(files) == []
 
 
 # ── UI tokens ──────────────────────────────────────────────────────────

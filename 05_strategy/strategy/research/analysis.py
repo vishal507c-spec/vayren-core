@@ -115,30 +115,7 @@ def analyze_dataset(dataset: ResearchDataset) -> ResearchAnalysis:
     For Phase 6, we compute from dataset.trades/signals. If dataset contains
     real Trade objects, we use compute_metrics; otherwise we compute simple stats.
     """
-    # Try to use existing metrics if trades are Trade objects
-    # For generic dataset, trades may be signals dicts — compute simple stats
     trades = dataset.trades
-    # If trades are dicts with price, we can't compute metrics, so do simple
-    # For real backtest, trades are Trade objects with pnl
-    # We will attempt to compute via existing logic if possible
-    try:
-        # If trades look like Trade objects (have pnl attribute)
-        if trades and hasattr(trades[0], "pnl"):
-            # Use TradeJournal-like computation via compute_metrics
-            # Need equity curve — for now use simple
-
-            # Fallback to simple
-            pass
-    except Exception:
-        pass
-
-    # Simple generic stats from signals/trades
-    trade_count = len(trades)
-    # For signals, win rate etc. not applicable, so try to infer
-    # If dataset was from execution history signals, we can compute
-    # For now, produce analysis with available data
-    # Use dataset parameters for context
-    # Compute from trades if they have pnl
     wins = 0
     losses = 0
     gross_profit = 0.0
@@ -162,6 +139,9 @@ def analyze_dataset(dataset: ResearchDataset) -> ResearchAnalysis:
             continue
 
     total = wins + losses
+    # trade_count is the ANALYZED count (trades with a usable pnl), not the
+    # raw dataset length — skipped dict/unparseable rows are not trades.
+    trade_count = len(pnls)
     win_rate = (wins / total) if total else None
     avg_win = (gross_profit / wins) if wins else None
     avg_loss = (gross_loss / losses) if losses else None

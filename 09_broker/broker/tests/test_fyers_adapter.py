@@ -54,12 +54,14 @@ def test_broker_id_is_stable_and_single() -> None:
     assert FyersProvider.name == BROKER_ID
 
 
-def test_capability_matrix_is_honestly_empty() -> None:
-    """Authentication phase: no history capabilities claimed, so every
-    history surface fails closed with the recorded reason."""
-    assert HISTORICAL_CAPABILITIES.items == frozenset()
-    for domain in (Domain.HISTORICAL_DATA, Domain.MARKET_DATA, Domain.TRADING):
-        assert not HISTORICAL_CAPABILITIES.supports_domain(domain)
+def test_capability_matrix_advertises_history_shape() -> None:
+    """Faces-vs-capabilities consistency: the record serves HISTORICAL_DATA,
+    so it advertises the history shape (split-brain empty sets are rejected
+    by BrokerRecord). Fail-closed history is enforced by the transport
+    raising ProviderError, not by advertising zero capabilities."""
+    assert HISTORICAL_CAPABILITIES.supports_domain(Domain.HISTORICAL_DATA)
+    assert not HISTORICAL_CAPABILITIES.supports_domain(Domain.MARKET_DATA)
+    assert not HISTORICAL_CAPABILITIES.supports_domain(Domain.TRADING)
 
 
 def test_registry_record_serves_fail_closed_history() -> None:
@@ -93,9 +95,11 @@ def test_history_face_fails_closed_without_network(tmp_path) -> None:
         face.symbols()
 
 
-def test_selection_resolves_but_history_surface_refuses() -> None:
-    """FYERS is selectable (management works); the history surface fails
-    closed with an explicit reason instead of a silent fallback."""
+def test_selection_resolves_and_history_surface_is_served() -> None:
+    """FYERS is selectable and the history surface resolves (caps advertised
+    for the served face). Fail-closed without network happens at the
+    transport (`ProviderError`), never as a silent fallback to another
+    broker — see test_history_face_fails_closed_without_network."""
     import data.provider.factory  # noqa: F401
 
     from broker.selection import surface_resolution
@@ -108,7 +112,7 @@ def test_selection_resolves_but_history_surface_refuses() -> None:
     )
     record = default_registry().get(selection.name)
     allowed, reason = surface_resolution(selection, record.capabilities, Domain.HISTORICAL_DATA)
-    assert not allowed
+    assert allowed
     assert "fyers" in reason
 
 

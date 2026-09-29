@@ -138,5 +138,10 @@ def test_lean_fallback_builds_lean_test(_fake_root: Path, monkeypatch: pytest.Mo
 
 
 def test_parts_stays_tuple_literal() -> None:
+    # Shape guard only (AST-parsed by test_gate_coverage): PARTS must stay a
+    # tuple literal of test directories. The COUNT is owned by
+    # test_gate_coverage.test_every_tests_dir_in_partitioned_runner — pinning
+    # it here just re-asserts a number and rots the moment a chapter gains a
+    # tests/ dir.
     assert isinstance(run_tests.PARTS, tuple)
-    assert len(run_tests.PARTS) == 6
+    assert all(isinstance(part, str) and part.endswith("/tests") for part in run_tests.PARTS)

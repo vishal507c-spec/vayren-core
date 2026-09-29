@@ -8,9 +8,10 @@ broker-name branching.
 
 This skeleton implements all three UBL faces with transport
 NOT_CONFIGURED: every operational method fails closed with the unified
-vocabulary (``UnsupportedCapabilityError``); ``capabilities()`` is empty
-(undeclared → NOT_CONFIGURED); ``available()``/``health()`` report
-``False`` honestly. It is real fail-closed behavior — not a mock — and
+vocabulary (``UnsupportedCapabilityError``); ``capabilities()`` advertises
+the one-item-per-face contract shape the registry consistency rule requires
+(``available()``/``health()`` still report ``False`` honestly — shape is not
+liveness). It is real fail-closed behavior — not a mock — and
 the contract suite proves a venue shaped like this can never trade.
 
 Stdlib + UBL vocabulary only. No SDK, no network, no credentials.
@@ -21,12 +22,30 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from broker.capabilities import CapabilitySet, Domain
+from broker.capabilities import CapabilitySet, Caps, Domain, capability_set
 from broker.registry import BrokerRecord
-from broker.vocab import Environment, UnsupportedCapabilityError
+from broker.vocab import BrokerError, Environment, ErrorCode, UnsupportedCapabilityError
 
 BROKER_ID = "skeleton"
 DISPLAY_NAME = "Skeleton (reference template)"
+
+# Reference-template capability shape: one advertised item per served face so
+# the record passes the faces-vs-capabilities consistency rule (`BrokerRecord`
+# rejects faces with zero advertised items as split-brain). The shape describes
+# the contract surface only — every operational method still refuses with
+# `UnsupportedCapabilityError` ("no transport"), proven by the contract suite,
+# so a venue shaped like this can never trade.
+SKELETON_CAPABILITIES: CapabilitySet = capability_set(
+    {
+        Domain.HISTORICAL_DATA: (Caps.HIST_CANDLES,),
+        Domain.MARKET_DATA: (Caps.MD_CANDLE_STREAM,),
+        Domain.TRADING: (Caps.ORDERS_MARKET,),
+    }
+)
+
+_HISTORICAL_SHAPE: CapabilitySet = capability_set({Domain.HISTORICAL_DATA: (Caps.HIST_CANDLES,)})
+_MARKET_DATA_SHAPE: CapabilitySet = capability_set({Domain.MARKET_DATA: (Caps.MD_CANDLE_STREAM,)})
+_TRADING_SHAPE: CapabilitySet = capability_set({Domain.TRADING: (Caps.ORDERS_MARKET,)})
 
 _UNCONFIGURED = "skeleton transport NOT_CONFIGURED"
 
@@ -35,13 +54,17 @@ def _refuse(operation: str) -> UnsupportedCapabilityError:
     return UnsupportedCapabilityError(f"skeleton cannot {operation}: {_UNCONFIGURED}")
 
 
+def _no_transport(operation: str) -> BrokerError:
+    return BrokerError(f"skeleton cannot {operation}: {_UNCONFIGURED}", ErrorCode.NOT_CONNECTED)
+
+
 class SkeletonHistorical:
     """Historical face with no transport: honest unavailability."""
 
     name = BROKER_ID
 
     def capabilities(self) -> CapabilitySet:
-        return CapabilitySet()
+        return _HISTORICAL_SHAPE
 
     def available(self) -> tuple[bool, str]:
         return False, _UNCONFIGURED
@@ -66,12 +89,18 @@ class SkeletonHistorical:
 
 
 class SkeletonMarketData:
-    """Market-data face with no transport: silent nothing, honest health."""
+    """Market-data face with no transport: explicit empty stream, honest health.
+
+    ``poll`` returns an explicit empty tuple (documented "no transport" —
+    never a silent success: there is no stream to read) and ``health``
+    reports ``False``; ``disconnect``/``close`` on an unconfigured transport
+    raise ``BrokerError`` (there is no session to release idempotently).
+    """
 
     name = BROKER_ID
 
     def capabilities(self) -> CapabilitySet:
-        return CapabilitySet()
+        return _MARKET_DATA_SHAPE
 
     def connect(self) -> None:
         raise _refuse("connect market data")
@@ -86,19 +115,20 @@ class SkeletonMarketData:
         raise _refuse("unsubscribe")
 
     def poll(self) -> tuple[Any, ...]:
+        """Explicit empty stream: no transport, not a silent success."""
         return ()
 
     def health(self) -> tuple[bool, str]:
         return False, _UNCONFIGURED
 
     def disconnect(self) -> None:
-        return None
+        raise _no_transport("disconnect market data")
 
     def reconnect(self) -> None:
         raise _refuse("reconnect market data")
 
     def close(self) -> None:
-        return None
+        raise _no_transport("close market data")
 
 
 class SkeletonTrading:
@@ -108,13 +138,13 @@ class SkeletonTrading:
     environment = Environment.PAPER
 
     def capabilities(self) -> CapabilitySet:
-        return CapabilitySet()
+        return _TRADING_SHAPE
 
     def connect(self) -> None:
         raise _refuse("connect trading")
 
     def disconnect(self) -> None:
-        return None
+        raise _no_transport("disconnect trading")
 
     def health(self) -> tuple[bool, str]:
         return False, _UNCONFIGURED
@@ -151,6 +181,7 @@ class SkeletonTrading:
         raise _refuse("modify orders")
 
     def stream_events(self) -> tuple[dict[str, Any], ...]:
+        """Explicit empty stream: no transport, not a silent success."""
         return ()
 
 
@@ -170,9 +201,9 @@ def skeleton_record() -> BrokerRecord:
             name=BROKER_ID,
             display_name=DISPLAY_NAME,
             face_map=faces,
-            capabilities=CapabilitySet(),
+            capabilities=SKELETON_CAPABILITIES,
         ),
-        capabilities=CapabilitySet(),
+        capabilities=SKELETON_CAPABILITIES,
         faces=(Domain.HISTORICAL_DATA, Domain.MARKET_DATA, Domain.TRADING),
     )
 

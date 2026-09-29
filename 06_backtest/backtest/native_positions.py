@@ -23,7 +23,6 @@ _SIDES = {"LONG": 0, "SHORT": 1}
 _REASONS = {"SIGNAL": 1, "SL": 2, "TP": 3, "END": 4}
 _REASON_NAMES = {code: name for name, code in _REASONS.items()}
 
-_CLOSE_RECORDED = 1
 _NO_EXIT = 0
 
 _R_MULTIPLE_NONE = 1
@@ -295,12 +294,18 @@ def close_trade(
     sl_price: float | None,
 ) -> ClosedTrade:
     """Close at a price Python already decided (signal exit, end of window)."""
+    try:
+        reason_code = _REASONS[exit_reason]
+    except KeyError:
+        raise ValueError(
+            f"exit_reason must be one of {sorted(_REASONS)}, not {exit_reason!r}"
+        ) from None
     sl_defined, sl = _level(sl_price)
     out = _TradeOut()
     code = int(
         _lib.vy_bt_close_trade(
             _side_code(side),
-            _REASONS[exit_reason],
+            reason_code,
             float(entry_price),
             float(quantity),
             float(commission_entry),

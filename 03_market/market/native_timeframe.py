@@ -65,6 +65,7 @@ def _read(needed: int, call) -> str:
     """Drain a two-call buffer protocol: probe, allocate, refill.
 
     ``needed`` is the byte length the kernel reported (0 means "no answer").
+    A undecodable payload is a bridge failure, never a raw `UnicodeDecodeError`.
     """
     if needed < 0:
         raise NativeBridgeError(f"timeframe kernel rejected the call: {needed}")
@@ -74,7 +75,10 @@ def _read(needed: int, call) -> str:
     if call(buf, needed + 1) != needed:
         raise NativeBridgeError("timeframe kernel length drift")
     # `buf.value` would stop at an embedded NUL; take the exact payload span.
-    return buf.raw[:needed].decode("utf-8")
+    try:
+        return buf.raw[:needed].decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise NativeBridgeError(f"timeframe kernel returned non-UTF-8 text: {exc}") from exc
 
 
 def _encode(name: str) -> tuple[bytes, int]:
@@ -84,9 +88,21 @@ def _encode(name: str) -> tuple[bytes, int]:
     return payload, len(payload)
 
 
+# The ladder is kernel-controlled but looped in Python: cap the rows so a
+# corrupt/foreign library cannot turn ladder() into an unbounded loop.
+_LADDER_COUNT_CAP = 10000
+
+
 def ladder() -> tuple[str, ...]:
     """Ladder labels in ascending granularity order, straight from the kernel."""
     count = int(_lib.vy_timeframe_ladder_count())
+    if count < 0:
+        raise NativeBridgeError(f"timeframe kernel reported a negative ladder count: {count}")
+    if count > _LADDER_COUNT_CAP:
+        raise NativeBridgeError(
+            f"timeframe ladder count {count} exceeds the {_LADDER_COUNT_CAP} cap; "
+            "refusing an unbounded kernel-driven loop"
+        )
     labels = []
     for index in range(count):
         needed = int(_lib.vy_timeframe_ladder_label(index, None, 0))
@@ -108,7 +124,12 @@ def ladder_seconds(index: int) -> int:
 
 
 def seconds_of(name: str) -> int | None:
-    """Seconds for a timeframe label (ladder or generated), or None if invalid."""
+    """Seconds for a timeframe label (ladder or generated).
+
+    Returns None when the label is unknown (the kernel answers 0 for invalid
+    labels). Raises `NativeBridgeError` on kernel misuse (the kernel answers
+    -1 for undecodable input) and `TypeError` for a non-string label.
+    """
     payload, length = _encode(name)
     seconds = int(_lib.vy_timeframe_seconds(payload, length))
     if seconds < 0:
@@ -117,19 +138,30 @@ def seconds_of(name: str) -> int | None:
 
 
 def name_of(seconds: int) -> str | None:
-    """Ladder label for a granularity, or None if it is not in the ladder."""
-    needed = int(_lib.vy_timeframe_label(int(seconds), None, 0))
-    return (
-        _read(needed, lambda buf, cap: int(_lib.vy_timeframe_label(int(seconds), buf, cap))) or None
-    )
+    """Ladder label for a granularity, or None if it is not in the ladder.
+
+    Non-positive granularities are caller misuse (`NativeBridgeError`): no
+    real granularity is zero or negative.
+    """
+    size = int(seconds)
+    if size <= 0:
+        raise NativeBridgeError(f"granularity must be positive, got {seconds!r}")
+    needed = int(_lib.vy_timeframe_label(size, None, 0))
+    return _read(needed, lambda buf, cap: int(_lib.vy_timeframe_label(size, buf, cap))) or None
 
 
 def generate_label(seconds: int) -> str:
-    """Human label for a granularity outside the ladder, derived from seconds."""
-    needed = int(_lib.vy_timeframe_generate_label(int(seconds), None, 0))
+    """Human label for a granularity outside the ladder, derived from seconds.
+
+    Non-positive granularities are caller misuse (`NativeBridgeError`).
+    """
+    size = int(seconds)
+    if size <= 0:
+        raise NativeBridgeError(f"granularity must be positive, got {seconds!r}")
+    needed = int(_lib.vy_timeframe_generate_label(size, None, 0))
     return _read(
         needed,
-        lambda buf, cap: int(_lib.vy_timeframe_generate_label(int(seconds), buf, cap)),
+        lambda buf, cap: int(_lib.vy_timeframe_generate_label(size, buf, cap)),
     )
 
 
@@ -169,6 +201,11 @@ def fetch_plan(label: str, base: int | None, limit: int | None) -> FetchPlan:
     if code != 1:
         raise NativeBridgeError(f"timeframe plan kernel rejected the call ({code})")
     plain, seconds, row_budget, keep_last = (int(slot) for slot in slots)
+    if seconds == 0:
+        # The kernel answers success with a zero granularity for unknown
+        # labels; a zero-seconds plan would divide by zero downstream, so an
+        # unknown label fails closed here instead of travelling further.
+        raise NativeBridgeError(f"unknown timeframe label: {label!r}")
     return FetchPlan(
         plain=bool(plain),
         seconds=seconds,

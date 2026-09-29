@@ -44,6 +44,18 @@ def _packet(task: str, **kwargs: object) -> dict:
     return packet
 
 
+def _broker_registry_line() -> int:
+    """Real declaration line of ``class BrokerRegistry`` (derived, not pinned).
+
+    A hardcoded number rots on every unrelated edit of the file, so tests assert
+    the CONTRACT — the reported line is the actual declaration line.
+    """
+    source = (ROOT / "09_broker/broker/registry.py").read_text(encoding="utf-8").splitlines()
+    return next(
+        n for n, text in enumerate(source, start=1) if text.startswith("class BrokerRegistry")
+    )
+
+
 def test_level_l0_routing_only() -> None:
     packet = _packet("add validation to broker registry", level="L0")
     assert packet["status"] == "RESOLVED"
@@ -93,10 +105,11 @@ def test_exact_target_snippet() -> None:
         for s in t["symbols"]
         if s["qualified"] == "broker.registry:BrokerRegistry"
     )
-    assert symbol["line"] == 68
+    declared = _broker_registry_line()
+    assert symbol["line"] == declared
     assert symbol["body"]["declaration"].startswith("class BrokerRegistry")
     assert "class BrokerRegistry" in symbol["body"]["snippet"]["text"]
-    assert symbol["body"]["start"] <= 68 <= symbol["body"]["end"]
+    assert symbol["body"]["start"] <= declared <= symbol["body"]["end"]
     assert symbol["body"].get("truncated") is None
 
 
@@ -166,7 +179,7 @@ def test_safety_boundaries_explicit() -> None:
 def test_execution_plan_deterministic() -> None:
     packet = _packet("add validation to broker registry")
     plan = packet["plan"]
-    assert any("BrokerRegistry@68" in r for r in plan["read"])
+    assert any(f"BrokerRegistry@{_broker_registry_line()}" in r for r in plan["read"])
     assert "09_broker/broker/registry.py" in plan["modify"]
     assert plan["test"]
     assert "pytest 09_broker/broker/tests -q" in plan["validate"] or plan["test"]

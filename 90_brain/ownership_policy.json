@@ -1,7 +1,7 @@
 {
   "_note": "Machine-readable language ownership policy. Authoritative source for validate_language_ownership.py. Human-readable mirror: AI_ENTRY.md section 1 (fixed ownership rules + language map). Every Python file is classified by directory path → domain → required language. Files in Rust-owned domains implemented in Python require explicit retention entry or must migrate.",
-  "version": 3,
-  "_ordering_note": "Rules are evaluated FIRST-MATCH in array order. Specific paths (ai/, provider/, adaptive/) MUST precede their general parent rules. Do not reorder without updating the validator.",
+  "version": 4,
+  "_ordering_note": "Rules are evaluated FIRST-MATCH in array order. Specific paths (ai/, provider/, adaptive/) MUST precede their general parent rules. One rule per path space: two rules covering 04_chart/ contradicted each other and were collapsed into RUST_UI. Do not reorder without updating the validator.",
   "languages": {
     "RUST": "rust/",
     "PYTHON": "stays in Python chapter directories",
@@ -52,11 +52,11 @@
       "id": "RUST_UI",
       "domain": "NATIVE_UI",
       "required_language": "RUST_SLINT",
-      "directory_prefixes": ["04_chart/chart/widgets/", "04_chart/chart/windows/", "04_chart/chart/renderer/", "00_app/app/ui/", "02_data/data/ui/", "06_backtest/backtest/ui/"],
-      "excluded_subpaths": [],
-      "description": "All native UI surfaces (chart, app shell, download console, backtest panels) are Rust+Slint only. No Python UI remains.",
+      "directory_prefixes": ["04_chart/chart/widgets/", "04_chart/chart/windows/", "04_chart/chart/renderer/", "04_chart/chart/", "00_app/app/ui/", "02_data/data/ui/", "06_backtest/backtest/ui/"],
+      "excluded_subpaths": ["04_chart/chart/tests/"],
+      "description": "All native UI surfaces (chart, app shell, download console, backtest panels) plus the chart presentation state they project are Rust+Slint only. The chart chapter's presentation model (MarketState projection) lives in rust/vayren-shell, so the whole chapter is covered by this one rule — a second 04_chart rule (the old RUST_PRESENTATION) contradicted this one's scope.",
       "allow_python_glue": false,
-      "python_glue_scope": "NONE - all UI lives in rust/vayren-shell."
+      "python_glue_scope": "NONE - all UI and its presentation state live in rust/vayren-shell."
     },
     {
       "id": "RUST_CORE",
@@ -127,16 +127,6 @@
       "description": "Trading strategies, experimentation. Always Python.",
       "allow_python_glue": true,
       "python_glue_scope": "ALL — strategy logic is Python-owned per AI_ENTRY.md §1"
-    },
-    {
-      "id": "RUST_PRESENTATION",
-      "domain": "PRESENTATION_MODEL",
-      "required_language": "RUST",
-      "directory_prefixes": ["04_chart/chart/"],
-      "excluded_subpaths": ["04_chart/chart/tests/", "04_chart/chart/widgets/", "04_chart/chart/windows/", "04_chart/chart/renderer/"],
-      "description": "Chart presentation state now lives in rust/vayren-shell (MarketState projection). No Python presentation remains; numeric kernels stay Rust.",
-      "allow_python_glue": true,
-      "python_glue_scope": "No Python presentation state remains"
     },
     {
       "id": "PYTHON_RESEARCH",

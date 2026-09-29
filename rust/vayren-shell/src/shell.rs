@@ -18,8 +18,8 @@ use crate::view_model::{BrokerPanel, CapabilityStatus, Environment};
 use crate::viewport::ChartViewportZoom;
 use crate::{
     AppWindow, BrokerCheckRow, BrokerRowView, CapabilityRowView, CredentialFieldView, DlCalDay,
-    DlCredField, DlPlan, DlStatus, DlStock, LabBoardCell, LabDetailMetric, LabHeader, LabKpi,
-    LabLibraryRow, LabMatrixRow, LabParam, LabPoint, LabPreset, LabRankRow, LabTradeMetric,
+    DlCredField, DlPlan, DlStatus, DlStock, LabBoardCell, LabCheckData, LabDetailMetric, LabHeader,
+    LabKpi, LabLibraryRow, LabMatrixRow, LabParam, LabPoint, LabPreset, LabRankRow, LabTradeMetric,
     LabTradeRow, LiveBar, LiveCandle, LiveEventRow, LiveFill, LiveGate, LiveKv, LiveMarket,
     LiveOrder, LivePosition, LiveSetup, LiveStat, LiveSymbolRow, MarketCandle, MarketIndicator,
     MarketMarker, MarketPlotSeg, MarketPopupRow, MarketRayLevel, MarketSettingsRow,
@@ -541,7 +541,10 @@ pub fn apply_market(ui: &AppWindow, state: &market::MarketState) {
         chunk: dl_status.chunk.clone().into(),
         rows: dl_status.rows.clone().into(),
         coverage: dl_status.coverage.clone().into(),
-        progress_pct: dl_status.progress_pct,
+        // Slint's `float` is f32, so the narrowing happens exactly here at the
+        // UI boundary — the view-model keeps the full f64 so the label and any
+        // Rust-side comparison use the value the backend actually measured.
+        progress_pct: dl_status.progress_pct as f32,
         progress_note: dl_status.progress_note.clone().into(),
         perf_rows: dl_status.perf_rows.clone().into(),
         perf_elapsed: dl_status.perf_elapsed.clone().into(),
@@ -1468,6 +1471,48 @@ pub fn apply_lab(ui: &AppWindow, state: &LabState) {
         today_days: view.today_days,
         dates_start_days: view.dates_start_days,
         dates_end_days: view.dates_end_days,
+        // §02 CONFIGURE — the three-row structured config card.
+        tf_short_idx: view.tf_short_idx,
+        range_preset_idx: view.range_preset_idx,
+        range_from_human: view.range_from_human.into(),
+        range_to_human: view.range_to_human.into(),
+        range_to_live: view.range_to_live,
+        range_span_line: view.range_span_line.into(),
+        timeframe_label: view.timeframe_label.into(),
+        capital_label: view.capital_label.into(),
+        capital_ok: view.capital_ok,
+        chips_more_line: view.chips_more_line.into(),
+        cfg_checks: Rc::new(slint::VecModel::from(
+            view.cfg_checks
+                .into_iter()
+                .map(|c| LabCheckData {
+                    label: c.label.into(),
+                    kind: c.kind,
+                })
+                .collect::<Vec<_>>(),
+        ))
+        .into(),
+        cov_pct: view.coverage.pct,
+        cov_note: view.coverage.note.into(),
+        cov_kind: view.coverage.kind,
+        cov_on: view.coverage.on,
+        cov_caption: view.cov_caption.into(),
+        // Live run progress — formatted in Rust from the measured events.
+        prog_active: view.prog_active,
+        prog_headline: view.prog_headline.into(),
+        prog_counts: view.prog_counts.into(),
+        prog_current: view.prog_current.into(),
+        prog_stage: view.prog_stage.into(),
+        prog_stage_pct: view.prog_stage_pct,
+        prog_elapsed: view.prog_elapsed.into(),
+        prog_eta: view.prog_eta.into(),
+        prog_speed: view.prog_speed.into(),
+        prog_throughput: view.prog_throughput.into(),
+        prog_failed_line: view.prog_failed_line.into(),
+        prog_pct: view.prog_pct,
+        prog_cancelled: view.prog_cancelled,
+        prog_long: view.prog_long,
+        prog_watchdog: view.prog_watchdog.into(),
     });
     // Signature of the band the UI currently shows — captured BEFORE the window
     // prop is overwritten, so the model-push guard below compares against what
@@ -1515,6 +1560,18 @@ pub fn apply_lab(ui: &AppWindow, state: &LabState) {
                     start_days: p.start_days,
                     end_days: p.end_days,
                 })
+                .collect::<Vec<_>>(),
+        ))
+        .into(),
+    );
+    // §02 segmented rows: only labels cross into the screen — a preset click
+    // reports its INDEX and Rust resolves the real range, so the two hosts can
+    // never disagree about what a cell means.
+    ui.set_lab_range_preset_labels(
+        Rc::new(slint::VecModel::from(
+            view.range_presets
+                .into_iter()
+                .map(|p| slint::SharedString::from(p.label))
                 .collect::<Vec<_>>(),
         ))
         .into(),
@@ -1641,6 +1698,7 @@ pub fn apply_lab(ui: &AppWindow, state: &LabState) {
         ))
     };
     ui.set_lab_timeframes(strings(view.timeframes).into());
+    ui.set_lab_tf_short(strings(view.tf_short).into());
     ui.set_lab_rankby_labels(strings(view.rankby_labels).into());
     ui.set_lab_rank_heads(strings(view.rank_heads).into());
     ui.set_lab_trade_heads(strings(view.trade_heads).into());
@@ -1782,7 +1840,12 @@ pub struct LabRunRequest {
 
 impl LabRunRequest {
     /// Gather the current workspace request; `None` when no strategy is
-    /// selected (RUN stays honestly disabled — never invents a request).
+    /// selected (RUN stays honestly disabled — never invents a request) or
+    /// when the capital is unparseable. A missing/garbage capital used to
+    /// become `0.0`, which is a fail-OPEN: the backend would happily run a
+    /// backtest with zero capital, producing a 100%-shaped equity curve that
+    /// looks like an enormous return. An unusable capital now yields no
+    /// request at all, so RUN stays disabled until the value is real.
     pub fn gather(state: &LabState) -> Option<Self> {
         let name = state.selected_strategy()?.name.clone();
         let known = |s: &String| state.universe_symbols.iter().any(|u| u == s);
@@ -1805,7 +1868,12 @@ impl LabRunRequest {
             .get(state.timeframe_index.max(0) as usize)
             .cloned()
             .unwrap_or_default();
-        let capital = parse_capital(&state.cfg_capital).unwrap_or(0.0);
+        // Zero, negative, non-finite or unparseable capital → no request.
+        // A finite positive amount is the only honest starting equity.
+        let capital = parse_capital(&state.cfg_capital)?;
+        if !capital.is_finite() || capital <= 0.0 {
+            return None;
+        }
         let mode = match state.mode {
             LabMode::Long => "buy",
             LabMode::Short => "sell",
@@ -1820,6 +1888,50 @@ impl LabRunRequest {
             end: state.cfg_dates_end.clone(),
             capital,
             mode,
+        })
+    }
+}
+
+/// Data-completeness probe request. The host forwards the CURRENT selection
+/// and window to the backend, which counts real rows; nothing here decides
+/// what the answer means.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LabCoverageRequest {
+    pub symbols: Vec<String>,
+    pub timeframe: String,
+    pub start: String,
+    pub end: String,
+    pub full: bool,
+}
+
+impl LabCoverageRequest {
+    /// `None` when there is nothing to measure (no selection, no committed
+    /// range, or no real timeframe) — an unprobeable config must not ask the
+    /// backend to count, and must not paint a percentage.
+    pub fn gather(state: &LabState) -> Option<Self> {
+        let symbols: Vec<String> = state.universe_selected.clone();
+        if symbols.is_empty() {
+            return None;
+        }
+        let start = state.cfg_dates_start.trim().to_string();
+        let end = state.cfg_dates_end.trim().to_string();
+        if start.is_empty() || end.is_empty() {
+            return None;
+        }
+        let timeframe = state
+            .timeframes
+            .get(state.timeframe_index.max(0) as usize)
+            .cloned()
+            .unwrap_or_default();
+        if timeframe.is_empty() {
+            return None;
+        }
+        Some(Self {
+            symbols,
+            timeframe,
+            start,
+            end,
+            full: false,
         })
     }
 }
@@ -1839,6 +1951,11 @@ pub struct LabSelectRequest {
 }
 
 impl LabSelectRequest {
+    /// Gather the select request. Shares [`LabRunRequest::gather`]'s
+    /// validation, so an unusable capital blocks the strategy switch as well:
+    /// the backend echoes the capital straight back into the workspace, and
+    /// echoing `0.0` would wipe the user's real starting equity with a value
+    /// they never typed.
     pub fn gather(state: &LabState) -> Option<Self> {
         let run = LabRunRequest::gather(state)?;
         Some(LabSelectRequest {
@@ -1870,6 +1987,8 @@ pub fn wire_lab(
     state: Rc<RefCell<LabState>>,
     fetch_workspace: Rc<dyn Fn(LabSelectRequest)>,
     fetch_run: Rc<dyn Fn(LabRunRequest)>,
+    fetch_coverage: Rc<dyn Fn(LabCoverageRequest)>,
+    fetch_cancel: Rc<dyn Fn()>,
 ) {
     let bind = |ui: &AppWindow, state: &Rc<RefCell<LabState>>, handler: fn(&mut LabState, i32)| {
         let strong = state.clone();
@@ -2053,12 +2172,46 @@ pub fn wire_lab(
     ui.on_lab_sym_close(bind0(ui, &state, |s| s.interaction_symclose()));
     ui.on_lab_sym_clear(bind0(ui, &state, |s| s.interaction_symclear()));
     ui.on_lab_sym_apply(bind0(ui, &state, |s| s.interaction_symapply()));
+    {
+        // The completeness strip measures the SELECTION, so a universe change
+        // invalidates it: re-probe after Apply.
+        let strong = state.clone();
+        let handle = ui.as_weak();
+        let fetch = fetch_coverage.clone();
+        ui.on_lab_sym_apply(move || {
+            let request = {
+                let mut guard = strong.borrow_mut();
+                guard.interaction_symapply();
+                LabCoverageRequest::gather(&guard)
+            };
+            if let Some(ui) = handle.upgrade() {
+                apply_lab(&ui, &strong.borrow());
+            }
+            if let Some(request) = request {
+                fetch(request);
+            }
+        });
+    }
     ui.on_lab_sym_all_visible(bind0(ui, &state, |s| s.interaction_symall()));
     ui.on_lab_run_buy_requested(bind0(ui, &state, |s| s.interaction_simple("runbuy")));
     ui.on_lab_run_sell_requested(bind0(ui, &state, |s| s.interaction_simple("runsell")));
     ui.on_lab_run_all_requested(bind0(ui, &state, |s| s.interaction_simple("runall")));
     ui.on_lab_export_trades_requested(bind0(ui, &state, |s| s.interaction_simple("exporttrades")));
     ui.on_lab_lens_picked(bind(ui, &state, |s, i| s.interaction_lens(i)));
+    // CANCEL is a backend call, not a local flag: the backend owns the running
+    // loop and polls the request between symbols, so the stop is graceful and
+    // can never leave a half-written result.
+    {
+        let strong = state.clone();
+        let handle = ui.as_weak();
+        let cancel = fetch_cancel.clone();
+        ui.on_lab_run_cancel_requested(move || {
+            cancel();
+            if let Some(ui) = handle.upgrade() {
+                apply_lab(&ui, &strong.borrow());
+            }
+        });
+    }
     ui.on_lab_equity_select_picked(bind(ui, &state, |s, i| s.interaction_equity_view(i)));
     ui.on_lab_inspector_close(bind0(ui, &state, |s| s.interaction_detail_close()));
     ui.on_lab_reset_requested(bind0(ui, &state, |s| s.interaction_reset()));
@@ -2174,14 +2327,40 @@ pub fn wire_lab(
     }
     {
         let strong = state.clone();
-        let handle = ui.as_weak();
+        let weak = ui.as_weak();
+        let fetch = fetch_coverage.clone();
         ui.on_lab_dates_committed(move |start, end| {
-            {
+            let request = {
                 let mut guard = strong.borrow_mut();
                 guard.interaction_dates(start.as_str(), end.as_str());
-            }
-            if let Some(ui) = handle.upgrade() {
+                LabCoverageRequest::gather(&guard)
+            };
+            if let Some(ui) = weak.upgrade() {
                 apply_lab(&ui, &strong.borrow());
+            }
+            if let Some(request) = request {
+                fetch(request);
+            }
+        });
+    }
+    {
+        // A date-range preset is the SAME commit contract as the picker's
+        // Apply: it rewrites the committed ISO bounds through
+        // `interaction_dates`, so no new date plumbing exists.
+        let strong = state.clone();
+        let weak = ui.as_weak();
+        let fetch = fetch_coverage.clone();
+        ui.on_lab_range_preset_picked(move |index: i32| {
+            let request = {
+                let mut guard = strong.borrow_mut();
+                guard.interaction_range_preset(index);
+                LabCoverageRequest::gather(&guard)
+            };
+            if let Some(ui) = weak.upgrade() {
+                apply_lab(&ui, &strong.borrow());
+            }
+            if let Some(request) = request {
+                fetch(request);
             }
         });
     }
@@ -3730,7 +3909,16 @@ mod tests {
 
         let no_fetch: Rc<dyn Fn(LabSelectRequest)> = Rc::new(|_| ());
         let no_run: Rc<dyn Fn(LabRunRequest)> = Rc::new(|_| ());
-        wire_lab(&ui, lab_state.clone(), no_fetch, no_run);
+        let no_coverage: Rc<dyn Fn(LabCoverageRequest)> = Rc::new(|_| ());
+        let no_cancel: Rc<dyn Fn()> = Rc::new(|| ());
+        wire_lab(
+            &ui,
+            lab_state.clone(),
+            no_fetch,
+            no_run,
+            no_coverage,
+            no_cancel,
+        );
         ui.invoke_lab_library_picked(1);
         assert_eq!(ui.get_lab().name, "SMA");
         assert!(ui.get_lab_library().row_data(1).unwrap().selected);
@@ -4243,6 +4431,40 @@ mod tests {
         assert_eq!(parse_capital("1000000"), Some(1000000.0));
         assert_eq!(parse_capital(""), None);
         assert_eq!(parse_capital("—"), None);
+    }
+
+    #[test]
+    fn an_unusable_capital_keeps_run_disabled_instead_of_sending_zero() {
+        // Fail-OPEN that was: an unparseable capital became 0.0 and the
+        // backend ran a backtest on zero starting equity, producing a
+        // 100%-shaped equity curve that reads as an enormous return.
+        let mut state = demo_lab_state();
+        state.engine_wired = true;
+        state.selected = Some(0);
+        state.universe_symbols = vec!["RELIANCE".into()];
+        state.universe_selected = vec!["RELIANCE".into()];
+        state.timeframes = vec!["15m".into()];
+        state.timeframe_index = 0;
+        state.cfg_dates_start = "2026-01-01".into();
+        state.cfg_dates_end = "2026-06-10".into();
+
+        for bad in ["", "—", "abc", "0", "-5000"] {
+            state.cfg_capital = bad.to_string();
+            assert!(
+                LabRunRequest::gather(&state).is_none(),
+                "capital {bad:?} must not produce a run request"
+            );
+        }
+
+        // A real positive amount works.
+        state.cfg_capital = "₹10,00,000".into();
+        let request = LabRunRequest::gather(&state).expect("valid capital runs");
+        assert_eq!(request.capital, 1000000.0);
+
+        // The select request carries the same validation, so a bad capital
+        // cannot echo 0.0 back into the workspace and wipe the real value.
+        state.cfg_capital = "—".into();
+        assert!(LabSelectRequest::gather(&state).is_none());
     }
 
     #[test]

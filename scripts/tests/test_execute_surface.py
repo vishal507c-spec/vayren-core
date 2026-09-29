@@ -64,7 +64,14 @@ def test_exact_target_read() -> None:
     region = next(
         r for r in result["regions"] if r["qualified"] == "broker.registry:BrokerRegistry"
     )
-    assert region["line"] == 68
+    # Derived from the live tree, not a magic number: a hardcoded 68 rots on
+    # every unrelated edit of the file. The contract is "the region starts at
+    # the real class declaration".
+    source = (ROOT / "09_broker/broker/registry.py").read_text(encoding="utf-8").splitlines()
+    declared = next(
+        n for n, text in enumerate(source, start=1) if text.startswith("class BrokerRegistry")
+    )
+    assert region["line"] == declared
     assert "class BrokerRegistry" in region["text"]
 
 

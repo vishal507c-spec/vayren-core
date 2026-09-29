@@ -60,15 +60,22 @@ class DiscoveryReport:
 def resolve_data_dir(explicit: str | Path | None = None) -> Path:
     """Resolve the candle store (priority: explicit → env → legacy → home).
 
-    A missing explicit dir never crashes resolution: the next usable
-    candidate (env, then legacy, then home) wins instead. The home default
-    (``~/.vayren/data``) always resolves — it is app-owned and created on
-    demand, so resolution itself never raises; readers treat a missing
-    store as empty.
+    An EXPLICIT dir that does not exist is an error the caller asked for: it
+    raises instead of silently serving a different store's data (a typo'd
+    ``--data-dir`` must never answer with someone else's candles). With no
+    explicit dir the next usable candidate (env, legacy, home) wins, and the
+    home default always resolves — it is app-owned and created on demand, so
+    resolution itself never raises; readers treat a missing store as empty.
     """
-    candidates: list[tuple[str, Path]] = []
     if explicit is not None and str(explicit).strip():
-        candidates.append(("explicit", Path(str(explicit)).expanduser()))
+        chosen = Path(str(explicit)).expanduser()
+        if not chosen.is_dir():
+            raise MarketDataError(
+                f"Data directory not found: {chosen} "
+                "(explicit --data-dir never falls back to another store)"
+            )
+        return chosen
+    candidates: list[tuple[str, Path]] = []
     env_dir = (os.environ.get("VAYREN_DATA_DIR") or "").strip()
     if env_dir:
         candidates.append(("VAYREN_DATA_DIR", Path(env_dir).expanduser()))
@@ -78,22 +85,55 @@ def resolve_data_dir(explicit: str | Path | None = None) -> Path:
     candidates.append(("default", home_default))
     for origin, path in candidates:
         if path.is_dir():
-            if origin != "explicit":
-                logger.info("Data directory resolved from %s: %s", origin, path)
+            logger.info("Data directory resolved from %s: %s", origin, path)
             return path
     return home_default
 
 
 def _parse_stamp(raw: object) -> datetime | None:
+    """Parse a store timestamp to a ``datetime`` (``None`` when unparseable).
+
+    HOT PATH. A 527-symbol backtest parses ~500k stamps, and
+    ``datetime.strptime`` was 57% of the whole run (it re-reads the locale for
+    every call). The fixed-shape ISO stamps this store writes are sliced
+    directly; anything else still goes through ``strptime`` so a non-standard
+    row keeps parsing exactly as before. The returned value is identical either
+    way — this is a speed change, never a semantic one.
+    """
     if not isinstance(raw, str):
         return None
     text = raw.strip()
     if len(text) == 16:  # "YYYY-MM-DD HH:MM" → pad seconds
         text += ":00"
+    if len(text) == 19 and text[4] == "-" and text[7] == "-" and text[13] == ":":
+        try:
+            return datetime(
+                int(text[0:4]),
+                int(text[5:7]),
+                int(text[8:10]),
+                int(text[11:13]),
+                int(text[14:16]),
+                int(text[17:19]),
+            )
+        except ValueError:
+            return None
     try:
         return datetime.strptime(text, _STAMP_FORMAT)
     except ValueError:
         return None
+
+
+def _format_stamp(moment: datetime) -> str:
+    """``datetime`` → the store's stamp format (the inverse of `_parse_stamp`).
+
+    HOT PATH companion to `_parse_stamp`: ``date.strftime`` was the third
+    hottest frame when rebuilding aggregated bar stamps, and slicing is both
+    faster and locale-independent.
+    """
+    return (
+        f"{moment.year:04d}-{moment.month:02d}-{moment.day:02d} "
+        f"{moment.hour:02d}:{moment.minute:02d}:{moment.second:02d}"
+    )
 
 
 def _epoch(date_value: date) -> int:
@@ -109,13 +149,16 @@ def _valid_ohlcv(o: float, h: float, lo: float, c: float) -> bool:
     return h >= lo
 
 
+_CachedRows = list[tuple[str, float, float, float, float, int]]
+
+
 class MarketDataService:
     """Single canonical reader for per-symbol SQLite OHLCV stores."""
 
     def __init__(self, data_dir: str | Path | None = None) -> None:
         self._data_dir = resolve_data_dir(data_dir)
         self._discovery: DiscoveryReport | None = None
-        self._row_cache: dict[str, list[tuple[str, float, float, float, float, int]]] = {}
+        self._row_cache: dict[str, tuple[float, _CachedRows]] = {}
         self._quote_cache: dict[str, tuple[float, Quote]] = {}
         report = self.discovery_report()
         logger.info(
@@ -156,7 +199,7 @@ class MarketDataService:
         if not path.is_file():
             return None, (path.name, "not a regular file")
         stem = path.stem.strip().upper()
-        if not stem or stem != path.stem.strip():
+        if not stem or any(ch.isspace() for ch in path.stem.strip()):
             return None, (path.name, "symbol name is empty or has whitespace")
         try:
             with open(path, "rb") as handle:
@@ -207,9 +250,18 @@ class MarketDataService:
         Skips (never crashes on): unparseable stamps, non-finite or
         non-positive prices, high < low, duplicate stamps (last wins).
         ``limit`` trims newest-first inside SQL (indexed tail, no full scan).
+        Non-positive limits return no rows.
         """
+        if limit is not None and limit <= 0:
+            return []
         if start is None and end is None and limit is None and symbol in self._row_cache:
-            return list(self._row_cache[symbol])
+            cached_mtime, cached_rows = self._row_cache[symbol]
+            try:
+                if self._db_path(symbol).stat().st_mtime == cached_mtime:
+                    return list(cached_rows)
+            except OSError:
+                pass
+            self._row_cache.pop(symbol, None)
         path = self._db_path(symbol)
         if not path.is_file():
             raise MarketDataError(f"No database found for symbol {symbol}")
@@ -219,6 +271,28 @@ class MarketDataService:
                 "ORDER BY candle_time DESC LIMIT ?"
             )
             params: tuple = (int(limit),)
+        elif start is not None or end is not None:
+            # Push the window into SQLite. `candle_time` is ISO TEXT, so the
+            # comparison is lexicographic and identical to the row filter below
+            # ("YYYY-MM-DD" bounds, day granularity) — but it stops reading
+            # (and Python-parsing) the years outside the experiment.
+            clauses = []
+            window: list[object] = []
+            if start is not None:
+                clauses.append("candle_time >= ?")
+                window.append(f"{start} 00:00:00")
+            if end is not None:
+                clauses.append("candle_time <= ?")
+                window.append(f"{end} 23:59:59")
+            where = " AND ".join(clauses)
+            tail = " ORDER BY candle_time ASC"
+            if limit is not None:
+                tail = f"{tail} LIMIT ?"
+                window.append(int(limit))
+            query = (
+                f"SELECT candle_time, open, high, low, close, volume FROM ohlcv WHERE {where}{tail}"
+            )
+            params = tuple(window)
         else:
             query = (
                 "SELECT candle_time, open, high, low, close, volume FROM ohlcv "
@@ -247,6 +321,9 @@ class MarketDataService:
                 invalid += 1
                 continue
             stamp = moment.strftime(_STAMP_FORMAT)
+            if any(isinstance(v, bool) for v in (o, h, lo, c)):
+                invalid += 1
+                continue
             try:
                 fo, fh, fl, fc = float(o), float(h), float(lo), float(c)
             except (TypeError, ValueError):
@@ -256,7 +333,7 @@ class MarketDataService:
                 invalid += 1
                 continue
             try:
-                volume = int(v) if v is not None else 0
+                volume = int(v) if v is not None and not isinstance(v, bool) else 0
             except (TypeError, ValueError):
                 volume = 0
             if volume < 0:
@@ -270,7 +347,11 @@ class MarketDataService:
             logger.warning("%s: skipped %d invalid OHLCV rows", symbol, invalid)
         rows = [by_stamp[key] for key in sorted(by_stamp)]
         if start is None and end is None and limit is None:
-            self._row_cache[symbol] = rows
+            try:
+                mtime = path.stat().st_mtime
+            except OSError:
+                mtime = -1.0
+            self._row_cache[symbol] = (mtime, rows)
             if len(self._row_cache) > 8:
                 oldest = next(iter(self._row_cache))
                 if oldest != symbol:
@@ -311,6 +392,30 @@ class MarketDataService:
         base = self._base_seconds(symbol)
         return native_timeframe.name_of(base) or f"{base}s"
 
+    @staticmethod
+    def _scan_bounds(
+        con: sqlite3.Connection, symbol: str
+    ) -> tuple[datetime | None, datetime | None]:
+        """First/last PARSEABLE stamp, so one bad row cannot poison the symbol."""
+        first: datetime | None = None
+        last: datetime | None = None
+        try:
+            for row in con.execute("SELECT candle_time FROM ohlcv ORDER BY candle_time ASC"):
+                moment = _parse_stamp(row[0])
+                if moment is not None:
+                    first = moment
+                    break
+            for row in con.execute("SELECT candle_time FROM ohlcv ORDER BY candle_time DESC"):
+                moment = _parse_stamp(row[0])
+                if moment is not None:
+                    last = moment
+                    break
+        except sqlite3.Error as exc:
+            raise MarketDataError(
+                f"{symbol} database has no readable OHLCV records: {exc}"
+            ) from exc
+        return first, last
+
     def date_range(self, symbol: str) -> tuple[str, str]:
         """Actual ``(first_date, last_date)`` history bounds for `symbol`."""
         path = self._db_path(symbol)
@@ -327,11 +432,15 @@ class MarketDataService:
                 raise MarketDataError(
                     f"{symbol} database has no readable OHLCV records: {exc}"
                 ) from exc
+            if not row or row[0] is None or row[1] is None:
+                raise MarketDataError(f"{symbol} database found but contains no OHLCV records")
+            first, last = _parse_stamp(row[0]), _parse_stamp(row[1])
+            if first is None or last is None:
+                # A single malformed extreme (e.g. a "bad-stamp" row) must not
+                # fail thousands of valid bars: find the parseable bounds.
+                first, last = self._scan_bounds(con, symbol)
         finally:
             con.close()
-        if not row or row[0] is None or row[1] is None:
-            raise MarketDataError(f"{symbol} database found but contains no OHLCV records")
-        first, last = _parse_stamp(row[0]), _parse_stamp(row[1])
         if first is None or last is None:
             raise MarketDataError(f"{symbol} database has no ordered candle timestamps")
         return first.strftime("%Y-%m-%d"), last.strftime("%Y-%m-%d")
@@ -397,9 +506,11 @@ class MarketDataService:
         days: list[int] = []
         secs: list[int] = []
         for stamp, _o, _h, _l, _c, _v in rows:
-            moment = datetime.strptime(stamp, _STAMP_FORMAT)
-            days.append(_epoch(moment.date()))
-            secs.append(moment.hour * 3600 + moment.minute * 60 + moment.second)
+            # `_read_rows` already normalised every stamp to the fixed
+            # "%Y-%m-%d %H:%M:%S" shape, so the kernel's two inputs are integer
+            # slices — a full `strptime` per row was 40% of the run.
+            days.append(date(int(stamp[0:4]), int(stamp[5:7]), int(stamp[8:10])).toordinal())
+            secs.append(int(stamp[11:13]) * 3600 + int(stamp[14:16]) * 60 + int(stamp[17:19]))
         buckets = native_aggregate.aggregate(
             days,
             secs,
@@ -434,11 +545,10 @@ class MarketDataService:
             total = int(anchor) + int(index) * int(tf)
             total %= 86_400
             stamp = stamp.replace(hour=total // 3600, minute=(total % 3600) // 60)
-            text = stamp.strftime(_STAMP_FORMAT)
-        elif tf == 86_400:
-            text = date.fromordinal(int(day)).strftime("%Y-%m-%d 00:00:00")
+            text = _format_stamp(stamp)
         else:
-            text = date.fromordinal(int(day)).strftime("%Y-%m-%d 00:00:00")
+            day_text = f"{date.fromordinal(int(day)).isoformat()} 00:00:00"
+            text = day_text
         return Bar(
             symbol=symbol.upper(),
             open=float(o),

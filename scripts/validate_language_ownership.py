@@ -56,12 +56,20 @@ NATIVE_UI_DIRS = (
     "06_backtest/backtest/ui/",
 )
 
+# Symbols whose authority has migrated to Rust and must never be restated in
+# Python. Every entry must point at a file that EXISTS: a guard whose target was
+# deleted (or renamed) never fires, because `_defines` is only asked about a
+# file on disk — that is how a migrated order-state table became re-introducible
+# again without a single failing check. `main` now hard-fails on a missing
+# target so the set cannot rot silently.
 NO_REINTRODUCE: dict[str, tuple[list[str], str]] = {
-    "TRANSITIONS": (["08_execution/execution/models/order.py"], "no-assign"),
-    "TERMINAL_STATES": (["08_execution/execution/models/order.py"], "no-assign"),
-    "_max_drawdown": (["06_backtest/backtest/engine/metrics.py"], "no-loop"),
-    "_sharpe": (["06_backtest/backtest/engine/metrics.py"], "no-loop"),
-    "_bucket_key": (["03_market/market/timeframe/aggregate.py"], "no-def"),
+    "TRANSITIONS": (["08_execution/execution/models/order_state.py"], "no-assign"),
+    "TERMINAL_STATES": (["08_execution/execution/models/order_state.py"], "no-assign"),
+    # Metrics kernels: the only Python surface left is the FFI projection.
+    "_max_drawdown": (["06_backtest/backtest/native_metrics.py"], "no-loop"),
+    "_sharpe": (["06_backtest/backtest/native_metrics.py"], "no-loop"),
+    # Bucketing kernel: same, behind the aggregation bridge.
+    "_bucket_key": (["03_market/market/native_aggregate.py"], "no-def"),
 }
 
 RUST_FORBIDDEN_MODULES = ("strategy", "research", "ai", "ml", "model_experiment")
@@ -143,10 +151,80 @@ def _imports_core_native(path: Path) -> bool:
             for alias in node.names:
                 if alias.name.split(".")[0:2] == ["core", "native"]:
                     return True
+        # Dynamic imports reach the same authority without an import statement:
+        # `importlib.import_module("core.native.loader")` and
+        # `__import__("core.native.loader")` are the two bypasses a
+        # statement-only scan misses.
+        if isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Attribute):
+                dynamic = (
+                    isinstance(func.value, ast.Name)
+                    and func.value.id == "importlib"
+                    and func.attr == "import_module"
+                )
+            elif isinstance(func, ast.Name):
+                dynamic = func.id == "__import__"
+            else:
+                dynamic = False
+            if dynamic and node.args and _is_core_native_string(node.args[0]):
+                return True
     return False
 
 
+def _is_core_native_string(node: ast.expr) -> bool:
+    return (
+        isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and node.value.split(".")[0:2] == ["core", "native"]
+    )
+
+
+# Loop constructs: statements plus every comprehension form. A comprehension
+# iterates a series exactly like a `for` loop, so a migrated loop kernel
+# rewritten as a one-liner must not slip past the guard.
+LOOP_NODES = (ast.For, ast.AsyncFor, ast.While)
+COMPREHENSION_NODES = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+
+
+def _target_names(target: ast.expr) -> set[str]:
+    """Every name a store target can introduce.
+
+    Covers plain names plus the shapes a duplicated authority hides behind:
+    attribute writes (`self.TRANSITIONS = {}`), string subscripts
+    (`TABLE["TRANSITIONS"] = {}`), and tuple/list unpacking
+    (`TRANSITIONS, other = {}, None`).
+    """
+    if isinstance(target, ast.Name):
+        return {target.id}
+    if isinstance(target, ast.Attribute):
+        return {target.attr}
+    if isinstance(target, ast.Subscript):
+        names: set[str] = set()
+        if isinstance(target.slice, ast.Constant) and isinstance(target.slice.value, str):
+            names.add(target.slice.value)
+        return names
+    if isinstance(target, (ast.Tuple, ast.List)):
+        names = set()
+        for element in target.elts:
+            names |= _target_names(element)
+        return names
+    if isinstance(target, ast.Starred):
+        return _target_names(target.value)
+    return set()
+
+
 def _defines(path: Path, name: str, kind: str) -> bool:
+    """Pure: does `path` re-declare `name` in the forbidden shape `kind`?
+
+    Kinds:
+      no-def    any function/class definition of the name
+      no-assign any module- or class-level store of the name (plain, annotated,
+                attribute, subscript or tuple-unpacked target)
+      no-loop   a definition of the name whose own body loops — statements OR a
+                comprehension. Bodies reached only through a helper CALL are out
+                of scope: that is a different symbol and a separate decision.
+    """
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"))
     except (OSError, SyntaxError):
@@ -155,21 +233,23 @@ def _defines(path: Path, name: str, kind: str) -> bool:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
             if kind == "no-def":
                 return True
-            return kind == "no-loop" and any(
-                isinstance(child, (ast.For, ast.AsyncFor, ast.While))
-                for stmt in node.body
-                for child in ast.walk(stmt)
-            )
+            if kind != "no-loop":
+                continue
+            for stmt in node.body:
+                for child in ast.walk(stmt):
+                    if isinstance(child, LOOP_NODES + COMPREHENSION_NODES):
+                        return True
+            return False
         if (
             kind == "no-assign"
             and isinstance(node, ast.Assign)
-            and any(getattr(t, "id", "") == name for t in node.targets)
+            and any(name in _target_names(target) for target in node.targets)
         ):
             return True
         if (
             kind == "no-assign"
             and isinstance(node, ast.AnnAssign)
-            and getattr(node.target, "id", "") == name
+            and name in _target_names(node.target)
         ):
             return True
     return False
@@ -275,7 +355,15 @@ def main() -> int:
     for name, (files, kind) in NO_REINTRODUCE.items():
         for rel in files:
             target = ROOT / rel
-            if target.is_file() and _defines(target, name, kind):
+            if not target.is_file():
+                # A guard nobody can evaluate is worse than no guard: it looks
+                # enforced and enforces nothing. Fail loudly instead.
+                errors.append(
+                    f"NO_REINTRODUCE guard is dead: '{name}' points at {rel}, "
+                    "which does not exist (retarget the guard or drop the entry)"
+                )
+                continue
+            if _defines(target, name, kind):
                 errors.append(f"migrated authority reintroduced in Python: {name} in {rel}")
 
     for file_path, entry in per_file_retention.items():

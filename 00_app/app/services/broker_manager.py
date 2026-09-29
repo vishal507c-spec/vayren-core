@@ -34,6 +34,8 @@ spec; nothing here changes.
 from __future__ import annotations
 
 import contextlib
+import logging
+import threading
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -132,6 +134,7 @@ class BrokerManager:
         self._states: dict[str, dict[str, Any]] = {}
         for broker_id, spec in self._specs.items():
             self._states[broker_id] = self._fresh_state(spec)
+        self._lock = threading.Lock()
         self._worker = _Worker(self._run_job)
         self._worker.start()
         self._stopping = False
@@ -152,7 +155,8 @@ class BrokerManager:
         return spec.display_name if spec else str(broker_id)
 
     def state(self, broker_id: str) -> dict[str, Any]:
-        current = dict(self._states.get(broker_id, {}))
+        with self._lock:
+            current = dict(self._states.get(broker_id, {}))
         details = current.get("details")
         if isinstance(details, dict):
             current["details"] = dict(details)
@@ -311,8 +315,13 @@ class BrokerManager:
         if not self._stopping:
             self._stopping = True
             self._worker.stop()
+            stopped = True
             with contextlib.suppress(Exception):
-                self._worker.wait(3000)
+                stopped = self._worker.wait(3000)
+            if not stopped:
+                logging.getLogger(__name__).warning(
+                    "broker worker did not stop in 3s; continuing shutdown"
+                )
 
     # ── worker jobs (background thread ONLY) ─────────────────────
 
@@ -327,6 +336,17 @@ class BrokerManager:
         elif kind == _HEALTH_JOB:
             self._job_health(spec)
         elif kind == "__error__":
+            with self._lock:
+                current = self._states.get(broker_id, {}).get("status")
+            # Never downgrade a specific verdict (LOGIN_REQUIRED/DISCONNECTED/
+            # NOT_CONFIGURED) into a generic ERROR — the specific reason is
+            # what the UI must show.
+            if current in (
+                BrokerStatus.LOGIN_REQUIRED,
+                BrokerStatus.DISCONNECTED,
+                BrokerStatus.NOT_CONFIGURED,
+            ):
+                return
             self._set_status(broker_id, BrokerStatus.ERROR, "background operation failed")
 
     def _job_session_check(self, spec: BrokerSpec) -> None:
@@ -344,7 +364,13 @@ class BrokerManager:
         if flow is None:
             self._set_status(spec.broker_id, BrokerStatus.ERROR, "auth flow not wired")
             return
-        ok, reason = flow.validate(config[spec.key_field], stored["access_token"])
+        token = stored.get("access_token", "") if isinstance(stored, dict) else ""
+        if not token:
+            self._set_status(
+                spec.broker_id, BrokerStatus.LOGIN_REQUIRED, "saved session has no token"
+            )
+            return
+        ok, reason = flow.validate(config[spec.key_field], token)
         if not ok:
             if "unreachable" in reason:
                 self._set_status(spec.broker_id, BrokerStatus.DISCONNECTED, reason)
@@ -355,7 +381,7 @@ class BrokerManager:
                     spec.broker_id, BrokerStatus.LOGIN_REQUIRED, f"session expired — {reason}"
                 )
             return
-        self._activate(spec, config, stored["access_token"], reason)
+        self._activate(spec, config, token, reason)
 
     def _try_auto_auth(self, spec: BrokerSpec, config: dict[str, str]) -> bool:
         """Run the venue's automatic authentication when wired.
@@ -402,6 +428,11 @@ class BrokerManager:
             self._set_status(spec.broker_id, BrokerStatus.NOT_CONFIGURED, "no configuration saved")
             return
         assert spec.interactive_login is not None and spec.build_flow is not None
+        if not spec.secret_field:
+            self._set_status(
+                spec.broker_id, BrokerStatus.ERROR, "venue has no secret field to log in with"
+            )
+            return
         session_store = self._session_store(spec)
         login_kwargs: dict[str, Any] = {
             "port": int(spec.callback_port or CALLBACK_PORT),
@@ -481,16 +512,20 @@ class BrokerManager:
                 checks["market_data"] = "READY" if md_ok else f"FAILED: {md_reason}"
             except Exception as exc:
                 checks["market_data"] = f"FAILED: {type(exc).__name__}"
-        state["checks"] = checks
-        state["details"] = details
-        state["last_sync"] = self._now_stamp()
         failed = [k for k, v in checks.items() if v != "READY"]
-        if failed:
-            state["status"] = BrokerStatus.ACCOUNT_NOT_READY
-            state["reason"] = f"checks failed: {', '.join(failed)}"
-        else:
-            state["status"] = BrokerStatus.CONNECTED
-            state["reason"] = "all checks passed"
+        with self._lock:
+            live = self._states.get(spec.broker_id)
+            if live is None:
+                return
+            live["checks"] = checks
+            live["details"] = details
+            live["last_sync"] = self._now_stamp()
+            if failed:
+                live["status"] = BrokerStatus.ACCOUNT_NOT_READY
+                live["reason"] = f"checks failed: {', '.join(failed)}"
+            else:
+                live["status"] = BrokerStatus.CONNECTED
+                live["reason"] = "all checks passed"
         self.state_changed.emit(spec.broker_id)
 
     # ── internals ────────────────────────────────────────────────
@@ -513,22 +548,24 @@ class BrokerManager:
         md = None
         with contextlib.suppress(Exception):
             if spec.build_market_data is not None:
-                md = spec.build_market_data(config["api_key"], token)
+                md = spec.build_market_data(config.get(spec.key_field, ""), token)
         registered, reg_reason = False, "venue registration unavailable"
         with contextlib.suppress(Exception):
             if spec.venue_register is not None:
                 registered, reg_reason = spec.venue_register(adapter, md)
         state = self._states[spec.broker_id]
-        state["adapter"] = adapter
-        state["market_data"] = md
-        state["checks"] = {"connection": "READY", "account": "READY"}
+        with self._lock:
+            state["adapter"] = adapter
+            state["market_data"] = md
+            state["checks"] = {"connection": "READY", "account": "READY"}
         details = self._empty_details()
         with contextlib.suppress(Exception):
             details["account_id"] = self._account_id_of(adapter.account())
-        state["details"] = details
-        state["last_sync"] = self._now_stamp()
-        state["status"] = BrokerStatus.CONNECTED
-        state["reason"] = f"{why}; {reg_reason}" if not registered else why
+        with self._lock:
+            state["details"] = details
+            state["last_sync"] = self._now_stamp()
+            state["status"] = BrokerStatus.CONNECTED
+            state["reason"] = f"{why}; {reg_reason}" if not registered else why
         self._note(spec.broker_id, "connected")
         self.state_changed.emit(spec.broker_id)
         self._worker.submit(_HEALTH_JOB, spec.broker_id)
@@ -606,28 +643,32 @@ class BrokerManager:
 
     @staticmethod
     def _mask(value: str) -> str:
+        """Full redaction — even partial key material never crosses IPC."""
         if not value:
             return ""
-        return f"{value[:4]}…{value[-2:]}" if len(value) > 8 else "••••"
+        return "••••"
 
     def _set_status(self, broker_id: str, status: BrokerStatus, reason: str) -> None:
-        state = self._states.setdefault(broker_id, {})
-        state["status"] = status
-        state["reason"] = reason
-        if status is BrokerStatus.NOT_CONFIGURED:
-            spec = self._specs.get(broker_id)
-            if spec is not None:
-                fresh = self._fresh_state(spec)
-                state.update(
-                    {k: fresh[k] for k in ("configured", "api_key_masked", "details", "last_sync")}
-                )
+        with self._lock:
+            state = self._states.setdefault(broker_id, {})
+            state["status"] = status
+            state["reason"] = reason
+            if status is BrokerStatus.NOT_CONFIGURED:
+                spec = self._specs.get(broker_id)
+                if spec is not None:
+                    fresh = self._fresh_state(spec)
+                    keys = ("configured", "api_key_masked", "details", "last_sync")
+                    state.update({k: fresh[k] for k in keys})
         self.state_changed.emit(broker_id)
 
     def _note(self, broker_id: str, text: str) -> None:
         self.message.emit(f"{self.display_name(broker_id)}: {text}")
 
-    def _callback_url(self) -> str:
-        spec = self._specs.get(next(iter(self._specs), ""))
+    def _callback_url(self, broker_id: str = "") -> str:
+        """Callback URL for one venue (never the first spec's for another)."""
+        spec = self._specs.get(broker_id) if broker_id else None
+        if spec is None:
+            spec = self._specs.get(next(iter(self._specs), ""))
         return spec.callback_url if spec else ""
 
 

@@ -6,6 +6,10 @@ library, first-party chapter roots and declared ``pyproject`` dependencies
 (including dev/test tooling) pass. Test files inherit their parent
 module's language and are exempt from retention.
 
+Without a git checkout the gate degrades instead of erroring: it warns and
+scans the whole working tree, so a source archive is still checked. CI always
+has git, so the diff-scoped path there is unchanged.
+
 Usage: python scripts/validate_architecture_gate.py [--ref HEAD] [--json]
 Exit: 0 PASS (warnings allowed), 1 FAIL, 2 ERROR.
 """
@@ -16,6 +20,7 @@ import argparse
 import ast
 import importlib.metadata
 import json
+import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -39,9 +44,33 @@ FIRST_PARTY_ROOTS = frozenset(
     }
 )
 
-# Conventional test tooling that is importable in this repo's test
-# environment but not pinned as a direct dependency.
+# Conventional test tooling. NOT a blanket exemption any more: a file may only
+# import one of these when its distribution is declared in pyproject
+# (dev-deps or an extra) — otherwise the import is a FAIL, because CI would
+# install an environment the project never asked for.
 TEST_TOOLING = frozenset({"pytest", "hypothesis", "faker", "anyio", "coverage"})
+
+# Directories never scanned when the gate degrades to a working-tree walk.
+SCAN_SKIP_DIRS = frozenset(
+    {
+        ".git",
+        ".venv",
+        "venv",
+        "__pycache__",
+        ".ruff_cache",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".pyright",
+        "node_modules",
+        "target",
+        "dist",
+        "build",
+        "htmlcov",
+        ".forensics",
+        ".context_cache",
+        ".repo_index",
+    }
+)
 
 
 @dataclass
@@ -113,6 +142,22 @@ UNAUTHORIZED_LANGUAGE_EXTENSIONS = frozenset(
         ".hpp",
         ".cc",
         ".cxx",
+        # Script shells: a .sh/.ps1/.bat/.cmd entry point is an executable
+        # program outside the allowlist just as much as a .go file is.
+        ".sh",
+        ".bash",
+        ".zsh",
+        ".ps1",
+        ".psm1",
+        ".bat",
+        ".cmd",
+        # Prebuilt binaries: shipping a checked-in .dll/.exe/.jar reintroduces
+        # a foreign runtime (and bypasses the Rust workspace) silently.
+        ".dll",
+        ".so",
+        ".dylib",
+        ".exe",
+        ".jar",
     }
 )
 
@@ -135,6 +180,21 @@ def check_new_file_extension(rel: str) -> Violation | None:
             ),
         )
     return None
+
+
+def _git_available() -> bool:
+    """Is this a git work tree we can diff against? (never raises)"""
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return False
+    return proc.returncode == 0 and proc.stdout.strip() == "true"
 
 
 def _git_changed(ref: str) -> tuple[list[str], list[str]]:
@@ -172,6 +232,19 @@ def _git_changed_all(ref: str) -> list[str]:
     return tracked + untracked
 
 
+def _working_tree(*, python_only: bool) -> list[str]:
+    """Repo-relative paths in the working tree (degraded, git-less mode)."""
+    wanted = {".py"} if python_only else set()
+    found: list[str] = []
+    for path in sorted(ROOT.rglob("*")):
+        if not path.is_file() or SCAN_SKIP_DIRS & set(path.parts):
+            continue
+        if wanted and path.suffix not in wanted:
+            continue
+        found.append(path.relative_to(ROOT).as_posix())
+    return found
+
+
 def _declared_distributions() -> set[str]:
     """Normalized distribution names from pyproject dependencies."""
     import tomllib
@@ -183,18 +256,11 @@ def _declared_distributions() -> set[str]:
         raw.extend(extra)
 
     def normalize(name: str) -> str:
-        return (
-            name.split(";")[0]
-            .split("[")[0]
-            .split("=")[0]
-            .split("<")[0]
-            .split(">")[0]
-            .split("!")[0]
-            .strip()
-            .lower()
-            .replace("_", "-")
-            .replace(".", "-")
-        )
+        # Cut at the FIRST version operator so every PEP 440 form leaves the
+        # bare distribution name: `>=`, `==`, `~=`, `===`, `!=`, `>`, `<`, and
+        # an extras marker. A trailing-only strip would keep `pytest>=8.0`.
+        head = re.split(r"[\s<>=!~\[]", name.split(";")[0].strip(), maxsplit=1)[0]
+        return head.strip().lower().replace("_", "-").replace(".", "-")
 
     return {normalize(item) for item in raw if normalize(item)}
 
@@ -224,14 +290,15 @@ def _required_language(rel: str, rules: list[dict]) -> str | None:
 
 
 def _is_first_party_root(root: str, local_modules: set[str]) -> bool:
-    """Pure check: stdlib, chapter roots, test tooling, or a bare module name
-    that resolves to a file inside scripts/ (path-insertion imports in tests).
-    Anything else needs a declared distribution (checked by the caller)."""
+    """Pure check: stdlib, chapter roots, or a bare module name that resolves
+    to a file inside scripts/ (path-insertion imports in tests). Test tooling
+    is NOT first-party: it is checked against the declared dependencies like
+    any other distribution. Anything else needs a declared distribution
+    (checked by the caller)."""
     return (
         not root
         or root in sys.stdlib_module_names
         or root in FIRST_PARTY_ROOTS
-        or root in TEST_TOOLING
         or root in local_modules
     )
 
@@ -240,7 +307,6 @@ def check_changes(ref: str = "HEAD") -> GateReport:
     """Scan changed .py files for undeclared imports and unretained code."""
     report = GateReport()
     try:
-        tracked, untracked = _git_changed(ref)
         rules, retained = _load_policy()
         declared = _declared_distributions()
         try:
@@ -262,12 +328,28 @@ def check_changes(ref: str = "HEAD") -> GateReport:
         for path in (ROOT / "scripts").rglob("__init__.py")
         if path.parent.name.isidentifier() and path.parent.name != "tests"
     }
-    try:
-        all_changed = _git_changed_all(ref)
-    except Exception as exc:  # noqa: BLE001
-        report.verdict = "ERROR"
-        report.details.append(str(exc))
-        return report
+    has_git = _git_available()
+    tracked: list[str] = []
+    untracked: list[str] = []
+    all_changed: list[str] = []
+    if has_git:
+        try:
+            tracked, untracked = _git_changed(ref)
+            all_changed = _git_changed_all(ref)
+        except Exception as exc:  # noqa: BLE001
+            report.warnings.append(f"git diff unavailable ({exc}); scanning the working tree")
+            has_git = False
+    if not has_git:
+        # Degraded mode: no ERROR exit. The gate still checks the whole tree,
+        # it simply cannot tell new files from pre-existing ones, so the
+        # new-file retention rule is skipped instead of guessing.
+        report.warnings.append(
+            "no git work tree: scanning the entire working tree; the diff-scoped "
+            "new-file checks are skipped (degraded mode, exit code unaffected)"
+        )
+        tracked = _working_tree(python_only=True)
+        untracked = []
+        all_changed = _working_tree(python_only=False)
     for rel in all_changed:
         if not (ROOT / rel).is_file():
             continue
@@ -300,11 +382,22 @@ def check_changes(ref: str = "HEAD") -> GateReport:
             root = module.split(".")[0]
             if _is_first_party_root(root, local_modules):
                 continue
-            if root in TEST_TOOLING:
-                continue
             providers = dist_map.get(root, [])
             if any(d.lower().replace("_", "-") in declared for d in providers):
                 continue
+            if root in TEST_TOOLING:
+                report.verdict = "FAIL"
+                report.violations.append(
+                    Violation(
+                        file=rel,
+                        rule="undeclared-test-tooling",
+                        message=(
+                            f"test tooling '{root}' is not declared in pyproject "
+                            "dev-dependencies; add it to [project.optional-dependencies].dev"
+                        ),
+                    )
+                )
+                break
             report.verdict = "FAIL"
             report.violations.append(
                 Violation(
@@ -350,10 +443,14 @@ def main() -> int:
         print("Architecture gate ERROR:")
         for detail in report.details:
             print(f"  - {detail}")
+        for warning in report.warnings[:20]:
+            print(f"  warn: {warning}")
     else:
         print("Architecture gate FAILED:")
         for violation in report.violations:
             print(f"  - {violation.file}: [{violation.rule}] {violation.message}")
+        for warning in report.warnings[:20]:
+            print(f"  warn: {warning}")
     return {"PASS": 0, "FAIL": 1}.get(report.verdict, 2)
 
 

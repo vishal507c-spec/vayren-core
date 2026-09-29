@@ -112,21 +112,6 @@ GOLDEN_TASKS: tuple[dict, ...] = (
     },
 )
 
-SAFETY_INVARIANTS = (
-    "one responsibility -> one owner",
-    "Rust/Python/Slint ownership",
-    "canonical routing",
-    "canonical contracts",
-    "architecture boundaries",
-    "forbidden dependencies",
-    "required governance validation",
-    "stale-state protection",
-    "execution hash protection",
-    "no arbitrary commands",
-    "no infinite retry",
-    "no automatic source repair",
-)
-
 # Canonical fields an optimization result must preserve byte-for-byte.
 PROTECTED_FIELDS = ("route", "owner", "language", "forbidden", "validation_commands")
 

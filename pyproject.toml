@@ -4,7 +4,7 @@
 
 [project]
 name = "vayren-core"
-version = "1.28.0"
+version = "1.29.0"
 description = "Event-driven desktop charting platform"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -70,6 +70,10 @@ line-ending = "auto"
 # ── Pyright (Type Checker) ────────────────────────────────────
 [tool.pyright]
 typeCheckingMode = "standard"
+# The declared floor in `requires-python`. Pinning it makes `datetime.UTC`
+# (3.11+) resolvable and checks the OLDEST supported version, so a 3.12-only
+# feature can never slip in unnoticed.
+pythonVersion = "3.11"
 include = [
     "00_app/app",
     "01_core/core",
@@ -82,8 +86,20 @@ include = [
     "09_broker/broker",
     "scripts",
 ]
+# Every chapter root, so `import core / market / broker / strategy / risk /
+# execution / backtest / app` resolves from the TREE — independent of whether a
+# (possibly stale) editable install is active. Without this, pyright reported
+# 138 bogus `reportMissingImports` on a machine whose install pointed elsewhere.
 extraPaths = [
+    "00_app",
+    "01_core",
     "02_data",
+    "03_market",
+    "05_strategy",
+    "06_backtest",
+    "07_risk",
+    "08_execution",
+    "09_broker",
     "scripts/forensics",
     "scripts/speed",
     "scripts",
@@ -95,6 +111,7 @@ testpaths = [
     "00_app/app/tests",
     "01_core/core/tests",
     "02_data/data/tests",
+    "03_market/market/tests",
     "05_strategy/strategy/tests",
     "05_strategy/strategy/research/tests",
     "09_broker/broker/tests",

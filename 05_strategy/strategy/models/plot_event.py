@@ -83,19 +83,6 @@ _DEFAULT_LAYER: dict[PlotType, RenderLayer] = {
     PlotType.VERTICAL_MARK: RenderLayer.OVERLAY,
 }
 
-_POINT_TYPES = frozenset({PlotType.MARKER, PlotType.SHAPE, PlotType.LABEL})
-_SPAN_TYPES = frozenset(
-    {
-        PlotType.LINE,
-        PlotType.RAY,
-        PlotType.SEGMENT,
-        PlotType.ZONE,
-        PlotType.HORIZONTAL_LEVEL,
-        PlotType.VERTICAL_MARK,
-        PlotType.AREA,
-    }
-)
-
 
 class PlotValidationError(ValueError):
     """A plot instruction violates the universal contract."""
@@ -215,6 +202,9 @@ class PlotEvent:
             _require_bar(self.start_bar, "start_bar")
             _require_bar(self.end_bar, "end_bar")
             _require_finite(self.start_price, "start_price")
+            # NOTE: end_price is accepted but IGNORED for HORIZONTAL_LEVEL —
+            # levels are flat by definition (start_price extends start_bar..end_bar).
+            # Callers must not rely on end_price being rendered; pass None.
         elif self.plot_type == PlotType.VERTICAL_MARK:
             _require_bar(self.bar_index, "bar_index")
         elif self.plot_type in (PlotType.ZONE, PlotType.AREA):
@@ -222,6 +212,12 @@ class PlotEvent:
             _require_bar(self.end_bar, "end_bar")
             _require_finite(self.start_price, "start_price")
             _require_finite(self.end_price, "end_price")
+            if (
+                self.start_bar is not None
+                and self.end_bar is not None
+                and self.end_bar < self.start_bar
+            ):
+                raise PlotValidationError("end_bar must be >= start_bar for ZONE/AREA")
 
     @property
     def anchor_bar(self) -> int:
@@ -237,19 +233,31 @@ class PlotEvent:
         """Inclusive (first, last) bar span this plot touches."""
         if self.bar_index is not None and self.start_bar is None and self.end_bar is None:
             return (self.bar_index, self.bar_index)
-        first = self.start_bar if self.start_bar is not None else self.bar_index or 0
+        if self.start_bar is not None:
+            first = self.start_bar
+        elif self.bar_index is not None:
+            first = self.bar_index
+        else:
+            first = 0
         last = self.end_bar if self.end_bar is not None else first
         if self.plot_type == PlotType.RAY and self.extend_bars is not None:
             last = max(last, first + self.extend_bars - 1)
         return (first, last)
 
     def with_update(self, **changes: object) -> PlotEvent:
-        """Return the next version of this plot (mutable live plots)."""
+        """Return the next version of this plot (mutable live plots).
+
+        The current ``lifecycle`` is preserved unless the caller explicitly
+        passes a new one — updates never resurrect a REMOVED/HIDDEN plot
+        back to ACTIVE by accident.
+        """
         from dataclasses import replace
 
         next_version = self.version + 1
-        merged: dict[str, object] = {"lifecycle": PlotLifecycle.ACTIVE}
+        merged: dict[str, object] = {}
         merged.update(changes)
+        if "lifecycle" not in merged:
+            merged["lifecycle"] = self.lifecycle
         return replace(self, version=next_version, **merged)  # type: ignore[arg-type]
 
     def to_dict(self) -> dict[str, object]:
@@ -280,14 +288,27 @@ class PlotEvent:
 
     @staticmethod
     def from_dict(data: dict[str, object]) -> PlotEvent:
-        """Rebuild a plot event from :meth:`to_dict` output."""
+        """Rebuild a plot event from :meth:`to_dict` output.
+
+        Strict: malformed ``metadata`` pairs raise instead of being
+        silently dropped, so a corrupt payload can never load as a
+        quietly different plot.
+        """
         try:
             raw_meta = data.get("metadata") or []
-            meta = tuple(
-                (str(pair[0]), str(pair[1]))
-                for pair in raw_meta  # type: ignore[union-attr]
-                if isinstance(pair, (list, tuple)) and len(pair) == 2
-            )
+            if not isinstance(raw_meta, (list, tuple)):
+                raise PlotValidationError(f"metadata must be a list of pairs, got {raw_meta!r}")
+            meta_pairs: list[tuple[str, str]] = []
+            for pair in raw_meta:
+                if (
+                    not isinstance(pair, (list, tuple))
+                    or len(pair) != 2
+                    or not isinstance(pair[0], str)
+                    or not isinstance(pair[1], str)
+                ):
+                    raise PlotValidationError(f"invalid metadata pair: {pair!r}")
+                meta_pairs.append((pair[0], pair[1]))
+            meta = tuple(meta_pairs)
             marker = data.get("marker_type")
             return PlotEvent(
                 event_id=str(data["event_id"]),

@@ -34,11 +34,19 @@ class ExpectationWindow:
         return sum(self._samples) / len(self._samples)
 
     def surprise(self, observed: float) -> float | None:
-        """Relative deviation |observed-expected|/|expected|; None when blind."""
+        """Relative deviation |observed-expected|/|expected|; None when blind.
+
+        A zero baseline with non-zero observed is maximal surprise
+        (`inf`, never `None`): the old `exp == 0 -> None` mistook the most
+        surprising case for "no baseline". `0` vs `0` is no surprise.
+        """
         exp = self.expected
-        if exp is None or exp == 0:
+        if exp is None:
             return None
-        return abs(float(observed) - exp) / abs(exp)
+        seen = float(observed)
+        if exp == 0:
+            return 0.0 if seen == 0.0 else float("inf")
+        return abs(seen - exp) / abs(exp)
 
 
 class SurpriseMonitor:
@@ -56,7 +64,11 @@ class SurpriseMonitor:
         return surprise
 
     def is_surprising(self, metric: str, value: float) -> bool:
-        surprise = self.observe(metric, value)
+        """Pure read-only check: never records (use `observe` to record)."""
+        window = self._windows.get(metric)
+        if window is None:
+            return False
+        surprise = window.surprise(value)
         return surprise is not None and surprise >= self._threshold
 
 
@@ -76,26 +88,39 @@ class ConfidenceInput:
     halt_threshold: float = 3.0
     reduce_threshold: float = 1.0
 
+    def __post_init__(self) -> None:
+        if self.halt_threshold < self.reduce_threshold:
+            raise ValueError(
+                f"halt_threshold ({self.halt_threshold}) must be >= "
+                f"reduce_threshold ({self.reduce_threshold})"
+            )
+
 
 @dataclass
 class ConfidencePolicy:
     """Maps surprise signals to an execution posture (advisory only)."""
 
     def evaluate(self, signals: ConfidenceInput) -> ExecutionPosture:
+        if signals.halt_threshold < signals.reduce_threshold:
+            raise ValueError(
+                f"halt_threshold ({signals.halt_threshold}) must be >= "
+                f"reduce_threshold ({signals.reduce_threshold})"
+            )
         if signals.data_stale or signals.broker_unstable:
             return ExecutionPosture.HALT
-        worst = max(
-            (
-                s
-                for s in (
-                    signals.spread_surprise,
-                    signals.latency_surprise,
-                    signals.slippage_surprise,
-                )
-                if s is not None
-            ),
-            default=0.0,
-        )
+        surprises = [
+            s
+            for s in (
+                signals.spread_surprise,
+                signals.latency_surprise,
+                signals.slippage_surprise,
+            )
+            if s is not None
+        ]
+        if not surprises:
+            # Blind (no baseline yet): shrink, never trade at full size.
+            return ExecutionPosture.REDUCED
+        worst = max(surprises)
         if worst >= signals.halt_threshold:
             return ExecutionPosture.HALT
         if worst >= signals.reduce_threshold:

@@ -214,7 +214,13 @@ def _closes(window: tuple[Any, ...]) -> list[float]:
 def _trailing_stats(
     trades: list[Any], windows: dict[str, tuple[Any, ...]], lookback: int = 20
 ) -> list[tuple[float, float] | None]:
-    """Per-trade (volatility, trend_gap) at entry from real bar windows."""
+    """Per-trade (volatility, trend_gap) at entry from real bar windows.
+
+    ``entry_index`` is a PER-SYMBOL index into that trade's own symbol
+    window (``windows[symbol]``) — never a global bar number. A missing or
+    negative index means "unknown" (None); a non-negative index at or past
+    the end of its window is corrupt data and raises :class:`ValueError`.
+    """
     cache: dict[str, list[float]] = {}
     out: list[tuple[float, float] | None] = []
     for trade in trades:
@@ -231,8 +237,16 @@ def _trailing_stats(
         except (TypeError, ValueError):
             out.append(None)
             continue
+        if idx < 0:
+            out.append(None)
+            continue
+        if idx >= len(closes):
+            raise ValueError(
+                f"entry_index {idx} out of range for symbol {symbol!r} "
+                f"window ({len(closes)} bars) — index is per-symbol"
+            )
         start = idx - lookback
-        if start < 0 or idx > len(closes) or idx <= 0:
+        if start < 0 or idx <= 0:
             out.append(None)
             continue
         trail = closes[start:idx]
