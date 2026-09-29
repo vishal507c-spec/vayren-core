@@ -7,6 +7,7 @@ the implementation.
 
 from __future__ import annotations
 
+import math
 from collections import deque
 from dataclasses import dataclass
 from enum import Enum
@@ -46,10 +47,19 @@ class StatisticalRegimeDetector:
     min_volume: float = 1.0
 
     def __post_init__(self) -> None:
+        if not isinstance(self.lookback, int) or isinstance(self.lookback, bool):
+            raise ValueError(f"lookback must be an int >= 2, got {self.lookback!r}")
+        if self.lookback < 2:
+            raise ValueError(f"lookback must be >= 2, got {self.lookback}")
         self._closes: deque[float] = deque(maxlen=self.lookback)
         self._volumes: deque[float] = deque(maxlen=self.lookback)
 
     def update(self, close: float, volume: float) -> MarketRegime:
+        for name, value in (("close", close), ("volume", volume)):
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f"regime {name} must be a number, got {value!r}")
+            if not math.isfinite(float(value)):
+                raise ValueError(f"regime {name} must be finite, got {value!r}")
         self._closes.append(float(close))
         self._volumes.append(float(volume))
         if len(self._closes) < self.lookback:

@@ -85,7 +85,14 @@ def test_resolve_symbol_inline() -> None:
 def test_resolve_symbol_live_tree() -> None:
     source = (ROOT / "09_broker/broker/registry.py").read_text(encoding="utf-8")
     line = resolve_symbol("BrokerRegistry", source)
-    assert line == 68
+    # Derived, not a magic number: the contract is that the resolver returns the
+    # real declaration line in the live tree (a hardcoded 68 rots on every edit).
+    declared = next(
+        n
+        for n, text in enumerate(source.splitlines(), start=1)
+        if text.startswith("class BrokerRegistry")
+    )
+    assert line == declared
     rs = (ROOT / "rust/vayren-shell/src/market.rs").read_text(encoding="utf-8")
     assert resolve_symbol("MarketBar", rs) == 24
 

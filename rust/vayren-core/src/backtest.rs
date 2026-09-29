@@ -522,13 +522,13 @@ impl PositionManager {
             bar_close,
             exit_signal,
         )?;
-        Some(self.close_position(
+        self.close_position(
             exit_index,
             exit_time,
             exit_price,
             commission_pct,
             exit_reason,
-        ))
+        )
     }
 
     pub fn close_signal(
@@ -541,13 +541,13 @@ impl PositionManager {
         if self.open.is_none() {
             return None;
         }
-        Some(self.close_position(
+        self.close_position(
             exit_index,
             exit_time,
             exit_price,
             commission_pct,
             ExitReason::Signal,
-        ))
+        )
     }
 
     pub fn close_end(
@@ -560,13 +560,13 @@ impl PositionManager {
         if self.open.is_none() {
             return None;
         }
-        Some(self.close_position(
+        self.close_position(
             exit_index,
             exit_time,
             exit_price,
             commission_pct,
             ExitReason::End,
-        ))
+        )
     }
 
     fn close_position(
@@ -576,11 +576,14 @@ impl PositionManager {
         exit_price: f64,
         commission_pct: f64,
         exit_reason: ExitReason,
-    ) -> TradeRecord {
-        let entry = self
-            .open
-            .take()
-            .expect("close_position called with no open position");
+    ) -> Option<TradeRecord> {
+        // Fail-closed: no open position means there is no trade to close, and
+        // the caller asked for one. Returning None keeps that a no-op instead
+        // of unwinding the whole backtest run (a panic here aborts a live
+        // multi-hour replay — the exact situation where a crash is least
+        // recoverable). Every public close path already guards on
+        // `self.open`, so this is the belt-and-braces branch.
+        let entry = self.open.take()?;
         let economics = close_economics(
             entry.side,
             entry.entry_price,
@@ -590,7 +593,7 @@ impl PositionManager {
             commission_pct,
             entry.sl_price,
         );
-        TradeRecord {
+        Some(TradeRecord {
             symbol: entry.symbol,
             side: entry.side,
             entry_index: entry.entry_index,
@@ -606,7 +609,7 @@ impl PositionManager {
             bars_held: exit_index - entry.entry_index,
             exit_reason,
             r_multiple: economics.r_multiple,
-        }
+        })
     }
 }
 
@@ -965,5 +968,23 @@ mod position_kernel_tests {
         assert_eq!(trade.r_multiple, economics.r_multiple);
         assert_eq!(trade.bars_held, 3);
         assert_eq!(trade.exit_reason, ExitReason::TakeProfit);
+    }
+
+    #[test]
+    fn closing_without_a_position_is_a_no_op_not_a_panic() {
+        // Fail-closed contract: every close path on a flat book answers None
+        // instead of unwinding the caller (a panic mid-replay loses the whole
+        // multi-hour run).
+        let mut flat = PositionManager::new("X");
+        assert!(flat.flat());
+        assert!(flat.close_signal(1, "t1", 100.0, 0.0).is_none());
+        assert!(flat.close_end(2, "t2", 100.0, 0.0).is_none());
+        assert!(flat
+            .try_close(1, "t1", 101.0, 99.0, 100.0, 0.0, true)
+            .is_none());
+        // Still flat, still usable: the refusal left no half-open position.
+        assert!(flat.open_position().is_none());
+        assert!(flat.open_long("X", 0, "t0", 100.0, 10.0, 2.0, Some(90.0), Some(120.0)));
+        assert!(!flat.flat());
     }
 }

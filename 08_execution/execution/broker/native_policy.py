@@ -13,10 +13,51 @@ from __future__ import annotations
 import contextlib
 import ctypes
 from collections.abc import Callable
+from enum import IntEnum
 
 from core.native.loader import NativeBridgeError, load_vayren_core
 
 _lib = load_vayren_core()
+
+_REQUIRED_EXPORTS = (
+    "vy_res_retry_kind",
+    "vy_res_limiter_problem",
+    "vy_res_limiter_new",
+    "vy_res_limiter_allow",
+    "vy_res_limiter_used",
+    "vy_res_limiter_record_429",
+    "vy_res_limiter_rejections",
+    "vy_res_limiter_free",
+    "vy_res_clock_ok",
+    "vy_res_timeout_problem",
+    "vy_res_backoff_problem",
+    "vy_res_backoff_delay",
+    "vy_res_exhausted",
+    "vy_res_reconnect_problem",
+    "vy_cer_credentials",
+    "vy_cer_account",
+    "vy_cer_risk",
+    "vy_cer_funds",
+    "vy_cer_gates",
+    "vy_cer_activation",
+    "vy_sbx_settle_decision",
+)
+
+_missing_exports = [name for name in _REQUIRED_EXPORTS if not hasattr(_lib, name)]
+if _missing_exports:
+    raise NativeBridgeError(
+        f"native library has no resilience kernel ({', '.join(_missing_exports)}). "
+        "Rebuild: `python scripts/build_rust.py`"
+    )
+
+
+class RetryKind(IntEnum):
+    """Retry class for one venue operation (kernel `vy_res_retry_kind`)."""
+
+    RETRY_SAFE = 0
+    DO_NOT_RETRY = 1
+    RECONCILE_FIRST = 2
+
 
 _char_out = ctypes.POINTER(ctypes.c_char)
 
@@ -258,10 +299,20 @@ def _split_frame(payload: bytes) -> tuple[str, ...]:
     fields: list[str] = []
     rest = payload
     while rest:
-        colon = rest.index(b":")
-        size = int(rest[:colon])
+        colon = rest.find(b":")
+        if colon < 0:
+            raise NativeBridgeError("readiness document field has no length prefix")
+        size_raw = rest[:colon]
+        if not size_raw.isdigit():
+            raise NativeBridgeError("readiness document field length is not a number")
+        size = int(size_raw)
         start = colon + 1
-        fields.append(rest[start : start + size].decode("utf-8"))
+        if len(rest) < start + size:
+            raise NativeBridgeError("readiness document field overruns its frame")
+        try:
+            fields.append(rest[start : start + size].decode("utf-8"))
+        except UnicodeDecodeError as exc:
+            raise NativeBridgeError("readiness document field is not UTF-8") from exc
         rest = rest[start + size :]
     return tuple(fields)
 
@@ -277,13 +328,16 @@ def _flag_array(flags: tuple[bool, ...]) -> ctypes.Array[ctypes.c_int8]:
     return holder
 
 
-def native_retry_kind(operation: str) -> int:
-    """Retry class for one venue operation: 0 safe, 1 not safe, 2 reconcile."""
+def native_retry_kind(operation: str) -> RetryKind:
+    """Retry class for one venue operation (kernel `vy_res_retry_kind`)."""
     payload = operation.encode("utf-8")
     code = int(_lib.vy_res_retry_kind(payload, len(payload)))
     if code < 0:
         raise _reject(code, "retry_kind")
-    return code
+    try:
+        return RetryKind(code)
+    except ValueError as exc:
+        raise NativeBridgeError(f"resilience kernel returned unknown retry kind: {code}") from exc
 
 
 def native_limiter_problem(max_requests: int, window_seconds: float) -> str:
@@ -311,8 +365,9 @@ def native_limiter_used(handle: int) -> int:
 
 
 def native_limiter_record_429(handle: int) -> None:
-    if int(_lib.vy_res_limiter_record_429(int(handle))) != 0:
-        raise _reject(-2, "limiter.record_429")
+    code = int(_lib.vy_res_limiter_record_429(int(handle)))
+    if code != 0:
+        raise _reject(code, "limiter.record_429")
 
 
 def native_limiter_rejections(handle: int) -> int:

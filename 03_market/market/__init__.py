@@ -1,11 +1,14 @@
-"""Market domain — Python retains the candle payload shape only.
+"""Market domain — candle payload plus the live Rust-bridge surface.
 
-Storage, repository, loading, aggregation and timeframe authority are
-Rust-owned (``rust/vayren-core`` ``market`` + ``aggregate``); their Python
-twins were removed. ``Bar`` stays as the zero-logic payload shape consumed
-by Python-owned Strategy code.
+Aggregation, timeframe-ladder and single-candle-metric authority are
+Rust-owned (``rust/vayren-core`` ``market`` + ``aggregate``) and reached only
+through the bridges re-exported here: `native_aggregate`, `native_bar` and
+`native_timeframe` (fail-closed FFI projections, no logic of their own).
+``Bar`` stays as the zero-logic validated payload shape consumed by
+Python-owned Strategy code.
 """
 
+from market import native_aggregate, native_bar, native_timeframe
 from market.models.bar import Bar
 
-__all__ = ["Bar"]
+__all__ = ["Bar", "native_aggregate", "native_bar", "native_timeframe"]

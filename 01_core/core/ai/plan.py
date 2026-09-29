@@ -9,11 +9,15 @@ import re
 from dataclasses import dataclass
 from enum import Enum
 
-# DEBT: retained unwired imports (see 90_brain/ai_memory.md).
-from core.contracts.capability import CapabilityId  # pyright: ignore[reportMissingImports]
-from core.system.change_impact import RiskLevel  # pyright: ignore[reportMissingImports]
+# Vocabulary lives behind core.ai._vocab: canonical core.contracts /
+# core.system modules win when they land; local fallbacks keep the Python-owned
+# AI layer importable until then.
+from core.ai._vocab import CapabilityId, RiskLevel
 
+# Plan ids are lowercase snake_case ("^[a-z][a-z0-9_]*$", max 128 chars): safe
+# as file tokens, log tokens and Rust-bridge labels without quoting.
 _ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+_ID_MAX_LENGTH = 128
 
 _RISK_RANK = {RiskLevel.LOW: 0, RiskLevel.MEDIUM: 1, RiskLevel.HIGH: 2}
 _RISK_BY_RANK = {0: RiskLevel.LOW, 1: RiskLevel.MEDIUM, 2: RiskLevel.HIGH}
@@ -102,10 +106,12 @@ def validate_plan(plan: Plan) -> PlanValidationResult:
     errors: list[str] = []
     if not _ID_PATTERN.match(plan.id):
         errors.append(f"invalid plan id: {plan.id!r}")
+    if len(plan.id) > _ID_MAX_LENGTH:
+        errors.append(f"plan id exceeds {_ID_MAX_LENGTH} chars: {plan.id!r}")
     if not plan.summary.strip():
         errors.append("summary must not be empty")
-    overlap = {str(cap) for cap in plan.new_capabilities} & {
-        str(cap) for cap in plan.reused_capabilities
+    overlap = {cap.value for cap in plan.new_capabilities} & {
+        cap.value for cap in plan.reused_capabilities
     }
     if overlap:
         errors.append("capability must not be both reused and new: " + ", ".join(sorted(overlap)))

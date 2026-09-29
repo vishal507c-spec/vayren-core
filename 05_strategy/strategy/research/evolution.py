@@ -16,7 +16,38 @@ from market import Bar
 from strategy.language import compile_strategy
 from strategy.models.state import StrategyState
 from strategy.runtime import BarView
-from strategy.version import create_version
+from strategy.version import canonical_hash, create_version
+
+
+def _synthetic_bars() -> tuple[Bar, ...]:
+    """Deterministic 30-bar validation tape: up, down AND flat legs.
+
+    A monotonic ramp would only ever exercise trend-following paths; mixing
+    a rally, a drawdown and a flat chop forces the candidate logic through
+    entries, exits and silent bars before its version is minted.
+    """
+    from datetime import timedelta
+
+    base = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    # 10 up (+1/bar), 10 down (-1.5/bar), 10 flat (chop ±0.2, net 0).
+    closes = [100.0 + i for i in range(10)]
+    closes += [closes[-1] - 1.5 * i for i in range(1, 11)]
+    flat_base = closes[-1]
+    closes += [flat_base + (0.2 if i % 2 == 0 else -0.2) for i in range(10)]
+    bars: list[Bar] = []
+    for i, close in enumerate(closes):
+        bars.append(
+            Bar(
+                symbol="TEST",
+                open=close - 0.2,
+                high=close + 0.5,
+                low=close - 0.5,
+                close=close,
+                volume=1000,
+                timestamp=(base + timedelta(minutes=15 * i)).strftime("%Y-%m-%d %H:%M:%S"),
+            )
+        )
+    return tuple(bars)
 
 
 def _hash_source(source: str) -> str:
@@ -73,7 +104,6 @@ class EvolutionProposal:
 
 
 def _evolution_dir(data_dir: Path | str | None) -> Path:
-    base = Path(data_dir) if data_dir and Path(data_dir).is_dir() else Path.cwd() / ".vayren"  # noqa: F841
     if data_dir and Path(data_dir).is_dir():
         d = Path(data_dir) / "research" / "evolution_proposals"
     else:
@@ -235,35 +265,21 @@ def approve_proposal(
     if prop.status not in ("PROPOSED", "UNDER_REVIEW"):
         raise ValueError(f"Proposal not in approvable state: {prop.status}")
 
-    # SAFETY CHECK 1: Verify parent version exists
+    # SAFETY CHECK 1: Verify parent version exists — a missing parent is an
+    # error, never silently rebound to "latest" (that would mint a version
+    # with a false lineage link).
     try:
-        from strategy.version import list_versions, load_version
+        from strategy.version import load_version
 
         parent_version = load_version(prop.strategy_id, prop.parent_version_id, data_dir)
         if parent_version is None:
-            existing = list_versions(prop.strategy_id, data_dir)
-            if existing:
-                parent_version = existing[-1]
-                prop = EvolutionProposal(
-                    proposal_id=prop.proposal_id,
-                    strategy_id=prop.strategy_id,
-                    parent_version_id=parent_version.version_id,
-                    discovery_id=prop.discovery_id,
-                    evidence_ids=prop.evidence_ids,
-                    proposed_change=prop.proposed_change,
-                    rationale=prop.rationale,
-                    expected_effect=prop.expected_effect,
-                    status=prop.status,
-                    created_at=prop.created_at,
-                    metadata=prop.metadata,
-                    parent_source_hash=parent_version.source_hash,
-                    new_source=prop.new_source,
-                    new_source_hash=prop.new_source_hash,
-                )
-            else:
-                failed = _proposal_failed(prop, "Parent version not found and no versions exist")
-                save_proposal(failed, data_dir)
-                return failed, None
+            failed = _proposal_failed(
+                prop,
+                f"Parent version not found: {prop.parent_version_id} "
+                "— refusing silent rebind; point the proposal at a real parent",
+            )
+            save_proposal(failed, data_dir)
+            return failed, None
     except Exception as e:
         failed = _proposal_failed(prop, f"Parent version lookup failed: {e}")
         save_proposal(failed, data_dir)
@@ -288,25 +304,12 @@ def approve_proposal(
         return failed, None
 
     # SAFETY CHECK 4: Python validation — controlled test execution
+    # over a mixed up/down/flat tape (never a monotonic ramp).
     try:
         from strategy.models.parameters import StrategyParameters
 
         logic = compiled.create_logic(StrategyParameters({}))
-        from datetime import timedelta
-
-        base = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
-        bars = tuple(
-            Bar(
-                symbol="TEST",
-                open=100 + i,
-                high=102 + i,
-                low=99 + i,
-                close=101 + i,
-                volume=1000,
-                timestamp=(base + timedelta(minutes=15 * i)).strftime("%Y-%m-%d %H:%M:%S"),
-            )
-            for i in range(30)
-        )
+        bars = _synthetic_bars()
         for idx in range(logic.warmup(), len(bars)):
             view = BarView(
                 bars=bars, index=idx, params=StrategyParameters({}), state=StrategyState()
@@ -317,9 +320,10 @@ def approve_proposal(
         save_proposal(failed, data_dir)
         return failed, None
 
-    # SAFETY CHECK 5: Create new version with deterministic hash
+    # SAFETY CHECK 5: Create new version with deterministic hash —
+    # canonical source hash from version.py (single implementation).
     try:
-        ir_hash = hashlib.sha256(compiled.code.encode("utf-8")).hexdigest()
+        ir_hash = canonical_hash(compiled.code)
         new_version = create_version(
             prop.strategy_id,
             prop.new_source,

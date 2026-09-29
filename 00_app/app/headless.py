@@ -11,15 +11,21 @@ import argparse
 import contextlib
 import json
 import logging
+import queue
 import sys
 import threading
+import time
+from collections.abc import Callable
 from contextlib import suppress
-from datetime import datetime
+from datetime import UTC, datetime
 from logging import getLogger
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from broker import BrokerStatus
+
+if TYPE_CHECKING:
+    from app.progress import RunProgress
 
 
 def _bootstrap_chapter_path() -> None:
@@ -48,13 +54,18 @@ def _bootstrap_chapter_path() -> None:
             candidate = str(repo_root / chapter)
             if (repo_root / chapter).is_dir() and candidate not in sys.path:
                 sys.path.insert(0, candidate)
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001
+        # logging-only: logger is defined below, so use the module directly.
+        logging.getLogger(__name__).warning("chapter path bootstrap failed: %s", exc)
 
 
 _bootstrap_chapter_path()
 
 logger = getLogger(__name__)
+
+#: ids of the log handlers this process installed itself. Only these are
+#: recycled on reconfigure — an imported SDK's handlers are left alone.
+_OWNED_HANDLER_IDS: set[int] = set()
 
 
 def _logs_to_stderr(level: str) -> None:
@@ -76,9 +87,13 @@ def _logs_to_stderr(level: str) -> None:
         )
     root = logging.getLogger()
     for handler in list(root.handlers):
-        root.removeHandler(handler)
-        with suppress(Exception):
-            handler.close()
+        # Only our own stderr handler is recycled; SDK-installed handlers
+        # (venue clients, drivers) are left exactly as imported code left them.
+        if id(handler) in _OWNED_HANDLER_IDS:
+            root.removeHandler(handler)
+            _OWNED_HANDLER_IDS.discard(id(handler))
+            with suppress(Exception):
+                handler.close()
     # Windowless launches (pythonw / CREATE_NO_WINDOW) have no console: a
     # broken stderr must degrade to silence, never kill the backend — the
     # JSON protocol on stdout stays the single source of truth either way.
@@ -90,6 +105,7 @@ def _logs_to_stderr(level: str) -> None:
         handler = logging.NullHandler()
     handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
     handler.setLevel(getattr(logging, level.upper(), logging.INFO))
+    _OWNED_HANDLER_IDS.add(id(handler))
     root.addHandler(handler)
 
 
@@ -97,20 +113,26 @@ def _emit(payload: dict) -> bool:
     """Write one JSON response line. False when the pipe is gone."""
     try:
         print(json.dumps(payload), flush=True)
-    except OSError:
+    except (OSError, ValueError, TypeError):
         return False
     return True
 
 
 def _bar_to_dict(bar) -> dict:
     """One backend Bar as bridge JSON (mirrors Rust MarketBar fields)."""
+
+    def _get(name: str):
+        if isinstance(bar, dict) and name in bar:
+            return bar[name]
+        return getattr(bar, name)
+
     return {
-        "time": bar.timestamp,
-        "open": bar.open,
-        "high": bar.high,
-        "low": bar.low,
-        "close": bar.close,
-        "volume": bar.volume,
+        "time": _get("timestamp"),
+        "open": _get("open"),
+        "high": _get("high"),
+        "low": _get("low"),
+        "close": _get("close"),
+        "volume": _get("volume"),
     }
 
 
@@ -322,9 +344,19 @@ def _system_snapshot(
         return {"brokers": [], "error": f"system backend unavailable: {exc}"}
     try:
         selection_service = BrokerSelectionService(app_selection_store(data_dir))
-        if selected_broker and selected_broker in ("zerodha", "fyers"):
-            with contextlib.suppress(Exception):
-                selection_service.select(selected_broker)
+        if selected_broker:
+            from broker import default_registry
+
+            known = {record.name for record in default_registry().list()}
+            current_name = ""
+            try:
+                current = selection_service.current_or_none()
+                current_name = current.name if current is not None else ""
+            except Exception:  # noqa: BLE001
+                current_name = ""
+            if selected_broker in known and selected_broker != current_name:
+                with contextlib.suppress(Exception):
+                    selection_service.select(selected_broker)
         selection = selection_service.current()
     except Exception:  # noqa: BLE001
         selection = None
@@ -411,8 +443,7 @@ def _trading_service_snapshot(data_dir: str, strategy_dir: str) -> dict:
     except Exception as exc:  # noqa: BLE001
         return {"mode": "PAPER", "error": f"trading snapshot failed: {exc}"}
     bars = snap.get("market_bars")
-    if bars:
-        snap["market_bars"] = [_bar_to_dict(b) for b in bars]
+    snap["market_bars"] = [_bar_to_dict(b) for b in bars] if bars else []
     return snap
 
 
@@ -438,7 +469,7 @@ def _lab_library_rows(strategy_dir: str) -> list[dict]:
         try:
             stamp = Path(strategy_dir, f"{name}.py").stat().st_mtime
             if stamp:
-                modified = datetime.fromtimestamp(stamp).strftime("%d %b %y")
+                modified = datetime.fromtimestamp(stamp, tz=UTC).strftime("%d %b %y")
         except Exception:  # noqa: BLE001
             modified = ""
         rows.append(
@@ -471,6 +502,8 @@ def _lab_library_rows(strategy_dir: str) -> list[dict]:
 
 
 _LAB_DEFAULT_CAPITAL = 10000.0
+_BACKEND_VERSION = "1.18.0"
+_STRATEGY_NAMES_LAST_WARN = 0.0
 
 
 def _strategy_names(strategy_dir: str) -> list[str]:
@@ -478,12 +511,17 @@ def _strategy_names(strategy_dir: str) -> list[str]:
 
     One source for both workspaces, so the INDICATORS popup's STRATEGIES
     section names exactly the strategies the Lab lists. Honest-empty on
-    failure — never invented names.
+    failure — never invented names. Failures warn at most once a minute so
+    a broken backend does not spam one line per snapshot.
     """
     try:
         return [str(row["name"]) for row in _lab_library_rows(strategy_dir)]
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Strategy names unavailable: %s", exc)
+        global _STRATEGY_NAMES_LAST_WARN
+        now = time.monotonic()
+        if now - _STRATEGY_NAMES_LAST_WARN >= 60.0:
+            _STRATEGY_NAMES_LAST_WARN = now
+            logger.warning("Strategy names unavailable: %s", exc)
         return []
 
 
@@ -501,8 +539,18 @@ def _lab_universe(repository: Any) -> tuple[list[str], str]:
 # A 500+ symbol run blocks the command loop for minutes, so CANCEL and the
 # progress stream need their own channel. The flag is a plain Event: setting it
 # can only ever make the run stop EARLIER, never change a result.
+#
+# stdin has exactly ONE reader for the process lifetime (a daemon feeding
+# _LAB_INBOX). Two iterators over sys.stdin split buffered chunks
+# unpredictably, so the run executes in a worker thread while the main loop
+# keeps pumping the same inbox: cancel sets the flag, anything else is parked
+# in _LAB_DEFERRED and re-queued in order when the run finishes.
 _LAB_CANCEL = threading.Event()
 _LAB_DEFERRED: list[dict] = []
+_LAB_INBOX: queue.Queue = queue.Queue()
+_LAB_READER_STARTED = False
+_LAB_EOF: Any = object()
+_LAB_MISS: Any = object()
 
 
 def _progress_emitter():
@@ -513,37 +561,78 @@ def _progress_emitter():
         try:
             sys.stdout.write(json.dumps(payload, separators=(",", ":")) + "\n")
             sys.stdout.flush()
-        except (OSError, ValueError):
+        except (OSError, ValueError, TypeError):
             pass
 
     return emit
 
 
-def _watch_for_cancel(stdin) -> threading.Thread:
-    """Drain stdin while a run blocks, honouring CANCEL and deferring the rest.
-
-    The normal loop is not reading during a run, so nothing is stolen: a cancel
-    sets the flag, and any other command is parked for the main loop to run once
-    the run finishes.
-    """
-
-    def reader() -> None:
-        for raw in stdin:
-            text = raw.strip()
-            if not text:
-                continue
-            try:
-                cmd = json.loads(text)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(cmd, dict) and cmd.get("type") == "cancel_backtest":
-                _LAB_CANCEL.set()
-                continue
-            _LAB_DEFERRED.append(cmd)
-
-    thread = threading.Thread(target=reader, name="lab-cancel-watch", daemon=True)
+def _watch_for_cancel(_stdin) -> threading.Thread:
+    """Legacy entry point kept for import compatibility; the inbox reader
+    supersedes it (single stdin reader, no second iterator)."""
+    logger.warning("_watch_for_cancel is deprecated; stdin uses the shared inbox reader")
+    thread = threading.Thread(target=lambda: None, name="lab-cancel-watch", daemon=True)
     thread.start()
     return thread
+
+
+def _ensure_stdin_reader() -> None:
+    """Start the single lifetime stdin reader feeding _LAB_INBOX."""
+    global _LAB_READER_STARTED
+    if _LAB_READER_STARTED:
+        return
+    _LAB_READER_STARTED = True
+
+    def _read() -> None:
+        try:
+            for raw in sys.stdin:
+                _LAB_INBOX.put(raw)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("stdin reader ended: %s", exc)
+        finally:
+            _LAB_INBOX.put(_LAB_EOF)
+
+    thread = threading.Thread(target=_read, name="stdin-reader", daemon=True)
+    thread.start()
+
+
+def _next_line(timeout: float | None = None) -> Any:
+    """Next stdin line from the shared inbox (None timeout = block forever)."""
+    try:
+        item = _LAB_INBOX.get(timeout=timeout)
+    except queue.Empty:
+        return _LAB_MISS
+    return item
+
+
+def _pump_while_running(done: threading.Event) -> None:
+    """Park inbox traffic while a run owns the worker: cancel sets the flag,
+    everything else waits its turn in _LAB_DEFERRED."""
+    while not done.is_set():
+        line = _next_line(timeout=0.1)
+        if line is _LAB_MISS:
+            continue
+        if line is _LAB_EOF:
+            _LAB_INBOX.put(_LAB_EOF)
+            return
+        text = line.strip() if isinstance(line, str) else ""
+        if not text:
+            continue
+        try:
+            cmd = json.loads(text)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(cmd, dict) and cmd.get("type") == "cancel_backtest":
+            _LAB_CANCEL.set()
+            continue
+        if isinstance(cmd, dict):
+            _LAB_DEFERRED.append(cmd)
+
+
+def _requeue_deferred() -> None:
+    """Return parked commands to the inbox in arrival order."""
+    while _LAB_DEFERRED:
+        _LAB_INBOX.put(json.dumps(_LAB_DEFERRED.pop(0)))
 
 
 # Coverage probes the ANCHOR symbol's bar count plus the selected symbols'
@@ -621,15 +710,21 @@ def _lab_workspace(
     """
     rows = rows if rows is not None else _lab_library_rows(strategy_dir)
     names = [row["name"] for row in rows]
-    requested = (command.get("strategy") or command.get("selected_name") or "").strip()
-    selected = requested if requested in names else (names[0] if names else "")
-    if requested and requested not in names:
+    requested = str(command.get("strategy") or command.get("selected_name") or "").strip()
+    if requested in names:
+        selected = requested
+    elif requested:
         selected = ""
+    else:
+        selected = names[0] if names else ""
     universe_symbols, universe_error = _lab_universe(repository)
+    universe_upper = {str(s).strip().upper() for s in universe_symbols}
     requested_symbols = command.get("symbols") or []
     if isinstance(requested_symbols, str):
         requested_symbols = [s.strip() for s in requested_symbols.split(",") if s.strip()]
-    selected_symbols = [s for s in requested_symbols if s in universe_symbols]
+    normalized = [str(s).strip().upper() for s in requested_symbols if str(s).strip()]
+    dropped = sorted({s for s in normalized if s not in universe_upper})
+    selected_symbols = [s for s in normalized if s in universe_upper]
     if universe_symbols and repository is not None:
         try:
             anchor = selected_symbols[0] if selected_symbols else universe_symbols[0]
@@ -639,11 +734,12 @@ def _lab_workspace(
             timeframes, first_date, last_date = [], "", ""
     else:
         timeframes, first_date, last_date = [], "", ""
-    timeframe = (command.get("timeframe") or "").strip()
+    timeframe = str(command.get("timeframe") or "").strip()
+    asked_timeframe = timeframe
     if timeframe not in timeframes:
         timeframe = "15m" if "15m" in timeframes else (timeframes[0] if timeframes else "")
-    dates_start = (command.get("start") or command.get("dates_start") or "").strip()
-    dates_end = (command.get("end") or command.get("dates_end") or "").strip()
+    dates_start = str(command.get("start") or command.get("dates_start") or "").strip()
+    dates_end = str(command.get("end") or command.get("dates_end") or "").strip()
     if not dates_start:
         dates_start = first_date
     if not dates_end:
@@ -653,13 +749,22 @@ def _lab_workspace(
         capital_value = float(capital_raw)
     except (TypeError, ValueError):
         capital_value = _LAB_DEFAULT_CAPITAL
-    mode = (command.get("mode") or "buy").strip().lower()
+    if capital_value != capital_value or capital_value == float("inf"):  # NaN/inf
+        capital_value = _LAB_DEFAULT_CAPITAL
+    mode = str(command.get("mode") or "buy").strip().lower()
     if mode not in ("buy", "sell", "compare"):
         mode = "buy"
     # Real store bounds of the ANCHOR symbol. The Lab's MAX date-range preset
     # is exactly this pair, so it needs the store's own facts, not the user's
     # current selection (which would collapse MAX onto whatever was picked).
     data_bounds: dict = {"first": first_date, "last": last_date} if first_date and last_date else {}
+    notes = [universe_error] if universe_error else []
+    if dropped:
+        notes.append(f"Unknown symbols ignored: {', '.join(dropped)}")
+    if asked_timeframe and asked_timeframe != timeframe:
+        notes.append(f"Timeframe {asked_timeframe!r} unavailable, using {timeframe or '—'}")
+    if dates_start and dates_end and dates_start > dates_end:
+        notes.append(f"Start {dates_start} is after end {dates_end}")
     snapshot: dict = {
         "selected_name": selected,
         "mode": mode,
@@ -680,7 +785,7 @@ def _lab_workspace(
             "dates_start": dates_start,
             "dates_end": dates_end,
             "capital": capital_value,
-            "config_error": universe_error,
+            "config_error": "; ".join(notes),
         },
         "universe": {"symbols": universe_symbols, "selected": selected_symbols},
         "results": None,
@@ -736,14 +841,16 @@ def _lab_run(
     data_dir: str,
     command: dict,
     repository: Any = None,
-    progress=None,
-    should_cancel=None,
+    progress: RunProgress | Callable[[dict], None] | None = None,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> dict:
     """Execute a real historical backtest and return the Lab snapshot.
 
     ``progress`` receives every real execution event while the run happens, and
     ``should_cancel`` is polled between symbols. Both are optional and neither
     can change a result — turning reporting off changes no number of the run.
+    A bare emit callable is accepted and wrapped into a real ``RunProgress``
+    below; ``run_backtest`` only ever receives the object.
     """
     try:
         rows = _lab_library_rows(strategy_dir)
@@ -751,7 +858,7 @@ def _lab_run(
         return {"strategies": [], "error": str(exc)}
     workspace = _lab_workspace(strategy_dir, command, rows, repository)
     workspace["strategies"] = rows
-    strategy_name = (command.get("strategy") or workspace.get("selected_name") or "").strip()
+    strategy_name = str(command.get("strategy") or workspace.get("selected_name") or "").strip()
     if not strategy_name:
         workspace["run"] = "failed"
         workspace["cfg_edit"]["config_error"] = "NO STRATEGY SELECTED"
@@ -762,11 +869,12 @@ def _lab_run(
     if not symbols:
         csv = workspace.get("cfg_edit", {}).get("universe_csv", "")
         symbols = [s.strip() for s in csv.split(",") if s.strip()]
-    timeframe = (command.get("timeframe") or "").strip() or None
+    symbols = [str(s).strip().upper() for s in symbols if str(s).strip()]
+    timeframe = str(command.get("timeframe") or "").strip() or None
     if timeframe is None:
         timeframe = workspace.get("cfg_edit", {}).get("timeframe") or None
-    start = (command.get("start") or "").strip() or None
-    end = (command.get("end") or "").strip() or None
+    start = str(command.get("start") or "").strip() or None
+    end = str(command.get("end") or "").strip() or None
     if start is None:
         start = workspace.get("cfg_edit", {}).get("dates_start") or None
     if end is None:
@@ -774,6 +882,8 @@ def _lab_run(
     try:
         capital = float(command.get("capital", _LAB_DEFAULT_CAPITAL))
     except (TypeError, ValueError):
+        capital = _LAB_DEFAULT_CAPITAL
+    if capital != capital or capital == float("inf"):
         capital = _LAB_DEFAULT_CAPITAL
     mode = str(command.get("mode") or workspace.get("mode") or "buy").strip().lower()
     try:
@@ -787,7 +897,7 @@ def _lab_run(
     # real RunProgress object (counts/cancel). Wrap once per run — never pass
     # a raw function into run_backtest.
     if progress is None or (callable(progress) and not isinstance(progress, RunProgress)):
-        emit = progress if callable(progress) else None
+        emit: Callable[[dict], None] | None = progress if callable(progress) else None
         progress = RunProgress(max(1, len(symbols)), emit, should_cancel)
     if not isinstance(progress, RunProgress):
         workspace["run"] = "failed"
@@ -1013,7 +1123,7 @@ def run_headless_backend(args: argparse.Namespace) -> int:
         "type": "ready",
         "data": {
             "backend": "vayren-headless",
-            "version": "1.18.0",
+            "version": _BACKEND_VERSION,
             "data_dir": str(data_dir),
             "strategy_dir": str(strategy_dir),
         },
@@ -1023,10 +1133,14 @@ def run_headless_backend(args: argparse.Namespace) -> int:
             broker_manager.stop_worker()
         return 1
 
-    # Command loop
+    # Command loop — the shared inbox is the only stdin reader.
+    _ensure_stdin_reader()
     try:
-        for line in sys.stdin:
-            if not line.strip():
+        while True:
+            line = _next_line()
+            if line is _LAB_EOF:
+                break
+            if not isinstance(line, str) or not line.strip():
                 continue
             try:
                 command = json.loads(line.strip())
@@ -1105,21 +1219,45 @@ def run_headless_backend(args: argparse.Namespace) -> int:
                 elif cmd_type == "run_backtest":
                     # The run streams real progress while it executes; the
                     # terminal line is still the snapshot the shell consumes.
+                    # The run owns a worker thread; this loop keeps pumping
+                    # the one inbox so cancel lands and nothing is dropped.
                     _LAB_CANCEL.clear()
-                    watcher = _watch_for_cancel(sys.stdin)
-                    snapshot = _lab_run(
-                        str(strategy_dir),
-                        str(data_dir),
-                        command,
-                        repository,
-                        progress=_progress_emitter(),
-                        should_cancel=_LAB_CANCEL.is_set,
-                    )
-                    watcher.join(timeout=1.0)
+                    box: dict[str, Any] = {}
+                    finished = threading.Event()
+
+                    def _run(
+                        cmd: dict = command, out: dict = box, done: threading.Event = finished
+                    ) -> None:
+                        try:
+                            out["snapshot"] = _lab_run(
+                                str(strategy_dir),
+                                str(data_dir),
+                                cmd,
+                                repository,
+                                progress=_progress_emitter(),
+                                should_cancel=_LAB_CANCEL.is_set,
+                            )
+                        except Exception as exc:  # noqa: BLE001
+                            out["error"] = exc
+                        finally:
+                            done.set()
+
+                    worker = threading.Thread(target=_run, name="lab-run", daemon=True)
+                    worker.start()
+                    _pump_while_running(finished)
+                    worker.join()
+                    _requeue_deferred()
+                    if "error" in box:
+                        raise box["error"]
+                    snapshot = box["snapshot"]
                     result = {"type": "lab_snapshot", "data": snapshot}
                     if not _emit(result):
                         break
                     _LAB_CANCEL.clear()
+
+                elif cmd_type == "cancel_backtest":
+                    # No run owns a worker right now — nothing to stop.
+                    logger.info("cancel_backtest received while idle; ignoring")
 
                 elif cmd_type == "connect_broker":
                     broker_id = str(command.get("broker_id") or "fyers").strip()

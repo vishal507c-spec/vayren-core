@@ -7,11 +7,10 @@ tests, and estimated risk are calculated before a plan can be accepted.
 
 from dataclasses import dataclass
 
+# Vocabulary lives behind core.ai._vocab: canonical core.system modules win
+# when they land; local fallbacks keep the Python-owned AI layer importable.
+from core.ai._vocab import RiskLevel, SystemModel
 from core.ai.plan import Plan, plan_risk, risk_rank
-
-# DEBT: retained unwired imports (see 90_brain/ai_memory.md).
-from core.system.change_impact import RiskLevel  # pyright: ignore[reportMissingImports]
-from core.system.system_model import SystemModel  # pyright: ignore[reportMissingImports]
 
 
 @dataclass(frozen=True)

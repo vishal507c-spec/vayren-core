@@ -60,15 +60,22 @@ class DiscoveryReport:
 def resolve_data_dir(explicit: str | Path | None = None) -> Path:
     """Resolve the candle store (priority: explicit → env → legacy → home).
 
-    A missing explicit dir never crashes resolution: the next usable
-    candidate (env, then legacy, then home) wins instead. The home default
-    (``~/.vayren/data``) always resolves — it is app-owned and created on
-    demand, so resolution itself never raises; readers treat a missing
-    store as empty.
+    An EXPLICIT dir that does not exist is an error the caller asked for: it
+    raises instead of silently serving a different store's data (a typo'd
+    ``--data-dir`` must never answer with someone else's candles). With no
+    explicit dir the next usable candidate (env, legacy, home) wins, and the
+    home default always resolves — it is app-owned and created on demand, so
+    resolution itself never raises; readers treat a missing store as empty.
     """
-    candidates: list[tuple[str, Path]] = []
     if explicit is not None and str(explicit).strip():
-        candidates.append(("explicit", Path(str(explicit)).expanduser()))
+        chosen = Path(str(explicit)).expanduser()
+        if not chosen.is_dir():
+            raise MarketDataError(
+                f"Data directory not found: {chosen} "
+                "(explicit --data-dir never falls back to another store)"
+            )
+        return chosen
+    candidates: list[tuple[str, Path]] = []
     env_dir = (os.environ.get("VAYREN_DATA_DIR") or "").strip()
     if env_dir:
         candidates.append(("VAYREN_DATA_DIR", Path(env_dir).expanduser()))
@@ -78,8 +85,7 @@ def resolve_data_dir(explicit: str | Path | None = None) -> Path:
     candidates.append(("default", home_default))
     for origin, path in candidates:
         if path.is_dir():
-            if origin != "explicit":
-                logger.info("Data directory resolved from %s: %s", origin, path)
+            logger.info("Data directory resolved from %s: %s", origin, path)
             return path
     return home_default
 
@@ -143,13 +149,16 @@ def _valid_ohlcv(o: float, h: float, lo: float, c: float) -> bool:
     return h >= lo
 
 
+_CachedRows = list[tuple[str, float, float, float, float, int]]
+
+
 class MarketDataService:
     """Single canonical reader for per-symbol SQLite OHLCV stores."""
 
     def __init__(self, data_dir: str | Path | None = None) -> None:
         self._data_dir = resolve_data_dir(data_dir)
         self._discovery: DiscoveryReport | None = None
-        self._row_cache: dict[str, list[tuple[str, float, float, float, float, int]]] = {}
+        self._row_cache: dict[str, tuple[float, _CachedRows]] = {}
         self._quote_cache: dict[str, tuple[float, Quote]] = {}
         report = self.discovery_report()
         logger.info(
@@ -241,9 +250,18 @@ class MarketDataService:
         Skips (never crashes on): unparseable stamps, non-finite or
         non-positive prices, high < low, duplicate stamps (last wins).
         ``limit`` trims newest-first inside SQL (indexed tail, no full scan).
+        Non-positive limits return no rows.
         """
+        if limit is not None and limit <= 0:
+            return []
         if start is None and end is None and limit is None and symbol in self._row_cache:
-            return list(self._row_cache[symbol])
+            cached_mtime, cached_rows = self._row_cache[symbol]
+            try:
+                if self._db_path(symbol).stat().st_mtime == cached_mtime:
+                    return list(cached_rows)
+            except OSError:
+                pass
+            self._row_cache.pop(symbol, None)
         path = self._db_path(symbol)
         if not path.is_file():
             raise MarketDataError(f"No database found for symbol {symbol}")
@@ -259,7 +277,7 @@ class MarketDataService:
             # ("YYYY-MM-DD" bounds, day granularity) — but it stops reading
             # (and Python-parsing) the years outside the experiment.
             clauses = []
-            window: list[str] = []
+            window: list[object] = []
             if start is not None:
                 clauses.append("candle_time >= ?")
                 window.append(f"{start} 00:00:00")
@@ -269,7 +287,8 @@ class MarketDataService:
             where = " AND ".join(clauses)
             tail = " ORDER BY candle_time ASC"
             if limit is not None:
-                tail = f"{tail} LIMIT {int(limit)}"
+                tail = f"{tail} LIMIT ?"
+                window.append(int(limit))
             query = (
                 f"SELECT candle_time, open, high, low, close, volume FROM ohlcv WHERE {where}{tail}"
             )
@@ -302,6 +321,9 @@ class MarketDataService:
                 invalid += 1
                 continue
             stamp = moment.strftime(_STAMP_FORMAT)
+            if any(isinstance(v, bool) for v in (o, h, lo, c)):
+                invalid += 1
+                continue
             try:
                 fo, fh, fl, fc = float(o), float(h), float(lo), float(c)
             except (TypeError, ValueError):
@@ -311,7 +333,7 @@ class MarketDataService:
                 invalid += 1
                 continue
             try:
-                volume = int(v) if v is not None else 0
+                volume = int(v) if v is not None and not isinstance(v, bool) else 0
             except (TypeError, ValueError):
                 volume = 0
             if volume < 0:
@@ -325,7 +347,11 @@ class MarketDataService:
             logger.warning("%s: skipped %d invalid OHLCV rows", symbol, invalid)
         rows = [by_stamp[key] for key in sorted(by_stamp)]
         if start is None and end is None and limit is None:
-            self._row_cache[symbol] = rows
+            try:
+                mtime = path.stat().st_mtime
+            except OSError:
+                mtime = -1.0
+            self._row_cache[symbol] = (mtime, rows)
             if len(self._row_cache) > 8:
                 oldest = next(iter(self._row_cache))
                 if oldest != symbol:
@@ -366,6 +392,30 @@ class MarketDataService:
         base = self._base_seconds(symbol)
         return native_timeframe.name_of(base) or f"{base}s"
 
+    @staticmethod
+    def _scan_bounds(
+        con: sqlite3.Connection, symbol: str
+    ) -> tuple[datetime | None, datetime | None]:
+        """First/last PARSEABLE stamp, so one bad row cannot poison the symbol."""
+        first: datetime | None = None
+        last: datetime | None = None
+        try:
+            for row in con.execute("SELECT candle_time FROM ohlcv ORDER BY candle_time ASC"):
+                moment = _parse_stamp(row[0])
+                if moment is not None:
+                    first = moment
+                    break
+            for row in con.execute("SELECT candle_time FROM ohlcv ORDER BY candle_time DESC"):
+                moment = _parse_stamp(row[0])
+                if moment is not None:
+                    last = moment
+                    break
+        except sqlite3.Error as exc:
+            raise MarketDataError(
+                f"{symbol} database has no readable OHLCV records: {exc}"
+            ) from exc
+        return first, last
+
     def date_range(self, symbol: str) -> tuple[str, str]:
         """Actual ``(first_date, last_date)`` history bounds for `symbol`."""
         path = self._db_path(symbol)
@@ -382,11 +432,15 @@ class MarketDataService:
                 raise MarketDataError(
                     f"{symbol} database has no readable OHLCV records: {exc}"
                 ) from exc
+            if not row or row[0] is None or row[1] is None:
+                raise MarketDataError(f"{symbol} database found but contains no OHLCV records")
+            first, last = _parse_stamp(row[0]), _parse_stamp(row[1])
+            if first is None or last is None:
+                # A single malformed extreme (e.g. a "bad-stamp" row) must not
+                # fail thousands of valid bars: find the parseable bounds.
+                first, last = self._scan_bounds(con, symbol)
         finally:
             con.close()
-        if not row or row[0] is None or row[1] is None:
-            raise MarketDataError(f"{symbol} database found but contains no OHLCV records")
-        first, last = _parse_stamp(row[0]), _parse_stamp(row[1])
         if first is None or last is None:
             raise MarketDataError(f"{symbol} database has no ordered candle timestamps")
         return first.strftime("%Y-%m-%d"), last.strftime("%Y-%m-%d")

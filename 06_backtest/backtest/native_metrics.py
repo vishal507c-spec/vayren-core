@@ -29,6 +29,29 @@ if not hasattr(_lib, "vy_bt_report"):
         "Rebuild: `python scripts/build_rust.py`"
     )
 
+_lib.vy_max_drawdown.argtypes = [
+    ctypes.POINTER(ctypes.c_double),
+    ctypes.c_size_t,
+    ctypes.POINTER(ctypes.c_double),
+    ctypes.POINTER(ctypes.c_double),
+]
+_lib.vy_max_drawdown.restype = None
+_lib.vy_equity_curve.argtypes = [
+    ctypes.c_double,
+    ctypes.POINTER(ctypes.c_double),
+    ctypes.c_size_t,
+    ctypes.POINTER(ctypes.c_double),
+]
+_lib.vy_equity_curve.restype = ctypes.c_size_t
+_lib.vy_sharpe.argtypes = [
+    ctypes.POINTER(ctypes.c_double),
+    ctypes.POINTER(ctypes.c_double),
+    ctypes.c_size_t,
+    ctypes.c_double,
+    ctypes.POINTER(ctypes.c_double),
+]
+_lib.vy_sharpe.restype = ctypes.c_int32
+
 
 def _f64_view(values: Sequence[float]) -> tuple[ctypes.Array, array]:
     """Pack floats in C and return a zero-copy ctypes view (buffer kept alive)."""
@@ -37,42 +60,55 @@ def _f64_view(values: Sequence[float]) -> tuple[ctypes.Array, array]:
 
 
 def max_drawdown(equities: Sequence[float]) -> tuple[float, float]:
-    """Peak-to-trough drawdown of an equity curve (pct, abs)."""
-    if not equities:
-        return 0.0, 0.0
+    """Peak-to-trough drawdown of an equity curve (pct, abs).
+
+    Kernel parity: an empty curve is `(0.0, 0.0)` — decided by
+    `metrics::max_drawdown` in Rust, not by a Python base-case. Empty input
+    crosses as NULL+0, which the kernel maps to an empty slice.
+    """
     view, _keepalive = _f64_view(equities)
     out_pct, out_abs = ctypes.c_double(), ctypes.c_double()
-    _lib.vy_max_drawdown(view, len(equities), ctypes.byref(out_pct), ctypes.byref(out_abs))
+    _lib.vy_max_drawdown(
+        view if len(equities) else None, len(equities), ctypes.byref(out_pct), ctypes.byref(out_abs)
+    )
     return float(out_pct.value), float(out_abs.value)
 
 
 def equity_curve_points(initial: float, pnls: Sequence[float]) -> list[tuple[float, float]]:
-    """Running `(equity, drawdown_pct)` pairs after each trade PnL, in order."""
+    """Running `(equity, drawdown_pct)` pairs after each trade PnL, in order.
+
+    Kernel parity: an empty PnL list yields `[]` from `metrics::equity_curve`
+    (the kernel returns `n` and writes `2*n` doubles; `n == 0` writes nothing).
+    """
     n = len(pnls)
-    if n == 0:
-        return []
     pnl_view, _keepalive = _f64_view(pnls)
     # Interleaved (equity, dd) pairs read back in one C-speed pass.
     raw = (ctypes.c_double * (2 * n))()
-    wrote = int(_lib.vy_equity_curve(float(initial), pnl_view, n, raw))
-    assert wrote == n, f"native equity curve short write: {wrote}/{n}"
+    wrote = int(
+        _lib.vy_equity_curve(float(initial), pnl_view if n else None, n, raw if n else None)
+    )
+    if wrote != n:
+        raise NativeBridgeError(f"native equity curve short write: {wrote}/{n}")
     return list(struct.iter_unpack("dd", bytes(raw)))
 
 
 def sharpe(pnls: Sequence[float], bars_held: Sequence[float], initial: float) -> float | None:
-    """Annualized Sharpe of per-trade returns; None when undefined."""
-    if len(pnls) < 2:
-        return None
+    """Annualized Sharpe of per-trade returns; None when undefined.
+
+    Kernel parity: fewer than two trades (or non-positive variance) is `None`
+    per `metrics::sharpe` — the kernel decides, this only maps `0` to `None`.
+    """
     if len(bars_held) != len(pnls):
         raise ValueError("pnls and bars_held must share a length")
     pnl_view, _keep_pnls = _f64_view(pnls)
     bars_view, _keep_bars = _f64_view(bars_held)
     out = ctypes.c_double()
+    n = len(pnls)
     defined = int(
         _lib.vy_sharpe(
-            pnl_view,
-            bars_view,
-            len(pnls),
+            pnl_view if n else None,
+            bars_view if n else None,
+            n,
             float(initial),
             ctypes.byref(out),
         )

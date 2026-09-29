@@ -13,13 +13,14 @@ import math
 import statistics
 import uuid
 from collections.abc import Sequence
-from dataclasses import asdict, dataclass, field  # noqa: F401
-from datetime import datetime, timezone  # noqa: F401
+from dataclasses import asdict, dataclass
+from datetime import datetime
 from typing import Any
 
 from .dataset import ResearchDataset
-from .discovery import Discovery  # noqa: F401
-from .experiment import Experiment  # noqa: F401
+
+#: Annualization factor shared by Sharpe and Sortino (daily-bar convention).
+_ANNUALIZATION = math.sqrt(252.0)
 
 
 def _extract_pnl(t: Any) -> float:
@@ -63,26 +64,40 @@ def _extract_timestamps(t: Any) -> list[str]:
 
 
 def _compute_sharpe(returns: list[float]) -> float | None:
+    """Annualized Sharpe — ONE definition shared with Sortino's numerator.
+
+    Sample stdev (n-1) times sqrt(252); None below 2 samples or at zero
+    variance. Sortino below uses the same mean/annualization, differing
+    only in the downside-deviation denominator.
+    """
     if len(returns) < 2:
         return None
     mean_r = statistics.mean(returns)
-    var = statistics.pstdev(returns)
-    if var <= 0.0:
+    try:
+        sample_sd = statistics.stdev(returns)
+    except statistics.StatisticsError:
         return None
-    return mean_r / var
+    if sample_sd <= 0.0:
+        return None
+    return mean_r / sample_sd * _ANNUALIZATION
 
 
 def _compute_sortino(returns: list[float]) -> float | None:
+    """Annualized Sortino — same mean/annualization as Sharpe above.
+
+    Numerator and sqrt(252) factor are identical to :func:`_compute_sharpe`;
+    only the denominator changes (downside deviation over losing returns).
+    """
     if len(returns) < 2:
         return None
     mean_r = statistics.mean(returns)
     downside = [r for r in returns if r < 0]
     if not downside:
-        return mean_r * math.sqrt(len(returns)) if mean_r > 0 else None
+        return mean_r * _ANNUALIZATION if mean_r > 0 else None
     downside_dev = math.sqrt(statistics.mean([r * r for r in downside]))
     if downside_dev <= 0:
         return None
-    return mean_r / downside_dev
+    return mean_r / downside_dev * _ANNUALIZATION
 
 
 # ── CPCV ─────────────────────────────────────────────────────────────────────
@@ -424,6 +439,17 @@ class PBOResult:
         return asdict(self)
 
 
+def _pbo_from_is_oos_pairs(is_perfs: list[float], oos_perfs: list[float]) -> float:
+    """Real PBO fraction (Bailey et al.): rank trials by IS descending, take
+    the top half, and return the fraction whose OOS sits below the median
+    OOS — i.e. how often the in-sample winner disappoints out-of-sample."""
+    paired = sorted(zip(is_perfs, oos_perfs, strict=True), key=lambda x: x[0], reverse=True)
+    top_half = paired[: max(1, (len(paired) + 1) // 2)]
+    median_oos = statistics.median(oos_perfs)
+    below = sum(1 for _, oos_v in top_half if oos_v < median_oos)
+    return below / len(top_half)
+
+
 def compute_pbo(
     cpcv_results: list[CPCVResult] | None = None,
     n_trials: int = 0,
@@ -467,9 +493,9 @@ def compute_pbo(
         is_perfs: list[float] = []
         oos_perfs: list[float] = []
         for path in cpcv.paths:
-            if path.train_metric is not None:
+            # Paired append only — IS and OOS ranks must stay aligned by path.
+            if path.train_metric is not None and path.test_metric is not None:
                 is_perfs.append(path.train_metric)
-            if path.test_metric is not None:
                 oos_perfs.append(path.test_metric)
 
         if len(is_perfs) < 3 or len(oos_perfs) < 3:
@@ -487,18 +513,7 @@ def compute_pbo(
             )
 
         is_sorted_indices = sorted(range(len(is_perfs)), key=lambda i: is_perfs[i], reverse=True)
-        oos_sorted_indices = sorted(range(len(oos_perfs)), key=lambda i: oos_perfs[i], reverse=True)
-
-        oos_rank_of_is_best: list[float] = []
-        for is_rank, is_idx in enumerate(is_sorted_indices):  # noqa: B007
-            if is_idx < len(oos_sorted_indices):
-                oos_rank = oos_sorted_indices.index(is_idx) + 1
-            else:
-                oos_rank = len(oos_sorted_indices) + 1
-            overfit_score = oos_rank / len(oos_sorted_indices) if oos_sorted_indices else 0.5
-            oos_rank_of_is_best.append(overfit_score)
-
-        pbo = sum(oos_rank_of_is_best) / len(oos_rank_of_is_best) if oos_rank_of_is_best else 0.5
+        pbo = _pbo_from_is_oos_pairs(is_perfs, oos_perfs)
 
         selected = is_rankings[0] if is_rankings else (is_perfs[0] if is_perfs else None)
         oos_perf = (
@@ -514,21 +529,25 @@ def compute_pbo(
         paired = sorted(
             zip(is_rankings, oos_rankings, strict=True), key=lambda x: x[0], reverse=True
         )
-        n_half = len(paired) // 2
-
-        overfit_count = sum(1 for i, (_, oos_v) in enumerate(paired) if i >= n_half)
-        pbo = overfit_count / len(paired) if paired else 0.5
+        pbo = _pbo_from_is_oos_pairs(list(is_rankings), list(oos_rankings))
         selected = paired[0][0] if paired else None
         oos_perf = paired[0][1] if paired else None
 
     elif path_metrics and total_trials > 0:
-        n_paths = len(path_metrics)
-        median_val = statistics.median(path_metrics)
-        best_val = max(path_metrics)
-        pbo = 0.3 if best_val > median_val else 0.7
-        selected = best_val
-        oos_perf = best_val
-        limitations.append("simplified PBO — no IS/OOS ranking available")
+        # Test-only metrics carry no IS/OOS pairing, so no rank comparison is
+        # possible — report inability honestly instead of a magic 0.3/0.7.
+        limitations.append("test-only path metrics — no IS/OOS ranking available for PBO")
+        return PBOResult(
+            n_trials=total_trials,
+            n_paths=len(path_metrics),
+            pbo=None,
+            method="insufficient_is_oos_pairing",
+            interpretation="PBO needs paired IS/OOS performances — test-only metrics insufficient",
+            selected_configuration=None,
+            is_performance=None,
+            oos_performance=None,
+            limitations=limitations,
+        )
     else:
         limitations.append("insufficient data for PBO")
         return PBOResult(
@@ -592,7 +611,20 @@ def compute_dsr(
     n_trials: int,
     returns: list[float] | None = None,
 ) -> DSRResult:
-    """Deflated Sharpe Ratio — Bailey & Lopez de Prado.
+    """Deflated Sharpe Ratio — Bailey & Lopez de Prado (2014).
+
+    Source: Bailey, D. & Lopez de Prado, M., "The Deflated Sharpe Ratio:
+    Correcting for Selection Bias, Backtest Overfitting and Non-Normality",
+    Journal of Portfolio Management (2014).
+
+    Formula: ``DSR = Phi((SR_obs - SR_0) / sigma_SR)`` with the expected
+    maximum under the null
+    ``SR_0 = sqrt(V) * ((1-gamma) * Phi^{-1}(1-1/K) + gamma * Phi^{-1}(1-1/(K*e)))``
+    where ``K`` = number of trials, ``gamma`` = Euler-Mascheroni constant,
+    ``V`` = variance of the Sharpe estimator (skew/kurtosis adjusted), and
+    ``Phi`` = standard normal CDF. ``SR_0`` GROWS with ``K`` (more trials
+    → higher bar for significance) — any formulation that shrinks with K
+    is a bug.
 
     Accounts for:
       - observed Sharpe
@@ -656,12 +688,6 @@ def compute_dsr(
         limitations.append("no returns provided, using defaults")
 
     gamma = 0.5772156649
-    psi = math.log(n_trials) if n_trials > 1 else 0.0
-    phi_inv = math.sqrt(2.0 * psi) if psi > 0 else 0.0
-
-    expected_max = (1.0 - gamma) * phi_inv + gamma * math.sqrt(2.0 * max(1.0, psi))
-    expected_max *= 1.0 / math.sqrt(2.0 * math.log(max(2.0, float(n_trials))))
-
     skew_term = (kurt - 1.0) / (4.0 * max(1, sample_size - 1))
     kurt_term = skew**2 / (2.0 * max(1, sample_size - 1))
 
@@ -670,6 +696,13 @@ def compute_dsr(
     )
 
     std_sharpe = math.sqrt(max(1e-12, var_sharpe))
+
+    # Expected maximum Sharpe under the null — Bailey & Lopez de Prado (2014).
+    # Phi^{-1}(1-1/K) grows with K, so the hurdle rises with more trials.
+    unit_normal = statistics.NormalDist()
+    phi_inv_k = unit_normal.inv_cdf(1.0 - 1.0 / float(n_trials))
+    phi_inv_ke = unit_normal.inv_cdf(1.0 - 1.0 / (float(n_trials) * math.e))
+    expected_max = std_sharpe * ((1.0 - gamma) * phi_inv_k + gamma * phi_inv_ke)
 
     z = (observed_sharpe - expected_max) / std_sharpe if std_sharpe > 0 else 0.0
 
@@ -946,6 +979,47 @@ class LeakageResult:
         }
 
 
+def _parse_stamp(text: object) -> datetime | None:
+    """Parse a trade timestamp via fromisoformat (space variant included).
+
+    Returns None when unparseable — time-based checks are then skipped and
+    recorded as skipped, never silently passed on string ordering.
+    """
+    if text is None or not str(text).strip():
+        return None
+    raw = str(text).strip()
+    try:
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        pass
+    try:
+        return datetime.strptime(raw[:19], "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+
+
+def _trade_indices(trades: list[Any]) -> list[int]:
+    """Per-symbol entry bar indices carried by trades (empty when absent)."""
+    out: list[int] = []
+    for t in trades:
+        idx_val = None
+        if isinstance(t, dict):
+            idx_val = t.get("entry_index")
+            if idx_val is None:
+                idx_val = t.get("index")
+        else:
+            idx_val = getattr(t, "entry_index", None)
+            if idx_val is None:
+                idx_val = getattr(t, "index", None)
+        if idx_val is None or isinstance(idx_val, bool):
+            continue
+        try:
+            out.append(int(idx_val))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
 def check_data_leakage(
     train_trades: list[Any] | None = None,
     test_trades: list[Any] | None = None,
@@ -960,12 +1034,9 @@ def check_data_leakage(
     Checks:
       1. duplicate trade IDs
       2. duplicate execution IDs
-      3. timestamp overlap
-      4. train data after test start
-      5. test data before allowed boundary
-      6. purge violation
-      7. embargo violation
-      8. overlapping windows
+      3. timestamp overlap (parsed datetimes, never string ordering)
+      4. purge gap — index-count enforced when bar indices exist
+      5. embargo gap — index-count enforced
     """
     checks: list[str] = []
     conflicts: list[dict[str, Any]] = []
@@ -1001,24 +1072,27 @@ def check_data_leakage(
             )
         checks.append("duplicate_trade_ids")
 
-        train_ts: list[str] = []
-        for t in train_trades:
-            train_ts.extend(_extract_timestamps(t))
-        test_ts: list[str] = []
-        for t in test_trades:
-            test_ts.extend(_extract_timestamps(t))
+        train_stamps = [
+            stamp
+            for t in train_trades
+            for raw in _extract_timestamps(t)
+            if (stamp := _parse_stamp(raw)) is not None
+        ]
+        test_stamps = [
+            stamp
+            for t in test_trades
+            for raw in _extract_timestamps(t)
+            if (stamp := _parse_stamp(raw)) is not None
+        ]
 
-        train_ts_sorted = sorted(train_ts)
-        test_ts_sorted = sorted(test_ts)
-
-        if train_ts_sorted and test_ts_sorted:
-            train_latest = train_ts_sorted[-1]
-            test_earliest = test_ts_sorted[0]
+        if train_stamps and test_stamps:
+            train_latest = max(train_stamps)
+            test_earliest = min(test_stamps)
             if train_latest >= test_earliest:
                 conflict = {
                     "check": "timestamp_overlap",
-                    "train_latest": train_latest,
-                    "test_earliest": test_earliest,
+                    "train_latest": train_latest.isoformat(),
+                    "test_earliest": test_earliest.isoformat(),
                 }
                 return LeakageResult(
                     status="FAIL",
@@ -1027,87 +1101,55 @@ def check_data_leakage(
                     conflict_details=[conflict],
                 )
             checks.append("timestamp_overlap")
+        else:
+            checks.append("timestamp_overlap_skipped (no parseable timestamps)")
 
-            if test_ts_sorted and train_ts_sorted:
-                train_end = train_ts_sorted[-1]
-                test_start = test_ts_sorted[0]
-                if test_start < train_end:
+        train_idx = _trade_indices(list(train_trades))
+        test_idx = _trade_indices(list(test_trades))
+
+        if purge_bars > 0:
+            if train_idx and test_idx:
+                gap = min(test_idx) - max(train_idx)
+                if gap < purge_bars:
                     conflict = {
-                        "check": "train_after_test_start",
-                        "train_end": train_end,
-                        "test_start": test_start,
+                        "check": "purge_violation",
+                        "train_max_index": max(train_idx),
+                        "test_min_index": min(test_idx),
+                        "actual_gap": gap,
+                        "required_purge": purge_bars,
                     }
                     return LeakageResult(
                         status="FAIL",
                         first_conflict=conflict,
-                        checks_performed=checks + ["train_after_test_start"],
+                        checks_performed=checks + ["purge_violation"],
                         conflict_details=[conflict],
                     )
-                checks.append("train_after_test_start")
+                checks.append("purge_violation")
+            else:
+                # No bar indices: purge count cannot be enforced — the parsed
+                # timestamp ordering above is the only boundary evidence.
+                checks.append("purge_violation_skipped (no bar indices)")
 
-        if train_trades and test_trades:
-            train_end_ts = _extract_timestamps(train_trades[-1])
-            test_start_ts = _extract_timestamps(test_trades[0])
-            if train_end_ts and test_start_ts:
-                if purge_bars > 0:
-                    gap = test_start_ts[0] >= train_end_ts[-1]
-                    if not gap:
-                        conflict = {
-                            "check": "purge_violation",
-                            "train_end": train_end_ts[-1],
-                            "test_start": test_start_ts[0],
-                            "purge_bars": purge_bars,
-                        }
-                        return LeakageResult(
-                            status="FAIL",
-                            first_conflict=conflict,
-                            checks_performed=checks + ["purge_violation"],
-                            conflict_details=[conflict],
-                        )
-                    checks.append("purge_violation")
-
-                if embargo_bars > 0:
-                    train_idx_list = []
-                    for t in train_trades:
-                        idx_val = None
-                        if isinstance(t, dict):
-                            idx_val = t.get("entry_index") or t.get("index")
-                        else:
-                            idx_val = getattr(t, "entry_index", None) or getattr(t, "index", None)
-                        if idx_val is not None:
-                            train_idx_list.append(int(idx_val))
-
-                    test_idx_list = []
-                    for t in test_trades:
-                        idx_val = None
-                        if isinstance(t, dict):
-                            idx_val = t.get("entry_index") or t.get("index")
-                        else:
-                            idx_val = getattr(t, "entry_index", None) or getattr(t, "index", None)
-                        if idx_val is not None:
-                            test_idx_list.append(int(idx_val))
-
-                    if train_idx_list and test_idx_list:
-                        train_max_idx = max(train_idx_list)
-                        test_min_idx = min(test_idx_list)
-                        gap = test_min_idx - train_max_idx
-                        if gap < embargo_bars:
-                            conflict = {
-                                "check": "embargo_violation",
-                                "train_max_index": train_max_idx,
-                                "test_min_index": test_min_idx,
-                                "actual_gap": gap,
-                                "required_embargo": embargo_bars,
-                            }
-                            return LeakageResult(
-                                status="FAIL",
-                                first_conflict=conflict,
-                                checks_performed=checks + ["embargo_violation"],
-                                conflict_details=[conflict],
-                            )
-                    checks.append("embargo_violation")
-
-            checks.append("train_after_test_boundary")
+        if embargo_bars > 0:
+            if train_idx and test_idx:
+                gap = min(test_idx) - max(train_idx)
+                if gap < embargo_bars:
+                    conflict = {
+                        "check": "embargo_violation",
+                        "train_max_index": max(train_idx),
+                        "test_min_index": min(test_idx),
+                        "actual_gap": gap,
+                        "required_embargo": embargo_bars,
+                    }
+                    return LeakageResult(
+                        status="FAIL",
+                        first_conflict=conflict,
+                        checks_performed=checks + ["embargo_violation"],
+                        conflict_details=[conflict],
+                    )
+                checks.append("embargo_violation")
+            else:
+                checks.append("embargo_violation_skipped (no bar indices)")
 
     return LeakageResult(
         status="PASS" if not conflicts else "FAIL",

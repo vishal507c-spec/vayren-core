@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
+from execution.regime import MarketRegime
+
 
 class PredictionModel(Protocol):
     """Future price/signal predictor. No implementation ships today."""
@@ -20,7 +22,7 @@ class PredictionModel(Protocol):
 class RegimeModel(Protocol):
     """Regime source behind the detector interface."""
 
-    def classify(self, closes: tuple[float, ...], volumes: tuple[float, ...]) -> str: ...
+    def classify(self, closes: tuple[float, ...], volumes: tuple[float, ...]) -> MarketRegime: ...
 
 
 class ExecutionModel(Protocol):
@@ -40,6 +42,17 @@ class DisabledPredictionModel:
 
     def predict(self, features: dict[str, Any]) -> dict[str, Any]:  # noqa: ARG002
         return {}
+
+
+class DisabledRegimeModel:
+    """Default: no regime signal. Always UNKNOWN, never influences orders."""
+
+    def classify(
+        self,
+        closes: tuple[float, ...],  # noqa: ARG002
+        volumes: tuple[float, ...],  # noqa: ARG002
+    ) -> MarketRegime:
+        return MarketRegime.UNKNOWN
 
 
 class DisabledExecutionModel:

@@ -16,7 +16,7 @@
     },
     "01_core/core/events/event.py": {
       "state": "TEMPORARILY_RETAINED",
-      "reason": "EventBus/contracts/registry/system-model foundation glue (stdlib-only, dispatch ~0.3us). Porting the bus rewires every module at once (big-bang, AI_ENTRY.md section 1). File role: frozen event dataclass payloads (bus vocabulary, no behavior)",
+      "reason": "EventBus/contracts/registry/system-model foundation glue (stdlib-only, dispatch ~0.3us). Porting the bus rewires every module at once (big-bang, AI_ENTRY.md section 1). File role: frozen (frozen=True, slots=True) event dataclass marker base — immutability is now true and pinned by 01_core/core/tests/test_event.py",
       "migration_target": "rust/vayren-core/src/core/",
       "migration_condition": "When the CORE slice containing this file is touched by feature work, migrate per AI_ENTRY.md §1 (smallest useful slice)."
     },
@@ -58,7 +58,7 @@
     },
     "03_market/market/models/bar.py": {
       "state": "TEMPORARILY_RETAINED",
-      "reason": "Frozen OHLCV payload for repository, loader and event boundaries. Its one derived metric is a kernel read through market.native_bar, so no arithmetic lives here. File role: boundary vocabulary",
+      "reason": "Validated OHLCV payload for repository, loader and event boundaries: __post_init__ now enforces symbol/timeframe-ladder/OHLC-order/finite/vol>=0/ISO-timestamp (fail-closed ValueError, pinned by 03_market/market/tests/test_bar.py). Its one derived metric is a kernel read through market.native_bar, so no arithmetic lives here. File role: boundary vocabulary",
       "migration_target": "rust/vayren-core/src/market/",
       "migration_condition": "When the MARKET_DATA slice containing this file is touched by feature work, migrate per AI_ENTRY.md §1 (smallest useful slice)."
     },
@@ -166,9 +166,9 @@
     },
     "08_execution/execution/models/order_state.py": {
       "state": "TEMPORARILY_RETAINED",
-      "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: frozen dataclass vocabulary (data holders, no algorithms)",
+      "reason": "Leaf vocabulary module, stdlib only: the `OrderState` enum and nothing else (no transition table, no terminal-state set, no algorithm). The transition TABLE and the terminal-state set are owned by rust/vayren-core (order_state module) and reach Python only as read-only projections from 08_execution/execution/native_order_state.py. File role: enum vocabulary (no authority)",
       "migration_target": "rust/vayren-core/src/execution/",
-      "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per AI_ENTRY.md §1 (smallest useful slice)."
+      "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per AI_ENTRY.md §1 (smallest useful slice). Guarded by NO_REINTRODUCE in scripts/validate_language_ownership.py: TRANSITIONS/TERMINAL_STATES must never be re-stated here."
     },
     "08_execution/execution/native_execution.py": {
       "state": "TEMPORARILY_RETAINED",

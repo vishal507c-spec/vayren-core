@@ -12,6 +12,8 @@ gate forces a build instead of silently running a stale table.
 
 from __future__ import annotations
 
+import ctypes
+
 from core.native.loader import load_vayren_core
 
 from execution.models.order_state import OrderState
@@ -34,6 +36,9 @@ _STATE_CODES: tuple[str, ...] = (
 )
 
 _lib = load_vayren_core()
+
+_lib.vy_order_transition_allowed.argtypes = [ctypes.c_int32, ctypes.c_int32]
+_lib.vy_order_transition_allowed.restype = ctypes.c_int32
 
 _code_by_state: dict[OrderState, int] = {}
 for _index, _name in enumerate(_STATE_CODES):

@@ -6,15 +6,19 @@ engineering memory. Never dumps the whole repository: only requested
 sections are built, and each section can be filtered.
 """
 
-import json
-from dataclasses import dataclass
+from __future__ import annotations
 
+import json
+import logging
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from types import MappingProxyType
+
+from core.ai._vocab import SystemModel, build_snapshot
 from core.ai.memory.engineering import EngineeringMemory
 from core.ai.memory.performance import PerformanceMemory
 
-# DEBT: retained unwired imports (see 90_brain/ai_memory.md).
-from core.system.snapshot import build_snapshot  # pyright: ignore[reportMissingImports]
-from core.system.system_model import SystemModel  # pyright: ignore[reportMissingImports]
+_log = logging.getLogger(__name__)
 
 SECTIONS = (
     "components",
@@ -47,11 +51,26 @@ class ContextRequest:
             raise ValueError(msg)
 
 
-@dataclass
+# Sections built when build() gets no request: a limited, cheap default, never
+# the whole dump (architecture_history and engineering_memory can be large and
+# need an explicit opt-in).
+DEFAULT_SECTIONS = ("components", "capabilities", "system_state")
+
+
+@dataclass(frozen=True)
 class AiContext:
     """The built context: one deterministic text block per section."""
 
-    sections: dict[str, str]
+    sections: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "sections", MappingProxyType(dict(self.sections)))
+
+    def with_section(self, name: str, text: str) -> AiContext:
+        """Return a new context with one section added or replaced."""
+        merged = dict(self.sections)
+        merged[name] = text
+        return AiContext(sections=merged)
 
     def render(self) -> str:
         """Render every section in the canonical order."""
@@ -86,10 +105,11 @@ class ContextBuilder:
     def build(self, request: ContextRequest | None = None) -> AiContext:
         """Build exactly the requested sections, in canonical order.
 
-        Without a request, every section is built.
+        Without a request, only `DEFAULT_SECTIONS` are built — never the
+        whole dump.
         """
         if request is None:
-            request = ContextRequest(sections=SECTIONS)
+            request = ContextRequest(sections=DEFAULT_SECTIONS)
         sections: dict[str, str] = {}
         if "components" in request.sections:
             sections["components"] = self._render_components(request.components)
@@ -113,12 +133,27 @@ class ContextBuilder:
 
     def _render_components(self, names: tuple[str, ...]) -> str:
         lines: list[str] = []
-        for manifest in self._system.manifests:
-            if names and manifest.identity.name not in names:
+        for manifest in getattr(self._system, "manifests", ()):
+            identity = getattr(manifest, "identity", None)
+            name = getattr(identity, "name", None)
+            if name is None:
+                _log.warning("skipping a manifest with no identity.name in components section")
                 continue
-            provides = ", ".join(decl.id.value for decl in manifest.capabilities)
-            consumes = ", ".join(cap.value for cap in manifest.capabilities_consumed)
-            line = f"- {manifest.identity.name} v{manifest.version} [{manifest.type}]"
+            if names and name not in names:
+                continue
+            provides = ", ".join(
+                getattr(decl_id, "value", decl_id)
+                for decl in (getattr(manifest, "capabilities", ()) or ())
+                for decl_id in (getattr(decl, "id", None),)
+                if decl_id is not None
+            )
+            consumes = ", ".join(
+                getattr(cap, "value", cap)
+                for cap in (getattr(manifest, "capabilities_consumed", ()) or ())
+            )
+            line = (
+                f"- {name} v{getattr(manifest, 'version', '?')} [{getattr(manifest, 'type', '?')}]"
+            )
             if provides:
                 line += f": provides {provides}"
             if consumes:
@@ -127,72 +162,124 @@ class ContextBuilder:
         return "\n".join(lines)
 
     def _render_capabilities(self, prefix: str) -> str:
+        graph = getattr(self._system, "capability_graph", None)
+        if graph is None:
+            _log.warning("skipping capabilities section: system has no capability_graph")
+            return ""
         lines = []
-        for capability in self._system.capability_graph.capabilities():
+        for capability in graph.capabilities():
             if capability.startswith(prefix):
-                providers = ", ".join(self._system.capability_graph.providers(capability))
+                providers = ", ".join(graph.providers(capability))
                 lines.append(f"capability {capability} -> {providers}")
         return "\n".join(lines)
 
     def _render_contracts(self, names: tuple[str, ...]) -> str:
         lines: list[str] = []
-        for manifest in self._system.manifests:
-            if names and manifest.identity.name not in names:
+        for manifest in getattr(self._system, "manifests", ()):
+            identity = getattr(manifest, "identity", None)
+            name = getattr(identity, "name", None)
+            if name is None:
+                _log.warning("skipping a manifest with no identity.name in contracts section")
                 continue
-            contract = manifest.contract
+            if names and name not in names:
+                continue
+            contract = getattr(manifest, "contract", None)
             if contract is None:
                 continue
-            lines.append(f"- {manifest.identity.name}:")
-            for invariant in contract.invariants:
+            lines.append(f"- {name}:")
+            for invariant in getattr(contract, "invariants", ()) or ():
                 lines.append(f"    invariant: {invariant}")
-            for capability_contract in contract.capabilities:
-                rules = capability_contract.rules
-                lines.append(f"    capability {capability_contract.capability.value}:")
-                if rules.guarantees:
+            for capability_contract in getattr(contract, "capabilities", ()) or ():
+                capability = getattr(capability_contract, "capability", None)
+                rules = getattr(capability_contract, "rules", None)
+                if capability is None or rules is None:
+                    _log.warning(
+                        "skipping a capability contract with no capability/rules in %s", name
+                    )
+                    continue
+                lines.append(f"    capability {getattr(capability, 'value', capability)}:")
+                if getattr(rules, "guarantees", ()):
                     lines.append(f"        guarantees: {', '.join(rules.guarantees)}")
-                if rules.failure_modes:
+                if getattr(rules, "failure_modes", ()):
                     lines.append(f"        failure modes: {', '.join(rules.failure_modes)}")
         return "\n".join(lines)
 
     def _render_dependencies(self, names: tuple[str, ...]) -> str:
         lines: list[str] = []
-        for manifest in self._system.manifests:
-            if names and manifest.identity.name not in names:
+        for manifest in getattr(self._system, "manifests", ()):
+            identity = getattr(manifest, "identity", None)
+            name = getattr(identity, "name", None)
+            if name is None:
+                _log.warning("skipping a manifest with no identity.name in dependencies section")
                 continue
-            hard = ", ".join(dep.name for dep in manifest.dependencies) or "none"
-            optional = ", ".join(dep.name for dep in manifest.optional_dependencies) or "none"
-            lines.append(f"- {manifest.identity.name}: depends on {hard}; optional {optional}")
+            if names and name not in names:
+                continue
+            hard = (
+                ", ".join(
+                    getattr(dep, "name", dep)
+                    for dep in (getattr(manifest, "dependencies", ()) or ())
+                )
+                or "none"
+            )
+            optional = (
+                ", ".join(
+                    getattr(dep, "name", dep)
+                    for dep in (getattr(manifest, "optional_dependencies", ()) or ())
+                )
+                or "none"
+            )
+            lines.append(f"- {name}: depends on {hard}; optional {optional}")
         return "\n".join(lines)
 
     def _render_workflows(self, ids: tuple[str, ...]) -> str:
+        workflows = getattr(self._system, "workflows", None)
+        if workflows is None:
+            _log.warning("skipping workflows section: system has no workflows")
+            return ""
         lines: list[str] = []
-        for workflow in self._system.workflows.list():
-            if ids and workflow.id not in ids:
+        for workflow in workflows.list():
+            workflow_id = getattr(workflow, "id", None)
+            if workflow_id is None:
+                _log.warning("skipping a workflow with no id")
                 continue
-            steps = "; ".join(f"{step.id}({step.capability.value})" for step in workflow.steps)
-            lines.append(f"- {workflow.id}: {steps}")
+            if ids and workflow_id not in ids:
+                continue
+            steps = "; ".join(
+                f"{getattr(step, 'id', '?')}("
+                f"{getattr(getattr(step, 'capability', None), 'value', '?')})"
+                for step in (getattr(workflow, "steps", ()) or ())
+            )
+            lines.append(f"- {workflow_id}: {steps}")
         return "\n".join(lines)
 
     def _render_events(self, names: tuple[str, ...]) -> str:
+        graph = getattr(self._system, "event_graph", None)
+        if graph is None:
+            _log.warning("skipping events section: system has no event_graph")
+            return ""
         lines: list[str] = []
-        for event in self._system.event_graph.events():
+        for event in graph.events():
             if names and event not in names:
                 continue
             lines.append(
-                f"- {event}: produced by {', '.join(self._system.event_graph.producers(event))}; "
-                f"consumed by {', '.join(self._system.event_graph.consumers(event))}"
+                f"- {event}: produced by {', '.join(graph.producers(event))}; "
+                f"consumed by {', '.join(graph.consumers(event))}"
             )
         return "\n".join(lines)
 
     def _render_system_state(self) -> str:
-        snapshot = build_snapshot(self._system)
+        try:
+            snapshot = build_snapshot(self._system)
+        except NotImplementedError:
+            _log.warning("skipping system_state section: no snapshot builder available")
+            return "system snapshot not available"
         lines = [
-            f"components: {len(snapshot.components)}, "
-            f"capabilities: {len(snapshot.capabilities)}, "
-            f"events: {len(snapshot.events)}, "
-            f"workflows: {len(snapshot.workflows)}"
+            f"components: {len(getattr(snapshot, 'components', ()) or ())}, "
+            f"capabilities: {len(getattr(snapshot, 'capabilities', ()) or ())}, "
+            f"events: {len(getattr(snapshot, 'events', ()) or ())}, "
+            f"workflows: {len(getattr(snapshot, 'workflows', ()) or ())}"
         ]
-        for key, items in snapshot.gaps.items():
+        for key, items in (getattr(snapshot, "gaps", {}) or {}).items():
             if items:
                 lines.append(f"gap ({key}): {', '.join(items)}")
         return "\n".join(lines)
@@ -201,7 +288,9 @@ class ContextBuilder:
         if self._engineering is None:
             return "engineering memory not available"
         lines = [
-            f"- {entry.id}: {entry.problem} | {entry.decision.value} | {entry.reason}"
+            f"- {getattr(entry, 'id', '?')}: {getattr(entry, 'problem', '?')} | "
+            f"{getattr(getattr(entry, 'decision', None), 'value', '?')} | "
+            f"{getattr(entry, 'reason', '')}"
             for entry in self._engineering.decisions()
         ]
         return "\n".join(lines) or "no architecture decisions recorded"
@@ -211,6 +300,10 @@ class ContextBuilder:
             return "engineering memory not available"
         lines = []
         for entry in self._engineering.search(query):
-            summary = f"{entry.problem} | {entry.hypothesis} | {entry.result}"
-            lines.append(f"- {entry.id}: {summary} | {entry.decision.value}")
+            summary = (
+                f"{getattr(entry, 'problem', '')} | {getattr(entry, 'hypothesis', '')} | "
+                f"{getattr(entry, 'result', '')}"
+            )
+            decision = getattr(getattr(entry, "decision", None), "value", "?")
+            lines.append(f"- {getattr(entry, 'id', '?')}: {summary} | {decision}")
         return "\n".join(lines) or "no matching entries"

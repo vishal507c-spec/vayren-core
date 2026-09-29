@@ -3,6 +3,7 @@
 import math
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 
 
 class ParameterError(ValueError):
@@ -29,6 +30,30 @@ class ParameterSpec:
     maximum: float
     decimals: int = 0
 
+    def __post_init__(self) -> None:
+        """Validate the declaration itself (fail fast at registration)."""
+        if not isinstance(self.key, str) or not self.key.strip():
+            raise ParameterError("ParameterSpec key must be a non-empty string")
+        if not isinstance(self.decimals, int) or isinstance(self.decimals, bool):
+            raise ParameterError(f"{self.key}: decimals must be an int >= 0")
+        if self.decimals < 0:
+            raise ParameterError(f"{self.key}: decimals must be >= 0")
+        for bound_name in ("minimum", "maximum", "default"):
+            bound = getattr(self, bound_name)
+            if not isinstance(bound, (int, float)) or isinstance(bound, bool):
+                raise ParameterError(f"{self.key}: {bound_name} must be a number")
+            if not math.isfinite(float(bound)):
+                raise ParameterError(f"{self.key}: {bound_name} must be finite")
+        if self.minimum > self.maximum:
+            raise ParameterError(
+                f"{self.key}: minimum ({self.minimum}) must be <= maximum ({self.maximum})"
+            )
+        if not (self.minimum <= float(self.default) <= self.maximum):
+            raise ParameterError(
+                f"{self.key}: default ({self.default}) must be within "
+                f"[{self.minimum}, {self.maximum}]"
+            )
+
     def validate(self, value: float) -> float:
         """Return the value rounded to `decimals`, clamped to the bounds."""
         if not isinstance(value, (int, float)) or not math.isfinite(value):
@@ -46,13 +71,23 @@ class StrategyParameters(Mapping[str, float]):
     """Immutable mapping of parameter values with spec-based validation.
 
     Wraps a plain dict behind the Mapping protocol so definitions stay
-    hashable-by-content and logics read typed numbers only.
+    hashable-by-content and logics read typed numbers only. The backing
+    store is a :class:`~types.MappingProxyType` and attribute assignment
+    is blocked, so instances are frozen-like: neither ``params[key] = v``
+    (Mapping has no ``__setitem__``) nor ``params._values = ...`` can
+    mutate them after construction.
     """
 
     __slots__ = ("_values",)
 
     def __init__(self, values: Mapping[str, float] | None = None) -> None:
-        self._values: dict[str, float] = dict(values or {})
+        object.__setattr__(self, "_values", MappingProxyType(dict(values or {})))
+
+    def __setattr__(self, name: str, value: object) -> None:
+        raise ParameterError(f"StrategyParameters is immutable — cannot set {name!r}")
+
+    def __delattr__(self, name: str) -> None:
+        raise ParameterError(f"StrategyParameters is immutable — cannot delete {name!r}")
 
     def __getitem__(self, key: str) -> float:
         return self._values[key]

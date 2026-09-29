@@ -474,11 +474,13 @@ def _patch_incremental(
     for relpath in touched + deleted:
         before_dotted.update(filemeta.get(relpath, {}).get("dotted", []))
 
-    notes: list[dict] = [n for n in graph.get("unresolved", []) if n.get("ref") not in changed_set]
+    kept = [n for n in graph.get("unresolved", []) if n.get("ref") not in changed_set]
+    recorder = repo_graph.UnresolvedNotes(repo_graph.unresolved_cap())
+    recorder.kept = kept
+    notes = kept
 
     def note(kind: str, ref: str, reason: str) -> None:
-        if len(notes) < repo_graph.UNRESOLVED_CAP:
-            notes.append({"kind": kind, "ref": ref, "reason": reason})
+        recorder.note(kind, ref, reason)
 
     # Files: drop deleted/touched, re-add touched.
     files = [f for f in graph["files"] if f["path"] not in changed_set]
@@ -751,7 +753,7 @@ def _patch_incremental(
         "drift": drift,
         "tests": tests,
         "validators": validators,
-        "unresolved": sorted(notes, key=lambda u: (u["kind"], u["ref"])),
+        "unresolved": sorted(recorder.record(), key=lambda u: (u["kind"], u["ref"])),
     }
     return patched, manifest, filemeta, "incremental"
 

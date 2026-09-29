@@ -259,7 +259,8 @@ class FactoryPlugin:
             raise UnsupportedCapabilityError(
                 f"broker {self.name!r} does not provide {domain.value} capability"
             )
-        assert callable(factory), f"plugin {self.name!r}: {domain.value} factory not callable"
+        if not callable(factory):
+            raise TypeError(f"plugin {self.name!r}: {domain.value} factory not callable")
         return factory(*args)
 
     def capability_set(self) -> CapabilitySet:

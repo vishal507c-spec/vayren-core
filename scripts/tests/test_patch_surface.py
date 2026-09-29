@@ -101,6 +101,18 @@ def _packet(task: str, **kwargs: str | list[str]) -> dict:
     return resolve(task, **kwargs)  # type: ignore[arg-type]
 
 
+def _broker_registry_line() -> int:
+    """Real definition line of ``class BrokerRegistry`` in the live tree.
+
+    A hardcoded number rots on every unrelated edit of the file, so the tests
+    derive it: the contract is "the reported line IS the declaration line".
+    """
+    source = (ROOT / "09_broker/broker/registry.py").read_text(encoding="utf-8").splitlines()
+    return next(
+        n for n, text in enumerate(source, start=1) if text.startswith("class BrokerRegistry")
+    )
+
+
 def test_exact_file_intent() -> None:
     packet = _packet("", file="09_broker/broker/registry.py")
     assert packet["status"] == "RESOLVED"
@@ -121,7 +133,10 @@ def test_exact_symbol_intent() -> None:
         for s in t["symbols"]
         if s["qualified"] == "broker.registry:BrokerRegistry"
     )
-    assert symbol["line"] == 68
+    # A magic line number rots on every unrelated edit of the file, so pin the
+    # CONTRACT instead: the reported line must be the real `class BrokerRegistry`
+    # definition line.
+    assert symbol["line"] == _broker_registry_line()
     assert symbol["module"] == "09_broker/broker"
     assert symbol["owner"] == "BROKER_CONTRACT"
 
@@ -167,7 +182,7 @@ def test_exact_symbol_current_line() -> None:
     symbol = next(
         s for s in registry["symbols"] if s["qualified"] == "broker.registry:BrokerRegistry"
     )
-    assert symbol["line"] == 68
+    assert symbol["line"] == _broker_registry_line()
     assert symbol["kind"] == "class"
     assert symbol["public"] is True
 

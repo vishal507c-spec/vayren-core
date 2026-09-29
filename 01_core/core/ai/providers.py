@@ -6,6 +6,7 @@ working with no AI at all: availability failures are graceful.
 """
 
 from abc import ABC, abstractmethod
+from threading import Lock
 
 
 class AiProvider(ABC):
@@ -44,17 +45,22 @@ class AiProviderRegistry:
 
     def __init__(self) -> None:
         self._providers: dict[str, AiProvider] = {"offline": OfflineProvider()}
+        self._lock = Lock()
 
     def register(self, provider: AiProvider) -> None:
         """Register a provider; duplicate names are rejected."""
-        if provider.name in self._providers:
-            msg = f"provider already registered: {provider.name}"
-            raise ValueError(msg)
-        self._providers[provider.name] = provider
+        with self._lock:
+            if provider.name in self._providers:
+                msg = f"provider already registered: {provider.name}"
+                raise ValueError(msg)
+            self._providers[provider.name] = provider
 
     def providers(self) -> tuple[AiProvider, ...]:
         """All registered providers, ordered by name."""
-        return tuple(self._providers[name] for name in sorted(self._providers))
+        with self._lock:
+            names = sorted(self._providers)
+            providers = tuple(self._providers[name] for name in names)
+        return providers
 
     def available(self) -> tuple[AiProvider, ...]:
         """Providers currently available, ordered by name."""
@@ -62,11 +68,20 @@ class AiProviderRegistry:
 
     def select(self, preferred: str | None = None) -> AiProvider | None:
         """Return the preferred available provider, else the first available,
-        else None. Failures are graceful: callers handle None."""
-        if preferred is not None and preferred in self._providers:
-            provider = self._providers[preferred]
-            return provider if provider.available() else None
-        available = self.available()
+        else None. Failures are graceful: callers handle None.
+
+        A preferred provider that is registered but currently unavailable
+        falls back to the first available provider (it does not return None
+        while another provider could serve); an unknown preferred name behaves
+        like no preference.
+        """
+        with self._lock:
+            providers = dict(self._providers)
+        if preferred is not None and preferred in providers:
+            provider = providers[preferred]
+            if provider.available():
+                return provider
+        available = tuple(provider for provider in self.providers() if provider.available())
         return available[0] if available else None
 
     def status(self) -> str:

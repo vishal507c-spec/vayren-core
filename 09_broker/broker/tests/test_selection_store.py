@@ -7,8 +7,10 @@ import json
 import sys
 from pathlib import Path
 
-BROKER_DIR = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(BROKER_DIR))
+ROOT = Path(__file__).resolve().parent.parent.parent.parent
+for entry in ("09_broker",):
+    if str(ROOT / entry) not in sys.path:
+        sys.path.insert(0, str(ROOT / entry))
 
 import pytest  # noqa: E402
 

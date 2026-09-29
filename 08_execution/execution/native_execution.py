@@ -303,7 +303,10 @@ def native_plan_order(
         )
     )
     if rc != 0:
-        raise ValueError("size_multiplier must be in (0, 1]")
+        reason = native_multiplier_problem(float(size_multiplier))
+        if reason:
+            raise ValueError(reason)
+        raise ValueError(f"kernel rejected the order plan (rc={rc})")
 
     planned_type = "LIMIT" if out_order_type.value == 1 else "MARKET"
     limit_price = float(out_limit_price.value) if out_has_limit.value != 0 else None
@@ -506,18 +509,22 @@ def native_ledger_snapshot(
     out_available = ctypes.c_double()
     out_day_pnl = ctypes.c_double()
 
-    _lib.vy_exec_ledger_snapshot(
-        float(starting_capital),
-        float(realized_sum),
-        float(day_pnl),
-        count,
-        qtys,
-        avg_prices,
-        mark_prices,
-        ctypes.byref(out_equity),
-        ctypes.byref(out_available),
-        ctypes.byref(out_day_pnl),
+    rc = int(
+        _lib.vy_exec_ledger_snapshot(
+            float(starting_capital),
+            float(realized_sum),
+            float(day_pnl),
+            count,
+            qtys,
+            avg_prices,
+            mark_prices,
+            ctypes.byref(out_equity),
+            ctypes.byref(out_available),
+            ctypes.byref(out_day_pnl),
+        )
     )
+    if rc != 0:
+        raise NativeBridgeError(f"ledger snapshot kernel rejected the call: {rc}")
     return (
         float(out_equity.value),
         float(out_available.value),
@@ -569,8 +576,25 @@ def native_paper_calculate_fill(
 ) -> tuple[float, float, float, float, float] | None:
     """Calculate fill economics for paper broker in Rust.
 
-    Returns (fill_price, fill_qty, notional, commission, new_capital) or None if unfillable.
+    Returns (fill_price, fill_qty, notional, commission, new_capital) or None
+    when genuinely unfillable (unaffordable quantity, degenerate fill price).
+
+    The kernel reports every failure as `-1` (`execution_engine` has no
+    separate fault/unfillable code), so this boundary splits them: invalid
+    caller inputs (`reference_price <= 0`, `remaining_qty <= 0`, non-finite
+    values) raise `NativeBridgeError` (bridge fault — never confused with an
+    unfillable order), while a kernel `-1` on sane inputs means the order
+    cannot fill and maps to `None`.
     """
+    for name, value in (("reference_price", reference_price), ("remaining_qty", remaining_qty)):
+        amount = float(value)
+        if not (amount == amount and amount not in (float("inf"), float("-inf"))):
+            raise NativeBridgeError(f"paper fill {name} must be finite, got {value!r}")
+    if float(reference_price) <= 0.0 or float(remaining_qty) <= 0.0:
+        raise NativeBridgeError(
+            "paper fill inputs invalid: "
+            f"reference_price={reference_price!r} remaining_qty={remaining_qty!r}"
+        )
     out_fill_price = ctypes.c_double()
     out_fill_qty = ctypes.c_double()
     out_notional = ctypes.c_double()
@@ -615,14 +639,18 @@ def native_order_apply_fill(
     """Fold a fill report into order filled_qty and avg_fill_price via Rust."""
     out_qty = ctypes.c_double()
     out_avg = ctypes.c_double()
-    _lib.vy_exec_order_apply_fill(
-        float(prev_qty),
-        float(prev_avg),
-        float(fill_qty),
-        float(fill_price),
-        ctypes.byref(out_qty),
-        ctypes.byref(out_avg),
+    rc = int(
+        _lib.vy_exec_order_apply_fill(
+            float(prev_qty),
+            float(prev_avg),
+            float(fill_qty),
+            float(fill_price),
+            ctypes.byref(out_qty),
+            ctypes.byref(out_avg),
+        )
     )
+    if rc != 0:
+        raise NativeBridgeError(f"order fill kernel rejected the call: {rc}")
     return float(out_qty.value), float(out_avg.value)
 
 
@@ -658,9 +686,14 @@ def native_percentile(ordered: Sequence[float], pct: float) -> float:
     """Rank percentile of an ascending sample set; 0.0 when there is no sample.
 
     The ranking itself (`min(n-1, int(pct/100*n))`) is Rust's —
-    `execution_engine::percentile` — this only packs the samples.
+    `execution_engine::percentile` — which assumes ASCENDING input. An
+    unsorted input is sorted (copied, never mutated in place) before the
+    call so an out-of-order caller cannot silently read the wrong rank.
     """
-    packed = array("d", (float(value) for value in ordered))
+    ordered_list = [float(value) for value in ordered]
+    if any(b < a for a, b in zip(ordered_list, ordered_list[1:], strict=False)):
+        ordered_list = sorted(ordered_list)
+    packed = array("d", ordered_list)
     count = len(packed)
     view = (ctypes.c_double * count).from_buffer(packed) if count else None
     out = ctypes.c_double()
@@ -787,9 +820,19 @@ def native_multiplier_problem(size_multiplier: float) -> str:
 
 
 def native_flags_to_mask(flags: Sequence[bool]) -> int:
-    """Five gate flags packed exactly as the kernel encodes them."""
-    view = (ctypes.c_int32 * len(flags))(*[1 if on else 0 for on in flags])
-    mask = int(_lib.vy_exec_flags_to_mask(view, len(flags)))
+    """Five gate flags packed exactly as the kernel encodes them.
+
+    The kernel rejects any count other than the five mandatory gates, so a
+    wrong-length caller fails here with the expected count instead of a bare
+    kernel `-1`.
+    """
+    materialized = tuple(flags)
+    if len(materialized) != 5:
+        raise NativeBridgeError(
+            f"execution kernel needs exactly 5 gate flags, got {len(materialized)}"
+        )
+    view = (ctypes.c_int32 * len(materialized))(*[1 if on else 0 for on in materialized])
+    mask = int(_lib.vy_exec_flags_to_mask(view, len(materialized)))
     if mask < 0:
         raise NativeBridgeError(f"execution kernel rejected the gate flags: {mask}")
     return mask

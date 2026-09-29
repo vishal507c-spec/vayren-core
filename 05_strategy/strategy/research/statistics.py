@@ -88,7 +88,6 @@ def describe_evidence(trades: list[Any] | tuple[Any, ...]) -> EvidenceStats:
         )
     var = sum((p - mean) ** 2 for p in pnls) / (n - 1)
     sd = math.sqrt(var) if var > 0 else 0.0
-    notes: list[str] = []
     if sd <= 0:
         return EvidenceStats(
             n=n,
@@ -106,17 +105,33 @@ def describe_evidence(trades: list[Any] | tuple[Any, ...]) -> EvidenceStats:
             notes=("zero variance — significance undefined",),
         )
     se = sd / math.sqrt(n)
+    cohens_d = mean / sd
+    if n < 30:
+        # No normal-approximation CI below n=30 — 1.96·SE understates
+        # uncertainty for small samples, so the interval stays None (N/A)
+        # instead of a fake-precise band.
+        return EvidenceStats(
+            n=n,
+            mean=mean,
+            ci_low=None,
+            ci_high=None,
+            ci_method="n/a — normal CI needs n>=30",
+            t_stat=None,
+            p_value=None,
+            p_method="n/a — normal approximation needs n>=30",
+            cohens_d=cohens_d,
+            win_rate=win_rate,
+            win_rate_ci=(None, None),
+            status="WEAK",
+            notes=(f"small sample (n={n}) — interval undefined below n=30",),
+        )
     ci_low, ci_high = mean - 1.96 * se, mean + 1.96 * se
     t_stat = mean / se
     p_value = 2.0 * (1.0 - _normal_cdf(abs(t_stat)))
-    cohens_d = mean / sd
     wr_se = math.sqrt(win_rate * (1.0 - win_rate) / n)
     wr_ci = (max(0.0, win_rate - 1.96 * wr_se), min(1.0, win_rate + 1.96 * wr_se))
-    if n < 30:
-        notes.append(f"small sample (n={n}) — normal approximation is rough")
-        status = "WEAK"
-    else:
-        status = "OK"
+    status = "OK"
+    notes: list[str] = []
     if ci_low > 0:
         notes.append("95% CI excludes zero — positive expectancy at 5% level (approx)")
     elif ci_high < 0:
@@ -205,8 +220,15 @@ def run_monte_carlo(
             status="INSUFFICIENT",
             note="fewer than 5 trades — resampling meaningless",
         )
+    if isinstance(n_paths, bool):
+        raise ValueError(f"n_paths must be an int in [100, 5000], got {n_paths!r}")
+    try:
+        paths = int(n_paths)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"n_paths must be an int in [100, 5000], got {n_paths!r}") from exc
+    if not 100 <= paths <= 5000:
+        raise ValueError(f"n_paths must be within [100, 5000], got {paths}")
     rng = random.Random(seed)
-    paths = max(100, min(int(n_paths), 5000))
     totals: list[float] = []
     drawdowns: list[float] = []
     for _ in range(paths):

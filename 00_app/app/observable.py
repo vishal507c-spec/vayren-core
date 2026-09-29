@@ -134,7 +134,7 @@ class WorkerThread:
         self._thread = threading.Thread(
             target=self._run_guard,
             name=type(self).__name__,
-            daemon=False,
+            daemon=True,
         )
         self._thread.start()
 
@@ -170,8 +170,13 @@ class IntervalTimer:
 
     def start(self) -> None:
         """Begin ticking (no-op while already ticking)."""
-        if self._thread is not None and self._thread.is_alive():
-            return
+        stale = self._thread
+        if stale is not None:
+            if stale.is_alive():
+                return
+            # Reap the previous thread so a stop();start() cycle never runs
+            # on (or leaks) the stale one.
+            stale.join(timeout=self._interval_s)
         self._stop.clear()
         self._thread = threading.Thread(
             target=self._loop,
@@ -181,8 +186,11 @@ class IntervalTimer:
         self._thread.start()
 
     def stop(self) -> None:
-        """Stop scheduling ticks."""
+        """Stop scheduling ticks and reap the thread."""
         self._stop.set()
+        thread, self._thread = self._thread, None
+        if thread is not None:
+            thread.join(timeout=self._interval_s + 1.0)
 
     def _loop(self) -> None:
         while not self._stop.is_set():

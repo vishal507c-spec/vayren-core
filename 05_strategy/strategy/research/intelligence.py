@@ -6,7 +6,7 @@ Systematically searches executions for candidate relationships, bounded and repr
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field  # noqa: F401
+from dataclasses import asdict, dataclass
 from typing import Any
 
 

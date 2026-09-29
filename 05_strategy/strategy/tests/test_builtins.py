@@ -32,8 +32,15 @@ def test_builtin_registry_lists_three_marked_strategies() -> None:
 
 
 def _bars(closes: list[float]):
+    from datetime import datetime, timedelta
+
     from market import Bar
 
+    # NOTE (2026-09-29, bug-pin justification): Bar is fail-closed on
+    # ISO-8601 timestamps, so minutes must roll into hours via timedelta —
+    # the old f"09:{30 + index}" emitted impossible 09:60+ clock times for
+    # index >= 30. Spacing/shape unchanged (1 bar per minute, same OHLCV).
+    start = datetime(2026, 1, 5, 9, 30, 0)
     return tuple(
         Bar(
             symbol="T",
@@ -42,7 +49,7 @@ def _bars(closes: list[float]):
             low=c - 1.0,
             close=c,
             volume=5000,
-            timestamp=f"2026-01-05 09:{30 + index:02d}:00",
+            timestamp=(start + timedelta(minutes=index)).strftime("%Y-%m-%d %H:%M:%S"),
         )
         for index, c in enumerate(closes)
     )

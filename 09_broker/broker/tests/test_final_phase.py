@@ -85,9 +85,23 @@ def test_broker_bound_ref_rejects_wrong_broker() -> None:
             broker="sandbox",
         ),
     )
-    ok, _ = validate_refs(refs, _MapResolver({"API_KEY": "v"}), expected_broker="sandbox")
+    # Expectations are required (no weak None default): every dimension is
+    # declared, the broker dimension is what varies here.
+    ok, _ = validate_refs(
+        refs,
+        _MapResolver({"API_KEY": "v"}),
+        expected_environment=Environment.SANDBOX,
+        expected_broker="sandbox",
+        expected_scope=CredentialScope.TRADING,
+    )
     assert ok is True
-    ok, reasons = validate_refs(refs, _MapResolver({"API_KEY": "v"}), expected_broker="paper")
+    ok, reasons = validate_refs(
+        refs,
+        _MapResolver({"API_KEY": "v"}),
+        expected_environment=Environment.SANDBOX,
+        expected_broker="paper",
+        expected_scope=CredentialScope.TRADING,
+    )
     assert ok is False and any("sandbox" in reason for reason in reasons)
 
 
@@ -96,7 +110,11 @@ def test_scope_mismatch_fails_closed() -> None:
         CredentialRef(key="K", scope=CredentialScope.HISTORICAL, environment=Environment.PAPER),
     )
     ok, reasons = validate_refs(
-        refs, _MapResolver({"K": "v"}), expected_scope=CredentialScope.TRADING
+        refs,
+        _MapResolver({"K": "v"}),
+        expected_environment=Environment.PAPER,
+        expected_broker="paper",
+        expected_scope=CredentialScope.TRADING,
     )
     assert ok is False and any("historical" in reason for reason in reasons)
 
@@ -104,7 +122,13 @@ def test_scope_mismatch_fails_closed() -> None:
 def test_venue_agnostic_ref_has_no_broker() -> None:
     ref = CredentialRef(key="K", scope=CredentialScope.HISTORICAL, environment=Environment.PAPER)
     assert ref.broker is None
-    ok, _ = validate_refs((ref,), _MapResolver({"K": "v"}), expected_broker="anything")
+    ok, _ = validate_refs(
+        (ref,),
+        _MapResolver({"K": "v"}),
+        expected_environment=Environment.PAPER,
+        expected_broker="anything",
+        expected_scope=CredentialScope.HISTORICAL,
+    )
     assert ok is True  # unbound refs never broker-mismatch
 
 
@@ -126,11 +150,17 @@ def test_expiry_and_rotation_metadata() -> None:
 
 
 def test_skeleton_record_shape() -> None:
+    # Consistency fix: the skeleton serves three faces, so it advertises a
+    # one-item-per-face contract shape (empty sets were split-brain and are
+    # now rejected by BrokerRecord). Shape is not liveness: every operation
+    # still refuses, proven below.
+    from broker.adapters.skeleton import SKELETON_CAPABILITIES
+
     record = skeleton_record()
     assert record.name == SKELETON_ID == "skeleton"
     assert set(record.faces) == {Domain.HISTORICAL_DATA, Domain.MARKET_DATA, Domain.TRADING}
-    assert record.capabilities == CapabilitySet()  # undeclared → NOT_CONFIGURED
-    assert record.capabilities.status(Caps.ORDERS_MARKET) is (CapabilityStatus.NOT_CONFIGURED)
+    assert record.capabilities == SKELETON_CAPABILITIES
+    assert record.capabilities.status(Caps.ORDERS_MARKET) is (CapabilityStatus.SUPPORTED)
 
 
 def test_skeleton_faces_satisfy_protocols_but_refuse_work() -> None:
@@ -147,9 +177,20 @@ def test_skeleton_faces_satisfy_protocols_but_refuse_work() -> None:
     assert md.poll() == () and md.health() == (False, "skeleton transport NOT_CONFIGURED")
     with pytest.raises(UnsupportedCapabilityError):
         md.open(("X",), "15m")
+    # Unconfigured transport: empty tuples are explicit "no transport" (never
+    # silent success); disconnect/close raise BrokerError (no session exists).
+    from broker.vocab import BrokerError
+
+    with pytest.raises(BrokerError):
+        md.disconnect()
+    with pytest.raises(BrokerError):
+        md.close()
     trading = record.plugin.face(Domain.TRADING)
     assert isinstance(trading, SkeletonTrading)
     assert trading.environment is Environment.PAPER  # safest default, never LIVE
+    with pytest.raises(BrokerError):
+        trading.disconnect()
+    assert trading.stream_events() == ()
     with pytest.raises(UnsupportedCapabilityError) as excinfo:
         trading.place_order(object(), "c1", idempotency_key="k1")
     assert excinfo.value.code is ErrorCode.CAPABILITY_UNSUPPORTED

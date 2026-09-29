@@ -127,7 +127,9 @@ class Experiment:
         elif not self.version_id and self.strategy_version:
             self.version_id = self.strategy_version
         if self.status not in EXPERIMENT_STATUSES:
-            self.status = "DRAFT"
+            raise ValueError(
+                f"invalid experiment status {self.status!r} — must be one of {EXPERIMENT_STATUSES}"
+            )
 
     def to_dict(self) -> dict[str, Any]:
         data = {
@@ -277,7 +279,11 @@ def create_experiment(
 
 
 def is_stale(experiment: Experiment, current_config_fingerprint: str) -> bool:
-    """True when meaningful inputs changed since execution (fingerprint mismatch)."""
+    """True when meaningful inputs changed since execution (fingerprint mismatch).
+
+    A never-executed experiment (no fingerprint or no execution timestamp)
+    is always stale — there is nothing fresh to trust yet.
+    """
     if not experiment.config_fingerprint or not experiment.executed_at:
-        return False
+        return True
     return experiment.config_fingerprint != current_config_fingerprint

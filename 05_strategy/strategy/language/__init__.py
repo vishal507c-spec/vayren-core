@@ -4,7 +4,6 @@ from .compiler import CompiledStrategy, StrategyLanguageError, compile_strategy
 from .storage import (
     DEFAULT_CODE,
     DEFAULT_NAME,
-    LEGACY_OBR_CODE,
     LEGACY_OBR_NAME,
     StrategyRecord,
     create_strategy,
@@ -27,7 +26,6 @@ __all__ = [
     "compile_strategy",
     "DEFAULT_CODE",
     "DEFAULT_NAME",
-    "LEGACY_OBR_CODE",
     "LEGACY_OBR_NAME",
     "StrategyRecord",
     "list_strategies",

@@ -59,8 +59,54 @@ pub struct RunProgress {
 impl RunProgress {
     /// Adopt a `lab_progress` payload. An unmeasurable field becomes `None`
     /// rather than a zero, so "we don't know yet" never reads as "0 seconds".
+    ///
+    /// COUNTS are read as integers (`as_i64`/`as_u64`), never via `as_f64`:
+    /// a count of 16,777,217 or more loses precision through an f64, and a
+    /// `null`/string field would arrive as `NaN` and then silently become `0`
+    /// — "0 of 527 completed" for a run that had done work. Percentages and
+    /// seconds stay f64 but a non-finite value is rejected to `0.0` rather
+    /// than flowing into Slint as `NaN`.
     pub fn from_json(value: &serde_json::Value) -> Self {
         let num = |key: &str| value.get(key).and_then(|v| v.as_f64());
+        let finite = |key: &str| num(key).filter(|v| v.is_finite()).unwrap_or(0.0);
+        let count = |key: &str| -> i32 {
+            // Accept a JSON integer directly; a float that is exactly integral
+            // (some Python emitters stringify counts) is honoured too, but only
+            // when it survives the range check without precision loss.
+            match value.get(key) {
+                Some(v) => v
+                    .as_i64()
+                    .or_else(|| v.as_u64().and_then(|u| i64::try_from(u).ok()))
+                    .or_else(|| {
+                        v.as_f64().and_then(|f| {
+                            (f.is_finite()
+                                && f.fract() == 0.0
+                                && f >= i32::MIN as f64
+                                && f <= i32::MAX as f64)
+                                .then_some(f as i64)
+                        })
+                    })
+                    .unwrap_or(0)
+                    .clamp(i32::MIN as i64, i32::MAX as i64) as i32,
+                None => 0,
+            }
+        };
+        let big_count = |key: &str| -> i64 {
+            match value.get(key) {
+                Some(v) => v
+                    .as_i64()
+                    .or_else(|| v.as_u64().and_then(|u| i64::try_from(u).ok()))
+                    .or_else(|| {
+                        v.as_f64().and_then(|f| {
+                            (f.is_finite() && f.fract() == 0.0 && f.abs() <= i64::MAX as f64)
+                                .then_some(f as i64)
+                        })
+                    })
+                    .unwrap_or(0),
+                None => 0,
+            }
+        };
+        let optional_secs = |key: &str| -> Option<f64> { num(key).filter(|v| v.is_finite()) };
         let strings = |key: &str| -> Vec<String> {
             value
                 .get(key)
@@ -75,26 +121,31 @@ impl RunProgress {
         Self {
             active: true,
             stage: opt_str(value, "stage"),
-            stage_pct: num("stage_pct").unwrap_or(0.0) as f32,
-            total: num("total").unwrap_or(0.0) as i32,
-            completed: num("completed").unwrap_or(0.0) as i32,
+            stage_pct: finite("stage_pct") as f32,
+            total: count("total"),
+            completed: count("completed"),
             failed: strings("failed"),
             skipped: strings("skipped"),
-            remaining: num("remaining").unwrap_or(0.0) as i32,
-            pct: num("pct").unwrap_or(0.0) as f32,
-            done: num("done").unwrap_or(0.0) as i32,
-            headline_total: num("headline_total")
-                .or_else(|| num("total"))
-                .unwrap_or(0.0) as i32,
+            remaining: count("remaining"),
+            pct: finite("pct") as f32,
+            done: count("done"),
+            headline_total: {
+                let direct = count("headline_total");
+                if value.get("headline_total").is_some() {
+                    direct
+                } else {
+                    count("total")
+                }
+            },
             current: opt_str(value, "current"),
-            current_secs: num("current_secs").unwrap_or(0.0) as f32,
-            elapsed_secs: num("elapsed_secs").unwrap_or(0.0) as f32,
-            eta_secs: num("eta_secs"),
-            mean_secs: num("mean_secs"),
-            throughput: num("throughput").unwrap_or(0.0) as f32,
-            trades: num("trades").unwrap_or(0.0) as i32,
-            bars: num("bars").unwrap_or(0.0) as i64,
-            net_pnl: num("net_pnl").unwrap_or(0.0) as f32,
+            current_secs: finite("current_secs") as f32,
+            elapsed_secs: finite("elapsed_secs") as f32,
+            eta_secs: optional_secs("eta_secs"),
+            mean_secs: optional_secs("mean_secs"),
+            throughput: finite("throughput") as f32,
+            trades: count("trades"),
+            bars: big_count("bars"),
+            net_pnl: finite("net_pnl") as f32,
             long_running: value
                 .get("long_running")
                 .and_then(|v| v.as_bool())
@@ -3044,11 +3095,6 @@ pub fn project(state: &LabState) -> LabView {
                     }
                 ),
             };
-            let cov_caption = if facts.sampled {
-                "SAMPLED".to_string()
-            } else {
-                "VERIFIED".to_string()
-            };
             CoverageView {
                 pct: i32::from(facts.pct),
                 note,
@@ -3064,6 +3110,7 @@ pub fn project(state: &LabState) -> LabView {
         }
         _ => CoverageView::default(),
     };
+    // Caption comes from the same `state.coverage` facts the bar above used.
     let cov_caption = match state.coverage {
         Some(facts) if facts.measured && facts.sampled => "SAMPLED".to_string(),
         Some(facts) if facts.measured => "VERIFIED".to_string(),
@@ -3337,6 +3384,128 @@ pub fn project(state: &LabState) -> LabView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn money_split_carries_a_hundredth_that_rounds_to_one_hundred() {
+        // 1234.999 → 123499.9 hundredths → rounds to 123500 → whole 1235,
+        // frac 0. The old `trunc()` + separate `round()` pair produced the
+        // impossible ".100" whenever the fraction rounded up past 99.
+        assert_eq!(split_rupees(1234.999), Some((1235, 0)));
+        assert_eq!(split_rupees(0.999), Some((1, 0)));
+        // 0.005 is exactly 0.5 hundredths and `f64::round` is half-away-from-
+        // zero, so it rounds UP to 0.01.
+        assert_eq!(split_rupees(0.005), Some((0, 1)));
+        assert_eq!(split_rupees(0.006), Some((0, 1)));
+        assert_eq!(split_rupees(0.004), Some((0, 0)));
+        assert_eq!(split_rupees(1234.564), Some((1234, 56)));
+        assert_eq!(split_rupees(0.0), Some((0, 0)));
+        // Non-finite / negative / out-of-i64 → honest absence, never a
+        // saturating 19-digit "amount".
+        assert_eq!(split_rupees(f64::NAN), None);
+        assert_eq!(split_rupees(f64::INFINITY), None);
+        assert_eq!(split_rupees(-1.0), None);
+        assert_eq!(split_rupees(1e30), None);
+        // Rendered money keeps Indian grouping and never shows a 3-digit frac.
+        assert_eq!(inr_body(1234.999), "1,235.00");
+        assert_eq!(inr_body(1234567.8), "12,34,567.80");
+        assert_eq!(inr_body(1e30), "N/A");
+        assert!(!inr_body(9.999).contains(".100"));
+        assert_eq!(western_signed2(9.999), "+10.00");
+        assert_eq!(western_signed2(-9.999), "-10.00");
+        assert_eq!(western_signed2(f64::NAN), "+N/A");
+    }
+
+    #[test]
+    fn iso_minutes_validates_the_calendar_and_the_clock() {
+        // Real timestamp maps to real minutes.
+        let jan2 = iso_minutes("2026-01-02T09:15:00".to_string());
+        assert!(jan2.is_finite());
+        assert_eq!(jan2, iso_minutes("2026-01-02T09:15:00".to_string()));
+        // Ordering still follows the calendar.
+        assert!(iso_minutes("2026-01-02T10:00:00".to_string()) > jan2);
+        assert!(iso_minutes("2026-01-03T09:15:00".to_string()) > jan2);
+        // Impossible civil dates sink (NaN sorts to the bottom) instead of
+        // producing a plausible-but-wrong timestamp among real trades.
+        for bad in [
+            "2026-13-01T09:15:00", // month 13
+            "2026-00-01T09:15:00", // month 0
+            "2026-01-32T09:15:00", // day 32
+            "2026-01-00T09:15:00", // day 0
+            "2026-02-30T09:15:00", // February 30
+            "2023-02-29T09:15:00", // not a leap year
+            "2026-01-02T25:15:00", // hour 25
+            "2026-01-02T09:61:00", // minute 61
+            "not-a-timestamp",
+        ] {
+            assert!(
+                iso_minutes(bad.to_string()).is_nan(),
+                "{bad} must not produce a time"
+            );
+        }
+        // Legal leap day and end-of-day still parse.
+        assert!(iso_minutes("2024-02-29T09:15:00".to_string()).is_finite());
+        assert!(iso_minutes("2026-01-02T24:00:00".to_string()).is_finite());
+        // A non-ASCII boundary must not panic.
+        assert!(iso_minutes("2026-é1-02T09:15:00".to_string()).is_nan());
+    }
+
+    #[test]
+    fn run_progress_counts_are_read_as_integers_and_reject_non_finite() {
+        // Integer counts survive exactly, including past 2^24 where an
+        // `as_f64` round-trip loses precision.
+        let big = 16_777_217i64;
+        let value = serde_json::json!({
+            "stage": "data",
+            "stage_pct": 42,
+            "total": big,
+            "completed": big - 1,
+            "remaining": 1,
+            "done": 12345,
+            "bars": 22_196_447,
+            "pct": 55.5,
+            "elapsed_secs": 12.25,
+            "eta_secs": 30.0,
+        });
+        let progress = RunProgress::from_json(&value);
+        assert_eq!(progress.total, big as i32);
+        assert_eq!(progress.completed, big as i32 - 1);
+        assert_eq!(progress.remaining, 1);
+        assert_eq!(progress.done, 12345);
+        assert_eq!(progress.bars, 22_196_447);
+        assert!((progress.pct - 55.5).abs() < 1e-3);
+        assert!((progress.stage_pct - 42.0).abs() < 1e-3);
+        assert_eq!(progress.eta_secs, Some(30.0));
+
+        // Non-finite / missing floats never reach Slint as NaN.
+        let dirty = serde_json::json!({
+            "stage_pct": "NaN",
+            "pct": null,
+            "elapsed_secs": null,
+            "net_pnl": null,
+            "eta_secs": null,
+            "throughput": null,
+        });
+        let progress = RunProgress::from_json(&dirty);
+        assert_eq!(progress.stage_pct, 0.0);
+        assert_eq!(progress.pct, 0.0);
+        assert_eq!(progress.elapsed_secs, 0.0);
+        assert_eq!(progress.net_pnl, 0.0);
+        assert_eq!(progress.throughput, 0.0);
+        assert_eq!(progress.eta_secs, None);
+
+        // A non-integer count is not silently truncated into a real total.
+        let fractional = serde_json::json!({"total": 12.5, "completed": 3.9});
+        let progress = RunProgress::from_json(&fractional);
+        assert_eq!(progress.total, 0);
+        assert_eq!(progress.completed, 0);
+
+        // headline_total falls back to total only when genuinely absent.
+        let no_headline = RunProgress::from_json(&serde_json::json!({"total": 527}));
+        assert_eq!(no_headline.headline_total, 527);
+        let explicit_zero =
+            RunProgress::from_json(&serde_json::json!({"total": 527, "headline_total": 0}));
+        assert_eq!(explicit_zero.headline_total, 0);
+    }
 
     fn obr() -> LabStrategy {
         LabStrategy {
@@ -4955,12 +5124,36 @@ fn plain(value: Option<f64>) -> (String, Tone) {
     }
 }
 
+/// Split a non-negative amount into its whole part and a 2-decimal fraction.
+///
+/// Returns `None` when the amount does not fit `i64` — a saturating
+/// `as i64` would render a plausible-but-wrong 19-digit number, so callers
+/// show honest absence instead.
+///
+/// The fraction is CARRIED: an amount whose fractional part rounds up to 100
+/// (e.g. `1234.999` → `123499.9` → 123500 hundredths) increments the whole
+/// part and returns 0, never the impossible ".100" the naive
+/// `trunc()` + `round()` pair produces.
+fn split_rupees(abs_value: f64) -> Option<(i64, u32)> {
+    if !abs_value.is_finite() || abs_value < 0.0 {
+        return None;
+    }
+    // Round to hundredths FIRST, then split by integer division — a single
+    // rounding step makes the carry exact instead of a two-step guess.
+    let hundredths = abs_value * 100.0;
+    if !hundredths.is_finite() || hundredths > i64::MAX as f64 {
+        return None;
+    }
+    let hundredths = hundredths.round() as i64;
+    Some((hundredths / 100, (hundredths % 100) as u32))
+}
+
 /// Indian-grouping money body, e.g. 1234567.8 → "12,34,567.80" (mirrors the
 /// legacy `_inr` helper exactly: last group of 3, then groups of 2).
 fn inr_body(abs_value: f64) -> String {
-    let rounded = (abs_value * 100.0).round() / 100.0;
-    let whole = rounded.trunc() as i64;
-    let frac = ((rounded - whole as f64) * 100.0).round() as i64;
+    let Some((whole, frac)) = split_rupees(abs_value) else {
+        return "N/A".to_string();
+    };
     let mut digits = whole.to_string();
     if digits.len() > 3 {
         let tail = digits.split_off(digits.len() - 3);
@@ -4989,9 +5182,9 @@ fn inr_signed(value: Option<f64>) -> String {
 /// Western-grouped signed 2-decimals (legacy blotter P&L: `f"{pnl:+,.2f}"`).
 fn western_signed2(value: f64) -> String {
     let sign = if value < 0.0 { "-" } else { "+" };
-    let abs = value.abs();
-    let whole = abs.trunc() as i64;
-    let frac = ((abs - whole as f64) * 100.0).round() as i64;
+    let Some((whole, frac)) = split_rupees(value.abs()) else {
+        return format!("{sign}N/A");
+    };
     let mut digits = whole.to_string();
     if digits.len() > 3 {
         let mut out = String::new();
@@ -5346,6 +5539,12 @@ fn parse_trade_row(i: usize, t: &serde_json::Value) -> TradeRow {
 /// Minutes since the epoch for an ISO timestamp ("2026-01-02T09:15:00"), or
 /// NaN when absent/unparseable. The blotter sorts by time numerically (NaN
 /// sinks), never by comparing formatted strings.
+///
+/// The calendar is VALIDATED by reusing [`parse_iso_days`] and bounding the
+/// clock fields. The previous version ran the day-of-era arithmetic on
+/// whatever numbers it parsed, so "2026-13-45T99:99" silently produced a
+/// plausible-looking (wrong) timestamp that sorted among real trades instead
+/// of sinking to the bottom.
 fn iso_minutes(iso: String) -> f64 {
     if iso.len() < 16 {
         return f64::NAN;
@@ -5356,19 +5555,19 @@ fn iso_minutes(iso: String) -> f64 {
             .ok()
             .and_then(|text| text.parse::<i64>().ok())
     };
-    let (Some(year), Some(month), Some(day), Some(hour), Some(minute)) =
-        (num(0..4), num(5..7), num(8..10), num(11..13), num(14..16))
-    else {
+    let (Some(hour), Some(minute)) = (num(11..13), num(14..16)) else {
         return f64::NAN;
     };
-    // Days from the civil date (Howard Hinnant's algorithm), then minutes.
-    let year = if month <= 2 { year - 1 } else { year };
-    let era = if year >= 0 { year } else { year - 399 } / 400;
-    let year_of_era = year - era * 400;
-    let month_shift = if month > 2 { month - 3 } else { month + 9 };
-    let day_of_year = (153 * month_shift + 2) / 5 + day - 1;
-    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    let days = era * 146_097 + day_of_era - 719_468;
+    // 24:00 is the legal ISO end-of-day; 24:01+ is not a time.
+    if !(0..=24).contains(&hour) || !(0..=60).contains(&minute) {
+        return f64::NAN;
+    }
+    // Same validator the calendar picker uses: rejects month > 12, day 0/32+,
+    // day 30 of February and any other impossible civil date. `iso.get(..10)`
+    // (not `&iso[..10]`) so a multi-byte boundary can never panic.
+    let Some(days) = iso.get(..10).and_then(parse_iso_days) else {
+        return f64::NAN;
+    };
     (days * 24 * 60 + hour * 60 + minute) as f64
 }
 

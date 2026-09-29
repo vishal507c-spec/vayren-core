@@ -60,6 +60,10 @@ jobs:
       - run: python scripts/validate_architecture_gate.py
       - run: python scripts/validate_authority.py
       - run: python scripts/validate_routes.py
+      # Derived graph must agree with its canonical sources (same check
+      # `make check` runs) — a stale artifact is a governance failure, not a
+      # warning.
+      - run: python scripts/validate_repo_graph.py
       - run: python scripts/context_engine.py --check
 
   build-test:

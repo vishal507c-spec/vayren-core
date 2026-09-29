@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
+from contextlib import suppress
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from threading import Lock
 from typing import Any
+
+_LINEAGE_LOCK = Lock()
 
 
 @dataclass(frozen=True)
@@ -144,7 +150,6 @@ class LineageGraph:
 
 
 def _lineage_path(data_dir: Path | str | None) -> Path:
-    base = Path(data_dir) if data_dir and Path(data_dir).is_dir() else Path.cwd() / ".vayren"  # noqa: F841
     if data_dir and Path(data_dir).is_dir():
         p = Path(data_dir) / "research" / "lineage.json"
     else:
@@ -154,16 +159,32 @@ def _lineage_path(data_dir: Path | str | None) -> Path:
 
 
 def save_lineage(graph: LineageGraph, data_dir: Path | str | None = None) -> Path:
+    """Persist the graph atomically (tmp file + replace) under a lock."""
     p = _lineage_path(data_dir)
-    p.write_text(graph.to_json(), encoding="utf-8")
+    payload = graph.to_json()
+    with _LINEAGE_LOCK:
+        fd, tmp_name = tempfile.mkstemp(dir=str(p.parent), prefix=".lineage-", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp_name, p)
+        except BaseException:
+            with suppress(OSError):
+                os.unlink(tmp_name)
+            raise
     return p
 
 
 def load_lineage(data_dir: Path | str | None = None) -> LineageGraph:
+    """Load the graph; corrupt content raises (never a silent empty graph)."""
     p = _lineage_path(data_dir)
     if not p.exists():
         return LineageGraph()
+    with _LINEAGE_LOCK:
+        text = p.read_text(encoding="utf-8")
     try:
-        return LineageGraph.from_json(p.read_text(encoding="utf-8"))
-    except Exception:
-        return LineageGraph()
+        return LineageGraph.from_json(text)
+    except Exception as exc:
+        raise ValueError(f"corrupt lineage file {p} — refusing silent loss") from exc

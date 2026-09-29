@@ -12,12 +12,13 @@ self-modifying loop.
 from dataclasses import dataclass
 from enum import Enum
 
+# Vocabulary lives behind core.ai._vocab: the canonical core.system module
+# wins when it lands; a local fallback keeps the Python-owned AI layer
+# importable until then.
+from core.ai._vocab import SystemModel
 from core.ai.change_simulation import ChangeSimulation, simulate_plan
 from core.ai.plan import Plan, PlanValidationResult
 from core.ai.plan_validator import PlanValidator, Policy
-
-# DEBT: retained unwired import (see 90_brain/ai_memory.md).
-from core.system.system_model import SystemModel  # pyright: ignore[reportMissingImports]
 
 
 class SandboxStage(Enum):
@@ -138,6 +139,13 @@ class Sandbox:
             raise SandboxError(msg)
 
     def _advance(self) -> None:
+        # DEPLOY is terminal: advancing past it is a lifecycle error
+        # (SandboxError), never an IndexError off the end of _STAGE_ORDER.
         index = _STAGE_ORDER.index(self._stage) + 1
+        if index >= len(_STAGE_ORDER):
+            raise SandboxError(
+                f"cannot advance past the terminal stage {self._stage.value}; "
+                "deployment is a recorded decision"
+            )
         self._stage = _STAGE_ORDER[index]
         self._history.append(self._stage.value)

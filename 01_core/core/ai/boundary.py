@@ -6,6 +6,7 @@ delete production data, modify protected systems, deploy unvalidated code,
 or override contracts. Deterministic VAYREN policies stay in charge.
 """
 
+import re
 from dataclasses import dataclass
 from enum import Enum
 
@@ -69,7 +70,7 @@ _FORBIDDEN_VERBS: dict[str, ActionKind] = {
 }
 
 
-class BoundaryViolation(PermissionError):  # noqa: N818
+class BoundaryViolation(RuntimeError):  # noqa: N818 -- "violation" is the domain term; RuntimeError (not PermissionError/OSError) so boundary denials are never swallowed by `except OSError` handlers.
     """Raised when AI attempts an action outside its boundary."""
 
 
@@ -86,7 +87,13 @@ class AiBoundary:
     """Fail-closed gatekeeper for AI actions."""
 
     def request(self, action: ActionKind) -> BoundaryDecision:
-        """Decide whether one action is inside the AI boundary."""
+        """Decide whether one action is inside the AI boundary.
+
+        Fail closed: anything that is not an `ActionKind` member is denied
+        (never a crash on ``.value``).
+        """
+        if not isinstance(action, ActionKind):
+            return BoundaryDecision(None, False, f"unrecognized action request: {action!r}")
         if action in FORBIDDEN_ACTIONS:
             return BoundaryDecision(action, False, f"forbidden by AI boundary: {action.value}")
         return BoundaryDecision(action, True, f"allowed by AI boundary: {action.value}")
@@ -98,13 +105,18 @@ class AiBoundary:
             raise BoundaryViolation(decision.reason)
 
     def classify(self, text: str) -> ActionKind | None:
-        """Classify a free-text action request; unknown requests return None."""
+        """Classify a free-text action request; unknown requests return None.
+
+        Verbs match on token boundaries (``\\b``), so "planned" does not
+        classify as PLAN and "re-execute trades" does not grant anything —
+        substring matching would both over- and under-grant.
+        """
         lowered = text.lower().strip()
         for verb, action in _FORBIDDEN_VERBS.items():
-            if verb in lowered:
+            if re.search(r"\b" + re.escape(verb) + r"\b", lowered):
                 return action
         for verb, action in _ALLOWED_VERBS.items():
-            if verb in lowered:
+            if re.search(r"\b" + re.escape(verb) + r"\b", lowered):
                 return action
         return None
 

@@ -847,6 +847,9 @@ export component AppWindow inherits Window {
                     connect-requested(v0, v1, v2, v3, v4, v5) => { root.broker-connect-requested(v0, v1, v2, v3, v4, v5); }
                     retry-requested() => { root.broker-login-requested(); }
                     disconnect-requested() => { root.broker-disconnect-requested(); }
+                    remove-requested() => { root.broker-remove-requested(); }
+                    config-saved(key, value) => { root.broker-config-saved(key, value); }
+                    copy-callback() => { root.broker-copy-callback(); }
                     refresh-requested() => { root.broker-refresh-requested(); }
                     help-requested() => { root.broker-help-requested(); }
                     add-broker-requested() => { root.broker-add-requested(); }

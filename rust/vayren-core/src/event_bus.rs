@@ -129,12 +129,18 @@ impl EventBus {
 
     /// Remove all subscriptions.
     pub fn clear(&self) {
-        self.subscribers.write().unwrap_or_else(|e| e.into_inner()).clear();
+        self.subscribers
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
     }
 
     /// Count of event types with active subscriptions.
     pub fn event_type_count(&self) -> usize {
-        self.subscribers.read().unwrap_or_else(|e| e.into_inner()).len()
+        self.subscribers
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .len()
     }
 
     /// Count of handlers for a specific event type.

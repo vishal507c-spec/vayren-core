@@ -541,7 +541,10 @@ pub fn apply_market(ui: &AppWindow, state: &market::MarketState) {
         chunk: dl_status.chunk.clone().into(),
         rows: dl_status.rows.clone().into(),
         coverage: dl_status.coverage.clone().into(),
-        progress_pct: dl_status.progress_pct,
+        // Slint's `float` is f32, so the narrowing happens exactly here at the
+        // UI boundary — the view-model keeps the full f64 so the label and any
+        // Rust-side comparison use the value the backend actually measured.
+        progress_pct: dl_status.progress_pct as f32,
         progress_note: dl_status.progress_note.clone().into(),
         perf_rows: dl_status.perf_rows.clone().into(),
         perf_elapsed: dl_status.perf_elapsed.clone().into(),
@@ -1837,7 +1840,12 @@ pub struct LabRunRequest {
 
 impl LabRunRequest {
     /// Gather the current workspace request; `None` when no strategy is
-    /// selected (RUN stays honestly disabled — never invents a request).
+    /// selected (RUN stays honestly disabled — never invents a request) or
+    /// when the capital is unparseable. A missing/garbage capital used to
+    /// become `0.0`, which is a fail-OPEN: the backend would happily run a
+    /// backtest with zero capital, producing a 100%-shaped equity curve that
+    /// looks like an enormous return. An unusable capital now yields no
+    /// request at all, so RUN stays disabled until the value is real.
     pub fn gather(state: &LabState) -> Option<Self> {
         let name = state.selected_strategy()?.name.clone();
         let known = |s: &String| state.universe_symbols.iter().any(|u| u == s);
@@ -1860,7 +1868,12 @@ impl LabRunRequest {
             .get(state.timeframe_index.max(0) as usize)
             .cloned()
             .unwrap_or_default();
-        let capital = parse_capital(&state.cfg_capital).unwrap_or(0.0);
+        // Zero, negative, non-finite or unparseable capital → no request.
+        // A finite positive amount is the only honest starting equity.
+        let capital = parse_capital(&state.cfg_capital)?;
+        if !capital.is_finite() || capital <= 0.0 {
+            return None;
+        }
         let mode = match state.mode {
             LabMode::Long => "buy",
             LabMode::Short => "sell",
@@ -1938,6 +1951,11 @@ pub struct LabSelectRequest {
 }
 
 impl LabSelectRequest {
+    /// Gather the select request. Shares [`LabRunRequest::gather`]'s
+    /// validation, so an unusable capital blocks the strategy switch as well:
+    /// the backend echoes the capital straight back into the workspace, and
+    /// echoing `0.0` would wipe the user's real starting equity with a value
+    /// they never typed.
     pub fn gather(state: &LabState) -> Option<Self> {
         let run = LabRunRequest::gather(state)?;
         Some(LabSelectRequest {
@@ -4413,6 +4431,40 @@ mod tests {
         assert_eq!(parse_capital("1000000"), Some(1000000.0));
         assert_eq!(parse_capital(""), None);
         assert_eq!(parse_capital("—"), None);
+    }
+
+    #[test]
+    fn an_unusable_capital_keeps_run_disabled_instead_of_sending_zero() {
+        // Fail-OPEN that was: an unparseable capital became 0.0 and the
+        // backend ran a backtest on zero starting equity, producing a
+        // 100%-shaped equity curve that reads as an enormous return.
+        let mut state = demo_lab_state();
+        state.engine_wired = true;
+        state.selected = Some(0);
+        state.universe_symbols = vec!["RELIANCE".into()];
+        state.universe_selected = vec!["RELIANCE".into()];
+        state.timeframes = vec!["15m".into()];
+        state.timeframe_index = 0;
+        state.cfg_dates_start = "2026-01-01".into();
+        state.cfg_dates_end = "2026-06-10".into();
+
+        for bad in ["", "—", "abc", "0", "-5000"] {
+            state.cfg_capital = bad.to_string();
+            assert!(
+                LabRunRequest::gather(&state).is_none(),
+                "capital {bad:?} must not produce a run request"
+            );
+        }
+
+        // A real positive amount works.
+        state.cfg_capital = "₹10,00,000".into();
+        let request = LabRunRequest::gather(&state).expect("valid capital runs");
+        assert_eq!(request.capital, 1000000.0);
+
+        // The select request carries the same validation, so a bad capital
+        // cannot echo 0.0 back into the workspace and wipe the real value.
+        state.cfg_capital = "—".into();
+        assert!(LabSelectRequest::gather(&state).is_none());
     }
 
     #[test]

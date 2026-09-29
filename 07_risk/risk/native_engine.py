@@ -240,49 +240,72 @@ class NativeRiskEngine:
             raise NativeBridgeError(f"native risk engine handle {handle} already released")
 
     def evaluate(self, request: RiskRequest, kill_halted: bool) -> RiskDecision:
-        """Ask the kernel for a verdict. Bridge faults propagate; the caller
-        that must never raise wraps them into a denial."""
-        code = int(
-            _lib.vy_risk_engine_evaluate(
-                self._handle,
-                1 if kill_halted else 0,
-                *_text(request.intent_id),
-                *_text(request.strategy_id),
-                *_text(request.symbol),
-                *_text(request.side),
-                *_text(request.timestamp),
-                float(request.quantity),
-                float(request.price),
-                float(request.position_qty),
-                float(request.day_pnl),
-                float(request.strategy_day_pnl),
-                float(request.equity),
-                float(request.available_capital),
-                float(request.now_epoch),
-                int(request.orders_today),
-                *_optional(request.spread_pct),
-                *_optional(request.data_age_seconds),
-                *_optional(request.last_order_epoch),
-                1 if request.broker_healthy else 0,
+        """Ask the kernel for a verdict. Bridge faults NEVER propagate: any
+        marshalling failure, kernel rejection or decision-read fault becomes a
+        denial (`approved=False` with a `bridge fault: ...` reason), so every
+        caller gets the fail-closed verdict without wrapping."""
+        try:
+            code = int(
+                _lib.vy_risk_engine_evaluate(
+                    self._handle,
+                    1 if kill_halted else 0,
+                    *_text(request.intent_id),
+                    *_text(request.strategy_id),
+                    *_text(request.symbol),
+                    *_text(request.side),
+                    *_text(request.timestamp),
+                    float(request.quantity),
+                    float(request.price),
+                    float(request.position_qty),
+                    float(request.day_pnl),
+                    float(request.strategy_day_pnl),
+                    float(request.equity),
+                    float(request.available_capital),
+                    float(request.now_epoch),
+                    int(request.orders_today),
+                    *_optional(request.spread_pct),
+                    *_optional(request.data_age_seconds),
+                    *_optional(request.last_order_epoch),
+                    1 if request.broker_healthy else 0,
+                )
             )
-        )
+        except Exception as exc:
+            return RiskDecision(
+                approved=False,
+                intent_id=request.intent_id,
+                reasons=(f"bridge fault: {exc}",),
+                checks=(),
+            )
         if code not in (0, 1):
-            raise NativeBridgeError(f"native risk engine rejected the request: {code}")
-        document = _read_decision(self._handle)
-        checks = tuple(
-            RiskCheck(
-                name=str(entry["name"]),
-                passed=bool(entry["passed"]),
-                detail=str(entry["detail"]),
+            return RiskDecision(
+                approved=False,
+                intent_id=request.intent_id,
+                reasons=(f"bridge fault: native risk engine rejected the request: {code}",),
+                checks=(),
             )
-            for entry in document["checks"]
-        )
-        return RiskDecision(
-            approved=bool(document["approved"]),
-            intent_id=str(document["intent_id"]),
-            reasons=tuple(str(reason) for reason in document["reasons"]),
-            checks=checks,
-        )
+        try:
+            document = _read_decision(self._handle)
+            checks = tuple(
+                RiskCheck(
+                    name=str(entry["name"]),
+                    passed=bool(entry["passed"]),
+                    detail=str(entry["detail"]),
+                )
+                for entry in document["checks"]
+            )
+            return RiskDecision(
+                approved=bool(document["approved"]),
+                intent_id=str(document["intent_id"]),
+                reasons=tuple(str(reason) for reason in document["reasons"]),
+                checks=checks,
+            )
+        except Exception as exc:
+            return RiskDecision(
+                approved=False,
+                intent_id=request.intent_id,
+                reasons=(f"bridge fault: {exc}",),
+                checks=(),
+            )
 
 
 __all__ = ["NativeBridgeError", "NativeRiskEngine"]

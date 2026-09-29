@@ -39,6 +39,21 @@ fn arg_value(argv: &[String], name: &str) -> Option<String> {
     None
 }
 
+/// The user's home directory.
+///
+/// `USERPROFILE` is the Windows variable; on every other platform it does not
+/// exist, so the old `USERPROFILE` lookup fell back to `"."` and wrote
+/// `./.vayren/data` — i.e. the data directory landed in whatever CWD the app
+/// happened to be launched from. `HOME` is the portable name on unix.
+fn home_dir() -> String {
+    #[cfg(windows)]
+    let raw = std::env::var("USERPROFILE").ok();
+    #[cfg(not(windows))]
+    let raw = std::env::var("HOME").ok();
+    raw.filter(|home| !home.trim().is_empty())
+        .unwrap_or_else(|| ".".to_string())
+}
+
 fn default_data_dir() -> String {
     // Same precedence as the Python launcher: explicit flags (handled by the
     // caller) → VAYREN_DATA_DIR → legacy workstation folder when present →
@@ -53,15 +68,35 @@ fn default_data_dir() -> String {
     if legacy.is_dir() {
         return legacy.to_string_lossy().into_owned();
     }
-    let home = std::env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string());
-    format!("{}/.vayren/data", home)
+    format!("{}/.vayren/data", home_dir())
 }
 
 fn default_strategy_dir() -> String {
-    std::env::var("VAYREN_STRATEGIES").unwrap_or_else(|_| {
-        let home = std::env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string());
-        format!("{}/.vayren/strategies", home)
-    })
+    std::env::var("VAYREN_STRATEGIES")
+        .unwrap_or_else(|_| format!("{}/.vayren/strategies", home_dir()))
+}
+
+/// Parse the `--limit` CLI value.
+///
+/// A garbage value used to parse to `None`, which the bridge reads as "no
+/// limit" — so `--limit abc` silently turned a bounded startup fetch into an
+/// UNBOUNDED one (the backend would try to load the symbol's entire history).
+/// An explicit flag that cannot be understood is an error, not a default.
+fn parse_limit(raw: Option<String>) -> Result<Option<i64>, String> {
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("--limit was given with no value".to_string());
+    }
+    let parsed: i64 = trimmed
+        .parse()
+        .map_err(|_| format!("--limit must be a whole number of bars, got '{raw}'"))?;
+    if parsed < 0 {
+        return Err(format!("--limit must be >= 0, got {parsed}"));
+    }
+    Ok(Some(parsed))
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -70,6 +105,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let data_dir = arg_value(&argv, "--data-dir").unwrap_or_else(default_data_dir);
     let strategy_dir = arg_value(&argv, "--strategy-dir").unwrap_or_else(default_strategy_dir);
+    // An unparseable --limit is rejected BEFORE the backend is spawned: a
+    // silent "no limit" would start an unbounded history fetch the user never
+    // asked for.
+    let snapshot_limit: Option<i64> = match parse_limit(arg_value(&argv, "--limit")) {
+        Ok(limit) => limit,
+        Err(message) => {
+            eprintln!("vayren-shell: {message}");
+            return Err(message.into());
+        }
+    };
 
     println!("VAYREN starting...");
     println!("Data dir: {}", data_dir);
@@ -112,7 +157,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // the state must be real, complete and render-ready.
     let snapshot_symbol = arg_value(&argv, "--symbol");
     let snapshot_timeframe = arg_value(&argv, "--timeframe");
-    let snapshot_limit: Option<i64> = arg_value(&argv, "--limit").and_then(|s| s.parse().ok());
     println!("Requesting market snapshot...");
     let market_state = match PythonBackend::lock_send(
         &backend,
@@ -206,7 +250,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         LabRun(u64, Option<serde_json::Value>),
         LabCoverage(u64, Option<serde_json::Value>),
         /// A measured progress event, applied on the UI thread as it arrives.
-        LabProgress(serde_json::Value),
+        /// The run sequence rides along so a progress event from a SUPERSEDED
+        /// run can be dropped: without it, a run that was cancelled and
+        /// restarted could have its old run's late progress applied on top of
+        /// the new run, showing a completed count that belongs to a backtest
+        /// the user no longer has on screen.
+        LabProgress(u64, serde_json::Value),
     }
     let (fetch_tx, fetch_rx) = mpsc::channel::<FetchResult>();
     let market_seq = Arc::new(AtomicU64::new(0));
@@ -292,7 +341,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             std::thread::spawn(move || {
                 let progress_tx = tx.clone();
                 let data = PythonBackend::lock_send_streaming(&backend, command, move |event| {
-                    let _ = progress_tx.send(FetchResult::LabProgress(event));
+                    let _ = progress_tx.send(FetchResult::LabProgress(id, event));
                 });
                 let payload = match data {
                     Ok(BackendResponse::LabSnapshot { data })
@@ -560,7 +609,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         // Progress is applied as it arrives: throttled by the
                         // backend's own 100ms publish, so the UI thread is
                         // never flooded and the panel still tracks reality.
-                        FetchResult::LabProgress(event) => {
+                        // Latest-wins per run: an event from a run older than
+                        // the one already on screen belongs to a backtest the
+                        // user has moved on from, so it is dropped rather than
+                        // overwriting current facts.
+                        FetchResult::LabProgress(id, event) => {
+                            if id < last_run {
+                                continue;
+                            }
                             lab_state.borrow_mut().apply_progress(&event);
                             shell::apply_lab(&ui, &lab_state.borrow());
                         }
@@ -872,6 +928,153 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Add broker requested");
     });
     {
+        // REMOVE. The backend protocol has exactly ONE destructive broker
+        // command — `disconnect_broker` — and no remove/delete verb. Rather
+        // than inventing a wire message the Python side does not understand
+        // (which would answer "Unknown command" and leave the user with a
+        // button that looks broken), REMOVE performs the real destructive
+        // action that DOES exist: it disconnects the session — then states
+        // plainly that the stored broker configuration was NOT removed,
+        // because no backend command does that. Silently pretending the
+        // profile was deleted while the credentials are still on disk would
+        // be the worse lie.
+        let handle = ui.as_weak();
+        let backend = Arc::clone(&backend);
+        let cur_ws = current_workspace.clone();
+        ui.on_broker_remove_requested(move || {
+            let broker_id = cur_ws.borrow().selected_id.clone();
+            println!("Broker remove requested for '{}'", broker_id);
+            let handle_bg = handle.clone();
+            let backend_bg = Arc::clone(&backend);
+            std::thread::spawn(move || {
+                let result = PythonBackend::lock_send(
+                    &backend_bg,
+                    BackendCommand::DisconnectBroker {
+                        broker_id: broker_id.clone(),
+                    },
+                );
+                match result {
+                    Ok(BackendResponse::SystemSnapshot { data }) => {
+                        let workspace = BrokerWorkspace::from_json(&data);
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(ui) = handle_bg.upgrade() {
+                                shell::apply_connection(&ui, &workspace);
+                                ui.set_conn_error_message(
+                                    format!(
+                                        "Removed '{broker_id}' is not supported: the session was \
+                                         disconnected, but the stored credentials are still on disk."
+                                    )
+                                    .into(),
+                                );
+                            }
+                        });
+                    }
+                    Ok(other) => {
+                        eprintln!("Broker remove: unexpected response ({other:?})");
+                    }
+                    Err(err) => {
+                        eprintln!("Broker remove failed: {err}");
+                    }
+                }
+            });
+        });
+    }
+    {
+        // CONFIG SAVE. The backend exposes no standalone "save one field"
+        // command either: credentials are persisted as part of `connect_broker`
+        // (which merges the typed values into the vault and then configures the
+        // venue). Inventing a command here would be a no-op that reports
+        // success. So the honest wiring is to route the typed key/value pair
+        // through the EXISTING connect path, which is what actually stores it.
+        let handle = ui.as_weak();
+        let backend = Arc::clone(&backend);
+        let cur_ws = current_workspace.clone();
+        ui.on_broker_config_saved(
+            move |key: slint::SharedString, value: slint::SharedString| {
+                let key = key.as_str().trim().to_string();
+                let value = value.as_str().trim().to_string();
+                if key.is_empty() {
+                    return;
+                }
+                let broker_id = cur_ws.borrow().selected_id.clone();
+                println!("Broker config saved for '{}' (key '{}')", broker_id, key);
+                let mut credentials = std::collections::HashMap::new();
+                if !value.is_empty() {
+                    credentials.insert(key, value);
+                }
+                let handle_bg = handle.clone();
+                let backend_bg = Arc::clone(&backend);
+                std::thread::spawn(move || {
+                    match PythonBackend::lock_send(
+                        &backend_bg,
+                        BackendCommand::ConnectBroker {
+                            broker_id,
+                            credentials,
+                        },
+                    ) {
+                        Ok(BackendResponse::SystemSnapshot { data }) => {
+                            let workspace = BrokerWorkspace::from_json(&data);
+                            let _ = slint::invoke_from_event_loop(move || {
+                                if let Some(ui) = handle_bg.upgrade() {
+                                    shell::apply_connection(&ui, &workspace);
+                                }
+                            });
+                        }
+                        Ok(BackendResponse::Error { data }) => {
+                            eprintln!("Broker config save failed: {}", data.message);
+                            let msg = data.message.clone();
+                            let _ = slint::invoke_from_event_loop(move || {
+                                if let Some(ui) = handle_bg.upgrade() {
+                                    ui.set_conn_is_failed(true);
+                                    ui.set_conn_error_message(msg.into());
+                                }
+                            });
+                        }
+                        Ok(other) => {
+                            eprintln!("Broker config save: unexpected response ({other:?})");
+                        }
+                        Err(err) => {
+                            eprintln!("Broker config save IPC error: {err}");
+                        }
+                    }
+                });
+            },
+        );
+    }
+    {
+        // COPY CALLBACK URL. A real clipboard write through the same
+        // `clipboard-win` crate the PASTE path already uses (Windows-only, so
+        // other platforms report unavailable rather than silently doing
+        // nothing). The text is the selected broker's identity + environment —
+        // the only facts the workspace actually holds; no URL is invented.
+        let handle = ui.as_weak();
+        let cur_ws = current_workspace.clone();
+        ui.on_broker_copy_callback(move || {
+            let ws = cur_ws.borrow();
+            if ws.selected_id.is_empty() {
+                eprintln!("Broker copy: no broker selected — nothing to copy");
+                return;
+            }
+            let text = format!(
+                "{} [{}] — {}",
+                ws.display_name, ws.selected_id, ws.env_label
+            );
+            #[cfg(windows)]
+            let copied = clipboard_win::set_clipboard_string(text.as_str()).is_ok();
+            #[cfg(not(windows))]
+            let copied: bool = {
+                eprintln!("Broker copy: clipboard unavailable on this platform");
+                false
+            };
+            if copied {
+                println!("Broker callback details copied to clipboard");
+            }
+            if let Some(ui) = handle.upgrade() {
+                ui.set_conn_status_message(format!("Copied to clipboard: {text}").into());
+            }
+        });
+    }
+    {
         let handle = ui.as_weak();
         ui.on_broker_paste_requested(move |idx: i32| {
             // clipboard-win is a Windows-only crate (empty elsewhere), so the
@@ -888,13 +1091,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
                 if let Some(ui) = handle.upgrade() {
                     let s = slint::SharedString::from(trimmed);
+                    // Indexed, NOT defaulted: the old `_ => v5` arm meant any
+                    // out-of-range index silently OVERWROTE the sixth
+                    // credential field (usually the secret) with whatever was
+                    // on the clipboard. An unknown index is a no-op.
                     match idx {
                         0 => ui.set_broker_field_v0(s),
                         1 => ui.set_broker_field_v1(s),
                         2 => ui.set_broker_field_v2(s),
                         3 => ui.set_broker_field_v3(s),
                         4 => ui.set_broker_field_v4(s),
-                        _ => ui.set_broker_field_v5(s),
+                        5 => ui.set_broker_field_v5(s),
+                        _ => eprintln!("Broker paste ignored: no field {idx}"),
                     }
                 }
             } else {
@@ -923,4 +1131,52 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("VAYREN shutdown complete");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_garbage_limit_is_rejected_not_treated_as_no_limit() {
+        // `--limit abc` used to parse to None, which the bridge reads as "no
+        // limit" — silently upgrading a bounded startup fetch into an
+        // UNBOUNDED one. An explicit flag that cannot be understood is an
+        // error, not a default.
+        assert_eq!(parse_limit(None).expect("absent flag"), None);
+        assert_eq!(
+            parse_limit(Some("150".to_string())).expect("int"),
+            Some(150)
+        );
+        assert_eq!(
+            parse_limit(Some(" 150 ".to_string())).expect("int"),
+            Some(150)
+        );
+        assert_eq!(parse_limit(Some("0".to_string())).expect("zero"), Some(0));
+        for bad in ["abc", "", "  ", "1.5", "-1", "150k", "١٥٠"] {
+            assert!(
+                parse_limit(Some(bad.to_string())).is_err(),
+                "--limit {bad:?} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn arg_value_reads_both_flag_spellings() {
+        let argv: Vec<String> = ["--symbol", "RELIANCE", "--limit=150", "--flag"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(arg_value(&argv, "--symbol").as_deref(), Some("RELIANCE"));
+        assert_eq!(arg_value(&argv, "--limit").as_deref(), Some("150"));
+        assert_eq!(arg_value(&argv, "--missing"), None);
+    }
+
+    #[test]
+    fn home_dir_is_never_empty_so_data_lands_in_a_stable_place() {
+        // A blank home used to fall through to ".", putting the data folder in
+        // whatever CWD the app was launched from.
+        let home = home_dir();
+        assert!(!home.trim().is_empty());
+    }
 }

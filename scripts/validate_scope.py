@@ -765,6 +765,29 @@ def _cache_path(key: str) -> Path:
     return VALID_DIR / f"{key}.json"
 
 
+def purge_cache() -> int:
+    """Drop every cached validation result (and stale lock/tmp leftovers).
+
+    `--no-cache` promises a run that ignores cached outcomes AND starts from an
+    empty cache; leaving the files behind only deferred the purge to a later
+    run. Returns the number of files removed.
+    """
+    removed = 0
+    if not VALID_DIR.is_dir():
+        return 0
+    for path in sorted(VALID_DIR.iterdir()):
+        if path.is_dir() and path.name.startswith(".lock-"):
+            shutil.rmtree(path, ignore_errors=True)
+            removed += 1
+        elif path.is_file() and (path.suffix == ".json" or ".tmp-" in path.name):
+            try:
+                path.unlink()
+            except OSError:
+                continue
+            removed += 1
+    return removed
+
+
 def cache_lookup(command: str, scope: dict, graph: dict) -> dict | None:
     """Reusable PASS/FAIL/UNAVAILABLE only; TIMEOUT/ENV rerun (never reused)."""
     built = build_cache_key(command, scope, graph)
@@ -1210,8 +1233,9 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         return 2
     if args.no_cache:
-        for path in VALID_DIR.glob("*.json"):
-            _ = path
+        purged = purge_cache()
+        if purged and not args.json:
+            print(f"purged {purged} cached validation file(s) from {VALID_DIR}")
     try:
         result = validate_manifest(
             manifest,

@@ -7,6 +7,7 @@ nothing here ever modifies the system.
 
 from dataclasses import dataclass
 from enum import Enum
+from threading import Lock
 
 
 class Decision(Enum):
@@ -56,6 +57,7 @@ class EngineeringMemory:
     def __init__(self) -> None:
         self._entries: list[EngineeringEntry] = []
         self._next_id = 1
+        self._lock = Lock()
 
     def add(
         self,
@@ -71,20 +73,21 @@ class EngineeringMemory:
         evidence: tuple[str, ...] = (),
     ) -> EngineeringEntry:
         """Append a new entry with an auto-incrementing id."""
-        entry = EngineeringEntry(
-            id=self._next_id,
-            problem=problem,
-            hypothesis=hypothesis,
-            experiment=experiment,
-            change=change,
-            benchmark=benchmark,
-            result=result,
-            decision=decision,
-            reason=reason,
-            evidence=evidence,
-        )
-        self._entries.append(entry)
-        self._next_id += 1
+        with self._lock:
+            entry = EngineeringEntry(
+                id=self._next_id,
+                problem=problem,
+                hypothesis=hypothesis,
+                experiment=experiment,
+                change=change,
+                benchmark=benchmark,
+                result=result,
+                decision=decision,
+                reason=reason,
+                evidence=evidence,
+            )
+            self._entries.append(entry)
+            self._next_id += 1
         return entry
 
     def get(self, entry_id: int) -> EngineeringEntry:

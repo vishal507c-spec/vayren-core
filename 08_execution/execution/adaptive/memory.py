@@ -8,11 +8,27 @@ from memory to RiskPolicy; memory output is diagnostics + warm-start data).
 
 from __future__ import annotations
 
+import contextlib
+import copy
 import json
+import logging
+import os
+import tempfile
+import time
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+_log = logging.getLogger(__name__)
+
+# Broker observations persist diagnostics only: anything that could carry a
+# secret value is dropped before it reaches the store (case-insensitive
+# substring match for secret/token/password, prefix match for session*).
+_SECRET_SUBSTRINGS = ("secret", "token", "password")
+_SESSION_PREFIX = "session"
+
+_BROKER_HISTORY_MAX = 50
 
 
 @dataclass
@@ -38,11 +54,11 @@ class WorkingMemory:
 
     @property
     def recent_events(self) -> tuple[dict[str, Any], ...]:
-        return tuple(self._events)
+        return tuple(copy.deepcopy(event) for event in self._events)
 
     @property
     def recent_signals(self) -> tuple[dict[str, Any], ...]:
-        return tuple(self._signals)
+        return tuple(copy.deepcopy(signal) for signal in self._signals)
 
     def snapshot(self) -> dict[str, Any]:
         return {
@@ -75,22 +91,109 @@ class LongTermMemory:
                     for key in self._store:
                         if key in loaded:
                             self._store[key] = loaded[key]
-            except Exception:
-                pass
+                    self._normalize_broker_history()
+                else:
+                    self._backup_corrupt("top-level JSON is not an object")
+            except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+                self._backup_corrupt(str(exc))
+
+    def _backup_corrupt(self, reason: str) -> None:
+        """Preserve a corrupt store beside the original and start empty.
+
+        The corrupt file is never silently discarded (`except: pass` lost
+        operator history); it is renamed with a timestamp suffix and a
+        warning names both paths so the incident is auditable.
+        """
+        assert self._path is not None
+        stamp = time.strftime("%Y%m%dT%H%M%S")
+        backup = self._path.with_name(f"{self._path.name}.corrupt-{stamp}")
+        try:
+            os.replace(self._path, backup)
+            _log.warning(
+                "long-term memory store corrupt (%s); moved %s to %s and started empty",
+                reason,
+                self._path,
+                backup,
+            )
+        except OSError as exc:
+            _log.warning(
+                "long-term memory store corrupt (%s); backup of %s failed: %s",
+                reason,
+                self._path,
+                exc,
+            )
+
+    @staticmethod
+    def _sanitize_observation(observation: dict[str, Any]) -> dict[str, Any]:
+        """Copy keeping diagnostics only; secret-bearing keys never persist."""
+        clean: dict[str, Any] = {}
+        for key, value in observation.items():
+            lowered = str(key).lower()
+            if any(part in lowered for part in _SECRET_SUBSTRINGS):
+                continue
+            if lowered.startswith(_SESSION_PREFIX):
+                continue
+            clean[key] = copy.deepcopy(value)
+        return clean
+
+    def _normalize_broker_history(self) -> None:
+        """Migrate legacy `broker[name] = dict` rows to `broker[name] = [dict]`."""
+        broker = self._store.get("broker")
+        if not isinstance(broker, dict):
+            self._store["broker"] = {}
+            return
+        for name, entry in list(broker.items()):
+            if isinstance(entry, list):
+                broker[name] = [
+                    self._sanitize_observation(o) for o in entry if isinstance(o, dict)
+                ][-_BROKER_HISTORY_MAX:]
+            elif isinstance(entry, dict):
+                broker[name] = [self._sanitize_observation(entry)]
+            else:
+                broker[name] = []
 
     def _save(self) -> None:
         if self._path is None:
             return
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._path.write_text(json.dumps(self._store, indent=2, sort_keys=True), encoding="utf-8")
+        handle = tempfile.NamedTemporaryFile(  # noqa: SIM115
+            "w",
+            encoding="utf-8",
+            dir=self._path.parent,
+            delete=False,
+            suffix=".tmp",
+        )
+        try:
+            json.dump(self._store, handle, indent=2, sort_keys=True)
+            handle.flush()
+            os.fsync(handle.fileno())
+        finally:
+            with contextlib.suppress(OSError):
+                handle.close()
+        try:
+            os.replace(handle.name, self._path)
+        except OSError:
+            Path(handle.name).unlink(missing_ok=True)
+            raise
+        else:
+            try:
+                dir_fd = os.open(self._path.parent, os.O_RDONLY)
+            except OSError:
+                return
+            try:
+                os.fsync(dir_fd)
+            except OSError:
+                pass
+            finally:
+                os.close(dir_fd)
 
     def save_checkpoint(self, key: str, state: dict[str, Any]) -> None:
-        self._store["checkpoints"][key] = state
+        self._store["checkpoints"][key] = copy.deepcopy(state)
         self._save()
 
     def load_checkpoint(self, key: str) -> dict[str, Any] | None:
         checkpoint = self._store["checkpoints"].get(key)
-        return dict(checkpoint) if isinstance(checkpoint, dict) else None
+        return copy.deepcopy(checkpoint) if isinstance(checkpoint, dict) else None
 
     def record_incident(self, incident: Incident) -> None:
         self._store["incidents"].append(
@@ -99,12 +202,16 @@ class LongTermMemory:
         self._save()
 
     def record_broker(self, name: str, observation: dict[str, Any]) -> None:
-        self._store["broker"][name] = observation
+        history = self._store["broker"].setdefault(name, [])
+        if not isinstance(history, list):
+            history = self._store["broker"][name] = [history]
+        history.append(self._sanitize_observation(observation))
+        del history[:-_BROKER_HISTORY_MAX]
         self._save()
 
     @property
     def incidents(self) -> tuple[dict[str, Any], ...]:
-        return tuple(self._store["incidents"])
+        return tuple(copy.deepcopy(incident) for incident in self._store["incidents"])
 
     def advise(self) -> dict[str, Any]:
         """Diagnostics-only summary. Callers must not treat this as authority."""

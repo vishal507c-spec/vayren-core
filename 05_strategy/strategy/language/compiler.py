@@ -173,6 +173,11 @@ def compile_strategy(code: str) -> CompiledStrategy:
     # Find StrategyLogic subclass defined in this code (skip imports and base).
     # exec'd classes carry __module__ == "strategy" (our __name__); imported
     # helpers carry their home module and are skipped.
+    # `StrategyLogic` is a non-runtime-checkable Protocol, so `issubclass` is
+    # not a legal runtime check against it. The MRO walk is the honest test: a
+    # real subclass names the protocol in its bases, a duck-typed class does
+    # not (and the hasattr protocol check above is the documented fallback).
+    logic_bases = tuple(getattr(StrategyLogic, "__mro__", ()))
     strategy_class = None
     candidates = []
     for name, obj in namespace.items():
@@ -182,11 +187,8 @@ def compile_strategy(code: str) -> CompiledStrategy:
             and name != "PythonStrategy"
             and getattr(obj, "__module__", None) == "strategy"
         ):
-            try:
-                if not issubclass(obj, StrategyLogic):
-                    continue
-            except TypeError:
-                pass  # non-runtime-checkable Protocol: hasattr check above suffices
+            if not any(base in obj.__mro__ for base in logic_bases):
+                continue
             candidates.append((name, obj))
     if len(candidates) == 1:
         strategy_class = candidates[0][1]

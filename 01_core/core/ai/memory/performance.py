@@ -6,6 +6,7 @@ metric: unmeasured records are rejected.
 """
 
 from dataclasses import dataclass
+from threading import Lock
 
 METRICS = (
     "latency_ms",
@@ -16,6 +17,11 @@ METRICS = (
     "error_rate",
 )
 
+# Cost-vs-throughput contract: every metric here is a cost EXCEPT throughput.
+# Lower latency / cpu / memory / io_ops / error_rate is better (fewer I/O ops
+# means a cheaper run, even though a higher *throughput* number is better).
+# Keep io_ops in this set deliberately: it prices work done, it does not
+# measure work delivered — that is what throughput is for.
 LOWER_IS_BETTER = frozenset({"latency_ms", "cpu_percent", "memory_mb", "io_ops", "error_rate"})
 
 
@@ -40,6 +46,7 @@ class PerformanceMemory:
     def __init__(self) -> None:
         self._records: list[PerformanceRecord] = []
         self._next_id = 1
+        self._lock = Lock()
 
     def record(
         self,
@@ -58,19 +65,20 @@ class PerformanceMemory:
         if all(value is None for value in values):
             msg = "performance claims require measurements"
             raise ValueError(msg)
-        entry = PerformanceRecord(
-            id=self._next_id,
-            subject=subject,
-            benchmark=benchmark,
-            latency_ms=latency_ms,
-            throughput=throughput,
-            cpu_percent=cpu_percent,
-            memory_mb=memory_mb,
-            io_ops=io_ops,
-            error_rate=error_rate,
-        )
-        self._records.append(entry)
-        self._next_id += 1
+        with self._lock:
+            entry = PerformanceRecord(
+                id=self._next_id,
+                subject=subject,
+                benchmark=benchmark,
+                latency_ms=latency_ms,
+                throughput=throughput,
+                cpu_percent=cpu_percent,
+                memory_mb=memory_mb,
+                io_ops=io_ops,
+                error_rate=error_rate,
+            )
+            self._records.append(entry)
+            self._next_id += 1
         return entry
 
     def for_subject(self, subject: str) -> tuple[PerformanceRecord, ...]:

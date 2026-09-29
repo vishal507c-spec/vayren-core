@@ -14,7 +14,13 @@ from core.ai.boundary import (
     BoundaryViolation,
 )
 from core.ai.change_simulation import ChangeSimulation, simulate_plan
-from core.ai.context import SECTIONS, AiContext, ContextBuilder, ContextRequest
+from core.ai.context import (
+    DEFAULT_SECTIONS,
+    SECTIONS,
+    AiContext,
+    ContextBuilder,
+    ContextRequest,
+)
 from core.ai.intent import (
     Intent,
     IntentKind,
@@ -98,4 +104,5 @@ __all__ = [
     "ContextRequest",
     "AiContext",
     "SECTIONS",
+    "DEFAULT_SECTIONS",
 ]

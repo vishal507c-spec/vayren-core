@@ -7,6 +7,7 @@ sandbox approval (guarded self-optimization).
 """
 
 from dataclasses import dataclass
+from threading import Lock
 
 from core.ai.memory.performance import (
     LOWER_IS_BETTER,
@@ -50,17 +51,22 @@ class OptimizationStudy:
         self._current = current
         self._performance = performance
         self._candidates: dict[str, Candidate] = {current.label: current}
+        self._lock = Lock()
 
     def add_candidate(self, candidate: Candidate) -> None:
         """Register an alternative candidate; duplicate labels are rejected."""
-        if candidate.label in self._candidates:
-            msg = f"candidate already registered: {candidate.label}"
-            raise OptimizationError(msg)
-        self._candidates[candidate.label] = candidate
+        with self._lock:
+            if candidate.label in self._candidates:
+                msg = f"candidate already registered: {candidate.label}"
+                raise OptimizationError(msg)
+            self._candidates[candidate.label] = candidate
 
     def candidates(self) -> tuple[Candidate, ...]:
         """All candidates, ordered by label."""
-        return tuple(self._candidates[label] for label in sorted(self._candidates))
+        with self._lock:
+            labels = sorted(self._candidates)
+            candidates = tuple(self._candidates[label] for label in labels)
+        return candidates
 
     def benchmark(self, label: str, **metrics: float) -> PerformanceRecord:
         """Benchmark one candidate; results go to performance memory."""
@@ -85,9 +91,16 @@ class OptimizationStudy:
         )
 
     def compare(self, metric: str) -> tuple[RankedResult, ...]:
-        """Rank measured candidates by one metric, best first."""
+        """Rank measured candidates by one metric, best first.
+
+        Direction follows `LOWER_IS_BETTER`: cost metrics (latency, cpu,
+        memory, io_ops, errors) rank ascending — fewer I/O ops is cheaper —
+        while throughput, the only delivery metric, ranks descending.
+        """
         ranked: list[tuple[float, str]] = []
-        for label in self._candidates:
+        with self._lock:
+            labels = tuple(self._candidates)
+        for label in labels:
             best = self._performance.best(label, metric)
             if best is None:
                 continue

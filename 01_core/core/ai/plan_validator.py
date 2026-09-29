@@ -5,8 +5,10 @@ configured policy: contracts, capabilities, dependencies, permissions, and
 risk. Invalid plans are rejected with explicit reasons.
 """
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
+from core.ai._vocab import CapabilityId, RiskLevel, SystemModel
 from core.ai.plan import (
     Plan,
     PlanChangeKind,
@@ -15,11 +17,6 @@ from core.ai.plan import (
     risk_rank,
     validate_plan,
 )
-
-# DEBT: retained unwired imports (see 90_brain/ai_memory.md).
-from core.contracts.capability import CapabilityId  # pyright: ignore[reportMissingImports]
-from core.system.change_impact import RiskLevel  # pyright: ignore[reportMissingImports]
-from core.system.system_model import SystemModel  # pyright: ignore[reportMissingImports]
 
 
 @dataclass(frozen=True)
@@ -50,19 +47,49 @@ class PlanValidator:
         """The policies this validator enforces."""
         return self._policies
 
-    def validate(self, plan: Plan, system: SystemModel) -> PlanValidationResult:
-        """Validate the plan structurally, against the system, and against policies."""
+    def validate(
+        self,
+        plan: Plan,
+        system: SystemModel,
+        dependencies: Mapping[str, Sequence[str]] | None = None,
+    ) -> PlanValidationResult:
+        """Validate the plan structurally, against the system, and policies.
+
+        ``dependencies`` maps a component to the components that directly
+        depend on it; it backs the REMOVE-dependents check (a removal that
+        would orphan a surviving dependent is rejected). Pass ``None`` when no
+        dependency map is available — the check is then skipped, never assumed.
+        """
         errors = list(validate_plan(plan).errors)
         risk = plan_risk(plan)
         for capability in plan.reused_capabilities:
-            if not system.capability_graph.providers(str(capability)):
-                errors.append(f"reused capability not provided: {capability}")
+            if not system.capability_graph.providers(capability.value):
+                errors.append(f"reused capability not provided: {capability.value}")
         for capability in plan.new_capabilities:
-            if str(capability) in system.capability_graph.capabilities():
-                errors.append(f"capability already provided: {capability}")
+            if capability.value in system.capability_graph.capabilities():
+                errors.append(f"capability already provided: {capability.value}")
+        removed = {
+            change.component for change in plan.changes if change.kind is PlanChangeKind.REMOVE
+        }
         for change in plan.changes:
-            if change.kind is not PlanChangeKind.ADD and not system.has_component(change.component):
+            if change.kind is PlanChangeKind.ADD:
+                if system.has_component(change.component):
+                    errors.append(f"component already exists: {change.component}")
+            elif not system.has_component(change.component):
                 errors.append(f"unknown component: {change.component}")
+            if change.kind is PlanChangeKind.REMOVE and dependencies is not None:
+                stranded = [
+                    dependent
+                    for dependent in dependencies.get(change.component, ())
+                    if dependent != change.component
+                    and dependent not in removed
+                    and (dependent in plan.components or system.has_component(dependent))
+                ]
+                if stranded:
+                    errors.append(
+                        f"cannot remove {change.component}: "
+                        f"dependents remain: {', '.join(sorted(stranded))}"
+                    )
         for policy in self._policies:
             errors.extend(self._check_policy(plan, policy, risk))
         return PlanValidationResult(valid=not errors, errors=tuple(errors))
@@ -74,10 +101,10 @@ class PlanValidator:
                 errors.append(f"protected component (policy {policy.id}): {change.component}")
             if change.kind not in policy.allowed_change_kinds:
                 errors.append(f"change kind not allowed by policy {policy.id}: {change.kind.value}")
-        forbidden = {str(cap) for cap in policy.forbidden_capabilities}
+        forbidden = {cap.value for cap in policy.forbidden_capabilities}
         for capability in (*plan.reused_capabilities, *plan.new_capabilities):
-            if str(capability) in forbidden:
-                errors.append(f"forbidden capability (policy {policy.id}): {capability}")
+            if capability.value in forbidden:
+                errors.append(f"forbidden capability (policy {policy.id}): {capability.value}")
         if risk_rank(risk) > risk_rank(policy.max_risk):
             errors.append(
                 f"risk {risk.value} exceeds policy limit {policy.max_risk.value} "

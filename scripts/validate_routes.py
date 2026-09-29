@@ -11,7 +11,9 @@ Checks per route:
   test dirs exist when listed (empty tests.files requires a note)
   validation commands use known runners; scripts/* commands reference files
   forbidden globs match >= 1 existing path (stale patterns fail)
-  symbols resolve in their file (def/class for Python, fn/struct/enum for Rust)
+  symbols resolve in their file (def/class/async def for Python; every Rust
+  item shape — fn/struct/enum/trait/mod/type/const/static, plain or
+  pub/pub(crate)/pub(super), top-level or inside an impl block)
   primary-file extensions consistent with the route language (drift detection)
 
 Usage: python scripts/validate_routes.py [--json]
@@ -39,18 +41,43 @@ LANGUAGE_EXTENSIONS = {
     "RUST+SLINT": {".rs", ".slint", ".json"},
 }
 KNOWN_RUNNERS = {"pytest", "cargo", "ruff", "pyright", "python", "make", "cd"}
-PY_SYMBOL = re.compile(r"^(?:def|class)\s+([A-Za-z_][A-Za-z0-9_]*)\b")
-RS_SYMBOL = re.compile(r"^(?:pub\s+)?(?:fn|struct|enum)\s+([A-Za-z_][A-Za-z0-9_]*)\b")
+PY_SYMBOL = re.compile(r"^(?:async\s+)?(?:def|class)\s+([A-Za-z_][A-Za-z0-9_]*)\b")
+# Rust item declarations. Covers every route symbol shape that can appear at any
+# indentation level (top level, `impl` blocks, nested `mod`): plain `fn`,
+# visibility-restricted `pub(crate)`/`pub(super)`/`pub(in path)`, qualifiers
+# (`async`/`unsafe`/`default`/`const fn`/`extern "C"`), and the item kinds a
+# route can legitimately pin — fn/struct/enum/trait/mod/type/const/static/union.
+# `const`/`static` are both qualifiers and item kinds; backtracking resolves
+# `const FOO: u8` (item) vs `const fn f()` (qualifier) without a second pattern.
+RS_SYMBOL = re.compile(
+    r"^(?:pub(?:\([^)]*\))?\s+)?"
+    r"(?:default\s+)?(?:const\s+)?(?:async\s+)?(?:unsafe\s+)?(?:extern\s+\"[^\"]*\"\s+)?"
+    r"(?:fn|struct|enum|trait|mod|type|const|static|union)\s+([A-Za-z_][A-Za-z0-9_]*)"
+)
+# Comment lines never declare an item; skipping them keeps a commented-out
+# definition from satisfying a route symbol.
+RS_COMMENT = re.compile(r"^(?://|/\*|\*)")
 
 
 def _symbols_in(path: Path) -> set[str]:
-    """Names defined at line start (def/class for .py, fn/struct/enum for .rs)."""
+    """Names declared in the file (def/class for .py, Rust items for .rs).
+
+    Lines are matched after stripping indentation, so `impl`-block and nested
+    `mod` methods count exactly like top-level items.
+    """
     pattern = PY_SYMBOL if path.suffix == ".py" else RS_SYMBOL
     try:
         text = path.read_text(encoding="utf-8")
     except OSError:
         return set()
-    return {m.group(1) for line in text.splitlines() if (m := pattern.match(line.strip()))}
+    names: set[str] = set()
+    for line in text.splitlines():
+        stripped = line.strip()
+        if path.suffix != ".py" and RS_COMMENT.match(stripped):
+            continue
+        if match := pattern.match(stripped):
+            names.add(match.group(1))
+    return names
 
 
 def _existing_paths() -> set[str]:

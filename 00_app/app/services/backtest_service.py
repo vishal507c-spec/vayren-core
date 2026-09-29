@@ -245,12 +245,9 @@ def run_backtest(
         notes.append(
             f"Max DD -{metrics['max_drawdown_pct']:.2f}% over {len(all_trades)} closed trades"
         )
-    if run.failed:
-        notes.append(
-            f"{len(run.failed)} symbol(s) failed and are excluded: "
-            + ", ".join(run.failed[:8])
-            + ("…" if len(run.failed) > 8 else "")
-        )
+    # `run.failed` is always empty on this path: a failed symbol raises (see
+    # the fail-closed contract above), so an exclusion note here would be
+    # dead text. The name is carried by the progress event + the raised error.
     run.set_stage("done" if not run.cancelled else "cancelled", 100.0)
     run.publish(force=True)
     return {
@@ -299,7 +296,11 @@ def _prefetch_bars(
 
     if workers is None:
         workers = 1
-    workers = max(1, min(8, int(workers)))
+    try:
+        workers = int(workers)
+    except (TypeError, ValueError) as exc:
+        raise BacktestError(f"Invalid load worker count {workers!r}") from exc
+    workers = max(1, min(8, workers))
     total = len(symbols)
     out: dict[str, tuple] = {}
     errors: dict[str, str] = {}
@@ -333,17 +334,26 @@ def _prefetch_bars(
 
     if workers == 1 or total < 2:
         for symbol in symbols:
+            # The load stage is the longest stretch of a run, so it must be
+            # cancellable too — not just the execution loop.
+            if should_cancel is not None and should_cancel():
+                break
             key, bars, err = _load(symbol)
             _record(key, bars, err)
         return out, errors
 
-    with ThreadPoolExecutor(max_workers=workers) as pool:
+    pool = ThreadPoolExecutor(max_workers=workers)
+    try:
         futures = {pool.submit(_load, symbol): symbol for symbol in symbols}
         for future in as_completed(futures):
             if should_cancel is not None and should_cancel():
                 break
             key, bars, err = future.result()
             _record(key, bars, err)
+    finally:
+        # cancel_futures=True stops queued reads immediately instead of waiting
+        # for every in-flight symbol to finish.
+        pool.shutdown(wait=True, cancel_futures=True)
     return out, errors
 
 

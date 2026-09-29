@@ -56,9 +56,23 @@ def _hash_text(text: str) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def canonical_hash(text: str) -> str:
+    """Public canonical content hash (single implementation, reused by evolution).
+
+    Canonicalizes ``text`` (trims outer blank lines, per-line rstrip,
+    normalized newlines) before SHA-256 so formatting-only differences
+    never change identity.
+    """
+    return _hash_text(text)
+
+
 def _hash_ir_json(ir_json: str) -> str:
-    # IR hash is deterministic: sorted keys already in to_json, but hash raw json
-    canonical = ir_json.strip()
+    # IR hash is deterministic: canonicalize via parsed JSON with sorted keys
+    # so key order never changes identity; unparseable input falls back to raw.
+    try:
+        canonical = json.dumps(json.loads(ir_json), sort_keys=True, ensure_ascii=False)
+    except (ValueError, TypeError):
+        canonical = ir_json.strip()
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
@@ -177,17 +191,25 @@ def _detect_duplicate(
 ) -> StrategyVersion | None:
     """Return existing version with identical canonical identity if any."""
     for v in list_versions(strategy_id, data_dir):
-        if v.source_hash == source_hash and v.ir_hash == ir_hash:
-            # parameters are part of identity if present — compare canonical JSON
-            try:
-                cur = json.dumps(parameters, sort_keys=True, ensure_ascii=False)
-                existing_params = json.dumps(v.parameters, sort_keys=True, ensure_ascii=False)
-                if cur != existing_params and parameters:
-                    # different params => not duplicate
-                    continue
-            except Exception:
-                pass
+        if v.source_hash != source_hash:
+            continue
+        if not parameters:
+            # No parameters supplied: identity is source-only (an empty
+            # params dict must not "match" only versions that also happen
+            # to carry empty params, nor dodge a same-source version).
             return v
+        if v.ir_hash != ir_hash:
+            continue
+        # parameters are part of identity when present — compare canonical JSON
+        try:
+            cur = json.dumps(parameters, sort_keys=True, ensure_ascii=False)
+            existing_params = json.dumps(v.parameters, sort_keys=True, ensure_ascii=False)
+            if cur != existing_params:
+                # different params => not duplicate
+                continue
+        except Exception:
+            pass
+        return v
     return None
 
 
@@ -449,7 +471,10 @@ def save_version(version: StrategyVersion, data_dir: Path | str | None = None) -
 def load_version(
     strategy_id: str, version_id: str, data_dir: Path | str | None = None
 ) -> StrategyVersion | None:
-    path = _version_path(data_dir, strategy_id, version_id)
+    if data_dir and Path(data_dir).is_dir():
+        path = Path(data_dir) / "strategy_versions" / strategy_id / f"{version_id}.json"
+    else:
+        path = Path.cwd() / ".vayren" / "strategy_versions" / strategy_id / f"{version_id}.json"
     if not path.exists():
         return None
     try:
@@ -460,11 +485,17 @@ def load_version(
 
 
 def list_versions(strategy_id: str, data_dir: Path | str | None = None) -> list[StrategyVersion]:
-    d = _version_dir(data_dir, strategy_id)
+    """List versions newest-last. Read-only: never creates directories."""
+    if data_dir and Path(data_dir).is_dir():
+        d = Path(data_dir) / "strategy_versions" / strategy_id
+    else:
+        d = Path.cwd() / ".vayren" / "strategy_versions" / strategy_id
+    if not d.is_dir():
+        return []
     versions: list[StrategyVersion] = []
     for p in d.glob("*.json"):
         v = load_version(strategy_id, p.stem, data_dir)
         if v is not None:
             versions.append(v)
-    versions.sort(key=lambda v: v.created_at)
+    versions.sort(key=lambda v: (v.created_at, v.version_id))
     return versions

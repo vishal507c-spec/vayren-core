@@ -91,48 +91,56 @@ def validate_refs(
     refs: tuple[CredentialRef, ...],
     resolver: CredentialResolver | None,
     *,
-    expected_environment: Environment | None = None,
-    expected_broker: str | None = None,
-    expected_scope: CredentialScope | None = None,
+    expected_environment: Environment,
+    expected_broker: str,
+    expected_scope: CredentialScope,
 ) -> tuple[bool, tuple[str, ...]]:
     """Validate credential references WITHOUT exposing values.
 
     Returns (ok, reasons). Reasons name missing keys / broker mismatches /
     scope mismatches / environment mismatches — never secret values.
     Fail-closed: a missing resolver, a missing required key, or any
-    broker/scope/environment mismatch denies.
+    broker/scope/environment mismatch denies. All three expectations are
+    required (no weak `None` default that silently skips a dimension);
+    pass the venue's own values when a dimension is unconstrained.
     """
+    if not isinstance(expected_environment, Environment):
+        raise ValueError(
+            f"expected_environment must be an Environment, got {expected_environment!r}"
+        )
+    if not isinstance(expected_broker, str) or not expected_broker.strip():
+        raise ValueError(f"expected_broker must be a non-empty string, got {expected_broker!r}")
+    if not isinstance(expected_scope, CredentialScope):
+        raise ValueError(f"expected_scope must be a CredentialScope, got {expected_scope!r}")
     reasons: list[str] = []
-    scope = expected_environment
+    env = expected_environment
     if resolver is None:
         return False, ("no credential resolver configured",)
     served = resolver.resolver_environment()
     for ref in refs:
-        if expected_broker is not None and ref.broker not in (None, expected_broker):
+        if ref.broker not in (None, expected_broker):
             reasons.append(
                 f"credential {ref.key!r} is bound to broker {ref.broker!r}, "
                 f"expected {expected_broker!r}"
             )
-            continue
-        if expected_scope is not None and ref.scope is not expected_scope:
+        elif ref.scope != expected_scope:
             reasons.append(
                 f"credential {ref.key!r} is scoped to {ref.scope.value!r}, "
                 f"expected {expected_scope.value!r}"
             )
-            continue
-        if scope is not None and ref.environment is not scope:
+        elif ref.environment != env:
             reasons.append(
                 f"credential {ref.key!r} is scoped to {ref.environment.value!r}, "
-                f"expected {scope.value!r}"
+                f"expected {env.value!r}"
             )
-            continue
-        if served is not None and ref.environment is not served:
+        elif served is not None and ref.environment != served:
             reasons.append(
                 f"credential {ref.key!r} requires {ref.environment.value!r}, "
                 f"resolver serves {served.value!r}"
             )
-            continue
-        if ref.required and resolver.resolve(ref) is None:
+        elif ref.required and resolver.resolve(ref) is None:
+            # The store is touched only for refs that passed every
+            # broker/scope/environment check — invalid refs never reach it.
             reasons.append(f"secret not resolvable: {ref.key}")
     return (not reasons, tuple(reasons))
 

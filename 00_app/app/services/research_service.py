@@ -720,6 +720,17 @@ class ResearchService:
                 known = sorted(set(known) | set(labels))
         return validate_research_config(dict(config or {}), known)
 
+    @staticmethod
+    def _number(value: Any, default: float = 0.0) -> float:
+        """Coerce to float; non-numeric becomes the default, never a raise."""
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return default
+        if number != number or number in (float("inf"), float("-inf")):
+            return default
+        return number
+
     def _canonical_config(self, config: dict[str, Any], source_hash: str = "") -> dict[str, Any]:
         symbols: list[str] = []
         for symbol in config.get("symbols", ()) or ():
@@ -743,10 +754,10 @@ class ResearchService:
             "timeframe": str(config.get("timeframe", "") or ""),
             "start_date": str(config.get("start_date", "") or "")[:10],
             "end_date": str(config.get("end_date", "") or "")[:10],
-            "side": str(config.get("side", "BOTH") or "BOTH").upper(),
-            "initial_capital": float(config.get("initial_capital", 0) or 0),
-            "slippage_pct": float(config.get("slippage_pct", 0) or 0),
-            "commission_pct": float(config.get("commission_pct", 0) or 0),
+            "side": str(config.get("side", "BOTH") or "BOTH").strip().upper(),
+            "initial_capital": self._number(config.get("initial_capital", 0)),
+            "slippage_pct": self._number(config.get("slippage_pct", 0)),
+            "commission_pct": self._number(config.get("commission_pct", 0)),
             "parameters": parameters,
         }
 

@@ -25,6 +25,8 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
+import os
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -67,7 +69,12 @@ class LiveConfigError(RuntimeError):
 
 @dataclass
 class LiveTradeConfig:
-    """UI-owned session setup. Plain data; restored on reopen, never auto-started."""
+    """UI-owned session setup. Plain data; restored on reopen, never auto-started.
+
+    NOTE: ``capital`` defaults to ₹10,00,000 for the LIVE tab while the Lab
+    defaults to ₹10,000 — different surfaces, different sizing basis. Do not
+    "unify" them without updating both tabs' copy.
+    """
 
     strategy_name: str = ""
     symbols: tuple[str, ...] = ()
@@ -94,15 +101,29 @@ class LiveSessionStore:
             return {}
         try:
             data = json.loads(raw)
-        except ValueError:
+        except (ValueError, UnicodeDecodeError):
+            logging.getLogger(__name__).warning(
+                "live session file %s is corrupt; starting fresh", self._path
+            )
             return {}
         return data if isinstance(data, dict) else {}
 
     def save(self, data: dict[str, Any]) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self._path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data, indent=1), encoding="utf-8")
+        text = json.dumps(data, indent=1)
+        with open(tmp, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            with contextlib.suppress(OSError):
+                os.fsync(handle.fileno())
         tmp.replace(self._path)
+        with contextlib.suppress(OSError):
+            dir_fd = os.open(str(self._path.parent), os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
 
 
 def _utcnow_iso() -> str:
@@ -192,7 +213,7 @@ class LiveTradingService:
         quantity: float | None = None,
     ) -> None:
         if self._status == "RUNNING":
-            return  # setup is frozen while a session runs
+            raise LiveConfigError("setup is frozen while a session runs")
         if strategy_name is not None:
             self._config.strategy_name = str(strategy_name)
         if symbols is not None:
@@ -204,8 +225,13 @@ class LiveTradingService:
                 self._confirmed_live_at = ""
             self._config.mode = mode
         if quantity is not None:
-            with contextlib.suppress(TypeError, ValueError):
-                self._config.quantity = max(0.0, float(quantity))
+            try:
+                qty = float(quantity)
+            except (TypeError, ValueError) as exc:
+                raise LiveConfigError(f"invalid quantity {quantity!r}") from exc
+            if qty != qty or qty in (float("inf"), float("-inf")) or qty <= 0:
+                raise LiveConfigError(f"quantity must be a positive finite number ({quantity!r})")
+            self._config.quantity = qty
         self.invalidate_validation_cache()
         self._chart_cache_key = None
         self._chart_cache = None
@@ -463,6 +489,13 @@ class LiveTradingService:
     # ── snapshot (the ONLY data the LIVE tab reads) ─────────────────────
 
     def snapshot(self) -> dict[str, Any]:
+        # Timer ticks arrive on the timer thread and queue for main-thread
+        # delivery; the headless loop never pumps, so drain them here — every
+        # snapshot doubles as the delivery point and sessions actually step.
+        from app.observable import pump_events
+
+        with contextlib.suppress(Exception):
+            pump_events()
         blockers = self.validate() if self._status != "RUNNING" else ()
         broker_name = self.broker_name()
         connected = False
@@ -500,9 +533,9 @@ class LiveTradingService:
                         pnl = pos.unrealized(px) if mark else 0.0
                         unrealized += pnl
                         realized += pos.realized_pnl
-                        if pnl >= 0:
+                        if pnl > 0:
                             wins += 1
-                        else:
+                        elif pnl < 0:
                             losses += 1
                         positions.append(
                             {
@@ -818,8 +851,9 @@ class LiveTradingService:
 
         Raises LiveConfigError with the exact reason on any failure. One
         market-data face per configured symbol is returned when the venue
-        serves MARKET_DATA, else {} (local SQLite tail applies). Probing
-        places no orders and changes no venue state.
+        serves MARKET_DATA, else {} (local SQLite tail applies). The probe
+        opens a read-only venue connection (login/session validation) but
+        places no orders and changes no trading state.
         """
         from broker.registry import default_registry
         from broker.vocab import Domain
@@ -981,8 +1015,12 @@ class LiveTradingService:
         last_close = getattr(provider, "last_close", None)
         if isinstance(last_close, dict):
             price = last_close.get(symbol)
-            if price and float(price) > 0:
-                self._marks[symbol] = float(price)
+            try:
+                price_value = float(price) if price is not None else 0.0
+            except (TypeError, ValueError):
+                return
+            if price_value > 0:
+                self._marks[symbol] = price_value
 
     def _track_open_since(self) -> None:
         for symbol, session in self._sessions.items():
@@ -1006,7 +1044,11 @@ class LiveTradingService:
         """
         if not self._config.symbols or not self._config.timeframe:
             return None
-        key = (self._config.symbols[0], self._config.timeframe)
+        try:
+            _, last_stamp = self._repository.date_range(self._config.symbols[0])
+        except Exception:
+            last_stamp = ""
+        key = (self._config.symbols[0], self._config.timeframe, last_stamp)
         if key == self._chart_cache_key and self._chart_cache is not None:
             return self._chart_cache
         try:
@@ -1034,19 +1076,32 @@ class LiveTradingService:
 
     # ── persistence (config always; checkpoints per symbol) ─────────────
 
+    @staticmethod
+    def _strict_positive(value: Any, default: float) -> float:
+        """Positive finite number or the default (corrupt values never mask)."""
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return default
+        if number != number or number in (float("inf"), float("-inf")) or number <= 0:
+            return default
+        return number
+
     def _restore_config(self) -> None:
         data = self._store.load()
         config = data.get("config", {})
         if not isinstance(config, dict):
             return
         try:
+            quantity = self._strict_positive(config.get("quantity", 1.0), 1.0)
+            capital = self._strict_positive(config.get("capital", 1_000_000.0), 1_000_000.0)
             self._config = LiveTradeConfig(
                 strategy_name=str(config.get("strategy_name", "")),
                 symbols=tuple(config.get("symbols", ())),
                 timeframe=str(config.get("timeframe", "")),
                 mode=str(config.get("mode", "PAPER")),
-                quantity=float(config.get("quantity", 1.0) or 0.0),
-                capital=float(config.get("capital", 1_000_000.0) or 1_000_000.0),
+                quantity=quantity,
+                capital=capital,
             )
         except (TypeError, ValueError):
             self._config = LiveTradeConfig()
@@ -1065,8 +1120,10 @@ class LiveTradingService:
             "quantity": self._config.quantity,
             "capital": self._config.capital,
         }
-        with contextlib.suppress(Exception):
+        try:
             self._store.save(data)
+        except Exception as exc:  # noqa: BLE001
+            logging.getLogger(__name__).warning("live config persist failed: %s", exc)
 
     def _stored_checkpoint(self, symbol: str) -> dict[str, Any]:
         data = self._store.load()
@@ -1094,8 +1151,10 @@ class LiveTradingService:
         data["checkpoints"] = checkpoints
         data["open_since"] = dict(self._open_since)
         data["activity"] = list(self._activity)[-200:]
-        with contextlib.suppress(Exception):
+        try:
             self._store.save(data)
+        except Exception as exc:  # noqa: BLE001
+            logging.getLogger(__name__).warning("live session persist failed: %s", exc)
 
 
 __all__ = [
