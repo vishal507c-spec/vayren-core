@@ -1,0 +1,434 @@
+"""Enforce language ownership (hard gate).
+
+Ownership rules: AI_ENTRY.md section 1 (fixed rules + language map),
+machine-readable in docs/ownership_policy.json.
+
+Checks:
+  1. Every Python file maps to a domain via ownership_policy.json.
+  2. EVERY Python file in a Rust-owned domain MUST have a per-file entry
+     in language_retention.json with a valid state + reason +
+     migration_target + migration_condition. Class-level "classes" text and
+     baseline membership grant NO exemption -> HARD FAIL otherwise.
+  3. New Python files in Rust-owned domains without retention -> HARD FAIL.
+   4. New Python UI surfaces without per-file retention -> HARD FAIL.
+  5. Migrated authorities must not reappear in Python (AST checks).
+  6. Retention entries must have valid states (not blanket exemptions).
+  7. Rust workspace integrity.
+
+Usage: python tools/validate_language_ownership.py
+"""
+
+from __future__ import annotations
+
+import ast
+import json
+import sys
+from pathlib import Path
+from typing import Any
+
+ROOT = Path(__file__).resolve().parent.parent
+DOCS = ROOT / "docs"
+
+RUST_OWNED_DOMAINS = {
+    "CORE",
+    "MARKET_DATA",
+    "DATA_PROCESSING",
+    "RISK",
+    "EXECUTION",
+    "BACKTEST",
+    "NATIVE_UI",
+    "PRESENTATION_MODEL",
+}
+
+VALID_RETENTION_STATES = {
+    "MIGRATED",
+    "MIGRATION_REQUIRED",
+    "TEMPORARILY_RETAINED",
+    "EXEMPT_WITH_JUSTIFICATION",
+}
+
+NATIVE_UI_DIRS = (
+    "04_chart/chart/widgets/",
+    "04_chart/chart/windows/",
+    "04_chart/chart/renderer/",
+    "src/app/ui/",
+    "src/data/ui/",
+    "src/backtest/ui/",
+)
+
+# Symbols whose authority has migrated to Rust and must never be restated in
+# Python. Every entry must point at a file that EXISTS: a guard whose target was
+# deleted (or renamed) never fires, because `_defines` is only asked about a
+# file on disk — that is how a migrated order-state table became re-introducible
+# again without a single failing check. `main` now hard-fails on a missing
+# target so the set cannot rot silently.
+NO_REINTRODUCE: dict[str, tuple[list[str], str]] = {
+    "TRANSITIONS": (["src/execution/models/order_state.py"], "no-assign"),
+    "TERMINAL_STATES": (["src/execution/models/order_state.py"], "no-assign"),
+    # Metrics kernels: the only Python surface left is the FFI projection.
+    "_max_drawdown": (["src/backtest/native_metrics.py"], "no-loop"),
+    "_sharpe": (["src/backtest/native_metrics.py"], "no-loop"),
+    # Bucketing kernel: same, behind the aggregation bridge.
+    "_bucket_key": (["src/market/native_aggregate.py"], "no-def"),
+}
+
+RUST_FORBIDDEN_MODULES = ("strategy", "research", "ai", "ml", "model_experiment")
+
+SKIP_DIRS = {".venv", "__pycache__", "99_archive", ".git", ".ruff_cache", ".pytest_cache"}
+
+
+def _load_json(path: Path) -> dict[str, Any]:
+    """Load a JSON object file; missing/unreadable/non-object -> empty dict."""
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _current_py_files() -> list[str]:
+    out = []
+    for path in sorted(ROOT.rglob("*.py")):
+        try:
+            rel = path.relative_to(ROOT).as_posix()
+        except ValueError:
+            continue
+        if any(d in path.parts for d in SKIP_DIRS):
+            continue
+        out.append(rel)
+    return out
+
+
+def _classify_file(rel_path: str, rules: list[dict]) -> dict | None:
+    for rule in rules:
+        for prefix in rule.get("directory_prefixes", []):
+            if rel_path.startswith(prefix):
+                for excluded in rule.get("excluded_subpaths", []):
+                    if rel_path.startswith(excluded):
+                        return None
+                return rule
+    if rel_path.startswith("tools/"):
+        return {"domain": "TOOLING", "required_language": "PYTHON", "allow_python_glue": True}
+    if "/tests/" in rel_path or rel_path.endswith("conftest.py"):
+        return {"domain": "TEST", "required_language": "SAME_AS_PARENT", "allow_python_glue": True}
+    return {"domain": "UNCLASSIFIED", "required_language": "UNKNOWN", "allow_python_glue": True}
+
+
+# FFI boundary allowlist (Phase 3 §7/§12): the ONLY production files that may
+# import the Rust cdylib loader are the transport bridges themselves
+# (`*/native_*.py`: marshal → delegate → return, no authority), the loader
+# package init, and tooling under tools/ (build_rust). Any other importer
+# is an unauthorized bridge around language ownership → FAIL.
+def core_native_importer_allowed(rel_path: str) -> bool:
+    """Pure check: may this repo-relative path import core.native?"""
+    posix = rel_path.replace("\\", "/")
+    if posix.startswith(("tools/", "scripts/")):
+        return True
+    if posix.startswith("src/core/native/"):
+        return True
+    return Path(posix).name.startswith("native_")
+
+
+def rust_module_forbidden(rel_path: str) -> bool:
+    """Pure check: does this Rust path absorb a Python-owned domain module?"""
+    return Path(rel_path).stem.lower() in RUST_FORBIDDEN_MODULES
+
+
+def _imports_core_native(path: Path) -> bool:
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError):
+        return False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[0:2] == [
+            "core",
+            "native",
+        ]:
+            return True
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.split(".")[0:2] == ["core", "native"]:
+                    return True
+        # Dynamic imports reach the same authority without an import statement:
+        # `importlib.import_module("core.native.loader")` and
+        # `__import__("core.native.loader")` are the two bypasses a
+        # statement-only scan misses.
+        if isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Attribute):
+                dynamic = (
+                    isinstance(func.value, ast.Name)
+                    and func.value.id == "importlib"
+                    and func.attr == "import_module"
+                )
+            elif isinstance(func, ast.Name):
+                dynamic = func.id == "__import__"
+            else:
+                dynamic = False
+            if dynamic and node.args and _is_core_native_string(node.args[0]):
+                return True
+    return False
+
+
+def _is_core_native_string(node: ast.expr) -> bool:
+    return (
+        isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and node.value.split(".")[0:2] == ["core", "native"]
+    )
+
+
+# Loop constructs: statements plus every comprehension form. A comprehension
+# iterates a series exactly like a `for` loop, so a migrated loop kernel
+# rewritten as a one-liner must not slip past the guard.
+LOOP_NODES = (ast.For, ast.AsyncFor, ast.While)
+COMPREHENSION_NODES = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+
+
+def _target_names(target: ast.expr) -> set[str]:
+    """Every name a store target can introduce.
+
+    Covers plain names plus the shapes a duplicated authority hides behind:
+    attribute writes (`self.TRANSITIONS = {}`), string subscripts
+    (`TABLE["TRANSITIONS"] = {}`), and tuple/list unpacking
+    (`TRANSITIONS, other = {}, None`).
+    """
+    if isinstance(target, ast.Name):
+        return {target.id}
+    if isinstance(target, ast.Attribute):
+        return {target.attr}
+    if isinstance(target, ast.Subscript):
+        names: set[str] = set()
+        if isinstance(target.slice, ast.Constant) and isinstance(target.slice.value, str):
+            names.add(target.slice.value)
+        return names
+    if isinstance(target, (ast.Tuple, ast.List)):
+        names = set()
+        for element in target.elts:
+            names |= _target_names(element)
+        return names
+    if isinstance(target, ast.Starred):
+        return _target_names(target.value)
+    return set()
+
+
+def _defines(path: Path, name: str, kind: str) -> bool:
+    """Pure: does `path` re-declare `name` in the forbidden shape `kind`?
+
+    Kinds:
+      no-def    any function/class definition of the name
+      no-assign any module- or class-level store of the name (plain, annotated,
+                attribute, subscript or tuple-unpacked target)
+      no-loop   a definition of the name whose own body loops — statements OR a
+                comprehension. Bodies reached only through a helper CALL are out
+                of scope: that is a different symbol and a separate decision.
+    """
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError):
+        return False
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+            if kind == "no-def":
+                return True
+            if kind != "no-loop":
+                continue
+            for stmt in node.body:
+                for child in ast.walk(stmt):
+                    if isinstance(child, LOOP_NODES + COMPREHENSION_NODES):
+                        return True
+            return False
+        if (
+            kind == "no-assign"
+            and isinstance(node, ast.Assign)
+            and any(name in _target_names(target) for target in node.targets)
+        ):
+            return True
+        if (
+            kind == "no-assign"
+            and isinstance(node, ast.AnnAssign)
+            and name in _target_names(node.target)
+        ):
+            return True
+    return False
+
+
+def main() -> int:
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    policy = _load_json(DOCS / "ownership_policy.json")
+    if not policy:
+        print("Language ownership validation FAILED: missing docs/ownership_policy.json")
+        return 1
+
+    retention_data = _load_json(DOCS / "language_retention.json")
+    if not retention_data:
+        errors.append("missing required file: docs/language_retention.json")
+
+    rules = policy.get("rules", [])
+    current = _current_py_files()
+
+    per_file_retention: dict[str, dict] = {}
+    for file_path, entry in retention_data.get("files", {}).items():
+        if isinstance(entry, str):
+            per_file_retention[file_path] = {"state": "TEMPORARILY_RETAINED", "reason": entry}
+        elif isinstance(entry, dict):
+            per_file_retention[file_path] = entry
+
+    migrated_files: set[str] = set()
+    for file_path in retention_data.get("migrated", {}):
+        migrated_files.add(file_path)
+
+    # NOTE: retention_data["classes"] is DOCUMENTATION ONLY (context for why a
+    # domain retains Python glue). It grants ZERO enforcement exemptions.
+    # Every Python file in a Rust-owned domain MUST have a per-file entry in
+    # retention_data["files"] with a valid state, or the validator FAILS.
+    # Baseline (language_baseline.json) is historical reference only and is
+    # NEVER consulted here: baseline membership grants no exemption.
+    native_allowlist: set[str] = set(retention_data.get("native_workspace_allowlist", {}).keys())
+
+    for rel in current:
+        if rel in migrated_files:
+            continue
+
+        rule = _classify_file(rel, rules)
+        if rule is None:
+            continue
+
+        domain = rule["domain"]
+        req_lang = rule["required_language"]
+
+        if domain in ("TEST", "TOOLING", "UNCLASSIFIED"):
+            continue
+        if req_lang in ("PYTHON", "SAME_AS_PARENT"):
+            continue
+        if req_lang == "UNKNOWN":
+            warnings.append(f"unclassified file: {rel}")
+            continue
+
+        if domain in RUST_OWNED_DOMAINS:
+            if rel in per_file_retention:
+                entry = per_file_retention[rel]
+                state = entry.get("state", "")
+                if state not in VALID_RETENTION_STATES:
+                    errors.append(
+                        f"INVALID RETENTION STATE for {rel}: '{state}'. "
+                        f"Must be one of {sorted(VALID_RETENTION_STATES)}"
+                    )
+                elif state == "MIGRATED":
+                    errors.append(
+                        f"FILE MARKED MIGRATED BUT STILL EXISTS: {rel}. "
+                        f"Remove the file or change state to MIGRATION_REQUIRED."
+                    )
+                elif state in ("TEMPORARILY_RETAINED", "EXEMPT_WITH_JUSTIFICATION"):
+                    for field in ("reason", "migration_target", "migration_condition"):
+                        if not entry.get(field):
+                            errors.append(
+                                f"INCOMPLETE RETENTION for {rel}: missing '{field}'. "
+                                f"Retained files must define reason, migration_target, "
+                                f"migration_condition."
+                            )
+                continue
+
+            if any(rel.startswith(prefix) for prefix in NATIVE_UI_DIRS):
+                if rel in native_allowlist:
+                    continue
+                errors.append(
+                    f"NEW PYTHON UI SURFACE IN WRONG LANGUAGE: {rel}. "
+                    f"Domain {domain} requires {req_lang} (Rust+Slint). "
+                    f"Add to language_retention.json with TEMPORARILY_RETAINED or migrate."
+                )
+                continue
+
+            errors.append(
+                f"WRONG LANGUAGE: {rel} implements {domain} responsibility in Python. "
+                f"Required language: {req_lang}. "
+                f"Baseline membership grants no exemption. "
+                f"Migrate to {req_lang} or add a tracked per-file retention entry "
+                f"(state/reason/migration_target/migration_condition) to "
+                f"docs/language_retention.json."
+            )
+
+    for name, (files, kind) in NO_REINTRODUCE.items():
+        for rel in files:
+            target = ROOT / rel
+            if not target.is_file():
+                # A guard nobody can evaluate is worse than no guard: it looks
+                # enforced and enforces nothing. Fail loudly instead.
+                errors.append(
+                    f"NO_REINTRODUCE guard is dead: '{name}' points at {rel}, "
+                    "which does not exist (retarget the guard or drop the entry)"
+                )
+                continue
+            if _defines(target, name, kind):
+                errors.append(f"migrated authority reintroduced in Python: {name} in {rel}")
+
+    for file_path, entry in per_file_retention.items():
+        if not (ROOT / file_path).is_file():
+            state = entry.get("state", "") if isinstance(entry, dict) else "?"
+            if state != "MIGRATED":
+                errors.append(f"retention references deleted file: {file_path}")
+
+    cargo = ROOT / "Cargo.toml"
+    core_manifest = ROOT / "crates" / "vayren-core" / "Cargo.toml"
+    if not cargo.is_file() or not core_manifest.is_file():
+        errors.append("missing Rust workspace (Cargo.toml, crates/vayren-core)")
+    else:
+        text = core_manifest.read_text(encoding="utf-8")
+        if "[dependencies]" not in text:
+            errors.append("vayren-core manifest lost its dependency section")
+        else:
+            deps = text.split("[dependencies]", 1)[1].split("[", 1)[0].strip()
+            if deps:
+                errors.append(f"vayren-core must stay dependency-free (std only): {deps[:120]}")
+
+    for rs in (ROOT / "crates").rglob("*.rs"):
+        if rust_module_forbidden(rs.relative_to(ROOT).as_posix()):
+            errors.append(f"Rust absorbed a Python-owned domain module: {rs}")
+
+    for rel in current:
+        target = ROOT / rel
+        if (
+            target.is_file()
+            and _imports_core_native(target)
+            and not core_native_importer_allowed(rel)
+        ):
+            errors.append(
+                f"UNAUTHORIZED BRIDGE: {rel} imports core.native outside the "
+                f"native_* bridge boundary (bridges must be marshal-delegate-return "
+                f"in */native_*.py, the loader package, or tools/ tooling)."
+            )
+
+    shell_lib = ROOT / "crates" / "vayren-shell" / "src" / "lib.rs"
+    if not shell_lib.is_file():
+        errors.append("missing native-UI target: crates/vayren-shell/src/lib.rs")
+
+    migration_required = [
+        f
+        for f, e in per_file_retention.items()
+        if isinstance(e, dict) and e.get("state") == "MIGRATION_REQUIRED" and (ROOT / f).is_file()
+    ]
+    if migration_required:
+        warnings.append(
+            f"{len(migration_required)} files marked MIGRATION_REQUIRED still active: "
+            + ", ".join(migration_required[:5])
+        )
+
+    for warning in warnings[:20]:
+        print(f"warn: {warning}")
+
+    if errors:
+        print(f"Language ownership validation FAILED ({len(errors)} errors):")
+        for error in errors:
+            print(f"  - {error}")
+        return 1
+
+    print(f"Language ownership validation PASSED ({len(current)} files checked)")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

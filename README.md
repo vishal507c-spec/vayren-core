@@ -12,13 +12,13 @@ Headless Python backend (app.headless)
 Flow: shell → backend snapshot (symbols, market, system, portfolio, live,
 research, lab) → Rust state → Slint projection.
 
-- UI: Rust + Slint only (`rust/vayren-shell`). No other UI framework.
+- UI: Rust + Slint only (`crates/vayren-shell`). No other UI framework.
 - Backend: Python owns market data, strategies, backtest, risk, execution,
-  broker SDKs, research (`00_app`–`09_broker`, headless, stdlib threading).
+  broker SDKs, research (`src/app`–`src/broker`, headless, stdlib threading).
 - Launch: `make dev` (debug) — data from `VAYREN_DATA_DIR`, strategies
   from `VAYREN_STRATEGIES`.
 
 Authoritative architecture/rules/contracts are in AGENTS.md,
-AI_ENTRY.md, and 90_brain/.
+AI_ENTRY.md, and docs/.
 AI: read those authoritative files before making architectural/code
 decisions; do not infer or invent rules from this README.

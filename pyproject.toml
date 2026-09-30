@@ -24,7 +24,7 @@ dev = [
     "ruff==0.15.20",
     "pyright>=1.1",
     "pre-commit>=3.0",
-    "pillow>=10.0",  # icon asset generation (scripts/assets/)
+    "pillow>=10.0",  # icon asset generation (tools/assets/)
 ]
 
 # ── Data Domain Extras (historical downloader) ─────────────────
@@ -60,12 +60,12 @@ line-ending = "auto"
 # E501: long lines here are embedded Python-strategy source payloads inside
 # triple-quoted strings (exec'd verbatim; rewrapping would change strategy
 # source bytes/hashes). Same tradeoff as strategy_lab_workspace above.
-"05_strategy/strategy/language/storage.py" = ["E501"]
-"05_strategy/strategy/tests/test_runtime.py" = ["E501"]
-"05_strategy/strategy/tests/test_version_control.py" = ["E501"]
-"05_strategy/strategy/tests/test_vm_migration.py" = ["E501"]
-"06_backtest/backtest/tests/test_runner.py" = ["E501"]
-"06_backtest/backtest/tests/test_batch_worker.py" = ["E501"]
+"src/strategy/language/storage.py" = ["E501"]
+"src/strategy/tests/test_runtime.py" = ["E501"]
+"src/strategy/tests/test_version_control.py" = ["E501"]
+"src/strategy/tests/test_vm_migration.py" = ["E501"]
+"src/backtest/tests/test_runner.py" = ["E501"]
+"src/backtest/tests/test_batch_worker.py" = ["E501"]
 
 # ── Pyright (Type Checker) ────────────────────────────────────
 [tool.pyright]
@@ -75,63 +75,57 @@ typeCheckingMode = "standard"
 # feature can never slip in unnoticed.
 pythonVersion = "3.11"
 include = [
-    "00_app/app",
-    "01_core/core",
-    "02_data/data",
-    "03_market/market",
-    "05_strategy/strategy",
-    "06_backtest/backtest",
-    "07_risk/risk",
-    "08_execution/execution",
-    "09_broker/broker",
-    "scripts",
+    "src/app",
+    "src/core",
+    "src/data",
+    "src/market",
+    "src/strategy",
+    "src/backtest",
+    "src/risk",
+    "src/execution",
+    "src/broker",
+    "tools",
 ]
-# Every chapter root, so `import core / market / broker / strategy / risk /
+# src/ root so `import core / market / broker / strategy / risk /
 # execution / backtest / app` resolves from the TREE — independent of whether a
-# (possibly stale) editable install is active. Without this, pyright reported
-# 138 bogus `reportMissingImports` on a machine whose install pointed elsewhere.
+# (possibly stale) editable install is active.
 extraPaths = [
-    "00_app",
-    "01_core",
-    "02_data",
-    "03_market",
-    "05_strategy",
-    "06_backtest",
-    "07_risk",
-    "08_execution",
-    "09_broker",
-    "scripts/forensics",
-    "scripts/speed",
-    "scripts",
+    "src",
+    "tools/forensics",
+    "tools/speed",
+    "tools",
 ]
 
 # ── Pytest (Test Runner) ──────────────────────────────────────
 [tool.pytest.ini_options]
 testpaths = [
-    "00_app/app/tests",
-    "01_core/core/tests",
-    "02_data/data/tests",
-    "03_market/market/tests",
-    "05_strategy/strategy/tests",
-    "05_strategy/strategy/research/tests",
-    "09_broker/broker/tests",
-    "scripts/forensics/tests",
-    "scripts/tests",
+    "src/app/tests",
+    "src/core/tests",
+    "src/data/tests",
+    "src/market/tests",
+    "src/strategy/tests",
+    "src/strategy/research/tests",
+    "src/backtest/tests",
+    "src/risk/tests",
+    "src/execution/tests",
+    "src/broker/tests",
+    "tools/forensics/tests",
+    "tools/tests",
 ]
 addopts = "-v --tb=short"
 
 # ── Coverage (Test Coverage) ──────────────────────────────────
 [tool.coverage.run]
 source = [
-    "00_app/app",
-    "01_core/core",
-    "02_data/data",
-    "03_market/market",
-    "05_strategy/strategy",
-    "06_backtest/backtest",
-    "07_risk/risk",
-    "08_execution/execution",
-    "09_broker/broker",
+    "src/app",
+    "src/core",
+    "src/data",
+    "src/market",
+    "src/strategy",
+    "src/backtest",
+    "src/risk",
+    "src/execution",
+    "src/broker",
 ]
 
 [tool.coverage.report]
@@ -143,15 +137,15 @@ exclude_lines = ["pragma: no cover", "def __repr__", "if __name__ == .__main__.:
 
 [tool.hatch.build.targets.wheel]
 packages = [
-    "00_app/app",
-    "01_core/core",
-    "02_data/data",
-    "03_market/market",
-    "05_strategy/strategy",
-    "06_backtest/backtest",
-    "07_risk/risk",
-    "08_execution/execution",
-    "09_broker/broker",
+    "src/app",
+    "src/core",
+    "src/data",
+    "src/market",
+    "src/strategy",
+    "src/backtest",
+    "src/risk",
+    "src/execution",
+    "src/broker",
 ]
 
 [build-system]

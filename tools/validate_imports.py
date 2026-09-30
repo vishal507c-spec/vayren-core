@@ -1,0 +1,209 @@
+"""Validate import rules across the repository.
+
+Domains live under src/ after Phase 5 migration.
+Files under docs are excluded.
+"""
+
+import argparse
+import ast
+import json
+from collections.abc import Iterator
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+
+EXCLUDED_TOP_DIRS = {"docs"}
+
+# Broker/vendor SDKs may only be imported inside the isolated provider
+# packages that own them (relative to repo root). Anywhere else —
+# strategy, risk, execution, chart, app included — is a layering violation:
+# Strategy → SDK and Risk → SDK are FORBIDDEN.
+# M7: ``src/broker/adapters/`` is the future SDK boundary (M5 adapter
+# move target). SDK code has NOT moved there yet — the entry documents the
+# intended boundary so a stray SDK import under broker adapters stays
+# legal by design while any SDK import anywhere else still fails.
+SDK_ALLOWLIST_PREFIXES = ("src/data/provider/", "src/broker/adapters/")
+SDK_DENYLIST = {"kiteconnect"}
+
+# M8 network boundary: production broker HTTP/WebSocket client code may exist
+# ONLY inside adapter packages (future) and the retained historical transport
+# (``src/data/provider/``, kept intentionally per M5/M8 — the Zerodha
+# transport is not moved). Core, market, chart, strategy, backtest, risk,
+# execution and app composition must never import broker network clients
+# directly — they go Core → UBL → Adapter → Network.
+NETWORK_ALLOWLIST_PREFIXES = ("src/data/provider/", "src/broker/adapters/")
+NETWORK_DENYLIST = {"kiteconnect", "httpx", "requests", "websockets", "websocket"}
+
+# Legacy snapshot excluded from shipment/validation (same precedent as the
+# ruff extend-exclude): historical vendor drafts, never imported by product.
+NETWORK_EXCLUDED_PREFIXES = ("99_archive/",)
+
+# Domains that should only import from lib/ and immediate upstream.
+# ``broker`` (UBL) consumes nothing but itself — it is a coordination
+# boundary beside the product domains; ``data``/``execution`` shims and
+# the ``app`` composition root may import it (design §4, §9-M3).
+DOMAIN_DEPS: dict[str, set[str]] = {
+    "app": {
+        "core",
+        "market",
+        "chart",
+        "data",
+        "strategy",
+        "backtest",
+        "risk",
+        "execution",
+        "broker",
+    },
+    "core": set(),
+    "market": {"core"},
+    "chart": {"core", "market"},
+    "data": {"core", "broker"},
+    "strategy": {"core", "market"},
+    "backtest": {"core", "market", "strategy"},
+    "risk": {"core"},
+    "execution": {"core", "market", "strategy", "risk", "broker"},
+    "broker": set(),
+}
+
+
+def check_file_domain(filepath: Path) -> str | None:
+    """Determine which domain a file belongs to, or None if it is excluded."""
+    try:
+        parts = filepath.relative_to(ROOT).parts
+    except ValueError:
+        return None
+    if len(parts) < 2:
+        return None
+    if parts[0] in EXCLUDED_TOP_DIRS:
+        return None
+    # parts[0] is "src", parts[1] is the domain package name (e.g. "market")
+    if parts[0] == "src" and parts[1] in DOMAIN_DEPS:
+        return parts[1]
+    return None
+
+
+def _is_type_checking_guard(node: ast.If) -> bool:
+    """True for ``if TYPE_CHECKING:`` / ``if typing.TYPE_CHECKING:`` blocks.
+
+    Imports guarded this way create no runtime coupling (annotations only),
+    so they are not runtime-dependency violations. Static checkers still see
+    them; only the runtime layering rule ignores them.
+    """
+    test = node.test
+    if isinstance(test, ast.Name) and test.id == "TYPE_CHECKING":
+        return True
+    return isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING"
+
+
+def _iter_runtime_imports(tree: ast.AST) -> Iterator[ast.stmt]:
+    """Yield Import/ImportFrom nodes, skipping TYPE_CHECKING-guarded blocks."""
+    stack: list[tuple[ast.AST, bool]] = [(tree, False)]
+    while stack:
+        node, in_tc = stack.pop()
+        if isinstance(node, ast.If) and _is_type_checking_guard(node):
+            stack.extend((child, True) for child in node.body)
+            stack.extend((child, in_tc) for child in node.orelse)
+            continue
+        if isinstance(node, (ast.Import, ast.ImportFrom)) and not in_tc:
+            yield node
+        stack.extend((child, in_tc) for child in ast.iter_child_nodes(node))
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Validate import rules across the repository")
+    parser.add_argument("--json", action="store_true", help="print a JSON summary instead of text")
+    args = parser.parse_args()
+    errors: list[str] = []
+    for pyfile in ROOT.rglob("*.py"):
+        domain = check_file_domain(pyfile)
+        try:
+            rel = pyfile.relative_to(ROOT).as_posix()
+        except ValueError:
+            continue
+        is_test = "test" in pyfile.name or pyfile.parent.name == "tests"
+        try:
+            source = pyfile.read_text(encoding="utf-8")
+            tree = ast.parse(source)
+        except SyntaxError:
+            if domain is not None and not is_test:
+                errors.append(f"Syntax error: {pyfile}")
+            continue
+        if not is_test and not rel.startswith(SDK_ALLOWLIST_PREFIXES):
+            for node in ast.walk(tree):
+                if not isinstance(node, (ast.Import, ast.ImportFrom)):
+                    continue
+                names: list[str] = []
+                if isinstance(node, ast.Import):
+                    names = [a.name.split(".")[0] for a in node.names]
+                elif node.module:
+                    names = [node.module.split(".")[0]]
+                for top in names:
+                    if top in SDK_DENYLIST:
+                        errors.append(
+                            f"{pyfile}:{node.lineno}: broker SDK import {top!r} outside "
+                            f"isolated provider packages"
+                        )
+        if (
+            not is_test
+            and not rel.startswith(NETWORK_ALLOWLIST_PREFIXES)
+            and not rel.startswith(NETWORK_EXCLUDED_PREFIXES)
+        ):
+            for node in ast.walk(tree):
+                if not isinstance(node, (ast.Import, ast.ImportFrom)):
+                    continue
+                names = []
+                if isinstance(node, ast.Import):
+                    names = [a.name.split(".")[0] for a in node.names]
+                elif node.module:
+                    names = [node.module.split(".")[0]]
+                for top in names:
+                    if top in NETWORK_DENYLIST:
+                        errors.append(
+                            f"{pyfile}:{node.lineno}: broker network import {top!r} outside "
+                            f"adapter/transport boundary (Core → UBL → Adapter → Network)"
+                        )
+        if domain is None:
+            continue
+        if is_test:
+            continue
+        lines = source.splitlines()
+        allowed_imports = DOMAIN_DEPS.get(domain, set())
+        for node in _iter_runtime_imports(tree):
+            stmt = lines[node.lineno - 1].strip() if 0 < node.lineno <= len(lines) else ""
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    parts = alias.name.split(".")
+                    if (
+                        parts[0] in DOMAIN_DEPS
+                        and parts[0] != domain
+                        and parts[0] not in allowed_imports
+                    ):
+                        errors.append(
+                            f"{pyfile}:{node.lineno}: imports {alias.name} "
+                            f"(not allowed from {domain}) | {stmt}"
+                        )
+            elif (
+                isinstance(node, ast.ImportFrom)
+                and node.module
+                and node.module.split(".")[0] in DOMAIN_DEPS
+                and node.module.split(".")[0] != domain
+                and node.module.split(".")[0] not in allowed_imports
+            ):
+                errors.append(
+                    f"{pyfile}:{node.lineno}: imports {node.module} "
+                    f"(not allowed from {domain}) | {stmt}"
+                )
+    if args.json:
+        print(json.dumps({"ok": not errors, "error_count": len(errors), "errors": errors}))
+        return 1 if errors else 0
+    if errors:
+        print("Import validation FAILED:")
+        for e in errors:
+            print(f"  - {e}")
+        return 1
+    print("Import validation PASSED")
+    return 0
+
+
+if __name__ == "__main__":
+    exit(main())

@@ -1,14 +1,14 @@
 # AGENTS.md — AI Agent ke Liye Rules
 
-> **AI-FIRST:** `AI_ENTRY.md → module → code` (startup: entry + current `90_brain/ai_memory.md` only).
+> **AI-FIRST:** `AI_ENTRY.md → module → code` (startup: entry + current `docs/ai_memory.md` only).
 > Full rules live below; canonical docs are linked from the entry — read a doc only when the entry routes you there.
 
-**Owns:** AI workflow, coding standards, naming, forbidden, validation. **Not owns:** Language ownership → `AI_ENTRY.md` §1 (machine: `90_brain/ownership_policy.json`); detailed boundaries/events/contracts/state → `90_brain/architecture.md`, `module_contracts.md`, `event_catalog.md`, `ai_memory.md`.
-**When to read:** ALWAYS first, before any code change. **Related:** `AI_ENTRY.md` (entry + language map), `90_brain/` (contracts/state).
+**Owns:** AI workflow, coding standards, naming, forbidden, validation. **Not owns:** Language ownership → `AI_ENTRY.md` §1 (machine: `docs/ownership_policy.json`); detailed boundaries/events/contracts/state → `docs/architecture.md`, `module_contracts.md`, `event_catalog.md`, `ai_memory.md`.
+**When to read:** ALWAYS first, before any code change. **Related:** `AI_ENTRY.md` (entry + language map), `docs/` (contracts/state).
 
 ## Pehle Padho, Phir Code Karo
 
-Ye repository ka **Brain** `90_brain/` folder mein hai. AI agent ko code chhune se pehle ye sab padhna **zaroori** hai:
+Ye repository ka **Brain** `docs/` folder mein hai. AI agent ko code chhune se pehle ye sab padhna **zaroori** hai:
 
 | File | Isme kya hai |
 |---|---|
@@ -20,36 +20,36 @@ Ye repository ka **Brain** `90_brain/` folder mein hai. AI agent ko code chhune 
 
 > `AI_ENTRY.md` §1 language ownership ka single source hai — Rust→Core/Perf, Python→Strategy/AI, Rust+Slint→UI. Naya code wahi se decide karo. Ownership duplicate mat karo, reference karo.
 >
-> **FAST PATH (default):** `AI_ENTRY.md` se route mil jaye to poora `90_brain/` har task par mat padho — entry jahan bheje (module + contract + policy), wahi padho. Neeche wali table full-reference list hai, har-task checklist nahi.
+> **FAST PATH (default):** `AI_ENTRY.md` se route mil jaye to poora `docs/` har task par mat padho — entry jahan bheje (module + contract + policy), wahi padho. Neeche wali table full-reference list hai, har-task checklist nahi.
 
 Code badalne ke baad `ai_memory.md` update karo.
 
-**Standards (consolidated):** Legacy `project_rules`/`coding_standards`/`naming_conventions`/`roadmap` docs → ye file + `90_brain/architecture.md` mein merge ho chuke hain. Detail neeche.
+**Standards (consolidated):** Legacy `project_rules`/`coding_standards`/`naming_conventions`/`roadmap` docs → ye file + `docs/architecture.md` mein merge ho chuke hain. Detail neeche.
 
 ## Repository Structure
 
 Numbered chapters = **development story order** (numbers organizational hain, strict dependency nahi):
 
 ```
-00_app/   app/     composition (headless backend + services)   depends on: all chapters (partly unwired — see ai_memory.md)
-01_core/  core/    Event marker, AI guardrails, native loader  depends on: stdlib only
-02_data/  data/    provider SDK boundary, settings, bridge     depends on: core, broker
-03_market/ market/ Bar vocabulary + native bridges             depends on: core
-05_strategy/ strategy/ registry, runtime, research, lab        depends on: core, market
-06_backtest/ backtest/ native bridges only (Rust owns engine)  depends on: — (via FFI)
-07_risk/   risk/   native bridges only (Rust owns engine)      depends on: — (via FFI)
-08_execution/ execution/ AI-adjacent logic + bridges (Rust owns core)  depends on: — (via FFI)
-09_broker/ broker/ registry, selection, vocab (UBL)            depends on: stdlib only
-rust/     kernels (vayren-core, std-only) + Slint shell       depends on: std / Slint
-90_brain/  (docs) knowledge — ai_memory.md active, current state only
+src/app/       app/        composition (headless backend + services)   depends on: all domains (partly unwired — see ai_memory.md)
+src/core/      core/       Event marker, AI guardrails, native loader  depends on: stdlib only
+src/data/      data/       provider SDK boundary, settings, bridge     depends on: core, broker
+src/market/    market/     Bar vocabulary + native bridges             depends on: core
+src/strategy/  strategy/   registry, runtime, research, lab        depends on: core, market
+src/backtest/  backtest/   native bridges only (Rust owns engine)  depends on: — (via FFI)
+src/risk/      risk/       native bridges only (Rust owns engine)      depends on: — (via FFI)
+src/execution/ execution/  AI-adjacent logic + bridges (Rust owns core)  depends on: — (via FFI)
+src/broker/    broker/     registry, selection, vocab (UBL)            depends on: stdlib only
+crates/        kernels (vayren-core, std-only) + Slint shell       depends on: std / Slint
+docs/      (docs) knowledge — ai_memory.md active, current state only
 ```
 
-Aage ke modules usi order mein: `05_strategy, 06_backtest, 07_risk, 08_execution, 09_portfolio` (phir `10_scanner, 11_indicator, 12_drawing, 13_replay, 14_workspace, 15_plugin`).
+Aage ke modules: `strategy, backtest, risk, execution, portfolio` (phir `scanner, indicator, drawing, replay, workspace, plugin`).
 
 ## Architecture Rules
 
 - **Event-driven only (target wiring).** Modules talk via public surface + bridge/snapshot only — direct internal calls forbidden. (Python bus subscription is future rewire; current mechanism status: `ai_memory.md`.)
-- **Single composition root.** `00_app` (+ Rust shell) owns wiring. UI layers never touch bus/SQL/loading.
+- **Single composition root.** `src/app` (+ Rust shell) owns wiring. UI layers never touch bus/SQL/loading.
 - **One module = one responsibility.** Naya feature = naya module. Purana kabhi expand nahi hota.
 - **No circular dependencies.** Import hamesha numbering ke neeche ki taraf.
 - **Layers alag-alag:** UI mein SQL nahi, loader mein drawing nahi, UI mein business logic nahi.
@@ -125,16 +125,16 @@ TODO/FIXME / dead code / mock logic / sample trading logic  ❌
 ## Workflow
 
 ```
-□ 90_brain/ padho (architecture, event_catalog, module_contracts, ai_memory) + AI_ENTRY.md §1 (ownership)
+□ docs/ padho (architecture, event_catalog, module_contracts, ai_memory) + AI_ENTRY.md §1 (ownership)
 □ Feature ka target language/module decide karo (AI_ENTRY.md §1) → naya code target mein; directly related legacy slice usi feature mein migrate (AI_ENTRY.md §1 fixed rules)
 □ Module contracts ke hisaab se implement karo
-□ Coding-time forensics: `python scripts/forensics/__main__.py mark --phase PHASE --action ...` evidence do,
+□ Coding-time forensics: `python tools/forensics/__main__.py mark --phase PHASE --action ...` evidence do,
   `run --phase PHASE -- <cmd>` lambi commands wrap karo; task ka session apne aap open/close hota hai
 □ make check chalao (lint + format + typecheck + test + validators)
   ↳ Fast path (measured): iterate par pehle impact-scope tests (`pytest <touched-module>/tests`, ~5s),
-    phir full gate (~105s: pytest ~82s + pyright ~23s). Benchmarks: `python scripts/benchmark.py gate|record|scoreboard`.
-□ Task end par LAST command: `python scripts/forensics/__main__.py report --name "..."` (report auto-append bhi hota hai next task par)
-□ 90_brain/ai_memory.md update karo
+    phir full gate (~105s: pytest ~82s + pyright ~23s). Benchmarks: `python tools/benchmark.py gate|record|scoreboard`.
+□ Task end par LAST command: `python tools/forensics/__main__.py report --name "..."` (report auto-append bhi hota hai next task par)
+□ docs/ai_memory.md update karo
 ```
 
 ## Language & Migration — Ownership Reference (Invisible Feature-Driven)
@@ -162,9 +162,9 @@ NEW FEATURE → target language mein implement
 
 Migration rules sirf instructions nahi — `make check` / CI mein **hard gate** se enforce hote hain:
 
-- **Policy:** `90_brain/ownership_policy.json` = machine-readable mapping (`file → domain → required language`). Pehle-match order mein evaluate hota hai. Naya rule add karo toh specific paths general parent se PEHLE rakho.
-- **Validator:** `python scripts/validate_language_ownership.py` — Rust-owned domain mein har Python file ko `90_brain/language_retention.json` mein per-file entry chahiye (state + reason + migration_target + migration_condition). Bina entry = **HARD FAIL**, chahe file baseline mein ho.
-- **Baseline = history only:** `90_brain/language_baseline.json` ko validator kabhi read nahi karta. Baseline mein hona koi exemption nahi deta.
+- **Policy:** `docs/ownership_policy.json` = machine-readable mapping (`file → domain → required language`). Pehle-match order mein evaluate hota hai. Naya rule add karo toh specific paths general parent se PEHLE rakho.
+- **Validator:** `python tools/validate_language_ownership.py` — Rust-owned domain mein har Python file ko `docs/language_retention.json` mein per-file entry chahiye (state + reason + migration_target + migration_condition). Bina entry = **HARD FAIL**, chahe file baseline mein ho.
+- **Baseline = history only:** `docs/language_baseline.json` ko validator kabhi read nahi karta. Baseline mein hona koi exemption nahi deta.
 - **States:** `MIGRATED` (file gayab honi chahiye) / `MIGRATION_REQUIRED` (active legacy, touch par migrate) / `TEMPORARILY_RETAINED` (justified, tracked) / `EXEMPT_WITH_JUSTIFICATION` (permanent, proof ke saath). Blanket domain-level exemption ka koi effect nahi.
 - **Feature flow:** Rust-owned file ko touch karo → usi feature mein related slice migrate karo → retention entry update karo → `validate_language_ownership.py` PASS hona chahiye. Sirf tests pass hona enough nahi.
 - **"Smallest useful slice" = minimum migration scope, migration skip karne ka excuse nahi.** Slice bada lage toh scope feature tak limited rakho, lekin Python mein naya wrong-language code mat likho — validator fail karega.

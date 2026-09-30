@@ -20,12 +20,12 @@ concurrency:
 # dir), so splitting build from test would force a second full compilation
 # (measured: +40m on a cold cache) or a fragile artifact handoff. No check
 # is skipped anywhere; a failure in any job fails the gate.
-# scripts/tests is sharded by dependency evidence (Day-6 intel: the two
+# tools/tests is sharded by dependency evidence (Day-6 intel: the two
 # live-tree mutators must stay serial vs index readers; same-checkout
 # parallel pytest is race-proven unsafe): mutators run serially in
 # test-shard-stateful, readers serially in test-shard-pure, on isolated
 # runners. test_desktop.py runs in build-test beside its shell binary.
-# Coverage contract: scripts/tests/test_shard_contract.py pins that every
+# Coverage contract: tools/tests/test_shard_contract.py pins that every
 # test file runs in exactly one CI site (no omission, no duplication).
 jobs:
   quality:
@@ -54,17 +54,18 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
       - run: pip install -e ".[dev,data]"
-      - run: python scripts/validate_structure.py
-      - run: python scripts/validate_imports.py
-      - run: python scripts/validate_language_ownership.py
-      - run: python scripts/validate_architecture_gate.py
-      - run: python scripts/validate_authority.py
-      - run: python scripts/validate_routes.py
+      - run: python tools/validate_structure.py
+      - run: python tools/validate_imports.py
+      - run: python tools/validate_language_ownership.py
+      - run: python tools/validate_architecture_gate.py
+      - run: python tools/validate_authority.py
+      - run: python tools/validate_routes.py
       # Derived graph must agree with its canonical sources (same check
       # `make check` runs) — a stale artifact is a governance failure, not a
       # warning.
-      - run: python scripts/validate_repo_graph.py
-      - run: python scripts/context_engine.py --check
+      - run: python tools/validate_repo_graph.py
+      - run: python tools/validate_scope.py --stats
+      - run: python tools/context_engine.py --check
 
   build-test:
     runs-on: ubuntu-latest
@@ -96,25 +97,20 @@ jobs:
       - run: pip install -e ".[dev,data]"
       - uses: dtolnay/rust-toolchain@stable
       # Dependency-only cache (workspace crates rebuild; see README of
-      # Swatinem/rust-cache). Workspace lives in rust/ (NOT repo root), so
-      # the mapping must be explicit — the default ". -> target" would cache
-      # a nonexistent dir. Saves on every branch: GitHub isolates caches per
-      # branch (main never restores branch caches), and this private
-      # single-owner repo has no forks/external writers, so branch saves
-      # cannot poison main. Failed runs never save (cache-on-failure=false).
+      # Swatinem/rust-cache). Workspace lives in repo root with crates/ members.
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: "rust -> target"
+          workspaces: ". -> target"
           shared-key: "vayren-rust"
       # Formatting first: a 2s style failure must not wait behind a 38min build.
-      - run: cd rust && cargo fmt --all -- --check
+      - run: cargo fmt --manifest-path Cargo.toml --all -- --check
       # CI measurement (Day-3 intelligence: wall-clock + cache effectiveness).
       # Behavior-preserving: same commands, only observed (`time` + snapshots
       # in the log). No CI improvement is claimed until runs prove it.
       - name: Pre-build cache snapshot
         run: |
           date -u +%FT%TZ
-          du -sh ~/.cargo/registry ~/.cargo/git rust/target 2>/dev/null || true
+          du -sh ~/.cargo/registry ~/.cargo/git target 2>/dev/null || true
           df -h /
       # Lean test path (verified Day-4/5: `cargo test --workspace` is
       # self-contained; only the kernel cdylib + shell binary are required
@@ -124,15 +120,15 @@ jobs:
       # workspace: --skip-build reuses the just-built artifacts only when the
       # fail-closed freshness gate proves them newer than every Rust source
       # (otherwise it rebuilds) — hence one job, no duplicate full chain.
-      # scripts/tests runs in the shard jobs below (--exclude here);
+      # tools/tests runs in the shard jobs below (--exclude here);
       # test_desktop.py stays here beside its shell binary.
-      - run: time python scripts/build_rust.py --lean-test
-      - run: time python scripts/run_tests.py --skip-build --lean --exclude scripts/tests
-      - run: python -m pytest scripts/tests/test_desktop.py -q --no-header
+      - run: time python tools/build_rust.py --lean-test
+      - run: time python tools/run_tests.py --skip-build --lean --exclude tools/tests
+      - run: python -m pytest tools/tests/test_desktop.py -q --no-header
       - name: Report disk usage
         run: |
           date -u +%FT%TZ
-          du -sh rust/target ~/.cargo/registry ~/.cargo/git 2>/dev/null || true
+          du -sh target ~/.cargo/registry ~/.cargo/git 2>/dev/null || true
           df -h /
 
   # Shard 1/2 — live-mutators, serial within the job, isolated runner.
@@ -163,13 +159,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: "rust -> target"
+          workspaces: ". -> target"
           shared-key: "vayren-rust"
-      - run: cargo build --release -p vayren-core --manifest-path rust/Cargo.toml
-      # The scope-bench tests execute the full `pytest scripts/tests -q`
+      - run: cargo build --release -p vayren-core --manifest-path Cargo.toml
+      # The scope-bench tests execute the full `pytest tools/tests -q`
       # baseline, which includes test_desktop.py (needs the shell binary).
-      - run: cargo build -p vayren-shell --manifest-path rust/Cargo.toml
-      - run: python -m pytest scripts/tests/test_validate_scope.py scripts/tests/test_failure_intel.py -q --no-header
+      - run: cargo build -p vayren-shell --manifest-path Cargo.toml
+      - run: python -m pytest tools/tests/test_validate_scope.py tools/tests/test_failure_intel.py -q --no-header
 
   # Shard 2/2 — isolated readers, serial within the job, isolated runner.
   # Every file here is tmp/sandbox/mock-scoped or read-only (Day-6 intel);
@@ -191,19 +187,19 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: "rust -> target"
+          workspaces: ". -> target"
           shared-key: "vayren-rust"
-      - run: cargo build --release -p vayren-core --manifest-path rust/Cargo.toml
+      - run: cargo build --release -p vayren-core --manifest-path Cargo.toml
       - run: >-
-          python -m pytest scripts/tests/test_authority.py
-          scripts/tests/test_build_rust.py scripts/tests/test_context.py
-          scripts/tests/test_context_packet.py scripts/tests/test_execute_surface.py
-          scripts/tests/test_gate_coverage.py scripts/tests/test_language_governance.py
-          scripts/tests/test_patch_surface.py scripts/tests/test_repo_graph.py
-          scripts/tests/test_repo_index.py scripts/tests/test_router.py
-          scripts/tests/test_run_tests.py scripts/tests/test_self_opt.py
-          scripts/tests/test_shard_contract.py scripts/tests/test_speed_loop.py
-          scripts/tests/test_speed_metrics.py scripts/tests/test_vayren_intel.py -q --no-header
+          python -m pytest tools/tests/test_authority.py
+          tools/tests/test_build_rust.py tools/tests/test_context.py
+          tools/tests/test_context_packet.py tools/tests/test_execute_surface.py
+          tools/tests/test_gate_coverage.py tools/tests/test_language_governance.py
+          tools/tests/test_patch_surface.py tools/tests/test_repo_graph.py
+          tools/tests/test_repo_index.py tools/tests/test_router.py
+          tools/tests/test_run_tests.py tools/tests/test_self_opt.py
+          tools/tests/test_shard_contract.py tools/tests/test_speed_loop.py
+          tools/tests/test_speed_metrics.py tools/tests/test_vayren_intel.py -q --no-header
 
   gate:
     name: CI gate

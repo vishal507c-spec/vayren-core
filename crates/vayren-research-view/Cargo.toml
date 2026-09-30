@@ -1,0 +1,22 @@
+[package]
+name = "vayren-research-view"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Embeddable native Research view (Rust + Slint software renderer, C ABI for the embed host)"
+
+[lib]
+name = "vayren_research_view"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+slint = { workspace = true, features = [
+    "std",
+    "renderer-software",
+    "compat-1-2",
+] }
+vayren-domain = { workspace = true }
+serde_json = { workspace = true }
+
+[build-dependencies]
+slint-build = { workspace = true }

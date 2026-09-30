@@ -1,0 +1,29 @@
+[package]
+name = "vayren-shell"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "VAYREN native UI (Rust + Slint): application shell — navigation rail, broker panel (first migrated native surface)"
+
+[lib]
+name = "vayren_shell"
+crate-type = ["rlib"]
+
+[[bin]]
+name = "vayren-shell"
+path = "src/main.rs"
+
+[dependencies]
+vayren-core = { workspace = true }
+vayren-domain = { workspace = true }
+slint = { workspace = true, default-features = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+clipboard-win = { workspace = true }
+
+[build-dependencies]
+slint-build = { workspace = true }
+
+[dev-dependencies]
+i-slint-backend-testing = { workspace = true }
+slint = { workspace = true, features = ["renderer-software"] }

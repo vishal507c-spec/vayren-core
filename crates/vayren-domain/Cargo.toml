@@ -1,0 +1,15 @@
+[package]
+name = "vayren-domain"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "VAYREN shared domain & view-model state (pure Rust, Slint-independent)"
+
+[lib]
+name = "vayren_domain"
+crate-type = ["rlib"]
+
+[dependencies]
+vayren-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

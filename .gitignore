@@ -71,6 +71,9 @@ secrets.yaml
 *.pem
 
 # Rust (AI_ENTRY.md §1: Rust workspace builds locally, never committed)
+# Workspace moved from rust/ → crates/ in Phase 4; Cargo now builds at repo root.
+/target/
 rust/target/
+crates/target/
 rust/shell_build.log
 rust/shell_build.err

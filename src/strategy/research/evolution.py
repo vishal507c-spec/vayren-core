@@ -1,0 +1,463 @@
+"""Controlled Strategy Evolution — generic, proposal-based, immutable."""
+
+from __future__ import annotations
+
+import difflib
+import hashlib
+import json
+import uuid
+from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+from market import Bar
+from strategy.language import compile_strategy
+from strategy.models.state import StrategyState
+from strategy.runtime import BarView
+from strategy.version import canonical_hash, create_version
+
+
+def _synthetic_bars() -> tuple[Bar, ...]:
+    """Deterministic 30-bar validation tape: up, down AND flat legs.
+
+    A monotonic ramp would only ever exercise trend-following paths; mixing
+    a rally, a drawdown and a flat chop forces the candidate logic through
+    entries, exits and silent bars before its version is minted.
+    """
+    from datetime import timedelta
+
+    base = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    # 10 up (+1/bar), 10 down (-1.5/bar), 10 flat (chop ±0.2, net 0).
+    closes = [100.0 + i for i in range(10)]
+    closes += [closes[-1] - 1.5 * i for i in range(1, 11)]
+    flat_base = closes[-1]
+    closes += [flat_base + (0.2 if i % 2 == 0 else -0.2) for i in range(10)]
+    bars: list[Bar] = []
+    for i, close in enumerate(closes):
+        bars.append(
+            Bar(
+                symbol="TEST",
+                open=close - 0.2,
+                high=close + 0.5,
+                low=close - 0.5,
+                close=close,
+                volume=1000,
+                timestamp=(base + timedelta(minutes=15 * i)).strftime("%Y-%m-%d %H:%M:%S"),
+            )
+        )
+    return tuple(bars)
+
+
+def _hash_source(source: str) -> str:
+    return hashlib.sha256(source.encode("utf-8")).hexdigest()
+
+
+@dataclass
+class EvolutionProposal:
+    """Proposal to evolve a strategy — does NOT modify strategy directly."""
+
+    proposal_id: str
+    strategy_id: str
+    parent_version_id: str
+    discovery_id: str
+    evidence_ids: tuple[str, ...]
+    proposed_change: dict[
+        str, Any
+    ]  # e.g., {"type": "parameter", "param": "threshold", "from": 1.25, "to": 1.35} or {"type": "code", "diff": "..."}  # noqa: E501
+    rationale: str
+    expected_effect: str
+    status: str  # PROPOSED, UNDER_REVIEW, APPROVED, REJECTED, APPLIED, FAILED
+    created_at: str
+    metadata: dict[str, Any] = field(default_factory=dict)
+    parent_source_hash: str = ""
+    new_source: str = ""
+    new_source_hash: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        d = asdict(self)
+        d["evidence_ids"] = list(self.evidence_ids)
+        return d
+
+    def to_json(self) -> str:
+        return json.dumps(self.to_dict(), sort_keys=True, ensure_ascii=False, indent=2)
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> EvolutionProposal:
+        return EvolutionProposal(
+            proposal_id=str(data["proposal_id"]),
+            strategy_id=str(data["strategy_id"]),
+            parent_version_id=str(data["parent_version_id"]),
+            discovery_id=str(data["discovery_id"]),
+            evidence_ids=tuple(data.get("evidence_ids", [])),
+            proposed_change=dict(data.get("proposed_change", {})),
+            rationale=str(data.get("rationale", "")),
+            expected_effect=str(data.get("expected_effect", "")),
+            status=str(data.get("status", "PROPOSED")),
+            created_at=str(data.get("created_at", "")),
+            metadata=dict(data.get("metadata", {})),
+            parent_source_hash=str(data.get("parent_source_hash", "")),
+            new_source=str(data.get("new_source", "")),
+            new_source_hash=str(data.get("new_source_hash", "")),
+        )
+
+
+def _evolution_dir(data_dir: Path | str | None) -> Path:
+    if data_dir and Path(data_dir).is_dir():
+        d = Path(data_dir) / "research" / "evolution_proposals"
+    else:
+        d = Path.cwd() / ".vayren" / "research" / "evolution_proposals"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def save_proposal(proposal: EvolutionProposal, data_dir: Path | str | None = None) -> Path:
+    p = _evolution_dir(data_dir) / f"{proposal.proposal_id}.json"
+    # Immutable check
+    if p.exists():
+        try:
+            existing = EvolutionProposal.from_dict(json.loads(p.read_text(encoding="utf-8")))
+            if existing.to_dict() == proposal.to_dict():
+                return p
+            raise FileExistsError(f"proposal id collision: {proposal.proposal_id}")
+        except FileExistsError:
+            raise
+        except Exception:
+            pass
+    p.write_text(proposal.to_json(), encoding="utf-8")
+    # Lineage: VERSION -> PROPOSAL and STRATEGY -> PROPOSAL, plus evidence/discovery links
+    try:
+        from .lineage import load_lineage, save_lineage
+
+        g = load_lineage(data_dir)
+        g.add_node("STRATEGY", proposal.strategy_id)
+        g.add_node("VERSION", proposal.parent_version_id)
+        g.add_node("EVOLUTION_PROPOSAL", proposal.proposal_id)
+        g.add_edge(
+            "STRATEGY",
+            proposal.strategy_id,
+            "EVOLUTION_PROPOSAL",
+            proposal.proposal_id,
+            relationship="proposed",
+        )
+        g.add_edge(
+            "VERSION",
+            proposal.parent_version_id,
+            "EVOLUTION_PROPOSAL",
+            proposal.proposal_id,
+            relationship="proposed_from",
+        )
+        if proposal.discovery_id:
+            g.add_node("DISCOVERY", proposal.discovery_id)
+            g.add_edge(
+                "DISCOVERY",
+                proposal.discovery_id,
+                "EVOLUTION_PROPOSAL",
+                proposal.proposal_id,
+                relationship="triggered",
+            )
+        for eid in proposal.evidence_ids:
+            g.add_node("EVIDENCE", eid)
+            g.add_edge(
+                "EVIDENCE",
+                eid,
+                "EVOLUTION_PROPOSAL",
+                proposal.proposal_id,
+                relationship="supported_by",
+            )
+        save_lineage(g, data_dir)
+    except Exception:
+        pass
+    return p
+
+
+def load_proposal(proposal_id: str, data_dir: Path | str | None = None) -> EvolutionProposal | None:
+    p = _evolution_dir(data_dir) / f"{proposal_id}.json"
+    if not p.exists():
+        return None
+    try:
+        return EvolutionProposal.from_dict(json.loads(p.read_text(encoding="utf-8")))
+    except Exception:
+        return None
+
+
+def list_proposals(data_dir: Path | str | None = None) -> list[EvolutionProposal]:
+    d = _evolution_dir(data_dir)
+    proposals: list[EvolutionProposal] = []
+    for p in d.glob("*.json"):
+        prop = load_proposal(p.stem, data_dir)
+        if prop:
+            proposals.append(prop)
+    proposals.sort(key=lambda x: x.created_at)
+    return proposals
+
+
+def create_proposal(
+    strategy_id: str,
+    parent_version_id: str,
+    discovery_id: str,
+    evidence_ids: list[str],
+    proposed_change: dict[str, Any],
+    rationale: str,
+    expected_effect: str,
+    new_source: str,
+    parent_source: str,
+    data_dir: Path | str | None = None,
+) -> EvolutionProposal:
+    """Create a proposal — does not modify strategy, shows BEFORE/AFTER/DIFF."""
+    parent_hash = _hash_source(parent_source)
+    new_hash = _hash_source(new_source)
+    # Verify parent unchanged
+    # Generate diff
+    diff = "\n".join(
+        difflib.unified_diff(
+            parent_source.splitlines(),
+            new_source.splitlines(),
+            fromfile="BEFORE",
+            tofile="AFTER",
+            lineterm="",
+        )
+    )
+    change = dict(proposed_change)
+    change["diff"] = diff
+    change["parent_source_hash"] = parent_hash
+    change["new_source_hash"] = new_hash
+    proposal = EvolutionProposal(
+        proposal_id=f"PROP-{uuid.uuid4().hex[:6].upper()}",
+        strategy_id=str(strategy_id),
+        parent_version_id=str(parent_version_id),
+        discovery_id=str(discovery_id),
+        evidence_ids=tuple(evidence_ids),
+        proposed_change=change,
+        rationale=str(rationale),
+        expected_effect=str(expected_effect),
+        status="PROPOSED",
+        created_at=datetime.now(UTC).isoformat(),
+        metadata={},
+        parent_source_hash=parent_hash,
+        new_source=new_source,
+        new_source_hash=new_hash,
+    )
+    save_proposal(proposal, data_dir)
+    return proposal
+
+
+def approve_proposal(
+    proposal_id: str,
+    data_dir: Path | str | None = None,
+) -> tuple[EvolutionProposal, Any | None]:
+    """Approve a proposal — creates new version, validates compilation and VM.
+
+    Safety checks before creating V4:
+    1. parent_version_id exists
+    2. parent source hash matches proposal's parent_source_hash
+    3. new source compiles to valid IR
+    4. VM execution succeeds on synthetic bars
+    5. IR hash is deterministic
+    6. New version is created with correct parent
+
+    Returns (updated_proposal, new_version or None if failed).
+    """
+    prop = load_proposal(proposal_id, data_dir)
+    if prop is None:
+        raise FileNotFoundError(f"Proposal not found: {proposal_id}")
+    if prop.status not in ("PROPOSED", "UNDER_REVIEW"):
+        raise ValueError(f"Proposal not in approvable state: {prop.status}")
+
+    # SAFETY CHECK 1: Verify parent version exists — a missing parent is an
+    # error, never silently rebound to "latest" (that would mint a version
+    # with a false lineage link).
+    try:
+        from strategy.version import load_version
+
+        parent_version = load_version(prop.strategy_id, prop.parent_version_id, data_dir)
+        if parent_version is None:
+            failed = _proposal_failed(
+                prop,
+                f"Parent version not found: {prop.parent_version_id} "
+                "— refusing silent rebind; point the proposal at a real parent",
+            )
+            save_proposal(failed, data_dir)
+            return failed, None
+    except Exception as e:
+        failed = _proposal_failed(prop, f"Parent version lookup failed: {e}")
+        save_proposal(failed, data_dir)
+        return failed, None
+
+    # SAFETY CHECK 2: Verify parent source hash matches
+    if prop.parent_source_hash and prop.parent_source_hash != parent_version.source_hash:
+        failed = _proposal_failed(
+            prop,
+            f"Parent source hash mismatch: proposal has {prop.parent_source_hash}, "
+            f"actual parent has {parent_version.source_hash}",
+        )
+        save_proposal(failed, data_dir)
+        return failed, None
+
+    # SAFETY CHECK 3: Compiler validation — Python-native
+    try:
+        compiled = compile_strategy(prop.new_source)
+    except Exception as e:
+        failed = _proposal_failed(prop, f"Compilation failed: {e}")
+        save_proposal(failed, data_dir)
+        return failed, None
+
+    # SAFETY CHECK 4: Python validation — controlled test execution
+    # over a mixed up/down/flat tape (never a monotonic ramp).
+    try:
+        from strategy.models.parameters import StrategyParameters
+
+        logic = compiled.create_logic(StrategyParameters({}))
+        bars = _synthetic_bars()
+        for idx in range(logic.warmup(), len(bars)):
+            view = BarView(
+                bars=bars, index=idx, params=StrategyParameters({}), state=StrategyState()
+            )
+            logic.on_bar(view)
+    except Exception as e:
+        failed = _proposal_failed(prop, f"Python execution failed: {e}")
+        save_proposal(failed, data_dir)
+        return failed, None
+
+    # SAFETY CHECK 5: Create new version with deterministic hash —
+    # canonical source hash from version.py (single implementation).
+    try:
+        ir_hash = canonical_hash(compiled.code)
+        new_version = create_version(
+            prop.strategy_id,
+            prop.new_source,
+            ir_version=1,
+            ir_hash=ir_hash,
+            parent_version_id=prop.parent_version_id,
+            data_dir=data_dir,
+            metadata={
+                "proposal_id": prop.proposal_id,
+                "discovery_id": prop.discovery_id,
+                "state": "RESEARCH",
+            },
+        )
+    except Exception as e:
+        failed = _proposal_failed(prop, f"Version creation failed: {e}")
+        save_proposal(failed, data_dir)
+        return failed, None
+
+    # Lineage: PROPOSAL -> NEW_VERSION
+    try:
+        from .lineage import load_lineage, save_lineage
+
+        g = load_lineage(data_dir)
+        g.add_node("EVOLUTION_PROPOSAL", prop.proposal_id)
+        g.add_node("VERSION", new_version.version_id)
+        g.add_edge(
+            "EVOLUTION_PROPOSAL",
+            prop.proposal_id,
+            "VERSION",
+            new_version.version_id,
+            relationship="evolved_to",
+        )
+        save_lineage(g, data_dir)
+    except Exception:
+        pass
+
+    # Mark proposal as APPLIED
+    applied = EvolutionProposal(
+        proposal_id=prop.proposal_id,
+        strategy_id=prop.strategy_id,
+        parent_version_id=prop.parent_version_id,
+        discovery_id=prop.discovery_id,
+        evidence_ids=prop.evidence_ids,
+        proposed_change=prop.proposed_change,
+        rationale=prop.rationale,
+        expected_effect=prop.expected_effect,
+        status="APPLIED",
+        created_at=prop.created_at,
+        metadata={**prop.metadata, "new_version_id": new_version.version_id},
+        parent_source_hash=prop.parent_source_hash,
+        new_source=prop.new_source,
+        new_source_hash=prop.new_source_hash,
+    )
+    save_proposal(applied, data_dir)
+
+    return applied, new_version
+
+
+def _proposal_failed(prop: EvolutionProposal, reason: str) -> EvolutionProposal:
+    """Create a FAILED copy of a proposal with a reason."""
+    return EvolutionProposal(
+        proposal_id=prop.proposal_id,
+        strategy_id=prop.strategy_id,
+        parent_version_id=prop.parent_version_id,
+        discovery_id=prop.discovery_id,
+        evidence_ids=prop.evidence_ids,
+        proposed_change=prop.proposed_change,
+        rationale=prop.rationale,
+        expected_effect=prop.expected_effect,
+        status="FAILED",
+        created_at=prop.created_at,
+        metadata={**prop.metadata, "failure_reason": reason},
+        parent_source_hash=prop.parent_source_hash,
+        new_source=prop.new_source,
+        new_source_hash=prop.new_source_hash,
+    )
+
+
+def reject_proposal(
+    proposal_id: str, data_dir: Path | str | None = None, reason: str = ""
+) -> EvolutionProposal:
+    prop = load_proposal(proposal_id, data_dir)
+    if prop is None:
+        raise FileNotFoundError(f"Proposal not found: {proposal_id}")
+    rejected = EvolutionProposal(
+        proposal_id=prop.proposal_id,
+        strategy_id=prop.strategy_id,
+        parent_version_id=prop.parent_version_id,
+        discovery_id=prop.discovery_id,
+        evidence_ids=prop.evidence_ids,
+        proposed_change=prop.proposed_change,
+        rationale=prop.rationale,
+        expected_effect=prop.expected_effect,
+        status="REJECTED",
+        created_at=prop.created_at,
+        metadata={**prop.metadata, "reject_reason": reason},
+        parent_source_hash=prop.parent_source_hash,
+        new_source=prop.new_source,
+        new_source_hash=prop.new_source_hash,
+    )
+    save_proposal(rejected, data_dir)
+    return rejected
+
+
+def get_diff(proposal: EvolutionProposal) -> str:
+    return proposal.proposed_change.get("diff", "")
+
+
+def compare_versions(
+    parent_version_id: str,
+    candidate_version_id: str,
+    strategy_id: str,
+    data_dir: Path | str | None = None,
+) -> dict[str, Any]:
+    """Compare parent vs candidate — generic, not strategy-specific."""
+    from strategy.version import load_version
+
+    parent = load_version(strategy_id, parent_version_id, data_dir)
+    candidate = load_version(strategy_id, candidate_version_id, data_dir)
+    if not parent or not candidate:
+        return {"error": "Version not found"}
+
+    # For generic, we compare source hashes, IR hashes, and if possible run a simple backtest comparison  # noqa: E501
+    # For now, return basic diff and metadata
+    return {
+        "parent": {
+            "version_id": parent.version_id,
+            "source_hash": parent.source_hash,
+            "ir_hash": parent.ir_hash,
+        },
+        "candidate": {
+            "version_id": candidate.version_id,
+            "source_hash": candidate.source_hash,
+            "ir_hash": candidate.ir_hash,
+        },
+        "source_changed": parent.source_hash != candidate.source_hash,
+        "ir_changed": parent.ir_hash != candidate.ir_hash,
+    }
