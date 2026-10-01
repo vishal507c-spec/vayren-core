@@ -302,37 +302,6 @@ component LabEyebrow inherits Rectangle {
     }
 }
 
-// Compact step chip for the section-02 rail (`✓ 01 DEFINE THE RESEARCH
-// OBJECT` / `● 03 READ ONE ANSWER`). State is passed in as text: the rail
-// must not invent step names or decide what is done.
-export component LabRailStep inherits Rectangle {
-    in property <string> num;
-    in property <string> name;
-    in property <bool> step-on: false;
-    height: 100%;
-    HorizontalLayout {
-        padding-left: 12px;
-        padding-right: 12px;
-        spacing: 7px;
-        alignment: center;
-        Text {
-            text: root.num;
-            font-family: "monospace";
-            font-size: 9px;
-            color: root.step-on ? LabPalette.lab-teal : LabPalette.lab-faint;
-            vertical-alignment: center;
-        }
-        Text {
-            text: root.name;
-            font-size: 9px;
-            letter-spacing: 0.8px;
-            font-weight: root.step-on ? 650 : 400;
-            color: root.step-on ? LabPalette.lab-text : LabPalette.dim;
-            vertical-alignment: center;
-        }
-    }
-}
-
 component LabFieldLabel inherits Rectangle {
     in property <string> lbl;
     in property <string> hint: "";
@@ -444,63 +413,6 @@ component LabSegmented inherits Rectangle {
                 width: parent.width - 4px;
                 overflow: elide;
             }
-        }
-    }
-}
-
-// Section rail: numbered badge + title + hairline + the neighbouring steps.
-// The step TEXT and its done/next marks come from real state (a research
-// object exists, the current section) — the rail never invents progress.
-component LabStepRail inherits Rectangle {
-    in property <string> num;
-    in property <string> title;
-    in property <string> prev-num: "";
-    in property <string> prev-name: "";
-    in property <string> next-num: "";
-    in property <string> next-name: "";
-    height: 20px;
-    width: 100%;
-    HorizontalLayout {
-        spacing: 10px;
-        alignment: center;
-        Rectangle {
-            width: raibtxt.width + 18px;
-            height: 20px;
-            border-radius: 6px;
-            background: LabPalette.inset;
-            border-width: 1px;
-            border-color: LabPalette.line;
-            raibtxt := Text {
-                text: root.num;
-                font-family: "monospace";
-                font-size: 10px;
-                color: LabPalette.lab-muted;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
-        }
-        Text {
-            text: root.title;
-            font-size: 10px;
-            letter-spacing: 1.6px;
-            font-weight: 600;
-            color: LabPalette.dim;
-            vertical-alignment: center;
-        }
-        Rectangle {
-            horizontal-stretch: 1;
-            height: 1px;
-            background: LabPalette.line2;
-        }
-        if root.prev-name != "": LabRailStep {
-            num: root.prev-num;
-            name: root.prev-name;
-            step-on: false;
-        }
-        if root.next-name != "": LabRailStep {
-            num: root.next-num;
-            name: root.next-name;
-            step-on: false;
         }
     }
 }
@@ -1189,6 +1101,13 @@ export component StrategyLabScreen inherits Rectangle {
                     // ════ 01 DEFINE ════
                     VerticalLayout {
                         spacing: 0;
+                        // A nested VerticalLayout is sized to its CONTENT on the
+                        // cross axis, so without this the section collapses to the
+                        // width of the name/description and the 380px objects
+                        // column is stranded mid-page instead of on the right
+                        // edge. Stated here so the width no longer depends on a
+                        // sibling's self-referential `parent.width` binding.
+                        horizontal-stretch: 1;
                         LabEyebrow { eyebrow-text: "01 · DEFINE THE RESEARCH OBJECT"; }
                         HorizontalLayout {
                             spacing: 26px;
@@ -1213,13 +1132,11 @@ export component StrategyLabScreen inherits Rectangle {
                                     Rectangle { height: 18px; }
                                     HorizontalLayout {
                                         spacing: 12px;
-                                        Text {
-                                            text: "DIRECTION";
-                                            font-size: 10px;
-                                            letter-spacing: 1px;
-                                            color: LabPalette.dim;
-                                            vertical-alignment: center;
-                                        }
+                                        // The direction control is the column's
+                                        // only trailing control, so it is pinned
+                                        // to the column's right edge explicitly
+                                        // rather than via a leading label.
+                                        alignment: end;
                                         Rectangle {
                                             height: 36px;
                                             border-radius: 9px;
@@ -1385,14 +1302,6 @@ export component StrategyLabScreen inherits Rectangle {
                     // ════ 02 CONFIGURE THE EXPERIMENT ════
                     VerticalLayout {
                         spacing: 0;
-                        LabStepRail {
-                            num: "02";
-                            title: "CONFIGURE THE EXPERIMENT YOU ARE ABOUT TO RUN";
-                            prev-num: root.lab.has-strategy ? "✓ 01" : "○ 01";
-                            prev-name: "DEFINE THE RESEARCH OBJECT";
-                            next-num: "● 03";
-                            next-name: "READ ONE ANSWER";
-                        }
                         // The card is the §02 width authority. Every block
                         // inside it sizes off THIS width, never off a width
                         // derived from its own row — a child measuring against
@@ -1655,30 +1564,6 @@ export component StrategyLabScreen inherits Rectangle {
                                                 pre-fix: "₹";
                                                 val: root.lab.cfg-capital;
                                                 committed(t) => { root.capital-committed(t); }
-                                            }
-                                            Rectangle { height: 15px; }
-                                            // The one honest capital rule the
-                                            // kernel enforces — the mock's
-                                            // "MIN ₹5,000 / NO LEVERAGE" had
-                                            // neither a minimum nor a leverage
-                                            // concept anywhere in the product.
-                                            HorizontalLayout {
-                                                spacing: 7px;
-                                                height: LabPalette.cfg-sub-h;
-                                                Text {
-                                                    text: root.lab.capital-ok ? "✓" : "✕";
-                                                    font-size: 9px;
-                                                    color: root.lab.capital-ok ? LabPalette.green : LabPalette.lab-red;
-                                                    vertical-alignment: center;
-                                                }
-                                                Text {
-                                                    text: "CAPITAL > 0";
-                                                    font-family: "monospace";
-                                                    font-size: 9px;
-                                                    letter-spacing: 0.8px;
-                                                    color: root.lab.capital-ok ? LabPalette.dim : LabPalette.lab-red;
-                                                    vertical-alignment: center;
-                                                }
                                             }
                                         }
                                     }
@@ -2018,19 +1903,6 @@ export component StrategyLabScreen inherits Rectangle {
                                     }
                                     Rectangle { y: 0; height: 1px; width: 100%; background: LabPalette.line; }
                                 }
-                            }
-                        }
-                        // Next-step anchor — reads as one system with the rail.
-                        HorizontalLayout {
-                            height: 34px;
-                            spacing: 10px; alignment: center;
-                            Rectangle { width: 34px; height: 1px; background: LabPalette.line; }
-                            Text {
-                                text: "NEXT → 03 · READ ONE ANSWER TO THE EXPERIMENT";
-                                font-size: 9.5px;
-                                letter-spacing: 1.6px;
-                                color: LabPalette.dim;
-                                vertical-alignment: center;
                             }
                         }
                     }

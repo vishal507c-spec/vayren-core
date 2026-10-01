@@ -97,6 +97,7 @@ _ALLOWED_IMPORT_ROOTS = frozenset(
         "math",
         "statistics",
         "typing",
+        "zoneinfo",  # PEP 615 tz data only (no IO/clock); OBR stamps IST-aware bars.
     }
 )
 

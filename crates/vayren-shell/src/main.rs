@@ -72,8 +72,23 @@ fn default_data_dir() -> String {
 }
 
 fn default_strategy_dir() -> String {
-    std::env::var("VAYREN_STRATEGIES")
-        .unwrap_or_else(|_| format!("{}/.vayren/strategies", home_dir()))
+    // Same precedence as the Python launcher: explicit flags (handled by the
+    // caller) → VAYREN_STRATEGIES → legacy workstation folder when present →
+    // per-user default. Without the legacy step a direct exe launch resolved
+    // to an empty home folder while the launcher resolved to the real
+    // library, so the same OBR file was visible in one path and missing in
+    // the other. No new location is introduced: this mirrors
+    // tools/launch_native.py::default_strategy_dir exactly.
+    if let Ok(dir) = std::env::var("VAYREN_STRATEGIES") {
+        if !dir.trim().is_empty() {
+            return dir;
+        }
+    }
+    let legacy = std::path::Path::new(r"D:\VAYREN_STRATEGIES");
+    if legacy.is_dir() {
+        return legacy.to_string_lossy().into_owned();
+    }
+    format!("{}/.vayren/strategies", home_dir())
 }
 
 /// Parse the `--limit` CLI value.

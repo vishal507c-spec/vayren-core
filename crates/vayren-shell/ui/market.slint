@@ -732,9 +732,9 @@ component CandleGlyph inherits Rectangle {
         height: Math.max(1px, parent.c.body * parent.grid-h);
         background: MarketTone.brush(parent.c.tone);
     }
-    // volume (TradingView parity: candle-direction hue at 50% — the bar
-    // reads bullish/bearish at a glance while grid + wicks show through)
+    // volume pane removed: bars hidden, zone reclaimed by the price grid.
     Rectangle {
+        visible: false;
         x: 0px;
         y: parent.grid-h + parent.vol-h - parent.c.vol * parent.vol-h;
         width: parent.width;
@@ -2129,8 +2129,8 @@ export component MarketScreen inherits Rectangle {
                             horizontal-stretch: 1;
                             clip: true;
                             background: VayrenPalette.bg;
-                            property <length> grid-h: self.height * 0.85;
-                            property <length> vol-h: self.height * 0.15;
+                            property <length> grid-h: self.height;
+                            property <length> vol-h: 0px;
                             property <int> n: Math.max(
                                 Math.max(root.plot-slots, root.candles.length), 1
                             );
@@ -2260,10 +2260,9 @@ export component MarketScreen inherits Rectangle {
                                     height: 1px;
                                     background: VayrenPalette.crosshair-line;
                                 }
-                                // Volume tag at the HOVERED bar's own height
-                                // (same scale as the bars — never a fixed
-                                // middle slot).
+                                // Volume tag removed with the volume pane.
                                 Text {
+                                    visible: false;
                                     x: plot.width - 96px;
                                     y: plot.grid-h + plot.vol-h - root.hover-vol-pos * plot.vol-h - VayrenDesign.sp-md;
                                     width: 90px;
@@ -2400,14 +2399,6 @@ export component MarketScreen inherits Rectangle {
                                         placeholder-text: "Search indicators & strategies…";
                                         edited(t) => { root.indicator-query(t); }
                                     }
-                                    HorizontalLayout {
-                                        spacing: 4px;
-                                        for cat in ["ALL", "TREND", "MOMENTUM", "VOLUME", "VOLATILITY", "STRATEGIES"]: SmallButton {
-                                            label: cat;
-                                            active: root.popup-category == cat;
-                                            picked => { root.indicator-category(cat); }
-                                        }
-                                    }
                                     ScrollView {
                                         vertical-stretch: 1;
                                         viewport-width: self.width;
@@ -2438,7 +2429,7 @@ export component MarketScreen inherits Rectangle {
                         Rectangle {
                             width: root.price-strip;
                             background: VayrenPalette.bg;
-                            property <length> grid-h: self.height * 0.85;
+                            property <length> grid-h: self.height;
 
                             // 1px subtle vertical separator line between plot and price axis
                             Rectangle {
@@ -2546,8 +2537,9 @@ export component MarketScreen inherits Rectangle {
                                 }
                             }
 
-                            // volume-zone separator (continues the plot baseline)
+                            // volume-zone separator (removed with the volume pane)
                             Rectangle {
+                                visible: false;
                                 x: 0px;
                                 y: parent.grid-h;
                                 width: parent.width;
@@ -2559,6 +2551,7 @@ export component MarketScreen inherits Rectangle {
                             // of the volume zone) + latest bar volume pinned
                             // at its own height in the bar's direction color.
                             if root.has-data && root.has-last-volume: Text {
+                                visible: false;
                                 y: parent.grid-h + (parent.height - parent.grid-h)
                                     - root.last-volume-pos * (parent.height - parent.grid-h) - 8px;
                                 height: parent.tick-h;
