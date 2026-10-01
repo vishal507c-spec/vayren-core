@@ -5,7 +5,13 @@
 
 **Owns:** Current state, open items, verified facts, oddities. **Not owns:** Rules/architecture/events/contracts → `AGENTS.md`, `AI_ENTRY.md`, `architecture.md`, `module_contracts.md`, `event_catalog.md`.
 
-**Latest update (phase-6-tooling-docs-consolidation, 2026-09-30):** PHASE 6 — PROFESSIONAL TOOLING & DOCUMENTATION CONSOLIDATION COMPLETE (no commit/push; local only).
+**Latest update (broker-boundary-graph-rebuild, 2026-10-01):** CI validators + test-shard-stateful 3 bench FAILs FIXED locally (no commit/push).
+1. **Root cause:** `docs/repo_graph.json` stale/polluted — CI `inputs_hash mismatch`, local `surprise.py + _phase6_probe` leftovers from bench TreeEdit.
+2. **Fix:** `python tools/repo_graph.py --build` -> 4401 entities, 7121 rels, 0 unresolved; `validate_repo_graph.py` PASS; all 8 validators PASS (282 files).
+3. **Verified:** `test_bench_private_py_change + cross_module + unexpected_file` 3/3 PASS in 344s; `validate_scope --stats` L0 VALID.
+4. **Pending:** commit/push only on explicit user command.
+
+**Previous update (phase-6-tooling-docs-consolidation, 2026-09-30):** PHASE 6 — PROFESSIONAL TOOLING & DOCUMENTATION CONSOLIDATION COMPLETE (no commit/push; local only).
 1. **Physical Directory Move & Taxonomy:**
    - `scripts/` -> `tools/` (developer, build, test, and validation tooling).
    - `90_brain/` -> `docs/` (architecture, contracts, design knowledge, AI memory, governance documentation).
