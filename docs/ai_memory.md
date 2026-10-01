@@ -5,11 +5,20 @@
 
 **Owns:** Current state, open items, verified facts, oddities. **Not owns:** Rules/architecture/events/contracts → `AGENTS.md`, `AI_ENTRY.md`, `architecture.md`, `module_contracts.md`, `event_catalog.md`.
 
-**Latest update (broker-boundary-graph-rebuild, 2026-10-01):** CI validators + test-shard-stateful 3 bench FAILs FIXED locally (no commit/push).
+**Latest update (obr-storage-sync, 2026-10-01):** OBR VISIBILITY/STORAGE SYNC FIXED, local only (no commit/push).
+1. **Root cause:** `crates/vayren-shell/src/main.rs::default_strategy_dir` me legacy `D:\VAYREN_STRATEGIES` fallback missing tha — direct exe launch `~/.vayren/strategies` (empty) par jata tha, jabki `tools/launch_native.py` legacy dir par — same OBR ek path me visible, dusre me missing.
+2. **Fix (1 file):** `main.rs` me env → legacy-if-is_dir → home precedence (sibling `default_data_dir` + launcher ka mirror; no new path, no dup, no arch change).
+3. **Verified:** `list_strategies = ['OBR']` count 1; record `cf7d76…/v1.0/39KB`; 6 versions intact; home me 0 files; pytest 95 passed/1 skipped; `cargo test -p vayren-shell --lib` 53 passed; fmt clean.
+4. **Known pre-existing (out of scope, untouched):** OBR `describe`/compile compiler allowlist par `zoneinfo` import se fail hota hai — launcher path par bhi identical, is fix se unchanged.
+
+**Previous update (broker-boundary-graph-rebuild, 2026-10-01):** CI validators + test-shard-stateful 3 bench FAILs FIXED locally (no commit/push).
 1. **Root cause:** `docs/repo_graph.json` stale/polluted — CI `inputs_hash mismatch`, local `surprise.py + _phase6_probe` leftovers from bench TreeEdit.
 2. **Fix:** `python tools/repo_graph.py --build` -> 4401 entities, 7121 rels, 0 unresolved; `validate_repo_graph.py` PASS; all 8 validators PASS (282 files).
 3. **Verified:** `test_bench_private_py_change + cross_module + unexpected_file` 3/3 PASS in 344s; `validate_scope --stats` L0 VALID.
-4. **Pending:** commit/push only on explicit user command.
+4. **Second blocker (user-approved fix):** OBR list me aaya par editor empty tha — `compile_strategy` allowlist `zoneinfo` rokta tha → `describe_strategy` fail → Lab ko `code` nahi milta tha. `src/strategy/language/compiler.py` me 1 token add (`zoneinfo`, PEP 615 tz-data only). Verify: `describe_strategy('OBR')` kind=library, 6 params, 39KB code; ruff+pyright clean; pytest 95 passed/1 skipped.
+5. **Pending:** local only, no commit/push; app restart needed (backend reloads compiler).
+6. **Volume pane removed (user request, 2026-10-01):** `crates/vayren-shell/ui/market.slint` — price grid full height (`vol-h: 0px`), volume bars + separator + last-volume/hover-volume labels hidden. Projection data untouched. Verify: market-view 11 passed, shell check clean, exe rebuilt 12:14.
+7. **Indicator popup ab strategies-only (user request, 2026-10-01):** `crates/vayren-domain/src/market.rs` — popup me se TREND/MOMENTUM/VOLUME/VOLATILITY sections + CHART (Scale/Crosshair) rows hataye; `market.slint` me category chips row hataya. **STRATEGIES section + OBR untouched.** Indicator toolbar/state machine (`AddIndicator`/`RemoveIndicator`/`CycleScaleMode`) jaari hai — sirf discovery list gayab. 2 tests naye contract par repin kiye. Verify: domain 205 passed, market-view 11 passed, shell 53 passed, fmt clean. **Exe rebuild nahi kiya (user ne cargo build mana kiya) — chalane ke liye build zaroori hai.**
 
 **Previous update (phase-6-tooling-docs-consolidation, 2026-09-30):** PHASE 6 — PROFESSIONAL TOOLING & DOCUMENTATION CONSOLIDATION COMPLETE (no commit/push; local only).
 1. **Physical Directory Move & Taxonomy:**

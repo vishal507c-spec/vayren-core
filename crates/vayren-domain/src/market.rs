@@ -2929,9 +2929,11 @@ fn project_inner(state: &MarketState, viewport_only: bool) -> MarketView {
                 });
             }
         };
-        for (label, items) in INDICATOR_CATEGORIES {
-            push_section(&mut popup_rows, label, items);
-        }
+        // Indicator categories (TREND/MOMENTUM/VOLUME/VOLATILITY) are
+        // intentionally NOT listed: this popup is strategies-only now. The
+        // indicator toolbar + the backend's AddIndicator path still work;
+        // only the discovery list is gone.
+        let _ = &push_section;
         if cat == "ALL" || cat == "STRATEGIES" {
             let strategies: Vec<&String> = state
                 .strategies
@@ -2955,50 +2957,9 @@ fn project_inner(state: &MarketState, viewport_only: bool) -> MarketView {
                 }
             }
         }
-        // Chart display settings section (own implementation of the
-        // chart-settings grouping): shown on ALL so scale/crosshair
-        // stay one click away without toolbar clutter. Rows carry stable
-        // ids; selection routes by category, never by label text.
-        if cat == "ALL" {
-            let chart_rows = [
-                (
-                    "scale",
-                    match state.scale_mode {
-                        ChartScaleMode::Regular => "Scale: Regular (₹)",
-                        ChartScaleMode::Percent => "Scale: Percent (%)",
-                        ChartScaleMode::Logarithmic => "Scale: Logarithmic (log)",
-                    },
-                ),
-                (
-                    "cross",
-                    if state.cross_visible {
-                        "Crosshair: On"
-                    } else {
-                        "Crosshair: Off"
-                    },
-                ),
-            ];
-            let chart_rows: Vec<(&str, &str)> = chart_rows
-                .into_iter()
-                .filter(|(_, label)| query.is_empty() || label.to_lowercase().contains(&query))
-                .collect();
-            if !chart_rows.is_empty() {
-                popup_rows.push(PopupRow {
-                    kind: "section".to_string(),
-                    label: "— CHART —".to_string(),
-                    name: String::new(),
-                    category: String::new(),
-                });
-                for (name, label) in chart_rows {
-                    popup_rows.push(PopupRow {
-                        kind: "item".to_string(),
-                        label: label.to_string(),
-                        name: name.to_string(),
-                        category: "CHART".to_string(),
-                    });
-                }
-            }
-        }
+        // Chart display settings (Scale/Crosshair) are no longer listed here:
+        // the popup is strategies-only. The settings action and its state are
+        // untouched — only the discovery rows are removed.
         if popup_rows.iter().all(|r| r.kind != "item") {
             popup_rows.clear();
             popup_rows.push(PopupRow {
@@ -4097,29 +4058,41 @@ mod tests {
     }
 
     #[test]
-    fn indicator_popup_sections_and_search() {
+    fn indicator_popup_is_strategies_only() {
         let mut st = MarketState::default();
         st.strategies = vec!["OBR".to_string()];
         assert!(st.apply(MarketAction::IndicatorPopup(true)));
         let v = project(&st);
         assert!(v.popup_open);
+        // Strategies stay listed.
         assert!(v
             .popup_rows
             .iter()
-            .any(|r| r.kind == "item" && r.name == "SMA"));
-        assert!(v
-            .popup_rows
-            .iter()
-            .any(|r| r.name == "OBR" && r.category == "STRATEGIES"));
+            .any(|r| r.kind == "item" && r.name == "OBR" && r.category == "STRATEGIES"));
+        // Indicator categories + the CHART section are gone.
+        for removed in [
+            "SMA",
+            "EMA",
+            "VWAP",
+            "Supertrend",
+            "RSI",
+            "MACD",
+            "Stochastic",
+        ] {
+            assert!(
+                !v.popup_rows.iter().any(|r| r.name == removed),
+                "{removed} must not be listed in the strategies-only popup"
+            );
+        }
+        assert!(!v.popup_rows.iter().any(|r| r.category == "CHART"));
+        // Search still applies, and a miss is honest-empty.
         assert!(st.apply(MarketAction::IndicatorQuery("zzz".to_string())));
         let v = project(&st);
         assert_eq!(v.popup_rows.len(), 1);
         assert_eq!(v.popup_rows[0].kind, "empty");
-        assert!(st.apply(MarketAction::IndicatorCategory("MOMENTUM".to_string())));
-        assert!(st.apply(MarketAction::IndicatorQuery(String::new())));
+        assert!(st.apply(MarketAction::IndicatorQuery("obr".to_string())));
         let v = project(&st);
-        assert!(v.popup_rows.iter().any(|r| r.name == "RSI"));
-        assert!(!v.popup_rows.iter().any(|r| r.name == "SMA"));
+        assert!(v.popup_rows.iter().any(|r| r.name == "OBR"));
         assert!(st.apply(MarketAction::IndicatorPopup(false)));
         assert!(!st.popup_open);
     }
@@ -5183,34 +5156,21 @@ mod tests {
     }
 
     #[test]
-    fn popup_chart_section_lists_scale_cross() {
+    fn popup_has_no_chart_section_but_scale_still_works() {
         let mut st = MarketState::default();
         st.set_bars("S", "15m", "", scale_bars());
         assert!(st.apply(MarketAction::IndicatorPopup(true)));
         let view = project(&st);
-        let rows: Vec<(&str, &str)> = view
+        assert!(!view.popup_rows.iter().any(|r| r.category == "CHART"));
+        assert!(!view
             .popup_rows
             .iter()
-            .filter(|r| r.kind == "item" && r.category == "CHART")
-            .map(|r| (r.name.as_str(), r.label.as_str()))
-            .collect();
-        assert_eq!(
-            rows,
-            vec![("scale", "Scale: Regular (₹)"), ("cross", "Crosshair: On"),]
-        );
-        // Labels follow state; ids stay stable for routing.
+            .any(|r| r.name == "scale" || r.name == "cross"));
+        // The scale state machine itself is untouched by the popup removal.
         assert!(st.apply(MarketAction::CycleScaleMode));
         let view = project(&st);
-        let rows: Vec<(&str, &str)> = view
-            .popup_rows
-            .iter()
-            .filter(|r| r.kind == "item" && r.category == "CHART")
-            .map(|r| (r.name.as_str(), r.label.as_str()))
-            .collect();
-        assert_eq!(
-            rows,
-            vec![("scale", "Scale: Percent (%)"), ("cross", "Crosshair: On"),]
-        );
+        assert_eq!(view.scale_mode, 1);
+        assert_eq!(view.scale_label, "%");
     }
 
     #[test]
