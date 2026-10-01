@@ -100,16 +100,16 @@
         "auth"
       ],
       "domain": "PROVIDER_BOUNDARY",
-      "owner_module": "src/data/provider",
+      "owner_module": "src/broker/providers",
       "language": "PYTHON",
       "primary_files": [
         "src/data/provider/contract.py",
         "src/data/provider/factory.py"
       ],
       "secondary_files": [
-        "src/data/provider/credentials_store.py",
-        "src/data/provider/zerodha/adapter.py",
-        "src/data/provider/fyers/adapter.py"
+        "src/broker/common/credentials_store.py",
+        "src/broker/providers/zerodha/adapter.py",
+        "src/broker/providers/fyers/adapter.py"
       ],
       "depends_on": [
         "src/broker",
@@ -147,8 +147,8 @@
       "contract": "docs/module_contracts.md section 5.3",
       "change_surface": {
         "likely_changed": [
-          "src/data/provider/zerodha/*.py",
-          "src/data/provider/fyers/*.py"
+          "src/broker/providers/zerodha/*.py",
+          "src/broker/providers/fyers/*.py"
         ],
         "affected_interfaces": [
           "Provider",
@@ -160,7 +160,8 @@
         "required_tests": "pytest src/data/tests -q"
       },
       "owner_paths": [
-        "src/data/provider"
+        "src/broker/providers",
+        "src/broker/common"
       ]
     },
     {
@@ -198,7 +199,7 @@
       ],
       "forbidden": [
         "crates/vayren-core/src/*",
-        "src/data/provider/*/adapter.py"
+        "src/broker/providers/*/adapter.py"
       ],
       "symbols": {
         "src/data/settings.py": [
@@ -697,7 +698,7 @@
         "src/broker/identity.py",
         "src/broker/management.py",
         "src/broker/selection_store.py",
-        "src/broker/adapters/skeleton/__init__.py"
+        "src/broker/providers/skeleton/__init__.py"
       ],
       "depends_on": [],
       "depended_on_by": [
@@ -728,13 +729,13 @@
         "src/broker/selection.py": [
           "BrokerSelection"
         ],
-        "src/broker/faces.py": [
+        "src/broker/providers/skeleton/__init__.py": [
+          "skeleton_record"
+        ],
+        "src/broker/interfaces/faces.py": [
           "HistoricalFace",
           "MarketDataFace",
           "TradingFace"
-        ],
-        "src/broker/adapters/skeleton/__init__.py": [
-          "skeleton_record"
         ]
       },
       "contract": "docs/module_contracts.md section 5.10",

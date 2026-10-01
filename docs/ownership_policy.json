@@ -22,7 +22,7 @@
       "id": "PROVIDER_SDK",
       "domain": "PROVIDER_BOUNDARY",
       "required_language": "PYTHON",
-      "directory_prefixes": ["src/data/provider/"],
+      "directory_prefixes": ["src/broker/providers/", "src/broker/common/", "src/data/provider/"],
       "excluded_subpaths": [],
       "description": "External broker SDK adapters (Zerodha etc). Stays Python - external API boundary, not core compute.",
       "allow_python_glue": true,

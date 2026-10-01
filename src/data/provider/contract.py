@@ -1,9 +1,8 @@
 """Provider contract — the engine ↔ provider boundary.
 
 The core download engine consumes ONLY this module. Concrete providers
-(``data.provider.zerodha.adapter.ZerodhaProvider`` and future adapters)
-implement the :class:`Provider` protocol; ``data.provider.factory.build_provider``
-resolves ``settings.provider`` to an instance.
+(in ``broker.providers``) implement the :class:`Provider` protocol;
+``data.provider.factory.build_provider`` resolves ``settings.provider`` to an instance.
 
 The engine's vocabulary is canonical and broker-free:
 
@@ -26,72 +25,40 @@ their meaning is provider-owned.
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Protocol, runtime_checkable
 
-TOKEN_EXPIRED = object()  # session/token invalid → renew and retry
-RATE_LIMITED = object()  # consecutive rate-limit hits → emergency stop
+from broker.interfaces.historical import (
+    CANONICAL_INTERVALS,
+    ERR_AUTHENTICATION_FAILED,
+    ERR_INVALID_REQUEST,
+    ERR_INVALID_SYMBOL,
+    ERR_NETWORK_ERROR,
+    ERR_PROVIDER_UNAVAILABLE,
+    ERR_UNKNOWN_PROVIDER_ERROR,
+    RATE_LIMITED,
+    TOKEN_EXPIRED,
+    HistoricalFace,
+    HistoricalProviderError,
+)
 
-# Normalized provider error codes — the only error vocabulary the engine sees.
-ERR_AUTHENTICATION_FAILED = "AUTHENTICATION_FAILED"
-ERR_INVALID_SYMBOL = "INVALID_SYMBOL"
-ERR_NETWORK_ERROR = "NETWORK_ERROR"
-ERR_PROVIDER_UNAVAILABLE = "PROVIDER_UNAVAILABLE"
-ERR_INVALID_REQUEST = "INVALID_REQUEST"
-ERR_UNKNOWN_PROVIDER_ERROR = "UNKNOWN_PROVIDER_ERROR"
-
-# Canonical interval ids — broker-agnostic, used by the engine end to end.
-CANONICAL_INTERVALS: tuple[str, ...] = ("1m", "5m", "15m", "30m", "1h")
-
-
-class ProviderError(RuntimeError):
-    """A normalized provider failure with a broker-agnostic error code."""
-
-    def __init__(self, message: str, code: str = ERR_UNKNOWN_PROVIDER_ERROR) -> None:
-        super().__init__(message)
-        self.code = code
+ProviderError = HistoricalProviderError
 
 
 @runtime_checkable
-class Provider(Protocol):
-    """The minimal surface the download engine needs from a provider.
+class Provider(HistoricalFace, Protocol):
+    """The minimal surface the download engine needs from a provider."""
 
-    Implementations translate broker SDKs, credentials, intervals, tokens,
-    exceptions and rate limits into this canonical vocabulary.
 
-    ``runtime_checkable`` (Phase 20 M3): the UBL delegation shim verifies a
-    resolved historical face satisfies this protocol before returning it —
-    fail-closed against mis-registered plugins. Method-presence checking
-    only (data attributes are not probed).
-    """
-
-    def available(self) -> tuple[bool, str]:
-        """(ready, reason) — SDKs present and credentials configured?"""
-        ...
-
-    def symbols(self) -> set[str]:
-        """Canonical symbols the provider can resolve (lazily fetched, cached)."""
-        ...
-
-    def fetch_candles(
-        self, symbol: str, interval: str, start: datetime, end: datetime
-    ) -> list[dict] | object:
-        """Normalized candles for one canonical symbol/interval/range.
-
-        Returns a list of candle dicts (date/open/high/low/close/volume) or
-        the :data:`TOKEN_EXPIRED` / :data:`RATE_LIMITED` sentinel. Raises
-        :class:`ProviderError` with a normalized code for hard failures.
-        """
-        ...
-
-    def new_session(self) -> None:
-        """Start a fresh fetch session (rate-limit bookkeeping reset).
-
-        Cheap and local: no re-authentication. The engine calls it at the
-        same points the original engine created a fresh fetch client.
-        """
-        ...
-
-    def renew(self) -> None:
-        """Discard the current session and re-authenticate."""
-        ...
+__all__ = [
+    "CANONICAL_INTERVALS",
+    "ERR_AUTHENTICATION_FAILED",
+    "ERR_INVALID_REQUEST",
+    "ERR_INVALID_SYMBOL",
+    "ERR_NETWORK_ERROR",
+    "ERR_PROVIDER_UNAVAILABLE",
+    "ERR_UNKNOWN_PROVIDER_ERROR",
+    "Provider",
+    "ProviderError",
+    "RATE_LIMITED",
+    "TOKEN_EXPIRED",
+]

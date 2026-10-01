@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from broker.adapters.zerodha import BROKER_ID as DEFAULT_PROVIDER_BROKER_ID
+DEFAULT_PROVIDER_BROKER_ID = "zerodha"
 
 # Canonical interval ids (broker-agnostic) and their human-readable labels.
 # The selected provider adapter maps these to broker-specific interval ids.

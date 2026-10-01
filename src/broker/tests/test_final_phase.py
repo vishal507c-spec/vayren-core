@@ -11,13 +11,6 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from broker.adapters.skeleton import BROKER_ID as SKELETON_ID  # noqa: E402
-from broker.adapters.skeleton import (  # noqa: E402
-    SkeletonHistorical,
-    SkeletonMarketData,
-    SkeletonTrading,
-    skeleton_record,
-)
 from broker.capabilities import CapabilitySet, CapabilityStatus, Caps, Domain  # noqa: E402
 from broker.credentials import (  # noqa: E402
     CredentialMetadata,
@@ -28,6 +21,13 @@ from broker.credentials import (  # noqa: E402
 )
 from broker.faces import MarketDataFace, TradingFace  # noqa: E402
 from broker.identity import BrokerIdentity, identity_of  # noqa: E402
+from broker.providers.skeleton import BROKER_ID as SKELETON_ID  # noqa: E402
+from broker.providers.skeleton import (  # noqa: E402
+    SkeletonHistorical,
+    SkeletonMarketData,
+    SkeletonTrading,
+    skeleton_record,
+)
 from broker.registry import BrokerRegistry  # noqa: E402
 from broker.selection import BrokerSelection, surface_status  # noqa: E402
 from broker.vocab import Environment, ErrorCode, UnsupportedCapabilityError  # noqa: E402
@@ -153,7 +153,7 @@ def test_skeleton_record_shape() -> None:
     # one-item-per-face contract shape (empty sets were split-brain and are
     # now rejected by BrokerRecord). Shape is not liveness: every operation
     # still refuses, proven below.
-    from broker.adapters.skeleton import SKELETON_CAPABILITIES
+    from broker.providers.skeleton import SKELETON_CAPABILITIES
 
     record = skeleton_record()
     assert record.name == SKELETON_ID == "skeleton"

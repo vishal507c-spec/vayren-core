@@ -19,7 +19,7 @@ repos:
     hooks:
       - id: architecture-gate
         name: architecture-gate
-        entry: python scripts/validate_architecture_gate.py
+        entry: python tools/validate_architecture_gate.py
         language: system
         pass_filenames: false
         always_run: true

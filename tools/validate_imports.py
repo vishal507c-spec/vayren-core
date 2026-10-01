@@ -22,17 +22,12 @@ EXCLUDED_TOP_DIRS = {"docs"}
 # move target). SDK code has NOT moved there yet — the entry documents the
 # intended boundary so a stray SDK import under broker adapters stays
 # legal by design while any SDK import anywhere else still fails.
-SDK_ALLOWLIST_PREFIXES = ("src/data/provider/", "src/broker/adapters/")
+SDK_ALLOWLIST_PREFIXES = ("src/broker/providers/",)
 SDK_DENYLIST = {"kiteconnect"}
 
-# M8 network boundary: production broker HTTP/WebSocket client code may exist
-# ONLY inside adapter packages (future) and the retained historical transport
-# (``src/data/provider/``, kept intentionally per M5/M8 — the Zerodha
-# transport is not moved). Core, market, chart, strategy, backtest, risk,
-# execution and app composition must never import broker network clients
-# directly — they go Core → UBL → Adapter → Network.
-NETWORK_ALLOWLIST_PREFIXES = ("src/data/provider/", "src/broker/adapters/")
+NETWORK_ALLOWLIST_PREFIXES = ("src/broker/providers/", "src/broker/common/")
 NETWORK_DENYLIST = {"kiteconnect", "httpx", "requests", "websockets", "websocket"}
+
 
 # Legacy snapshot excluded from shipment/validation (same precedent as the
 # ruff extend-exclude): historical vendor drafts, never imported by product.

@@ -321,7 +321,7 @@ def _system_snapshot(
     when the broker stack cannot load.
     """
     try:
-        import data.provider.factory  # noqa: F401 (seeds zerodha+fyers specs)
+        import broker.providers  # noqa: F401
         from app.services.broker_manager import BrokerManager
         from app.services.broker_selection_service import (
             BrokerSelectionService,
@@ -389,7 +389,7 @@ def _system_snapshot(
     # UI can show a "saved" indicator without ever echoing the actual values.
     saved_keys: set = set()
     try:
-        from data.provider.credentials_store import default_store, provider_service
+        from broker.common.credentials_store import default_store, provider_service
 
         vault_store = default_store(data_dir)
         stored = vault_store.load(provider_service(selected_id)) if selected_id else None
@@ -1095,7 +1095,7 @@ def run_headless_backend(args: argparse.Namespace) -> int:
     # Initialize broker manager for system workspace
     broker_manager = None
     try:
-        import data.provider.factory  # noqa: F401
+        import broker.providers  # noqa: F401
         from app.services.broker_manager import BrokerManager
 
         broker_manager = BrokerManager(data_dir=str(data_dir))
@@ -1264,7 +1264,7 @@ def run_headless_backend(args: argparse.Namespace) -> int:
                                     merged[str(k)] = val
 
                             if broker_id == "fyers":
-                                from data.provider.fyers.live_auth import DEFAULT_REDIRECT_URL
+                                from broker.providers.fyers.live_auth import DEFAULT_REDIRECT_URL
 
                                 r_uri = str(merged.get("redirect_uri") or "").strip()
                                 if (

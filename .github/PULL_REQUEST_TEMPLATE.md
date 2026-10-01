@@ -2,7 +2,7 @@
 What does this PR do?
 
 ## Related Docs
-Link to relevant doc in `90_brain/` (e.g. `architecture.md`, `module_contracts.md`)
+Link to relevant doc in `docs/` (e.g. `architecture.md`, `module_contracts.md`)
 
 ## Type of Change
 - [ ] Bug fix
@@ -19,6 +19,6 @@ Link to relevant doc in `90_brain/` (e.g. `architecture.md`, `module_contracts.m
 - [ ] PR title follows the commit convention (`type: object`)
 - [ ] Merge method: squash (feature/fix/perf PRs)
 - [ ] Followed domain conventions (`AGENTS.md`)
-- [ ] Updated relevant READMEs / `90_brain/` if public API changed
+- [ ] Updated relevant READMEs / `docs/` if public API changed
 - [ ] `make check` passes
-- [ ] Updated `90_brain/ai_memory.md` if needed
+- [ ] Updated `docs/ai_memory.md` if needed

@@ -150,3 +150,10 @@ def default_registry() -> BrokerRegistry:
                 _default_registry = BrokerRegistry()
     assert _default_registry is not None
     return _default_registry
+
+
+def _phase6_probe() -> int:
+    return 1
+
+
+# phase6 probe 49349c66cc7043c79444f127197d5926

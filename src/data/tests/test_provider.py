@@ -12,6 +12,7 @@ from typing import cast
 
 import pytest
 
+from broker.providers.zerodha import AuthEngine, ZerodhaProvider
 from data.provider import RATE_LIMITED, TOKEN_EXPIRED, ProviderError
 from data.provider.contract import (
     CANONICAL_INTERVALS,
@@ -21,7 +22,6 @@ from data.provider.contract import (
     ERR_NETWORK_ERROR,
 )
 from data.provider.factory import build_provider
-from data.provider.zerodha import AuthEngine, ZerodhaProvider
 from data.settings import DownloadSettings
 from data.tests.conftest import FakeAuth, FakeKite, candle, make_settings
 
@@ -205,7 +205,7 @@ def test_zerodha_provider_unknown_symbol_is_invalid_symbol(tmp_path) -> None:
 
 
 def test_zerodha_provider_auth_failure_is_normalized(tmp_path) -> None:
-    from data.provider.zerodha.auth import AuthError
+    from broker.providers.zerodha.auth import AuthError
 
     settings = make_settings(tmp_path)
     auth = FakeAuth(kite=None)

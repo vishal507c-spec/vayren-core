@@ -45,7 +45,7 @@ from failure_intel import (  # noqa: E402
 
 ROOT = SCRIPTS_DIR.parent
 FYERS_COMMAND = (
-    "pytest src/data/tests/test_fyers_provider.py::"
+    "pytest src/broker/tests/test_fyers_provider.py::"
     "test_reload_credentials_falls_back_to_layered_loader -q"
 )
 FYERS_TAIL = (

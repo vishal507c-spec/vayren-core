@@ -53,7 +53,7 @@ CHAPTERS = (
 )
 
 SYMBOL_DEF = re.compile(
-    r"^\s*(?:pub\s+)?(?:async\s+)?(def|class|fn|struct|enum)\s+([A-Za-z_][A-Za-z0-9_]*)"
+    r"^\s*(?:pub\s+)?(?:async\s+)?(?:def|class|fn|struct|enum)\s+([A-Za-z_][A-Za-z0-9_]*)|^\s*([A-Za-z_][A-Za-z0-9_]*)\s*="
 )
 
 # Scope -> validation level (deterministic escalation, existing commands only).
@@ -81,8 +81,10 @@ def resolve_symbol(name: str, source: str) -> int | None:
     """Pure: 1-based definition line of a symbol in source text, else None."""
     for lineno, line in enumerate(source.splitlines(), 1):
         match = SYMBOL_DEF.match(line)
-        if match and match.group(2) == name:
-            return lineno
+        if match:
+            sym = match.group(1) or match.group(2)
+            if sym == name:
+                return lineno
     return None
 
 

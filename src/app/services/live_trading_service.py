@@ -383,7 +383,7 @@ class LiveTradingService:
         simply stay unregistered (fail-closed).
         """
         with contextlib.suppress(Exception):
-            from data.provider.factory import ensure_live_venues
+            from broker.providers import ensure_live_venues
 
             ensure_live_venues()
 

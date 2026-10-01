@@ -41,7 +41,9 @@ LANGUAGE_EXTENSIONS = {
     "RUST+SLINT": {".rs", ".slint", ".json"},
 }
 KNOWN_RUNNERS = {"pytest", "cargo", "ruff", "pyright", "python", "make", "cd"}
-PY_SYMBOL = re.compile(r"^(?:async\s+)?(?:def|class)\s+([A-Za-z_][A-Za-z0-9_]*)\b")
+PY_SYMBOL = re.compile(
+    r"^(?:async\s+)?(?:def|class)\s+([A-Za-z_][A-Za-z0-9_]*)\b|^([A-Za-z_][A-Za-z0-9_]*)\s*="
+)
 # Rust item declarations. Covers every route symbol shape that can appear at any
 # indentation level (top level, `impl` blocks, nested `mod`): plain `fn`,
 # visibility-restricted `pub(crate)`/`pub(super)`/`pub(in path)`, qualifiers
@@ -60,7 +62,7 @@ RS_COMMENT = re.compile(r"^(?://|/\*|\*)")
 
 
 def _symbols_in(path: Path) -> set[str]:
-    """Names declared in the file (def/class for .py, Rust items for .rs).
+    """Names declared in the file (def/class/alias for .py, Rust items for .rs).
 
     Lines are matched after stripping indentation, so `impl`-block and nested
     `mod` methods count exactly like top-level items.
@@ -76,7 +78,7 @@ def _symbols_in(path: Path) -> set[str]:
         if path.suffix != ".py" and RS_COMMENT.match(stripped):
             continue
         if match := pattern.match(stripped):
-            names.add(match.group(1))
+            names.add(match.group(1) or match.group(2))
     return names
 
 

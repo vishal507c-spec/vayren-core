@@ -1,16 +1,13 @@
-"""FYERS adapter tests: identity, honest capability matrix, registration,
+"""FYERS provider tests: identity, honest capability matrix, registration,
 delegation, SDK isolation.
 
-Strategy: transport stays exactly once in ``02_data/data/provider/fyers/``;
-this suite pins the UBL contract surface in
-``09_broker/broker/adapters/fyers/`` and the absence of duplication,
-leakage and aliases. Authentication phase: the venue claims NO history
-capabilities, so history fails closed while management/selection work.
+Strategy: transport and provider implementation live in ``src/broker/providers/fyers/``;
+this suite pins the UBL contract surface, absence of duplicate implementations,
+and clean boundary isolation.
 """
 
 from __future__ import annotations
 
-import subprocess
 import sys
 from pathlib import Path
 
@@ -19,20 +16,20 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from broker.adapters.fyers import (  # noqa: E402
+from broker.capabilities import Domain  # noqa: E402
+from broker.interfaces import ERR_PROVIDER_UNAVAILABLE, ProviderError  # noqa: E402
+from broker.providers.fyers import (  # noqa: E402
     BROKER_ID,
     DISPLAY_NAME,
     HISTORICAL_CAPABILITIES,
+    FyersProvider,
 )
-from broker.capabilities import Domain  # noqa: E402
 from broker.registry import default_registry  # noqa: E402
 from broker.selection import BrokerSelection  # noqa: E402
 from broker.vocab import Environment, UnsupportedCapabilityError  # noqa: E402
-from data.provider.contract import ProviderError  # noqa: E402
-from data.provider.fyers import FyersProvider  # noqa: E402
 from data.settings import DownloadSettings  # noqa: E402
 
-ADAPTER_DIR = ROOT / "src" / "broker" / "adapters" / "fyers"
+PROVIDER_DIR = ROOT / "src" / "broker" / "providers" / "fyers"
 TS = "2026-09-07T00:00:00+05:30"
 
 
@@ -57,7 +54,7 @@ def test_capability_matrix_advertises_history_shape() -> None:
 
 
 def test_registry_record_serves_fail_closed_history() -> None:
-    import data.provider.factory  # noqa: F401 — seeds the record
+    import broker.providers  # noqa: F401 — seeds the record
 
     record = default_registry().get(BROKER_ID)
     assert record.name == BROKER_ID
@@ -73,7 +70,7 @@ def test_registry_record_serves_fail_closed_history() -> None:
 
 
 def test_history_face_fails_closed_without_network(tmp_path) -> None:
-    import data.provider.factory  # noqa: F401
+    import broker.providers  # noqa: F401
 
     record = default_registry().get(BROKER_ID)
     face = record.plugin.face(Domain.HISTORICAL_DATA, _settings(tmp_path))
@@ -82,7 +79,7 @@ def test_history_face_fails_closed_without_network(tmp_path) -> None:
     assert isinstance(ready, bool) and isinstance(reason, str)
     with pytest.raises(ProviderError) as excinfo:
         face.fetch_candles("RELIANCE", "15m", None, None)  # type: ignore[arg-type]
-    assert excinfo.value.code == "PROVIDER_UNAVAILABLE"
+    assert excinfo.value.code == ERR_PROVIDER_UNAVAILABLE
     with pytest.raises(ProviderError):
         face.symbols()
 
@@ -92,7 +89,7 @@ def test_selection_resolves_and_history_surface_is_served() -> None:
     for the served face). Fail-closed without network happens at the
     transport (`ProviderError`), never as a silent fallback to another
     broker — see test_history_face_fails_closed_without_network."""
-    import data.provider.factory  # noqa: F401
+    import broker.providers  # noqa: F401
     from broker.selection import surface_resolution
 
     selection = BrokerSelection(
@@ -108,9 +105,8 @@ def test_selection_resolves_and_history_surface_is_served() -> None:
 
 
 def test_plugin_record_builder_uses_injected_factory() -> None:
-    """The adapter package builds registry records without importing the
-    transport layer (constructor injection — no broker→data edge)."""
-    from broker.adapters.fyers import fyers_plugin_record as build_record
+    """The provider package builds registry records without hardcoding transport."""
+    from broker.providers.fyers import fyers_plugin_record as build_record
 
     made: list[object] = []
 
@@ -130,52 +126,20 @@ def test_plugin_record_builder_uses_injected_factory() -> None:
         record.plugin.face(Domain.TRADING)
 
 
-def test_adapter_package_has_no_business_logic() -> None:
-    """The adapter package owns identity/capabilities/registration only —
-    no transport classes, no endpoints, no credential handling."""
-    assert ADAPTER_DIR.is_dir()
-    sources = "".join(
-        p.read_text(encoding="utf-8")
-        for p in sorted(ADAPTER_DIR.rglob("*.py"))
-        if "__pycache__" not in p.parts
-    )
-    for token in (
-        "class FyersProvider",
-        "class FyersAuthFlow",
-        "generate-authcode",
-        "validate-authcode",
-        "app_id_hash",
-        "os.environ",
-        "getenv",
-    ):
-        assert token not in sources, f"business logic leaked into adapter package: {token}"
-
-
-def test_adapter_import_pulls_no_transport_or_secrets() -> None:
-    """Fresh interpreter: importing the adapter package must not touch the
-    transport layer, HTTP clients, or any credential machinery."""
-    code = (
-        "import sys, broker.adapters.fyers as a; "
-        "mods = set(sys.modules); "
-        "print('urllib.request' in mods); "
-        "print([m for m in mods if m == 'data' or m.startswith('data.')]); "
-        "print(a.BROKER_ID)"
-    )
-    proc = subprocess.run(
-        [sys.executable, "-c", code],
-        capture_output=True,
-        text=True,
-        cwd=ROOT,
-        env={
-            "PATH": __import__("os").environ.get("PATH", ""),
-            "PYTHONPATH": str(ROOT / "09_broker"),
-        },
-    )
-    assert proc.returncode == 0, proc.stderr
-    has_http, data_mods, broker_id = proc.stdout.splitlines()
-    assert has_http == "False"
-    assert data_mods == "[]"
-    assert broker_id == "fyers"
+def test_data_domain_has_no_broker_sdk_implementation() -> None:
+    """src/data/ has no broker-specific SDK implementation, auth flows, or session stores."""
+    data_dir = ROOT / "src" / "data"
+    for py in data_dir.rglob("*.py"):
+        if "__pycache__" in py.parts or "tests" in py.parts:
+            continue
+        text = py.read_text(encoding="utf-8", errors="replace")
+        for forbidden in (
+            "class FyersProvider",
+            "class ZerodhaProvider",
+            "class FyersAuthFlow",
+            "class KiteAuthFlow",
+        ):
+            assert forbidden not in text, f"{py} contains leaked broker implementation: {forbidden}"
 
 
 def test_no_duplicate_fyers_implementation() -> None:
@@ -189,7 +153,7 @@ def test_no_duplicate_fyers_implementation() -> None:
         and "tests" not in p.parts
         and "class FyersProvider" in p.read_text(encoding="utf-8", errors="replace")
     ]
-    assert providers == ["src/data/provider/fyers/adapter.py"], providers
+    assert providers == ["src/broker/providers/fyers/adapter.py"], providers
     for cls in ("class FyersAuthFlow", "class FyersSessionStore", "class FyersSessionAdapter"):
         found = [
             p.relative_to(ROOT).as_posix()
@@ -203,7 +167,7 @@ def test_no_duplicate_fyers_implementation() -> None:
         assert len(found) == 1, f"{cls}: {found}"
 
 
-def test_credentials_schema_is_adapter_owned() -> None:
+def test_credentials_schema_is_provider_owned() -> None:
     """The venue declares its own credential shape (never Zerodha's)."""
     assert [f.key for f in FyersProvider.credential_fields] == [
         "app_id",

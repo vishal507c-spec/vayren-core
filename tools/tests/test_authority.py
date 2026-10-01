@@ -43,15 +43,15 @@ def _full_registries(extra: dict[str, str] | None = None) -> dict[str, str]:
 
 def _full_authorities(extra: dict[str, str] | None = None) -> dict[str, str]:
     files = {
-        "src/data/provider/zerodha/adapter.py": "class ZerodhaProvider:\n    pass\n",
-        "src/data/provider/fyers/adapter.py": "class FyersProvider:\n    pass\n",
+        "src/broker/providers/zerodha/adapter.py": "class ZerodhaProvider:\n    pass\n",
+        "src/broker/providers/fyers/adapter.py": "class FyersProvider:\n    pass\n",
         STRAT_REG: "class StrategyRegistry:\n    pass\n",
         BROKER_REG: ("class BrokerRegistry:\n    pass\ndef default_registry():\n    return None\n"),
         "src/data/settings.py": "class DownloadSettings:\n    pass\n",
         "src/broker/selection.py": "class BrokerSelection:\n    pass\n",
         "src/strategy/runtime.py": "class StrategyRuntime:\n    pass\n",
         FACTORY: "def build_provider(settings):\n    return None\n",
-        "src/broker/adapters/skeleton/__init__.py": ("def skeleton_record():\n    return None\n"),
+        "src/broker/providers/skeleton/__init__.py": ("def skeleton_record():\n    return None\n"),
         "src/strategy/language/compiler.py": ("def compile_strategy(code):\n    return None\n"),
         "src/app/services/broker_selection_service.py": (
             "class BrokerSelectionService:\n    pass\n"

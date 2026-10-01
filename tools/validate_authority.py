@@ -35,8 +35,8 @@ REGISTRIES = {
 
 # Canonical single authorities: symbol -> defining file (exactly one site).
 AUTHORITIES = {
-    "ZerodhaProvider": "src/data/provider/zerodha/adapter.py",
-    "FyersProvider": "src/data/provider/fyers/adapter.py",
+    "ZerodhaProvider": "src/broker/providers/zerodha/adapter.py",
+    "FyersProvider": "src/broker/providers/fyers/adapter.py",
     "StrategyRegistry": "src/strategy/registry.py",
     "BrokerRegistry": "src/broker/registry.py",
     "DownloadSettings": "src/data/settings.py",
@@ -45,14 +45,14 @@ AUTHORITIES = {
     "build_provider": "src/data/provider/factory.py",
     "default_registry": "src/broker/registry.py",
     "compile_strategy": "src/strategy/language/compiler.py",
-    "skeleton_record": "src/broker/adapters/skeleton/__init__.py",
+    "skeleton_record": "src/broker/providers/skeleton/__init__.py",
     "BrokerSelectionService": "src/app/services/broker_selection_service.py",
 }
 
 # Canonical registry seeding points: files allowed to call `.register(`.
 REGISTER_WRITERS = {
-    "src/data/provider/factory.py",
-    "src/data/provider/zerodha/live_activation.py",
+    "src/broker/providers/__init__.py",
+    "src/broker/providers/zerodha/live_activation.py",
     "src/broker/registry.py",
 }
 

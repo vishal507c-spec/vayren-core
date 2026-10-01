@@ -119,7 +119,7 @@ class BrokerManager:
         browser_opener: Callable[[str], None] | None = None,
         specs: dict[str, BrokerSpec] | None = None,
     ) -> None:
-        from data.provider.credentials_store import default_store
+        from broker.common.credentials_store import default_store
 
         self._data_dir = Path(data_dir)
         self._store = (
@@ -140,7 +140,8 @@ class BrokerManager:
 
     @staticmethod
     def _default_specs() -> dict[str, BrokerSpec]:
-        from data.provider.factory import fyers_management_spec, zerodha_management_spec
+        from broker.providers.fyers import fyers_management_spec
+        from broker.providers.zerodha import zerodha_management_spec
 
         return {"zerodha": zerodha_management_spec(), "fyers": fyers_management_spec()}
 

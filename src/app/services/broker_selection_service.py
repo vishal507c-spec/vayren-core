@@ -29,8 +29,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from broker.adapters.zerodha import BROKER_ID as ZERODHA_BROKER_ID
 from broker.capabilities import CapabilityStatus, Domain
+from broker.providers.zerodha import BROKER_ID as ZERODHA_BROKER_ID
 from broker.registry import BrokerRegistry, default_registry
 from broker.selection import (
     BrokerSelection,
