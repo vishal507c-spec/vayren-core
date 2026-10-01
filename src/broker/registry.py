@@ -157,3 +157,7 @@ def _phase6_probe() -> int:
 
 
 # phase6 probe 49349c66cc7043c79444f127197d5926
+
+
+def phase6_probe_api() -> str:
+    return "probe"

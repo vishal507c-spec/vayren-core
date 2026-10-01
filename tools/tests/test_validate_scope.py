@@ -513,6 +513,8 @@ PROBE_PUBLIC = '\n\ndef phase6_probe_api() -> str:\n    return "probe"\n'
 AMBIENT_FAIL_COMMANDS = {
     "pytest src/data/tests/test_fyers_provider.py -q",
     "pytest src/data/tests -q",
+    "pytest src/broker/tests/test_fyers_provider.py -q",
+    "pytest src/broker/tests -q",
 }
 
 
