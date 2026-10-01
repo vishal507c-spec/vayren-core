@@ -1091,7 +1091,7 @@
       "to": "src/core/native"
     }
   ],
-  "entity_count": 4403,
+  "entity_count": 4401,
   "files": [
     {
       "domain": "CORE",
@@ -13038,21 +13038,6 @@
       "tests": []
     },
     {
-      "called_by": [],
-      "callers_complete": true,
-      "calls": [],
-      "dotted": "broker.registry._phase6_probe",
-      "file": "src/broker/registry.py",
-      "kind": "function",
-      "language": "PYTHON",
-      "line": 155,
-      "module": "src/broker",
-      "name": "_phase6_probe",
-      "public": false,
-      "qualified": "broker.registry:_phase6_probe",
-      "tests": []
-    },
-    {
       "called_by": [
         "app.services.broker_selection_service:BrokerSelectionService",
         "app.services.live_trading_service:LiveTradingService",
@@ -13081,21 +13066,6 @@
       "name": "default_registry",
       "public": true,
       "qualified": "broker.registry:default_registry",
-      "tests": []
-    },
-    {
-      "called_by": [],
-      "callers_complete": true,
-      "calls": [],
-      "dotted": "broker.registry.phase6_probe_api",
-      "file": "src/broker/registry.py",
-      "kind": "function",
-      "language": "PYTHON",
-      "line": 162,
-      "module": "src/broker",
-      "name": "phase6_probe_api",
-      "public": true,
-      "qualified": "broker.registry:phase6_probe_api",
       "tests": []
     },
     {
