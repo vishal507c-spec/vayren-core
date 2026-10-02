@@ -347,10 +347,17 @@ pub fn layout_mode(content_width: f32) -> MarketLayoutMode {
     }
 }
 
-/// Snapped crosshair state (nearest candle + pointer y for the price tag).
+/// Crosshair state: the bar under the pointer, the raw pointer fractions and
+/// the price at the pointer height.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MarketHover {
     pub index: usize,
+    /// Raw pointer fraction across the PLOT VIEWPORT (0 = left edge,
+    /// 1 = right edge), kept alongside the bar index on purpose: the index is
+    /// clamped into real data, this fraction is not. The crosshair line and
+    /// the time badge position from this, so they keep following the pointer
+    /// across the empty area to the right of the last candle.
+    pub x_frac: f32,
     pub y_frac: f32,
     pub price: f64,
 }
@@ -431,6 +438,14 @@ pub struct MarketState {
     /// left-drag pans the viewport.
     pub drag_origin: Option<(f32, f32, f64, (f64, f64))>,
     pub price_drag_active: bool,
+    /// Last cumulative price-drag notches seen during the active drag. The UI
+    /// re-sends the TOTAL offset from the press point on every move, so only
+    /// the step since the previous event may be applied.
+    pub price_drag_notches: f32,
+    /// Series (`symbol\u{1}timeframe`) the loaded `bars` belong to. Written
+    /// ONLY when bars are ingested, so a stale header cannot "adopt" the bars
+    /// it is mismatched with.
+    pub bars_series: String,
     pub hover: Option<MarketHover>,
     pub indicators: Vec<IndicatorEntry>,
     /// Editable parameter specs per indicator, as the backend reports them
@@ -500,6 +515,8 @@ impl Default for MarketState {
             price_manual: None,
             drag_origin: None,
             price_drag_active: false,
+            price_drag_notches: 0.0,
+            bars_series: String::new(),
             hover: None,
             indicators: Vec::new(),
             indicator_params: std::collections::HashMap::new(),
@@ -855,7 +872,9 @@ impl MarketState {
                 // Inverse of the ONE canonical transform (`index_at`): the
                 // bar under the cursor is the floor of its data coordinate,
                 // clamped into the real data (right-margin empty slots snap
-                // to the newest bar, left edge to the oldest visible).
+                // to the newest bar, left edge to the oldest visible). That
+                // clamp is right for BAR FACTS only - the crosshair line
+                // itself follows the unclamped viewport fraction stored below.
                 let idx = self.index_at(f64::from(x_frac));
                 let (low, high) = self.price_range();
                 let span = high - low;
@@ -866,6 +885,7 @@ impl MarketState {
                 // pane edges (no per-use-site re-clamping).
                 self.hover = Some(MarketHover {
                     index: idx,
+                    x_frac: x_frac.clamp(0.0, 1.0),
                     y_frac: y_frac.clamp(0.0, 1.0),
                     price,
                 });
@@ -897,20 +917,36 @@ impl MarketState {
                 let count = self.window_size().max(1);
                 let fraction = f64::from(x_frac).clamp(0.0, 1.0);
                 // Cursor-anchored zoom in exact bar-space: the data coordinate
-                // under the pointer is preserved, so the same candle stays
-                // under the cursor while the slot width changes. No rounding
-                // of `first` — fractional precision kills cumulative drift.
-                let anchor_bar =
-                    (self.first + fraction * count as f64).clamp(self.first, (total - 1) as f64);
+                // under the pointer is preserved, so the point under the cursor
+                // stays at the same screen X while the slot width changes. No
+                // rounding of `first` - fractional precision kills cumulative
+                // drift.
+                //
+                // The anchor is NOT clamped into the data range. Clamping it
+                // (the previous `.clamp(first, total - 1)`) silently re-anchored
+                // the zoom to the NEWEST BAR whenever the cursor sat in the
+                // empty right-hand area, which is what made the candles jump
+                // sideways under a stationary mouse. Whatever the cursor is
+                // over - a candle, a gap, or empty future space - is the anchor.
+                // Only the resulting viewport offset is clamped (below), so the
+                // data edges still bound the view.
+                let anchor_bar = self.first + fraction * count as f64;
                 // HARD CAP: zoom-out never exposes more than the viewport
                 // maximum (1600 slots), regardless of dataset size.
+                // `clamp` PANICS when min > max, and a series shorter than
+                // MIN_VISIBLE_BARS inverted the two bounds, so the upper bound
+                // is lifted first: fewer bars than the minimum simply pins the
+                // width at the minimum (the extra slots stay empty).
+                let upper = (total as f64).max(MIN_VISIBLE_BARS as f64);
                 let new_count = round_py(count as f64 * scale)
-                    .clamp(MIN_VISIBLE_BARS as f64, total as f64)
+                    .clamp(MIN_VISIBLE_BARS as f64, upper)
                     .min(self.max_visible_bars() as f64) as usize;
                 let new_count = new_count.max(MIN_VISIBLE_BARS);
+                // Re-centre on the ANCHOR, not on the chart: the offset that
+                // puts `anchor_bar` back under the cursor at the new scale.
                 let new_first_raw = (anchor_bar - fraction * new_count as f64).max(0.0);
                 // Same right boundary as panning (never yank a view parked in
-                // the empty right space back to the live-edge anchor — that
+                // the empty right space back to the live-edge anchor - that
                 // re-anchor WAS the "chart slides during zoom" jump).
                 let new_first = self.clamp_first(new_first_raw);
                 self.first = new_first;
@@ -1020,6 +1056,15 @@ impl MarketState {
                 if !notches.is_finite() || !anchor_frac.is_finite() || notches == 0.0 {
                     return self.price_drag_active != prev_active;
                 }
+                // The gesture re-sends the CUMULATIVE offset from the press
+                // point on every pointer-move, so applying the whole value again
+                // each time compounded the zoom (1.25^n1 * 1.25^n2 ... instead of
+                // 1.25^(n1+n2)). Only the step since the last event is new.
+                let step = f64::from(notches) - f64::from(self.price_drag_notches);
+                self.price_drag_notches = notches;
+                if step == 0.0 {
+                    return self.price_drag_active != prev_active;
+                }
                 let (low, high) = self.price_range();
                 let span = high - low;
                 if span <= 0.0 {
@@ -1028,7 +1073,7 @@ impl MarketState {
                 // legacy _drag_price_from -> _zoom_price_at(anchor_y, factor):
                 // the live range zooms around the fixed press point, so the
                 // price under the press cursor stays under it.
-                let factor = PRICE_ZOOM_STEP.powf(f64::from(notches));
+                let factor = PRICE_ZOOM_STEP.powf(step);
                 let fraction = (1.0 - f64::from(anchor_frac)).clamp(0.0, 1.0);
                 let anchor = low + fraction * span;
                 let new_span = (span * factor).max(span * 0.01);
@@ -1038,6 +1083,7 @@ impl MarketState {
             }
             MarketAction::PriceDragEnd => {
                 self.price_drag_active = false;
+                self.price_drag_notches = 0.0;
                 true
             }
             MarketAction::PriceReset => {
@@ -1126,9 +1172,11 @@ impl MarketState {
                 if !self.indicators.iter().any(|e| e.name == key) {
                     return false;
                 }
-                // Drop the backend's stored overrides (they return to the
-                // strategy's own defaults) and re-seed the panel rows.
-                self.indicator_params.remove(&key);
+                // The backend drops its stored overrides (a fresh snapshot re-seeds these
+                // rows with the strategy defaults). The local SPEC must
+                // survive: removing it emptied the panel and disabled SAVE
+                // until the next snapshot, so a parameter could not be set at
+                // all for the rest of the session.
                 self.settings_rows = self.indicator_params.get(&key).cloned().unwrap_or_default();
                 true
             }
@@ -1552,6 +1600,82 @@ pub fn format_axis_time(stamp: &str, timeframe: &str, window: &[MarketBar]) -> S
 /// intraday frames read `17 Jul 2026 09:45`, daily and above read
 /// `17 Jul 2026` — no weekday, no short-year, no filler spaces, so the
 /// axis badge stays small at every zoom.
+/// One timeframe expressed in whole minutes (`15m` -> 15, `1h` -> 60,
+/// `1D` -> 1440, `1W` -> 10080). `None` for anything this chart does not
+/// price, so the future-area time badge can say "unknown" instead of
+/// guessing a step.
+fn timeframe_minutes(timeframe: &str) -> Option<i64> {
+    let tf = timeframe.trim();
+    let split = tf.find(|c: char| !c.is_ascii_digit()).unwrap_or(tf.len());
+    let (digits, unit) = tf.split_at(split);
+    let n: i64 = digits.parse().ok()?;
+    let per_unit = match unit {
+        "" | "m" => 1,
+        "h" => 60,
+        "D" | "d" => 1440,
+        "W" | "w" => 10080,
+        _ => return None,
+    };
+    Some(n * per_unit)
+}
+
+/// Days since 1970-01-01 for a proleptic Gregorian date (std-only civil-days
+/// arithmetic - the same well-known algorithm the Lab date range uses).
+fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let mp = if m > 2 { m - 3 } else { m + 9 };
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
+/// Inverse of [`days_from_civil`]: (year, month, day) for a day count.
+fn civil_from_days(z: i64) -> (i64, i64, i64) {
+    let z = z + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
+/// Shift an ISO-ish bar stamp by whole minutes, preserving the input shape
+/// (`T` separator, seconds present or not). `None` when the stamp is not a
+/// parseable date-time - the caller then leaves the time badge empty rather
+/// than inventing a timestamp.
+fn shift_stamp_minutes(stamp: &str, minutes: i64) -> Option<String> {
+    let iso_sep = stamp.contains('T');
+    let cleaned = stamp.replace('T', " ");
+    let (date_part, time_part) = cleaned.trim().split_once(' ')?;
+    let mut dp = date_part.split('-');
+    let y: i64 = dp.next()?.parse().ok()?;
+    let mo: i64 = dp.next()?.parse().ok()?;
+    let d: i64 = dp.next()?.parse().ok()?;
+    let mut tp = time_part.split(':');
+    let h: i64 = tp.next()?.parse().ok()?;
+    let mi: i64 = tp.next()?.parse().ok()?;
+    let (sec, had_seconds) = match tp.next() {
+        Some(s) => (s.parse::<i64>().ok()?, true),
+        None => (0, false),
+    };
+    let total = h * 60 + mi + minutes;
+    let (ny, nm, nd) = civil_from_days(days_from_civil(y, mo, d) + total.div_euclid(1440));
+    let rem = total.rem_euclid(1440);
+    let (nh, nmi) = (rem / 60, rem % 60);
+    let sep = if iso_sep { 'T' } else { ' ' };
+    Some(if had_seconds {
+        format!("{ny:04}-{nm:02}-{nd:02}{sep}{nh:02}:{nmi:02}:{sec:02}")
+    } else {
+        format!("{ny:04}-{nm:02}-{nd:02}{sep}{nh:02}:{nmi:02}")
+    })
+}
+
 pub fn format_crosshair_time(stamp: &str, timeframe: &str) -> String {
     let cleaned = stamp.replace('T', " ");
     let cleaned = cleaned.trim();
@@ -1738,6 +1862,11 @@ pub struct MarketView {
     pub exchange_label: String,
     pub status_message: String,
     pub has_data: bool,
+    /// The bars on screen belong to a DIFFERENT series than the one the
+    /// snapshot header names (symbol/timeframe switched while the previous
+    /// series was still loaded). The real data stays visible - never swapped
+    /// away - and the screen marks it stale instead.
+    pub bars_stale: bool,
     pub header_ohlc: String,
     pub watch_rows: Vec<WatchRow>,
     pub watchlists: Vec<String>,
@@ -1898,23 +2027,49 @@ pub fn project_hover(state: &MarketState) -> HoverView {
         }
     }
     if let Some(hover) = state.hover {
-        if let Some(bar) = state.bars.get(hover.index) {
-            out.has_hover = true;
-            // Same canonical transform the candles use — crosshair and chart
-            // can never disagree about where a bar sits.
-            out.hover_x = state.x_of(hover.index);
-            out.hover_y = hover.y_frac;
-            // Regular keeps the state-computed price verbatim (golden
-            // parity) at axis precision; Percent/Log read the cursor
-            // position off the same transformed frame the axis labels use.
-            let dec = axis_decimals(frame.xform, frame.low, frame.high);
-            out.hover_price = match frame.xform {
-                ScaleXform::Identity => fmt_price_prec(hover.price, dec),
-                xform => {
-                    let frac = f64::from(hover.y_frac).clamp(0.0, 1.0);
-                    fmt_scale_dec(xform, frame.high - frac * (frame.high - frame.low), dec)
+        // The crosshair belongs to the VIEWPORT, not to the data extent: it is
+        // visible across the full plot width and its X is the pointer
+        // fraction, so it keeps following the cursor into the empty area to
+        // the right of the last candle. Only BAR-DERIVED facts need a bar.
+        out.has_hover = true;
+        out.hover_x = hover.x_frac;
+        out.hover_y = hover.y_frac;
+        // Regular keeps the state-computed price verbatim (golden
+        // parity) at axis precision; Percent/Log read the cursor
+        // position off the same transformed frame the axis labels use.
+        let dec = axis_decimals(frame.xform, frame.low, frame.high);
+        out.hover_price = match frame.xform {
+            ScaleXform::Identity => fmt_price_prec(hover.price, dec),
+            xform => {
+                let frac = f64::from(hover.y_frac).clamp(0.0, 1.0);
+                fmt_scale_dec(xform, frame.high - frac * (frame.high - frame.low), dec)
+            }
+        };
+        // Data coordinate of the pointer: bar i owns [i, i+1) and is drawn
+        // at its centre (i + 0.5) - the exact inverse of `x_of`. Past the
+        // last bar the pointer is in FUTURE space: the index is clamped
+        // into data, so this test - not the index - decides which facts
+        // exist.
+        let slots = state.window_size().max(1) as f64;
+        let cursor_slot = state.first + f64::from(hover.x_frac) * slots;
+        let data_slots = state.bars.len() as f64;
+        if cursor_slot >= data_slots {
+            // Future area: no bar owns this X, but the crosshair still
+            // does. The time badge advances from the newest bar by whole
+            // timeframes, so one candle-width to the right is the next
+            // interval. Nothing else is invented - no volume and no OHLC
+            // for a bar that is not there.
+            if let (Some(last), Some(step)) =
+                (state.bars.last(), timeframe_minutes(&state.timeframe))
+            {
+                let ahead = cursor_slot.floor() as i64 - (data_slots as i64 - 1);
+                if ahead >= 1 {
+                    if let Some(stamp) = shift_stamp_minutes(&last.time, ahead * step) {
+                        out.hover_time = format_crosshair_time(&stamp, &state.timeframe);
+                    }
                 }
-            };
+            }
+        } else if let Some(bar) = state.bars.get(hover.index) {
             out.hover_time = format_crosshair_time(&bar.time, &state.timeframe);
             out.hover_volume = fmt_volume(bar.volume);
             let vol_max = state
@@ -3011,6 +3166,7 @@ fn project_inner(state: &MarketState, viewport_only: bool) -> MarketView {
         exchange_label: state.exchange.clone(),
         status_message,
         has_data,
+        bars_stale: state.bars_stale,
         header_ohlc,
         watch_rows,
         watchlists: state.watchlists.clone(),
@@ -3133,11 +3289,12 @@ pub fn apply_snapshot_json(state: &mut MarketState, value: &serde_json::Value) {
             .filter(|s| !s.symbol.is_empty())
             .collect();
     }
-    // Series the CURRENT bars belong to — captured before the header fields
-    // are overwritten, so the no-bars branch below can tell "header still
-    // names the loaded series" from "header switched, candles did not".
-    let bars_owner_symbol = state.selected_symbol.clone();
-    let bars_owner_timeframe = state.timeframe.clone();
+    // Series the CURRENT bars belong to, as recorded when they were ingested.
+    // It used to be re-derived from the header here, which is mutated by the
+    // previous poll, so the second identical poll found "header == owner" and
+    // cleared the warning while the wrong candles were still up. Only the bars
+    // branch rewrites it.
+    let previous_series = state.bars_series.clone();
     let selected = snap_str(value, "selected_symbol");
     if !selected.is_empty() {
         state.selected_symbol = selected;
@@ -3184,6 +3341,7 @@ pub fn apply_snapshot_json(state: &mut MarketState, value: &serde_json::Value) {
         state.set_bars(&symbol, &timeframe, &exchange, bars);
         // Bars for the series the header now names: the mismatch is resolved.
         state.bars_stale = false;
+        state.bars_series = format!("{}\u{1}{}", symbol, timeframe);
     } else {
         // No `bars` key in the payload. If the header just changed series, the
         // candles on screen still belong to the PREVIOUS symbol/timeframe —
@@ -3191,8 +3349,12 @@ pub fn apply_snapshot_json(state: &mut MarketState, value: &serde_json::Value) {
         // bars themselves are kept (they are real data for a real series) and
         // the projection reports the staleness.
         let header_series = format!("{}\u{1}{}", state.selected_symbol, state.timeframe);
-        let previous_series = format!("{}\u{1}{}", bars_owner_symbol, bars_owner_timeframe);
-        state.bars_stale = !state.bars.is_empty() && header_series != previous_series;
+        let previous_series = state.bars_series.clone();
+        let stale = !state.bars.is_empty() && header_series != previous_series;
+        state.bars_stale = stale;
+        if !stale {
+            state.bars_series = header_series;
+        }
         state.status = match snap_str(value, "status").as_str() {
             "ready" => {
                 if state.bars.is_empty() {
@@ -4673,12 +4835,15 @@ mod tests {
             let mut st = MarketState::default();
             st.set_bars("TEST", tf, "NSE", bars(200));
 
-            // Test across multiple crosshair positions
-            for fx in [0.1f32, 0.25, 0.5, 0.7, 0.85] {
+            // Positions that sit ON data (the newest bar is anchored
+            // RIGHT_MARGIN_FRACTION from the right edge, so the tail of the
+            // plot is empty future space by design - probed separately below).
+            for fx in [0.1f32, 0.25, 0.5, 0.7] {
                 assert!(st.apply(MarketAction::HoverMoved(fx, 0.5)));
                 let hover = st.hover.expect("hover active");
                 let v = project(&st);
                 assert!(v.has_hover);
+                assert!((v.hover_x - fx).abs() < 1e-6, "line follows the pointer");
 
                 let bar = &st.bars[hover.index];
                 // Acceptance test: crosshair candle == timestamp == volume == OHLC
@@ -4718,6 +4883,37 @@ mod tests {
                 format_crosshair_time(&bar_pan.time, &st.timeframe)
             );
             assert!(v_pan.header_ohlc.contains(&fmt_price(bar_pan.close)));
+
+            // The anchored right margin is EMPTY future space: the crosshair
+            // still follows the pointer there and the time badge advances by
+            // whole timeframes instead of pretending the newest bar is under
+            // the cursor. The data-end fraction is derived, not assumed (a
+            // state whose window ends exactly on the data has no margin).
+            let slots = st.window_size().max(1) as f64;
+            let data_end = ((st.bars.len() as f64 - st.first) / slots).clamp(0.0, 1.0);
+            if data_end < 0.999 {
+                let newest = st.bars.last().expect("bars").time.clone();
+                assert!(
+                    data_end < 1.0,
+                    "the newest bar leaves empty space to its right"
+                );
+                for fx in [data_end + 0.005, (data_end + 1.0) / 2.0, 1.0] {
+                    let fx = fx.min(1.0);
+                    assert!(st.apply(MarketAction::HoverMoved(fx as f32, 0.5)));
+                    let v = project(&st);
+                    assert!(v.has_hover, "margin: crosshair must stay visible");
+                    assert!(
+                        (v.hover_x - fx as f32).abs() < 1e-5,
+                        "margin: follows pointer"
+                    );
+                    assert_ne!(
+                        v.hover_time,
+                        format_crosshair_time(&newest, &st.timeframe),
+                        "margin: the time badge must not stay pinned to the last bar"
+                    );
+                    assert!(v.hover_volume.is_empty(), "margin: no bar, no volume");
+                }
+            }
         }
     }
 
@@ -5285,6 +5481,117 @@ mod tests {
     }
 
     #[test]
+    fn a_repeated_barless_poll_keeps_reporting_the_mismatch() {
+        // The owner of the loaded bars is recorded when they are INGESTED. It
+        // used to be re-derived from the header at the top of every poll, so
+        // the second identical poll found "header == owner" and cleared the
+        // warning while the wrong candles were still up.
+        let mut st = MarketState::default();
+        apply_snapshot_json(
+            &mut st,
+            &serde_json::json!({
+                "selected_symbol": "TCS", "timeframe": "15m",
+                "bars": [{"time": "2026-06-10T09:15:00", "open": 1.0, "high": 2.0,
+                          "low": 0.5, "close": 1.5, "volume": 100.0}],
+            }),
+        );
+        let switched = serde_json::json!({
+            "selected_symbol": "RELIANCE", "timeframe": "15m", "status": "loading"
+        });
+        for poll in 1..=3 {
+            apply_snapshot_json(&mut st, &switched);
+            assert!(
+                st.bars_stale,
+                "poll {poll} dropped the mismatch while the TCS bars stayed up"
+            );
+            assert!(project(&st).status_message.contains("previous series"));
+        }
+    }
+
+    #[test]
+    fn wheel_zoom_never_panics_on_a_series_shorter_than_the_minimum() {
+        // `clamp` panics when min > max, and a series shorter than
+        // MIN_VISIBLE_BARS inverted the two bounds: the first wheel gesture on
+        // a freshly listed symbol killed the app.
+        for n in [1usize, 2, 5, 9, MIN_VISIBLE_BARS, 40] {
+            let mut st = MarketState::default();
+            st.set_bars("NEW", "1W", "NSE", bars(n));
+            for steps in [-3.0f32, -1.0, 1.0, 3.0] {
+                st.apply(MarketAction::WheelZoom(0.5, steps));
+                assert!(
+                    st.count >= MIN_VISIBLE_BARS,
+                    "{n} bars, steps {steps}: count {} below the minimum",
+                    st.count
+                );
+            }
+            assert!(!st.visible_window().is_empty());
+        }
+    }
+
+    #[test]
+    fn price_drag_applies_the_whole_gesture_once_not_once_per_event() {
+        // The UI re-sends the cumulative offset from the press point on every
+        // move, so applying it whole each time compounded the zoom.
+        let mut st = MarketState::default();
+        st.set_bars("TEST", "15m", "NSE", bars(300));
+        let (low, high) = st.price_range();
+        let span = high - low;
+        for step in 1..=5 {
+            st.apply(MarketAction::PriceDrag(step as f32 * 0.2, 0.5));
+        }
+        let (low, high) = st.price_range();
+        let ratio = (high - low) / span;
+        assert!(
+            (ratio - PRICE_ZOOM_STEP).abs() < 1e-9,
+            "one notch of drag zoomed {ratio}x, expected {}x",
+            PRICE_ZOOM_STEP
+        );
+        // A released drag re-arms: the next gesture starts from zero again.
+        st.apply(MarketAction::PriceDragEnd);
+        st.apply(MarketAction::PriceDrag(1.0, 0.5));
+        let (low, high) = st.price_range();
+        assert!(((high - low) / span - PRICE_ZOOM_STEP * PRICE_ZOOM_STEP).abs() < 1e-9);
+    }
+
+    #[test]
+    fn reset_indicator_settings_keeps_the_parameter_spec() {
+        // RESET used to delete the whole spec, which emptied the panel and
+        // disabled SAVE until the next snapshot.
+        let mut st = MarketState::default();
+        apply_snapshot_json(
+            &mut st,
+            &serde_json::json!({
+                "selected_symbol": "TEST", "timeframe": "15m",
+                "indicators": {"SMA": true},
+                "indicator_params": {"SMA": [
+                    {"key": "period", "label": "Period", "value": 20.0,
+                     "min": 2.0, "max": 200.0, "step": 1.0, "decimals": 0},
+                    {"key": "source", "label": "Source", "value": 1.0,
+                     "min": 0.0, "max": 2.0, "step": 1.0, "decimals": 0},
+                ]},
+            }),
+        );
+        st.apply(MarketAction::SettingsPopup(true, "SMA".into()));
+        assert_eq!(st.settings_rows.len(), 2);
+        st.apply(MarketAction::SettingsEdit("period".into(), 50.0));
+        st.apply(MarketAction::ResetIndicatorSettings("SMA".into()));
+        assert_eq!(
+            st.settings_rows.len(),
+            2,
+            "RESET emptied the panel and disabled SAVE"
+        );
+        assert_eq!(
+            st.indicator_params.get("SMA").map(|v| v.len()),
+            Some(2),
+            "RESET dropped the parameter spec"
+        );
+        // Reopening the panel still shows the rows.
+        st.apply(MarketAction::SettingsPopup(false, String::new()));
+        st.apply(MarketAction::SettingsPopup(true, "SMA".into()));
+        assert_eq!(st.settings_rows.len(), 2);
+    }
+
+    #[test]
     fn indicator_rows_merge_by_key_instead_of_being_replaced() {
         // An optimistic add must survive the next snapshot: the panel has no
         // row for it yet because the backend has not persisted it, and a
@@ -5525,5 +5832,397 @@ mod tests {
             "16 Sep 2026"
         );
         assert_eq!(format_crosshair_time("garbage", "15m"), "garbage");
+    }
+
+    /// Crosshair acceptance (TradingView behaviour): the crosshair is bound to
+    /// the VISIBLE VIEWPORT, not to the last available candle.
+    #[test]
+    fn crosshair_follows_the_pointer_into_the_future_area() {
+        // A plot WIDER than the data: the right half is empty future space, so
+        // several candle-widths past the newest bar are reachable.
+        let mut st = MarketState::default();
+        st.set_bars("TEST", "15m", "NSE", bars(120));
+        st.follow_latest = false;
+        st.count = st.bars.len() * 2;
+        st.first = 0.0;
+        let last_x = st.x_of(st.bars.len() - 1);
+        assert!(
+            last_x < 0.6,
+            "the newest bar must leave empty space to its right"
+        );
+
+        // A. Over an existing candle: the crosshair sits under the pointer and
+        //    the bar facts are the hovered bar's own.
+        let on_bar = st.x_of(60) as f32;
+        assert!(st.apply(MarketAction::HoverMoved(on_bar, 0.5)));
+        let v = project_hover(&st);
+        assert!(v.has_hover);
+        assert!((v.hover_x - on_bar).abs() < 1e-6, "A: line follows pointer");
+        let bar = &st.bars[st.hover.expect("hover").index];
+        assert_eq!(
+            v.hover_time,
+            format_crosshair_time(&bar.time, &st.timeframe)
+        );
+        assert_eq!(v.hover_volume, fmt_volume(bar.volume));
+
+        // B. Between candles: continuous, never snapped back to a bar centre.
+        let mut prev = v.hover_x;
+        for step in 1..=8 {
+            let fx = (on_bar + step as f32 * 0.004).min(last_x + 0.02);
+            assert!(st.apply(MarketAction::HoverMoved(fx, 0.5)));
+            let v = project_hover(&st);
+            assert!(v.hover_x > prev, "B: crosshair must move continuously");
+            assert!((v.hover_x - fx).abs() < 1e-6, "B: line sits on the pointer");
+            prev = v.hover_x;
+        }
+
+        // C. Immediately right of the newest candle: the line CONTINUES past
+        //    the data end instead of sticking to the last candle.
+        let step_x = 1.0 / st.count as f32;
+        let just_after = (last_x + step_x / 2.0).min(0.999);
+        assert!(
+            just_after > last_x,
+            "C: probe must be right of the last candle"
+        );
+        assert!(st.apply(MarketAction::HoverMoved(just_after, 0.5)));
+        let v = project_hover(&st);
+        assert!(v.has_hover, "C: crosshair must stay visible past the data");
+        assert!(v.hover_x > last_x, "C: line must leave the last candle's x");
+        assert!(v.hover_x <= 1.0, "C: line stays inside the viewport");
+
+        // D. Far into the empty right-hand area: still following, still visible.
+        for fx in [last_x + 0.05, 0.8, 0.95] {
+            let fx = fx.min(1.0);
+            assert!(st.apply(MarketAction::HoverMoved(fx, 0.5)));
+            let v = project_hover(&st);
+            assert!(v.has_hover, "D: crosshair must not vanish in empty space");
+            assert!((v.hover_x - fx).abs() < 1e-6, "D: line follows pointer");
+        }
+
+        // E. The right edge of the chart: the line stops at the viewport edge
+        //    (and not one bar earlier).
+        assert!(st.apply(MarketAction::HoverMoved(1.0, 0.5)));
+        let v = project_hover(&st);
+        assert!(
+            (v.hover_x - 1.0).abs() < 1e-6,
+            "E: line reaches the viewport edge"
+        );
+        assert!(v.hover_x > last_x);
+
+        // F. The time badge keeps updating in the future area: one
+        //    candle-width right of the newest bar is the next 15-minute
+        //    interval, two widths the one after that.
+        let last_time = st.bars.last().expect("bars").time.clone();
+        let mut seen: Vec<String> = Vec::new();
+        for widths in [1.0f32, 2.0, 4.0] {
+            let fx = (last_x + widths * step_x).min(1.0);
+            assert!(st.apply(MarketAction::HoverMoved(fx, 0.5)));
+            let v = project_hover(&st);
+            assert!(v.has_hover);
+            assert!(
+                !v.hover_time.is_empty(),
+                "F: future area keeps a time badge"
+            );
+            assert_ne!(
+                v.hover_time,
+                format_crosshair_time(&last_time, &st.timeframe)
+            );
+            seen.push(v.hover_time);
+        }
+        // 15m steps from the newest bar (09:59): 1 width -> 10:14,
+        // 2 -> 10:29, 4 -> 10:59.
+        let step = timeframe_minutes(&st.timeframe).expect("15m");
+        for (widths, expect) in [
+            (1i64, "2 Jan 2024 10:14"),
+            (2, "2 Jan 2024 10:29"),
+            (4, "2 Jan 2024 10:59"),
+        ] {
+            let shifted = shift_stamp_minutes(&last_time, widths * step).expect("shift");
+            assert_eq!(
+                seen[widths as usize / 2],
+                format_crosshair_time(&shifted, "15m")
+            );
+            assert_eq!(seen[widths as usize / 2], expect);
+        }
+
+        // G. Zoom/pan/timeframe are untouched by the fix: the line keeps
+        //    following the pointer at every viewport, and bar facts stay bound
+        //    to the bar under the pointer.
+        assert!(st.apply(MarketAction::WheelZoom(0.5, -3.0)));
+        for fx in [0.1f32, 0.5, 0.99] {
+            assert!(st.apply(MarketAction::HoverMoved(fx, 0.4)));
+            let v = project_hover(&st);
+            assert!(
+                (v.hover_x - fx).abs() < 1e-6,
+                "G: follows the pointer after zoom"
+            );
+        }
+        assert!(st.apply(MarketAction::HoverMoved(0.25, 0.5)));
+        let zoom_bar = st.bars[st.hover.expect("hover").index].clone();
+        let v = project_hover(&st);
+        assert_eq!(
+            v.hover_time,
+            format_crosshair_time(&zoom_bar.time, &st.timeframe)
+        );
+        assert_eq!(v.hover_volume, fmt_volume(zoom_bar.volume));
+        // Pan (free until the newest bar hits the left edge): the viewport
+        // change honestly drops the crosshair, and the next pointer report
+        // behaves exactly like the first one - including in the empty right
+        // space the pan opens up.
+        assert!(st.apply(MarketAction::WheelPanX(0.2)));
+        assert!(
+            st.hover.is_none(),
+            "G: a viewport change re-reports on move"
+        );
+        let data_end_after = {
+            let slots = st.window_size().max(1) as f64;
+            ((st.bars.len() as f64 - st.first) / slots).clamp(0.0, 1.0)
+        };
+        let probe = (((data_end_after + 1.0) / 2.0).min(1.0)) as f32;
+        assert!(st.apply(MarketAction::HoverMoved(probe, 0.5)));
+        let v = project_hover(&st);
+        assert!(v.has_hover, "G: crosshair returns after a pan");
+        assert!(
+            (v.hover_x - probe).abs() < 1e-6,
+            "G: still follows the pointer after a pan"
+        );
+    }
+
+    /// Zoom acceptance (TradingView behaviour): whatever sits under the cursor
+    /// stays at the same screen X. Measured through the canonical transform -
+    /// the data coordinate under the cursor must be identical before and after
+    /// every zoom, in both directions, at every cursor position (middle, both
+    /// edges and the empty future area), with no cumulative drift.
+    #[test]
+    fn zoom_is_anchored_on_the_cursor_not_the_chart() {
+        // 400 bars in a 200-slot window: 200 slots of empty space to the right
+        // of the newest bar, so the future area is genuinely reachable.
+        let fresh = || {
+            let mut st = MarketState::default();
+            st.set_bars("TEST", "15m", "NSE", bars(400));
+            st.follow_latest = false;
+            st.count = 200;
+            st.first = 0.0;
+            st
+        };
+        // Data coordinate under the cursor (inverse of `x_of`).
+        let under = |st: &MarketState, fx: f32| st.first + f64::from(fx) * st.window_size() as f64;
+
+        // A. Middle of the chart, zoom IN. The cursor sits exactly on a
+        // candle's centre, so that candle must keep the same screen X.
+        let mut st = fresh();
+        let mid = 100usize;
+        let fx = st.x_of(mid);
+        let before = under(&st, fx);
+        assert!(st.apply(MarketAction::WheelZoom(fx, -1.0)));
+        assert!(
+            (under(&st, fx) - before).abs() < 1e-9,
+            "A: mid-chart anchor drifted by {}",
+            under(&st, fx) - before
+        );
+        assert!(
+            (st.x_of(mid) - fx).abs() < 1e-6,
+            "A: that candle moved off the cursor ({} -> {})",
+            fx,
+            st.x_of(mid)
+        );
+
+        // B. Near the LEFT edge, cursor on a candle centre: repeated zoom
+        //    in/out stays anchored.
+        let mut st = fresh();
+        let left = 4usize;
+        let fx = st.x_of(left);
+        for _ in 0..6 {
+            let before = under(&st, fx);
+            assert!(st.apply(MarketAction::WheelZoom(fx, -1.0)));
+            assert!(
+                (under(&st, fx) - before).abs() < 1e-9,
+                "B: left-edge zoom-in drifted"
+            );
+            assert!(
+                (st.x_of(left) - fx).abs() < 1e-6,
+                "B: the left candle left the cursor"
+            );
+            let before = under(&st, fx);
+            assert!(st.apply(MarketAction::WheelZoom(fx, 1.0)));
+            assert!(
+                (under(&st, fx) - before).abs() < 1e-9,
+                "B: left-edge zoom-out drifted"
+            );
+        }
+
+        // C. Near the RIGHT side (still on data), cursor on a candle centre:
+        //    no jump toward the centre.
+        let mut st = fresh();
+        let right = 190usize;
+        let fx = st.x_of(right);
+        assert!(
+            (fx - 0.95).abs() < 0.01,
+            "C: fixture should sit near the right"
+        );
+        assert!(st.apply(MarketAction::WheelZoom(fx, -1.0)));
+        assert!(
+            (st.x_of(right) - fx).abs() < 1e-6,
+            "C: right-side candle jumped ({} -> {})",
+            fx,
+            st.x_of(right)
+        );
+        assert!(
+            st.x_of(right) > 0.9,
+            "C: the anchored candle must stay near the cursor, not recentre"
+        );
+
+        // D. EMPTY future area, right of the newest bar: the exact viewport
+        //    position under the cursor stays anchored in both directions.
+        //    The window is parked so its right half has no bars at all.
+        let future_state = || {
+            let mut st = MarketState::default();
+            st.set_bars("TEST", "15m", "NSE", bars(400));
+            st.follow_latest = false;
+            st.count = 200;
+            st.first = 300.0;
+            st
+        };
+        let st = future_state();
+        assert!(
+            st.first + st.window_size() as f64 > st.bars.len() as f64 + 50.0,
+            "D: the fixture must have empty space to the right"
+        );
+        for fx in [0.7f32, 0.85, 0.95, 1.0] {
+            let mut st = future_state();
+            let before = under(&st, fx);
+            assert!(st.apply(MarketAction::WheelZoom(fx, -1.0)), "D: zoom in");
+            assert!(
+                (under(&st, fx) - before).abs() < 1e-9,
+                "D: future-area zoom-in drifted at fx={fx}"
+            );
+            let before = under(&st, fx);
+            assert!(st.apply(MarketAction::WheelZoom(fx, 1.0)), "D: zoom out");
+            assert!(
+                (under(&st, fx) - before).abs() < 1e-9,
+                "D: future-area zoom-out drifted at fx={fx}"
+            );
+        }
+
+        // E. Repeated zoom in -> zoom out: zero accumulated horizontal drift.
+        let mut st = fresh();
+        let anchor = under(&st, 0.62);
+        for _ in 0..10 {
+            assert!(st.apply(MarketAction::WheelZoom(0.62, -1.0)));
+            assert!(st.apply(MarketAction::WheelZoom(0.62, 1.0)));
+        }
+        assert!(
+            (under(&st, 0.62) - anchor).abs() < 1e-9,
+            "E: accumulated drift {}",
+            under(&st, 0.62) - anchor
+        );
+        // And the round trip returns to the original scale and viewport.
+        assert_eq!(st.window_size(), 200);
+        assert!(
+            (st.first - 0.0).abs() < 1e-9,
+            "E: viewport did not round trip"
+        );
+
+        // The cap and the data edge still bound the view: a cursor at the far
+        // left cannot drag the viewport before bar 0.
+        let mut st = fresh();
+        for _ in 0..40 {
+            st.apply(MarketAction::WheelZoom(0.0, -1.0));
+        }
+        assert!(st.first >= 0.0, "the data edge must still bound the view");
+    }
+
+    /// The wheel direction contract is unchanged by the anchor fix: wheel UP
+    /// (negative steps) zooms IN (fewer slots), wheel DOWN zooms OUT.
+    #[test]
+    fn zoom_direction_and_scale_contract_hold() {
+        let mut st = MarketState::default();
+        st.set_bars("TEST", "15m", "NSE", bars(4000));
+        st.follow_latest = false;
+        st.first = 500.0;
+        let base = st.window_size();
+        assert!(st.apply(MarketAction::WheelZoom(0.5, -1.0)));
+        assert!(st.window_size() < base, "wheel up must zoom IN");
+        assert!(st.apply(MarketAction::WheelZoom(0.5, 1.0)));
+        assert!(
+            st.window_size() >= base,
+            "wheel down must zoom OUT (round trip back to the base scale)"
+        );
+    }
+
+    #[test]
+    fn future_area_time_badge_needs_no_invented_facts() {
+        let mut st = MarketState::default();
+        st.set_bars("TEST", "15m", "NSE", bars(60));
+        st.follow_latest = false;
+        st.first = 0.0;
+        st.count = st.bars.len();
+        // Far right of the data: the crosshair is there, the time badge says a
+        // future interval, and nothing else is claimed.
+        assert!(st.apply(MarketAction::HoverMoved(1.0, 0.5)));
+        let v = project_hover(&st);
+        assert!(v.has_hover);
+        assert_eq!(v.hover_x, 1.0);
+        assert_eq!(
+            v.hover_time,
+            format_crosshair_time("2024-01-02T10:14:00", "15m"),
+            "one slot past the newest bar is the next 15 minutes"
+        );
+        // No bar is under the pointer, so no volume/OHLC is claimed for it.
+        assert!(v.hover_volume.is_empty());
+        // An unparseable timeframe leaves the badge empty rather than guessing.
+        st.set_bars("TEST", "3mo", "NSE", bars(60));
+        st.first = 0.0;
+        st.count = st.bars.len();
+        assert!(st.apply(MarketAction::HoverMoved(1.0, 0.5)));
+        let v = project_hover(&st);
+        assert!(v.has_hover);
+        assert_eq!(v.hover_x, 1.0);
+        assert!(v.hover_time.is_empty());
+    }
+
+    #[test]
+    fn timeframe_minutes_and_stamp_shift_cover_the_whole_vocabulary() {
+        assert_eq!(timeframe_minutes("1m"), Some(1));
+        assert_eq!(timeframe_minutes("15m"), Some(15));
+        assert_eq!(timeframe_minutes("45m"), Some(45));
+        assert_eq!(timeframe_minutes("1h"), Some(60));
+        assert_eq!(timeframe_minutes("4h"), Some(240));
+        assert_eq!(timeframe_minutes("1D"), Some(1440));
+        assert_eq!(timeframe_minutes("1W"), Some(10_080));
+        assert_eq!(timeframe_minutes("3mo"), None);
+        assert_eq!(timeframe_minutes(""), None);
+        assert_eq!(timeframe_minutes("junk"), None);
+
+        // Shape is preserved, minutes roll over, days roll over.
+        assert_eq!(
+            shift_stamp_minutes("2024-01-02T10:15:00", 15).as_deref(),
+            Some("2024-01-02T10:30:00")
+        );
+        assert_eq!(
+            shift_stamp_minutes("2024-01-02 10:15", 30).as_deref(),
+            Some("2024-01-02 10:45")
+        );
+        assert_eq!(
+            shift_stamp_minutes("2024-01-02T23:50:00", 20).as_deref(),
+            Some("2024-01-03T00:10:00")
+        );
+        // Month / leap-year rollover.
+        assert_eq!(
+            shift_stamp_minutes("2024-02-28T23:30:00", 60).as_deref(),
+            Some("2024-02-29T00:30:00")
+        );
+        assert_eq!(
+            shift_stamp_minutes("2024-12-31T23:45:00", 30).as_deref(),
+            Some("2025-01-01T00:15:00")
+        );
+        // Backwards works too (the same transform, negated).
+        assert_eq!(
+            shift_stamp_minutes("2024-01-03T00:10:00", -20).as_deref(),
+            Some("2024-01-02T23:50:00")
+        );
+        // Unparseable input yields nothing rather than a fabricated stamp.
+        assert_eq!(shift_stamp_minutes("garbage", 15), None);
+        assert_eq!(shift_stamp_minutes("", 15), None);
     }
 }

@@ -147,6 +147,137 @@ fn diff_frac(a: &[u8], b: &[u8]) -> f64 {
     1.0 - same as f64 / a.len() as f64
 }
 
+/// Zoom is anchored on the CURSOR, not on the chart: zooming in at the pointer
+/// and back out at the same pointer position must restore the viewport, so the
+/// rendered frame returns to what it was. Any re-anchoring on the chart centre,
+/// the first/last candle or the data end shows up here as a shifted frame.
+/// Probed mid-chart AND in the empty right-hand (future) area, because that is
+/// where the anchor used to be clamped to the newest bar.
+///
+/// Wheel direction (market.slint `scroll-event`): `delta-y > 0` zooms IN,
+/// `delta-y < 0` zooms OUT; one step is 120 logical pixels.
+#[test]
+fn zoom_round_trip_at_the_cursor_restores_the_frame() {
+    let (w, h) = (1280u32, 720u32);
+    let (in_step, out_step) = (120.0f32, -120.0f32);
+    for (label, fx) in [("mid-chart", 0.40f32), ("future area", 0.86f32)] {
+        let (px, py) = (w as f32 * fx, h as f32 * 0.4);
+        let view = vayren_market_view_create(w, h, 1.0);
+        assert!(!view.is_null());
+        let json = CString::new(snapshot(400)).unwrap();
+        assert_eq!(vayren_market_view_set_snapshot(view, json.as_ptr()), 0);
+        assert_eq!(vayren_market_view_tick(view), 0);
+
+        // The wheel anchor is the CURSOR, so park the pointer on the target
+        // first: a bare scroll event leaves the shell's tracked mouse where it
+        // was, which would silently anchor the zoom somewhere else.
+        assert_eq!(
+            vayren_market_view_pointer_move(view, px, py),
+            0,
+            "{label}: park the cursor"
+        );
+        assert_eq!(vayren_market_view_tick(view), 0);
+        let mut base = vec![0u8; (w * h * 3) as usize];
+        assert_eq!(
+            vayren_market_view_render(view, base.as_mut_ptr(), base.len()),
+            1
+        );
+
+        let wheel = |dy: f32| -> Vec<u8> {
+            assert_eq!(
+                vayren_market_view_scroll(view, px, py, 0.0, dy),
+                0,
+                "{label}: wheel dy={dy}"
+            );
+            assert_eq!(vayren_market_view_tick(view), 0);
+            let mut buf = vec![0u8; (w * h * 3) as usize];
+            assert_eq!(
+                vayren_market_view_render(view, buf.as_mut_ptr(), buf.len()),
+                1,
+                "{label}: wheel dy={dy} must repaint (the viewport changed)"
+            );
+            buf
+        };
+
+        let zoomed_in = wheel(in_step);
+        let in_diff = diff_frac(&base, &zoomed_in);
+        assert!(
+            in_diff > 0.02,
+            "{label}: zooming in must visibly change the scale (diff {in_diff})"
+        );
+        let round_trip = wheel(out_step);
+        // A cursor-anchored zoom round trip restores the viewport exactly, so the
+        // frame must come back byte-identical. A re-anchor (chart centre, first/
+        // last candle, data end) shifts the candles by whole slots instead.
+        assert_eq!(
+            base, round_trip,
+            "{label}: zoom in -> out at the same cursor must restore the viewport \
+             (no drift, no jump)"
+        );
+        vayren_market_view_destroy(view);
+    }
+}
+/// right-hand (future) area instead of sticking to the last bar. Before the
+/// fix every probe right of the data produced the SAME frame, because the
+/// line was re-derived from a data index clamped to the last bar.
+#[test]
+fn crosshair_keeps_following_the_pointer_into_the_future_area() {
+    let (w, h) = (1280u32, 720u32);
+    let view = vayren_market_view_create(w, h, 1.0);
+    assert!(!view.is_null());
+    let json = CString::new(snapshot(400)).unwrap();
+    assert_eq!(vayren_market_view_set_snapshot(view, json.as_ptr()), 0);
+    assert_eq!(vayren_market_view_tick(view), 0);
+    // Base frame first: it consumes the snapshot's dirty flag, so every later
+    // probe repaint is caused by the pointer move alone.
+    let mut base = vec![0u8; (w * h * 3) as usize];
+    assert_eq!(
+        vayren_market_view_render(view, base.as_mut_ptr(), base.len()),
+        1
+    );
+
+    let hover_at = |fx: f32| -> Vec<u8> {
+        assert_eq!(
+            vayren_market_view_pointer_move(view, w as f32 * fx, h as f32 * 0.4),
+            0
+        );
+        assert_eq!(vayren_market_view_tick(view), 0);
+        let mut buf = vec![0u8; (w * h * 3) as usize];
+        vayren_market_view_render(view, buf.as_mut_ptr(), buf.len());
+        buf
+    };
+
+    // A/B: on data and between candles behave as before.
+    let on_bar = hover_at(0.30);
+    let between = hover_at(0.45);
+    assert!(
+        diff_frac(&on_bar, &between) > 0.0002,
+        "A/B: the crosshair must move between candles"
+    );
+
+    // C/D/E: right of the newest candle (the anchored right margin is empty by
+    // design) the line keeps following instead of sticking to the last bar.
+    let after_first = hover_at(0.85);
+    let mid_future = hover_at(0.88);
+    let at_edge = hover_at(0.91);
+    assert!(
+        diff_frac(&after_first, &mid_future) > 0.0002,
+        "C/D: the crosshair must keep moving in the future area"
+    );
+    assert!(
+        diff_frac(&mid_future, &at_edge) > 0.0002,
+        "E: the crosshair must keep moving towards the viewport edge"
+    );
+    // Each future probe still shows a crosshair (it never disappears).
+    for frame in [&after_first, &mid_future, &at_edge] {
+        assert!(
+            diff_frac(&on_bar, frame) > 0.0002,
+            "C/D/E: the crosshair must stay visible in the future area"
+        );
+    }
+    vayren_market_view_destroy(view);
+}
+
 /// Pointer input parity: hover (crosshair), horizontal-wheel pan and
 /// left-drag pan must each repaint a visibly different frame through the
 /// same C ABI the legacy host uses (pointer_move/scroll/press/release).
