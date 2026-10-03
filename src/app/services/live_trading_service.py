@@ -33,6 +33,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from execution.modes import LiveArm  # pyright: ignore[reportMissingImports]
+
 from app.observable import IntervalTimer, Signal
 from execution import (
     ExecutionMode,  # pyright: ignore[reportAttributeAccessIssue]
@@ -40,7 +42,6 @@ from execution import (
     SessionConfig,  # pyright: ignore[reportAttributeAccessIssue]
     SqliteTailProvider,  # pyright: ignore[reportAttributeAccessIssue]
 )
-from execution.modes import LiveArm  # pyright: ignore[reportMissingImports]
 from market import Bar, SymbolRepository  # pyright: ignore[reportAttributeAccessIssue]
 from risk import RiskPolicy  # pyright: ignore[reportAttributeAccessIssue]
 from strategy import StrategyDefinition, StrategyParameters
@@ -49,6 +50,8 @@ from strategy.language.storage import (
     StrategyRecord,
     list_strategies,
     load_strategy_record,
+)
+from strategy.language.storage import (
     strategy_dir as resolve_strategy_dir,
 )
 
