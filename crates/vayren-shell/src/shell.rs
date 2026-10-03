@@ -203,7 +203,8 @@ pub fn apply(ui: &AppWindow, panel: &BrokerPanel) {
 /// in the OS vault: the connect handler reads it as "unchanged — use the vault
 /// value", and the screen compares against it so its SAVED indicator can never
 /// claim a value the user has since retyped.
-pub const SAVED_CREDENTIAL_SENTINEL: &str = "\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}";
+pub const SAVED_CREDENTIAL_SENTINEL: &str =
+    "\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}";
 
 /// Bind the broker CONNECTION workspace view-model to the Slint screen.
 /// Every displayed value comes from backend facts + the venue's existing

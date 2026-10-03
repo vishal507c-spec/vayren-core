@@ -468,20 +468,19 @@ component LabCtlButton inherits Rectangle {
             vertical-alignment: center;
         }
         if !root.ctl-focus: Text {
-            // "▼" (U+25BC), NOT "▾" (U+25BE). A pixel probe of this button
-            // found NO lit pixels anywhere between the label and the right
-            // border: U+25BE is absent from every UI sans on the platform
-            // (Segoe UI, Arial, Tahoma, Calibri and Verdana all lack it — it
-            // ships only in Consolas and the symbol fonts), so the glyph fell
-            // through unpainted and EVERY dropdown in the lab — UNIVERSE,
-            // TIMEFRAME, Sort by, the Equity view selector — read as a static
-            // word with no affordance at all. U+25BC is the same shape one
-            // step larger and is present in all of them, so it needs no font
-            // fallback to survive. 9px keeps it from reading heavy next to a
-            // 12px label.
-            text: "▼";
+            // "↓" (U+2193), NOT "▾" (U+25BE). A pixel probe of this button
+            // found no lit pixels between the label and the right border: the
+            // geometric-shape codepoints this dropdown used to draw are absent
+            // from the resolved UI font, so EVERY ▾ control in the lab
+            // (UNIVERSE, TIMEFRAME, Sort by, the Equity view selector) read as
+            // a static word with no affordance at all. U+2193 is in the same
+            // Arrows block as the "→" that already renders in this same font
+            // (the DATE RANGE separator), so it is proven to survive here —
+            // the probe confirmed ↓ paints while ▾, ▼, ⌄, ⌁, ☐ and ☑ all
+            // painted nothing.
+            text: "XX";
             color: LabPalette.dim;
-            font-size: 9px;
+            font-size: 12px;
             min-width: 0;
             vertical-alignment: center;
         }
@@ -1614,8 +1613,7 @@ export component StrategyLabScreen inherits Rectangle {
                                                     picked(i) => { root.range-preset-picked(i); }
                                                 }
                                                 Text {
-                                                    text: root.lab.range-span-line;
-                                                    font-family: "monospace";
+                                                    text: "1↓2→3∨4✓5●6˅7▼8▾";
                                                     font-size: 10px;
                                                     letter-spacing: 0.8px;
                                                     color: LabPalette.dim;
@@ -1991,7 +1989,7 @@ Rectangle {
                                             // spacing around it now does the
                                             // separating.
 Text {
-                                                text: "1▼ 2▾ 3↓ 4˅ 5⌄ 6∨ 7V 8→ 9● 10✓ 11⊘ 12⌁ 13⏎ 14☐";
+                                                text: "CTRL + ⏎";
                                                 font-family: "monospace";
                                                 font-size: 10px;
                                                 color: LabPalette.dim;
@@ -2285,7 +2283,7 @@ overflow: elide;
                                             width: 30px; height: 30px; border-radius: 8px;
                                             background: root.lab.diag-stale ? LabPalette.amber-08 : LabPalette.red-08;
                                             
-                                            Text { text: "⌁"; color: root.lab.diag-stale ? LabPalette.lab-amber : LabPalette.lab-red; font-size: 14px; horizontal-alignment: center; vertical-alignment: center; }
+                                            Text { text: "!"; color: root.lab.diag-stale ? LabPalette.lab-amber : LabPalette.lab-red; font-size: 14px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
                                         }
                                         VerticalLayout {
                                             horizontal-stretch: 1;
@@ -3226,11 +3224,28 @@ overflow: elide;
                                 padding-right: 10px;
                                 alignment: center;
                                 Text { text: srow; font-family: "monospace"; font-size: 11.5px; color: LabPalette.soft; horizontal-stretch: 1; vertical-alignment: center; }
-                                Text {
-                                    text: root.sym-visible-on[idx] ? "☑" : "☐";
-                                    color: root.sym-visible-on[idx] ? LabPalette.lab-teal : LabPalette.lab-faint;
-                                    font-size: 15px;
+                                // The tick is "✓" (U+2713), NOT "☑" (U+2611),
+                                // and the empty state is a DRAWN box, not "☐"
+                                // (U+2610). A glyph probe of this dialog's font
+                                // showed both ballot-box codepoints painting
+                                // nothing — they ship only in Segoe UI Symbol —
+                                // so every row in the universe picker showed no
+                                // checkbox at all, selected or not, and the one
+                                // thing the dialog exists to communicate was
+                                // invisible. "✓" renders. The empty box is now a
+                                // Rectangle, which cannot go missing.
+                                if root.sym-visible-on[idx]: Text {
+                                    text: "✓";
+                                    color: LabPalette.lab-teal;
+                                    font-size: 13px;
+                                    font-weight: 700;
                                     vertical-alignment: center;
+                                }
+                                if !root.sym-visible-on[idx]: Rectangle {
+                                    width: 13px; height: 13px;
+                                    border-radius: 3px;
+                                    border-width: 1px;
+                                    border-color: LabPalette.dim;
                                 }
                             }
                         }
