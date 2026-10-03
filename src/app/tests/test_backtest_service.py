@@ -222,8 +222,8 @@ def test_lab_run_applies_full_command_config(store: Path, tmp_path: Path) -> Non
 
 
 def test_lab_run_defaults_capital_to_ten_thousand(store: Path, tmp_path: Path) -> None:
-    """The Lab has no capital control of its own, so an omitted/unparseable
-    capital must land on the ₹10,000 default instead of a stale big number.
+    """An omitted capital lands on the ₹10,000 default; an unparseable or
+    non-positive capital fails actionably instead of silently defaulting.
     """
     sys.path.insert(0, str(ROOT / "src"))
     from app.headless import _lab_run
@@ -245,4 +245,8 @@ def test_lab_run_defaults_capital_to_ten_thousand(store: Path, tmp_path: Path) -
     junk_run = _lab_run(
         str(tmp_path), str(store), dict(command, capital="not-a-number"), repository
     )
-    assert junk_run["config"]["capital"] == "₹10,000"
+    assert junk_run["run"] == "failed"
+    assert "capital" in junk_run["cfg_edit"]["config_error"].lower()
+    zero_run = _lab_run(str(tmp_path), str(store), dict(command, capital=0), repository)
+    assert zero_run["run"] == "failed"
+    assert "capital" in zero_run["cfg_edit"]["config_error"].lower()

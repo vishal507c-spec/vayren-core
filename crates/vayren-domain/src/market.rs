@@ -3289,12 +3289,6 @@ pub fn apply_snapshot_json(state: &mut MarketState, value: &serde_json::Value) {
             .filter(|s| !s.symbol.is_empty())
             .collect();
     }
-    // Series the CURRENT bars belong to, as recorded when they were ingested.
-    // It used to be re-derived from the header here, which is mutated by the
-    // previous poll, so the second identical poll found "header == owner" and
-    // cleared the warning while the wrong candles were still up. Only the bars
-    // branch rewrites it.
-    let previous_series = state.bars_series.clone();
     let selected = snap_str(value, "selected_symbol");
     if !selected.is_empty() {
         state.selected_symbol = selected;
@@ -3349,6 +3343,11 @@ pub fn apply_snapshot_json(state: &mut MarketState, value: &serde_json::Value) {
         // bars themselves are kept (they are real data for a real series) and
         // the projection reports the staleness.
         let header_series = format!("{}\u{1}{}", state.selected_symbol, state.timeframe);
+        // Series the CURRENT bars belong to, as recorded when they were
+        // ingested. It used to be re-derived from the header here, which is
+        // mutated by the previous poll, so the second identical poll found
+        // "header == owner" and cleared the warning while the wrong candles
+        // were still up. Only the bars branch rewrites it.
         let previous_series = state.bars_series.clone();
         let stale = !state.bars.is_empty() && header_series != previous_series;
         state.bars_stale = stale;

@@ -86,6 +86,17 @@ class PythonStrategy(StrategyLogic):
             raise ValueError(f"max_history must be an int >= 1, got {raw_history!r}") from exc
         if max_history < 1:
             raise ValueError(f"max_history must be >= 1, got {max_history!r}")
+        for key in _WARMUP_PERIOD_KEYS:
+            if key in parsed:
+                try:
+                    period = int(parsed[key])
+                except (TypeError, ValueError):
+                    continue
+                if period > max_history:
+                    raise ValueError(
+                        f"{key}={period} exceeds max_history={max_history} "
+                        "(indicator history would truncate the warmup window)"
+                    )
         self._max_history = max_history
         self.closes: deque[float] = deque(maxlen=max_history)
         self.highs: deque[float] = deque(maxlen=max_history)
@@ -135,7 +146,9 @@ class PythonStrategy(StrategyLogic):
         self._pending_kind = None
         self._pending_sl = None
         self._pending_tp = None
-        self._pending_time_exit = None
+        # NOTE: _pending_time_exit is NOT wiped here — it stays armed across
+        # bars until it fires (cleared below), so a time_exit() set on one bar
+        # still exits on a later bar instead of being forgotten each bar.
         self._current_bar_index = view.index
 
         signal = self.on_bar_logic(view)
@@ -151,6 +164,7 @@ class PythonStrategy(StrategyLogic):
 
         # Time exit fires only when logic produced no signal — it never
         # overwrites a logic decision (returned Signal or pending buy/sell).
+        time_exit_fired = False
         if self._pending_time_exit and self._pending_kind is None and not view.state.flat:
             exit_time = _parse_exit_time(self._pending_time_exit)
             bar_time = _parse_bar_time(bar.timestamp)
@@ -162,11 +176,12 @@ class PythonStrategy(StrategyLogic):
                 self._pending_kind = (
                     SignalKind.BUY if view.state.side == "SHORT" else SignalKind.SELL
                 )
+                time_exit_fired = True
 
         if self._pending_kind is None:
             return None
 
-        return Signal(
+        signal = Signal(
             index=view.index,
             timestamp=bar.timestamp,
             kind=self._pending_kind,
@@ -174,6 +189,9 @@ class PythonStrategy(StrategyLogic):
             stop_loss=self._pending_sl,
             take_profit=self._pending_tp,
         )
+        if time_exit_fired:
+            self._pending_time_exit = None
+        return signal
 
     def on_bar_logic(self, view: BarView) -> Signal | None:
         raise NotImplementedError

@@ -122,19 +122,21 @@ TODO/FIXME / dead code / mock logic / sample trading logic  ❌
 
 **One Module = One Responsibility:** Naya kaam → naya module (`05_strategy`...), purana expand nahi. Trading logic chart mein nahi, market sirf store, chart sirf dikhata hai. Har public class ka ek clear kaam + docstring.
 
-## Workflow
+## Workflow — 10x Fast Speed Protocol
 
 ```
-□ docs/ padho (architecture, event_catalog, module_contracts, ai_memory) + AI_ENTRY.md §1 (ownership)
-□ Feature ka target language/module decide karo (AI_ENTRY.md §1) → naya code target mein; directly related legacy slice usi feature mein migrate (AI_ENTRY.md §1 fixed rules)
-□ Module contracts ke hisaab se implement karo
-□ Coding-time forensics: `python tools/forensics/__main__.py mark --phase PHASE --action ...` evidence do,
-  `run --phase PHASE -- <cmd>` lambi commands wrap karo; task ka session apne aap open/close hota hai
-□ make check chalao (lint + format + typecheck + test + validators)
-  ↳ Fast path (measured): iterate par pehle impact-scope tests (`pytest <touched-module>/tests`, ~5s),
-    phir full gate (~105s: pytest ~82s + pyright ~23s). Benchmarks: `python tools/benchmark.py gate|record|scoreboard`.
-□ Task end par LAST command: `python tools/forensics/__main__.py report --name "..."` (report auto-append bhi hota hai next task par)
-□ docs/ai_memory.md update karo
+□ 1. Fast Routing (1s): `python tools/route.py --task "<task>"` — poore docs padhne ki zaroorat nahi
+□ 2. Targeted Ingestion: Sirf required slice padho (StartLine/EndLine, max 50-100 lines)
+□ 3. Target Language decide karo (AI_ENTRY.md §1) → naya code target mein, directly related slice migrate
+□ 4. Surgical Edit: Single contiguous block, 5-20 lines, zero whole-file rewrites
+□ 5. Sub-Second Validation (Fast Inner Loop — har edit par):
+     - Python: `pytest <touched-module>/tests -q` (<1s) + `ruff check <file>` (30ms)
+     - Rust: `cargo check -p <crate>` (0.17s) — edit time par heavy cargo build nahi
+     - Automated Impact: `python tools/benchmark.py impact --run` (<2s)
+□ 6. Coding-time forensics: `python tools/forensics/__main__.py mark --phase PHASE --action ...`
+□ 7. Full Gate (Run ONCE at task finish): `make check` (105s) — har edit par nahi, sirf task end par
+□ 8. Task end par LAST command: `python tools/forensics/__main__.py report --name "..."`
+□ 9. docs/ai_memory.md update karo
 ```
 
 ## Language & Migration — Ownership Reference (Invisible Feature-Driven)
@@ -203,8 +205,12 @@ Public API badla → README update karo, tests saath mein, `make check` pass kiy
 |---|---|
 | `make setup` | Sab kuch install karo |
 | `make dev` | Charting app kholo (`python -m app`) |
-| `make check` | Poora verification gate |
+| `make fast` | **Fast Inner Loop:** Sirf changed files test & lint karo (<2s, 100x speedup) |
+| `make check-fast` | Fast lint, cargo check & governance without full gate |
+| `make check` | Poora verification gate (sirf task finish par) |
 | `make format` | Formatting auto-fix |
+
+> Windows note: Repository tooling uses GNU Make. Agar GNU Make installed nahi hai (`winget install ezwinports.make` ya `choco install make`), toh direct command run karo (`python tools/benchmark.py impact --run` for `fast`, etc.).
 
 ## Ek Line Mein
 

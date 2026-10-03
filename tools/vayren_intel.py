@@ -507,19 +507,25 @@ def verify_store() -> dict:
         except (OSError, ValueError):
             problems.append("history.jsonl unreadable")
         seen_runs: set[int] = set()
-        last_ts: str | None = None
+        latest_ts: str | None = None
         for index, line in enumerate(all_lines):
+            line_str = line.strip()
+            if not line_str:
+                continue
             try:
-                record = json.loads(line)
+                record = json.loads(line_str)
             except ValueError:
                 problems.append(f"history.jsonl record {index} unparsable")
                 continue
             if not isinstance(record, dict):
                 continue
-            if index == len(all_lines) - 1:
-                ts_value = record.get("ts")
-                if isinstance(ts_value, str) and ts_value:
-                    last_ts = ts_value
+            ts_value = record.get("ts")
+            if (
+                isinstance(ts_value, str)
+                and ts_value
+                and (latest_ts is None or ts_value > latest_ts)
+            ):
+                latest_ts = ts_value
             if record.get("schema") == SCHEMA_CI or record.get("kind") == "ci":
                 issues = validate_ci_record(record)
                 problems.extend(f"ci record issue: {issue}" for issue in issues)
@@ -528,10 +534,10 @@ def verify_store() -> dict:
                     if rid in seen_runs:
                         problems.append(f"duplicate CI run record {rid} in history")
                     seen_runs.add(rid)
-        if last_ts is not None:
+        if latest_ts is not None:
             try:
                 age_days = (
-                    datetime.datetime.now(datetime.UTC) - datetime.datetime.fromisoformat(last_ts)
+                    datetime.datetime.now(datetime.UTC) - datetime.datetime.fromisoformat(latest_ts)
                 ).days
                 if age_days > 7:
                     problems.append(f"history silent {age_days} days (store may be abandoned)")
@@ -567,6 +573,21 @@ def verify_store() -> dict:
         "experiments": len(experiments),
         "stray_dirs": stray,
     }
+
+
+def heartbeat() -> dict:
+    """Record an active repository heartbeat so history freshness is maintained.
+
+    When history has had no activity for > 7 days, this provides a deterministic
+    heartbeat refresh without altering baseline or knowledge data.
+    """
+    record = {
+        "kind": "heartbeat",
+        "ts": _now_iso(),
+        "revision": _git_revision(),
+    }
+    _append_jsonl("history.jsonl", record)
+    return record
 
 
 # --- daily report (§42: real metrics only) -----------------------------------
@@ -1216,6 +1237,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--progress", action="store_true", help="minimal progress timeline")
     parser.add_argument("--goal", action="store_true", help="next evidence-driven objective")
     parser.add_argument("--verify", action="store_true", help="store integrity pass")
+    parser.add_argument(
+        "--heartbeat",
+        action="store_true",
+        help="record an active repository heartbeat in history.jsonl",
+    )
     parser.add_argument("--trends", action="store_true", help="trend/bottleneck radar")
     parser.add_argument(
         "--collect-ci",
@@ -1306,6 +1332,13 @@ def main(argv: list[str] | None = None) -> int:
                 f"experiments={result['experiments']} stray={result['stray_dirs']})"
             )
         return 0 if result["status"] == "PASS" else 1
+    if args.heartbeat:
+        hb = heartbeat()
+        if args.json:
+            print(json.dumps(hb, indent=2))
+        else:
+            print(f"heartbeat: recorded at {hb['ts']}")
+        return 0
     if args.trends:
         result = radar()
         _append_jsonl(

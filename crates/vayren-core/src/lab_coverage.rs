@@ -109,12 +109,16 @@ pub fn coverage_facts(input: &CoverageInput) -> CoverageFacts {
 /// is not a bar). Daily and above: one bar per trading day, so a weekly
 /// timeframe yields `days / 7`. `end_days < start_days` or a non-positive
 /// timeframe yields 0 (an empty window expects nothing).
-pub fn expected_bars(start_days: i64, end_days: i64, tf_secs: i64) -> u64 {
+pub fn expected_bars(
+    start_days: i64,
+    end_days: i64,
+    tf_secs: i64,
+    holidays: &HashSet<String>,
+) -> u64 {
     if tf_secs <= 0 || end_days < start_days {
         return 0;
     }
-    let holidays: HashSet<String> = HashSet::new();
-    let trading = trading_days_between(start_days, end_days, &holidays);
+    let trading = trading_days_between(start_days, end_days, holidays);
     if tf_secs >= SECONDS_PER_DAY {
         let days_per_bar = (tf_secs / SECONDS_PER_DAY).max(1) as u64;
         return trading / days_per_bar;
@@ -217,28 +221,37 @@ mod tests {
     fn expected_bars_counts_weekday_sessions_only() {
         // 2026-01-05 (Mon) → 2026-01-09 (Fri) is five sessions, two weekends
         // inside the calendar range would otherwise inflate the count.
+        let holidays: HashSet<String> = HashSet::new();
         let start = 20_458; // 2026-01-05 (Mon)
         let end = start + 4; // 2026-01-09
         let fifteen_min = 900;
         assert_eq!(
-            expected_bars(start, end, fifteen_min),
+            expected_bars(start, end, fifteen_min, &holidays),
             5 * (SESSION_SECS / 900) as u64
         );
         // A Sat→Sun range holds nothing.
-        assert_eq!(expected_bars(start + 5, start + 6, fifteen_min), 0);
+        assert_eq!(
+            expected_bars(start + 5, start + 6, fifteen_min, &holidays),
+            0
+        );
     }
 
     #[test]
     fn daily_timeframe_is_one_bar_per_session() {
+        let holidays: HashSet<String> = HashSet::new();
         let start = 20_458; // 2026-01-05 (Mon) Mon
                             // 2026-01-05 (Mon) → 2026-01-16 (Fri): ten sessions, not twelve days.
-        assert_eq!(expected_bars(start, start + 11, SECONDS_PER_DAY), 10);
+        assert_eq!(
+            expected_bars(start, start + 11, SECONDS_PER_DAY, &holidays),
+            10
+        );
     }
 
     #[test]
     fn expected_bars_rejects_an_inverted_or_invalid_window() {
-        assert_eq!(expected_bars(20_458, 20_451, 900), 0);
-        assert_eq!(expected_bars(20_458, 20_461, 0), 0);
-        assert_eq!(expected_bars(20_458, 20_461, -900), 0);
+        let holidays: HashSet<String> = HashSet::new();
+        assert_eq!(expected_bars(20_458, 20_451, 900, &holidays), 0);
+        assert_eq!(expected_bars(20_458, 20_461, 0, &holidays), 0);
+        assert_eq!(expected_bars(20_458, 20_461, -900, &holidays), 0);
     }
 }

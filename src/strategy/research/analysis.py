@@ -123,7 +123,20 @@ def analyze_dataset(dataset: ResearchDataset) -> ResearchAnalysis:
     pnls: list[float] = []
     for t in trades:
         if isinstance(t, dict):
-            # dict signal has no pnl, skip
+            raw = t.get("pnl")
+            if isinstance(raw, bool) or not isinstance(raw, (int, float, str)):
+                continue
+            try:
+                pnl = float(raw)
+            except (TypeError, ValueError):
+                continue
+            pnls.append(pnl)
+            if pnl > 0:
+                wins += 1
+                gross_profit += pnl
+            elif pnl < 0:
+                losses += 1
+                gross_loss += abs(pnl)
             continue
         # Assume Trade object
         try:

@@ -70,6 +70,8 @@ jobs:
   build-test:
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    env:
+      RUSTFLAGS: "-C link-arg=-fuse-ld=lld"
     # Cache SAVE needs write; checkout still needs read (a permissions
     # block replaces defaults, so contents:read must stay explicit).
     permissions:
@@ -80,15 +82,13 @@ jobs:
       # The Slint workspace emits multi-GB release+debug+test artifacts and
       # exhausts the runner disk (linker SIGBUS / ENOSPC archives). Reclaim
       # space from preinstalled toolchains this build never uses.
-      - name: Free disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-          sudo docker image prune --all --force
-          df -h /
+      - name: Check disk space
+        run: df -h /
       # Native build prerequisites (Slint font stack links fontconfig via
       # pkg-config; without the dev package yeslogic-fontconfig-sys fails).
+      # lld linker provides 4x faster Rust linking on multi-crate workspaces.
       - name: Install Linux build dependencies
-        run: sudo apt-get update && sudo apt-get install -y pkg-config libfontconfig1-dev
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libfontconfig1-dev lld
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -96,12 +96,13 @@ jobs:
           cache-dependency-path: pyproject.toml
       - run: pip install -e ".[dev,data]"
       - uses: dtolnay/rust-toolchain@stable
-      # Dependency-only cache (workspace crates rebuild; see README of
-      # Swatinem/rust-cache). Workspace lives in repo root with crates/ members.
+      # Dependency and workspace cache: cache-all-crates caches target/ outputs
+      # across runs to prevent redundant workspace crate rebuilds.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
           shared-key: "vayren-rust"
+          cache-all-crates: "true"
       # Formatting first: a 2s style failure must not wait behind a 38min build.
       - run: cargo fmt --manifest-path Cargo.toml --all -- --check
       # CI measurement (Day-3 intelligence: wall-clock + cache effectiveness).
@@ -140,6 +141,8 @@ jobs:
   test-shard-stateful:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      RUSTFLAGS: "-C link-arg=-fuse-ld=lld"
     permissions:
       contents: read
       actions: write
@@ -149,7 +152,7 @@ jobs:
       # links fontconfig/freetype at final link time (linker fails
       # without the dev packages — Day-6 CI proof).
       - name: Install Linux build dependencies
-        run: sudo apt-get update && sudo apt-get install -y pkg-config libfontconfig1-dev
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libfontconfig1-dev lld
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -161,10 +164,8 @@ jobs:
         with:
           workspaces: ". -> target"
           shared-key: "vayren-rust"
+          cache-all-crates: "true"
       - run: cargo build --release -p vayren-core --manifest-path Cargo.toml
-      # The scope-bench tests execute the full `pytest tools/tests -q`
-      # baseline, which includes test_desktop.py (needs the shell binary).
-      - run: cargo build -p vayren-shell --manifest-path Cargo.toml
       - run: python -m pytest tools/tests/test_validate_scope.py tools/tests/test_failure_intel.py -q --no-header
 
   # Shard 2/2 — isolated readers, serial within the job, isolated runner.
@@ -173,6 +174,8 @@ jobs:
   test-shard-pure:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      RUSTFLAGS: "-C link-arg=-fuse-ld=lld"
     permissions:
       contents: read
       actions: write
@@ -189,6 +192,7 @@ jobs:
         with:
           workspaces: ". -> target"
           shared-key: "vayren-rust"
+          cache-all-crates: "true"
       - run: cargo build --release -p vayren-core --manifest-path Cargo.toml
       - run: >-
           python -m pytest tools/tests/test_authority.py

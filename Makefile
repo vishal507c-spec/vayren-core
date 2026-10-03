@@ -1,9 +1,12 @@
-.PHONY: setup dev test test-coverage lint format typecheck check validate-structure validate-imports validate-language validate-architecture validate-routes validate-authority validate-repo-graph validate-scope context-check rust release exe clean
+.PHONY: setup dev fast check-fast test test-coverage lint format typecheck check validate-structure validate-imports validate-language validate-architecture validate-routes validate-authority validate-repo-graph validate-scope context-check rust release exe clean
 
 # ═══════════════════════════════════════════════════════════════
 # VAYREN — MAKEFILE
 # ═══════════════════════════════════════════════════════════════
 # Single entry point for all common commands.
+# Windows: GNU Make can be installed via `winget install ezwinports.make`
+# or `choco install make`. Alternatively run target commands directly
+# (e.g. `python tools/benchmark.py impact --run` for `make fast`).
 
 # ── Setup ──────────────────────────────────────────────────────
 
@@ -12,10 +15,20 @@ setup:
 	pre-commit install
 	python tools/build_rust.py
 
-# ── Development ────────────────────────────────────────────────
+# ── Development & Fast Loop (10x Speedup) ──────────────────────
 
 dev:
 	python tools/launch_native.py
+
+fast:
+	python tools/benchmark.py impact --run
+
+check-fast:
+	ruff check .
+	cargo check --workspace
+	python tools/validate_imports.py
+	python tools/validate_structure.py
+	python tools/validate_language_ownership.py
 
 # ── Quality ────────────────────────────────────────────────────
 
@@ -100,6 +113,8 @@ clean:
 #
 #   make setup       → First time: install everything
 #   make dev         → Launch the charting application
+#   make fast        → Fast inner loop: test & lint only changed files (<2s)
+#   make check-fast  → Fast lint, cargo check & governance without full gate
 #   make check       → Before commit: verify everything
 #   make format      → Auto-fix formatting issues
 #   make test        → Run the test suite

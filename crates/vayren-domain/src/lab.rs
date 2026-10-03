@@ -479,6 +479,8 @@ pub struct LabState {
     /// applies them optimistically too, so the UI reacts instantly while the
     /// backend remains the single owner of business behavior.
     pub pending_actions: Vec<String>,
+    /// How many backend intents were dropped because the queue was full.
+    pub dropped_pending_actions: u64,
     /// Verdict pill facts from the backend interpretation layer (legacy parity:
     /// verdict + note + colour). Empty when nothing has been interpreted.
     pub verdict_label: String,
@@ -688,8 +690,8 @@ impl LabState {
             if let Some(index) = self.timeframes.iter().position(|t| t == timeframe) {
                 self.timeframe_index = index as i32;
                 self.edit_config(|c| c.timeframe = timeframe.to_string());
+                self.queue_action(format!("settimeframe:{timeframe}"));
             }
-            self.queue_action(format!("settimeframe:{timeframe}"));
         }
     }
 
@@ -701,16 +703,17 @@ impl LabState {
             // the committed value must be visible locally immediately, or the
             // next run silently uses the previous capital. The receipt line
             // and the staleness fingerprint read config.capital, so the
-            // formatted echo follows here too.
-            self.cfg_capital = value.to_string();
-            let label = value
+            // formatted echo follows here too. An invalid value never commits:
+            // cfg_capital keeps the last good echo.
+            let valid = value
                 .parse::<f64>()
                 .ok()
-                .filter(|n| n.is_finite() && *n > 0.0)
-                .map(|n| format!("₹{}", grouped_whole(n)));
-            match label {
-                Some(label) => self.edit_config(|c| c.capital = label),
-                None => self.refresh_staleness(),
+                .filter(|n| n.is_finite() && *n > 0.0);
+            if let Some(n) = valid {
+                self.cfg_capital = value.to_string();
+                self.edit_config(|c| c.capital = format!("₹{}", grouped_whole(n)));
+            } else {
+                self.refresh_staleness();
             }
             self.queue_action(format!("capital:{value}"));
         }
@@ -775,13 +778,14 @@ impl LabState {
             self.coverage = None;
             return;
         }
-        let expected = lab_coverage::expected_bars(start as i64, end as i64, tf_secs);
+        let holidays = std::collections::HashSet::new();
+        let expected = lab_coverage::expected_bars(start as i64, end as i64, tf_secs, &holidays);
         self.coverage = Some(lab_coverage::coverage_facts(&CoverageInput {
             symbols_total: measured.symbols_total,
             symbols_covering: measured.symbols_covering,
             bars_present: measured.bars_present,
             bars_expected: expected,
-            gaps: 0,
+            gaps: measured.gaps,
             sampled: measured.sampled,
             symbols_probed: measured.symbols_probed,
         }));
@@ -865,11 +869,18 @@ impl LabState {
 
     /// Build the detail panel for ONE trade, straight from the record
     /// (`spec §27`): nothing is precomputed for rows the user never clicks.
+    /// `index` is the trade's `abs_index` (the blotter's stable identity),
+    /// never the positional row — filtering/sorting must not retarget clicks.
     fn trade_detail_for(&self, index: i32) -> Option<TradeDetailState> {
         if index < 0 {
             return None;
         }
-        let row = self.results.as_ref()?.trades.get(index as usize)?;
+        let row = self
+            .results
+            .as_ref()?
+            .trades
+            .iter()
+            .find(|r| r.abs_index == index)?;
         let metric = |label: &str, value: String, tone: Tone| DetailMetricView {
             label: label.to_string(),
             value,
@@ -1059,8 +1070,10 @@ impl LabState {
     /// Reference-layout interactions. Perspectives lens + equity view are
     /// view-local presentation filters (never queued); the inspector close
     /// goes through the existing pending-actions bridge.
+    /// Lens range 0..6: 0 Performance, 1 Trades, 2 Equity, 3 Drawdown,
+    /// 4 Analytics, 5 Strategy (the MODIFY section below the lens pages).
     pub fn interaction_lens(&mut self, lens: i32) {
-        if (0..5).contains(&lens) {
+        if (0..6).contains(&lens) {
             self.lens = lens;
         }
     }
@@ -1212,6 +1225,12 @@ impl LabState {
     fn queue_action(&mut self, action: String) {
         if self.pending_actions.len() < 64 {
             self.pending_actions.push(action);
+        } else {
+            self.dropped_pending_actions += 1;
+            eprintln!(
+                "lab: pending-action queue full (64 entries) — dropped '{action}' ({} dropped total)",
+                self.dropped_pending_actions
+            );
         }
     }
 
@@ -1474,7 +1493,7 @@ fn window_view<R>(
         thumb_y,
         scrollable: window.max_scroll() > 0.0,
         signature: sign(rendered),
-        overscan: rendered.len() as i32 - visible_rows,
+        overscan: (rendered.len() as i32 - visible_rows).max(0),
     }
 }
 
@@ -1703,6 +1722,7 @@ pub struct CoverageMeasurement {
     pub symbols_covering: u32,
     pub symbols_probed: u32,
     pub bars_present: u64,
+    pub gaps: u32,
     pub start_days: i32,
     pub end_days: i32,
     pub tf_secs: i64,
@@ -2036,7 +2056,7 @@ fn trade_matches(row: &TradeRow, needle: &str, side: i32, result: i32, compare_s
     if result == TRADE_RESULT_WIN && row.pnl_tone != Tone::Positive {
         return false;
     }
-    if result == TRADE_RESULT_LOSS && row.pnl_tone == Tone::Positive {
+    if result == TRADE_RESULT_LOSS && row.pnl_tone != Tone::Negative {
         return false;
     }
     needle.is_empty()
@@ -2471,6 +2491,32 @@ fn rankby_sort_field(state: &LabState) -> Option<usize> {
         .get(state.rankby_current as usize)
         .map(|column| column.saturating_sub(2))
         .filter(|field| *field < 7)
+}
+
+/// Local gather-validity for the RUN control: the same fail-closed rules the
+/// host's `LabRunRequest::gather` enforces (a real selection, a real
+/// timeframe, a finite positive capital). RUN stays disabled until the values
+/// are real — never invents a request.
+fn gather_valid(state: &LabState) -> bool {
+    let has_symbols =
+        !state.universe_selected.is_empty() || count_symbols(&state.cfg_universe_csv) > 0;
+    let timeframe = if state.timeframe_index < 0 {
+        String::new()
+    } else {
+        state
+            .timeframes
+            .get(state.timeframe_index as usize)
+            .cloned()
+            .unwrap_or_default()
+    };
+    let capital_ok = state
+        .cfg_capital
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|n| n.is_finite() && *n > 0.0)
+        .is_some();
+    has_symbols && !timeframe.is_empty() && capital_ok
 }
 
 pub fn project(state: &LabState) -> LabView {
@@ -2937,18 +2983,27 @@ pub fn project(state: &LabState) -> LabView {
         .take(TF_SHORT_CAP)
         .cloned()
         .collect();
-    let tf_short_idx = state
-        .timeframes
-        .get(state.timeframe_index.max(0) as usize)
-        .and_then(|current| tf_short.iter().position(|t| t == current))
-        .map_or(-1, |i| i as i32);
+    let tf_short_idx = if state.timeframe_index < 0 {
+        -1
+    } else {
+        state
+            .timeframes
+            .get(state.timeframe_index as usize)
+            .and_then(|current| tf_short.iter().position(|t| t == current))
+            .map_or(-1, |i| i as i32)
+    };
     // One authority for "which timeframe": the resolved ladder entry. The
     // config echo is only the fallback for a store that reported no ladder.
-    let timeframe_label = state
-        .timeframes
-        .get(state.timeframe_index.max(0) as usize)
-        .cloned()
-        .unwrap_or_else(|| state.config.timeframe.clone());
+    // A -1 index stays -1 (disabled) — it never auto-selects timeframes[0].
+    let timeframe_label = if state.timeframe_index < 0 {
+        state.config.timeframe.clone()
+    } else {
+        state
+            .timeframes
+            .get(state.timeframe_index as usize)
+            .cloned()
+            .unwrap_or_else(|| state.config.timeframe.clone())
+    };
     let range_presets = range_presets_for(
         state.data_bounds_start_days as i64,
         state.data_bounds_end_days as i64,
@@ -2985,11 +3040,15 @@ pub fn project(state: &LabState) -> LabView {
         .ok()
         .filter(|n| n.is_finite())
         .unwrap_or(0.0);
-    let timeframe_ok = state
-        .timeframes
-        .get(state.timeframe_index.max(0) as usize)
-        .map(|t| !t.is_empty())
-        .unwrap_or(false);
+    let timeframe_ok = if state.timeframe_index < 0 {
+        false
+    } else {
+        state
+            .timeframes
+            .get(state.timeframe_index as usize)
+            .map(|t| !t.is_empty())
+            .unwrap_or(false)
+    };
     let bits = validation::validate_form(
         sym_applied > 0,
         has_strategy,
@@ -3077,7 +3136,7 @@ pub fn project(state: &LabState) -> LabView {
                 "" if facts.sampled => format!(
                     "{} BARS  ·  {} OF {} PROBED",
                     grouped_whole(facts.present as f64),
-                    COVERAGE_SAMPLE_SYMBOLS,
+                    facts.symbols_probed,
                     facts.symbols_covered_of()
                 ),
                 "" => format!("{} BARS", grouped_whole(facts.present as f64)),
@@ -3087,7 +3146,7 @@ pub fn project(state: &LabState) -> LabView {
                     if facts.sampled {
                         format!(
                             "  ·  {} OF {} PROBED",
-                            COVERAGE_SAMPLE_SYMBOLS,
+                            facts.symbols_probed,
                             facts.symbols_covered_of()
                         )
                     } else {
@@ -3197,7 +3256,10 @@ pub fn project(state: &LabState) -> LabView {
         state_tone: state_badge,
         mode: state.mode.kind(),
         outdated: state.outdated,
-        run_enabled: state.engine_wired && has_strategy,
+        run_enabled: state.engine_wired
+            && has_strategy
+            && state.run != RunState::Running
+            && gather_valid(state),
         config_summary: summary_line.clone(),
         universe: state.config.universe.clone(),
         timeframe: state.config.timeframe.clone(),
@@ -3683,13 +3745,20 @@ mod tests {
     fn run_requires_engine_and_selection_never_fakes() {
         let mut st = state_with_obr();
         st.select(0);
+        // A runnable workspace needs a real selection, timeframe and capital.
+        st.universe_selected = vec!["RELIANCE".into()];
+        st.timeframes = vec!["15m".into()];
+        st.timeframe_index = 0;
+        st.cfg_capital = "100000".into();
         // No engine bridge -> RUN disabled, start_run refused.
         assert!(!st.engine_wired);
         assert!(!st.start_run());
         assert!(!project(&st).run_enabled);
         st.engine_wired = true;
-        assert!(st.start_run());
         assert!(project(&st).run_enabled);
+        assert!(st.start_run());
+        // While running, RUN stays disabled until the run settles.
+        assert!(!project(&st).run_enabled);
     }
 
     #[test]
@@ -4821,6 +4890,7 @@ mod tests {
             symbols_total: 527,
             symbols_covering: 524,
             bars_present: 94_000,
+            gaps: 0,
             start_days: LONG_FIRST as i32,
             end_days: LONG_LAST as i32,
             tf_secs: 1800,
@@ -4858,6 +4928,7 @@ mod tests {
             symbols_total: 3,
             symbols_covering: 3,
             bars_present: 500,
+            gaps: 0,
             start_days: -1,
             end_days: LONG_LAST as i32,
             tf_secs: 1800,
@@ -4892,6 +4963,7 @@ mod tests {
             LONG_FIRST,
             LONG_LAST,
             vayren_core::market::timeframe_seconds("30m").expect("ladder"),
+            &std::collections::HashSet::new(),
         );
         assert!(expected > 1000);
     }
@@ -5253,6 +5325,7 @@ pub fn apply_coverage_json(state: &mut LabState, value: &serde_json::Value) {
             .get("bars_present")
             .and_then(|v| v.as_u64())
             .unwrap_or(0),
+        gaps: value.get("gaps").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
         start_days: parse_iso_days(opt_str(value, "start").trim())
             .map(|v| v as i32)
             .unwrap_or(-1),
@@ -5345,6 +5418,31 @@ pub fn apply_snapshot_json(state: &mut LabState, value: &serde_json::Value) {
     }
     if let Some(outdated) = value.get("outdated").and_then(|v| v.as_bool()) {
         state.outdated = outdated;
+    } else {
+        state.refresh_staleness();
+    }
+    // Staleness hints the backend may send instead of a full fingerprint echo:
+    // consume them so a stale indicator/bar set never renders as current.
+    let stale_hint = value
+        .get("bars_stale")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+        || value
+            .get("data_stale")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        || value
+            .get("indicators")
+            .and_then(|v| {
+                v.as_bool().or_else(|| {
+                    v.get("stale")
+                        .and_then(|s| s.as_bool())
+                        .or_else(|| v.get("bars_stale").and_then(|s| s.as_bool()))
+                })
+            })
+            .unwrap_or(false);
+    if stale_hint {
+        state.outdated = true;
     }
     state.verdict_label = opt_str(value, "verdict");
     state.verdict_note = opt_str(value, "verdict_note");
@@ -5691,11 +5789,12 @@ fn apply_parity_keys(state: &mut LabState, value: &serde_json::Value) {
             state.rebuild_trade_view();
         }
     }
-    // Editor buffer: adopt the backend echo (typing never triggers a
-    // snapshot — the host dedupes identical payloads — so local edits are
-    // never clobbered; dirty is derived in `project`).
+    // Editor buffer: adopt the backend echo only when it carries source.
+    // An absent or empty `code` means "unchanged" (polls omit the ~39KB
+    // blob), so local edits are never clobbered; dirty is derived in
+    // `project`.
     let code = opt_str(value, "code");
-    if !code.is_empty() || value.get("code").is_some() {
+    if !code.is_empty() {
         state.code = code.clone();
         state.synced_code = code;
     }
@@ -5737,16 +5836,30 @@ fn apply_parity_keys(state: &mut LabState, value: &serde_json::Value) {
             })
             .unwrap_or_default();
         let current = opt_str(cfg, "timeframe");
+        // A missing ladder (or a missing entry) disables the control (-1) —
+        // it never auto-selects timeframes[0].
         state.timeframe_index = state
             .timeframes
             .iter()
             .position(|t| *t == current)
             .map(|i| i as i32)
-            .unwrap_or(0);
+            .unwrap_or(-1);
         state.cfg_dates_start = opt_str(cfg, "dates_start");
         state.cfg_dates_end = opt_str(cfg, "dates_end");
         state.cfg_capital = parse_capital(cfg);
-        state.config_error = opt_str(cfg, "config_error");
+        state.config_error = {
+            let scoped = opt_str(cfg, "config_error");
+            if !scoped.trim().is_empty() {
+                scoped
+            } else {
+                let top = opt_str(value, "config_error");
+                if !top.trim().is_empty() {
+                    top
+                } else {
+                    opt_str(value, "error")
+                }
+            }
+        };
     }
     // Real store history bounds. These are the ANCHOR symbol's actual
     // first/last available dates, which is what the §02 `MAX` preset means —

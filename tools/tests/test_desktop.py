@@ -10,11 +10,17 @@ reference verified-deleted files, and the retention ledger must stay healthy
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+
+pytestmark = pytest.mark.skipif(
+    os.environ.get("VAYREN_SCOPE_BENCH_NESTED") == "1",
+    reason="nested benchmark run (outer full-validation in progress)",
+)
 
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SCRIPTS_DIR))

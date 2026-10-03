@@ -14,7 +14,7 @@ _real_import = _builtins_module.__import__
 def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
     """`__import__` replacement enforcing the module allowlist at runtime."""
     root = (name or "").split(".")[0]
-    if root not in _ALLOWED_IMPORT_ROOTS:
+    if root not in _ALLOWED_IMPORT_ROOTS or _blocked_import_name(name or ""):
         raise ImportError(f"import of {name!r} is not allowed in strategy code")
     return _real_import(name, globals, locals, fromlist, level)
 
@@ -82,7 +82,9 @@ _BLOCKED_NODES = (
 #: Modules strategy code may import. Everything else (os/sys/subprocess/
 #: socket/pathlib/shutil/importlib/ctypes/...) is rejected — user code must
 #: never touch the filesystem, the network or the interpreter internals.
-#: `strategy.*` stays importable: the builtins subclass it.
+#: `strategy.*` stays importable: the builtins subclass it — except the
+#: strategy-file loader itself (`strategy.language.storage`), which would let
+#: user code read/write other strategies' files.
 _ALLOWED_IMPORT_ROOTS = frozenset(
     {
         "__future__",
@@ -100,6 +102,20 @@ _ALLOWED_IMPORT_ROOTS = frozenset(
         "zoneinfo",  # PEP 615 tz data only (no IO/clock); OBR stamps IST-aware bars.
     }
 )
+
+#: Dotted prefixes strategy code may never import (checked against the full
+#: dotted name, so the parent root staying allowed does not reopen them).
+_BLOCKED_IMPORT_PREFIXES = ("strategy.language.storage",)
+
+#: Attribute names that escape the sandbox to interpreter internals.
+_DENIED_DUNDER_ATTRS = frozenset({"__class__", "__subclasses__", "__dict__"})
+
+
+def _blocked_import_name(dotted: str) -> bool:
+    """True when `dotted` names a blocked module (itself or below it)."""
+    return any(
+        dotted == prefix or dotted.startswith(prefix + ".") for prefix in _BLOCKED_IMPORT_PREFIXES
+    )
 
 
 class StrategyLanguageError(Exception):
@@ -148,15 +164,39 @@ def compile_strategy(code: str) -> CompiledStrategy:
         if isinstance(node, _BLOCKED_NODES):
             raise StrategyLanguageError(["globals and deletes are not allowed in strategy code"])
         if isinstance(node, (ast.Import, ast.ImportFrom)):
-            roots = (
-                [a.name.split(".")[0] for a in node.names]
-                if isinstance(node, ast.Import)
-                else [(node.module or "").split(".")[0]]
-            )
+            if isinstance(node, ast.Import):
+                dotted = [a.name for a in node.names]
+                roots = [name.split(".")[0] for name in dotted]
+            else:
+                dotted = [node.module or ""]
+                roots = [(node.module or "").split(".")[0]]
             if any(root not in _ALLOWED_IMPORT_ROOTS for root in roots):
                 raise StrategyLanguageError(
                     [f"import of {roots!r} is not allowed in strategy code"]
                 )
+            if any(_blocked_import_name(name) for name in dotted):
+                raise StrategyLanguageError(
+                    [f"import of {dotted!r} is not allowed in strategy code"]
+                )
+        if isinstance(node, ast.Attribute) and node.attr in _DENIED_DUNDER_ATTRS:
+            raise StrategyLanguageError(
+                [f"attribute {node.attr!r} is not allowed in strategy code"]
+            )
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "getattr"
+            and any(
+                isinstance(arg, ast.Constant)
+                and isinstance(arg.value, str)
+                and arg.value.startswith("__")
+                and arg.value.endswith("__")
+                for arg in node.args
+            )
+        ):
+            raise StrategyLanguageError(
+                ["getattr() on dunder attributes is not allowed in strategy code"]
+            )
         if (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Name)

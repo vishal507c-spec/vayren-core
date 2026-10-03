@@ -124,7 +124,10 @@ def compile_context(
     kept_files = list(files[:max_files])
     tests: list[str] = []
     for domain in domains:
-        tests.extend(str(domain_tests.get(domain, "")).split())
+        if domain in domain_tests:
+            tests.extend(str(domain_tests[domain]).split())
+        elif domain == "chart":
+            tests.append("04_chart/chart/tests")
     tests = sorted({t for t in tests if t})
     # Impact-first validation plan (§11): reuse the proven benchmark planner
     # instead of re-deriving it — likely tests, validators and risk areas.

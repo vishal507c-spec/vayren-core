@@ -312,6 +312,9 @@ component LabFieldLabel inherits Rectangle {
     height: 19px;
     Text {
         text: root.lbl;
+        x: 0;
+        width: parent.width;
+        horizontal-alignment: left;
         font-size: 9.5px;
         letter-spacing: 1px;
         color: LabPalette.lab-muted;
@@ -823,7 +826,7 @@ component LabDateRangePicker inherits Rectangle {
                 }
                 Rectangle {
                     visible: cell.in-range;
-                    x: 0; y: 4px; width: 100%; height: cell.height - 8px;
+                    x: 0; y: 4px; width: parent.width; height: cell.height - 8px;
                     background: LabPalette.teal-06;
                 }
                 Rectangle {
@@ -984,7 +987,7 @@ export component StrategyLabScreen inherits Rectangle {
     property <[string]> menu-items: root.menu-src == 0 ? root.timeframes
         : root.menu-src == 1 ? root.rankby-labels
         : ["Cumulative P&L", "Daily P&L", "Return %"];
-    property <string> menu-current: root.menu-src == 0 ? root.lab.timeframe
+    property <string> menu-current: root.menu-src == 0 ? root.lab.timeframe-label
         : root.menu-src == 1 ? (root.lab.rankby-current >= 0 && root.lab.rankby-current < root.rankby-labels.length
             ? root.rankby-labels[root.lab.rankby-current] : "")
         : (root.lab.equity-select == 1 ? "Daily P&L" : root.lab.equity-select == 2 ? "Return %" : "Cumulative P&L");
@@ -1548,6 +1551,12 @@ export component StrategyLabScreen inherits Rectangle {
                                                     vertical-alignment: center;
                                                 }
                                             }
+                                            if root.lab.dates-error != "": Text {
+                                                text: root.lab.dates-error;
+                                                font-size: 10px;
+                                                color: LabPalette.lab-red;
+                                                overflow: elide;
+                                            }
                                         }
                                         LabFieldDivider { x: parent.width - 1px; }
                                     }
@@ -1685,9 +1694,12 @@ export component StrategyLabScreen inherits Rectangle {
                                                 color: LabPalette.lab-text; vertical-alignment: center;
                                             }
                                         }
-                                        // overall bar
+                                        // overall bar (absolute off the padded
+                                        // parent: a stretched weight lays out
+                                        // at ZERO in Slint 1.17, like the
+                                        // coverage strip below documents).
                                         progtrack := Rectangle {
-                                            horizontal-stretch: 1;
+                                            width: parent.width - 44px;
                                             height: 6px;
                                             border-radius: 3px;
                                             background: LabPalette.track-bg;
@@ -1842,7 +1854,7 @@ export component StrategyLabScreen inherits Rectangle {
                                                 rta := TouchArea {
                                                     // A run in flight owns the workspace: a second
                                                     // RUN would race the first one's equity chain.
-                                                    enabled: root.lab.run-enabled && !root.lab.prog-active;
+                                                    enabled: root.lab.run-enabled && !root.lab.prog-active && !root.lab.run-stop;
                                                     mouse-cursor: pointer;
                                                     clicked => { root.run-requested(); }
                                                 }
@@ -1855,7 +1867,7 @@ export component StrategyLabScreen inherits Rectangle {
                                                     font-weight: 700;
                                                     horizontal-alignment: center;
                                                     vertical-alignment: center;
-                                                    opacity: root.lab.run-enabled && !root.lab.prog-active ? 1 : 0.6;
+                                                    opacity: root.lab.run-enabled && !root.lab.prog-active && !root.lab.run-stop ? 1 : 0.6;
                                                 }
                                             }
                                             Rectangle {
@@ -2242,6 +2254,11 @@ export component StrategyLabScreen inherits Rectangle {
                     if root.lab.lens != 1: VerticalLayout {
                         spacing: 0;
                         LabEyebrow { eyebrow-text: "04 · INVESTIGATE WHERE THE RESULT CAME FROM"; }
+                        // Lens 0 (Performance) owns the stock grid + inspector;
+                        // every other lens renders its own body below, so hidden
+                        // subtrees are never instantiated.
+                        if root.lab.lens == 0: VerticalLayout {
+                            spacing: 0;
                         // tools row
                         HorizontalLayout {
                             height: 34px;
@@ -2291,6 +2308,9 @@ export component StrategyLabScreen inherits Rectangle {
                                 // Rust-side window instead of a layout.
                                 height: root.lab-rank-window.viewport-h;
                                 init => { root.rank-viewport-reported(root.lab-rank-window.viewport-h); }
+                                // Window resize re-reports: the Rust window owns
+                                // the geometry, the viewport height is the fact.
+                                changed height => { root.rank-viewport-reported(self.height); }
                                 // Wheel + drag scrolling (`spec §8`: the frame
                                 // path only re-lays the window).
                                 rank-scroll-area := TouchArea {
@@ -2415,7 +2435,9 @@ export component StrategyLabScreen inherits Rectangle {
                                                 sbd.pressed = true;
                                                 sbd.press-y = self.mouse-y;
                                             } else if (ev.kind == PointerEventKind.move && sbd.pressed) {
-                                                root.rank-scrolled((sbd.press-y - self.mouse-y) / 1px);
+                                                // Same sign as the content drag
+                                                // above: thumb down scrolls down.
+                                                root.rank-scrolled((self.mouse-y - sbd.press-y) / 1px);
                                                 sbd.press-y = self.mouse-y;
                                             } else if (ev.kind == PointerEventKind.up) {
                                                 sbd.pressed = false;
@@ -2494,8 +2516,9 @@ export component StrategyLabScreen inherits Rectangle {
                             }
                         }
                         Rectangle { height: 12px; }
-                        // ── EQUITY ──
-                        Rectangle {
+                        } // lens == 0 grid body (tools + table + inspector)
+                        // ── EQUITY (lens 0 overview + lens 2 page) ──
+                        if root.lab.lens == 0 || root.lab.lens == 2: Rectangle {
                             border-radius: LabPalette.section-radius;
                             background: LabPalette.panel;
                             border-width: 1px;
@@ -2551,13 +2574,24 @@ export component StrategyLabScreen inherits Rectangle {
                                         color: LabPalette.dim;
                                         x: 16px; y: (parent.height - self.height) / 2;
                                     }
-                                    for p in root.equity: Rectangle {
+                                    // Windowed like the rank grid: the first 300
+                                    // points bound the element count, the note
+                                    // owns the remainder honestly.
+                                    for p[pidx] in root.equity: Rectangle {
+                                        visible: pidx < 300;
                                         width: 3px;
                                         height: 3px;
                                         border-radius: 2px;
                                         x: 44px + (parent.width - 58px) * (p.x / 1000px);
                                         y: 24px + 150px - 150px * (p.y / 300px);
                                         background: LabPalette.lab-red;
+                                    }
+                                    if root.equity.length > 300: Text {
+                                        text: "showing first 300 of " + root.equity.length + " points";
+                                        font-size: 9px;
+                                        color: LabPalette.dim;
+                                        x: 44px; y: parent.height - 16px;
+                                        overflow: elide;
                                     }
                                 }
                                 Rectangle {
@@ -2635,6 +2669,8 @@ export component StrategyLabScreen inherits Rectangle {
                             clip: true;
                             height: root.lab-trade-window.viewport-h;
                             init => { root.trade-viewport-reported(root.lab-trade-window.viewport-h); }
+                            // Window resize re-reports, same contract as rank.
+                            changed height => { root.trade-viewport-reported(self.height); }
                             trade-scroll-area := TouchArea {
                                 scroll-event(ev) => {
                                     if (ev.delta-y == 0px) { return reject; }
@@ -2689,7 +2725,20 @@ export component StrategyLabScreen inherits Rectangle {
                                 }
                                 Rectangle { y: parent.height - 1px; height: 1px; width: 100%; background: LabPalette.line; }
                             }
-                            if root.lab.trade-total == 0: Text {
+                            // Honest empty: a filter that matches nothing says
+                            // so (the summary carries the recorded count),
+                            // only a run with no trades at all gets the
+                            // generic line.
+                            if root.lab.trade-total == 0 && (root.lab.trade-needle != "" || root.lab.trade-side-filter != 0 || root.lab.trade-result-filter != 0): Text {
+                                text: root.lab.trade-summary;
+                                font-size: 11px;
+                                color: LabPalette.dim;
+                                height: 30px;
+                                y: 46px;
+                                x: 14px;
+                                vertical-alignment: center;
+                            }
+                            if root.lab.trade-total == 0 && root.lab.trade-needle == "" && root.lab.trade-side-filter == 0 && root.lab.trade-result-filter == 0: Text {
                                 text: "No trades yet — run the backtest to record individual trades.";
                                 font-size: 11px;
                                 color: LabPalette.dim;
@@ -2754,7 +2803,9 @@ export component StrategyLabScreen inherits Rectangle {
                                             tsbd.pressed = true;
                                             tsbd.press-y = self.mouse-y;
                                         } else if (ev.kind == PointerEventKind.move && tsbd.pressed) {
-                                            root.trade-scrolled((tsbd.press-y - self.mouse-y) / 1px);
+                                            // Same sign as the content drag
+                                            // above: thumb down scrolls down.
+                                            root.trade-scrolled((self.mouse-y - tsbd.press-y) / 1px);
                                             tsbd.press-y = self.mouse-y;
                                         } else if (ev.kind == PointerEventKind.up) {
                                             tsbd.pressed = false;
@@ -2822,7 +2873,7 @@ export component StrategyLabScreen inherits Rectangle {
                                         Rectangle { width: 1px; background: LabPalette.line2; }
                                         LabMetaCell { mc-label: "MODE"; mc-value: root.lab.mode == 0 ? "LONG" : root.lab.mode == 1 ? "SHORT" : "COMPARE"; }
                                         Rectangle { width: 1px; background: LabPalette.line2; }
-                                        LabMetaCell { mc-label: "TIMEFRAME"; mc-value: root.lab.timeframe == "" ? "—" : root.lab.timeframe; }
+                                        LabMetaCell { mc-label: "TIMEFRAME"; mc-value: root.lab.timeframe-label == "" ? "—" : root.lab.timeframe-label; }
                                         Rectangle { width: 1px; background: LabPalette.line2; }
                                         LabMetaCell { mc-label: "REF PF"; mc-value: root.lab.studio-ref-pf == "" ? "—" : root.lab.studio-ref-pf; }
                                         Rectangle { width: 1px; background: LabPalette.line2; }
@@ -3055,11 +3106,25 @@ export component StrategyLabScreen inherits Rectangle {
                             Text { text: "Apply"; color: LabPalette.chip-bg; font-size: 11.5px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
                         }
                     }
-                    Rectangle { y: 0; height: 1px; width: 100%; background: LabPalette.line; }
-                }
-            }
-        }
-    }
+                                    Rectangle { y: 0; height: 1px; width: 100%; background: LabPalette.line; }
+                                }
+                            }
+                        } // equity body (lens 0 + lens 2)
+                        // ── DRAWDOWN (lens 3) — caption only until the lens
+                        // owns a chart; never an invented curve.
+                        if root.lab.lens == 3: Text {
+                            text: root.lab.drawdown-caption == "" ? "No drawdown series — run to produce the curve." : root.lab.drawdown-caption;
+                            font-size: 11px;
+                            color: LabPalette.dim;
+                        }
+                        // ── ANALYTICS (lens 4) — the verdict line only; the
+                        // section below already carries the full facts.
+                        if root.lab.lens == 4: Text {
+                            text: root.lab.summary-line == "" ? "No analytics yet — run the experiment." : root.lab.summary-line;
+                            font-size: 11px;
+                            color: LabPalette.dim;
+                        }
+                    }
 
     // ── DROPDOWN MENU HOST (overlay; never clipped by section cards) ──
     if root.menu-src >= 0: Rectangle {
