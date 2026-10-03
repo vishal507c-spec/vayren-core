@@ -41,6 +41,14 @@
       "to": "crates/vayren-domain"
     },
     {
+      "from": "crates/vayren-shell",
+      "kind": "actual",
+      "sources": [
+        "crates/vayren-shell/src/lib.rs"
+      ],
+      "to": "crates/vayren-domain"
+    },
+    {
       "from": "crates/vayren-strategy-lab-view",
       "kind": "actual",
       "sources": [
@@ -893,6 +901,11 @@
       "to": "crates/vayren-domain"
     },
     {
+      "from": "crates/vayren-shell",
+      "kind": "actual-without-declared",
+      "to": "crates/vayren-domain"
+    },
+    {
       "from": "crates/vayren-strategy-lab-view",
       "kind": "actual-without-declared",
       "to": "crates/vayren-domain"
@@ -1113,7 +1126,7 @@
       "to": "src/core/native"
     }
   ],
-  "entity_count": 4596,
+  "entity_count": 4595,
   "files": [
     {
       "domain": "CORE",
@@ -5400,6 +5413,7 @@
         "crates/vayren-market-view",
         "crates/vayren-portfolio-view",
         "crates/vayren-research-view",
+        "crates/vayren-shell",
         "crates/vayren-strategy-lab-view",
         "crates/vayren-system-view"
       ],
@@ -5510,7 +5524,9 @@
       "depended_on_by": [
         "src/app"
       ],
-      "depends_on_actual": [],
+      "depends_on_actual": [
+        "crates/vayren-domain"
+      ],
       "depends_on_declared": [],
       "domain": "NATIVE_UI",
       "files": [
@@ -6521,7 +6537,7 @@
       "required_language": "PYTHON"
     }
   ],
-  "relationship_count": 7834,
+  "relationship_count": 7836,
   "repository": {
     "name": "vayren-core",
     "root": "."
@@ -13985,21 +14001,6 @@
       "name": "DuplicateBrokerError",
       "public": true,
       "qualified": "broker.registry:DuplicateBrokerError",
-      "tests": []
-    },
-    {
-      "called_by": [],
-      "callers_complete": true,
-      "calls": [],
-      "dotted": "broker.registry._phase6_probe",
-      "file": "src/broker/registry.py",
-      "kind": "function",
-      "language": "PYTHON",
-      "line": 158,
-      "module": "src/broker",
-      "name": "_phase6_probe",
-      "public": false,
-      "qualified": "broker.registry:_phase6_probe",
       "tests": []
     },
     {
