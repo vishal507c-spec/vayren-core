@@ -143,6 +143,12 @@ pub enum BackendCommand {
     },
     GetPortfolioSnapshot,
     GetLiveSnapshot,
+    /// A host-mode UI action for the live service (setup/mode/start/stop/
+    /// halt/arm). The Live view never mutates state in Rust — it queues the
+    /// action and the backend applies it and answers with a fresh snapshot.
+    LiveAction {
+        action: serde_json::Value,
+    },
     GetResearchSnapshot,
     GetLabSnapshot,
     SelectLabStrategy {

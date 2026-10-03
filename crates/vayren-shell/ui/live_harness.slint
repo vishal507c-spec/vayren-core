@@ -7,7 +7,7 @@
 // cfg(test). Layout decisions are read back from LiveScreen's own
 // out-properties — one decision source for screen and tests.
 
-import { LiveScreen, LiveBar, LiveSetup, LiveMarket, LiveSymbolRow, LiveGate, LiveKv, LiveStat, LivePosition, LiveOrder, LiveFill, LiveEventRow, LiveCandle } from "live.slint";
+import { LiveScreen, LiveBar, LiveSetup, LiveMarket, LiveSymbolRow, LiveGate, LiveKv, LiveStat, LivePosition, LiveOrder, LiveFill, LiveEventRow } from "live.slint";
 import { VayrenPalette } from "palette.slint";
 
 export component LiveHarness inherits Window {
@@ -25,7 +25,6 @@ export component LiveHarness inherits Window {
     in-out property <bool> inspector-open: true;
     in property <LiveSetup> setup;
     in property <LiveMarket> market;
-    in property <[LiveCandle]> candles;
     in property <[string]> strategy-names;
     in property <int> strategy-selected: -1;
     in property <[LiveSymbolRow]> symbols;
@@ -98,7 +97,6 @@ export component LiveHarness inherits Window {
         inspector-w: root.tier-inspector-w;
         setup: root.setup;
         market: root.market;
-        candles: root.candles;
         strategy-names: root.strategy-names;
         strategy-selected: root.strategy-selected;
         symbols: root.symbols;

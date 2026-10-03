@@ -19,7 +19,7 @@ use slint::platform::{Platform, PlatformError, WindowAdapter};
 use slint::{ComponentHandle, PhysicalSize, Rgb8Pixel, SharedPixelBuffer};
 use std::rc::Rc;
 use std::time::Duration;
-use vayren_shell::{shell, ShellScreen};
+use vayren_shell::{live, shell, ShellScreen};
 
 struct MiniPlatform {
     window: Rc<MinimalSoftwareWindow>,
@@ -82,6 +82,52 @@ fn render_frame(
     buffer
 }
 
+/// Production steady state for render geometry: the backend snapshot has
+/// landed (universe known, mixed quote statuses) while the broker is still
+/// NOT CONFIGURED and every gate stays blocked. An empty boot universe would
+/// clip the readiness panel out of the pixel probes. Quote figures are
+/// render-fixture placeholders, never product data.
+fn idle_populated_state() -> live::LiveState {
+    let mut state = shell::demo_live_state();
+    let names = [
+        "NSE:KAYNES",
+        "NSE:DREDGECORP",
+        "NSE:AVANTIFEED",
+        "NSE:WAAREERTL",
+        "NSE:ROUTE",
+        "NSE:KEC",
+        "NSE:RAILTEL",
+        "NSE:SCI",
+        "NSE:MOIL",
+        "NSE:CRAMC",
+        "NSE:LXCHEM",
+        "NSE:NOCIL",
+        "NSE:DAMCAPITAL",
+        "NSE:JSWCEMENT",
+        "NSE:TEXRAIL",
+        "NSE:ZEEL",
+        "NSE:VIKRAN",
+        "NSE:IFCI",
+        "NSE:DCW",
+        "NSE:SAGILITY",
+        "NSE:JINDWORLD",
+        "NSE:NETWEB",
+    ];
+    state.symbols = names
+        .into_iter()
+        .enumerate()
+        .map(|(i, symbol)| live::SymbolPick {
+            symbol: symbol.into(),
+            checked: false,
+            ltp: if i == 0 { Some(100.0) } else { None },
+            change_pct: if i == 0 { Some(0.5) } else { None },
+            in_store: i != 1,
+        })
+        .collect();
+    state.store_total = Some(22);
+    state
+}
+
 #[test]
 fn live_screen_renders_structurally_at_every_viewport_tier() {
     let win = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
@@ -92,7 +138,7 @@ fn live_screen_renders_structurally_at_every_viewport_tier() {
 
     let ui = vayren_shell::AppWindow::new().unwrap();
     shell::apply(&ui, &shell::demo_snapshot());
-    shell::apply_live(&ui, &shell::demo_live_state());
+    shell::apply_live(&ui, &idle_populated_state());
     shell::select(&ui, ShellScreen::Live);
 
     // â”€â”€ disconnected / NOT CONFIGURED desktop (the honest idle shape) â”€â”€
@@ -111,7 +157,7 @@ fn live_screen_renders_structurally_at_every_viewport_tier() {
         let buffer = render_frame(&ui, &win, name, w, h);
         let px = (w * h) as usize;
         let surface = count_near(&buffer, [16, 23, 32], 6);
-        let accent = count_near(&buffer, [0, 199, 183], 24);
+        let accent = count_near(&buffer, [0, 229, 200], 24);
         let neg = count_near(&buffer, [240, 90, 103], 24);
         let text =
             count_near(&buffer, [230, 237, 243], 26) + count_near(&buffer, [139, 152, 167], 18);
@@ -192,10 +238,10 @@ fn live_screen_renders_structurally_at_every_viewport_tier() {
     open.inspector_open = true;
     shell::apply_live(&ui, &open);
     let o = render_frame(&ui, &win, "expanded_1280x720", 1280, 720);
-    let bg_c = count_near(&c, [7, 11, 16], 3) as i64;
-    let bg_o = count_near(&o, [7, 11, 16], 3) as i64;
+    let surf_c = count_near(&c, [12, 18, 27], 6) as i64;
+    let surf_o = count_near(&o, [12, 18, 27], 6) as i64;
     assert!(
-        (bg_c - bg_o).abs() > 2000,
+        (surf_c - surf_o).abs() > 2000,
         "collapse/expand must recompose the frame, not just hide pixels"
     );
     println!("live render probes written to {}", out_dir().display());

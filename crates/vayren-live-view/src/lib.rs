@@ -124,10 +124,12 @@ fn apply_view(ui: &LiveHostWindow, state: &LiveState) {
         conn_tone: view.bar.conn_tone,
         strategy_label: view.bar.strategy_label.into(),
         strategy_tone: view.bar.strategy_tone,
+        strategy_sub: view.bar.strategy_sub.into(),
         risk_label: view.bar.risk_label.into(),
         risk_tone: view.bar.risk_tone,
         recon_label: view.bar.recon_label.into(),
         recon_tone: view.bar.recon_tone,
+        recon_sub: view.bar.recon_sub.into(),
         exec_label: view.bar.exec_label.into(),
         exec_tone: view.bar.exec_tone,
         halted: view.bar.halted,
@@ -159,20 +161,10 @@ fn apply_view(ui: &LiveHostWindow, state: &LiveState) {
         title: view.market.title.into(),
         detail: view.market.detail.into(),
         header: view.market.header.into(),
+        feed_label: view.market.feed_label.into(),
+        feed_tone: view.market.feed_tone,
+        updated_label: view.market.updated_label.into(),
     });
-    ui.set_candles(model(
-        view.candles
-            .into_iter()
-            .map(|c| LiveCandle {
-                x: c.x,
-                open: c.open,
-                high: c.high,
-                low: c.low,
-                close: c.close,
-                up: c.up,
-            })
-            .collect::<Vec<_>>(),
-    ));
     ui.set_symbols(model(
         view.symbols
             .into_iter()
@@ -180,6 +172,11 @@ fn apply_view(ui: &LiveHostWindow, state: &LiveState) {
                 real_index: s.real_index,
                 name: s.name.into(),
                 checked: s.checked,
+                ltp: s.ltp.into(),
+                change: s.change.into(),
+                change_tone: s.change_tone,
+                status: s.status.into(),
+                status_tone: s.status_tone,
             })
             .collect::<Vec<_>>(),
     ));
@@ -213,17 +210,20 @@ fn apply_view(ui: &LiveHostWindow, state: &LiveState) {
     ui.set_risk_rows(kv(view.risk_rows));
     ui.set_broker_rows(kv(view.broker_rows));
     ui.set_recon_rows(kv(view.recon_rows));
+    ui.set_account_rows(kv(view.account_rows));
     ui.set_positions(model(
         view.positions
             .into_iter()
             .map(|p| LivePosition {
                 symbol: p.symbol.into(),
                 side: p.side.into(),
+                side_tone: p.side_tone,
                 qty: p.qty.into(),
                 entry: p.entry.into(),
                 current: p.current.into(),
                 pnl: p.pnl.into(),
                 pnl_tone: p.pnl_tone,
+                pnl_pct: p.pnl_pct.into(),
                 status: p.status.into(),
             })
             .collect::<Vec<_>>(),
@@ -236,6 +236,7 @@ fn apply_view(ui: &LiveHostWindow, state: &LiveState) {
                 strategy: o.strategy.into(),
                 symbol: o.symbol.into(),
                 side: o.side.into(),
+                side_tone: o.side_tone,
                 qty: o.qty.into(),
                 order_type: o.order_type.into(),
                 price: o.price.into(),
@@ -281,6 +282,8 @@ fn apply_view(ui: &LiveHostWindow, state: &LiveState) {
                 event: e.event.into(),
                 status: e.status.into(),
                 status_tone: e.status_tone,
+                level: e.level.into(),
+                category: e.category.into(),
             })
             .collect::<Vec<_>>(),
     ));
@@ -344,7 +347,7 @@ fn wire_view(ui: &LiveHostWindow, state: Rc<RefCell<LiveState>>, refresh: Rc<Cel
     });
     wire_text!(on_strategy_picked, LiveState::select_strategy_value);
     wire_text!(on_timeframe_picked, LiveState::select_timeframe_value);
-    wire_text!(on_event_type_picked, LiveState::apply_event_type);
+    wire_text!(on_event_type_picked, LiveState::apply_event_category);
     wire_text!(on_symbol_filter_changed, LiveState::set_symbol_filter);
     wire_text!(on_event_filter_changed, LiveState::set_event_filter);
     wire_text!(on_quantity_edited, LiveState::set_quantity);
@@ -354,6 +357,18 @@ fn wire_view(ui: &LiveHostWindow, state: Rc<RefCell<LiveState>>, refresh: Rc<Cel
     wire_unit!(on_halt_requested, LiveState::halt);
     wire_unit!(on_confirm_requested, LiveState::confirm_live);
     wire_unit!(on_inspector_toggled, LiveState::toggle_inspector);
+    {
+        // CLEAR EVENTS is UI-hygiene only (same contract as shell::wire_live):
+        // drops the rendered history, never queues a host action.
+        let strong = state.clone();
+        let handle = ui.as_weak();
+        ui.on_clear_events(move || {
+            strong.borrow_mut().clear_events();
+            if let Some(ui) = handle.upgrade() {
+                apply_view(&ui, &strong.borrow());
+            }
+        });
+    }
     // CONFIGURE BROKER is navigation intent — the legacy host routes it to the
     // BROKERS workspace; no broker logic lives in this surface.
     {

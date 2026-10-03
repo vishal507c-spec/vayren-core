@@ -27,13 +27,26 @@ from strategy.models.plot_event import (
 )
 from strategy.models.signal import Signal, SignalKind
 from strategy.models.state import StrategyState
-from strategy.registry import StrategyRegistry, StrategyRegistryError
+from strategy.registry import (
+    OBR_C1C4_METADATA,
+    OBR_C1C4_SYMBOLS,
+    StrategyRegistry,
+    StrategyRegistryError,
+    create_obr_c1c4_definition,
+    get_strategy_registry,
+    reset_strategy_registry,
+)
 from strategy.research.dataset import ResearchDataset
 from strategy.runtime import BarView, StrategyLogic, StrategyRuntime
 
 __all__ = [
     "StrategyRegistry",
     "StrategyRegistryError",
+    "get_strategy_registry",
+    "reset_strategy_registry",
+    "OBR_C1C4_SYMBOLS",
+    "OBR_C1C4_METADATA",
+    "create_obr_c1c4_definition",
     "StrategyDefinition",
     "BacktestForm",
     "StrategyParameters",
