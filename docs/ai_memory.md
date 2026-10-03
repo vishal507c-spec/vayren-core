@@ -6,7 +6,24 @@
 **Owns:** Current state, open items, verified facts, oddities. **Not owns:** Rules/architecture/events/contracts ΓåÆ `AGENTS.md`, `AI_ENTRY.md`, `architecture.md`, `module_contracts.md`, `event_catalog.md`.
 
 
-**Latest update (speed-forensics-and-granularity-repair, 2026-10-03):** SPEED-ENGINEERING FINAL FORENSIC VERIFICATION & REPAIR COMPLETE (local only, no commit/push).
+**Latest update (github-ci-repair, 2026-10-04):** GITHUB ACTIONS CI RUN 37146090960 100% PASS (ALL 6 JOBS GREEN on `polish-live-ui`).
+1. **Root Cause Analysis of GitHub CI Failure (Run `37130318077`):**
+   - `validators` failed because `LiveGateRow` line number in `crates/vayren-shell/ui/live.slint` moved from line 354 to line 356 without `repo_graph.json` synchronization.
+   - `test-shard-pure` failed in `tools/tests/test_vayren_intel.py` with `IntelError: store untrusted: history silent 8 days` because `verify_store()` evaluated only the last record in `history.jsonl` rather than calculating `latest_ts = max(...)` over all valid timestamps.
+   - `test-shard-stateful` failed in `test_validate_scope.py::test_bench_private_py_change` because its internal `pytest tools/tests -q` hit the same `vayren_intel` failure.
+2. **Repairs Applied & Verified (Commit `794a9b2` pushed with user permission):**
+   - Synchronized `docs/repo_graph.json` via `python tools/repo_graph.py --build` (4601 entities, 7863 relationships, 0 unresolved).
+   - Fixed `verify_store()` in `tools/vayren_intel.py` to evaluate max timestamp across all history entries and provided deterministic `--heartbeat` mechanism.
+3. **GitHub Actions CI Results (Run `37146090960`):**
+   - `validators`: PASSED (34s)
+   - `quality`: PASSED (43s)
+   - `test-shard-pure`: PASSED (1m 14s)
+   - `build-test`: PASSED (13m 9s)
+   - `test-shard-stateful`: PASSED (16m 41s)
+   - `CI gate`: PASSED (3s)
+   - **Status:** 100% ALL JOBS GREEN on branch `polish-live-ui`.
+
+**Previous update (speed-forensics-and-granularity-repair, 2026-10-03):** SPEED-ENGINEERING FINAL FORENSIC VERIFICATION & REPAIR COMPLETE (local only, no commit/push).
 1. **Impact Execution Granularity Fixed (`tools/benchmark.py`):**
    - Differentiated Level 2 (single-domain private/internal src changes) from Level 3/cross-domain changes. Level 2 never pulls in reverse dependencies (like `app`).
    - Added `TARGETED_FILE_TESTS` mapping for focused vocabulary/contract files (e.g., `src/broker/vocab.py` -> `test_broker_contracts.py`, `test_broker_boundary.py`, `test_auth.py`).
