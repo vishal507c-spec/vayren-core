@@ -447,44 +447,48 @@ component LabCtlButton inherits Rectangle {
             }
         }
     }
-    HorizontalLayout {
-        padding-left: 11px;
-        padding-right: 11px;
-        // NOT `alignment: center`. On a HorizontalLayout that is the MAIN
-        // axis, so it packs [label, chevron] as one centred block and the
-        // label's `horizontal-stretch: 1` is never honoured. The dropdown
-        // affordance consequently had nowhere to sit — every ▾ control in
-        // the lab (UNIVERSE, TIMEFRAME, Sort by, the Equity view selector)
-        // rendered as a centred word with no chevron at all, which is what
-        // made those fields read as static text. Start-aligned, the label
-        // takes the slack and the chevron pins to the right edge.
-        alignment: start;
-        Text { text: root.ctl-label; font-size: 12px; color: LabPalette.lab-text; horizontal-stretch: 1; min-width: 0; horizontal-alignment: left; overflow: elide; vertical-alignment: center; }
-        if root.ctl-focus: Text {
-            text: "▌";
-            color: LabPalette.lab-teal;
-            font-size: 11px;
-            min-width: 0;
-            vertical-alignment: center;
-        }
-        if !root.ctl-focus: Text {
-            // "↓" (U+2193), NOT "▾" (U+25BE). A pixel probe of this button
-            // found no lit pixels between the label and the right border: the
-            // geometric-shape codepoints this dropdown used to draw are absent
-            // from the resolved UI font, so EVERY ▾ control in the lab
-            // (UNIVERSE, TIMEFRAME, Sort by, the Equity view selector) read as
-            // a static word with no affordance at all. U+2193 is in the same
-            // Arrows block as the "→" that already renders in this same font
-            // (the DATE RANGE separator), so it is proven to survive here —
-            // the probe confirmed ↓ paints while ▾, ▼, ⌄, ⌁, ☐ and ☑ all
-            // painted nothing.
-            text: "XX";
-            color: LabPalette.dim;
-            font-size: 12px;
-            min-width: 0;
-            vertical-alignment: center;
-        }
-    }
+    // Label and chevron positioned ABSOLUTELY, not by a HorizontalLayout.
+//
+// Inside a bare `Rectangle` in Slint 1.17 a HorizontalLayout here sized itself
+// to its content instead of the button's width, so `horizontal-stretch: 1` on
+// the label had no slack to hand out and the chevron was packed flush against
+// the label's last glyph. Every ▾ control in the lab therefore read as one
+// longer word with the affordance buried mid-text ("30m▾"), and no amount of
+// `alignment` changed it — `start`, `center` and a stretch factor all produced
+// the same packed block. Stating the geometry is what actually pins the
+// chevron to the right padding edge, which is where a dropdown caret belongs.
+Text {
+    text: root.ctl-label;
+    font-size: 12px;
+    color: LabPalette.lab-text;
+    x: 11px;
+    width: parent.width - 11px - 15px - 11px;
+    horizontal-alignment: left;
+    vertical-alignment: center;
+    overflow: elide;
+}
+if root.ctl-focus: Text {
+    text: "▌";
+    color: LabPalette.lab-teal;
+    font-size: 11px;
+    x: parent.width - 11px - 9px;
+    width: 9px;
+    horizontal-alignment: center;
+    vertical-alignment: center;
+}
+if !root.ctl-focus: Text {
+    // "▼" (U+25BC), not "▾" (U+25BE). A glyph probe across this UI's resolved
+    // font showed ↓ → ∨ ✓ ● ˅ ▼ all painting and ▾ painting NOTHING — U+25BE
+    // is the one codepoint here with no glyph in the stack, so it silently
+    // vanished and took the dropdown affordance with it.
+    text: "▼";
+    color: LabPalette.dim;
+    font-size: 10px;
+    x: parent.width - 11px - 9px;
+    width: 9px;
+    horizontal-alignment: center;
+    vertical-alignment: center;
+}
 }
 
 // Dark text field — same control family as LabCtlButton (height, radius,
@@ -1613,7 +1617,8 @@ export component StrategyLabScreen inherits Rectangle {
                                                     picked(i) => { root.range-preset-picked(i); }
                                                 }
                                                 Text {
-                                                    text: "1↓2→3∨4✓5●6˅7▼8▾";
+                                                    text: root.lab.range-span-line;
+                                                    font-family: "monospace";
                                                     font-size: 10px;
                                                     letter-spacing: 0.8px;
                                                     color: LabPalette.dim;

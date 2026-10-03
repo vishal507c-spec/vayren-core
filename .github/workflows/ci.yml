@@ -73,6 +73,8 @@ jobs:
     env:
       RUSTFLAGS: "-C link-arg=-fuse-ld=lld"
       CARGO_BUILD_JOBS: "4"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     # Cache SAVE needs write; checkout still needs read (a permissions
     # block replaces defaults, so contents:read must stay explicit).
     permissions:
@@ -145,6 +147,8 @@ jobs:
     env:
       RUSTFLAGS: "-C link-arg=-fuse-ld=lld"
       CARGO_BUILD_JOBS: "4"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     permissions:
       contents: read
       actions: write
@@ -154,6 +158,7 @@ jobs:
       # links fontconfig/freetype at final link time (linker fails
       # without the dev packages — Day-6 CI proof).
       - name: Install Linux build dependencies
+      # lld linker provides 4x faster Rust linking on multi-crate workspaces.
         run: sudo apt-get update && sudo apt-get install -y pkg-config libfontconfig1-dev lld
       - uses: actions/setup-python@v5
         with:
@@ -168,6 +173,7 @@ jobs:
           shared-key: "vayren-rust"
           cache-all-crates: "true"
       - run: cargo build --release -p vayren-core --manifest-path Cargo.toml
+      - run: cargo test -p vayren-core --lib --no-run --manifest-path Cargo.toml
       - run: python -m pytest tools/tests/test_validate_scope.py tools/tests/test_failure_intel.py -q --no-header
 
   # Shard 2/2 — isolated readers, serial within the job, isolated runner.
@@ -179,6 +185,8 @@ jobs:
     env:
       RUSTFLAGS: "-C link-arg=-fuse-ld=lld"
       CARGO_BUILD_JOBS: "4"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     permissions:
       contents: read
       actions: write
