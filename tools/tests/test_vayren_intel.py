@@ -320,13 +320,17 @@ def test_radar_persists_real_trend_knowledge(monkeypatch: pytest.MonkeyPatch) ->
     vayren_intel.build_baseline()
     # Injected monotone series gets persisted as a knowledge item.
     path = vayren_intel._path("history.jsonl")
+    # Dates are relative to today, never hardcoded: the radar BLOCKs history
+    # silent > 7 days, so fixed 2026-09 dates rotted the test within days.
+    today = datetime.datetime.now(datetime.UTC).date()
     with open(path, "a", encoding="utf-8", newline="\n") as fh:
-        for i, value in enumerate((10.0, 12.0, 14.0, 16.0), start=2):
+        for offset, value in enumerate((10.0, 12.0, 14.0, 16.0)):
+            day = today - datetime.timedelta(days=3 - offset)
             fh.write(
                 json.dumps(
                     {
                         "kind": "daily",
-                        "ts": f"2026-09-2{i}T00:00:00+00:00",
+                        "ts": f"{day.isoformat()}T00:00:00+00:00",
                         "today": {"py_files": value},
                     }
                 )

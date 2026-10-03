@@ -50,10 +50,15 @@ AUTHORITIES = {
 }
 
 # Canonical registry seeding points: files allowed to call `.register(`.
+# src/execution/broker/factory.py seeds the built-in paper/sandbox venues
+# into the broker registry at import (idempotent: unregister-then-register).
+# Seeding built-ins is the same canonical act as providers/__init__, so it
+# is listed here instead of flagged.
 REGISTER_WRITERS = {
     "src/broker/providers/__init__.py",
     "src/broker/providers/zerodha/live_activation.py",
     "src/broker/registry.py",
+    "src/execution/broker/factory.py",
 }
 
 # Canonical selection writers: files allowed to construct BrokerSelection.
@@ -77,11 +82,18 @@ BRIDGE_IMPORT_EXCEPTIONS = {
     ("src/backtest/native_validation.py", "strategy"),
 }
 
-# Module-level map names that may only live in the canonical registry file.
+# Module-level map names that may only live in a canonical registry file.
 # Case-insensitive: `venue_registry`, `Venue_Registry` and `VENUE_REGISTRY` are
 # the same shadow-map shape, and only the last spelling used to be caught.
 REGISTRY_MAP_PATTERN = re.compile(r"(REGISTRY|_PROVIDERS|_ADAPTERS|_PLUGINS|_VENUES)$", re.I)
-REGISTRY_MAP_OWNER = "src/broker/registry.py"
+# One canonical holder per registry domain: venues live in the broker
+# registry, strategies in the strategy registry (Phase 6 single source of
+# truth). A SECOND map in either file, or a map anywhere else, still fails —
+# this is not a blanket exemption, it is one owner per responsibility.
+REGISTRY_MAP_OWNERS = {
+    "src/broker/registry.py",
+    "src/strategy/registry.py",
+}
 
 # Authority tables that live in RUST. A module-level store of one of these
 # names in Python is a second authority (the exact failure a duplicated
@@ -237,7 +249,7 @@ def check_registries(files: dict[str, str]) -> list[AuthorityViolation]:
                 if (
                     isinstance(target, ast.Name)
                     and REGISTRY_MAP_PATTERN.search(target.id)
-                    and rel != REGISTRY_MAP_OWNER
+                    and rel not in REGISTRY_MAP_OWNERS
                 ):
                     out.append(
                         AuthorityViolation(
@@ -245,9 +257,12 @@ def check_registries(files: dict[str, str]) -> list[AuthorityViolation]:
                             domain="REGISTRY",
                             file=rel,
                             symbol=target.id,
-                            reason="registry-like map outside the canonical registry file",
-                            canonical=REGISTRY_MAP_OWNER,
-                            fix=f"move the map into {REGISTRY_MAP_OWNER} or delete it",
+                            reason="registry-like map outside a canonical registry file",
+                            canonical=", ".join(sorted(REGISTRY_MAP_OWNERS)),
+                            fix=(
+                                "move the map into its domain registry file "
+                                f"({', '.join(sorted(REGISTRY_MAP_OWNERS))}) or delete it"
+                            ),
                         )
                     )
         for node in ast.walk(tree):
@@ -396,9 +411,31 @@ def check_authorities(files: dict[str, str]) -> list[AuthorityViolation]:
         if _is_test(rel):
             continue
         tree = _parse(source)
-        if tree is None:
+        if not isinstance(tree, ast.Module):
             continue
-        for name in sorted(_module_level_targets(tree) & set(MIGRATED_TABLE_AUTHORITIES)):
+        flagged: set[str] = set()
+        for node in tree.body:
+            if isinstance(node, ast.Assign):
+                targets, value = list(node.targets), node.value
+            elif isinstance(node, ast.AnnAssign):
+                targets, value = [node.target], node.value
+            else:
+                continue
+            if value is None or isinstance(value, ast.Call):
+                # A bare annotation (`TRANSITIONS: dict`) declares no facts,
+                # and a call result (`TRANSITIONS = _transition_table()`) is
+                # the sanctioned FFI read-through — the fix text prescribes
+                # exactly this shape. Only a literal restates the kernel.
+                continue
+            for target in targets:
+                if (
+                    isinstance(target, ast.Name)
+                    and target.id.isupper()
+                    and any(char.isalpha() for char in target.id)
+                    and target.id in MIGRATED_TABLE_AUTHORITIES
+                ):
+                    flagged.add(target.id)
+        for name in sorted(flagged):
             out.append(
                 AuthorityViolation(
                     rule="duplicate-table-authority",

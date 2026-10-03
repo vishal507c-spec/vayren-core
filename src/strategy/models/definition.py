@@ -32,6 +32,19 @@ class StrategyDefinition:
     params: StrategyParameters
     allocation_pct: float = 100.0
     enabled: bool = True
+    status: str = "ACTIVE"
+    timeframe: str = ""
+    direction: str = ""
+    symbols: tuple[str, ...] = ()
+    runtime_state: str = "IDLE"
+    description: str = ""
+    metadata: tuple[tuple[str, str], ...] = ()
+    source_code: str = ""
+
+    @property
+    def symbol_count(self) -> int:
+        """Total symbols in the strategy universe."""
+        return len(self.symbols)
 
     def __post_init__(self) -> None:
         """Reject empty identity fields and out-of-range allocations."""
@@ -58,6 +71,14 @@ class StrategyDefinition:
             params=params,
             allocation_pct=self.allocation_pct,
             enabled=self.enabled,
+            status=self.status,
+            timeframe=self.timeframe,
+            direction=self.direction,
+            symbols=self.symbols,
+            runtime_state=self.runtime_state,
+            description=self.description,
+            metadata=self.metadata,
+            source_code=self.source_code,
         )
 
     def with_enabled(self, enabled: bool) -> "StrategyDefinition":
@@ -70,6 +91,14 @@ class StrategyDefinition:
             params=self.params,
             allocation_pct=self.allocation_pct,
             enabled=enabled,
+            status=self.status,
+            timeframe=self.timeframe,
+            direction=self.direction,
+            symbols=self.symbols,
+            runtime_state=self.runtime_state,
+            description=self.description,
+            metadata=self.metadata,
+            source_code=self.source_code,
         )
 
     def with_allocation(self, allocation_pct: float) -> "StrategyDefinition":
@@ -82,7 +111,80 @@ class StrategyDefinition:
             params=self.params,
             allocation_pct=allocation_pct,
             enabled=self.enabled,
+            status=self.status,
+            timeframe=self.timeframe,
+            direction=self.direction,
+            symbols=self.symbols,
+            runtime_state=self.runtime_state,
+            description=self.description,
+            metadata=self.metadata,
+            source_code=self.source_code,
         )
+
+    def with_symbols(self, symbols: tuple[str, ...]) -> "StrategyDefinition":
+        """Return a copy with replaced symbols."""
+        return StrategyDefinition(
+            id=self.id,
+            name=self.name,
+            version=self.version,
+            kind=self.kind,
+            params=self.params,
+            allocation_pct=self.allocation_pct,
+            enabled=self.enabled,
+            status=self.status,
+            timeframe=self.timeframe,
+            direction=self.direction,
+            symbols=tuple(symbols),
+            runtime_state=self.runtime_state,
+            description=self.description,
+            metadata=self.metadata,
+            source_code=self.source_code,
+        )
+
+    def with_status(self, status: str) -> "StrategyDefinition":
+        """Return a copy with a new status."""
+        return StrategyDefinition(
+            id=self.id,
+            name=self.name,
+            version=self.version,
+            kind=self.kind,
+            params=self.params,
+            allocation_pct=self.allocation_pct,
+            enabled=self.enabled,
+            status=status,
+            timeframe=self.timeframe,
+            direction=self.direction,
+            symbols=self.symbols,
+            runtime_state=self.runtime_state,
+            description=self.description,
+            metadata=self.metadata,
+            source_code=self.source_code,
+        )
+
+    def with_runtime_state(self, runtime_state: str) -> "StrategyDefinition":
+        """Return a copy with a new runtime state."""
+        return StrategyDefinition(
+            id=self.id,
+            name=self.name,
+            version=self.version,
+            kind=self.kind,
+            params=self.params,
+            allocation_pct=self.allocation_pct,
+            enabled=self.enabled,
+            status=self.status,
+            timeframe=self.timeframe,
+            direction=self.direction,
+            symbols=self.symbols,
+            runtime_state=runtime_state,
+            description=self.description,
+            metadata=self.metadata,
+            source_code=self.source_code,
+        )
+
+    @property
+    def metadata_dict(self) -> dict[str, str]:
+        """Convert tuple metadata to dict."""
+        return dict(self.metadata)
 
     @property
     def label(self) -> str:

@@ -20,15 +20,15 @@ use crate::{
     AppWindow, BrokerCheckRow, BrokerRowView, CapabilityRowView, CredentialFieldView, DlCalDay,
     DlCredField, DlPlan, DlStatus, DlStock, LabBoardCell, LabCheckData, LabDetailMetric, LabHeader,
     LabKpi, LabLibraryRow, LabMatrixRow, LabParam, LabPoint, LabPreset, LabRankRow, LabTradeMetric,
-    LabTradeRow, LiveBar, LiveCandle, LiveEventRow, LiveFill, LiveGate, LiveKv, LiveMarket,
-    LiveOrder, LivePosition, LiveSetup, LiveStat, LiveSymbolRow, MarketCandle, MarketIndicator,
-    MarketMarker, MarketPlotSeg, MarketPopupRow, MarketRayLevel, MarketSettingsRow,
-    MarketStatusRow, MarketTick, MarketTimeframe, MarketTradeContext, MarketWatchRow,
-    PortfolioAlloc, PortfolioFill, PortfolioGate, PortfolioKpi, PortfolioOrder, PortfolioPosition,
-    PortfolioRisk, ProgressStepView, RankWindow, ResearchCompareRow, ResearchConfigGroup,
-    ResearchEvidenceDim, ResearchEvidenceWhy, ResearchExperimentRow, ResearchField, ResearchKv,
-    ResearchKvGroup, ResearchMetric, ResearchRobustRow, ResearchSignalRow, ResearchStrategyRow,
-    ResearchTradeRow, ShellScreen,
+    LabTradeRow, LiveBar, LiveEventRow, LiveFill, LiveGate, LiveKv, LiveMarket, LiveOrder,
+    LivePosition, LiveSetup, LiveStat, LiveSymbolRow, MarketCandle, MarketIndicator, MarketMarker,
+    MarketPlotSeg, MarketPopupRow, MarketRayLevel, MarketSettingsRow, MarketStatusRow, MarketTick,
+    MarketTimeframe, MarketTradeContext, MarketWatchRow, PortfolioAlloc, PortfolioFill,
+    PortfolioGate, PortfolioKpi, PortfolioOrder, PortfolioPosition, PortfolioRisk,
+    ProgressStepView, RankWindow, ResearchCompareRow, ResearchConfigGroup, ResearchEvidenceDim,
+    ResearchEvidenceWhy, ResearchExperimentRow, ResearchField, ResearchKv, ResearchKvGroup,
+    ResearchMetric, ResearchRobustRow, ResearchSignalRow, ResearchStrategyRow, ResearchTradeRow,
+    ShellScreen,
 };
 use slint::ComponentHandle;
 #[cfg(test)]
@@ -3181,10 +3181,12 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
         conn_tone: view.bar.conn_tone,
         strategy_label: view.bar.strategy_label.into(),
         strategy_tone: view.bar.strategy_tone,
+        strategy_sub: view.bar.strategy_sub.into(),
         risk_label: view.bar.risk_label.into(),
         risk_tone: view.bar.risk_tone,
         recon_label: view.bar.recon_label.into(),
         recon_tone: view.bar.recon_tone,
+        recon_sub: view.bar.recon_sub.into(),
         exec_label: view.bar.exec_label.into(),
         exec_tone: view.bar.exec_tone,
         halted: view.bar.halted,
@@ -3234,23 +3236,10 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
         title: view.market.title.into(),
         detail: view.market.detail.into(),
         header: view.market.header.into(),
+        feed_label: view.market.feed_label.into(),
+        feed_tone: view.market.feed_tone,
+        updated_label: view.market.updated_label.into(),
     });
-    ui.set_live_candles(
-        Rc::new(slint::VecModel::from(
-            view.candles
-                .into_iter()
-                .map(|c| LiveCandle {
-                    x: c.x,
-                    open: c.open,
-                    high: c.high,
-                    low: c.low,
-                    close: c.close,
-                    up: c.up,
-                })
-                .collect::<Vec<_>>(),
-        ))
-        .into(),
-    );
     ui.set_live_symbols(
         Rc::new(slint::VecModel::from(
             view.symbols
@@ -3259,6 +3248,11 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
                     real_index: s.real_index,
                     name: s.name.into(),
                     checked: s.checked,
+                    ltp: s.ltp.into(),
+                    change: s.change.into(),
+                    change_tone: s.change_tone,
+                    status: s.status.into(),
+                    status_tone: s.status_tone,
                 })
                 .collect::<Vec<_>>(),
         ))
@@ -3306,6 +3300,7 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
     ui.set_live_risk_rows(kv_model(view.risk_rows).into());
     ui.set_live_broker_rows(kv_model(view.broker_rows).into());
     ui.set_live_recon_rows(kv_model(view.recon_rows).into());
+    ui.set_live_account_rows(kv_model(view.account_rows).into());
     ui.set_live_positions(
         Rc::new(slint::VecModel::from(
             view.positions
@@ -3313,11 +3308,13 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
                 .map(|p| LivePosition {
                     symbol: p.symbol.into(),
                     side: p.side.into(),
+                    side_tone: p.side_tone,
                     qty: p.qty.into(),
                     entry: p.entry.into(),
                     current: p.current.into(),
                     pnl: p.pnl.into(),
                     pnl_tone: p.pnl_tone,
+                    pnl_pct: p.pnl_pct.into(),
                     status: p.status.into(),
                 })
                 .collect::<Vec<_>>(),
@@ -3333,6 +3330,7 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
                     strategy: o.strategy.into(),
                     symbol: o.symbol.into(),
                     side: o.side.into(),
+                    side_tone: o.side_tone,
                     qty: o.qty.into(),
                     order_type: o.order_type.into(),
                     price: o.price.into(),
@@ -3387,6 +3385,8 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
                     event: e.event.into(),
                     status: e.status.into(),
                     status_tone: e.status_tone,
+                    level: e.level.into(),
+                    category: e.category.into(),
                 })
                 .collect::<Vec<_>>(),
         ))
@@ -3454,7 +3454,7 @@ pub fn wire_live(ui: &AppWindow, state: Rc<RefCell<LiveState>>) {
         s.toggle_symbol(i.max(0) as usize);
     });
     wire_text!(on_live_timeframe_picked, LiveState::select_timeframe_value);
-    wire_text!(on_live_event_type_picked, LiveState::apply_event_type);
+    wire_text!(on_live_event_type_picked, LiveState::apply_event_category);
     wire_text!(on_live_symbol_filter_changed, LiveState::set_symbol_filter);
     wire_text!(on_live_event_filter_changed, LiveState::set_event_filter);
     {
@@ -3472,6 +3472,17 @@ pub fn wire_live(ui: &AppWindow, state: Rc<RefCell<LiveState>>) {
     wire_unit!(on_live_confirm_requested, LiveState::confirm_live);
     wire_unit!(on_live_inspector_toggled, LiveState::toggle_inspector);
     {
+        // CLEAR EVENTS is UI-hygiene only: it drops the rendered event
+        // history and never queues a host action — backend trading state
+        // (sessions, positions, journal) is untouched.
+        let strong = state.clone();
+        let handle = ui.as_weak();
+        ui.on_live_clear_events(move || {
+            strong.borrow_mut().clear_events();
+            refresh_live(&handle, &strong);
+        });
+    }
+    {
         // CONFIGURE BROKER is navigation intent — the shell owns the
         // screen switch; no broker logic lives in the LIVE surface.
         let handle = ui.as_weak();
@@ -3485,8 +3496,11 @@ pub fn wire_live(ui: &AppWindow, state: Rc<RefCell<LiveState>>) {
 
 /// Representative LIVE state for the standalone shell binary — the exact
 /// static readiness of this workstation (`--check-live` facts): no live
-/// venue adapter, PAPER default, real strategy library and store head,
-/// empty execution tables. Nothing is fabricated.
+/// venue adapter, PAPER default, empty execution tables. Nothing is
+/// fabricated: the watchlist starts EMPTY (the universe is registry-owned
+/// and arrives with the first backend snapshot — a stale built-in list
+/// would pose as the strategy's universe), while the strategy option names
+/// the registry-canonical default the backend will confirm or replace.
 pub fn demo_live_state() -> LiveState {
     let gate = |name: &str, reason: &str| Gate {
         name: name.into(),
@@ -3509,6 +3523,7 @@ pub fn demo_live_state() -> LiveState {
             capabilities: vec!["historical_data.candles".into()],
             latency_ms: None,
             last_heartbeat: String::new(),
+            account_id: String::new(),
         },
         gates: vec![
             blocked(
@@ -3537,28 +3552,18 @@ pub fn demo_live_state() -> LiveState {
             mismatches: String::new(),
             blocks_live: true,
         },
-        strategies: vec!["OBR".into(), "Untitled Strategy".into()],
-        symbols: [
-            "360ONE", "AARTIIND", "ABCAPITAL", "ABFRL", "ADANIENT", "ADANIPORTS", "AMBUJACEM",
-            "ANGELONE", "APOLLOHOSP", "ASIANPAINT", "BAJFINANCE", "BHARTIARTL", "DMART", "HAL",
-            "HDFCBANK", "ICICIBANK", "INFY", "IRCTC", "ITC", "JSWSTEEL", "LT", "NESTLEIND",
-            "RELIANCE", "SBIN", "SUNPHARMA", "TATACHEM", "TATASTEEL", "TCS", "TITAN",
-        ]
-        .into_iter()
-        .map(|symbol| SymbolPick {
-            symbol: symbol.into(),
-            checked: false,
-        })
-        .collect(),
-        store_total: Some(527),
+        strategies: vec!["OBR C1C4".into()],
+        symbols: Vec::new(),
+        store_total: None,
         timeframes: [
             "1m", "3m", "5m", "15m", "30m", "45m", "1h", "2h", "4h", "1D", "1W",
         ]
         .into_iter()
         .map(String::from)
         .collect(),
-        timeframe_index: Some(3),
-        market_timeframe: "15m".into(),
+        timeframe_index: Some(4),
+        market_timeframe: "30m".into(),
+        market_symbol: String::new(),
         ..LiveState::default()
     }
 }
@@ -3587,6 +3592,9 @@ pub fn demo_live_state_running() -> LiveState {
         .map(|symbol| SymbolPick {
             symbol: symbol.into(),
             checked: matches!(symbol, "RELIANCE" | "TCS"),
+            ltp: None,
+            change_pct: None,
+            in_store: true,
         })
         .collect(),
         store_total: Some(527),
@@ -3600,6 +3608,7 @@ pub fn demo_live_state_running() -> LiveState {
             current: "2812.40".into(),
             pnl: "+113.00".into(),
             status: "OPEN".into(),
+            pnl_pct: Some(0.40),
         }],
         position_facts: Some(live::PositionFacts {
             instrument: "RELIANCE".into(),
@@ -3644,6 +3653,10 @@ pub fn demo_live_state_running() -> LiveState {
             warmup: Some(60),
             state: "RELIANCE: no signal yet; TCS: no signal yet".into(),
             params: vec!["range_minutes=15".into(), "target_atr=2.0".into()],
+            direction: String::new(),
+            runtime_state: String::new(),
+            reference_window: String::new(),
+            universe: None,
         }),
         pnl: live::Pnl {
             realized: Some(0.0),
@@ -3661,6 +3674,7 @@ pub fn demo_live_state_running() -> LiveState {
                 symbol: "RELIANCE".into(),
                 event: "ORDER_SUBMITTED".into(),
                 status: "ok".into(),
+                category: "ORDERS".into(),
             },
             live::LiveEvent {
                 timestamp: "13:00:04".into(),
@@ -3668,6 +3682,7 @@ pub fn demo_live_state_running() -> LiveState {
                 symbol: "RELIANCE".into(),
                 event: "ORDER_FILL".into(),
                 status: "ok".into(),
+                category: "ORDERS".into(),
             },
         ],
         market_state: live::DataState::Ready,
@@ -4191,7 +4206,7 @@ mod tests {
         assert_eq!(ui.get_active_screen(), ShellScreen::Live);
         let bar = ui.get_live_bar();
         assert_eq!(bar.exec_label, "● ENABLED");
-        assert_eq!(bar.broker_label, "Broker: NOT CONFIGURED");
+        assert_eq!(bar.broker_label, "NOT CONFIGURED");
         assert_eq!(bar.conn_label, "Connection: N/A");
         assert!(!bar.halted);
         // Halt follows real state: an idle session cannot be halted.
@@ -4217,21 +4232,48 @@ mod tests {
         assert_eq!(ui.get_live_market().state_label, "NO DATA");
 
         wire_live(&ui, live_state.clone());
+        // Boot carries no universe (registry-owned, backend-fed) — the
+        // watchlist fills when the first backend snapshot lands.
+        assert_eq!(ui.get_live_symbols().row_count(), 0);
+        live_state.borrow_mut().apply_snapshot(&serde_json::json!({
+            "available_symbols": ["NSE:KAYNES", "NSE:TCS"],
+            "selected_symbols": [],
+            "quotes": [
+                {"symbol": "NSE:KAYNES", "ltp": 7234.8, "change_pct": 1.25,
+                 "status": "AVAILABLE"},
+                {"symbol": "NSE:TCS", "ltp": null, "change_pct": null,
+                 "status": "NO MARKET DATA"},
+            ],
+        }));
+        refresh_live(&ui.as_weak(), &live_state);
         // Watchlist filter keeps real indices; toggling selects the store row.
-        ui.invoke_live_symbol_filter_changed("reliance".into());
+        ui.invoke_live_symbol_filter_changed("kaynes".into());
         let symbols = ui.get_live_symbols();
         assert_eq!(symbols.row_count(), 1);
-        let reliance = symbols.row_data(0).unwrap();
-        assert_eq!(reliance.name, "RELIANCE");
-        ui.invoke_live_symbol_toggled(reliance.real_index);
+        let kaynes = symbols.row_data(0).unwrap();
+        assert_eq!(kaynes.name, "NSE:KAYNES");
+        assert_eq!(kaynes.ltp, "7,234.80");
+        assert_eq!(kaynes.change, "+1.25%");
+        assert_eq!(kaynes.status, "AVAILABLE");
+        ui.invoke_live_symbol_toggled(kaynes.real_index);
         assert!(ui.get_live_symbols().row_data(0).unwrap().checked);
-        assert_eq!(live_state.borrow().checked_symbols(), vec!["RELIANCE"]);
+        assert_eq!(live_state.borrow().checked_symbols(), vec!["NSE:KAYNES"]);
         ui.invoke_live_symbol_filter_changed("".into());
+        // Category chips filter the real stream; Clear drops UI history only.
+        ui.invoke_live_event_type_picked("ORDERS".into());
+        assert_eq!(live_state.borrow().event_category, "ORDERS");
+        ui.invoke_live_clear_events();
+        assert!(live_state.borrow().events.is_empty());
 
-        // LIVE mode intent is fail-closed while venue gates block.
+        // LIVE mode intent is fail-closed while venue gates block (non-host
+        // path says so outright; the host path asks the backend instead).
+        let mut local = demo_live_state();
+        local.set_mode(live::ExecMode::Live);
+        assert_eq!(local.mode, live::ExecMode::Paper);
+        assert!(local.action_note.unwrap().contains("LIVE refused"));
         ui.invoke_live_mode_picked(2);
-        assert_eq!(live_state.borrow().mode, live::ExecMode::Paper);
-        assert!(ui.get_live_bar().note.contains("LIVE refused"));
+        assert_eq!(live_state.borrow().mode, live::ExecMode::Paper); // backend decides
+        assert!(ui.get_live_bar().note.contains("awaiting backend"));
 
         // Quantity edits validate centrally; garbage keeps the old value.
         ui.invoke_live_quantity_edited("25".into());
@@ -4251,16 +4293,18 @@ mod tests {
         // idle shape — content must survive every recomposition tier.
         harness.set_bar(LiveBar {
             mode: 0,
-            broker_label: "Broker: NOT CONFIGURED".into(),
+            broker_label: "NOT CONFIGURED".into(),
             broker_tone: 0,
             conn_label: "Connection: N/A".into(),
             conn_tone: 0,
-            strategy_label: "Strategy: —".into(),
+            strategy_label: "—".into(),
             strategy_tone: 0,
-            risk_label: "Risk: READY".into(),
+            strategy_sub: "".into(),
+            risk_label: "READY".into(),
             risk_tone: 1,
-            recon_label: "Reconciliation: NOT CONFIGURED".into(),
+            recon_label: "NOT CONFIGURED".into(),
             recon_tone: 0,
+            recon_sub: "Positions: N/A | Orders: N/A".into(),
             exec_label: "● ENABLED".into(),
             exec_tone: 1,
             halted: false,
@@ -4278,7 +4322,7 @@ mod tests {
             can_arm: false,
             needs_live_confirm: false,
             confirmed_live: false,
-            symbol_total: "527 in store · 0 selected".into(),
+            symbol_total: "527 symbols (OBR C1C4)".into(),
         });
         harness.set_market(LiveMarket {
             has_data: false,
@@ -4287,6 +4331,9 @@ mod tests {
             title: "NO MARKET DATA".into(),
             detail: "Symbol: — · Timeframe: 15m".into(),
             header: "— 15m".into(),
+            feed_label: "".into(),
+            feed_tone: 0,
+            updated_label: "".into(),
         });
         harness.set_inspector_open(true);
 
@@ -4365,8 +4412,11 @@ mod tests {
         harness.set_inspector_open(true);
         assert!(harness.get_show_inspector());
 
-        // With real bars the chart expands into the remaining height (§8) —
-        // the same screen, data-driven, no mode switch.
+        // With real bars the blotter keeps its tall tier (§8) —
+        // the same screen, data-driven, no mode switch. The tiers are harness
+        // INPUTS (app.slint drives them from the window), so they must be
+        // re-driven for the size under assertion — the matrix above left them
+        // at its last (360x640) row.
         harness.set_market(LiveMarket {
             has_data: true,
             state_label: "READY".into(),
@@ -4374,10 +4424,14 @@ mod tests {
             title: "RELIANCE · 15m".into(),
             detail: "500 bars · source: market store (SQLite)".into(),
             header: "RELIANCE 15m".into(),
+            feed_label: "FEED: LOCAL TAIL".into(),
+            feed_tone: 2,
+            updated_label: "13:00:05".into(),
         });
         harness
             .window()
             .set_size(slint::PhysicalSize::new(1600, 900));
+        harness.set_tier_tall(harness.window().size().height as f64 >= 720.0);
         assert!(
             harness.get_chart_h() > 300.0,
             "chart owns remaining height with data"
@@ -4385,6 +4439,7 @@ mod tests {
         harness
             .window()
             .set_size(slint::PhysicalSize::new(1600, 620));
+        harness.set_tier_tall(harness.window().size().height as f64 >= 720.0);
         assert!(
             harness.get_chart_h() >= 220.0,
             "chart keeps its usable floor; page scrolls"
@@ -4393,8 +4448,6 @@ mod tests {
         select(&ui, ShellScreen::Broker);
         assert!(!ui.get_screen_pending());
     }
-
-    #[test]
     fn lab_run_request_gathers_backend_echoes() {
         let mut state = demo_lab_state();
         // No selection → honestly no request (RUN stays disabled).

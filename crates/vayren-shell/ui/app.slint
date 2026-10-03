@@ -10,7 +10,7 @@ import { StrategyLabScreen, LabHeader, LabLibraryRow, LabKpi, LabRankRow, LabTra
 import { MarketScreen, MarketWatchRow, MarketCandle, MarketTick, MarketRayLevel, MarketTimeframe, MarketIndicator, MarketStatusRow, MarketSettingsRow, MarketPopupRow, MarketPlotSeg, MarketMarker, MarketTradeContext, DlPlan, DlStatus, DlCalDay, DlCredField, DlStock } from "market.slint";
 import { ResearchScreen, ResearchMetric, ResearchSignalRow, ResearchTradeRow, ResearchRobustRow, ResearchKv, ResearchCompareRow, ResearchStrategyRow, ResearchExperimentRow, ResearchField, ResearchConfigGroup, ResearchEvidenceDim, ResearchEvidenceWhy, ResearchKvGroup } from "research.slint";
 import { PortfolioScreen, PortfolioKpi, PortfolioGate, PortfolioPosition, PortfolioAlloc, PortfolioOrder, PortfolioFill, PortfolioRisk } from "portfolio.slint";
-import { LiveScreen, LiveBar, LiveSetup, LiveMarket, LiveSymbolRow, LiveGate, LiveKv, LiveStat, LivePosition, LiveOrder, LiveFill, LiveEventRow, LiveCandle, LiveTiers } from "live.slint";
+import { LiveScreen, LiveBar, LiveSetup, LiveMarket, LiveSymbolRow, LiveGate, LiveKv, LiveStat, LivePosition, LiveOrder, LiveFill, LiveEventRow, LiveTiers } from "live.slint";
 import { BrokerPanel, BrokerCheckRow } from "broker.slint";
 import { BrokerConnectionWorkspace, BrokerRowView, CredentialFieldView, ProgressStepView } from "broker_connection.slint";
 
@@ -181,6 +181,7 @@ export component AppWindow inherits Window {
     callback live-confirm-requested();
     callback live-event-filter-changed(string);
     callback live-event-type-picked(string);
+    callback live-clear-events();
     callback live-inspector-toggled();
     callback live-configure-broker();
 
@@ -573,7 +574,6 @@ export component AppWindow inherits Window {
     in-out property <LiveBar> live-bar;
     in-out property <LiveSetup> live-setup;
     in-out property <LiveMarket> live-market;
-    in-out property <[LiveCandle]> live-candles;
     in-out property <[string]> live-strategy-names;
     in-out property <int> live-strategy-selected: -1;
     in-out property <[LiveSymbolRow]> live-symbols;
@@ -588,6 +588,7 @@ export component AppWindow inherits Window {
     in-out property <[LiveKv]> live-risk-rows;
     in-out property <[LiveKv]> live-broker-rows;
     in-out property <[LiveKv]> live-recon-rows;
+    in-out property <[LiveKv]> live-account-rows;
     in-out property <[LivePosition]> live-positions;
     in-out property <[LiveOrder]> live-orders;
     in-out property <[LiveFill]> live-fills;
@@ -1086,7 +1087,6 @@ export component AppWindow inherits Window {
                     inspector-w: root.live-inspector-w;
                     setup: root.live-setup;
                     market: root.live-market;
-                    candles: root.live-candles;
                     strategy-names: root.live-strategy-names;
                     strategy-selected: root.live-strategy-selected;
                     symbols: root.live-symbols;
@@ -1101,6 +1101,7 @@ export component AppWindow inherits Window {
                     risk-rows: root.live-risk-rows;
                     broker-rows: root.live-broker-rows;
                     recon-rows: root.live-recon-rows;
+                    account-rows: root.live-account-rows;
                     positions: root.live-positions;
                     orders: root.live-orders;
                     fills: root.live-fills;
@@ -1122,6 +1123,7 @@ export component AppWindow inherits Window {
                     confirm-requested() => { root.live-confirm-requested(); }
                     event-filter-changed(t) => { root.live-event-filter-changed(t); }
                     event-type-picked(i) => { root.live-event-type-picked(i); }
+                    clear-events() => { root.live-clear-events(); }
                     inspector-toggled() => { root.live-inspector-toggled(); }
                     configure-broker() => { root.live-configure-broker(); }
                 }

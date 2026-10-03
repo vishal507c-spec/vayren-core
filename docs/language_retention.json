@@ -2,6 +2,42 @@
   "_note": "Per-file language retention (ACTIVE MACHINE INPUT). Every Python file in a Rust-owned domain MUST have an entry here with state + reason + migration_target + migration_condition, or validate_language_ownership.py HARD FAILS. States: MIGRATED (file must be absent) / MIGRATION_REQUIRED (touch-to-migrate) / TEMPORARILY_RETAINED (justified bridge/facade) / EXEMPT_WITH_JUSTIFICATION (permanent, proven).",
   "version": 2,
   "files": {
+    "src/backtest/__init__.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Runner/optimizer/worker orchestration driving Python strategies (strategies must stay Python). Metrics kernels already migrated. File role: package re-export surface (no logic)",
+      "migration_target": "crates/vayren-core/src/backtest/",
+      "migration_condition": "When the BACKTEST slice containing this file is touched by feature work, migrate per AI_ENTRY.md Â§1 (smallest useful slice)."
+    },
+    "src/backtest/native_metrics.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Rust-backed ctypes bridge for the backtest numeric kernels (drawdown / equity curve / Sharpe / whole-report framing) over vy_max_drawdown, vy_equity_curve, vy_sharpe, vy_bt_report. No math: marshals float arrays and maps the kernel answers back; authority lives in crates/vayren-core/src/metrics.rs. File role: bridge (no authority)",
+      "migration_target": "crates/vayren-core/src/metrics.rs",
+      "migration_condition": "Terminal bridge state: retained as the FFI projection (same pattern as native_aggregate/native_checks)."
+    },
+    "src/backtest/native_positions.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Rust-backed ctypes bridge for the backtest trade kernels: bar-crossing exit (vy_bt_try_close/vy_bt_close_trade), signal exit and exit-price choice (vy_bt_signal_exit/vy_bt_exit_price) and entry fill economics (vy_bt_fill). No policy: packs floats, reads packed structs and renders absent exit / absent R multiple as None; every rule lives in crates/vayren-core/src/backtest.rs. File role: bridge (no authority)",
+      "migration_target": "crates/vayren-core/src/backtest.rs",
+      "migration_condition": "Terminal bridge state: retained as the FFI projection (same pattern as native_metrics/native_validation)."
+    },
+    "src/backtest/native_replay.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "ctypes bridge for the replay window kernel (vy_bt_slice): encodes the timestamp blob plus the two optional bounds (a -1 length is Python's None) and reads back the surviving bar indices. No policy: which bars a [start, end] range keeps is decided by backtest_engine.rs::slice_indices, and the bars themselves never cross the boundary. File role: bridge (no authority)",
+      "migration_target": "crates/vayren-core/src/backtest_engine.rs",
+      "migration_condition": "Terminal bridge state: retained as the FFI projection (same pattern as native_positions/native_validation)."
+    },
+    "src/backtest/native_runner.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "ctypes bridge for the two runner kernels (vy_bt_window_bounds, vy_bt_default_workers). No policy of its own: the aggregation-window margin rule and the bounded worker-count clamp live in backtest_runner.rs; the machine probe and the process pool stay in runner.py as host IO/process control. File role: bridge (no authority)",
+      "migration_target": "crates/vayren-core/src/backtest_runner.rs",
+      "migration_condition": "Terminal bridge state: retained as the FFI projection (same pattern as native_positions/native_validation)."
+    },
+    "src/backtest/native_validation.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Rust-backed ctypes bridge for backtest form checks (7-check bitmask decision). No independent logic: calls vy_backtest_validate_form in rust/vayren-core. File role: bridge (no authority)",
+      "migration_target": "crates/vayren-core/src/backtest_validation.rs",
+      "migration_condition": "Kernel proven; bridge retained as the FFI projection (same pattern as native_metrics/native_checks)."
+    },
     "src/core/__init__.py": {
       "state": "TEMPORARILY_RETAINED",
       "reason": "EventBus/contracts/registry/system-model foundation glue (stdlib-only, dispatch ~0.3us). Porting the bus rewires every module at once (big-bang, AI_ENTRY.md section 1). File role: package re-export surface (no logic)",
@@ -44,6 +80,252 @@
       "migration_target": "crates/vayren-core/src/data/",
       "migration_condition": "When the DATA_PROCESSING slice containing this file is touched by feature work, migrate per AI_ENTRY.md Â§1 (smallest useful slice)."
     },
+    "src/execution/__init__.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: package re-export surface (no logic)",
+      "migration_target": "crates/vayren-core/src/execution/",
+      "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per AI_ENTRY.md Â§1 (smallest useful slice)."
+    },
+    "src/execution/broker/__init__.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Restored 2026-10-02 from d0cc3f9^ (the v1.21.0 'ownership purity' release deleted the live execution subsystem, which left the LIVE page importing a module that no longer existed). Session/engine/venue/ledger/journal orchestration is Python again; every numeric decision still crosses into Rust (risk gates via risk.native_engine, order lifecycle via execution.native_order_state, fill/position math via execution.native_positions, metrics via backtest.native_metrics). Tracked debt, not an exemption: migrate the orchestration layer to Rust and delete this file.",
+      "migration_target": "crates/vayren-core/src/execution_engine.rs",
+      "migration_condition": "Rust session runtime (session lifecycle, journal, ledger, reconcile, arming) exists and is proven by the restored parity/safety suite; until then this file is the only live path."
+    },
+    "src/execution/broker/activation.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Restored 2026-10-02 from d0cc3f9^ (the v1.21.0 'ownership purity' release deleted the live execution subsystem, which left the LIVE page importing a module that no longer existed). Session/engine/venue/ledger/journal orchestration is Python again; every numeric decision still crosses into Rust (risk gates via risk.native_engine, order lifecycle via execution.native_order_state, fill/position math via execution.native_positions, metrics via backtest.native_metrics). Tracked debt, not an exemption: migrate the orchestration layer to Rust and delete this file.",
+      "migration_target": "crates/vayren-core/src/execution_engine.rs",
+      "migration_condition": "Rust session runtime (session lifecycle, journal, ledger, reconcile, arming) exists and is proven by the restored parity/safety suite; until then this file is the only live path."
+    },
+    "src/execution/broker/adapter.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Restored 2026-10-02 from d0cc3f9^ (the v1.21.0 'ownership purity' release deleted the live execution subsystem, which left the LIVE page importing a module that no longer existed). Session/engine/venue/ledger/journal orchestration is Python again; every numeric decision still crosses into Rust (risk gates via risk.native_engine, order lifecycle via execution.native_order_state, fill/position math via execution.native_positions, metrics via backtest.native_metrics). Tracked debt, not an exemption: migrate the orchestration layer to Rust and delete this file.",
+      "migration_target": "crates/vayren-core/src/execution_engine.rs",
+      "migration_condition": "Rust session runtime (session lifecycle, journal, ledger, reconcile, arming) exists and is proven by the restored parity/safety suite; until then this file is the only live path."
+    },
+    "src/execution/broker/credentials.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Restored 2026-10-02 from d0cc3f9^ (the v1.21.0 'ownership purity' release deleted the live execution subsystem, which left the LIVE page importing a module that no longer existed). Session/engine/venue/ledger/journal orchestration is Python again; every numeric decision still crosses into Rust (risk gates via risk.native_engine, order lifecycle via execution.native_order_state, fill/position math via execution.native_positions, metrics via backtest.native_metrics). Tracked debt, not an exemption: migrate the orchestration layer to Rust and delete this file.",
+      "migration_target": "crates/vayren-core/src/execution_engine.rs",
+      "migration_condition": "Rust session runtime (session lifecycle, journal, ledger, reconcile, arming) exists and is proven by the restored parity/safety suite; until then this file is the only live path."
+    },
+    "src/execution/broker/factory.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Restored 2026-10-02 from d0cc3f9^ (the v1.21.0 'ownership purity' release deleted the live execution subsystem, which left the LIVE page importing a module that no longer existed). Session/engine/venue/ledger/journal orchestration is Python again; every numeric decision still crosses into Rust (risk gates via risk.native_engine, order lifecycle via execution.native_order_state, fill/position math via execution.native_positions, metrics via backtest.native_metrics). Tracked debt, not an exemption: migrate the orchestration layer to Rust and delete this file.",
+      "migration_target": "crates/vayren-core/src/execution_engine.rs",
+      "migration_condition": "Rust session runtime (session lifecycle, journal, ledger, reconcile, arming) exists and is proven by the restored parity/safety suite; until then this file is the only live path."
+    },
+    "src/execution/broker/gates.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Restored 2026-10-02 from d0cc3f9^ (the v1.21.0 'ownership purity' release deleted the live execution subsystem, which left the LIVE page importing a module that no longer existed). Session/engine/venue/ledger/journal orchestration is Python again; every numeric decision still crosses into Rust (risk gates via risk.native_engine, order lifecycle via execution.native_order_state, fill/position math via execution.native_positions, metrics via backtest.native_metrics). Tracked debt, not an exemption: migrate the orchestration layer to Rust and delete this file.",
+      "migration_target": "crates/vayren-core/src/execution_engine.rs",
+      "migration_condition": "Rust session runtime (session lifecycle, journal, ledger, reconcile, arming) exists and is proven by the restored parity/safety suite; until then this file is the only live path."
+    },
+    "src/execution/broker/native_policy.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Rust-backed ctypes bridge for the broker-boundary kernels: vy_res_* (retry table, sliding-window throttle, clock drift, budget validators), vy_cer_* (credential, account, risk-policy and funds reason wording, the five-gate assembly, the twelve-step activation ceremony) and vy_sbx_settle_decision (sandbox fill script). It encodes text arguments, drains the kernel's length-prefixed documents and frees limiter handles. No rule, threshold, ordering or reason string is decided here. File role: bridge (no authority)",
+      "migration_target": "crates/vayren-core/src/resilience.rs",
+      "migration_condition": "Terminal bridge state: retained as the FFI projection (no rule lives here)."
+    },
+    "src/execution/broker/paper.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Restored 2026-10-02 from d0cc3f9^ (the v1.21.0 'ownership purity' release deleted the live execution subsystem, which left the LIVE page importing a module that no longer existed). Session/engine/venue/ledger/journal orchestration is Python again; every numeric decision still crosses into Rust (risk gates via risk.native_engine, order lifecycle via execution.native_order_state, fill/position math via execution.native_positions, metrics via backtest.native_metrics). Tracked debt, not an exemption: migrate the orchestration layer to Rust and delete this file.",
+      "migration_target": "crates/vayren-core/src/execution_engine.rs",
+      "migration_condition": "Rust session runtime (session lifecycle, journal, ledger, reconcile, arming) exists and is proven by the restored parity/safety suite; until then this file is the only live path."
+    },
+    "src/execution/broker/readonly.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Restored 2026-10-02 from d0cc3f9^ (the v1.21.0 'ownership purity' release deleted the live execution subsystem, which left the LIVE page importing a module that no longer existed). Session/engine/venue/ledger/journal orchestration is Python again; every numeric decision still crosses into Rust (risk gates via risk.native_engine, order lifecycle via execution.native_order_state, fill/position math via execution.native_positions, metrics via backtest.native_metrics). Tracked debt, not an exemption: migrate the orchestration layer to Rust and delete this file.",
+      "migration_target": "crates/vayren-core/src/execution_engine.rs",
+      "migration_condition": "Rust session runtime (session lifecycle, journal, ledger, reconcile, arming) exists and is proven by the restored parity/safety suite; until then this file is the only live path."
+    },
+    "src/execution/broker/resilience.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Restored 2026-10-02 from d0cc3f9^ (the v1.21.0 'ownership purity' release deleted the live execution subsystem, which left the LIVE page importing a module that no longer existed). Session/engine/venue/ledger/journal orchestration is Python again; every numeric decision still crosses into Rust (risk gates via risk.native_engine, order lifecycle via execution.native_order_state, fill/position math via execution.native_positions, metrics via backtest.native_metrics). Tracked debt, not an exemption: migrate the orchestration layer to Rust and delete this file.",
+      "migration_target": "crates/vayren-core/src/execution_engine.rs",
+      "migration_condition": "Rust session runtime (session lifecycle, journal, ledger, reconcile, arming) exists and is proven by the restored parity/safety suite; until then this file is the only live path."
+    },
+    "src/execution/broker/sandbox.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Restored 2026-10-02 from d0cc3f9^ (the v1.21.0 'ownership purity' release deleted the live execution subsystem, which left the LIVE page importing a module that no longer existed). Session/engine/venue/ledger/journal orchestration is Python again; every numeric decision still crosses into Rust (risk gates via risk.native_engine, order lifecycle via execution.native_order_state, fill/position math via execution.native_positions, metrics via backtest.native_metrics). Tracked debt, not an exemption: migrate the orchestration layer to Rust and delete this file.",
+      "migration_target": "crates/vayren-core/src/execution_engine.rs",
+      "migration_condition": "Rust session runtime (session lifecycle, journal, ledger, reconcile, arming) exists and is proven by the restored parity/safety suite; until then this file is the only live path."
+    },
+    "src/execution/engine.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Restored 2026-10-02 from d0cc3f9^ (the v1.21.0 'ownership purity' release deleted the live execution subsystem, which left the LIVE page importing a module that no longer existed). Session/engine/venue/ledger/journal orchestration is Python again; every numeric decision still crosses into Rust (risk gates via risk.native_engine, order lifecycle via execution.native_order_state, fill/position math via execution.native_positions, metrics via backtest.native_metrics). Tracked debt, not an exemption: migrate the orchestration layer to Rust and delete this file.",
+      "migration_target": "crates/vayren-core/src/execution_engine.rs",
+      "migration_condition": "Rust session runtime (session lifecycle, journal, ledger, reconcile, arming) exists and is proven by the restored parity/safety suite; until then this file is the only live path."
+    },
+    "src/execution/events/__init__.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: package re-export surface (no logic)",
+      "migration_target": "crates/vayren-core/src/execution/",
+      "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per AI_ENTRY.md Â§1 (smallest useful slice)."
+    },
+    "src/execution/journal.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Restored 2026-10-02 from d0cc3f9^ (the v1.21.0 'ownership purity' release deleted the live execution subsystem, which left the LIVE page importing a module that no longer existed). Session/engine/venue/ledger/journal orchestration is Python again; every numeric decision still crosses into Rust (risk gates via risk.native_engine, order lifecycle via execution.native_order_state, fill/position math via execution.native_positions, metrics via backtest.native_metrics). Tracked debt, not an exemption: migrate the orchestration layer to Rust and delete this file.",
+      "migration_target": "crates/vayren-core/src/execution_engine.rs",
+      "migration_condition": "Rust session runtime (session lifecycle, journal, ledger, reconcile, arming) exists and is proven by the restored parity/safety suite; until then this file is the only live path."
+    },
+    "src/execution/market_data/__init__.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Restored 2026-10-02 from d0cc3f9^ with the execution subsystem. Market-data providers (SQLite tail, broker feed, replay, stream normalizer) are Python; bucket alignment, closed-bar counting and aggregation are Rust (market.native_aggregate).",
+      "migration_target": "crates/vayren-core/src/aggregate.rs",
+      "migration_condition": "Rust session runtime (session lifecycle, journal, ledger, reconcile, arming) exists and is proven by the restored parity/safety suite; until then this file is the only live path."
+    },
+    "src/execution/market_data/broker_feed.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Restored 2026-10-02 from d0cc3f9^ with the execution subsystem. Market-data providers (SQLite tail, broker feed, replay, stream normalizer) are Python; bucket alignment, closed-bar counting and aggregation are Rust (market.native_aggregate).",
+      "migration_target": "crates/vayren-core/src/aggregate.rs",
+      "migration_condition": "Rust session runtime (session lifecycle, journal, ledger, reconcile, arming) exists and is proven by the restored parity/safety suite; until then this file is the only live path."
+    },
+    "src/execution/market_data/native_normalizer.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Handle-based ctypes bridge for the stream gate (vy_norm_*) plus, since 2026-09-20, its stateless rules: the staleness floor, the strict gap comparison, the stall reason wording and the sequence watermark. It packs a symbol, sequence and opaque token, drains the kernel's verdict documents (delivered/dropped tokens, the six counters, health wording) and re-materialises them as plain value tuples. No policy: watermarking, gap/duplicate accounting, reorder overflow, staleness thresholds, counters and every reason string are decided in crates/vayren-core/src/normalizer.rs. File role: bridge (no authority)",
+      "migration_target": "crates/vayren-core/src/normalizer.rs",
+      "migration_condition": "Terminal bridge state: retained as the FFI projection (same pattern as native_aggregate/native_timeframe)."
+    },
+    "src/execution/market_data/normalizer.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Restored 2026-10-02 from d0cc3f9^ with the execution subsystem. Market-data providers (SQLite tail, broker feed, replay, stream normalizer) are Python; bucket alignment, closed-bar counting and aggregation are Rust (market.native_aggregate).",
+      "migration_target": "crates/vayren-core/src/aggregate.rs",
+      "migration_condition": "Rust session runtime (session lifecycle, journal, ledger, reconcile, arming) exists and is proven by the restored parity/safety suite; until then this file is the only live path."
+    },
+    "src/execution/market_data/provider.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Restored 2026-10-02 from d0cc3f9^ with the execution subsystem. Market-data providers (SQLite tail, broker feed, replay, stream normalizer) are Python; bucket alignment, closed-bar counting and aggregation are Rust (market.native_aggregate).",
+      "migration_target": "crates/vayren-core/src/aggregate.rs",
+      "migration_condition": "Rust session runtime (session lifecycle, journal, ledger, reconcile, arming) exists and is proven by the restored parity/safety suite; until then this file is the only live path."
+    },
+    "src/execution/market_data/replay.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Restored 2026-10-02 from d0cc3f9^ with the execution subsystem. Market-data providers (SQLite tail, broker feed, replay, stream normalizer) are Python; bucket alignment, closed-bar counting and aggregation are Rust (market.native_aggregate).",
+      "migration_target": "crates/vayren-core/src/aggregate.rs",
+      "migration_condition": "Rust session runtime (session lifecycle, journal, ledger, reconcile, arming) exists and is proven by the restored parity/safety suite; until then this file is the only live path."
+    },
+    "src/execution/market_data/sqlite_tail.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Restored 2026-10-02 from d0cc3f9^ with the execution subsystem. Market-data providers (SQLite tail, broker feed, replay, stream normalizer) are Python; bucket alignment, closed-bar counting and aggregation are Rust (market.native_aggregate).",
+      "migration_target": "crates/vayren-core/src/aggregate.rs",
+      "migration_condition": "Rust session runtime (session lifecycle, journal, ledger, reconcile, arming) exists and is proven by the restored parity/safety suite; until then this file is the only live path."
+    },
+    "src/execution/models/__init__.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: package re-export surface (no logic)",
+      "migration_target": "crates/vayren-core/src/execution/",
+      "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per AI_ENTRY.md Â§1 (smallest useful slice)."
+    },
+    "src/execution/models/contract.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Restored 2026-10-02 from d0cc3f9^ with the execution subsystem. Intent/order/position/contract value objects are frozen dataclasses with no decisions in them; the order lifecycle table itself is Rust (execution.native_order_state re-exports TERMINAL_STATES/TRANSITIONS as a read-only projection).",
+      "migration_target": "crates/vayren-core/src/execution_engine.rs",
+      "migration_condition": "Rust session runtime (session lifecycle, journal, ledger, reconcile, arming) exists and is proven by the restored parity/safety suite; until then this file is the only live path."
+    },
+    "src/execution/models/intent.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Restored 2026-10-02 from d0cc3f9^ with the execution subsystem. Intent/order/position/contract value objects are frozen dataclasses with no decisions in them; the order lifecycle table itself is Rust (execution.native_order_state re-exports TERMINAL_STATES/TRANSITIONS as a read-only projection).",
+      "migration_target": "crates/vayren-core/src/execution_engine.rs",
+      "migration_condition": "Rust session runtime (session lifecycle, journal, ledger, reconcile, arming) exists and is proven by the restored parity/safety suite; until then this file is the only live path."
+    },
+    "src/execution/models/order.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Restored 2026-10-02 from d0cc3f9^ with the execution subsystem. Intent/order/position/contract value objects are frozen dataclasses with no decisions in them; the order lifecycle table itself is Rust (execution.native_order_state re-exports TERMINAL_STATES/TRANSITIONS as a read-only projection).",
+      "migration_target": "crates/vayren-core/src/execution_engine.rs",
+      "migration_condition": "Rust session runtime (session lifecycle, journal, ledger, reconcile, arming) exists and is proven by the restored parity/safety suite; until then this file is the only live path."
+    },
+    "src/execution/models/order_state.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Leaf vocabulary module, stdlib only: the `OrderState` enum and nothing else (no transition table, no terminal-state set, no algorithm). The transition TABLE and the terminal-state set are owned by rust/vayren-core (order_state module) and reach Python only as read-only projections from 08_execution/execution/native_order_state.py. File role: enum vocabulary (no authority)",
+      "migration_target": "crates/vayren-core/src/execution/",
+      "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per AI_ENTRY.md Â§1 (smallest useful slice). Guarded by NO_REINTRODUCE in tools/validate_language_ownership.py: TRANSITIONS/TERMINAL_STATES must never be re-stated here."
+    },
+    "src/execution/models/position.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Restored 2026-10-02 from d0cc3f9^ with the execution subsystem. Intent/order/position/contract value objects are frozen dataclasses with no decisions in them; the order lifecycle table itself is Rust (execution.native_order_state re-exports TERMINAL_STATES/TRANSITIONS as a read-only projection).",
+      "migration_target": "crates/vayren-core/src/execution_engine.rs",
+      "migration_condition": "Rust session runtime (session lifecycle, journal, ledger, reconcile, arming) exists and is proven by the restored parity/safety suite; until then this file is the only live path."
+    },
+    "src/execution/modes.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Restored 2026-10-02 from d0cc3f9^: the arming/mode vocabulary (LiveArm, ModeGates, gates_from_env) the LIVE service and runtime import. Mode resolution delegates to Rust (execution.native_execution.resolve_mode); this file is the Python-shaped vocabulary plus env reading only.",
+      "migration_target": "crates/vayren-core/src/execution_engine.rs",
+      "migration_condition": "Rust session runtime (session lifecycle, journal, ledger, reconcile, arming) exists and is proven by the restored parity/safety suite; until then this file is the only live path."
+    },
+    "src/execution/native_execution.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Rust-backed ctypes bridge for the execution kernels: arm/lifecycle transitions, planner math, ledger fill accounting and position sign/mark reads, the basic live-readiness check, the gate mask / missing-gate / mode-resolution rules, the latency percentile, the reconciliation reports (positions, orders, funds) and verdict status codes over vy_exec_*. Since 2026-09-20 it also carries the pure rules the runtime used to hold: default order quantity, advisory multiplier narrowing plus its validation message, and gate flag pack/unpack. Migrated 2026-09-21: the risk-policy sanity mask export and its bridge function were deleted - live_readiness (through broker/native_policy.py) owns that gate and its wording. No independent logic: every answer comes from rust/vayren-core. Terminal bridge state",
+      "migration_target": "crates/vayren-core/src/execution_engine.rs",
+      "migration_condition": "Kernel proven; bridge retained as the FFI projection (same pattern as native_metrics/native_checks)."
+    },
+    "src/execution/native_order_state.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Rust-backed ctypes bridge: the order transition table and terminal set live in crates/vayren-core/src/order_state.rs and are projected here as read-only views (handshake-verified, parity-pinned). No transition logic of its own. Terminal bridge state. File role: bridge (no authority)",
+      "migration_target": "crates/vayren-core/src/execution/",
+      "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per AI_ENTRY.md Â§1 (smallest useful slice)."
+    },
+    "src/execution/planner.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Restored 2026-10-02 from d0cc3f9^ (the v1.21.0 'ownership purity' release deleted the live execution subsystem, which left the LIVE page importing a module that no longer existed). Session/engine/venue/ledger/journal orchestration is Python again; every numeric decision still crosses into Rust (risk gates via risk.native_engine, order lifecycle via execution.native_order_state, fill/position math via execution.native_positions, metrics via backtest.native_metrics). Tracked debt, not an exemption: migrate the orchestration layer to Rust and delete this file.",
+      "migration_target": "crates/vayren-core/src/execution_engine.rs",
+      "migration_condition": "Rust session runtime (session lifecycle, journal, ledger, reconcile, arming) exists and is proven by the restored parity/safety suite; until then this file is the only live path."
+    },
+    "src/execution/portfolio/__init__.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Restored 2026-10-02 from d0cc3f9^ with the execution subsystem. Position ledger and the reconciliation reports drive off Rust-computed fills and order state; the reconciliation verdict kernel is Rust (execution.native_execution).",
+      "migration_target": "crates/vayren-core/src/execution_engine.rs",
+      "migration_condition": "Rust session runtime (session lifecycle, journal, ledger, reconcile, arming) exists and is proven by the restored parity/safety suite; until then this file is the only live path."
+    },
+    "src/execution/portfolio/ledger.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Restored 2026-10-02 from d0cc3f9^ with the execution subsystem. Position ledger and the reconciliation reports drive off Rust-computed fills and order state; the reconciliation verdict kernel is Rust (execution.native_execution).",
+      "migration_target": "crates/vayren-core/src/execution_engine.rs",
+      "migration_condition": "Rust session runtime (session lifecycle, journal, ledger, reconcile, arming) exists and is proven by the restored parity/safety suite; until then this file is the only live path."
+    },
+    "src/execution/portfolio/reconcile.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Restored 2026-10-02 from d0cc3f9^ with the execution subsystem. Position ledger and the reconciliation reports drive off Rust-computed fills and order state; the reconciliation verdict kernel is Rust (execution.native_execution).",
+      "migration_target": "crates/vayren-core/src/execution_engine.rs",
+      "migration_condition": "Rust session runtime (session lifecycle, journal, ledger, reconcile, arming) exists and is proven by the restored parity/safety suite; until then this file is the only live path."
+    },
+    "src/execution/replay.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Restored 2026-10-02 from d0cc3f9^ with the execution subsystem. Event recording and the replay comparison harness are Python; compared metrics are Rust (backtest.native_metrics).",
+      "migration_target": "crates/vayren-core/src/execution_engine.rs",
+      "migration_condition": "Rust session runtime (session lifecycle, journal, ledger, reconcile, arming) exists and is proven by the restored parity/safety suite; until then this file is the only live path."
+    },
+    "src/execution/runtime/__init__.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Restored 2026-10-02 from d0cc3f9^ with the execution subsystem. LiveSession/SessionConfig/lifecycle/driver own the per-symbol session loop and warmup feed; sizing, risk, fills and order state stay in Rust. Tracked debt.",
+      "migration_target": "crates/vayren-core/src/execution_engine.rs",
+      "migration_condition": "Rust session runtime (session lifecycle, journal, ledger, reconcile, arming) exists and is proven by the restored parity/safety suite; until then this file is the only live path."
+    },
+    "src/execution/runtime/inspector.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Restored 2026-10-02 from d0cc3f9^ with the execution subsystem. LiveSession/SessionConfig/lifecycle/driver own the per-symbol session loop and warmup feed; sizing, risk, fills and order state stay in Rust. Tracked debt.",
+      "migration_target": "crates/vayren-core/src/execution_engine.rs",
+      "migration_condition": "Rust session runtime (session lifecycle, journal, ledger, reconcile, arming) exists and is proven by the restored parity/safety suite; until then this file is the only live path."
+    },
+    "src/execution/runtime/lifecycle.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Restored 2026-10-02 from d0cc3f9^ with the execution subsystem. LiveSession/SessionConfig/lifecycle/driver own the per-symbol session loop and warmup feed; sizing, risk, fills and order state stay in Rust. Tracked debt.",
+      "migration_target": "crates/vayren-core/src/execution_engine.rs",
+      "migration_condition": "Rust session runtime (session lifecycle, journal, ledger, reconcile, arming) exists and is proven by the restored parity/safety suite; until then this file is the only live path."
+    },
+    "src/execution/runtime/session.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Restored 2026-10-02 from d0cc3f9^ with the execution subsystem. LiveSession/SessionConfig/lifecycle/driver own the per-symbol session loop and warmup feed; sizing, risk, fills and order state stay in Rust. Tracked debt.",
+      "migration_target": "crates/vayren-core/src/execution_engine.rs",
+      "migration_condition": "Rust session runtime (session lifecycle, journal, ledger, reconcile, arming) exists and is proven by the restored parity/safety suite; until then this file is the only live path."
+    },
+    "src/execution/runtime/strategy_runtime.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Restored 2026-10-02 from d0cc3f9^ with the execution subsystem. LiveSession/SessionConfig/lifecycle/driver own the per-symbol session loop and warmup feed; sizing, risk, fills and order state stay in Rust. Tracked debt.",
+      "migration_target": "crates/vayren-core/src/execution_engine.rs",
+      "migration_condition": "Rust session runtime (session lifecycle, journal, ledger, reconcile, arming) exists and is proven by the restored parity/safety suite; until then this file is the only live path."
+    },
     "src/market/__init__.py": {
       "state": "TEMPORARILY_RETAINED",
       "reason": "SQLite IO orchestration / repository / loader / event payloads. Aggregation kernel already migrated to Rust; full storage port is product-scale with zero measured need. File role: package re-export surface (no logic)",
@@ -80,47 +362,47 @@
       "migration_target": "crates/vayren-core/src/market.rs",
       "migration_condition": "Terminal bridge state: retained as the FFI projection (same pattern as native_aggregate/native_checks)."
     },
-    "src/backtest/__init__.py": {
+    "src/market/repository/__init__.py": {
       "state": "TEMPORARILY_RETAINED",
-      "reason": "Runner/optimizer/worker orchestration driving Python strategies (strategies must stay Python). Metrics kernels already migrated. File role: package re-export surface (no logic)",
-      "migration_target": "crates/vayren-core/src/backtest/",
-      "migration_condition": "When the BACKTEST slice containing this file is touched by feature work, migrate per AI_ENTRY.md Â§1 (smallest useful slice)."
+      "reason": "Restored 2026-10-02 because the execution engine needs a per-symbol candle reader and the app composition root cannot be imported from the market domain (that would be a cycle). Row reading is IO; base-bar detection, the timeframe ladder, bucket alignment and aggregation are all Rust (market.native_aggregate / market.native_timeframe). Overlaps app.services.market_data_service.MarketDataService on purpose - the Rust market store is the migration target that removes the overlap.",
+      "migration_target": "crates/vayren-core/src/market.rs",
+      "migration_condition": "Package marker for the restored repository slice."
     },
-    "src/backtest/native_metrics.py": {
+    "src/market/repository/store_connection.py": {
       "state": "TEMPORARILY_RETAINED",
-      "reason": "Rust-backed ctypes bridge for the backtest numeric kernels (drawdown / equity curve / Sharpe / whole-report framing) over vy_max_drawdown, vy_equity_curve, vy_sharpe, vy_bt_report. No math: marshals float arrays and maps the kernel answers back; authority lives in crates/vayren-core/src/metrics.rs. File role: bridge (no authority)",
-      "migration_target": "crates/vayren-core/src/metrics.rs",
-      "migration_condition": "Terminal bridge state: retained as the FFI projection (same pattern as native_aggregate/native_checks)."
+      "reason": "Added 2026-10-02 as the single read-only open policy for the candle stores. The stores are persisted WAL-mode databases, so the previous mode=ro URI materialised a 0 KB <SYMBOL>.db-wal and a 32 KB <SYMBOL>.db-shm on every read and could never clean them up; immutable=1 (gated on an empty WAL plus a before/after fingerprint, falling back to the locking URI) reads the same rows with no sidecars and no lock. This is SQLite IO/connection orchestration - the row semantics, base-bar detection, timeframe ladder and aggregation stay Rust (market.native_aggregate / market.native_timeframe).",
+      "migration_target": "crates/vayren-core/src/market.rs",
+      "migration_condition": "The Rust market store owns store access end to end; until then this policy module is the only place that opens a store, and both readers (symbol_repository and app.services.market_data_service) route through it."
     },
-    "src/backtest/native_positions.py": {
+    "src/market/repository/symbol_repository.py": {
       "state": "TEMPORARILY_RETAINED",
-      "reason": "Rust-backed ctypes bridge for the backtest trade kernels: bar-crossing exit (vy_bt_try_close/vy_bt_close_trade), signal exit and exit-price choice (vy_bt_signal_exit/vy_bt_exit_price) and entry fill economics (vy_bt_fill). No policy: packs floats, reads packed structs and renders absent exit / absent R multiple as None; every rule lives in crates/vayren-core/src/backtest.rs. File role: bridge (no authority)",
-      "migration_target": "crates/vayren-core/src/backtest.rs",
-      "migration_condition": "Terminal bridge state: retained as the FFI projection (same pattern as native_metrics/native_validation)."
-    },
-    "src/backtest/native_replay.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "reason": "ctypes bridge for the replay window kernel (vy_bt_slice): encodes the timestamp blob plus the two optional bounds (a -1 length is Python's None) and reads back the surviving bar indices. No policy: which bars a [start, end] range keeps is decided by backtest_engine.rs::slice_indices, and the bars themselves never cross the boundary. File role: bridge (no authority)",
-      "migration_target": "crates/vayren-core/src/backtest_engine.rs",
-      "migration_condition": "Terminal bridge state: retained as the FFI projection (same pattern as native_positions/native_validation)."
-    },
-    "src/backtest/native_runner.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "reason": "ctypes bridge for the two runner kernels (vy_bt_window_bounds, vy_bt_default_workers). No policy of its own: the aggregation-window margin rule and the bounded worker-count clamp live in backtest_runner.rs; the machine probe and the process pool stay in runner.py as host IO/process control. File role: bridge (no authority)",
-      "migration_target": "crates/vayren-core/src/backtest_runner.rs",
-      "migration_condition": "Terminal bridge state: retained as the FFI projection (same pattern as native_positions/native_validation)."
-    },
-    "src/backtest/native_validation.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "reason": "Rust-backed ctypes bridge for backtest form checks (7-check bitmask decision). No independent logic: calls vy_backtest_validate_form in rust/vayren-core. File role: bridge (no authority)",
-      "migration_target": "crates/vayren-core/src/backtest_validation.rs",
-      "migration_condition": "Kernel proven; bridge retained as the FFI projection (same pattern as native_metrics/native_checks)."
+      "reason": "Restored 2026-10-02 because the execution engine needs a per-symbol candle reader and the app composition root cannot be imported from the market domain (that would be a cycle). Row reading is IO; base-bar detection, the timeframe ladder, bucket alignment and aggregation are all Rust (market.native_aggregate / market.native_timeframe). Overlaps app.services.market_data_service.MarketDataService on purpose - the Rust market store is the migration target that removes the overlap.",
+      "migration_target": "crates/vayren-core/src/market.rs",
+      "migration_condition": "The Rust market store owns candle reads for the execution engine; until then this reader is the engine's only store access path."
     },
     "src/risk/__init__.py": {
       "state": "TEMPORARILY_RETAINED",
       "reason": "Fail-closed orchestration over string-keyed audit reasons, kill-switch persistence, session rules (~0.017ms/req). Port splits safety-critical strings across FFI with regression risk. File role: package re-export surface (no logic)",
       "migration_target": "crates/vayren-core/src/risk/",
       "migration_condition": "When the RISK slice containing this file is touched by feature work, migrate per AI_ENTRY.md Â§1 (smallest useful slice)."
+    },
+    "src/risk/engine.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Facade restored 2026-10-02 from d0cc3f9^. It holds NO risk logic: the 18-gate checklist, verdicts, reasons and duplicate-intent memory are Rust (risk.native_engine), and the latch table is Rust (risk.native_kill_switch). This file only owns the JSON file the kill switch persists to and turns any bridge fault into a DENIAL, because an uncertain verdict must never place an order.",
+      "migration_target": "crates/vayren-core/src/risk_engine.rs",
+      "migration_condition": "No Rust replacement needed: this is a boundary facade over Rust kernels, kept as-is."
+    },
+    "src/risk/kill_switch.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Facade restored 2026-10-02 from d0cc3f9^. It holds NO risk logic: the 18-gate checklist, verdicts, reasons and duplicate-intent memory are Rust (risk.native_engine), and the latch table is Rust (risk.native_kill_switch). This file only owns the JSON file the kill switch persists to and turns any bridge fault into a DENIAL, because an uncertain verdict must never place an order.",
+      "migration_target": "crates/vayren-core/src/kill_switch.rs",
+      "migration_condition": "No Rust replacement needed: this is a boundary facade over Rust kernels, kept as-is."
+    },
+    "src/risk/models.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Restored 2026-10-02 from d0cc3f9^: frozen risk value objects (policy/request/decision/check). No decisions - the checklist is Rust (risk.native_engine).",
+      "migration_target": "crates/vayren-core/src/risk_engine.rs",
+      "migration_condition": "No Rust replacement needed: this is a boundary facade over Rust kernels, kept as-is."
     },
     "src/risk/native_engine.py": {
       "state": "TEMPORARILY_RETAINED",
@@ -139,54 +421,6 @@
       "reason": "ctypes bridge for the Rust session/clock gates: encodes UTF-8 timestamps and HH:MM bounds (a -1 length is Python's None) and maps the verdict code onto a bool. No policy: window comparison, ISO parsing and skew rule stay in Rust. File role: bridge (no authority)",
       "migration_target": "crates/vayren-core/src/risk_engine.rs",
       "migration_condition": "Terminal bridge state: retained as the FFI projection (same pattern as native_checks/native_kill_switch)."
-    },
-    "src/execution/__init__.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: package re-export surface (no logic)",
-      "migration_target": "crates/vayren-core/src/execution/",
-      "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per AI_ENTRY.md Â§1 (smallest useful slice)."
-    },
-    "src/execution/events/__init__.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: package re-export surface (no logic)",
-      "migration_target": "crates/vayren-core/src/execution/",
-      "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per AI_ENTRY.md Â§1 (smallest useful slice)."
-    },
-    "src/execution/market_data/native_normalizer.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "reason": "Handle-based ctypes bridge for the stream gate (vy_norm_*) plus, since 2026-09-20, its stateless rules: the staleness floor, the strict gap comparison, the stall reason wording and the sequence watermark. It packs a symbol, sequence and opaque token, drains the kernel's verdict documents (delivered/dropped tokens, the six counters, health wording) and re-materialises them as plain value tuples. No policy: watermarking, gap/duplicate accounting, reorder overflow, staleness thresholds, counters and every reason string are decided in crates/vayren-core/src/normalizer.rs. File role: bridge (no authority)",
-      "migration_target": "crates/vayren-core/src/normalizer.rs",
-      "migration_condition": "Terminal bridge state: retained as the FFI projection (same pattern as native_aggregate/native_timeframe)."
-    },
-    "src/execution/models/__init__.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: package re-export surface (no logic)",
-      "migration_target": "crates/vayren-core/src/execution/",
-      "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per AI_ENTRY.md Â§1 (smallest useful slice)."
-    },
-    "src/execution/models/order_state.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "reason": "Leaf vocabulary module, stdlib only: the `OrderState` enum and nothing else (no transition table, no terminal-state set, no algorithm). The transition TABLE and the terminal-state set are owned by rust/vayren-core (order_state module) and reach Python only as read-only projections from 08_execution/execution/native_order_state.py. File role: enum vocabulary (no authority)",
-      "migration_target": "crates/vayren-core/src/execution/",
-      "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per AI_ENTRY.md Â§1 (smallest useful slice). Guarded by NO_REINTRODUCE in tools/validate_language_ownership.py: TRANSITIONS/TERMINAL_STATES must never be re-stated here."
-    },
-    "src/execution/native_execution.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "reason": "Rust-backed ctypes bridge for the execution kernels: arm/lifecycle transitions, planner math, ledger fill accounting and position sign/mark reads, the basic live-readiness check, the gate mask / missing-gate / mode-resolution rules, the latency percentile, the reconciliation reports (positions, orders, funds) and verdict status codes over vy_exec_*. Since 2026-09-20 it also carries the pure rules the runtime used to hold: default order quantity, advisory multiplier narrowing plus its validation message, and gate flag pack/unpack. Migrated 2026-09-21: the risk-policy sanity mask export and its bridge function were deleted - live_readiness (through broker/native_policy.py) owns that gate and its wording. No independent logic: every answer comes from rust/vayren-core. Terminal bridge state",
-      "migration_target": "crates/vayren-core/src/execution_engine.rs",
-      "migration_condition": "Kernel proven; bridge retained as the FFI projection (same pattern as native_metrics/native_checks)."
-    },
-    "src/execution/native_order_state.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "reason": "Rust-backed ctypes bridge: the order transition table and terminal set live in crates/vayren-core/src/order_state.rs and are projected here as read-only views (handshake-verified, parity-pinned). No transition logic of its own. Terminal bridge state. File role: bridge (no authority)",
-      "migration_target": "crates/vayren-core/src/execution/",
-      "migration_condition": "When the EXECUTION slice containing this file is touched by feature work, migrate per AI_ENTRY.md Â§1 (smallest useful slice)."
-    },
-    "src/execution/broker/native_policy.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "reason": "Rust-backed ctypes bridge for the broker-boundary kernels: vy_res_* (retry table, sliding-window throttle, clock drift, budget validators), vy_cer_* (credential, account, risk-policy and funds reason wording, the five-gate assembly, the twelve-step activation ceremony) and vy_sbx_settle_decision (sandbox fill script). It encodes text arguments, drains the kernel's length-prefixed documents and frees limiter handles. No rule, threshold, ordering or reason string is decided here. File role: bridge (no authority)",
-      "migration_target": "crates/vayren-core/src/resilience.rs",
-      "migration_condition": "Terminal bridge state: retained as the FFI projection (no rule lives here)."
     }
   }
 }

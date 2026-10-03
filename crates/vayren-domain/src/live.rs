@@ -208,10 +208,16 @@ pub struct Gate {
 }
 
 /// One symbol in the market-store watchlist with its session selection.
+/// Quote facts ride along (the market-store tail read): `ltp`/`change_pct`
+/// are `None` when the store has no readable quote — never zero-filled —
+/// and `in_store` is false when no store file exists at all.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SymbolPick {
     pub symbol: String,
     pub checked: bool,
+    pub ltp: Option<f64>,
+    pub change_pct: Option<f64>,
+    pub in_store: bool,
 }
 
 /// Open position fact (pre-formatted numbers arrive as strings; the model
@@ -225,6 +231,8 @@ pub struct PositionRow {
     pub current: String,
     pub pnl: String,
     pub status: String,
+    /// Signed P&L percent from the ledger (None = unknown, renders —).
+    pub pnl_pct: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -259,6 +267,10 @@ pub struct LiveEvent {
     pub symbol: String,
     pub event: String,
     pub status: String,
+    /// Fixed filter bucket from the backend (`BROKER`, `MARKET DATA`,
+    /// `STRATEGY`, `ORDERS`, `RISK`, `SYSTEM`); snapshots that predate the
+    /// key ingest as `SYSTEM`, the same default the backend applies.
+    pub category: String,
 }
 
 /// One real OHLC bar for the chart region. The projection applies only a
@@ -297,6 +309,14 @@ pub struct StrategyFacts {
     pub warmup: Option<i64>,
     pub state: String,
     pub params: Vec<String>,
+    /// Registry direction (`SHORT`, …); empty when the backend omits it.
+    pub direction: String,
+    /// Registry runtime state (`ACTIVE`, …).
+    pub runtime_state: String,
+    /// Registry reference window (`10:15–10:45`, …).
+    pub reference_window: String,
+    /// Configured universe size (symbols).
+    pub universe: Option<i64>,
 }
 
 /// Single-position facts (execution-critical; mirrors the `position` block).
@@ -323,6 +343,8 @@ pub struct BrokerFacts {
     pub capabilities: Vec<String>,
     pub latency_ms: Option<f64>,
     pub last_heartbeat: String,
+    /// Safe venue account identifier (never a secret); empty when unknown.
+    pub account_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -333,6 +355,21 @@ pub struct ReconciliationFacts {
     pub last_check: String,
     pub mismatches: String,
     pub blocks_live: bool,
+}
+
+/// Capital facts for the Account & Risk card (the snapshot `capital`
+/// block). Venue numbers are `None` until a RUNNING session reports real
+/// funds — the projection renders NOT REPORTED, never 0. Leverage and
+/// per-trade risk have no canonical source on this path, so they are
+/// absent here by design (not zeroed, not hardcoded).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct CapitalFacts {
+    /// `broker` (venue funds) or `configured` (paper sizing basis).
+    pub source: String,
+    pub broker_capital: Option<f64>,
+    pub available_margin: Option<f64>,
+    pub used_margin: Option<f64>,
+    pub configured_capital: Option<f64>,
 }
 
 // ── the single LIVE presentation state source ──────────────────────────────
@@ -373,7 +410,7 @@ pub struct LiveState {
     pub strategy_facts: Option<StrategyFacts>,
     pub position_facts: Option<PositionFacts>,
     pub events: Vec<LiveEvent>,
-    pub event_type_filter: String,
+    pub event_category: String,
     pub event_filter: String,
 
     // Market workspace facts.
@@ -383,6 +420,14 @@ pub struct LiveState {
     pub market_last_price: Option<f64>,
     pub market_bar_count: usize,
     pub bars: Vec<Candle>,
+    /// Session feed kind from the backend (`live` broker feed, `local`
+    /// SQLite tail, `none` when no session runs); drives the market card's
+    /// honest streaming line.
+    pub feed_kind: String,
+    /// Capital facts for the Account & Risk card (venue truth only).
+    pub capital: CapitalFacts,
+    /// Backend snapshot timestamp (ISO); drives the card "Last" lines.
+    pub snapshot_time: String,
     /// True symbol count in the market store (the displayed watchlist may be
     /// a head slice — the count label always states the truth).
     pub store_total: Option<usize>,
@@ -404,6 +449,10 @@ pub struct LiveState {
     pub backend_arm_blockers: Option<Vec<String>>,
     pub backend_can_arm: Option<bool>,
     pub backend_can_halt: Option<bool>,
+    /// True open-order count from the backend (`open_orders` key). The
+    /// `orders` table is capped at the last 50 rows, so its length is NOT
+    /// the open count — `None` outside host mode keeps the local length.
+    pub open_order_count: Option<usize>,
     /// Action intents accepted in host mode (JSON objects), drained by the
     /// embedding host via [`LiveState::take_action`] and dispatched to the
     /// Python services. The model never mutates runtime state from these.
@@ -446,7 +495,7 @@ impl Default for LiveState {
             strategy_facts: None,
             position_facts: None,
             events: Vec::new(),
-            event_type_filter: "ALL EVENTS".into(),
+            event_category: "ALL".into(),
             event_filter: String::new(),
             market_state: DataState::NoData,
             market_symbol: String::new(),
@@ -454,6 +503,9 @@ impl Default for LiveState {
             market_last_price: None,
             market_bar_count: 0,
             bars: Vec::new(),
+            feed_kind: String::new(),
+            capital: CapitalFacts::default(),
+            snapshot_time: String::new(),
             store_total: None,
             bridge_wired: false,
             host_mode: false,
@@ -461,6 +513,7 @@ impl Default for LiveState {
             backend_arm_blockers: None,
             backend_can_arm: None,
             backend_can_halt: None,
+            open_order_count: None,
             host_actions: std::collections::VecDeque::new(),
             // The inspector (session setup + LIVE readiness) is the most
             // important panel on an execution workstation, so it starts
@@ -480,6 +533,18 @@ pub const VENUE_GATES: [&str; 5] = [
     "ACCOUNT_CONFIRMED",
     "RISK_CONFIGURATION_VALID",
     "EXECUTION_SAFETY_ENABLED",
+];
+
+/// Fixed LIVE event filter buckets (the backend tags every activity entry
+/// with exactly one; the UI renders one chip per bucket, never per-row
+/// inventions).
+pub const EVENT_CATEGORIES: [&str; 6] = [
+    "BROKER",
+    "MARKET DATA",
+    "STRATEGY",
+    "ORDERS",
+    "RISK",
+    "SYSTEM",
 ];
 
 impl LiveState {
@@ -737,14 +802,23 @@ impl LiveState {
 
     /// Quantity edits parse honestly: garbage is rejected with a note, the
     /// old value survives; execution calculations are never recomputed here.
+    /// The projection renders grouped thousands ("1,250.00"), so separators
+    /// are stripped before parsing — otherwise re-committing the displayed
+    /// value fails. Zero is rejected: the service raises on it, which used
+    /// to degrade the whole page over a typo.
     pub fn set_quantity(&mut self, raw: &str) {
-        match raw.trim().parse::<f64>() {
-            Ok(v) if v.is_finite() && v >= 0.0 => {
+        let digits: String = raw
+            .trim()
+            .chars()
+            .filter(|c| !matches!(c, ',' | '_' | ' '))
+            .collect();
+        match digits.parse::<f64>() {
+            Ok(v) if v.is_finite() && v > 0.0 => {
                 self.quantity = v;
                 self.action_note = None;
                 self.push_setup_action();
             }
-            _ => self.action_note = Some("invalid quantity — value must be a number ≥ 0".into()),
+            _ => self.action_note = Some("invalid quantity — value must be a number > 0".into()),
         }
     }
 
@@ -833,12 +907,37 @@ impl LiveState {
                 self.action_note = Some("arm requested — awaiting engine bridge ceremony".into());
             }
         } else {
-            self.action_note = Some("Blocked: ".into());
+            // Refusals carry the exact blocking reason (module invariant):
+            // a bare "Blocked: " strands the operator with no next step.
+            // In host mode the backend's own verdict wins (its gate names
+            // are the real ones); otherwise the locally derived blockers.
+            let backend = if self.host_mode {
+                self.backend_arm_blockers.clone().unwrap_or_default()
+            } else {
+                Vec::new()
+            };
+            let reasons = if backend.is_empty() {
+                self.arm_blockers()
+            } else {
+                backend
+            };
+            self.action_note = Some(if reasons.is_empty() {
+                "Blocked: arming unavailable in this state".into()
+            } else {
+                format!("Blocked: {}", reasons.join("; "))
+            });
         }
     }
 
-    pub fn set_event_type_filter(&mut self, kind: &str) {
-        self.event_type_filter = kind.to_string();
+    pub fn set_event_category(&mut self, kind: &str) {
+        self.event_category = kind.to_string();
+    }
+
+    /// Drop the UI event history ONLY — backend trading state (sessions,
+    /// positions, orders, journal) is untouched; this never queues a host
+    /// action because there is nothing for the backend to do.
+    pub fn clear_events(&mut self) {
+        self.events.clear();
     }
 
     // ── host bridge ingest (the legacy app's live-state provider → here) ─────
@@ -871,6 +970,7 @@ impl LiveState {
             self.broker.latency_ms = b.get("latency_ms").and_then(|c| c.as_f64());
             self.broker.last_heartbeat = str_of(b, "last_heartbeat");
             self.broker.capabilities = str_vec_of(b, "capabilities");
+            self.broker.account_id = str_of(b, "account_id");
         }
         if let Some(gs) = v.get("gates").and_then(|g| g.as_array()) {
             self.gates = gs
@@ -917,6 +1017,9 @@ impl LiveState {
         if v.get("can_halt").is_some() {
             self.backend_can_halt = v.get("can_halt").and_then(|c| c.as_bool());
         }
+        if let Some(n) = v.get("open_orders").and_then(|n| n.as_u64()) {
+            self.open_order_count = Some(n as usize);
+        }
         if v.get("can_arm").is_some() {
             self.backend_can_arm = v.get("can_arm").and_then(|c| c.as_bool());
         }
@@ -958,6 +1061,12 @@ impl LiveState {
                 .map(|symbol| SymbolPick {
                     checked: selected.iter().any(|s| *s == symbol),
                     symbol,
+                    // Quote facts arrive in the same snapshot (`quotes`
+                    // ingested below); a bare universe row is NOT FOUND
+                    // until the quotes say otherwise.
+                    ltp: None,
+                    change_pct: None,
+                    in_store: false,
                 })
                 .collect();
             self.store_total = Some(self.symbols.len());
@@ -990,6 +1099,7 @@ impl LiveState {
                     current: grouped_v(p, "current_price"),
                     pnl: money_v(p, "pnl"),
                     status: str_of(p, "status"),
+                    pnl_pct: p.get("pnl_pct").and_then(|x| x.as_f64()),
                 })
                 .collect();
         }
@@ -1058,6 +1168,10 @@ impl LiveState {
                 warmup: s.get("warmup").and_then(|x| x.as_i64()),
                 state: str_of(s, "state"),
                 params,
+                direction: str_of(s, "direction"),
+                runtime_state: str_of(s, "runtime_state"),
+                reference_window: str_of(s, "reference_window"),
+                universe: s.get("universe").and_then(|x| x.as_i64()),
             });
         } else if v.get("strategy").is_some() {
             self.strategy_facts = None;
@@ -1141,11 +1255,68 @@ impl LiveState {
                     symbol: str_of(e, "symbol"),
                     event: str_of(e, "event"),
                     status: str_of(e, "status"),
+                    category: {
+                        let raw = str_of(e, "category");
+                        if raw.trim().is_empty() {
+                            "SYSTEM".into()
+                        } else {
+                            raw
+                        }
+                    },
                 })
                 .collect();
         }
+        // Per-symbol quote facts (the watchlist's LTP source). Snapshots
+        // that predate the key keep whatever the state already holds —
+        // absence degrades per-row, never to invented prices.
+        if let Some(list) = v.get("quotes").and_then(|a| a.as_array()) {
+            for q in list {
+                let name = str_of(q, "symbol");
+                if name.is_empty() {
+                    continue;
+                }
+                if let Some(pick) = self.symbols.iter_mut().find(|s| s.symbol == name) {
+                    pick.ltp = q.get("ltp").and_then(|x| x.as_f64());
+                    pick.change_pct = q.get("change_pct").and_then(|x| x.as_f64());
+                    pick.in_store = str_of(q, "status") != "NOT FOUND";
+                }
+            }
+        }
+        if let Some(c) = v.get("capital") {
+            self.capital = CapitalFacts {
+                source: str_of(c, "source"),
+                broker_capital: c.get("broker_capital").and_then(|x| x.as_f64()),
+                available_margin: c.get("available_margin").and_then(|x| x.as_f64()),
+                used_margin: c.get("used_margin").and_then(|x| x.as_f64()),
+                configured_capital: c.get("configured_capital").and_then(|x| x.as_f64()),
+            };
+        }
+        if let Some(feed) = v.get("feed").and_then(|f| f.as_str()) {
+            self.feed_kind = feed.to_string();
+        }
+        // The backend's own action note (e.g. the armed-consent line) is a
+        // first-class fact; snapshots without the key keep the local note.
+        if let Some(note) = v.get("action_note").and_then(|n| n.as_str()) {
+            self.action_note = if note.trim().is_empty() {
+                None
+            } else {
+                Some(note.to_string())
+            };
+        }
+        if self.session == SessionStatus::Running {
+            // The backend confirmed RUNNING, so a lingering local request
+            // note ("start requested — awaiting backend") would be a lie.
+            if let Some(note) = &self.action_note {
+                if note.starts_with("start requested") || note.starts_with("arm requested") {
+                    self.action_note = None;
+                }
+            }
+        }
 
         // ── market region ──
+        if let Some(stamp) = v.get("as_of").and_then(|s| s.as_str()) {
+            self.snapshot_time = stamp.to_string();
+        }
         if v.get("market_symbol").is_some() {
             self.market_symbol = str_of(v, "market_symbol");
         }
@@ -1168,7 +1339,16 @@ impl LiveState {
                     })
                 })
                 .collect();
-            self.market_bar_count = bars.len();
+            // `market_bars` now carries only the LAST candle (the LIVE view has
+            // no chart — the series was 500 rows of encode/parse/model per
+            // poll to draw nothing). The real total arrives beside it as
+            // `market_bar_count`, so "N bars" stays the true count rather than
+            // collapsing to 1; an absent count falls back to what we received.
+            let reported = v
+                .get("market_bar_count")
+                .and_then(|n| n.as_u64())
+                .map(|n| n as usize);
+            self.market_bar_count = reported.unwrap_or(bars.len());
             self.market_last_price = bars.last().map(|b| b.close);
             self.market_state = if bars.is_empty() {
                 DataState::NoData
@@ -1180,11 +1360,11 @@ impl LiveState {
         }
     }
 
-    /// The event-type ComboBox reports the selected value; accept only
-    /// ALL EVENTS or a type that actually appears in the real rows.
-    pub fn apply_event_type(&mut self, value: &str) {
-        if value == "ALL EVENTS" || self.events.iter().any(|e| e.event == value) {
-            self.event_type_filter = value.to_string();
+    /// The event-category chip reports the selected bucket; accept only the
+    /// fixed filter vocabulary (unknown values are honest no-ops).
+    pub fn apply_event_category(&mut self, value: &str) {
+        if value == "ALL" || EVENT_CATEGORIES.contains(&value) {
+            self.event_category = value.to_string();
         }
     }
 
@@ -1195,12 +1375,12 @@ impl LiveState {
     fn visible_events(&self) -> Vec<&LiveEvent> {
         self.events
             .iter()
-            .filter(|e| self.event_type_filter == "ALL EVENTS" || e.event == self.event_type_filter)
+            .filter(|e| self.event_category == "ALL" || e.category == self.event_category)
             .filter(|e| {
                 self.event_filter.is_empty()
                     || format!(
-                        "{} {} {} {} {}",
-                        e.timestamp, e.strategy, e.symbol, e.event, e.status
+                        "{} {} {} {} {} {}",
+                        e.timestamp, e.strategy, e.symbol, e.event, e.status, e.category
                     )
                     .to_lowercase()
                     .contains(&self.event_filter)
@@ -1288,6 +1468,18 @@ fn money_v(v: &serde_json::Value, key: &str) -> String {
         .unwrap_or_else(|| "N/A".to_string())
 }
 
+/// Backend poll clock (`HH:MM:SS`) from the snapshot ISO timestamp — the
+/// card "Last" line. Unparseable/missing renders empty, never a guess.
+fn snapshot_clock(state: &LiveState) -> String {
+    let stamp = state.snapshot_time.trim();
+    let time_part = stamp.split('T').nth(1).unwrap_or("");
+    if time_part.len() >= 8 {
+        time_part[..8].to_string()
+    } else {
+        String::new()
+    }
+}
+
 /// Grouped 2dp plain number (ui_kit.text for floats).
 pub fn grouped(value: f64) -> String {
     let negative = value < 0.0;
@@ -1334,6 +1526,14 @@ pub struct SymbolRow {
     pub real_index: i32,
     pub name: String,
     pub checked: bool,
+    /// Formatted LTP (`7,234.80`) or `—` when the store reports no quote.
+    pub ltp: String,
+    /// Signed session change (`+1.25%`) or `—` when unknown.
+    pub change: String,
+    pub change_tone: i32,
+    /// `AVAILABLE`, `NO MARKET DATA` or `NOT FOUND` (backend-derived).
+    pub status: String,
+    pub status_tone: i32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1348,11 +1548,16 @@ pub struct GateRow {
 pub struct PositionRowView {
     pub symbol: String,
     pub side: String,
+    /// Domain-signed side tone (`BUY`/`LONG` → 1, `SELL`/`SHORT` → 3):
+    /// surfaces must pass it through, never re-derive it from a string.
+    pub side_tone: i32,
     pub qty: String,
     pub entry: String,
     pub current: String,
     pub pnl: String,
     pub pnl_tone: i32,
+    /// Signed P&L percent (`+1.12%`) or `—` when the ledger omits it.
+    pub pnl_pct: String,
     pub status: String,
 }
 
@@ -1362,6 +1567,8 @@ pub struct OrderRowView {
     pub strategy: String,
     pub symbol: String,
     pub side: String,
+    /// Domain-signed side tone (see `PositionRowView::side_tone`).
+    pub side_tone: i32,
     pub qty: String,
     pub order_type: String,
     pub price: String,
@@ -1391,6 +1598,10 @@ pub struct EventRowView {
     pub event: String,
     pub status: String,
     pub status_tone: i32,
+    /// Uppercase status word (`INFO`, `OK`, `ERROR`) — the Level column.
+    pub level: String,
+    /// Fixed filter bucket (`BROKER`, `ORDERS`, …) — the Category column.
+    pub category: String,
 }
 
 /// Flat command-bar facts (compact safety strip; always rendered).
@@ -1403,10 +1614,14 @@ pub struct BarView {
     pub conn_tone: i32,
     pub strategy_label: String,
     pub strategy_tone: i32,
+    /// Strategy sub-line (`STATUS · TIMEFRAME`); empty when unknown.
+    pub strategy_sub: String,
     pub risk_label: String,
     pub risk_tone: i32,
     pub recon_label: String,
     pub recon_tone: i32,
+    /// Reconciliation sub-line (`Positions: N | Orders: M`).
+    pub recon_sub: String,
     pub exec_label: String,
     pub exec_tone: i32,
     pub halted: bool,
@@ -1442,16 +1657,12 @@ pub struct MarketView {
     pub title: String,
     pub detail: String,
     pub header: String,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct CandleView {
-    pub x: f32,
-    pub open: f32,
-    pub high: f32,
-    pub low: f32,
-    pub close: f32,
-    pub up: bool,
+    /// Honest streaming line from the session feed kind (`FEED: BROKER
+    /// LIVE`, `FEED: LOCAL TAIL`, `FEED: NONE`); empty when unknown.
+    pub feed_label: String,
+    pub feed_tone: i32,
+    /// Backend poll time (`HH:MM:SS`) — the "Last" line of the card.
+    pub updated_label: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1459,7 +1670,6 @@ pub struct LiveView {
     pub bar: BarView,
     pub setup: SetupView,
     pub market: MarketView,
-    pub candles: Vec<CandleView>,
     pub symbols: Vec<SymbolRow>,
     pub symbol_filter: String,
     pub gates: Vec<GateRow>,
@@ -1469,6 +1679,7 @@ pub struct LiveView {
     pub risk_rows: Vec<KvRow>,
     pub broker_rows: Vec<KvRow>,
     pub recon_rows: Vec<KvRow>,
+    pub account_rows: Vec<KvRow>,
     pub positions: Vec<PositionRowView>,
     pub has_positions: bool,
     pub orders: Vec<OrderRowView>,
@@ -1510,38 +1721,6 @@ fn pnl_tone(pnl: &str) -> i32 {
     }
 }
 
-/// Normalize real bars into 0..1 view coordinates (x = slot center, y with
-/// 0 = highest price). A presentation transform only — never new data.
-fn project_candles(state: &LiveState) -> Vec<CandleView> {
-    let n = state.bars.len();
-    if n == 0 {
-        return Vec::new();
-    }
-    let hi = state
-        .bars
-        .iter()
-        .fold(f64::NEG_INFINITY, |m, c| m.max(c.high));
-    let lo = state.bars.iter().fold(f64::INFINITY, |m, c| m.min(c.low));
-    let span = if (hi - lo) <= f64::EPSILON {
-        1.0
-    } else {
-        hi - lo
-    };
-    state
-        .bars
-        .iter()
-        .enumerate()
-        .map(|(i, c)| CandleView {
-            x: ((i as f64 + 0.5) / n as f64) as f32,
-            open: ((hi - c.open) / span) as f32,
-            high: ((hi - c.high) / span) as f32,
-            low: ((hi - c.low) / span) as f32,
-            close: ((hi - c.close) / span) as f32,
-            up: c.close >= c.open,
-        })
-        .collect()
-}
-
 fn strategy_rows(state: &LiveState) -> Vec<KvRow> {
     let Some(facts) = &state.strategy_facts else {
         return [
@@ -1549,8 +1728,12 @@ fn strategy_rows(state: &LiveState) -> Vec<KvRow> {
             "VERSION",
             "STATUS",
             "MODE",
+            "DIRECTION",
+            "RUNTIME",
             "INSTRUMENT",
             "TIMEFRAME",
+            "REFERENCE WINDOW",
+            "UNIVERSE",
             "LIVE SUPPORTED",
             "WARMUP",
             "STATE",
@@ -1585,6 +1768,16 @@ fn strategy_rows(state: &LiveState) -> Vec<KvRow> {
             tone: 0,
         },
         KvRow {
+            key: "DIRECTION".into(),
+            value: text_or_na(&facts.direction),
+            tone: 0,
+        },
+        KvRow {
+            key: "RUNTIME".into(),
+            value: text_or_na(&facts.runtime_state),
+            tone: 0,
+        },
+        KvRow {
             key: "INSTRUMENT".into(),
             value: text_or_na(&facts.instrument),
             tone: 0,
@@ -1592,6 +1785,19 @@ fn strategy_rows(state: &LiveState) -> Vec<KvRow> {
         KvRow {
             key: "TIMEFRAME".into(),
             value: text_or_na(&facts.timeframe),
+            tone: 0,
+        },
+        KvRow {
+            key: "REFERENCE WINDOW".into(),
+            value: text_or_na(&facts.reference_window),
+            tone: 0,
+        },
+        KvRow {
+            key: "UNIVERSE".into(),
+            value: facts
+                .universe
+                .map(|n| format!("{} symbols", n))
+                .unwrap_or_else(|| "N/A".into()),
             tone: 0,
         },
         KvRow {
@@ -1656,17 +1862,19 @@ fn position_rows(state: &LiveState) -> Vec<KvRow> {
         })
         .collect(),
         None => {
-            if state.positions.len() == 1 {
-                // Table already carries the row; show its identity once.
-                vec![KvRow {
-                    key: "POSITION".into(),
-                    value: "see POSITIONS".into(),
-                    tone: 0,
-                }]
-            } else {
+            if state.positions.is_empty() {
                 vec![KvRow {
                     key: "SIDE".into(),
                     value: "FLAT".into(),
+                    tone: 0,
+                }]
+            } else {
+                // The provider sends single-position facts only; with 2+
+                // open positions there is no single fact to show, but the
+                // book is NOT flat — point at the table, never print FLAT.
+                vec![KvRow {
+                    key: "POSITION".into(),
+                    value: "see POSITIONS".into(),
                     tone: 0,
                 }]
             }
@@ -1760,7 +1968,16 @@ fn recon_rows(state: &LiveState) -> Vec<KvRow> {
         KvRow {
             key: "MISMATCHES".into(),
             value: text_or_na(&r.mismatches),
-            tone: if r.mismatches.trim().is_empty() { 0 } else { 3 },
+            // A clean reconciliation reports "0" — that is the GOOD state,
+            // not an alarm. Only a real mismatch count alarms.
+            tone: {
+                let count = r.mismatches.trim();
+                if count.is_empty() || count == "0" {
+                    0
+                } else {
+                    3
+                }
+            },
         },
         KvRow {
             key: "LAST CHECK".into(),
@@ -1775,25 +1992,96 @@ fn recon_rows(state: &LiveState) -> Vec<KvRow> {
     ]
 }
 
+/// Account & Risk card rows — venue capital when a session reports it,
+/// otherwise the configured paper basis, always source-labelled. Leverage
+/// and per-trade risk have no canonical source on this path: the rows say
+/// NOT REPORTED instead of repeating unverified desk lore.
+fn account_rows(state: &LiveState) -> Vec<KvRow> {
+    let money_or_na =
+        |v: Option<f64>| v.map_or_else(|| "NOT REPORTED".into(), |x| format!("₹{}", grouped(x)));
+    vec![
+        KvRow {
+            key: "BROKER CAPITAL".into(),
+            value: money_or_na(state.capital.broker_capital),
+            tone: 0,
+        },
+        KvRow {
+            key: "AVAILABLE MARGIN".into(),
+            value: money_or_na(state.capital.available_margin),
+            tone: 0,
+        },
+        KvRow {
+            key: "USED MARGIN".into(),
+            value: money_or_na(state.capital.used_margin),
+            tone: 0,
+        },
+        KvRow {
+            key: "CONFIGURED CAPITAL".into(),
+            value: money_or_na(state.capital.configured_capital),
+            tone: 0,
+        },
+        KvRow {
+            key: "CAPITAL SOURCE".into(),
+            value: match state.capital.source.as_str() {
+                "broker" => "BROKER (VENUE)".into(),
+                "configured" => "CONFIGURED (PAPER)".into(),
+                _ => "NOT REPORTED".into(),
+            },
+            tone: 0,
+        },
+        KvRow {
+            key: "LEVERAGE".into(),
+            value: "NOT REPORTED".into(),
+            tone: 0,
+        },
+        KvRow {
+            key: "RISK PER TRADE".into(),
+            value: "NOT REPORTED".into(),
+            tone: 0,
+        },
+        KvRow {
+            key: "MAX RISK / TRADE".into(),
+            value: "NOT REPORTED".into(),
+            tone: 0,
+        },
+        KvRow {
+            key: "OPEN POSITIONS".into(),
+            value: state.positions.len().to_string(),
+            tone: 0,
+        },
+        KvRow {
+            key: "OPEN ORDERS".into(),
+            value: state
+                .open_order_count
+                .map(|n| n.to_string())
+                .unwrap_or_else(|| state.orders.len().to_string()),
+            tone: 0,
+        },
+    ]
+}
+
 pub fn project(state: &LiveState) -> LiveView {
     // ── command bar ──
+    // Card anatomy matches the terminal reference: small label (in Slint),
+    // bold value, honest sub-line. The value never carries a prefix — the
+    // Slint card owns the label — so "NOT CONFIGURED" reads exactly so.
     let broker_name = if state.broker.name.trim().is_empty() {
         "NOT CONFIGURED"
     } else {
         state.broker.name.as_str()
-    };
-    let broker_label = if state.broker.status.is_empty() {
-        format!("Broker: {}", broker_name)
-    } else {
-        format!("Broker: {} — {}", broker_name, state.broker.status)
     };
     let broker_tone = match state.broker.status.as_str() {
         "CONNECTED" | "LIVE_READY" => 1,
         _ if broker_name == "NOT CONFIGURED" || broker_name == "N/A" => 0,
         _ => 4,
     };
+    let account_suffix = if state.broker.account_id.trim().is_empty() {
+        String::new()
+    } else {
+        format!(" · ACC: {}", state.broker.account_id.trim())
+    };
     let (conn_label, conn_tone) = match state.broker.connected {
-        Some(true) => ("● Connected".into(), 1),
+        Some(true) => (format!("● Connected{}", account_suffix), 1),
         Some(false) => ("○ Disconnected".into(), 3),
         None => ("Connection: N/A".into(), 0),
     };
@@ -1803,11 +2091,18 @@ pub fn project(state: &LiveState) -> LiveView {
         .map(|f| f.id.clone())
         .filter(|id| !id.trim().is_empty())
         .or_else(|| state.selected_strategy().map(str::to_string));
-    let strategy_label = format!(
-        "Strategy: {}",
-        strategy_id.clone().unwrap_or_else(|| "—".into())
-    );
+    let strategy_label = strategy_id.clone().unwrap_or_else(|| "—".into());
     let strategy_tone = if strategy_id.is_some() { 4 } else { 0 };
+    let strategy_sub = match &state.strategy_facts {
+        Some(facts) if !facts.status.trim().is_empty() || !facts.timeframe.trim().is_empty() => {
+            format!(
+                "{} · {}",
+                text_or_na(&facts.status),
+                text_or_na(&facts.timeframe)
+            )
+        }
+        _ => String::new(),
+    };
     let blockers = state.start_blockers();
 
     let note_tone = match state.action_note.as_deref() {
@@ -1819,23 +2114,26 @@ pub fn project(state: &LiveState) -> LiveView {
     };
     let bar = BarView {
         mode: state.mode.kind(),
-        broker_label,
+        broker_label: broker_name.into(),
         broker_tone,
         conn_label,
         conn_tone,
         strategy_label,
         strategy_tone,
-        risk_label: format!("Risk: {}", state.risk_status.label()),
+        strategy_sub,
+        risk_label: state.risk_status.label().into(),
         risk_tone: state.risk_status.badge(),
-        recon_label: format!(
-            "Reconciliation: {}",
-            text_or_na(&state.reconciliation.status)
-        ),
+        recon_label: text_or_na(&state.reconciliation.status),
         recon_tone: match state.reconciliation.status.as_str() {
             "CLEAN" => 1,
             "MISMATCH" | "BLOCKED" => 3,
             _ => 0,
         },
+        recon_sub: format!(
+            "Positions: {} | Orders: {}",
+            text_or_na(&state.reconciliation.positions),
+            text_or_na(&state.reconciliation.orders)
+        ),
         exec_label: if state.kill_halted {
             "■ HALTED"
         } else {
@@ -1900,6 +2198,19 @@ pub fn project(state: &LiveState) -> LiveView {
         title,
         detail,
         header,
+        feed_label: match state.feed_kind.as_str() {
+            "live" => "FEED: BROKER LIVE".into(),
+            "local" => "FEED: LOCAL TAIL".into(),
+            "none" => "FEED: NONE".into(),
+            _ => String::new(),
+        },
+        feed_tone: match state.feed_kind.as_str() {
+            "live" => 1,
+            "local" => 2,
+            "none" => 0,
+            _ => 0,
+        },
+        updated_label: snapshot_clock(state),
     };
 
     // ── session setup ──
@@ -1923,11 +2234,20 @@ pub fn project(state: &LiveState) -> LiveView {
             }
             lines
         },
-        symbol_total: format!(
-            "{} in store · {} selected",
-            state.store_total.unwrap_or(state.symbols.len()),
-            state.checked_symbols().len()
-        ),
+        symbol_total: {
+            let strategy = state
+                .strategy_facts
+                .as_ref()
+                .map(|f| f.id.clone())
+                .filter(|id| !id.trim().is_empty())
+                .or_else(|| state.selected_strategy().map(str::to_string))
+                .unwrap_or_else(|| "—".into());
+            format!(
+                "{} symbols ({})",
+                state.store_total.unwrap_or(state.symbols.len()),
+                strategy
+            )
+        },
         strategy_names: state.strategies.clone(),
         strategy_selected: state.strategy_index.map_or(-1, |i| i as i32),
         timeframe_names: state.timeframes.clone(),
@@ -1966,11 +2286,15 @@ pub fn project(state: &LiveState) -> LiveView {
         .map(|p| PositionRowView {
             symbol: p.symbol.clone(),
             side: p.side.clone(),
+            side_tone: side_tone(&p.side),
             qty: p.quantity.clone(),
             entry: p.entry.clone(),
             current: p.current.clone(),
             pnl: p.pnl.clone(),
             pnl_tone: pnl_tone(&p.pnl),
+            pnl_pct: p
+                .pnl_pct
+                .map_or_else(|| "—".into(), |v| format!("{:+.2}%", v)),
             status: p.status.clone(),
         })
         .collect();
@@ -1984,6 +2308,7 @@ pub fn project(state: &LiveState) -> LiveView {
             strategy: o.strategy.clone(),
             symbol: o.symbol.clone(),
             side: o.side.clone(),
+            side_tone: side_tone(&o.side),
             qty: o.quantity.clone(),
             order_type: o.order_type.clone(),
             price: o.price.clone(),
@@ -2070,18 +2395,37 @@ pub fn project(state: &LiveState) -> LiveView {
             state.symbol_filter.is_empty() || s.symbol.to_lowercase().contains(&state.symbol_filter)
         })
         .take(SYMBOL_VIEW_CAP)
-        .map(|(i, s)| SymbolRow {
-            real_index: i as i32,
-            name: s.symbol.clone(),
-            checked: s.checked,
+        .map(|(i, s)| {
+            let (status, status_tone) = if !s.in_store {
+                ("NOT FOUND", 3)
+            } else if s.ltp.is_none() {
+                ("NO MARKET DATA", 2)
+            } else {
+                ("AVAILABLE", 1)
+            };
+            SymbolRow {
+                real_index: i as i32,
+                name: s.symbol.clone(),
+                checked: s.checked,
+                ltp: s.ltp.map_or_else(|| "—".into(), grouped),
+                change: s
+                    .change_pct
+                    .map_or_else(|| "—".into(), |c| format!("{:+.2}%", c)),
+                change_tone: match s.change_pct {
+                    Some(c) if c > 0.0 => 1,
+                    Some(c) if c < 0.0 => 3,
+                    _ => 0,
+                },
+                status: status.into(),
+                status_tone,
+            }
         })
         .collect();
 
-    // ── events (type options from real rows only) ──
-    let mut event_types: Vec<String> = state.events.iter().map(|e| e.event.clone()).collect();
-    event_types.sort();
-    event_types.dedup();
-    event_types.insert(0, "ALL EVENTS".into());
+    // ── events (fixed category buckets only — never per-row inventions) ──
+    let event_types: Vec<String> = std::iter::once("ALL".to_string())
+        .chain(EVENT_CATEGORIES.iter().map(|c| c.to_string()))
+        .collect();
     let events: Vec<EventRowView> = state
         .visible_events()
         .into_iter()
@@ -2095,9 +2439,11 @@ pub fn project(state: &LiveState) -> LiveView {
             status: e.status.clone(),
             status_tone: match e.status.to_ascii_uppercase().as_str() {
                 "OK" => 1,
-                "FAIL" | "UNKNOWN" | "REJECTED" => 3,
+                "ERROR" | "FAIL" | "UNKNOWN" | "REJECTED" => 3,
                 _ => 0,
             },
+            level: e.status.to_ascii_uppercase(),
+            category: e.category.clone(),
         })
         .collect();
 
@@ -2105,7 +2451,6 @@ pub fn project(state: &LiveState) -> LiveView {
         bar,
         setup,
         market,
-        candles: project_candles(state),
         symbols: visible_symbols,
         symbol_filter: state.symbol_filter.clone(),
         gates,
@@ -2115,6 +2460,7 @@ pub fn project(state: &LiveState) -> LiveView {
         risk_rows: risk_rows(state),
         broker_rows: broker_rows(state),
         recon_rows: recon_rows(state),
+        account_rows: account_rows(state),
         has_positions: !positions.is_empty(),
         positions,
         has_orders: !orders.is_empty(),
@@ -2127,7 +2473,7 @@ pub fn project(state: &LiveState) -> LiveView {
         event_types: event_types.clone(),
         event_type_index: event_types
             .iter()
-            .position(|t| *t == state.event_type_filter)
+            .position(|t| *t == state.event_category)
             .map_or(0, |i| i as i32),
         event_filter: state.event_filter.clone(),
     }
@@ -2173,10 +2519,16 @@ mod tests {
             SymbolPick {
                 symbol: "RELIANCE".into(),
                 checked: true,
+                ltp: None,
+                change_pct: None,
+                in_store: true,
             },
             SymbolPick {
                 symbol: "TCS".into(),
                 checked: false,
+                ltp: None,
+                change_pct: None,
+                in_store: true,
             },
         ];
         st.timeframes = vec!["1m".into(), "5m".into(), "15m".into()];
@@ -2197,9 +2549,9 @@ mod tests {
         assert!(!st.can_arm());
         let view = project(&st);
         // Never fabricates: no strategy, no data, no numbers.
-        assert_eq!(view.bar.broker_label, "Broker: NOT CONFIGURED");
+        assert_eq!(view.bar.broker_label, "NOT CONFIGURED");
         assert_eq!(view.bar.conn_label, "Connection: N/A");
-        assert_eq!(view.bar.strategy_label, "Strategy: —");
+        assert_eq!(view.bar.strategy_label, "—");
         assert_eq!(view.market.state_label, "NO DATA");
         assert!(!view.market.has_data);
         assert!(view
@@ -2341,6 +2693,116 @@ mod tests {
     }
 
     #[test]
+    fn quantity_rejects_zero_and_reparses_grouped_display() {
+        let mut st = configured(LiveState::default());
+        st.set_quantity("25.5");
+        // Zero is rejected locally: the service raises on it, which used
+        // to degrade the whole page into _live_unavailable over a typo.
+        st.set_quantity("0");
+        assert_eq!(st.quantity, 25.5);
+        assert!(st
+            .action_note
+            .as_deref()
+            .unwrap()
+            .contains("invalid quantity"));
+        // The projection renders grouped thousands ("1,250.00");
+        // re-committing the displayed text parses back to the same value.
+        st.set_quantity("1,250.00");
+        assert_eq!(st.quantity, 1250.0);
+    }
+
+    #[test]
+    fn arm_refusal_carries_the_exact_blocking_reason() {
+        // Host mode: the backend's own verdict wins (its gate names are
+        // the real ones — not the local canonical vocabulary).
+        let mut st = configured(LiveState::default());
+        st.host_mode = true;
+        st.bridge_wired = true;
+        st.backend_can_arm = Some(false);
+        st.backend_arm_blockers = Some(vec![
+            "no live broker selected (configure in SYSTEM → BROKERS)".into(),
+        ]);
+        st.arm();
+        assert_eq!(
+            st.action_note.as_deref().unwrap(),
+            "Blocked: no live broker selected (configure in SYSTEM → BROKERS)"
+        );
+        // Local mode: the derived blockers, never a bare "Blocked: ".
+        let mut local = configured(LiveState::default());
+        local.bridge_wired = true;
+        local.arm();
+        let note = local.action_note.as_deref().unwrap();
+        assert!(note.starts_with("Blocked: "));
+        assert!(note.len() > "Blocked: ".len());
+    }
+
+    #[test]
+    fn multi_position_book_never_prints_flat() {
+        let row = |symbol: &str| PositionRow {
+            symbol: symbol.into(),
+            side: "LONG".into(),
+            quantity: "10".into(),
+            entry: "100".into(),
+            current: "101".into(),
+            pnl: "+10".into(),
+            status: "OPEN".into(),
+            pnl_pct: Some(1.0),
+        };
+        // The provider sends single-position facts only: with 2+ open
+        // positions the card must point at the table, never print FLAT.
+        let mut st = LiveState::default();
+        st.positions = vec![row("AAA"), row("BBB")];
+        st.position_facts = None;
+        let view = project(&st);
+        assert_eq!(view.position_rows[0].value, "see POSITIONS");
+    }
+
+    #[test]
+    fn clean_reconciliation_does_not_alarm() {
+        // A clean book reports mismatches "0" — the GOOD state, not red.
+        let mut st = LiveState::default();
+        st.reconciliation = ReconciliationFacts {
+            status: "CLEAN".into(),
+            positions: "2".into(),
+            orders: "3".into(),
+            last_check: "t".into(),
+            mismatches: "0".into(),
+            blocks_live: false,
+        };
+        let view = project(&st);
+        let row = view
+            .recon_rows
+            .iter()
+            .find(|r| r.key == "MISMATCHES")
+            .unwrap();
+        assert_eq!(row.value, "0");
+        assert_eq!(row.tone, 0);
+    }
+
+    #[test]
+    fn open_orders_uses_the_backend_count_not_the_capped_table() {
+        // The orders table is capped at the last 50 rows; the card must
+        // show the backend's true open count when the snapshot carries it.
+        let mut st = LiveState::default();
+        st.apply_snapshot(&serde_json::json!({"open_orders": 3}));
+        let view = project(&st);
+        let row = view
+            .account_rows
+            .iter()
+            .find(|r| r.key == "OPEN ORDERS")
+            .unwrap();
+        assert_eq!(row.value, "3");
+        // Without the key the visible table length is the honest fallback.
+        let fallback = project(&LiveState::default());
+        let row = fallback
+            .account_rows
+            .iter()
+            .find(|r| r.key == "OPEN ORDERS")
+            .unwrap();
+        assert_eq!(row.value, "0");
+    }
+
+    #[test]
     fn symbol_filter_and_toggle_use_real_indices() {
         let mut st = LiveState::default();
         st.symbols = "AAA,ABA,BB,REL,REL-JR"
@@ -2348,6 +2810,9 @@ mod tests {
             .map(|s| SymbolPick {
                 symbol: s.into(),
                 checked: false,
+                ltp: None,
+                change_pct: None,
+                in_store: true,
             })
             .collect();
         st.set_symbol_filter("rel");
@@ -2407,6 +2872,7 @@ mod tests {
             current: "2812.40".into(),
             pnl: "+113.00".into(),
             status: "OPEN".into(),
+            pnl_pct: None,
         }];
         st.orders = vec![OrderRow {
             order_id: "cid-1".into(),
@@ -2542,9 +3008,17 @@ mod tests {
             "market_timeframe": "15m",
             "market_bars": [{"o": 1.0, "h": 2.0, "l": 0.5, "c": 1.5},
                             {"open": 1.5, "high": 2.5, "low": 1.2, "close": 2.2}],
+            "quotes": [{"symbol": "RELIANCE", "ltp": 2812.4, "change_pct": 1.12,
+                        "status": "AVAILABLE"},
+                       {"symbol": "TCS", "ltp": null, "change_pct": null,
+                        "status": "NO MARKET DATA"}],
+            "capital": {"source": "broker", "broker_capital": 500000.0,
+                        "available_margin": 482350.0, "used_margin": 17650.0,
+                        "configured_capital": 1000000.0},
+            "feed": "local",
         }));
         let view = project(&st);
-        assert_eq!(view.bar.broker_label, "Broker: paper");
+        assert_eq!(view.bar.broker_label, "paper");
         assert_eq!(view.bar.conn_label, "● Connected");
         assert_eq!(view.setup.session_label, "● RUNNING");
         assert_eq!(view.positions[0].pnl, "+113.00");
@@ -2554,13 +3028,34 @@ mod tests {
         assert_eq!(view.recon_rows[5].value, "NO"); // blocks_live false
         assert_eq!(view.market.state_label, "READY");
         assert!(view.market.has_data);
-        assert_eq!(view.candles.len(), 2);
+        assert_eq!(view.market.feed_label, "FEED: LOCAL TAIL");
         assert_eq!(view.gates.len(), 2);
         assert_eq!(view.gates[1].status, "NOT READY");
         assert_eq!(view.symbols.len(), 2);
         assert!(view.symbols[0].checked);
         assert!(!view.symbols[1].checked);
-        assert_eq!(view.setup.symbol_total, "2 in store · 1 selected");
+        // Quote facts project honestly: LTP + signed change + backend status.
+        assert_eq!(view.symbols[0].ltp, "2,812.40");
+        assert_eq!(view.symbols[0].change, "+1.12%");
+        assert_eq!(view.symbols[0].status, "AVAILABLE");
+        assert_eq!(view.symbols[0].status_tone, 1);
+        assert_eq!(view.symbols[1].ltp, "—");
+        assert_eq!(view.symbols[1].status, "NO MARKET DATA");
+        assert_eq!(view.symbols[1].status_tone, 2);
+        // Venue capital reaches the Account & Risk rows verbatim.
+        let capital = view
+            .account_rows
+            .iter()
+            .find(|r| r.key == "BROKER CAPITAL")
+            .unwrap();
+        assert_eq!(capital.value, "₹500,000.00");
+        let source = view
+            .account_rows
+            .iter()
+            .find(|r| r.key == "CAPITAL SOURCE")
+            .unwrap();
+        assert_eq!(source.value, "BROKER (VENUE)");
+        assert_eq!(view.setup.symbol_total, "2 symbols (—)");
         assert_eq!(view.events.len(), 1);
     }
 
@@ -2591,31 +3086,198 @@ mod tests {
                 timestamp: "13:00".into(),
                 strategy: "OBR".into(),
                 symbol: "RELIANCE".into(),
-                event: "ORDER_SUBMITTED".into(),
+                event: "order submitted cid-1".into(),
                 status: "ok".into(),
+                category: "ORDERS".into(),
             },
             LiveEvent {
                 timestamp: "13:01".into(),
                 strategy: "OBR".into(),
                 symbol: "RELIANCE".into(),
-                event: "RISK_DENIED".into(),
-                status: "FAIL".into(),
+                event: "risk denied: over limit".into(),
+                status: "error".into(),
+                category: "RISK".into(),
             },
         ];
         let view = project(&st);
+        // Fixed buckets only — never one chip per row text.
         assert_eq!(
             view.event_types,
-            vec!["ALL EVENTS", "ORDER_SUBMITTED", "RISK_DENIED"]
+            vec![
+                "ALL",
+                "BROKER",
+                "MARKET DATA",
+                "STRATEGY",
+                "ORDERS",
+                "RISK",
+                "SYSTEM"
+            ]
         );
-        st.set_event_type_filter("RISK_DENIED");
+        assert_eq!(view.events[0].level, "ERROR"); // newest first, uppercased
+        assert_eq!(view.events[0].category, "RISK");
+        st.set_event_category("RISK");
         let view = project(&st);
         assert_eq!(view.events.len(), 1);
         assert_eq!(view.events[0].status_tone, 3);
-        st.set_event_type_filter("ALL EVENTS");
+        // Unknown buckets are honest no-ops, never silent re-filters.
+        st.apply_event_category("NOPE");
+        assert_eq!(project(&st).events.len(), 1);
+        st.set_event_category("ALL");
         st.set_event_filter("reliance 13:00");
         // text filter is a whole-line substring match
         assert!(project(&st).events.is_empty());
         st.set_event_filter("13:01");
         assert_eq!(project(&st).events.len(), 1);
+        // Clear drops UI history only — counts, not backend facts.
+        st.clear_events();
+        assert!(st.events.is_empty());
+        assert_eq!(project(&st).events.len(), 0);
+    }
+
+    #[test]
+    fn watchlist_statuses_come_from_quote_facts_not_colors() {
+        let mut st = LiveState::default();
+        st.apply_snapshot(&serde_json::json!({
+            "available_symbols": ["NSE:A", "NSE:B", "NSE:C"],
+            "selected_symbols": [],
+            "quotes": [
+                {"symbol": "NSE:A", "ltp": 100.0, "change_pct": -0.5,
+                 "status": "AVAILABLE"},
+                {"symbol": "NSE:B", "ltp": null, "change_pct": null,
+                 "status": "NO MARKET DATA"},
+                {"symbol": "NSE:C", "ltp": null, "change_pct": null,
+                 "status": "NOT FOUND"},
+            ],
+        }));
+        let view = project(&st);
+        assert_eq!(view.symbols[0].status, "AVAILABLE");
+        assert_eq!(view.symbols[0].status_tone, 1);
+        assert_eq!(view.symbols[0].change, "-0.50%");
+        assert_eq!(view.symbols[1].status, "NO MARKET DATA");
+        assert_eq!(view.symbols[1].status_tone, 2);
+        assert_eq!(view.symbols[2].status, "NOT FOUND");
+        assert_eq!(view.symbols[2].status_tone, 3);
+    }
+
+    #[test]
+    fn idle_capital_is_configured_basis_never_broker_money() {
+        let mut st = LiveState::default();
+        st.apply_snapshot(&serde_json::json!({
+            "capital": {"source": "configured", "broker_capital": null,
+                        "available_margin": null, "used_margin": null,
+                        "configured_capital": 1000000.0},
+        }));
+        let view = project(&st);
+        let by_key = |k: &str| {
+            view.account_rows
+                .iter()
+                .find(|r| r.key == k)
+                .unwrap()
+                .value
+                .clone()
+        };
+        assert_eq!(by_key("BROKER CAPITAL"), "NOT REPORTED");
+        assert_eq!(by_key("AVAILABLE MARGIN"), "NOT REPORTED");
+        assert_eq!(by_key("CONFIGURED CAPITAL"), "₹1,000,000.00");
+        assert_eq!(by_key("CAPITAL SOURCE"), "CONFIGURED (PAPER)");
+        assert_eq!(by_key("LEVERAGE"), "NOT REPORTED");
+        assert_eq!(by_key("OPEN POSITIONS"), "0");
+    }
+
+    #[test]
+    fn backend_action_note_is_a_fact_and_running_clears_stale_requests() {
+        let mut st = configured(LiveState::default());
+        st.host_mode = true;
+        st.bridge_wired = true;
+        st.gates = all_ready_gates();
+        st.start();
+        assert!(st
+            .action_note
+            .as_deref()
+            .unwrap()
+            .starts_with("start requested"));
+        // Backend confirms RUNNING: the stale local request note must go.
+        st.apply_snapshot(&serde_json::json!({"session_status": "RUNNING"}));
+        assert!(st.action_note.is_none());
+        // And a backend note of its own is adopted verbatim.
+        st.apply_snapshot(&serde_json::json!({
+            "session_status": "STOPPED",
+            "action_note": "armed — confirm LIVE consent on START",
+        }));
+        assert_eq!(
+            st.action_note.as_deref(),
+            Some("armed — confirm LIVE consent on START")
+        );
+        assert_eq!(
+            project(&st).bar.note,
+            "armed — confirm LIVE consent on START"
+        );
+    }
+
+    #[test]
+    fn card_anatomy_matches_the_terminal_reference() {
+        let mut st = LiveState::default();
+        st.apply_snapshot(&serde_json::json!({
+            "as_of": "2026-10-02T10:28:42+00:00",
+            "broker": {"name": "FYERS", "environment": "LIVE",
+                       "connected": true, "reason": "session active",
+                       "account_id": "VA1234", "status": "CONNECTED"},
+            "strategy": {"id": "OBR C1C4", "status": "ACTIVE",
+                         "timeframe": "30m"},
+            "reconciliation": {"status": "CLEAN", "positions": 0, "orders": 0,
+                               "blocks_live": false},
+            "positions": [{"symbol": "NSE:KAYNES", "side": "LONG",
+                           "quantity": 10, "entry_price": 2800.0,
+                           "current_price": 2812.4, "pnl": 124.0,
+                           "pnl_pct": 0.44, "status": "OPEN"}],
+            "available_strategies": ["OBR C1C4"],
+            "available_symbols": ["NSE:KAYNES"],
+            "selected_symbols": ["NSE:KAYNES"],
+        }));
+        let view = project(&st);
+        // Broker card: bare name + connection/account sub-line.
+        assert_eq!(view.bar.broker_label, "FYERS");
+        assert_eq!(view.bar.broker_tone, 1);
+        assert_eq!(view.bar.conn_label, "● Connected · ACC: VA1234");
+        assert_eq!(view.bar.conn_tone, 1);
+        // Strategy card: bare id + status/timeframe sub-line.
+        assert_eq!(view.bar.strategy_label, "OBR C1C4");
+        assert_eq!(view.bar.strategy_sub, "ACTIVE · 30m");
+        // Recon card: bare status + counts sub-line.
+        assert_eq!(view.bar.recon_label, "CLEAN");
+        assert_eq!(view.bar.recon_sub, "Positions: 0 | Orders: 0");
+        // Positions carry the ledger P&L percent.
+        assert_eq!(view.positions[0].pnl_pct, "+0.44%");
+        // Market card carries the backend poll clock.
+        assert_eq!(view.market.updated_label, "10:28:42");
+        // Watchlist header names the universe strategy.
+        assert_eq!(view.setup.symbol_total, "1 symbols (OBR C1C4)");
+    }
+
+    #[test]
+    fn strategy_enrichment_projects_registry_facts() {
+        let mut st = LiveState::default();
+        st.apply_snapshot(&serde_json::json!({
+            "strategy": {"id": "OBR C1C4", "version": "1.0.0", "status": "ACTIVE",
+                         "mode": "PAPER", "instrument": "NSE:KAYNES",
+                         "timeframe": "30m", "direction": "SHORT",
+                         "runtime_state": "ACTIVE",
+                         "reference_window": "10:15–10:45", "universe": 22,
+                         "live_supported": true, "warmup": 120,
+                         "state": "IDLE"},
+        }));
+        let view = project(&st);
+        let by_key = |k: &str| {
+            view.strategy_rows
+                .iter()
+                .find(|r| r.key == k)
+                .unwrap()
+                .value
+                .clone()
+        };
+        assert_eq!(by_key("DIRECTION"), "SHORT");
+        assert_eq!(by_key("RUNTIME"), "ACTIVE");
+        assert_eq!(by_key("REFERENCE WINDOW"), "10:15–10:45");
+        assert_eq!(by_key("UNIVERSE"), "22 symbols");
     }
 }

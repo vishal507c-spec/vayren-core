@@ -9,7 +9,7 @@
 // the HOST WINDOW size (platform-owned input — never the screen's own
 // width, which would feed layout implicit sizes) using the same LiveTiers
 // functions production uses.
-import { LiveScreen, LiveTiers, LiveBar, LiveSetup, LiveMarket, LiveSymbolRow, LiveGate, LiveKv, LiveStat, LivePosition, LiveOrder, LiveFill, LiveEventRow, LiveCandle } from "../../vayren-shell/ui/live.slint";
+import { LiveScreen, LiveTiers, LiveBar, LiveSetup, LiveMarket, LiveSymbolRow, LiveGate, LiveKv, LiveStat, LivePosition, LiveOrder, LiveFill, LiveEventRow } from "../../vayren-shell/ui/live.slint";
 
 export component LiveHostWindow inherits Window {
     title: "VAYREN — Live";
@@ -27,7 +27,6 @@ export component LiveHostWindow inherits Window {
     in-out property <LiveBar> bar;
     in-out property <LiveSetup> setup;
     in-out property <LiveMarket> market;
-    in-out property <[LiveCandle]> candles;
     in-out property <[string]> strategy-names;
     in-out property <int> strategy-selected: -1;
     in-out property <[LiveSymbolRow]> symbols;
@@ -42,6 +41,7 @@ export component LiveHostWindow inherits Window {
     in-out property <[LiveKv]> risk-rows;
     in-out property <[LiveKv]> broker-rows;
     in-out property <[LiveKv]> recon-rows;
+    in-out property <[LiveKv]> account-rows;
     in-out property <[LivePosition]> positions;
     in-out property <[LiveOrder]> orders;
     in-out property <[LiveFill]> fills;
@@ -65,6 +65,7 @@ export component LiveHostWindow inherits Window {
     callback confirm-requested();
     callback event-filter-changed(string);
     callback event-type-picked(string);
+    callback clear-events();
     callback inspector-toggled();
     callback configure-broker();
 
@@ -74,7 +75,6 @@ export component LiveHostWindow inherits Window {
         bar: root.bar;
         setup: root.setup;
         market: root.market;
-        candles: root.candles;
         strategy-names: root.strategy-names;
         strategy-selected: root.strategy-selected;
         symbols: root.symbols;
@@ -89,6 +89,7 @@ export component LiveHostWindow inherits Window {
         risk-rows: root.risk-rows;
         broker-rows: root.broker-rows;
         recon-rows: root.recon-rows;
+        account-rows: root.account-rows;
         positions: root.positions;
         orders: root.orders;
         fills: root.fills;
@@ -118,6 +119,7 @@ export component LiveHostWindow inherits Window {
         confirm-requested() => { root.confirm-requested(); }
         event-filter-changed(t) => { root.event-filter-changed(t); }
         event-type-picked(v) => { root.event-type-picked(v); }
+        clear-events() => { root.clear-events(); }
         inspector-toggled() => { root.inspector-toggled(); }
         configure-broker() => { root.configure-broker(); }
     }

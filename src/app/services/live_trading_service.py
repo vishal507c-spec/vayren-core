@@ -33,8 +33,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from execution.modes import LiveArm  # pyright: ignore[reportMissingImports]
-
 from app.observable import IntervalTimer, Signal
 from execution import (
     ExecutionMode,  # pyright: ignore[reportAttributeAccessIssue]
@@ -42,11 +40,13 @@ from execution import (
     SessionConfig,  # pyright: ignore[reportAttributeAccessIssue]
     SqliteTailProvider,  # pyright: ignore[reportAttributeAccessIssue]
 )
+from execution.modes import LiveArm  # pyright: ignore[reportMissingImports]
 from market import Bar, SymbolRepository  # pyright: ignore[reportAttributeAccessIssue]
 from risk import RiskPolicy  # pyright: ignore[reportAttributeAccessIssue]
 from strategy import StrategyDefinition, StrategyParameters
 from strategy.language.compiler import compile_strategy
 from strategy.language.storage import (
+    StrategyRecord,
     list_strategies,
     load_strategy_record,
 )
@@ -61,6 +61,75 @@ DEFAULT_STRATEGY_DIR = resolve_strategy_dir(None)
 _WARMUP_BARS = 120
 _ACTIVITY_CAP = 500
 _TICK_MS = 1000
+
+#: LIVE event categories — the fixed filter vocabulary the native UI renders.
+#: Every activity entry carries exactly one; unknown journal kinds land in
+#: SYSTEM rather than inventing a new bucket the UI cannot render.
+_EVENT_CATEGORIES = ("BROKER", "MARKET DATA", "STRATEGY", "ORDERS", "RISK", "SYSTEM")
+
+#: Journal-kind prefixes mapped to their category (first match wins).
+_KIND_CATEGORY_PREFIXES = (
+    ("BROKER_", "BROKER"),
+    ("VENUE_", "BROKER"),
+    ("ACCOUNT_", "BROKER"),
+    ("CONNECTION_", "BROKER"),
+    ("LOGIN_", "BROKER"),
+    ("DATA_", "MARKET DATA"),
+    ("FEED_", "MARKET DATA"),
+    ("MARKET_DATA_", "MARKET DATA"),
+    ("STALE_DATA", "MARKET DATA"),
+    ("SIGNAL_", "STRATEGY"),
+    ("STRATEGY_", "STRATEGY"),
+    ("REFERENCE_", "STRATEGY"),
+    ("BREAK_", "STRATEGY"),
+    ("WARMUP_", "STRATEGY"),
+    ("ORDER_", "ORDERS"),
+    ("FILL", "ORDERS"),
+    ("POSITION_", "ORDERS"),
+    ("SL_", "ORDERS"),
+    ("RISK_", "RISK"),
+)
+
+
+def _category_for_kind(kind: str) -> str:
+    """Map a journal kind to its fixed UI category (default SYSTEM)."""
+    name = str(kind or "").upper()
+    for prefix, category in _KIND_CATEGORY_PREFIXES:
+        if name.startswith(prefix):
+            return category
+    return "SYSTEM"
+
+
+def _category_for_event(text: str) -> str:
+    """Map a free-text recorded event to its fixed UI category."""
+    name = str(text or "").upper()
+    if "RISK" in name or "DENIED" in name:
+        return "RISK"
+    if "ORDER" in name or "FILL" in name or " SL" in name or name.startswith("SL "):
+        return "ORDERS"
+    if "SIGNAL" in name or "BREAK" in name or "REFERENCE" in name or "STRATEGY" in name:
+        return "STRATEGY"
+    if "MARKET DATA" in name or "FEED" in name or "QUOTE" in name:
+        return "MARKET DATA"
+    if "BROKER" in name or "VENUE" in name or "ACCOUNT" in name:
+        return "BROKER"
+    return "SYSTEM"
+
+
+def _clean_symbol(symbol: str) -> str:
+    """Strip the venue prefix (``NSE:KAYNES`` → ``KAYNES``) for store lookups."""
+    return str(symbol or "").split(":")[-1].strip().upper()
+
+
+def _as_float(value: Any) -> float | None:
+    """Defensive float coercion — non-numbers become ``None``, never 0.0."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number != number or number in (float("inf"), float("-inf")):
+        return None
+    return number
 
 
 class LiveConfigError(RuntimeError):
@@ -169,8 +238,14 @@ class LiveTradingService:
         self._validate_cache: tuple[str, ...] | None = None
         self._chart_cache_key: tuple | None = None
         self._chart_cache: tuple[Bar, ...] | None = None
+        self._quotes_reader: Any | None = None
         self._compiled_cache: dict[str, tuple[str, Any]] = {}
         self._tick_count = 0
+        # SYSTEM broker view (attached per poll by headless — never owned
+        # here): last connectivity key for cache invalidation + last seen
+        # triple for connect/disconnect transition records.
+        self._last_broker_key: tuple = ()
+        self._last_broker_seen: tuple = ()
         self._timer = IntervalTimer(_TICK_MS, self.tick)
         self._restore_config()
 
@@ -178,11 +253,31 @@ class LiveTradingService:
 
     def available_strategies(self) -> tuple[str, ...]:
         try:
+            from strategy.registry import get_strategy_registry
+
+            reg = get_strategy_registry()
+            names = [d.name for d in reg.list()]
+            if names:
+                return tuple(names)
+        except Exception:
+            pass
+        try:
             return tuple(sorted(list_strategies(self._strategy_dir)))
         except Exception:
             return ()
 
-    def available_symbols(self) -> tuple[str, ...]:
+    def available_symbols(self, strategy_name: str | None = None) -> tuple[str, ...]:
+        try:
+            from strategy.registry import get_strategy_registry
+
+            reg = get_strategy_registry()
+            strat = strategy_name or self._config.strategy_name or "OBR C1C4"
+            if reg.contains(strat):
+                defn = reg.get(strat)
+                if defn.symbols:
+                    return defn.symbols
+        except Exception:
+            pass
         try:
             return tuple(self._repository.list_symbols())
         except Exception:
@@ -190,7 +285,8 @@ class LiveTradingService:
 
     def available_timeframes(self, symbol: str) -> tuple[str, ...]:
         try:
-            return tuple(self._repository.detect_timeframes(symbol))
+            clean = symbol.split(":")[-1]
+            return tuple(self._repository.detect_timeframes(clean))
         except Exception:
             return ()
 
@@ -214,15 +310,45 @@ class LiveTradingService:
     ) -> None:
         if self._status == "RUNNING":
             raise LiveConfigError("setup is frozen while a session runs")
+        from strategy.registry import get_strategy_registry
+
+        reg = get_strategy_registry()
+        strat_def = None
         if strategy_name is not None:
             self._config.strategy_name = str(strategy_name)
+            if reg.contains(strategy_name):
+                strat_def = reg.get(strategy_name)
+                if strat_def.timeframe and not timeframe:
+                    self._config.timeframe = strat_def.timeframe
+        elif self._config.strategy_name and reg.contains(self._config.strategy_name):
+            strat_def = reg.get(self._config.strategy_name)
+
         if symbols is not None:
-            self._config.symbols = tuple(symbols)
+            if strat_def and strat_def.symbols:
+                strat_syms_clean = {s.split(":")[-1] for s in strat_def.symbols}
+                allowed = tuple(
+                    s
+                    for s in symbols
+                    if s in strat_def.symbols or s.split(":")[-1] in strat_syms_clean
+                )
+                self._config.symbols = allowed if allowed else strat_def.symbols
+            else:
+                self._config.symbols = tuple(symbols)
+        elif strat_def and strat_def.symbols and not self._config.symbols:
+            self._config.symbols = strat_def.symbols
+
         if timeframe is not None:
             self._config.timeframe = str(timeframe)
         if mode is not None and mode in ("PAPER", "LIVE"):
             if mode != self._config.mode:
                 self._confirmed_live_at = ""
+                self._record_activity(
+                    self._config.strategy_name or "session",
+                    "",
+                    f"mode set to {mode}",
+                    "info",
+                    "SYSTEM",
+                )
             self._config.mode = mode
         if quantity is not None:
             try:
@@ -254,6 +380,126 @@ class LiveTradingService:
         name = str(getattr(selection, "name", "") or "") if selection is not None else ""
         return name or "paper"
 
+    def attach_broker_view(self, broker_manager: Any, selection: Any) -> None:
+        """Attach the SYSTEM broker stack (owned elsewhere, read-only here).
+
+        Called on every poll so connects/disconnects surface within one
+        tick. A connectivity change invalidates the validation cache —
+        otherwise START blockers would freeze at the pre-connect verdict.
+        """
+        self._broker_manager = broker_manager
+        self._selection = selection
+        key = self._broker_key()
+        if key != self._last_broker_key:
+            self._last_broker_key = key
+            self.invalidate_validation_cache()
+
+    def _broker_key(self) -> tuple:
+        """Connectivity triple driving cache invalidation (cheap strings)."""
+        try:
+            view = self._broker_view()
+            return (view["id"], view["connected"], view["account_id"])
+        except Exception:
+            return ("", False, "")
+
+    def broker_display_name(self) -> str:
+        """UI-facing broker name (venue display label, never a secret)."""
+        return self._broker_view()["display"]
+
+    def _broker_view(self) -> dict[str, Any]:
+        """Resolved SYSTEM broker facts (safe scalars only, never secrets).
+
+        The selection id (``fyers``) stays the venue key; the manager's
+        display label (``FYERS``) is what the UI prints. Without a manager
+        (or selection) the view is empty and every consumer degrades to
+        NOT CONFIGURED — never to an invented broker.
+        """
+        view: dict[str, Any] = {
+            "id": "",
+            "display": "",
+            "connected": False,
+            "status": "",
+            "reason": "",
+            "account_id": "",
+            "configured": False,
+            "funds": {},
+        }
+        name = self.broker_name()
+        if not name or name == "paper":
+            return view
+        view["id"] = name
+        view["display"] = name
+        manager = self._broker_manager
+        if manager is None:
+            return view
+        try:
+            brokers = (manager.snapshot() or {}).get("brokers", [])
+        except Exception:
+            brokers = []
+        for entry in brokers:
+            if not isinstance(entry, dict):
+                continue
+            if str(entry.get("id", "") or "") != name:
+                continue
+            view["display"] = str(entry.get("display_name", "") or name)
+            view["status"] = str(entry.get("status", "") or "")
+            view["reason"] = str(entry.get("reason", "") or "")
+            view["configured"] = bool(entry.get("configured", False))
+            view["connected"] = view["status"] in ("CONNECTED", "LIVE_READY")
+            view["account_id"] = str(entry.get("account_id", "") or "")
+            funds = entry.get("funds")
+            if isinstance(funds, dict):
+                clean = {
+                    "available": _as_float(funds.get("available")),
+                    "used": _as_float(funds.get("used")),
+                    "total": _as_float(funds.get("total")),
+                }
+                if any(v is not None for v in clean.values()):
+                    view["funds"] = clean
+            break
+        return view
+
+    def _note_broker_transitions(self, view: dict[str, Any]) -> None:
+        """Record broker connect/disconnect/account edges (once per edge).
+
+        The stream would otherwise stay silent about the most important
+        venue fact on the page. Poll-safe: only transitions append.
+        """
+        seen = (view["id"], view["connected"], view["account_id"])
+        previous = self._last_broker_seen
+        self._last_broker_seen = seen
+        if not previous:
+            # First sight is not a transition — but a broker that is
+            # already connected at boot still deserves its stream lines,
+            # exactly once.
+            if seen[1]:
+                self._record_broker_connected(view, seen)
+            return
+        if seen == previous:
+            return
+        name = view["display"] or view["id"] or "broker"
+        if seen[1] and not previous[1]:
+            self._record_broker_connected(view, seen)
+        elif previous[1] and not seen[1]:
+            self._record_activity(name, "", f"broker disconnected — {name}", "error", "BROKER")
+
+    def _record_broker_connected(self, view: dict[str, Any], seen: tuple) -> None:
+        """Stream lines for a fresh broker connection (edge or boot)."""
+        name = view["display"] or view["id"] or "broker"
+        account = f" (ACC: {seen[2]})" if seen[2] else ""
+        self._record_activity(name, "", f"broker connected — {name}{account}", "ok", "BROKER")
+        if seen[2]:
+            funds = view.get("funds") or {}
+            available = funds.get("available")
+            self._record_activity(
+                name,
+                "",
+                f"account details fetched — ACC: {seen[2]}"
+                + (f" | Available: {available:,.2f}" if available else ""),
+                "ok",
+                "BROKER",
+            )
+
     # ── validation (START gate; exact reasons, never raises) ────────────
 
     def validate(self) -> tuple[str, ...]:
@@ -280,14 +526,33 @@ class LiveTradingService:
     def _validate_uncached(self) -> tuple[str, ...]:
         blockers: list[str] = []
         record = None
+        strat_def = None
         if not self._config.strategy_name:
             blockers.append("no strategy selected")
         else:
             try:
-                record = load_strategy_record(self._config.strategy_name, self._strategy_dir)
-            except Exception as exc:
-                record = None
-                blockers.append(f"strategy load failed: {exc}")
+                from strategy.registry import get_strategy_registry
+
+                reg = get_strategy_registry()
+                if reg.contains(self._config.strategy_name):
+                    strat_def = reg.get(self._config.strategy_name)
+                    if strat_def.source_code:
+                        record = StrategyRecord(
+                            id=strat_def.id,
+                            name=strat_def.name,
+                            code=strat_def.source_code,
+                            created_at="",
+                            updated_at="",
+                            version=strat_def.version,
+                        )
+            except Exception:
+                pass
+            if record is None:
+                try:
+                    record = load_strategy_record(self._config.strategy_name, self._strategy_dir)
+                except Exception as exc:
+                    record = None
+                    blockers.append(f"strategy load failed: {exc}")
             if record is None:
                 blockers.append(f"strategy not found: {self._config.strategy_name}")
             else:
@@ -298,13 +563,24 @@ class LiveTradingService:
         if not self._config.symbols:
             blockers.append("no symbols selected (pick from Market Watchlist)")
         else:
+            if strat_def and strat_def.symbols:
+                strat_syms_clean = {s.split(":")[-1] for s in strat_def.symbols}
+                for symbol in self._config.symbols:
+                    if (
+                        symbol not in strat_def.symbols
+                        and symbol.split(":")[-1] not in strat_syms_clean
+                    ):
+                        blockers.append(
+                            f"symbol {symbol} not in {strat_def.name} configured universe"
+                        )
             try:
                 universe = set(self._repository.list_symbols())
             except Exception as exc:
                 universe = set()
                 blockers.append(f"market store unreadable: {exc}")
             for symbol in self._config.symbols:
-                if symbol not in universe:
+                clean = symbol.split(":")[-1]
+                if clean not in universe and symbol not in universe:
                     blockers.append(f"invalid symbol: {symbol}")
         if not self._config.timeframe:
             blockers.append("no timeframe selected")
@@ -312,8 +588,9 @@ class LiveTradingService:
             blockers.append("quantity must be positive")
         if record is not None and self._config.symbols and self._config.timeframe:
             for symbol in self._config.symbols:
+                clean = symbol.split(":")[-1]
                 try:
-                    frames = self._repository.detect_timeframes(symbol)
+                    frames = self._repository.detect_timeframes(clean)
                 except Exception:
                     frames = ()
                 if frames and self._config.timeframe not in frames:
@@ -321,7 +598,7 @@ class LiveTradingService:
                         f"timeframe {self._config.timeframe} not available for {symbol}"
                     )
                 try:
-                    bars = self._repository.get_candles_timeframe(symbol, self._config.timeframe, 1)
+                    bars = self._repository.get_candles_timeframe(clean, self._config.timeframe, 1)
                 except Exception as exc:
                     bars = []
                     blockers.append(f"market data unreadable for {symbol}: {exc}")
@@ -419,11 +696,30 @@ class LiveTradingService:
             return False, ("already running",)
         self.invalidate_validation_cache()
         blockers = self.validate()
-        if self._config.mode == "LIVE" and not confirmed:
-            blockers = (*blockers, "live confirmation required (explicit operator consent)")
+        if self._config.mode == "LIVE":
+            if confirmed:
+                # A confirmed start SATISFIES the consent requirement — the
+                # validate() consent line must not block the very start that
+                # carries the confirmation (otherwise LIVE could never start:
+                # nothing but a successful start records the confirmation).
+                # Same consent-line filter as _arm_eligible_blockers().
+                blockers = tuple(
+                    b for b in blockers if "confirmation" not in b and "consent" not in b
+                )
+            elif not any("confirmation" in b or "consent" in b for b in blockers):
+                blockers = (
+                    *blockers,
+                    "live confirmation required (explicit operator consent)",
+                )
         if blockers:
             self._status = "STOPPED"
             self._status_reason = "; ".join(blockers)
+            self._record_activity(
+                self._config.strategy_name or "session",
+                "",
+                f"start blocked: {self._status_reason}",
+                "error",
+            )
             self.state_changed.emit()
             return False, blockers
         if self._config.mode == "LIVE" and confirmed:
@@ -439,10 +735,47 @@ class LiveTradingService:
         self._status = "RUNNING"
         self._status_reason = ""
         self._timer.start()
-        self._record_activity("session", "", "START", "ok")
+        self._record_session_start()
         self._persist()
         self.state_changed.emit()
         return True, ()
+
+    def _record_session_start(self) -> None:
+        """Log the session-startup facts (the stream's backbone).
+
+        Every line reports something that just happened — strategy resolved,
+        universe counted from real quotes, risk limits from config, feed kind
+        from the session build — so the events stream reads as a session
+        log, never as boilerplate.
+        """
+        name = self._config.strategy_name or "session"
+        symbols = self.available_symbols()
+        quotes = self._universe_quotes(symbols)
+        available = sum(1 for q in quotes if q["status"] == "AVAILABLE")
+        missing = sum(1 for q in quotes if q["status"] == "NOT FOUND")
+        nodata = len(quotes) - available - missing
+        timeframe = self._config.timeframe or ""
+        self._record_activity(name, "", f"strategy {name} ready — {timeframe}", "ok", "STRATEGY")
+        self._record_activity(
+            name,
+            "",
+            f"watchlist loaded — {len(quotes)} symbols "
+            f"({available} available, {missing} not found, {nodata} no data)",
+            "ok" if not missing and not nodata else "error",
+            "MARKET DATA",
+        )
+        self._record_activity(
+            name,
+            "",
+            f"risk initialized — max {self._config.quantity:g} per order",
+            "ok",
+            "RISK",
+        )
+        feed = {"live": "broker feed streaming", "local": "local tail"}.get(
+            self._feed_kind, "no feed"
+        )
+        self._record_activity(name, "", f"market data connected ({feed})", "ok", "MARKET DATA")
+        self._record_activity(name, "", "START", "ok", "SYSTEM")
 
     def stop(self, reason: str = "operator stop") -> None:
         """Halt immediately: no new signals; open orders stay tracked."""
@@ -455,9 +788,21 @@ class LiveTradingService:
         self._drain_activity()
         self._status = "STOPPED"
         self._status_reason = reason if reason != "operator stop" else ""
+        # Consent is per start, not per service lifetime: without this the
+        # snapshot keeps hiding the consent blocker after a STOP, so START
+        # renders enabled and the service then refuses it. Fresh ARM per run.
+        self._confirmed_live_at = ""
+        self.invalidate_validation_cache()
         self._tick_count = 0
         self._persist()
-        self._record_activity("session", "", "STOP", "info")
+        halted = "halt" in str(reason).lower()
+        self._record_activity(
+            self._config.strategy_name or "session",
+            "",
+            "HALT — execution disabled" if halted else "STOP",
+            "error" if halted else "info",
+            "SYSTEM",
+        )
         self.state_changed.emit()
 
     def tick(self) -> None:
@@ -487,6 +832,35 @@ class LiveTradingService:
         self.state_changed.emit()
 
     # ── snapshot (the ONLY data the LIVE tab reads) ─────────────────────
+
+    def _registry_strategy_facts(self, name: str) -> dict[str, Any]:
+        """Registry facts for the Active Strategy card (no invention).
+
+        Direction, runtime state, universe size and the reference window
+        come straight from the registered ``StrategyDefinition``; anything
+        the registry does not carry stays empty and the UI says N/A.
+        """
+        facts: dict[str, Any] = {
+            "direction": "",
+            "runtime_state": "",
+            "reference_window": "",
+            "universe": 0,
+        }
+        try:
+            from strategy.registry import get_strategy_registry
+
+            reg = get_strategy_registry()
+            if name and reg.contains(name):
+                defn = reg.get(name)
+                facts["direction"] = str(getattr(defn, "direction", "") or "")
+                facts["runtime_state"] = str(getattr(defn, "runtime_state", "") or "")
+                facts["universe"] = len(getattr(defn, "symbols", ()) or ())
+                for key, value in getattr(defn, "metadata", ()) or ():
+                    if str(key).strip().lower() == "reference window":
+                        facts["reference_window"] = str(value)
+        except Exception:
+            pass
+        return facts
 
     def snapshot(self) -> dict[str, Any]:
         # Timer ticks arrive on the timer thread and queue for main-thread
@@ -537,6 +911,10 @@ class LiveTradingService:
                             wins += 1
                         elif pnl < 0:
                             losses += 1
+                        entry = pos.avg_price or 0.0
+                        basis = abs(pos.quantity) * abs(entry)
+                        row_pnl = pnl + pos.realized_pnl
+                        pnl_pct = (100.0 * row_pnl / basis) if basis > 0 else None
                         positions.append(
                             {
                                 "symbol": pos.symbol,
@@ -544,7 +922,8 @@ class LiveTradingService:
                                 "quantity": abs(pos.quantity),
                                 "entry_price": pos.avg_price,
                                 "current_price": px,
-                                "pnl": pnl + pos.realized_pnl,
+                                "pnl": row_pnl,
+                                "pnl_pct": round(pnl_pct, 2) if pnl_pct is not None else None,
                                 "status": "OPEN",
                                 "entry_time": self._open_since.get(symbol, ""),
                             }
@@ -600,8 +979,37 @@ class LiveTradingService:
                     f"{s}: {self._last_signal.get(s, 'no signal yet')}"
                     for s in self._config.symbols
                 ),
+                **self._registry_strategy_facts(self._config.strategy_name),
             }
             self._track_open_since()
+        if strategy_state is None:
+            strat_name = self._config.strategy_name or "OBR C1C4"
+            strat_tf = self._config.timeframe or "30m"
+            strat_syms = self._config.symbols
+            strat_status = "ACTIVE"
+            try:
+                from strategy.registry import get_strategy_registry
+
+                reg = get_strategy_registry()
+                if reg.contains(strat_name):
+                    defn = reg.get(strat_name)
+                    strat_tf = strat_tf or defn.timeframe
+                    strat_syms = strat_syms or defn.symbols
+                    strat_status = defn.status or "ACTIVE"
+            except Exception:
+                pass
+            strategy_state = {
+                "id": strat_name,
+                "version": self._strategy_version or "1.0.0",
+                "status": strat_status,
+                "mode": self._config.mode,
+                "instrument": ", ".join(strat_syms),
+                "timeframe": strat_tf,
+                "live_supported": True,
+                "warmup": _WARMUP_BARS,
+                "state": "IDLE" if self._status == "STOPPED" else self._status,
+                **self._registry_strategy_facts(strat_name),
+            }
         total = realized + unrealized
         exposure = sum(abs(p["quantity"]) * (p["current_price"] or 0.0) for p in positions)
         can_halt = self._status == "RUNNING"
@@ -620,50 +1028,44 @@ class LiveTradingService:
         elif kill_halted:
             execution_reason = "kill switch halted"
         feed = self._feed_kind if running else "none"
-        # Service readiness rows only exist around a real session; idle state
-        # stays clean (the UBL venue gates already describe static readiness).
-        service_gates = (
-            [
-                {
-                    "name": "ACCOUNT",
-                    "status": "READY" if account.get("ready") else "NOT READY",
-                    "reason": str(account.get("reason", "")),
-                },
-                {
-                    "name": "ORDER EXECUTION",
-                    "status": "READY" if execution_ready else "BLOCKED",
-                    "reason": execution_reason,
-                },
-                {
-                    "name": "MARKET DATA FEED",
-                    "status": "READY" if running and feed != "none" else "NOT READY",
-                    "reason": {
-                        "live": "broker feed streaming",
-                        "local": "local SQLite tail (delayed, not a broker feed)",
-                        "none": "session not running",
-                    }[feed],
-                },
-            ]
-            if self._sessions
-            else []
-        )
+        # SYSTEM broker view: the manager owns auth, LIVE only consumes it.
+        # Transitions (connect/disconnect) are recorded once per edge so the
+        # stream tells the venue story without per-poll spam.
+        view = self._broker_view()
+        self._note_broker_transitions(view)
+        # Session health wins while running; otherwise the SYSTEM manager
+        # is the venue truth (idle sessions report "not started").
+        if broker_reason == "not started":
+            connected = view["connected"]
+            broker_reason = view["reason"] or (
+                f"{view['display']} connected" if view["connected"] else "not started"
+            )
+        else:
+            connected = connected or view["connected"]
+        universe = self.available_symbols()
+        quotes = self._universe_quotes(universe)
+        risk_status = "HALTED" if kill_halted else ("BLOCKED" if recon_blocks else "READY")
+        can_arm = self._config.mode == "LIVE" and not running and not self._arm_eligible_blockers()
         arm_blockers = list(blockers)
-        if self._status == "RUNNING" and self._config.mode == "LIVE":
+        if running and self._config.mode == "LIVE":
             armed_states = set()
             for session in self._sessions.values():
                 with contextlib.suppress(Exception):
                     armed_states.add(session.armed)
             if LiveArm.ARMED not in armed_states and LiveArm.RUNNING not in armed_states:
                 arm_blockers.append("sessions not armed")
-        return {
+        snap = {
             "mode": self._config.mode,
             "session_status": self._status,
             "status_reason": self._status_reason,
+            "as_of": _utcnow_iso(),
             "broker": {
-                "name": broker_name,
+                "name": view["display"] or broker_name,
                 "environment": self._config.mode,
                 "connected": connected,
                 "reason": broker_reason,
+                "account_id": view["account_id"],
+                "status": view["status"],
             },
             "strategy": strategy_state,
             "positions": positions,
@@ -681,7 +1083,7 @@ class LiveTradingService:
                 "losses": losses,
             },
             "risk": {
-                "status": "HALTED" if kill_halted else ("BLOCKED" if recon_blocks else "READY"),
+                "status": risk_status,
                 "limits": [("max_order_qty", self._config.quantity, "ok")],
                 "decisions": [],
             },
@@ -694,20 +1096,21 @@ class LiveTradingService:
                 "blocks_live": recon_blocks,
             },
             "kill": {"halted": kill_halted, "level": ""},
-            "gates": service_gates,
             "account": account,
             "execution": {"ready": execution_ready, "reason": execution_reason},
             "feed": feed,
-            "can_arm": False,
+            "can_arm": can_arm,
             "arm_blockers": arm_blockers,
             "can_halt": can_halt,
             "lifecycle": lifecycle,
             "events": list(self._activity)[-100:],
+            "quotes": quotes,
+            "capital": self._capital_block(view),
             "market_symbol": self._config.symbols[0] if self._config.symbols else "",
             "market_timeframe": self._config.timeframe,
             "market_bars": self._chart_bars(),
             "available_strategies": self.available_strategies(),
-            "available_symbols": self.available_symbols(),
+            "available_symbols": universe,
             "selected_symbols": self._config.symbols,
             "available_timeframes": self._setup_timeframes(),
             "selected_timeframe": self._config.timeframe,
@@ -716,6 +1119,23 @@ class LiveTradingService:
             "active_positions": len(positions),
             "open_orders": open_count,
         }
+        # Readiness rows always exist (idle included): the checklist renders
+        # backend verdicts, never an empty panel.
+        snap["gates"] = self._readiness_gates(snap, view, quotes)
+        return snap
+
+    def _arm_eligible_blockers(self) -> list[str]:
+        """Setup blockers that also block ARMING (consent lines excluded).
+
+        Arming IS the LIVE consent ceremony, so the confirmation/consent
+        requirement must not block the ARM button itself — everything else
+        does.
+        """
+        return [
+            blocker
+            for blocker in self.validate()
+            if "confirmation" not in blocker and "consent" not in blocker
+        ]
 
     # ── session construction (same record, same engine, per-symbol) ─────
 
@@ -964,6 +1384,7 @@ class LiveTradingService:
                 "symbol": str(payload.get("symbol", symbol)),
                 "event": self._describe_entry(kind, payload),
                 "status": status,
+                "category": _category_for_kind(kind),
             }
         )
 
@@ -991,7 +1412,9 @@ class LiveTradingService:
             return f"strategy error: {payload.get('reason', '')}"
         return kind.lower().replace("_", " ")
 
-    def _record_activity(self, strategy: str, symbol: str, event: str, status: str) -> None:
+    def _record_activity(
+        self, strategy: str, symbol: str, event: str, status: str, category: str = ""
+    ) -> None:
         self._activity.append(
             {
                 "timestamp": _utcnow_iso(),
@@ -999,6 +1422,7 @@ class LiveTradingService:
                 "symbol": symbol,
                 "event": event,
                 "status": status,
+                "category": category or _category_for_event(event),
             }
         )
 
@@ -1062,6 +1486,319 @@ class LiveTradingService:
             return None
         return self._chart_cache
 
+    def _universe_quotes(self, symbols: tuple[str, ...]) -> list[dict[str, Any]]:
+        """Per-symbol LTP facts for the strategy universe (watchlist source).
+
+        One entry per listed symbol, in listed order: ``ltp``/``change_pct``
+        from the market store tail (``None`` = no quote, never 0.0) and a
+        ``status`` the UI renders verbatim — AVAILABLE (quote present),
+        NO MARKET DATA (store file exists but no readable quote) or NOT
+        FOUND (no store file at all). A dead reader degrades to NOT FOUND
+        rows, never to invented prices.
+        """
+        listed = [str(s) for s in symbols]
+        if not listed:
+            return []
+        reader = self._quotes_reader
+        if reader is None:
+            try:
+                from app.services.market_data_service import MarketDataService
+
+                reader = MarketDataService(self._data_dir)
+            except Exception:
+                reader = None
+            self._quotes_reader = reader
+        try:
+            store = {str(s).upper() for s in self._repository.list_symbols()}
+        except Exception:
+            store = set()
+        quotes: dict[str, Any] = {}
+        if reader is not None:
+            try:
+                bare = [_clean_symbol(s) for s in listed]
+                rows = reader.get_quotes(bare)
+                quotes = dict(zip(bare, rows, strict=False))
+            except Exception:
+                quotes = {}
+                with contextlib.suppress(Exception):
+                    reader.refresh()
+        out: list[dict[str, Any]] = []
+        for symbol in listed:
+            clean = _clean_symbol(symbol)
+            row = quotes.get(clean)
+            price = getattr(row, "price", None) if row is not None else None
+            change = getattr(row, "change_pct", None) if row is not None else None
+            if clean and clean in store and price is not None:
+                status = "AVAILABLE"
+            elif clean and clean in store:
+                status = "NO MARKET DATA"
+            else:
+                status = "NOT FOUND"
+            out.append(
+                {
+                    "symbol": symbol,
+                    "ltp": price,
+                    "change_pct": change,
+                    "status": status,
+                }
+            )
+        return out
+
+    def _capital_block(self, view: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Capital facts for the Account & Risk card (venue truth only).
+
+        Priority: a RUNNING session's reported funds, else the connected
+        SYSTEM broker's funds (works idle — the reference card shows money
+        while STOPPED), else the configured paper basis, always
+        source-labelled. Leverage and per-trade risk have no canonical
+        in-repo source on this path, so they are NOT invented here — the
+        UI says NOT REPORTED.
+        """
+        funds: dict[str, Any] = {}
+        account = self._account_state if isinstance(self._account_state, dict) else {}
+        raw_funds = account.get("funds")
+        if isinstance(raw_funds, dict):
+            funds = raw_funds
+        running = self._status == "RUNNING" and bool(account.get("ready"))
+        if not running and view is not None and view.get("connected"):
+            venue_funds = view.get("funds")
+            if isinstance(venue_funds, dict) and any(
+                venue_funds.get(k) is not None for k in ("available", "used", "total")
+            ):
+                funds = {
+                    "available": venue_funds.get("available"),
+                    "used": venue_funds.get("used"),
+                    "equity": venue_funds.get("total"),
+                }
+        has_venue_numbers = running or (view is not None and view.get("connected") and bool(funds))
+        return {
+            "source": "broker" if has_venue_numbers and funds else "configured",
+            "broker_capital": _as_float(funds.get("equity")) if has_venue_numbers else None,
+            "available_margin": _as_float(funds.get("available")) if has_venue_numbers else None,
+            "used_margin": _as_float(funds.get("used")) if has_venue_numbers else None,
+            "configured_capital": _as_float(self._config.capital),
+        }
+
+    def _readiness_gates(
+        self, snap: dict[str, Any], view: dict[str, Any], quotes: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Nine static readiness rows, idle included (never an empty panel).
+
+        Every row reuses the same checks as START validation — the checklist
+        and the blockers can never disagree. A row is READY only on a
+        positive fact; anything else names its reason.
+        """
+        gates: list[dict[str, Any]] = []
+        display = str(view.get("display") or view.get("id") or "")
+        if view.get("connected"):
+            account = f" (ACC: {view['account_id']})" if view.get("account_id") else ""
+            gates.append(
+                {
+                    "name": "Broker Connected",
+                    "status": "READY",
+                    "reason": f"{display} connected{account}",
+                }
+            )
+        elif view.get("id"):
+            gates.append(
+                {
+                    "name": "Broker Connected",
+                    "status": "NOT READY",
+                    "reason": view.get("reason")
+                    or f"{display} not authenticated — open SYSTEM → BROKERS",
+                }
+            )
+        else:
+            gates.append(
+                {
+                    "name": "Broker Connected",
+                    "status": "NOT READY",
+                    "reason": "no live broker selected (configure in SYSTEM → BROKERS)",
+                }
+            )
+        if view.get("configured"):
+            gates.append(
+                {
+                    "name": "Credentials Valid",
+                    "status": "READY",
+                    "reason": "credentials stored",
+                }
+            )
+        else:
+            gates.append(
+                {
+                    "name": "Credentials Valid",
+                    "status": "NOT READY",
+                    "reason": "broker not configured",
+                }
+            )
+        if view.get("account_id"):
+            gates.append(
+                {
+                    "name": "Account Confirmed",
+                    "status": "READY",
+                    "reason": f"account {view['account_id']} confirmed",
+                }
+            )
+        else:
+            gates.append(
+                {
+                    "name": "Account Confirmed",
+                    "status": "NOT READY",
+                    "reason": "no account reported by the venue",
+                }
+            )
+        if not quotes:
+            gates.append(
+                {
+                    "name": "Market Data Streaming",
+                    "status": "NOT READY",
+                    "reason": "no symbols in universe",
+                }
+            )
+        else:
+            available = sum(1 for q in quotes if q.get("status") == "AVAILABLE")
+            missing = sum(1 for q in quotes if q.get("status") == "NOT FOUND")
+            nodata = len(quotes) - available - missing
+            if not missing and not nodata:
+                gates.append(
+                    {
+                        "name": "Market Data Streaming",
+                        "status": "READY",
+                        "reason": f"{available} symbols with quotes",
+                    }
+                )
+            else:
+                gates.append(
+                    {
+                        "name": "Market Data Streaming",
+                        "status": "NOT READY",
+                        "reason": (
+                            f"{available} available, {missing} not found, {nodata} without data"
+                        ),
+                    }
+                )
+        strategy_state = snap.get("strategy") or {}
+        strat_name = str(strategy_state.get("id", "") or "")
+        strat_ok, strat_reason = self._strategy_gate_check(strat_name)
+        gates.append(
+            {
+                "name": "Strategy Ready",
+                "status": "READY" if strat_ok else "NOT READY",
+                "reason": strat_reason,
+            }
+        )
+        risk_status = str((snap.get("risk") or {}).get("status", ""))
+        if risk_status == "READY":
+            gates.append(
+                {
+                    "name": "Risk Engine Ready",
+                    "status": "READY",
+                    "reason": f"max {self._config.quantity:g} per order",
+                }
+            )
+        else:
+            gates.append(
+                {
+                    "name": "Risk Engine Ready",
+                    "status": "BLOCKED" if risk_status == "HALTED" else "NOT READY",
+                    "reason": f"risk engine {risk_status or 'unknown'}",
+                }
+            )
+        recon = snap.get("reconciliation") or {}
+        recon_status = str(recon.get("status", "") or "")
+        if recon_status in ("CLEAN", "SYNCED"):
+            gates.append(
+                {
+                    "name": "Reconciliation Synced",
+                    "status": "READY",
+                    "reason": (
+                        f"positions: {recon.get('positions', 0)} | orders: {recon.get('orders', 0)}"
+                    ),
+                }
+            )
+        elif recon_status in ("MISMATCH", "BLOCKED"):
+            gates.append(
+                {
+                    "name": "Reconciliation Synced",
+                    "status": "BLOCKED",
+                    "reason": f"venue mismatch: {recon.get('mismatches', '')}",
+                }
+            )
+        else:
+            gates.append(
+                {
+                    "name": "Reconciliation Synced",
+                    "status": "NOT CONFIGURED",
+                    "reason": "no session to reconcile",
+                }
+            )
+        gates.append(
+            {
+                "name": f"Environment ({self._config.mode})",
+                "status": "READY",
+                "reason": f"{self._config.mode} mode selected",
+            }
+        )
+        if self._config.mode != "LIVE":
+            gates.append(
+                {
+                    "name": "Arming",
+                    "status": "NOT READY",
+                    "reason": "arming applies to LIVE only",
+                }
+            )
+        elif self._status == "RUNNING":
+            gates.append(
+                {
+                    "name": "Arming",
+                    "status": "READY",
+                    "reason": "sessions armed and running",
+                }
+            )
+        else:
+            gates.append(
+                {
+                    "name": "Arming",
+                    "status": "NOT READY",
+                    "reason": "DISARMED — arm before START",
+                }
+            )
+        return gates
+
+    def _strategy_gate_check(self, name: str) -> tuple[bool, str]:
+        """Strategy registry truth for the checklist row (no invention)."""
+        if not name:
+            return False, "no strategy selected"
+        try:
+            from strategy.registry import get_strategy_registry
+
+            reg = get_strategy_registry()
+            if not reg.contains(name):
+                return False, f"strategy not found: {name}"
+            defn = reg.get(name)
+            record = None
+            if defn.source_code:
+                record = StrategyRecord(
+                    id=defn.id,
+                    name=defn.name,
+                    code=defn.source_code,
+                    created_at="",
+                    updated_at="",
+                    version=defn.version,
+                )
+            if record is None:
+                record = load_strategy_record(name, self._strategy_dir)
+            if record is None:
+                return False, f"strategy not found: {name}"
+            self._compiled(record)
+        except Exception as exc:
+            return False, f"strategy not ready: {exc}"
+        timeframe = str(getattr(defn, "timeframe", "") or "")
+        if timeframe:
+            return True, f"{name} ready — {timeframe}"
+        return True, f"{name} ready"
+
     def _setup_timeframes(self) -> tuple[str, ...]:
         if not self._config.symbols:
             return ()
@@ -1089,24 +1826,62 @@ class LiveTradingService:
 
     def _restore_config(self) -> None:
         data = self._store.load()
+        # Activity history survives restarts (bounded): the stream opens
+        # with the real session log instead of an empty page.
+        stored = data.get("activity", [])
+        if isinstance(stored, list):
+            for entry in stored[-100:]:
+                if not isinstance(entry, dict) or not entry.get("event"):
+                    continue
+                self._activity.append(
+                    {
+                        "timestamp": str(entry.get("timestamp", "")),
+                        "strategy": str(entry.get("strategy", "")),
+                        "symbol": str(entry.get("symbol", "")),
+                        "event": str(entry.get("event", "")),
+                        "status": str(entry.get("status", "info")),
+                        "category": str(entry.get("category", ""))
+                        or _category_for_event(str(entry.get("event", ""))),
+                    }
+                )
         config = data.get("config", {})
-        if not isinstance(config, dict):
-            return
-        try:
-            quantity = self._strict_positive(config.get("quantity", 1.0), 1.0)
-            capital = self._strict_positive(config.get("capital", 1_000_000.0), 1_000_000.0)
-            self._config = LiveTradeConfig(
-                strategy_name=str(config.get("strategy_name", "")),
-                symbols=tuple(config.get("symbols", ())),
-                timeframe=str(config.get("timeframe", "")),
-                mode=str(config.get("mode", "PAPER")),
-                quantity=quantity,
-                capital=capital,
-            )
-        except (TypeError, ValueError):
+        if isinstance(config, dict) and config:
+            try:
+                quantity = self._strict_positive(config.get("quantity", 1.0), 1.0)
+                capital = self._strict_positive(config.get("capital", 1_000_000.0), 1_000_000.0)
+                self._config = LiveTradeConfig(
+                    strategy_name=str(config.get("strategy_name", "")),
+                    symbols=tuple(config.get("symbols", ())),
+                    timeframe=str(config.get("timeframe", "")),
+                    mode=str(config.get("mode", "PAPER")),
+                    quantity=quantity,
+                    capital=capital,
+                )
+            except (TypeError, ValueError):
+                self._config = LiveTradeConfig()
+        else:
             self._config = LiveTradeConfig()
         if self._config.mode not in ("PAPER", "LIVE"):
             self._config.mode = "PAPER"
+
+        # Strategy Registry authority default: if not configured, default to OBR C1C4
+        try:
+            from strategy.registry import get_strategy_registry
+
+            reg = get_strategy_registry()
+            if (
+                not self._config.strategy_name or not reg.contains(self._config.strategy_name)
+            ) and reg.contains("OBR C1C4"):
+                self._config.strategy_name = "OBR C1C4"
+            if self._config.strategy_name and reg.contains(self._config.strategy_name):
+                defn = reg.get(self._config.strategy_name)
+                if not self._config.symbols and defn.symbols:
+                    self._config.symbols = defn.symbols
+                if not self._config.timeframe and defn.timeframe:
+                    self._config.timeframe = defn.timeframe
+        except Exception:
+            pass
+
         # Restored config NEVER auto-starts (real-money safety + paper hygiene).
         self._status = "STOPPED"
 

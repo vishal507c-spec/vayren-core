@@ -100,6 +100,18 @@ def test_unauthorized_register_writer_fails() -> None:
     assert "unauthorized-registry-writer" in _rule_ids(check_registries(files))
 
 
+def test_builtin_venue_seeding_passes() -> None:
+    # Built-in paper/sandbox seeding is canonical seeding, not a hijack.
+    files = _full_registries({"src/execution/broker/factory.py": "registry.register(record)\n"})
+    assert "unauthorized-registry-writer" not in _rule_ids(check_registries(files))
+
+
+def test_strategy_registry_holder_passes() -> None:
+    # One holder per domain: venues in broker/registry.py, strategies here.
+    files = _full_registries({STRAT_REG: "_GLOBAL_REGISTRY = None\n"})
+    assert "shadow-registry-map" not in _rule_ids(check_registries(files))
+
+
 def test_registry_constructed_outside_holder_fails() -> None:
     files = _full_registries({"src/app/x.py": "r = BrokerRegistry()\n"})
     assert "duplicate-registry-instance" in _rule_ids(check_registries(files))
@@ -141,6 +153,19 @@ def test_function_local_constant_is_not_a_table_authority() -> None:
         {
             "src/execution/models/order_state.py": (
                 "def build():\n    TRANSITIONS = {}\n    return TRANSITIONS\n"
+            )
+        }
+    )
+    assert "duplicate-table-authority" not in _rule_ids(check_authorities(files))
+
+
+def test_ffi_projected_table_is_not_a_restatement() -> None:
+    # The sanctioned read-through shape: a call result, not a literal.
+    files = _full_authorities(
+        {
+            "src/execution/native_order_state.py": (
+                "TRANSITIONS = _transition_table()\n"
+                "TERMINAL_STATES = frozenset(_terminal_states())\n"
             )
         }
     )
