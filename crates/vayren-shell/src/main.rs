@@ -367,9 +367,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let tx = tx.clone();
             std::thread::spawn(move || {
                 let progress_tx = tx.clone();
-                let data = PythonBackend::lock_send_streaming(&backend, command, move |event| {
-                    let _ = progress_tx.send(FetchResult::LabProgress(id, event));
-                });
+                let error_tx = tx.clone();
+                let data = PythonBackend::lock_send_streaming(
+                    &backend,
+                    command,
+                    move |event| {
+                        let _ = progress_tx.send(FetchResult::LabProgress(id, event));
+                    },
+                    move |message| {
+                        eprintln!("Run progress without data ({message})");
+                        let _ = error_tx.send(FetchResult::LabProgress(
+                            id,
+                            serde_json::json!({"stage": "failed", "error": message}),
+                        ));
+                    },
+                );
                 let payload = match data {
                     Ok(BackendResponse::LabSnapshot { data })
                     | Ok(BackendResponse::MarketSnapshot { data }) => Some(data),
@@ -602,6 +614,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut last_select: u64 = 0;
         let mut last_run: u64 = 0;
         let mut last_coverage: u64 = 0;
+        // Dropped stale progress events (seq-guard): a superseded run's late
+        // event must never overwrite the current run's facts.
+        let mut progress_dropped: u64 = 0;
+        let run_seq = Arc::clone(&lab_run_seq);
         fetch_timer.start(
             slint::TimerMode::Repeated,
             std::time::Duration::from_millis(50),
@@ -675,6 +691,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let mut latest_lab_run: Option<(u64, Option<serde_json::Value>)> = None;
                 let mut latest_lab_coverage: Option<(u64, Option<serde_json::Value>)> = None;
                 let mut latest_system: Option<Option<serde_json::Value>> = None;
+                // Latest-wins coalesce: one tick applies at most ONE progress
+                // event (the newest in this batch) instead of repainting per
+                // arrival, so a burst never floods the UI thread.
+                let mut latest_progress: Option<(u64, serde_json::Value)> = None;
 
                 for result in fetch_rx.try_iter() {
                     match result {
@@ -714,19 +734,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 latest_lab_coverage = Some((id, data));
                             }
                         }
-                        // Progress is applied as it arrives: throttled by the
-                        // backend's own 100ms publish, so the UI thread is
-                        // never flooded and the panel still tracks reality.
-                        // Latest-wins per run: an event from a run older than
-                        // the one already on screen belongs to a backtest the
-                        // user has moved on from, so it is dropped rather than
-                        // overwriting current facts.
+                        // Progress is coalesced below: keep only the latest per
+                        // tick batch. Seq-guard: an event whose run id is not
+                        // the currently expected run is stale — drop and count
+                        // it instead of overwriting current facts.
                         FetchResult::LabProgress(id, event) => {
-                            if id < last_run {
+                            let expected = run_seq.load(Ordering::SeqCst);
+                            if id != expected {
+                                progress_dropped += 1;
+                                eprintln!(
+                                    "Lab progress: dropped stale event for run {id} (expected {expected}, {progress_dropped} dropped total)"
+                                );
                                 continue;
                             }
-                            lab_state.borrow_mut().apply_progress(&event);
-                            shell::apply_lab(&ui, &lab_state.borrow());
+                            latest_progress = Some((id, event));
                         }
                         // No sequence: every system answer supersedes the
                         // previous one (it IS the latest backend truth), so
@@ -780,13 +801,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     match data {
                         Some(data) => {
                             lab::apply_snapshot_json(&mut lab_state.borrow_mut(), &data);
+                            // Success retires the panel; failure/cancel keeps
+                            // the evidence on screen instead of wiping it.
+                            lab_state.borrow_mut().clear_progress();
                         }
                         None => lab_state.borrow_mut().fail_run(),
                     }
-                    // The run is over: the panel retires and the results take
-                    // its place. A cancelled run is NOT a complete run, and
-                    // the snapshot says so.
-                    lab_state.borrow_mut().clear_progress();
+                    shell::apply_lab(&ui, &lab_state.borrow());
+                }
+                // One coalesced progress apply per tick (latest wins).
+                if let Some((_, event)) = latest_progress {
+                    lab_state.borrow_mut().apply_progress(&event);
                     shell::apply_lab(&ui, &lab_state.borrow());
                 }
                 if let Some((id, data)) = latest_lab_coverage {

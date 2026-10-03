@@ -427,6 +427,7 @@ impl PythonBackend {
         &self,
         command: BackendCommand,
         mut on_progress: impl FnMut(serde_json::Value),
+        mut on_error: impl FnMut(String),
     ) -> BridgeResult<BackendResponse> {
         let json =
             serde_json::to_string(&command).map_err(|e| bridge_error(format!("encode: {e}")))?;
@@ -444,16 +445,20 @@ impl PythonBackend {
             let line = read_line_within(&self.stdout, STREAM_IDLE_TIMEOUT, || {
                 self.kill_child("stream idle timeout")
             })?;
-            let value: serde_json::Value =
-                serde_json::from_str(&line).map_err(|e| bridge_error(format!("decode: {e}")))?;
-            if value.get("type").and_then(|t| t.as_str()) == Some("lab_progress") {
-                if let Some(data) = value.get("data") {
-                    on_progress(data.clone());
+            // Single parse per line: progress lines carry `"lab_progress"`,
+            // terminal lines parse straight into the response enum — the old
+            // `from_str`→`Value` + `from_value`→`Response` double parse is gone.
+            if line.contains("\"lab_progress\"") {
+                let value: serde_json::Value = serde_json::from_str(&line)
+                    .map_err(|e| bridge_error(format!("decode: {e}")))?;
+                match value.get("data") {
+                    Some(data) => on_progress(data.clone()),
+                    None => on_error("lab_progress without data".to_string()),
                 }
                 continue;
             }
             let response: BackendResponse =
-                serde_json::from_value(value).map_err(|e| bridge_error(format!("decode: {e}")))?;
+                serde_json::from_str(&line).map_err(|e| bridge_error(format!("decode: {e}")))?;
             return Ok(response);
         }
     }
@@ -485,16 +490,69 @@ impl PythonBackend {
     }
 
     /// Streaming round-trip through a shared handle, forwarding every
-    /// intermediate progress event to `on_progress`.
+    /// intermediate progress event to `on_progress` and malformed progress to
+    /// `on_error`. The outer handle lock is held only to clone the pipe
+    /// handles — never across the line-read loop — so a concurrent cancel can
+    /// still send while a run streams.
     pub fn lock_send_streaming(
         backend: &std::sync::Mutex<PythonBackend>,
         command: BackendCommand,
         on_progress: impl FnMut(serde_json::Value),
+        on_error: impl FnMut(String),
     ) -> BridgeResult<BackendResponse> {
-        let guard = backend
-            .lock()
-            .map_err(|e| bridge_error(format!("backend lock: {e}")))?;
-        guard.send_command_streaming(command, on_progress)
+        // Clone the pipe handles under a brief lock, then stream lock-free.
+        let (stdin, stdout, process) = {
+            let guard = backend
+                .lock()
+                .map_err(|e| bridge_error(format!("backend lock: {e}")))?;
+            (
+                Arc::clone(&guard.stdin),
+                Arc::clone(&guard.stdout),
+                Arc::clone(&guard.process),
+            )
+        };
+        let json =
+            serde_json::to_string(&command).map_err(|e| bridge_error(format!("encode: {e}")))?;
+        {
+            let mut stdin = stdin
+                .lock()
+                .map_err(|e| bridge_error(format!("stdin lock: {e}")))?;
+            writeln!(stdin, "{json}").map_err(|e| bridge_error(format!("write: {e}")))?;
+            stdin
+                .flush()
+                .map_err(|e| bridge_error(format!("flush: {e}")))?;
+        }
+        Self::stream_lines(&stdout, &process, on_progress, on_error)
+    }
+
+    /// Line-read loop over already-cloned pipe handles (outer lock released).
+    fn stream_lines(
+        stdout: &Arc<Mutex<BufReader<ChildStdout>>>,
+        process: &Arc<Mutex<Child>>,
+        mut on_progress: impl FnMut(serde_json::Value),
+        mut on_error: impl FnMut(String),
+    ) -> BridgeResult<BackendResponse> {
+        loop {
+            let process_kill = Arc::clone(process);
+            let line = read_line_within(stdout, STREAM_IDLE_TIMEOUT, move || {
+                if let Ok(mut child) = process_kill.lock() {
+                    let _ = child.kill();
+                }
+                eprintln!("python bridge: killed backend (stream idle timeout)");
+            })?;
+            if line.contains("\"lab_progress\"") {
+                let value: serde_json::Value = serde_json::from_str(&line)
+                    .map_err(|e| bridge_error(format!("decode: {e}")))?;
+                match value.get("data") {
+                    Some(data) => on_progress(data.clone()),
+                    None => on_error("lab_progress without data".to_string()),
+                }
+                continue;
+            }
+            let response: BackendResponse =
+                serde_json::from_str(&line).map_err(|e| bridge_error(format!("decode: {e}")))?;
+            return Ok(response);
+        }
     }
 
     /// Shut the backend down gracefully, then FORCE it down if it hangs.

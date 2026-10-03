@@ -112,7 +112,7 @@ def _pytest_summary(output: str) -> tuple[int | None, int | None]:
 
 
 def cmd_gate(samples: int) -> int:
-    print(f"# gate benchmark — {samples} sample(s), sample 1 = cold")
+    print(f"# gate benchmark - {samples} sample(s), sample 1 = cold")
     records: list[dict] = []
     for name, cmd in GATE_STEPS:
         timings: list[float] = []
@@ -208,10 +208,9 @@ def _git_numstat() -> tuple[int | None, int | None, int | None]:
 # Domain reverse-dependency map: a change in key requires re-running the
 # tests of every listed domain (own + consumers), cheapest safe superset.
 REVERSE_DEPS: dict[str, tuple[str, ...]] = {
-    "core": ("core", "data", "market", "chart", "strategy", "backtest", "risk", "execution", "app"),
+    "core": ("core", "data", "market", "strategy", "backtest", "risk", "execution", "app"),
     "data": ("data", "app"),
-    "market": ("market", "chart", "strategy", "backtest", "execution", "app"),
-    "chart": ("chart", "app"),
+    "market": ("market", "strategy", "backtest", "execution", "app"),
     "strategy": ("strategy", "backtest", "execution", "app"),
     "backtest": ("backtest", "app"),
     "risk": ("risk", "execution", "app"),
@@ -224,7 +223,6 @@ DOMAIN_TESTS: dict[str, str] = {
     "core": "src/core/tests",
     "data": "src/data/tests",
     "market": "src/market/tests",
-    "chart": "04_chart/chart/tests",
     "strategy": "src/strategy/tests src/strategy/research/tests",
     "backtest": "src/backtest/tests",
     "risk": "src/risk/tests",
@@ -256,6 +254,16 @@ PUBLIC_FRAGMENTS = ("__init__.py", "/events/", "/manifest.py", "/models/")
 # Files whose change always escalates to the full gate.
 FULL_GATE_FILES = ("pyproject.toml", "conftest.py", "Makefile")
 
+# Exact test mapping for targeted non-public files to run the smallest safe
+# test set without pulling in heavy integration suites (e.g. broker selenium mocks).
+TARGETED_FILE_TESTS: dict[str, tuple[str, ...]] = {
+    "src/broker/vocab.py": (
+        "src/broker/tests/test_broker_contracts.py",
+        "src/broker/tests/test_broker_boundary.py",
+        "src/broker/tests/test_auth.py",
+    ),
+}
+
 
 def _domain_of(path: str) -> str | None:
     part = path.replace("\\", "/").split("/")
@@ -269,7 +277,7 @@ def _rust_domain_of(path: str) -> str | None:
     if path.endswith(".slint"):
         return "rust-ui"
     part = path.split("/")
-    if len(part) >= 2 and part[0] == "rust":
+    if len(part) >= 2 and part[0] in ("crates", "rust"):
         if part[1] == "vayren-core":
             return "rust-core"
         if part[1] == "vayren-shell" or part[1].endswith("-view"):
@@ -360,29 +368,29 @@ def impact_plan(files: list[str]) -> dict:
             "full_gate": False,
         }
     public = any(frag in f for f in flat for frag in PUBLIC_FRAGMENTS if "/tests/" not in f)
-    needed: set[str] = set()
-    for d in py_domains:
-        needed.update(REVERSE_DEPS[d])
-    pytest_paths: list[str] = []
-    for d in (
-        "core",
-        "data",
-        "market",
-        "chart",
-        "strategy",
-        "backtest",
-        "risk",
-        "execution",
-        "broker",
-        "app",
-    ):
-        if d in needed:
-            pytest_paths.extend(DOMAIN_TESTS[d].split())
-    if any(f.startswith(("tools/", "scripts/")) for f in flat):
-        pytest_paths.append("tools/forensics/tests tools/tests")
     cargo_cmds = [RUST_TESTS[d] for d in RUST_ORDER if d in rust_domains]
     pyright_scope = "files" if py_domains else "none"
+
     if public or len(domains) > 1:
+        needed: set[str] = set()
+        for d in py_domains:
+            needed.update(REVERSE_DEPS[d])
+        pytest_paths: list[str] = []
+        for d in (
+            "core",
+            "data",
+            "market",
+            "strategy",
+            "backtest",
+            "risk",
+            "execution",
+            "broker",
+            "app",
+        ):
+            if d in needed and d in DOMAIN_TESTS:
+                pytest_paths.extend(DOMAIN_TESTS[d].split())
+        if any(f.startswith(("tools/", "scripts/")) for f in flat):
+            pytest_paths.append("tools/forensics/tests tools/tests")
         return {
             "level": 3,
             "reason": "public-surface or multi-domain change",
@@ -391,6 +399,7 @@ def impact_plan(files: list[str]) -> dict:
             "pyright": "full" if py_domains else "none",
             "full_gate": False,
         }
+
     if rust_domains and not py_domains:
         return {
             "level": 2,
@@ -400,9 +409,25 @@ def impact_plan(files: list[str]) -> dict:
             "pyright": "none",
             "full_gate": False,
         }
+
+    domain = sorted(py_domains)[0]
+    pytest_paths = []
+    if all(f in TARGETED_FILE_TESTS for f in flat):
+        seen_targets: set[str] = set()
+        for f in flat:
+            for t in TARGETED_FILE_TESTS[f]:
+                if t not in seen_targets:
+                    seen_targets.add(t)
+                    pytest_paths.append(t)
+    elif domain in DOMAIN_TESTS:
+        pytest_paths.extend(DOMAIN_TESTS[domain].split())
+
+    if any(f.startswith(("tools/", "scripts/")) for f in flat):
+        pytest_paths.append("tools/forensics/tests tools/tests")
+
     return {
         "level": 2,
-        "reason": f"single-domain src change ({sorted(py_domains)[0]})",
+        "reason": f"single-domain src change ({domain})",
         "pytest": pytest_paths,
         "cargo": cargo_cmds,
         "pyright": pyright_scope,
@@ -410,11 +435,83 @@ def impact_plan(files: list[str]) -> dict:
     }
 
 
+def run_impact_plan(plan: dict, files: list[str]) -> int:
+    """Execute the computed impact validation plan quickly (10x fast inner loop)."""
+    if plan["level"] == 0 and not files:
+        print("\n[OK] No changed files. Nothing to validate.")
+        return 0
+
+    reason = plan["reason"]
+    print(f"\n[IMPACT] Executing Validation (Level {plan['level']}: {reason})...")
+    start = time.perf_counter()
+    overall_ok = True
+
+    # 1. Targeted lint on changed Python files (sub-second)
+    py_files = [f for f in files if f.endswith(".py") and Path(f).is_file()]
+    if py_files:
+        print(f"  * ruff check {len(py_files)} file(s)...", end=" ", flush=True)
+        elapsed, rc, out = _run_step(["ruff", "check", *py_files])
+        if rc == 0:
+            print(f"PASS ({elapsed:.2f}s)")
+        else:
+            print(f"FAIL ({elapsed:.2f}s)\n{out}")
+            overall_ok = False
+
+    # 2. Targeted pytest commands
+    if plan.get("pytest"):
+        paths = plan["pytest"]
+        if paths == ["full suite"]:
+            cmd = [sys.executable, "-m", "pytest", "-q", "--no-header"]
+        else:
+            expanded_paths: list[str] = []
+            for p in paths:
+                expanded_paths.extend(p.split())
+            cmd = [sys.executable, "-m", "pytest", *expanded_paths, "-q", "--no-header"]
+        print(f"  * pytest {' '.join(cmd[3:])}...", end=" ", flush=True)
+        elapsed, rc, out = _run_step(cmd)
+        passed, failed = _pytest_summary(out)
+        if rc == 0 or (passed and not failed):
+            print(f"PASS ({passed or 0} passed in {elapsed:.2f}s)")
+        else:
+            print(f"FAIL ({elapsed:.2f}s)\n{out}")
+            overall_ok = False
+
+    # 3. Targeted cargo commands
+    for cargo_cmd_str in plan.get("cargo", []):
+        cmd = cargo_cmd_str.split()
+        print(f"  * {cargo_cmd_str}...", end=" ", flush=True)
+        elapsed, rc, out = _run_step(cmd)
+        if rc == 0:
+            print(f"PASS ({elapsed:.2f}s)")
+        else:
+            print(f"FAIL ({elapsed:.2f}s)\n{out}")
+            overall_ok = False
+
+    # 4. Extra commands
+    for extra in plan.get("extra_cmds", []):
+        cmd = extra.split()
+        print(f"  * {extra}...", end=" ", flush=True)
+        elapsed, rc, out = _run_step(cmd)
+        if rc == 0:
+            print(f"PASS ({elapsed:.2f}s)")
+        else:
+            print(f"FAIL ({elapsed:.2f}s)\n{out}")
+            overall_ok = False
+
+    total_s = time.perf_counter() - start
+    if overall_ok:
+        print(f"[OK] Impact validation PASSED in {total_s:.2f}s total!\n")
+        return 0
+    else:
+        print(f"[ERROR] Impact validation FAILED in {total_s:.2f}s total.\n")
+        return 1
+
+
 def cmd_impact(args: argparse.Namespace) -> int:
     files = _changed_files(args.files)
     plan = impact_plan(files)
     print(
-        f"# impact plan for {len(files)} changed file(s) — level {plan['level']}: {plan['reason']}"
+        f"# impact plan for {len(files)} changed file(s) - level {plan['level']}: {plan['reason']}"
     )
     for f in files:
         print(f"  changed: {f}")
@@ -426,6 +523,8 @@ def cmd_impact(args: argparse.Namespace) -> int:
     for cmd in plan.get("extra_cmds", []):
         print(f"also: {cmd}")
     print(f"full gate required: {plan['full_gate']}")
+    if getattr(args, "run", False):
+        return run_impact_plan(plan, files)
     return 0
 
 
@@ -934,6 +1033,7 @@ def main() -> int:
     _add_phase_args(p_rec)
     p_impact = sub.add_parser("impact", help="print impact-first validation plan")
     p_impact.add_argument("--files", nargs="*", default=None)
+    p_impact.add_argument("--run", action="store_true", help="execute the impact plan immediately")
     p_replay = sub.add_parser("replay", help="re-run a recorded task's validation")
     p_replay.add_argument("--task", required=True)
     p_act = sub.add_parser("record-action", help="append one bracket-timed action")

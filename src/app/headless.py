@@ -16,6 +16,7 @@ import queue
 import sys
 import threading
 import time
+from collections import deque
 from collections.abc import Callable
 from contextlib import suppress
 from logging import getLogger
@@ -644,6 +645,7 @@ def _portfolio_snapshot(data_dir: str, strategy_dir: str) -> dict:
 
 _LAB_ROWS_CACHE: dict[str, tuple[tuple, list[dict]]] = {}
 _DESCRIBE_CACHE: dict[tuple, dict] = {}
+_LAST_SENT_CODE: dict[tuple, str] = {}
 
 
 def _library_signature(strategy_dir: str) -> tuple:
@@ -853,7 +855,8 @@ def _lab_universe(repository: Any) -> tuple[list[str], str]:
 # keeps pumping the same inbox: cancel sets the flag, anything else is parked
 # in _LAB_DEFERRED and re-queued in order when the run finishes.
 _LAB_CANCEL = threading.Event()
-_LAB_DEFERRED: list[dict] = []
+_LAB_DEFERRED: deque[dict] = deque(maxlen=200)
+_LAB_DEFERRED_DROPPED = 0
 _LAB_INBOX: queue.Queue = queue.Queue()
 _LAB_READER_STARTED = False
 _LAB_EOF: Any = object()
@@ -933,13 +936,21 @@ def _pump_while_running(done: threading.Event) -> None:
             _LAB_CANCEL.set()
             continue
         if isinstance(cmd, dict):
+            global _LAB_DEFERRED_DROPPED
+            maxlen = _LAB_DEFERRED.maxlen
+            if maxlen is not None and len(_LAB_DEFERRED) >= maxlen:
+                _LAB_DEFERRED_DROPPED += 1
+                logger.warning(
+                    "lab deferred queue full (200); dropping oldest (%d dropped)",
+                    _LAB_DEFERRED_DROPPED,
+                )
             _LAB_DEFERRED.append(cmd)
 
 
 def _requeue_deferred() -> None:
     """Return parked commands to the inbox in arrival order."""
     while _LAB_DEFERRED:
-        _LAB_INBOX.put(json.dumps(_LAB_DEFERRED.pop(0)))
+        _LAB_INBOX.put(json.dumps(_LAB_DEFERRED.popleft()))
 
 
 # Coverage probes the ANCHOR symbol's bar count plus the selected symbols'
@@ -1084,8 +1095,14 @@ def _lab_workspace(
     try:
         capital_value = float(capital_raw)
     except (TypeError, ValueError):
-        capital_value = _LAB_DEFAULT_CAPITAL
-    if capital_value != capital_value or capital_value == float("inf"):  # NaN/inf
+        capital_value = float("nan")
+    capital_error = ""
+    if (
+        capital_value != capital_value
+        or capital_value in (float("inf"), float("-inf"))
+        or capital_value <= 0
+    ):
+        capital_error = f"Invalid capital {capital_raw!r} — must be a positive number"
         capital_value = _LAB_DEFAULT_CAPITAL
     strat_dir = strat_def.direction.lower() if (strat_def and strat_def.direction) else ""
     default_mode = "sell" if strat_dir == "short" else "buy"
@@ -1097,6 +1114,8 @@ def _lab_workspace(
     # current selection (which would collapse MAX onto whatever was picked).
     data_bounds: dict = {"first": first_date, "last": last_date} if first_date and last_date else {}
     notes = [universe_error] if universe_error else []
+    if capital_error:
+        notes.append(capital_error)
     if dropped:
         notes.append(f"Unknown symbols ignored: {', '.join(dropped)}")
     if asked_timeframe and asked_timeframe != timeframe:
@@ -1155,9 +1174,16 @@ def _lab_workspace(
         _DESCRIBE_CACHE[describe_key] = detail
         if len(_DESCRIBE_CACHE) > 32:
             _DESCRIBE_CACHE.pop(next(iter(_DESCRIBE_CACHE)))
-    snapshot["code"] = (
-        strat_def.source_code if (strat_def and strat_def.source_code) else detail.get("code", "")
-    )
+    # Source ships only when it changed: the first snapshot populates the
+    # editor, later polls omit the key and Rust keeps its buffer — every
+    # poll stays a small JSON line but the editor never goes blank.
+    code_text = str(detail.get("code", ""))
+    code_key = (selected, strategy_dir, describe_key[2])
+    if _LAST_SENT_CODE.get(code_key) != code_text:
+        _LAST_SENT_CODE[code_key] = code_text
+        if len(_LAST_SENT_CODE) > 32:
+            _LAST_SENT_CODE.pop(next(iter(_LAST_SENT_CODE)))
+        snapshot["code"] = code_text
     snapshot["params"] = detail["params"]
     snapshot["rankby"] = {
         "labels": ["Net P&L", "Return %", "Trades", "Win %", "Profit Factor", "Max DD"],
@@ -1215,13 +1241,22 @@ def _lab_run(
         workspace["run"] = "failed"
         workspace["cfg_edit"]["config_error"] = "NO STRATEGY SELECTED"
         return workspace
-    symbols = command.get("symbols") or []
-    if isinstance(symbols, str):
-        symbols = [s.strip() for s in symbols.split(",") if s.strip()]
+    raw_symbols = command.get("symbols") or []
+    if isinstance(raw_symbols, str):
+        raw_symbols = [s.strip() for s in raw_symbols.split(",") if s.strip()]
+    seen: set[str] = set()
+    symbols: list[str] = []
+    for entry in raw_symbols:
+        text = str(entry).strip().upper()
+        if text and text not in seen:
+            seen.add(text)
+            symbols.append(text)
+    # No silent fallback to the workspace universe: an explicitly empty
+    # selection fails actionably instead of running unasked symbols.
     if not symbols:
-        csv = workspace.get("cfg_edit", {}).get("universe_csv", "")
-        symbols = [s.strip() for s in csv.split(",") if s.strip()]
-    symbols = [str(s).strip().upper() for s in symbols if str(s).strip()]
+        workspace["run"] = "failed"
+        workspace["cfg_edit"]["config_error"] = "No universe: select at least one symbol"
+        return workspace
     timeframe = str(command.get("timeframe") or "").strip() or None
     if timeframe is None:
         timeframe = workspace.get("cfg_edit", {}).get("timeframe") or None
@@ -1231,12 +1266,19 @@ def _lab_run(
         start = workspace.get("cfg_edit", {}).get("dates_start") or None
     if end is None:
         end = workspace.get("cfg_edit", {}).get("dates_end") or None
+    capital_raw = command.get("capital", _LAB_DEFAULT_CAPITAL)
     try:
-        capital = float(command.get("capital", _LAB_DEFAULT_CAPITAL))
+        capital = float(capital_raw)
     except (TypeError, ValueError):
-        capital = _LAB_DEFAULT_CAPITAL
-    if capital != capital or capital == float("inf"):
-        capital = _LAB_DEFAULT_CAPITAL
+        workspace["run"] = "failed"
+        workspace["cfg_edit"]["config_error"] = f"Invalid capital {capital_raw!r}: must be a number"
+        return workspace
+    if capital != capital or capital in (float("inf"), float("-inf")) or capital <= 0:
+        workspace["run"] = "failed"
+        workspace["cfg_edit"]["config_error"] = (
+            f"Invalid capital {capital_raw!r}: must be a positive number"
+        )
+        return workspace
     mode = str(command.get("mode") or workspace.get("mode") or "buy").strip().lower()
     try:
         from app.progress import RunProgress
@@ -1256,8 +1298,26 @@ def _lab_run(
         workspace["cfg_edit"]["config_error"] = "lab progress channel unavailable"
         return workspace
 
+    legs: list[RunProgress] = []
+
     def _fresh_progress() -> RunProgress:
-        return RunProgress(max(1, len(symbols)), progress._emit, should_cancel)  # noqa: SLF001
+        leg = RunProgress(max(1, len(symbols)), progress._emit, should_cancel)  # noqa: SLF001
+        legs.append(leg)
+        return leg
+
+    def _forward_leg(leg: RunProgress) -> None:
+        """Fold one leg's measured facts into the outer progress."""
+        progress.completed += leg.completed
+        progress.trades += leg.trades
+        progress.bars += leg.bars
+        progress.net_pnl += leg.net_pnl
+        progress.failed.extend(s for s in leg.failed if s not in progress.failed)
+        progress.skipped.extend(s for s in leg.skipped if s not in progress.skipped)
+        if leg.cancelled:
+            progress.cancelled = True
+
+    def _legs_cancelled() -> bool:
+        return progress.cancelled or any(leg.cancelled or leg.cancel_requested() for leg in legs)
 
     try:
         if mode == "compare":
@@ -1275,7 +1335,9 @@ def _lab_run(
                 progress=_fresh_progress(),
                 should_cancel=should_cancel,
             )
-            if progress.cancel_requested():
+            _forward_leg(legs[-1])
+            if progress.cancel_requested() or _legs_cancelled():
+                progress.cancelled = True
                 workspace["results"] = None
                 workspace["run"] = "cancelled"
                 workspace["cfg_edit"]["config_error"] = (
@@ -1296,6 +1358,7 @@ def _lab_run(
                 progress=_fresh_progress(),
                 should_cancel=should_cancel,
             )
+            _forward_leg(legs[-1])
             workspace["results"] = buy_results
             workspace["buy"] = buy_results
             workspace["sell"] = sell_results
@@ -1324,7 +1387,11 @@ def _lab_run(
         return workspace
     # A cancelled run is reported as CANCELLED, never as a complete one: the
     # partial result set is not a result for the requested universe.
-    was_cancelled = isinstance(progress, RunProgress) and progress.cancelled
+    # Compare mode runs two legs on child progress objects, so a cancel that
+    # landed mid-leg lives on the leg — the outer flag alone would miss it.
+    was_cancelled = isinstance(progress, RunProgress) and (
+        progress.cancelled or _legs_cancelled() if mode == "compare" else progress.cancelled
+    )
     if was_cancelled:
         workspace["results"] = None
         workspace.pop("buy", None)
@@ -1613,7 +1680,10 @@ def run_headless_backend(args: argparse.Namespace) -> int:
                     worker = threading.Thread(target=_run, name="lab-run", daemon=True)
                     worker.start()
                     _pump_while_running(finished)
-                    worker.join()
+                    worker.join(timeout=5.0)
+                    if worker.is_alive():
+                        logger.warning("lab run worker hung after 5s; waiting for result")
+                        worker.join()
                     _requeue_deferred()
                     if "error" in box:
                         raise box["error"]

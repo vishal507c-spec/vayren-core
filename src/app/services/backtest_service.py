@@ -132,6 +132,14 @@ def run_backtest(
     if not capital_value > 0 or capital_value == float("inf"):
         raise BacktestError("Initial capital must be positive")
     capital = capital_value
+    seen: set[str] = set()
+    clean: list[str] = []
+    for raw_symbol in symbols:
+        text = str(raw_symbol).strip().upper()
+        if text and text not in seen:
+            seen.add(text)
+            clean.append(text)
+    symbols = clean
     if not symbols:
         raise BacktestError("No universe: select at least one symbol")
     if start is not None and end is not None and start > end:
@@ -156,8 +164,22 @@ def run_backtest(
         raise BacktestError("progress must be a RunProgress or None")
     run = progress if progress is not None else RunProgress(len(symbols), None, should_cancel)
     run.set_stage("data", 0.0)
-    logic, _kind = _make_logic(strategy_name, strategy_dir)
-    warmup = max(0, int(logic.warmup()))
+    # Compile ONCE for the whole universe: per-symbol logic instances are
+    # cheap clones of this compiled unit, so a 500-symbol run pays the
+    # AST parse + exec exactly once instead of once per symbol.
+    from strategy.language.compiler import compile_strategy
+    from strategy.models.parameters import StrategyParameters as _Params
+
+    _kind, _code = _strategy_source(strategy_name, strategy_dir)
+    try:
+        _compiled = compile_strategy(_code)
+    except Exception as exc:
+        raise BacktestError(f"Strategy failed: {strategy_name}: {exc}") from exc
+    _params = _Params.from_specs(_compiled.param_specs).validated(_compiled.param_specs)
+    try:
+        warmup = max(0, int(_compiled.create_logic(_params, owner_id=strategy_name).warmup()))
+    except Exception as exc:
+        raise BacktestError(f"Strategy failed: {strategy_name}: {exc}") from exc
     want_long = direction == "buy"
     all_trades: list[dict] = []
     ranking: list[dict] = []
@@ -180,6 +202,12 @@ def run_backtest(
         run=run,
     )
 
+    # A thin symbol that cannot run must not abort the whole universe: it is
+    # recorded as failed and the loop continues in universe order, so the
+    # equity chain (capital + realised_total) keeps its deterministic order.
+    # Fail-closed for an EMPTY outcome stays: when no symbol produced a row,
+    # the first recorded reason is raised instead of returning hollow results.
+    empty_reasons: list[str] = []
     for symbol in symbols:
         if run.cancel_requested():
             break
@@ -199,16 +227,21 @@ def run_backtest(
             run.set_stage("failed", 0.0)
             raise BacktestError(str(exc)) from exc
         if len(bars) < warmup + 2:
-            run.symbol_skipped(symbol)
-            run.set_stage("failed", 0.0)
-            raise BacktestError(
+            reason = (
                 f"Insufficient data for {symbol}: {len(bars)} bars "
                 f"(strategy needs more than {warmup} warmup bars)"
             )
+            run.symbol_failed(symbol)
+            empty_reasons.append(reason)
+            continue
         run.symbol_progress("calculate", 0.0)
         try:
+            logic = _compiled.create_logic(_params, owner_id=strategy_name)
+        except Exception as exc:
+            raise BacktestError(f"Strategy failed: {strategy_name}: {exc}") from exc
+        try:
             trades = _run_symbol(
-                _make_logic(strategy_name, strategy_dir)[0],
+                logic,
                 bars,
                 symbol,
                 capital + realised_total,
@@ -227,6 +260,9 @@ def run_backtest(
         ranking.append(_rank_row(symbol, trades, capital))
         run.symbol_done(trades, len(bars), sum(t["pnl"] for t in trades))
 
+    if not ranking:
+        run.set_stage("failed", 0.0)
+        raise BacktestError(empty_reasons[0] if empty_reasons else "No symbols produced results")
     run.set_stage("aggregate", 0.0)
     ranking.sort(key=lambda row: row["net_profit"], reverse=True)
     for position, row in enumerate(ranking, start=1):
@@ -538,7 +574,7 @@ def _trade(symbol, side, entry_index, entry_time, entry_price, exit_index, exit_
         "r_multiple": closed.r_multiple,
         "bars": exit_index - entry_index,
         "reason": closed.exit_reason,
-        "winning": closed.pnl > 0,
+        "winning": closed.pnl >= 0,
     }
 
 

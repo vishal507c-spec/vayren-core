@@ -632,3 +632,33 @@ def test_verify_flags_malformed_ci_record(monkeypatch: pytest.MonkeyPatch) -> No
     print("PROBLEMS:", result["problems"])
     assert result["status"] == "FAIL"
     assert any("ci record issue" in p for p in result["problems"])
+
+
+def test_verify_flags_stale_abandoned_store(monkeypatch: pytest.MonkeyPatch) -> None:
+    _baseline_without_cargo(monkeypatch)
+    old_ts = (datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=10)).isoformat()
+    path = vayren_intel._path("history.jsonl")
+    path.write_text(
+        json.dumps({"kind": "baseline", "schema": vayren_intel.SCHEMA_BASELINE, "ts": old_ts})
+        + "\n",
+        encoding="utf-8",
+    )
+    result = vayren_intel.verify_store()
+    assert result["status"] == "FAIL"
+    assert any("history silent 10 days" in p for p in result["problems"])
+
+
+def test_heartbeat_refreshes_stale_store(monkeypatch: pytest.MonkeyPatch) -> None:
+    _baseline_without_cargo(monkeypatch)
+    old_ts = (datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=10)).isoformat()
+    path = vayren_intel._path("history.jsonl")
+    path.write_text(
+        json.dumps({"kind": "baseline", "schema": vayren_intel.SCHEMA_BASELINE, "ts": old_ts})
+        + "\n",
+        encoding="utf-8",
+    )
+    assert vayren_intel.verify_store()["status"] == "FAIL"
+    hb = vayren_intel.heartbeat()
+    assert hb["kind"] == "heartbeat"
+    result = vayren_intel.verify_store()
+    assert result["status"] == "PASS", result["problems"]

@@ -248,7 +248,8 @@ class MarketDataService:
         """Raw validated base rows ``(stamp, o, h, l, c, v)`` ascending.
 
         Skips (never crashes on): unparseable stamps, non-finite or
-        non-positive prices, high < low, duplicate stamps (last wins).
+        non-positive prices, high < low, duplicate stamps (keep-first wins,
+        later copies are counted and warned about, never silently merged).
         ``limit`` trims newest-first inside SQL (indexed tail, no full scan).
         Non-positive limits return no rows.
         """
@@ -314,6 +315,7 @@ class MarketDataService:
             con.close()
         by_stamp: dict[str, tuple[str, float, float, float, float, int]] = {}
         invalid = 0
+        duplicates = 0
         for row in raw:
             stamp_raw, o, h, lo, c, v = row[0], row[1], row[2], row[3], row[4], row[5]
             moment = _parse_stamp(stamp_raw)
@@ -342,9 +344,19 @@ class MarketDataService:
                 continue
             if end is not None and stamp[:10] > end:
                 continue
+            if stamp in by_stamp:
+                duplicates += 1
+                continue
             by_stamp[stamp] = (stamp, fo, fh, fl, fc, volume)
         if invalid:
             logger.warning("%s: skipped %d invalid OHLCV rows", symbol, invalid)
+        if duplicates:
+            logger.warning(
+                "%s: kept first of %d duplicate stamps (%d later copies ignored)",
+                symbol,
+                duplicates,
+                duplicates,
+            )
         rows = [by_stamp[key] for key in sorted(by_stamp)]
         if start is None and end is None and limit is None:
             try:
@@ -352,7 +364,7 @@ class MarketDataService:
             except OSError:
                 mtime = -1.0
             self._row_cache[symbol] = (mtime, rows)
-            if len(self._row_cache) > 8:
+            if len(self._row_cache) > 64:
                 oldest = next(iter(self._row_cache))
                 if oldest != symbol:
                     del self._row_cache[oldest]

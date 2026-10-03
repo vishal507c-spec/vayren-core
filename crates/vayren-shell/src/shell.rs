@@ -1516,8 +1516,11 @@ pub fn apply_lab(ui: &AppWindow, state: &LabState) {
     });
     // Signature of the band the UI currently shows — captured BEFORE the window
     // prop is overwritten, so the model-push guard below compares against what
-    // is really on screen.
-    let rendered_rank_signature = ui.get_lab_rank_window().signature_hi;
+    // is really on screen. Both halves are compared: hi alone collides.
+    let rendered_rank_signature = {
+        let w = ui.get_lab_rank_window();
+        (w.signature_hi, w.signature_lo)
+    };
     ui.set_lab_rank_window(RankWindow {
         total: view.rank_window.total,
         first: view.rank_window.first,
@@ -1535,7 +1538,10 @@ pub fn apply_lab(ui: &AppWindow, state: &LabState) {
     });
     // Signature of the trade band the UI currently shows — captured BEFORE the
     // window prop is overwritten, so the guard below compares against the truth.
-    let rendered_trade_signature = ui.get_lab_trade_window().signature_hi;
+    let rendered_trade_signature = {
+        let w = ui.get_lab_trade_window();
+        (w.signature_hi, w.signature_lo)
+    };
     ui.set_lab_trade_window(RankWindow {
         total: view.trade_window.total,
         first: view.trade_window.first,
@@ -1610,7 +1616,7 @@ pub fn apply_lab(ui: &AppWindow, state: &LabState) {
     // window, and an unrelated state change (a KPI, a code edit, a hover) must
     // not rebuild its model. The Rust side signs the band; an equal signature
     // means the rows on screen are already correct.
-    if rendered_rank_signature != view.rank_window.signature.0 {
+    if rendered_rank_signature != view.rank_window.signature {
         ui.set_lab_ranking(
             Rc::new(slint::VecModel::from(
                 view.ranking
@@ -1637,7 +1643,7 @@ pub fn apply_lab(ui: &AppWindow, state: &LabState) {
     // Zero full-table re-render for the blotter (`spec §3`): same signature
     // guard as the ranking grid, so a KPI change or a code edit never rebuilds
     // the trade model.
-    if rendered_trade_signature != view.trade_window.signature.0 {
+    if rendered_trade_signature != view.trade_window.signature {
         ui.set_lab_trades(
             Rc::new(slint::VecModel::from(
                 view.trades
@@ -1863,11 +1869,15 @@ impl LabRunRequest {
                 .filter(|s| !s.is_empty() && known(&s))
                 .collect();
         }
-        let timeframe = state
-            .timeframes
-            .get(state.timeframe_index.max(0) as usize)
-            .cloned()
-            .unwrap_or_default();
+        let timeframe = if state.timeframe_index < 0 {
+            String::new()
+        } else {
+            state
+                .timeframes
+                .get(state.timeframe_index as usize)
+                .cloned()
+                .unwrap_or_default()
+        };
         // Zero, negative, non-finite or unparseable capital → no request.
         // A finite positive amount is the only honest starting equity.
         let capital = parse_capital(&state.cfg_capital)?;
@@ -1918,11 +1928,15 @@ impl LabCoverageRequest {
         if start.is_empty() || end.is_empty() {
             return None;
         }
-        let timeframe = state
-            .timeframes
-            .get(state.timeframe_index.max(0) as usize)
-            .cloned()
-            .unwrap_or_default();
+        let timeframe = if state.timeframe_index < 0 {
+            String::new()
+        } else {
+            state
+                .timeframes
+                .get(state.timeframe_index as usize)
+                .cloned()
+                .unwrap_or_default()
+        };
         if timeframe.is_empty() {
             return None;
         }
@@ -2059,32 +2073,64 @@ pub fn wire_lab(
         let fetch = fetch_run.clone();
         ui.on_lab_run_requested(move || {
             let Some(ui) = handle.upgrade() else { return };
-            let request = {
+            // Gather FIRST: an ungatherable workspace (bad capital, no
+            // selection/timeframe) never queues "run" and never enters
+            // Running — the control stays honestly disabled.
+            let request = { LabRunRequest::gather(&strong.borrow()) };
+            let Some(request) = request else {
+                apply_lab(&ui, &strong.borrow());
+                return;
+            };
+            {
                 let mut guard = strong.borrow_mut();
                 guard.interaction_run();
                 if !guard.start_run() {
-                    None
-                } else {
-                    LabRunRequest::gather(&guard)
+                    apply_lab(&ui, &strong.borrow());
+                    return;
                 }
-            };
-            if let Some(request) = request {
-                apply_lab(&ui, &strong.borrow());
-                fetch(request);
             }
+            apply_lab(&ui, &strong.borrow());
+            fetch(request);
             if let Some(ui) = handle.upgrade() {
                 apply_lab(&ui, &strong.borrow());
             }
         });
     }
-    let strong = state.clone();
-    let handle = ui.as_weak();
-    ui.on_lab_search_changed(move |text| {
-        strong.borrow_mut().set_search(text.as_str());
-        if let Some(ui) = handle.upgrade() {
-            apply_lab(&ui, &strong.borrow());
-        }
-    });
+    // Debounced text bindings (Slint has no Timer element, so the 300ms
+    // editor / 150ms search coalescing lives here, next to the bindings).
+    // Keystrokes only stash the latest text; the single-shot timer applies it
+    // to state + re-projects once the burst settles, so a paste never re-lays
+    // the page per char. The timer handle is held by the closures (Rc), so it
+    // lives as long as the UI.
+    macro_rules! on_lab_text_debounced {
+        ($on:ident, $act:expr, $ms:expr) => {{
+            let strong = state.clone();
+            let handle = ui.as_weak();
+            let timer = std::rc::Rc::new(slint::Timer::default());
+            let stashed = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
+            ui.$on(move |text| {
+                *stashed.borrow_mut() = text.to_string();
+                let strong = strong.clone();
+                let handle = handle.clone();
+                let timer_handle = timer.clone();
+                let stashed_handle = stashed.clone();
+                timer_handle.start(
+                    slint::TimerMode::SingleShot,
+                    std::time::Duration::from_millis($ms),
+                    move || {
+                        {
+                            let mut guard = strong.borrow_mut();
+                            $act(&mut guard, stashed_handle.borrow().as_str());
+                        }
+                        if let Some(ui) = handle.upgrade() {
+                            apply_lab(&ui, &strong.borrow());
+                        }
+                    },
+                );
+            });
+        }};
+    }
+    on_lab_text_debounced!(on_lab_search_changed, LabState::set_search, 150);
     ui.on_lab_save_requested(bind0(ui, &state, |s| s.interaction_save()));
     ui.on_lab_compile_requested(bind0(ui, &state, |s| s.interaction_compile()));
     ui.on_lab_new_requested(bind0(ui, &state, |s| s.interaction_simple("new")));
@@ -2171,10 +2217,10 @@ pub fn wire_lab(
     ui.on_lab_sym_open(bind0(ui, &state, |s| s.interaction_symopen()));
     ui.on_lab_sym_close(bind0(ui, &state, |s| s.interaction_symclose()));
     ui.on_lab_sym_clear(bind0(ui, &state, |s| s.interaction_symclear()));
-    ui.on_lab_sym_apply(bind0(ui, &state, |s| s.interaction_symapply()));
     {
         // The completeness strip measures the SELECTION, so a universe change
-        // invalidates it: re-probe after Apply.
+        // invalidates it: re-probe after Apply. (Single bind: the plain
+        // optimistic echo above is folded in here.)
         let strong = state.clone();
         let handle = ui.as_weak();
         let fetch = fetch_coverage.clone();
@@ -2206,6 +2252,9 @@ pub fn wire_lab(
         let handle = ui.as_weak();
         let cancel = fetch_cancel.clone();
         ui.on_lab_run_cancel_requested(move || {
+            // Local state first (queues `cancelrun` for the backend poll),
+            // then the fetch-level abort: both layers must hear the stop.
+            strong.borrow_mut().interaction_run_cancel();
             cancel();
             if let Some(ui) = handle.upgrade() {
                 apply_lab(&ui, &strong.borrow());
@@ -2283,21 +2332,31 @@ pub fn wire_lab(
             });
         }};
     }
-    on_lab_text!(on_lab_code_changed, LabState::interaction_codeedit);
-    on_lab_text!(on_lab_sym_search_changed, LabState::interaction_symsearch);
+    on_lab_text_debounced!(on_lab_code_changed, LabState::interaction_codeedit, 300);
+    on_lab_text_debounced!(
+        on_lab_sym_search_changed,
+        LabState::interaction_symsearch,
+        150
+    );
     on_lab_text!(on_lab_timeframe_picked, LabState::interaction_timeframe);
     on_lab_text!(on_lab_capital_committed, LabState::interaction_capital);
-    on_lab_text!(on_lab_rank_search_changed, LabState::interaction_ranksearch);
+    on_lab_text_debounced!(
+        on_lab_rank_search_changed,
+        LabState::interaction_ranksearch,
+        150
+    );
     on_lab_text!(on_lab_rankby_picked, LabState::interaction_rankby);
-    on_lab_text!(
+    on_lab_text_debounced!(
         on_lab_trade_filter_changed,
-        LabState::interaction_tradefilter
+        LabState::interaction_tradefilter,
+        150
     );
     // The blotter's own search box feeds the same filter path (it is the one
     // control the new page binds to).
-    on_lab_text!(
+    on_lab_text_debounced!(
         on_lab_trade_search_changed,
-        LabState::interaction_tradefilter
+        LabState::interaction_tradefilter,
+        150
     );
     {
         let strong = state.clone();
@@ -3944,8 +4003,25 @@ mod tests {
         assert_eq!(lab_state.borrow().mode, LabMode::Short);
 
         ui.invoke_lab_search_changed("ob".into());
+        // Search is DEBOUNCED (150ms, so a paste never re-lays the page per
+        // keystroke). The filter therefore lands on the debounce tick, not on
+        // the keystroke: advance the test backend's MOCK clock past the window
+        // and assert the RESULT, which is the contract that matters — the row
+        // filter still applies.
+        i_slint_backend_testing::mock_elapsed_time(std::time::Duration::from_millis(250));
+        slint::platform::update_timers_and_animations();
+        assert_eq!(ui.get_lab_library().row_count(), 1);
+        // A burst of keystrokes coalesces: only the LAST value is applied, so
+        // the filter must end on "ob", never on an intermediate prefix.
+        ui.invoke_lab_search_changed("o".into());
+        ui.invoke_lab_search_changed("ob".into());
+        i_slint_backend_testing::mock_elapsed_time(std::time::Duration::from_millis(250));
+        slint::platform::update_timers_and_animations();
         assert_eq!(ui.get_lab_library().row_count(), 1);
         ui.invoke_lab_search_changed("".into());
+        i_slint_backend_testing::mock_elapsed_time(std::time::Duration::from_millis(250));
+        slint::platform::update_timers_and_animations();
+        assert_eq!(ui.get_lab_library().row_count(), 2);
 
         // KPI placeholders use the legacy tile vocabulary ("--", 8 tiles —
         // no SORTINO tile ever existed), never fabricated numbers.
@@ -4448,6 +4524,7 @@ mod tests {
         select(&ui, ShellScreen::Broker);
         assert!(!ui.get_screen_pending());
     }
+    #[test]
     fn lab_run_request_gathers_backend_echoes() {
         let mut state = demo_lab_state();
         // No selection → honestly no request (RUN stays disabled).

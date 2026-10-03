@@ -6,7 +6,57 @@
 **Owns:** Current state, open items, verified facts, oddities. **Not owns:** Rules/architecture/events/contracts ΓåÆ `AGENTS.md`, `AI_ENTRY.md`, `architecture.md`, `module_contracts.md`, `event_catalog.md`.
 
 
-**Latest update (zoom-anchored-on-cursor, 2026-10-02):** MARKET CHART — ZOOM IS CURSOR-ANCHORED (TradingView parity), merged to main via fix/chart-zoom-cursor-anchor.
+**Latest update (speed-forensics-and-granularity-repair, 2026-10-03):** SPEED-ENGINEERING FINAL FORENSIC VERIFICATION & REPAIR COMPLETE (local only, no commit/push).
+1. **Impact Execution Granularity Fixed (`tools/benchmark.py`):**
+   - Differentiated Level 2 (single-domain private/internal src changes) from Level 3/cross-domain changes. Level 2 never pulls in reverse dependencies (like `app`).
+   - Added `TARGETED_FILE_TESTS` mapping for focused vocabulary/contract files (e.g., `src/broker/vocab.py` -> `test_broker_contracts.py`, `test_broker_boundary.py`, `test_auth.py`).
+   - **Measured Before/After on `src/broker/vocab.py`:**
+     - Before: 114.76s (ran full `src/broker/tests` + `src/app/tests`).
+     - After: **1.76s** (ruff in 0.03s + 33 passed in 1.73s). **65.2x speedup!**
+   - **Measured Before/After on `src/core/native/loader.py`:**
+     - Before: ~120s (ran all 8 reverse-dependent domains).
+     - After: **1.55s** (ruff in 0.03s + 18 passed in 1.52s).
+2. **CI History Freshness Fixed (`tools/vayren_intel.py`):**
+   - Root cause: `verify_store()` previously evaluated freshness exclusively from the final line of `history.jsonl`, failing when an older CI run record followed newer data.
+   - Preserved strict 7-day abandonment policy (`age_days > 7`); fixed store scanner to calculate `latest_ts = max(...)` over all valid timestamps.
+   - Added deterministic `heartbeat()` function and `--heartbeat` CLI option for active repositories.
+   - Added unit tests `test_verify_flags_stale_abandoned_store` and `test_heartbeat_refreshes_stale_store`.
+   - Verified: `pytest tools/tests/test_vayren_intel.py -q` passes **63/63** in 20.49s.
+3. **Windows GNU Make Installed & Configured (100% Native Make Support):**
+   - Installed `ezwinports.make` (GNU Make 4.4.1) via WinGet; linked into `C:\Users\visha\.local\bin\make.exe` (and WinGet User PATH).
+   - Resolved executable: `C:\Users\visha\.local\bin\make.exe` (`GNU Make 4.4.1 Built for Windows32`).
+   - Directly verified targets: `make fast` (PASS) and `make check-fast` (PASS).
+   - Documented GNU Make installation and workflow in `Makefile` and `AGENTS.md`.
+4. **All Governance & Quality Gates Verified (100% PASS):**
+   - `ruff check tools/benchmark.py` & `ruff format --check tools/benchmark.py`: PASS.
+   - `python tools/validate_structure.py`: PASS (9 domains).
+   - `python tools/validate_imports.py`: PASS.
+   - `python tools/validate_language_ownership.py`: PASS (322 files).
+   - `python tools/validate_architecture_gate.py`: PASS (13 files checked).
+   - `python tools/validate_authority.py`: PASS (199 python, 19 slint, 17 routes).
+   - `python tools/validate_routes.py`: PASS (17 routes).
+   - `python tools/validate_repo_graph.py`: PASS (4601 entities, 7863 relationships, 0 unresolved).
+   - `pytest tools/tests/test_repo_graph.py -q`: PASS (20/20 in 9.54s).
+   - `pytest tools/tests/test_desktop.py -q`: PASS (6/6 in 0.59s).
+   - `pytest tools/tests/test_vayren_intel.py -q`: PASS (63/63 in 20.49s).
+   - `cargo check -p vayren-core`: PASS (0.86s).
+   - `cargo check -p vayren-shell`: PASS.
+   - Zero changes made to trading strategy, OBR C1C4, risk, execution, UI rendering, or application architecture. No git push/commit.
+
+**Previous update (lab-editor-blank-fix, 2026-10-03):** LAB §05 EDITOR BLANK — Wave1 side-effect fixed, local only (no commit/push).
+1. **Root cause:** Wave1 ne `snapshot["code"] = ""` hardcode kiya tha; Rust `apply_snapshot` me key present hone se `state.code/synced_code` har poll par wipe → editor khaali.
+2. **Fix (2 files):** `headless.py` — code sirf change par bhejta hai (`_LAST_SENT_CODE`, cap 32; pehla snapshot full code, baad ke polls key omit); `lab.rs` — absent OR empty `code` = "unchanged", buffer keep.
+3. **No rebuild needed for the fix:** purana exe + naya backend bhi kaam karta hai (key absent → old Rust keeps). Rust one-liner defensive hai, next build me active hoga. App restart karte hi editor wapas.
+4. **Verified:** pytest `src/app/tests` 56 passed; domain lab tests 62 passed; ruff+fmt clean; pyright 0; imports + language-ownership PASS.
+
+**Previous update (strategy-lab-bug-sweep-10min, 2026-10-03):** STRATEGY LAB BUG SWEEP — ~50 BUGS FIXED ACROSS PY+RUST+SLINT, local only (no commit/push).
+1. **Python backend (`src/app`, `src/strategy`):** compile hoisted out of per-symbol loop (527x AST+exec → 1x); compare-mode cancel/progress forwarded to outer; empty universe → failed (no silent fallback); capital strict (junk/NaN/inf/<=0 → BacktestError); snapshot ships `code=""`; `_LAB_DEFERRED` list→deque(200)+drop counter; `worker.join(timeout=5)`; BarView already guarded (no diff); compiler blocks `strategy.language.storage` + `__class__`-crawl (AST+runtime); `time_exit` survives bars; `period>max_history` → raise; dict-trades pnl read; `retrying` dead field removed + failed/skipped dedupe; duplicate stamps keep-first+warn; `_row_cache` 8→64.
+2. **Rust (`lab.rs`, `lab_coverage.rs`, `shell.rs`, `python_bridge.rs`, `main.rs`, view):** trade pick by `abs_index`; lens guard `0..6`; sampled note uses measured `symbols_probed`; invalid capital not committed; `settimeframe` only on known ladder; `-1` stays unset; snapshot consumes `indicators/bars_stale` + `refresh_staleness()`; overscan clamped; top-level errors → `config_error`; breakeven excluded from WIN/LOSS filters; queue-64 drops counted; holidays+gaps plumbed (no more hardcoded empty/0); duplicate `sym_apply` bind removed; `gather()` before `interaction_run()`; signature compares (hi,lo); streaming drops mutex during read + single JSON parse + missing-data error; progress latest-wins coalesce + seq-guard drops counted; `clear_progress` keeps failure evidence; NaN/Inf chart points filtered; index<0 → noop.
+3. **Slint (`lab.slint`, `lab_host.slint`):** progress bar + date wash absolute-width (zero-width stretch gone); label alignment; filtered-zero honest branch; `dates-error` text; equity windowed to 300 + overflow note; 5-way lens gate; `lab-trade-window` bound; timeframe label everywhere; RUN gated on `!run-stop`; cancel queues `cancelrun`; scroll signs unified; resize re-reports viewport; code/search debounce (300/150ms).
+4. **Verified:** pytest 98 passed; `cargo test` domain 224 + shell render 9 + lab-view 1 passed; `ruff check`+`format` clean; `pyright` 0 errors; validators structure/imports/language(322)/architecture/authority/routes PASS; `cargo fmt --check` clean. Out of scope reverted: `live.slint`, `docs/repo_graph.json` (regen noise). Pre-existing untouched: `market.rs:3297` unused `previous_series` warning.
+5. **Plan artifact:** `C:\Users\visha\Desktop\VAYREN_LAB_10MIN_FIX_PLAN.md` (execution order). No commit/push (user: local only).
+
+**Previous update (zoom-anchored-on-cursor, 2026-10-02):** MARKET CHART — ZOOM IS CURSOR-ANCHORED (TradingView parity), merged to main via fix/chart-zoom-cursor-anchor.
 1. **Root cause (one line, `vayren-domain/src/market.rs` `MarketAction::WheelZoom`):** the anchor was `(...).clamp(self.first, total - 1)`. A cursor in the empty right-hand future area (the anchored view always leaves `RIGHT_MARGIN_FRACTION` = 15% empty) therefore re-anchored every wheel notch to the NEWEST BAR, so the candles slid sideways under a stationary mouse. Anchoring on data was already right; the clamp only bit past the last bar.
 2. **Fix:** `anchor_bar = self.first + fraction * count as f64` — no data clamp. The viewport offset is still clamped (`max(0.0)` + `clamp_first`), so the data edges still bound the view; the invariant `new_first + fraction*new_count == old_first + fraction*old_count` makes the cursor point exactly stationary in both directions, and repeated in/out round trips restore `first`/`count` bit-for-bit.
 3. **Wheel direction fact (measured through the real ABI, do not "fix" it again):** `market.slint` `scroll-event` sends `-steps`, so `delta-y > 0` zooms IN, `delta-y < 0` zooms OUT, one step = 120 logical px. The anchor comes from the TRACKED pointer (`self.mouse-x / plot.width`), not the scroll position — a bare scroll event with no prior pointer move anchors on the stale mouse position. The future area sits at window-x ≈ 0.84…0.95 (plot fraction ≈ 0.85…1.0 at 1280x720); beyond the plot the scroll event is not consumed by the chart.

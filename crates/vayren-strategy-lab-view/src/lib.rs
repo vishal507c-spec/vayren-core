@@ -405,10 +405,12 @@ fn apply_state(ui: &LabHostWindow, state: &LabState) {
     let to_points = |series: &[(f32, f32)]| -> Vec<LabPoint> {
         series
             .iter()
+            .filter(|(x, y)| x.is_finite() && y.is_finite())
             .map(|(x, y)| LabPoint {
                 x: x * 1000.0,
                 y: y * 300.0,
             })
+            .filter(|p| p.x.is_finite() && p.y.is_finite())
             .collect()
     };
     ui.set_equity(Rc::new(slint::VecModel::from(to_points(&view.equity))).into());
@@ -612,7 +614,10 @@ fn wire_view(ui: &LabHostWindow, state: Rc<RefCell<LabState>>) {
             }
         };
     ui.on_library_picked(bind(ui, &state, |s, i| {
-        s.interaction_select(i.max(0) as usize);
+        if i < 0 {
+            return;
+        }
+        s.interaction_select(i as usize);
     }));
     ui.on_filter_picked(bind(ui, &state, |s, i| {
         s.interaction_filter(match i {
@@ -625,7 +630,10 @@ fn wire_view(ui: &LabHostWindow, state: Rc<RefCell<LabState>>) {
         s.interaction_mode(lab::LabMode::from_kind(i));
     }));
     ui.on_tab_picked(bind(ui, &state, |s, i| {
-        s.interaction_tab(i.max(0) as usize)
+        if i < 0 {
+            return;
+        }
+        s.interaction_tab(i as usize)
     }));
     let strong = state.clone();
     let weak = ui.as_weak();
@@ -660,7 +668,10 @@ fn wire_view(ui: &LabHostWindow, state: Rc<RefCell<LabState>>) {
     ui.on_compile_requested(bind0(ui, &state, |s| s.interaction_compile()));
     ui.on_new_requested(bind0(ui, &state, |s| s.interaction_simple("new")));
     ui.on_row_menu(bind(ui, &state, |s, i| {
-        s.interaction_simple(&format!("menu:{}", i.max(0)));
+        if i < 0 {
+            return;
+        }
+        s.interaction_simple(&format!("menu:{i}"));
     }));
     ui.on_trade_picked(bind(ui, &state, |s, i| {
         s.interaction_trade_pick(i);

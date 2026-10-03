@@ -53,7 +53,6 @@ class RunProgress:
         self.completed = 0
         self.failed: list[str] = []
         self.skipped: list[str] = []
-        self.retrying = 0
         self.current = ""
         self.stage = "starting"
         self.stage_pct = 0.0
@@ -179,7 +178,6 @@ class RunProgress:
             "completed": self.completed,
             "failed": list(self.failed),
             "skipped": list(self.skipped),
-            "retrying": self.retrying,
             "remaining": self.remaining,
             "pct": self.pct,
             "current": self.current,
@@ -238,6 +236,8 @@ class RunProgress:
         self.publish(force=True)
 
     def symbol_failed(self, symbol: str) -> None:
+        if symbol in self.failed or symbol in self.skipped:
+            return
         self.failed.append(symbol)
         if self._started:
             self._durations.append(time.monotonic() - self._symbol_started)
@@ -245,6 +245,8 @@ class RunProgress:
         self.publish(force=True)
 
     def symbol_skipped(self, symbol: str) -> None:
+        if symbol in self.skipped or symbol in self.failed:
+            return
         self.skipped.append(symbol)
         if self._started:
             self._durations.append(time.monotonic() - self._symbol_started)

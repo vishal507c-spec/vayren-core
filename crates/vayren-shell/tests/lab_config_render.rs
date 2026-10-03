@@ -135,6 +135,7 @@ fn configured_state(coverage: bool) -> lab::LabState {
             symbols_total: 3,
             symbols_covering: 3,
             bars_present: 94_000,
+            gaps: 0,
             start_days: 18_158,
             end_days: 20_683,
             tf_secs: 1_800,
