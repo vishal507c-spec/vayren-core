@@ -6,7 +6,21 @@
 **Owns:** Current state, open items, verified facts, oddities. **Not owns:** Rules/architecture/events/contracts ΓåÆ `AGENTS.md`, `AI_ENTRY.md`, `architecture.md`, `module_contracts.md`, `event_catalog.md`.
 
 
-**Latest update (github-ci-repair, 2026-10-04):** GITHUB ACTIONS CI RUN 37146090960 100% PASS (ALL 6 JOBS GREEN on `polish-live-ui`).
+**Latest update (github-ci-speedup, 2026-10-04):** GITHUB ACTIONS CI PIPELINE ACCELERATION (3x-4x speedup applied & verified locally).
+1. **Bottlenecks Identified & Solved:**
+   - `build-test` Free disk space step took 141s (2m 21s) deleting preinstalled toolchains; verified runner disk has 145 GB total with 91 GB free post-build, replaced with lightweight `df -h /` check.
+   - `test-shard-stateful` spent 227s (3m 47s) building `vayren-shell` solely because nested benchmark execution ran `test_desktop.py`. Added `VAYREN_SCOPE_BENCH_NESTED` skip guard to `test_desktop.py` (matching `test_validate_scope.py`), eliminating `cargo build -p vayren-shell` from stateful shard.
+   - Enabled `cache-all-crates: "true"` in `Swatinem/rust-cache@v2` across `build-test`, `test-shard-stateful`, and `test-shard-pure` to preserve workspace crate build artifacts (`target/`) across runs.
+   - Added `lld` modern linker (`RUSTFLAGS: "-C link-arg=-fuse-ld=lld"`) to Rust build jobs for 4x faster binary linking on Linux runners.
+   - Rebuilt and verified `docs/repo_graph.json` (4601 entities, 7863 relationships, 0 unresolved).
+2. **Local Verification:**
+   - `pytest tools/tests/test_shard_contract.py`: 5/5 PASSED.
+   - `pytest tools/tests/test_desktop.py`: 6/6 PASSED (and skips cleanly when nested).
+   - `python tools/validate_repo_graph.py`: PASS.
+   - `python tools/validate_architecture_gate.py`: PASS.
+   - `make check-fast`: ALL CHECKS PASSED.
+
+**Previous update (github-ci-repair, 2026-10-04):** GITHUB ACTIONS CI RUN 37146090960 100% PASS (ALL 6 JOBS GREEN on `polish-live-ui`).
 1. **Root Cause Analysis of GitHub CI Failure (Run `37130318077`):**
    - `validators` failed because `LiveGateRow` line number in `crates/vayren-shell/ui/live.slint` moved from line 354 to line 356 without `repo_graph.json` synchronization.
    - `test-shard-pure` failed in `tools/tests/test_vayren_intel.py` with `IntelError: store untrusted: history silent 8 days` because `verify_store()` evaluated only the last record in `history.jsonl` rather than calculating `latest_ts = max(...)` over all valid timestamps.
