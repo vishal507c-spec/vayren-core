@@ -1126,7 +1126,7 @@
       "to": "src/core/native"
     }
   ],
-  "entity_count": 4570,
+  "entity_count": 4592,
   "files": [
     {
       "domain": "CORE",
@@ -3839,6 +3839,56 @@
       "retention_state": "TEMPORARILY_RETAINED"
     },
     {
+      "domain": "EXECUTION",
+      "is_test": true,
+      "language": "RUST",
+      "module": "src/execution",
+      "owner": "RUST_EXECUTION",
+      "owner_source": "policy",
+      "path": "src/execution/tests/__init__.py",
+      "retention_state": null
+    },
+    {
+      "domain": "EXECUTION",
+      "is_test": true,
+      "language": "RUST",
+      "module": "src/execution",
+      "owner": "RUST_EXECUTION",
+      "owner_source": "policy",
+      "path": "src/execution/tests/test_native_execution.py",
+      "retention_state": null
+    },
+    {
+      "domain": "EXECUTION",
+      "is_test": true,
+      "language": "RUST",
+      "module": "src/execution",
+      "owner": "RUST_EXECUTION",
+      "owner_source": "policy",
+      "path": "src/execution/tests/test_native_normalizer.py",
+      "retention_state": null
+    },
+    {
+      "domain": "EXECUTION",
+      "is_test": true,
+      "language": "RUST",
+      "module": "src/execution",
+      "owner": "RUST_EXECUTION",
+      "owner_source": "policy",
+      "path": "src/execution/tests/test_native_order_state.py",
+      "retention_state": null
+    },
+    {
+      "domain": "EXECUTION",
+      "is_test": true,
+      "language": "RUST",
+      "module": "src/execution",
+      "owner": "RUST_EXECUTION",
+      "owner_source": "policy",
+      "path": "src/execution/tests/test_native_policy.py",
+      "retention_state": null
+    },
+    {
       "domain": "MARKET_DATA",
       "is_test": false,
       "language": "RUST",
@@ -6045,7 +6095,12 @@
         "src/execution/runtime/inspector.py",
         "src/execution/runtime/lifecycle.py",
         "src/execution/runtime/session.py",
-        "src/execution/runtime/strategy_runtime.py"
+        "src/execution/runtime/strategy_runtime.py",
+        "src/execution/tests/__init__.py",
+        "src/execution/tests/test_native_execution.py",
+        "src/execution/tests/test_native_normalizer.py",
+        "src/execution/tests/test_native_order_state.py",
+        "src/execution/tests/test_native_policy.py"
       ],
       "id": "src/execution",
       "language": "RUST",
@@ -6482,7 +6537,7 @@
       "required_language": "PYTHON"
     }
   ],
-  "relationship_count": 7784,
+  "relationship_count": 7824,
   "repository": {
     "name": "vayren-core",
     "root": "."
@@ -7769,7 +7824,7 @@
       "file": "src/app/services/live_trading_service.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 136,
+      "line": 135,
       "module": "src/app/services",
       "name": "LiveConfigError",
       "public": true,
@@ -7786,7 +7841,7 @@
       "file": "src/app/services/live_trading_service.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 157,
+      "line": 156,
       "module": "src/app/services",
       "name": "LiveSessionStore",
       "public": true,
@@ -7803,7 +7858,7 @@
       "file": "src/app/services/live_trading_service.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 141,
+      "line": 140,
       "module": "src/app/services",
       "name": "LiveTradeConfig",
       "public": true,
@@ -7846,7 +7901,7 @@
       "file": "src/app/services/live_trading_service.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 205,
+      "line": 204,
       "module": "src/app/services",
       "name": "LiveTradingService",
       "public": true,
@@ -7863,7 +7918,7 @@
       "file": "src/app/services/live_trading_service.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 125,
+      "line": 124,
       "module": "src/app/services",
       "name": "_as_float",
       "public": false,
@@ -7880,7 +7935,7 @@
       "file": "src/app/services/live_trading_service.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 104,
+      "line": 103,
       "module": "src/app/services",
       "name": "_category_for_event",
       "public": false,
@@ -7897,7 +7952,7 @@
       "file": "src/app/services/live_trading_service.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 95,
+      "line": 94,
       "module": "src/app/services",
       "name": "_category_for_kind",
       "public": false,
@@ -7914,7 +7969,7 @@
       "file": "src/app/services/live_trading_service.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 120,
+      "line": 119,
       "module": "src/app/services",
       "name": "_clean_symbol",
       "public": false,
@@ -7931,7 +7986,7 @@
       "file": "src/app/services/live_trading_service.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 199,
+      "line": 198,
       "module": "src/app/services",
       "name": "_utcnow_iso",
       "public": false,
@@ -45723,7 +45778,9 @@
         "execution.native_order_state:_state_by_code",
         "execution.native_order_state:_terminal_states",
         "execution.native_order_state:_transition_table",
-        "execution.native_order_state:transition_allowed"
+        "execution.native_order_state:transition_allowed",
+        "execution.tests.test_native_order_state:test_invalid_transitions_fail_closed",
+        "execution.tests.test_native_order_state:test_valid_transitions"
       ],
       "callers_complete": true,
       "calls": [],
@@ -45938,7 +45995,9 @@
       "name": "_document",
       "public": false,
       "qualified": "execution.native_execution:_document",
-      "tests": []
+      "tests": [
+        "src/execution/tests/test_native_execution.py"
+      ]
     },
     {
       "called_by": [
@@ -45955,7 +46014,9 @@
       "name": "_fields",
       "public": false,
       "qualified": "execution.native_execution:_fields",
-      "tests": []
+      "tests": [
+        "src/execution/tests/test_native_execution.py"
+      ]
     },
     {
       "called_by": [
@@ -45972,7 +46033,9 @@
       "name": "_pairs",
       "public": false,
       "qualified": "execution.native_execution:_pairs",
-      "tests": []
+      "tests": [
+        "src/execution/tests/test_native_execution.py"
+      ]
     },
     {
       "called_by": [
@@ -45995,7 +46058,9 @@
       "name": "_read",
       "public": false,
       "qualified": "execution.native_execution:_read",
-      "tests": []
+      "tests": [
+        "src/execution/tests/test_native_execution.py"
+      ]
     },
     {
       "called_by": [
@@ -46016,7 +46081,9 @@
       "name": "_report",
       "public": false,
       "qualified": "execution.native_execution:_report",
-      "tests": []
+      "tests": [
+        "src/execution/tests/test_native_execution.py"
+      ]
     },
     {
       "called_by": [
@@ -46033,7 +46100,9 @@
       "name": "native_arm_transition",
       "public": true,
       "qualified": "execution.native_execution:native_arm_transition",
-      "tests": []
+      "tests": [
+        "src/execution/tests/test_native_execution.py"
+      ]
     },
     {
       "called_by": [
@@ -46050,7 +46119,9 @@
       "name": "native_check_live_readiness_basic",
       "public": true,
       "qualified": "execution.native_execution:native_check_live_readiness_basic",
-      "tests": []
+      "tests": [
+        "src/execution/tests/test_native_execution.py"
+      ]
     },
     {
       "called_by": [
@@ -46067,7 +46138,9 @@
       "name": "native_default_quantity",
       "public": true,
       "qualified": "execution.native_execution:native_default_quantity",
-      "tests": []
+      "tests": [
+        "src/execution/tests/test_native_execution.py"
+      ]
     },
     {
       "called_by": [
@@ -46086,7 +46159,9 @@
       "name": "native_flags_to_mask",
       "public": true,
       "qualified": "execution.native_execution:native_flags_to_mask",
-      "tests": []
+      "tests": [
+        "src/execution/tests/test_native_execution.py"
+      ]
     },
     {
       "called_by": [
@@ -46105,7 +46180,9 @@
       "name": "native_gates_mask",
       "public": true,
       "qualified": "execution.native_execution:native_gates_mask",
-      "tests": []
+      "tests": [
+        "src/execution/tests/test_native_execution.py"
+      ]
     },
     {
       "called_by": [
@@ -46124,7 +46201,9 @@
       "name": "native_intent_id",
       "public": true,
       "qualified": "execution.native_execution:native_intent_id",
-      "tests": []
+      "tests": [
+        "src/execution/tests/test_native_execution.py"
+      ]
     },
     {
       "called_by": [
@@ -46141,7 +46220,9 @@
       "name": "native_ledger_apply_fill",
       "public": true,
       "qualified": "execution.native_execution:native_ledger_apply_fill",
-      "tests": []
+      "tests": [
+        "src/execution/tests/test_native_execution.py"
+      ]
     },
     {
       "called_by": [
@@ -46160,7 +46241,9 @@
       "name": "native_ledger_snapshot",
       "public": true,
       "qualified": "execution.native_execution:native_ledger_snapshot",
-      "tests": []
+      "tests": [
+        "src/execution/tests/test_native_execution.py"
+      ]
     },
     {
       "called_by": [
@@ -46177,7 +46260,9 @@
       "name": "native_lifecycle_transition_allowed",
       "public": true,
       "qualified": "execution.native_execution:native_lifecycle_transition_allowed",
-      "tests": []
+      "tests": [
+        "src/execution/tests/test_native_execution.py"
+      ]
     },
     {
       "called_by": [
@@ -46196,7 +46281,9 @@
       "name": "native_mask_to_flags",
       "public": true,
       "qualified": "execution.native_execution:native_mask_to_flags",
-      "tests": []
+      "tests": [
+        "src/execution/tests/test_native_execution.py"
+      ]
     },
     {
       "called_by": [
@@ -46215,7 +46302,9 @@
       "name": "native_missing_gates",
       "public": true,
       "qualified": "execution.native_execution:native_missing_gates",
-      "tests": []
+      "tests": [
+        "src/execution/tests/test_native_execution.py"
+      ]
     },
     {
       "called_by": [
@@ -46235,7 +46324,9 @@
       "name": "native_multiplier_problem",
       "public": true,
       "qualified": "execution.native_execution:native_multiplier_problem",
-      "tests": []
+      "tests": [
+        "src/execution/tests/test_native_execution.py"
+      ]
     },
     {
       "called_by": [
@@ -46252,7 +46343,9 @@
       "name": "native_narrow_multiplier",
       "public": true,
       "qualified": "execution.native_execution:native_narrow_multiplier",
-      "tests": []
+      "tests": [
+        "src/execution/tests/test_native_execution.py"
+      ]
     },
     {
       "called_by": [
@@ -46271,7 +46364,9 @@
       "name": "native_order_apply_fill",
       "public": true,
       "qualified": "execution.native_execution:native_order_apply_fill",
-      "tests": []
+      "tests": [
+        "src/execution/tests/test_native_execution.py"
+      ]
     },
     {
       "called_by": [
@@ -46291,7 +46386,9 @@
       "name": "native_paper_calculate_fill",
       "public": true,
       "qualified": "execution.native_execution:native_paper_calculate_fill",
-      "tests": []
+      "tests": [
+        "src/execution/tests/test_native_execution.py"
+      ]
     },
     {
       "called_by": [
@@ -46308,7 +46405,9 @@
       "name": "native_percentile",
       "public": true,
       "qualified": "execution.native_execution:native_percentile",
-      "tests": []
+      "tests": [
+        "src/execution/tests/test_native_execution.py"
+      ]
     },
     {
       "called_by": [
@@ -46327,7 +46426,9 @@
       "name": "native_plan_order",
       "public": true,
       "qualified": "execution.native_execution:native_plan_order",
-      "tests": []
+      "tests": [
+        "src/execution/tests/test_native_execution.py"
+      ]
     },
     {
       "called_by": [
@@ -46347,7 +46448,9 @@
       "name": "native_position_state",
       "public": true,
       "qualified": "execution.native_execution:native_position_state",
-      "tests": []
+      "tests": [
+        "src/execution/tests/test_native_execution.py"
+      ]
     },
     {
       "called_by": [
@@ -46366,7 +46469,9 @@
       "name": "native_position_unrealized",
       "public": true,
       "qualified": "execution.native_execution:native_position_unrealized",
-      "tests": []
+      "tests": [
+        "src/execution/tests/test_native_execution.py"
+      ]
     },
     {
       "called_by": [
@@ -46386,7 +46491,9 @@
       "name": "native_reconcile_funds",
       "public": true,
       "qualified": "execution.native_execution:native_reconcile_funds",
-      "tests": []
+      "tests": [
+        "src/execution/tests/test_native_execution.py"
+      ]
     },
     {
       "called_by": [
@@ -46407,7 +46514,9 @@
       "name": "native_reconcile_orders",
       "public": true,
       "qualified": "execution.native_execution:native_reconcile_orders",
-      "tests": []
+      "tests": [
+        "src/execution/tests/test_native_execution.py"
+      ]
     },
     {
       "called_by": [
@@ -46428,7 +46537,9 @@
       "name": "native_reconcile_positions",
       "public": true,
       "qualified": "execution.native_execution:native_reconcile_positions",
-      "tests": []
+      "tests": [
+        "src/execution/tests/test_native_execution.py"
+      ]
     },
     {
       "called_by": [
@@ -46445,7 +46556,9 @@
       "name": "native_report_blocks_live",
       "public": true,
       "qualified": "execution.native_execution:native_report_blocks_live",
-      "tests": []
+      "tests": [
+        "src/execution/tests/test_native_execution.py"
+      ]
     },
     {
       "called_by": [
@@ -46465,7 +46578,9 @@
       "name": "native_resolve_mode",
       "public": true,
       "qualified": "execution.native_execution:native_resolve_mode",
-      "tests": []
+      "tests": [
+        "src/execution/tests/test_native_execution.py"
+      ]
     },
     {
       "called_by": [
@@ -46483,7 +46598,9 @@
       "name": "native_verdict_blocks_live",
       "public": true,
       "qualified": "execution.native_execution:native_verdict_blocks_live",
-      "tests": []
+      "tests": [
+        "src/execution/tests/test_native_execution.py"
+      ]
     },
     {
       "called_by": [
@@ -46502,7 +46619,9 @@
       "name": "native_verdict_status",
       "public": true,
       "qualified": "execution.native_execution:native_verdict_status",
-      "tests": []
+      "tests": [
+        "src/execution/tests/test_native_execution.py"
+      ]
     },
     {
       "called_by": [
@@ -46521,7 +46640,9 @@
       "name": "_code",
       "public": false,
       "qualified": "execution.native_order_state:_code",
-      "tests": []
+      "tests": [
+        "src/execution/tests/test_native_order_state.py"
+      ]
     },
     {
       "called_by": [
@@ -46541,7 +46662,9 @@
       "name": "_state_by_code",
       "public": false,
       "qualified": "execution.native_order_state:_state_by_code",
-      "tests": []
+      "tests": [
+        "src/execution/tests/test_native_order_state.py"
+      ]
     },
     {
       "called_by": [],
@@ -46559,7 +46682,9 @@
       "name": "_terminal_states",
       "public": false,
       "qualified": "execution.native_order_state:_terminal_states",
-      "tests": []
+      "tests": [
+        "src/execution/tests/test_native_order_state.py"
+      ]
     },
     {
       "called_by": [],
@@ -46577,7 +46702,9 @@
       "name": "_transition_table",
       "public": false,
       "qualified": "execution.native_order_state:_transition_table",
-      "tests": []
+      "tests": [
+        "src/execution/tests/test_native_order_state.py"
+      ]
     },
     {
       "called_by": [
@@ -46597,7 +46724,9 @@
       "name": "transition_allowed",
       "public": true,
       "qualified": "execution.native_order_state:transition_allowed",
-      "tests": []
+      "tests": [
+        "src/execution/tests/test_native_order_state.py"
+      ]
     },
     {
       "called_by": [
@@ -47388,6 +47517,190 @@
       "name": "candle_to_bar",
       "public": true,
       "qualified": "execution.runtime.strategy_runtime:candle_to_bar",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "execution.tests.test_native_execution.test_gates_mask_and_missing",
+      "file": "src/execution/tests/test_native_execution.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 15,
+      "module": "src/execution",
+      "name": "test_gates_mask_and_missing",
+      "public": true,
+      "qualified": "execution.tests.test_native_execution:test_gates_mask_and_missing",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "execution.tests.test_native_execution.test_intent_id_format",
+      "file": "src/execution/tests/test_native_execution.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 41,
+      "module": "src/execution",
+      "name": "test_intent_id_format",
+      "public": true,
+      "qualified": "execution.tests.test_native_execution:test_intent_id_format",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "execution.tests.test_native_execution.test_resolve_mode_falls_back_to_paper",
+      "file": "src/execution/tests/test_native_execution.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 35,
+      "module": "src/execution",
+      "name": "test_resolve_mode_falls_back_to_paper",
+      "public": true,
+      "qualified": "execution.tests.test_native_execution:test_resolve_mode_falls_back_to_paper",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "execution.tests.test_native_normalizer.test_normalizer_lifecycle_and_sequence",
+      "file": "src/execution/tests/test_native_normalizer.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 15,
+      "module": "src/execution",
+      "name": "test_normalizer_lifecycle_and_sequence",
+      "public": true,
+      "qualified": "execution.tests.test_native_normalizer:test_normalizer_lifecycle_and_sequence",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "execution.models.order_state:OrderState"
+      ],
+      "dotted": "execution.tests.test_native_order_state.test_invalid_transitions_fail_closed",
+      "file": "src/execution/tests/test_native_order_state.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 27,
+      "module": "src/execution",
+      "name": "test_invalid_transitions_fail_closed",
+      "public": true,
+      "qualified": "execution.tests.test_native_order_state:test_invalid_transitions_fail_closed",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "execution.models.order_state:OrderState"
+      ],
+      "dotted": "execution.tests.test_native_order_state.test_valid_transitions",
+      "file": "src/execution/tests/test_native_order_state.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 16,
+      "module": "src/execution",
+      "name": "test_valid_transitions",
+      "public": true,
+      "qualified": "execution.tests.test_native_order_state:test_valid_transitions",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "execution.tests.test_native_policy.test_native_backoff_delay",
+      "file": "src/execution/tests/test_native_policy.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 44,
+      "module": "src/execution",
+      "name": "test_native_backoff_delay",
+      "public": true,
+      "qualified": "execution.tests.test_native_policy:test_native_backoff_delay",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "execution.tests.test_native_policy.test_native_clock_ok",
+      "file": "src/execution/tests/test_native_policy.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 36,
+      "module": "src/execution",
+      "name": "test_native_clock_ok",
+      "public": true,
+      "qualified": "execution.tests.test_native_policy:test_native_clock_ok",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "execution.tests.test_native_policy.test_native_exhausted",
+      "file": "src/execution/tests/test_native_policy.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 50,
+      "module": "src/execution",
+      "name": "test_native_exhausted",
+      "public": true,
+      "qualified": "execution.tests.test_native_policy:test_native_exhausted",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "execution.tests.test_native_policy.test_native_limiter_problem",
+      "file": "src/execution/tests/test_native_policy.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 26,
+      "module": "src/execution",
+      "name": "test_native_limiter_problem",
+      "public": true,
+      "qualified": "execution.tests.test_native_policy:test_native_limiter_problem",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "execution.tests.test_native_policy.test_native_retry_kind",
+      "file": "src/execution/tests/test_native_policy.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 21,
+      "module": "src/execution",
+      "name": "test_native_retry_kind",
+      "public": true,
+      "qualified": "execution.tests.test_native_policy:test_native_retry_kind",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "execution.tests.test_native_policy.test_retry_kind_enum",
+      "file": "src/execution/tests/test_native_policy.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 15,
+      "module": "src/execution",
+      "name": "test_retry_kind_enum",
+      "public": true,
+      "qualified": "execution.tests.test_native_policy:test_retry_kind_enum",
       "tests": []
     },
     {
@@ -73543,7 +73856,7 @@
       "file": "tools/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 486,
+      "line": 490,
       "module": "tools",
       "name": "_baseline_without_cargo",
       "public": false,
@@ -73576,7 +73889,7 @@
       "file": "tools/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 548,
+      "line": 552,
       "module": "tools",
       "name": "_monotone_wall_runs",
       "public": false,
@@ -73644,7 +73957,7 @@
       "file": "tools/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 465,
+      "line": 469,
       "module": "tools",
       "name": "test_ci_record_rejects_empty_jobs",
       "public": true,
@@ -73659,7 +73972,7 @@
       "file": "tools/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 450,
+      "line": 454,
       "module": "tools",
       "name": "test_ci_record_rejects_failed_run",
       "public": true,
@@ -73674,7 +73987,7 @@
       "file": "tools/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 436,
+      "line": 440,
       "module": "tools",
       "name": "test_ci_record_rejects_missing_commit",
       "public": true,
@@ -73689,7 +74002,7 @@
       "file": "tools/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 443,
+      "line": 447,
       "module": "tools",
       "name": "test_ci_record_rejects_missing_run_id",
       "public": true,
@@ -73704,7 +74017,7 @@
       "file": "tools/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 429,
+      "line": 433,
       "module": "tools",
       "name": "test_ci_record_rejects_missing_timestamp",
       "public": true,
@@ -73719,7 +74032,7 @@
       "file": "tools/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 457,
+      "line": 461,
       "module": "tools",
       "name": "test_ci_record_skips_job_with_missing_timing",
       "public": true,
@@ -73734,7 +74047,7 @@
       "file": "tools/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 419,
+      "line": 423,
       "module": "tools",
       "name": "test_ci_record_valid_build",
       "public": true,
@@ -73796,7 +74109,7 @@
       "file": "tools/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 343,
+      "line": 347,
       "module": "tools",
       "name": "test_experiment_cli_keeps_record",
       "public": true,
@@ -73901,7 +74214,7 @@
       "file": "tools/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 505,
+      "line": 509,
       "module": "tools",
       "name": "test_ingest_blocks_on_untrusted_store",
       "public": true,
@@ -73918,7 +74231,7 @@
       "file": "tools/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 495,
+      "line": 499,
       "module": "tools",
       "name": "test_ingest_rejects_duplicate",
       "public": true,
@@ -73933,7 +74246,7 @@
       "file": "tools/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 605,
+      "line": 609,
       "module": "tools",
       "name": "test_ingest_rejects_tampered_provenance",
       "public": true,
@@ -73948,7 +74261,7 @@
       "file": "tools/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 535,
+      "line": 539,
       "module": "tools",
       "name": "test_ingest_skips_partial_failed_job",
       "public": true,
@@ -73965,7 +74278,7 @@
       "file": "tools/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 511,
+      "line": 515,
       "module": "tools",
       "name": "test_ingest_writes_exactly_one_record",
       "public": true,
@@ -74070,7 +74383,7 @@
       "file": "tools/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 477,
+      "line": 481,
       "module": "tools",
       "name": "test_metric_intent_duration_lower_better",
       "public": true,
@@ -74085,7 +74398,7 @@
       "file": "tools/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 482,
+      "line": 486,
       "module": "tools",
       "name": "test_metric_intent_unknown_for_counts",
       "public": true,
@@ -74148,7 +74461,7 @@
       "file": "tools/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 590,
+      "line": 594,
       "module": "tools",
       "name": "test_radar_ci_trend_down_classified",
       "public": true,
@@ -74166,7 +74479,7 @@
       "file": "tools/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 569,
+      "line": 573,
       "module": "tools",
       "name": "test_radar_ci_trend_up_classified",
       "public": true,
@@ -74183,7 +74496,7 @@
       "file": "tools/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 520,
+      "line": 524,
       "module": "tools",
       "name": "test_radar_consumes_ci_history",
       "public": true,
@@ -74215,7 +74528,7 @@
       "file": "tools/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 529,
+      "line": 533,
       "module": "tools",
       "name": "test_radar_no_fabricated_ci_runs",
       "public": true,
@@ -74435,7 +74748,7 @@
       "file": "tools/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 470,
+      "line": 474,
       "module": "tools",
       "name": "test_validate_detects_bad_metric_value",
       "public": true,
@@ -74467,7 +74780,7 @@
       "file": "tools/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 353,
+      "line": 357,
       "module": "tools",
       "name": "test_verify_fails_without_baseline",
       "public": true,
@@ -74484,7 +74797,7 @@
       "file": "tools/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 612,
+      "line": 616,
       "module": "tools",
       "name": "test_verify_flags_duplicate_ci_run",
       "public": true,
@@ -74499,7 +74812,7 @@
       "file": "tools/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 373,
+      "line": 377,
       "module": "tools",
       "name": "test_verify_flags_foreign_repo_index_dirs",
       "public": true,
@@ -74514,7 +74827,7 @@
       "file": "tools/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 380,
+      "line": 384,
       "module": "tools",
       "name": "test_verify_flags_invalid_knowledge_state",
       "public": true,
@@ -74531,7 +74844,7 @@
       "file": "tools/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 622,
+      "line": 626,
       "module": "tools",
       "name": "test_verify_flags_malformed_ci_record",
       "public": true,
@@ -74546,7 +74859,7 @@
       "file": "tools/tests/test_vayren_intel.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 360,
+      "line": 364,
       "module": "tools",
       "name": "test_verify_green_on_wellformed_store",
       "public": true,
@@ -77673,6 +77986,40 @@
       "targets": [
         "src/data/settings.py"
       ]
+    },
+    {
+      "granularity": "module",
+      "module": "src/execution",
+      "path": "src/execution/tests/__init__.py",
+      "targets": []
+    },
+    {
+      "granularity": "file",
+      "module": "src/execution",
+      "path": "src/execution/tests/test_native_execution.py",
+      "targets": [
+        "src/execution/native_execution.py"
+      ]
+    },
+    {
+      "granularity": "module",
+      "module": "src/execution",
+      "path": "src/execution/tests/test_native_normalizer.py",
+      "targets": []
+    },
+    {
+      "granularity": "file",
+      "module": "src/execution",
+      "path": "src/execution/tests/test_native_order_state.py",
+      "targets": [
+        "src/execution/native_order_state.py"
+      ]
+    },
+    {
+      "granularity": "module",
+      "module": "src/execution",
+      "path": "src/execution/tests/test_native_policy.py",
+      "targets": []
     },
     {
       "granularity": "module",

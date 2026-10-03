@@ -228,6 +228,15 @@ def test_graph_has_no_canonical_prose() -> None:
        not narrative. Regeneration was tried first (option (a) of the finding)
        and produced a LARGER, valid artifact (2,306,560 B), so the cap moved
        instead. `python tools/repo_graph.py --stats` prints graph_bytes.
+       Justification for the 2.40MB -> 2.56MB bump (2026-10-03): the artifact
+       crossed the old cap because the restored live-execution / risk-facade /
+       market-repository runtime files joined the tree (4,570 entities / 3,993
+       symbols over 415 files, 26 modules) — product code, not narrative.
+       Regeneration was tried first and produced a LARGER valid artifact, so
+       the cap moved instead: two consecutive rebuilds of an unchanged tree
+       measured 2,452,206 B and 2,463,322 B (the builder is nondeterministic
+       across runs, ~11 KB variance), and 2.56MB covers the observed size plus
+       headroom for that variance.
     2. Per-entity budget + a max-string-length budget. These are what make the
        cap safe to raise: prose pasted into any field would blow the string
        budget long before it filled the entity budget, so a future dump cannot
@@ -237,7 +246,7 @@ def test_graph_has_no_canonical_prose() -> None:
     assert "INSERT OR IGNORE" not in text
     graph = json.loads(text)
     size = len(text.encode("utf-8"))
-    assert size < 2_400_000, f"graph artifact grew past the cap: {size} B"
+    assert size < 2_560_000, f"graph artifact grew past the cap: {size} B"
 
     entities = graph["entity_count"]
     assert entities > 0
