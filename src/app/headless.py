@@ -1049,8 +1049,10 @@ def _lab_workspace(
 
     dropped = sorted({s for s in normalized if not _in_universe(s)})
     selected_symbols = [s for s in normalized if _in_universe(s)]
-    if not selected_symbols:
-        selected_symbols = list(universe_symbols)
+    # No silent fallback to the full universe: an explicitly empty (or
+    # fully stale) selection fails actionably downstream ("No universe")
+    # instead of running hundreds of unasked symbols. Pinned by
+    # test_lab_run_applies_full_command_config.
 
     if universe_symbols and repository is not None:
         try:

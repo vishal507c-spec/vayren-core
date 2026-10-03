@@ -153,3 +153,7 @@ def default_registry() -> BrokerRegistry:
 
 
 # phase6 probe f7fd2379be19432995f4b0500d91eb53
+
+
+def _phase6_probe() -> int:
+    return 1
