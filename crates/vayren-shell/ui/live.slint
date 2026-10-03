@@ -237,8 +237,8 @@ component LiveTopCard inherits Rectangle {
             Text {
                 text: root.icon-char;
                 color: LiveTone.ink(root.tone);
-                font-size: 13px;
-                font-weight: 700;
+                font-size: 10px;
+                font-weight: 800;
                 horizontal-alignment: center;
                 vertical-alignment: center;
             }
@@ -330,6 +330,7 @@ component LiveKvRow inherits HorizontalLayout {
     spacing: 4px;
 
     Text {
+        width: 112px;
         text: root.key;
         color: VayrenPalette.live-ink-faint;
         font-size: 9px;
@@ -338,6 +339,7 @@ component LiveKvRow inherits HorizontalLayout {
         overflow: elide;
     }
     Text {
+        horizontal-stretch: 1;
         text: root.value;
         color: LiveTone.ink(root.tone);
         font-size: 10px;
@@ -538,7 +540,7 @@ export component LiveScreen inherits Rectangle {
                 // and tones come from the domain projection, so an
                 // unconfigured broker reads NOT CONFIGURED in muted ink.
                 LiveTopCard {
-                    icon-char: "⚡";
+                    icon-char: "B";
                     show-icon: root.bar-extended;
                     label: "BROKER";
                     value-text: root.bar.broker-label;
@@ -550,7 +552,7 @@ export component LiveScreen inherits Rectangle {
                 // Card 2: Market data state (real DataState verdict + tone)
                 // with the honest session feed + poll-time line underneath.
                 if root.bar-secondary: LiveTopCard {
-                    icon-char: "📊";
+                    icon-char: "M";
                     label: "MARKET DATA";
                     value-text: root.market.state-label;
                     tone: root.market.tone;
@@ -560,7 +562,7 @@ export component LiveScreen inherits Rectangle {
 
                 // Card 3: Strategy fact (real id + status/timeframe line).
                 if root.bar-secondary: LiveTopCard {
-                    icon-char: "⚙";
+                    icon-char: "S";
                     label: "STRATEGY";
                     value-text: root.bar.strategy-label;
                     tone: root.bar.strategy-tone;
@@ -570,7 +572,7 @@ export component LiveScreen inherits Rectangle {
 
                 // Card 4: Risk engine verdict (real RiskStatus badge).
                 LiveTopCard {
-                    icon-char: "🛡";
+                    icon-char: "R";
                     show-icon: root.bar-extended;
                     label: "RISK";
                     value-text: root.bar.risk-label;
@@ -579,7 +581,7 @@ export component LiveScreen inherits Rectangle {
 
                 // Card 5: Reconciliation verdict + venue counts.
                 if root.bar-extended: LiveTopCard {
-                    icon-char: "🔄";
+                    icon-char: "RC";
                     label: "RECONCILIATION";
                     value-text: root.bar.recon-label;
                     tone: root.bar.recon-tone;
@@ -638,11 +640,11 @@ export component LiveScreen inherits Rectangle {
                         Rectangle {
                             horizontal-stretch: 1;
                             border-radius: 4px;
-                            background: root.bar.mode == 2 ? VayrenPalette.live-teal : transparent;
+                            background: root.bar.mode == 2 ? VayrenPalette.neg : transparent;
                             TouchArea { clicked => { root.mode-picked(2); } }
                             Text {
                                 text: "LIVE";
-                                color: root.bar.mode == 2 ? VayrenPalette.accent-text : VayrenPalette.live-ink-faint;
+                                color: root.bar.mode == 2 ? VayrenPalette.text-bright : VayrenPalette.live-ink-faint;
                                 font-size: 11px;
                                 font-weight: 700;
                                 horizontal-alignment: center;
@@ -946,20 +948,24 @@ export component LiveScreen inherits Rectangle {
                             // the active bucket reads teal, the rest neutral.
                             HorizontalLayout {
                                 height: 24px;
-                                spacing: 4px;
+                                spacing: 6px;
                                 for cat[idx] in root.event-types: Rectangle {
-                                    border-radius: 4px;
+                                    width: cat == "ALL" ? 44px : cat == "MARKET DATA" ? 66px : cat == "STRATEGY" ? 74px : cat == "ORDERS" ? 68px : cat == "BROKER" ? 66px : cat == "SYSTEM" ? 66px : 54px;
+                                    height: 20px;
+                                    border-radius: 10px;
                                     background: root.event-type-index == idx ? VayrenPalette.live-teal-deep : VayrenPalette.live-panel-deep;
-                                    border-width: root.event-type-index == idx ? 1px : 0px;
-                                    border-color: VayrenPalette.live-teal;
+                                    border-width: 1px;
+                                    border-color: root.event-type-index == idx ? VayrenPalette.live-teal : VayrenPalette.live-line-soft;
                                     TouchArea { clicked => { root.event-type-picked(cat); } }
                                     Text {
-                                        text: cat == "ALL" ? "All" : cat;
+                                        width: 100%;
+                                        text: cat == "ALL" ? "All" : (cat == "MARKET DATA" ? "Data" : cat);
                                         color: root.event-type-index == idx ? VayrenPalette.live-teal : VayrenPalette.live-ink-mute;
-                                        font-size: 10px;
-                                        font-weight: root.event-type-index == idx ? 700 : 500;
+                                        font-size: 9.5px;
+                                        font-weight: root.event-type-index == idx ? 700 : 600;
                                         horizontal-alignment: center;
                                         vertical-alignment: center;
+                                        overflow: elide;
                                     }
                                 }
                                 Rectangle { horizontal-stretch: 1; background: transparent; }
