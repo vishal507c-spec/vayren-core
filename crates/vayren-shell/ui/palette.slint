@@ -52,6 +52,27 @@ export global VayrenPalette {
     // keep compiling while they converge onto the canonical names above.
     out property <color> teal: #21C58B;
     out property <color> red: #F05A67;
+    // Live-terminal ramp (moved out of live.slint by the token rule —
+    // exact values preserved, zero pixel change; consolidate with the
+    // core ramp when the terminal design is reconciled).
+    out property <color> live-teal: #00E5C8;
+    out property <color> live-teal-deep: #092829;
+    out property <color> live-topbar: #090E16;
+    out property <color> live-panel-deep: #0A0F17;
+    out property <color> live-panel: #0C121B;
+    out property <color> live-row-checked: #0E1A26;
+    out property <color> live-btn: #131D2A;
+    out property <color> live-btn-line: #1E2D3E;
+    out property <color> live-line: #16202C;
+    out property <color> live-line-deep: #141C28;
+    out property <color> live-line-soft: #182332;
+    out property <color> live-line-faint: #1A2636;
+    out property <color> live-line-mist: #162231;
+    out property <color> live-ink: #D3DFEC;
+    out property <color> live-ink-dim: #6E7D8F;
+    out property <color> live-ink-faint: #7E8D9F;
+    out property <color> live-ink-mute: #7C8B9E;
+    out property <color> live-ink-soft: #8C9CAE;
 }
 
 export global VayrenDesign {
