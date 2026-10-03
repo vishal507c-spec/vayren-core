@@ -326,14 +326,14 @@ component LiveKvRow inherits HorizontalLayout {
     in property <string> value;
     in property <int> tone: 0;
 
-    height: 15px;
-    spacing: 4px;
+    height: 18px;
+    spacing: 6px;
 
     Text {
         width: 112px;
         text: root.key;
         color: VayrenPalette.live-ink-faint;
-        font-size: 9px;
+        font-size: 10px;
         font-weight: 600;
         vertical-alignment: center;
         overflow: elide;
@@ -342,7 +342,7 @@ component LiveKvRow inherits HorizontalLayout {
         horizontal-stretch: 1;
         text: root.value;
         color: LiveTone.ink(root.tone);
-        font-size: 10px;
+        font-size: 11px;
         font-weight: 700;
         vertical-alignment: center;
         overflow: elide;
@@ -708,7 +708,7 @@ export component LiveScreen inherits Rectangle {
 
                     // 1.2 POSITIONS / ORDERS / FILLS / DAILY P&L TABBED PANEL
                     Rectangle {
-                        height: 148px;
+                        height: 164px;
                         background: VayrenPalette.live-panel;
                         border-radius: 6px;
                         border-width: 1px;
@@ -927,8 +927,8 @@ export component LiveScreen inherits Rectangle {
                                 }
                                 Rectangle { horizontal-stretch: 1; background: transparent; }
                                 Rectangle {
-                                    width: 52px;
-                                    height: 24px;
+                                    width: 64px;
+                                    height: 28px;
                                     border-radius: 4px;
                                     background: VayrenPalette.live-panel-deep;
                                     border-width: 1px;
@@ -950,9 +950,9 @@ export component LiveScreen inherits Rectangle {
                                 height: 24px;
                                 spacing: 6px;
                                 for cat[idx] in root.event-types: Rectangle {
-                                    width: cat == "ALL" ? 44px : cat == "MARKET DATA" ? 66px : cat == "STRATEGY" ? 74px : cat == "ORDERS" ? 68px : cat == "BROKER" ? 66px : cat == "SYSTEM" ? 66px : 54px;
-                                    height: 20px;
-                                    border-radius: 10px;
+                                    width: cat == "ALL" ? 48px : cat == "MARKET DATA" ? 70px : cat == "STRATEGY" ? 78px : cat == "ORDERS" ? 72px : cat == "BROKER" ? 70px : cat == "SYSTEM" ? 70px : 58px;
+                                    height: 22px;
+                                    border-radius: 11px;
                                     background: root.event-type-index == idx ? VayrenPalette.live-teal-deep : VayrenPalette.live-panel-deep;
                                     border-width: 1px;
                                     border-color: root.event-type-index == idx ? VayrenPalette.live-teal : VayrenPalette.live-line-soft;
@@ -961,7 +961,7 @@ export component LiveScreen inherits Rectangle {
                                         width: 100%;
                                         text: cat == "ALL" ? "All" : (cat == "MARKET DATA" ? "Data" : cat);
                                         color: root.event-type-index == idx ? VayrenPalette.live-teal : VayrenPalette.live-ink-mute;
-                                        font-size: 9.5px;
+                                        font-size: 10px;
                                         font-weight: root.event-type-index == idx ? 700 : 600;
                                         horizontal-alignment: center;
                                         vertical-alignment: center;
@@ -1001,7 +1001,7 @@ export component LiveScreen inherits Rectangle {
                                     }
                                 }
                                 for ev in root.events: HorizontalLayout {
-                                    height: 20px; padding-left: 6px; padding-right: 6px; spacing: 6px; alignment: center;
+                                    height: 22px; padding-left: 6px; padding-right: 6px; spacing: 6px; alignment: center;
                                     Text { width: 62px; text: ev.timestamp; color: VayrenPalette.text; font-size: 10px; vertical-alignment: center; overflow: elide; }
                                     Text { width: 44px; text: ev.level; color: LiveTone.ink(ev.status-tone); font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
                                     Text { horizontal-stretch: 1; text: ev.event; color: ev.status-tone == 3 ? VayrenPalette.neg : VayrenPalette.live-ink; font-size: 11px; font-weight: ev.status-tone == 3 ? 700 : 500; vertical-alignment: center; overflow: elide; }
@@ -1090,7 +1090,7 @@ export component LiveScreen inherits Rectangle {
                                 }
                             }
                             for sym[idx] in root.symbols: Rectangle {
-                                height: 26px;
+                                height: 28px;
                                 border-radius: 4px;
                                 background: sym.checked ? VayrenPalette.live-row-checked : transparent;
                                 TouchArea { clicked => { root.symbol-toggled(sym.real-index); } }
@@ -1098,9 +1098,9 @@ export component LiveScreen inherits Rectangle {
                                     padding-left: 6px; padding-right: 6px; spacing: 4px; alignment: center;
                                     Text { width: 16px; text: idx + 1; color: VayrenPalette.live-ink-dim; font-size: 10px; vertical-alignment: center; overflow: elide; }
                                     Text { horizontal-stretch: 1; text: sym.name; color: sym.checked ? VayrenPalette.text-bright : VayrenPalette.live-ink; font-size: 11px; font-weight: sym.checked ? 700 : 500; vertical-alignment: center; overflow: elide; }
-                                    Text { width: 60px; text: sym.ltp; color: VayrenPalette.text; font-size: 10px; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 60px; text: sym.ltp; color: VayrenPalette.text; font-size: 11px; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
                                     Text { width: 46px; text: sym.change; color: LiveTone.ink(sym.change-tone); font-size: 10px; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                    Text { width: 78px; text: sym.status; color: LiveTone.ink(sym.status-tone); font-size: 9px; font-weight: 700; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 78px; text: sym.status; color: LiveTone.ink(sym.status-tone); font-size: 10px; font-weight: 700; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
                                 }
                             }
                         }
@@ -1171,9 +1171,9 @@ export component LiveScreen inherits Rectangle {
                                 // Inspector collapse: the only way to reclaim the
                                 // column width for the workspace.
                                 Rectangle {
-                                    width: 20px;
-                                    height: 20px;
-                                    border-radius: 3px;
+                                    width: 28px;
+                                    height: 28px;
+                                    border-radius: 4px;
                                     background: VayrenPalette.live-btn;
                                     border-width: 1px;
                                     border-color: VayrenPalette.live-btn-line;
@@ -1181,7 +1181,7 @@ export component LiveScreen inherits Rectangle {
                                     Text {
                                         text: "›";
                                         color: VayrenPalette.live-ink;
-                                        font-size: 13px;
+                                        font-size: 14px;
                                         font-weight: 700;
                                         horizontal-alignment: center;
                                         vertical-alignment: center;
@@ -1319,39 +1319,39 @@ export component LiveScreen inherits Rectangle {
                                     }
                                 }
 
-                                Text { text: "ACCOUNT & RISK"; color: VayrenPalette.live-ink-soft; font-size: 9px; font-weight: 700; }
+                                Text { text: "ACCOUNT & RISK"; color: VayrenPalette.live-ink-soft; font-size: 10px; font-weight: 700; }
                                 for r in root.account-rows: LiveKvRow { key: r.key; value: r.value; tone: r.tone; }
 
                                 Rectangle { height: 1px; background: VayrenPalette.live-line; }
-                                Text { text: "RISK LIMITS"; color: VayrenPalette.live-ink-soft; font-size: 9px; font-weight: 700; }
+                                Text { text: "RISK LIMITS"; color: VayrenPalette.live-ink-soft; font-size: 10px; font-weight: 700; }
                                 for r in root.risk-rows: LiveKvRow { key: r.key; value: r.value; tone: r.tone; }
 
                                 Rectangle { height: 1px; background: VayrenPalette.live-line; }
-                                Text { text: "POSITION FACTS"; color: VayrenPalette.live-ink-soft; font-size: 9px; font-weight: 700; }
+                                Text { text: "POSITION FACTS"; color: VayrenPalette.live-ink-soft; font-size: 10px; font-weight: 700; }
                                 for r in root.position-rows: LiveKvRow { key: r.key; value: r.value; tone: r.tone; }
 
                                 Rectangle { height: 1px; background: VayrenPalette.live-line; }
-                                Text { text: "ACTIVE STRATEGY"; color: VayrenPalette.live-ink-soft; font-size: 9px; font-weight: 700; }
+                                Text { text: "ACTIVE STRATEGY"; color: VayrenPalette.live-ink-soft; font-size: 10px; font-weight: 700; }
                                 for r in root.strategy-rows: LiveKvRow { key: r.key; value: r.value; tone: r.tone; }
 
                                 Rectangle { height: 1px; background: VayrenPalette.live-line; }
-                                Text { text: "VENUE"; color: VayrenPalette.live-ink-soft; font-size: 9px; font-weight: 700; }
+                                Text { text: "VENUE"; color: VayrenPalette.live-ink-soft; font-size: 10px; font-weight: 700; }
                                 for r in root.broker-rows: LiveKvRow { key: r.key; value: r.value; tone: r.tone; }
 
                                 Rectangle { height: 1px; background: VayrenPalette.live-line; }
-                                Text { text: "RECONCILIATION"; color: VayrenPalette.live-ink-soft; font-size: 9px; font-weight: 700; }
+                                Text { text: "RECONCILIATION"; color: VayrenPalette.live-ink-soft; font-size: 10px; font-weight: 700; }
                                 for r in root.recon-rows: LiveKvRow { key: r.key; value: r.value; tone: r.tone; }
 
                                 Rectangle { height: 1px; background: VayrenPalette.live-line; }
-                                Text { text: "ORDER"; color: VayrenPalette.live-ink-soft; font-size: 9px; font-weight: 700; }
+                                Text { text: "ORDER"; color: VayrenPalette.live-ink-soft; font-size: 10px; font-weight: 700; }
                                 HorizontalLayout {
-                                    height: 22px;
+                                    height: 28px;
                                     spacing: 8px;
                                     Text { text: "QUANTITY"; color: VayrenPalette.live-ink-faint; font-size: 10px; font-weight: 700; vertical-alignment: center; }
                                     Rectangle { horizontal-stretch: 1; background: transparent; }
                                     LineEdit {
-                                        width: 84px;
-                                        height: 22px;
+                                        width: 96px;
+                                        height: 28px;
                                         text <=> root.qty-text;
                                         edited(t) => { root.qty-dirty = true; }
                                         accepted(t) => { root.qty-dirty = false; root.quantity-edited(t); }
@@ -1402,16 +1402,16 @@ export component LiveScreen inherits Rectangle {
             // only toggle along with it, stranding ARM/CONFIRM with no way
             // back until restart. The rail re-opens it from the edge.
             if !root.show-inspector: Rectangle {
-                x: parent.width - 22px;
+                x: parent.width - 28px;
                 y: 0;
-                width: 22px;
+                width: 28px;
                 height: 100%;
                 background: VayrenPalette.bg;
                 TouchArea { clicked => { root.inspector-toggled(); } }
                 Text {
                     text: "‹";
                     color: VayrenPalette.live-ink;
-                    font-size: 13px;
+                    font-size: 14px;
                     font-weight: 700;
                     horizontal-alignment: center;
                     vertical-alignment: center;

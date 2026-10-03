@@ -72,6 +72,7 @@ jobs:
     timeout-minutes: 120
     env:
       RUSTFLAGS: "-C link-arg=-fuse-ld=lld"
+      CARGO_BUILD_JOBS: "4"
     # Cache SAVE needs write; checkout still needs read (a permissions
     # block replaces defaults, so contents:read must stay explicit).
     permissions:
@@ -143,6 +144,7 @@ jobs:
     timeout-minutes: 30
     env:
       RUSTFLAGS: "-C link-arg=-fuse-ld=lld"
+      CARGO_BUILD_JOBS: "4"
     permissions:
       contents: read
       actions: write
@@ -176,6 +178,7 @@ jobs:
     timeout-minutes: 30
     env:
       RUSTFLAGS: "-C link-arg=-fuse-ld=lld"
+      CARGO_BUILD_JOBS: "4"
     permissions:
       contents: read
       actions: write

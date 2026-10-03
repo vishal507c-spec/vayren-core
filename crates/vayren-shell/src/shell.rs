@@ -199,6 +199,12 @@ pub fn apply(ui: &AppWindow, panel: &BrokerPanel) {
     ui.set_remove_visible(card.remove_visible);
 }
 
+/// Pre-fill stand-in written into credential fields that already hold a value
+/// in the OS vault: the connect handler reads it as "unchanged — use the vault
+/// value", and the screen compares against it so its SAVED indicator can never
+/// claim a value the user has since retyped.
+pub const SAVED_CREDENTIAL_SENTINEL: &str = "\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}";
+
 /// Bind the broker CONNECTION workspace view-model to the Slint screen.
 /// Every displayed value comes from backend facts + the venue's existing
 /// credential schema — the screen never infers sessions or secrets.
@@ -252,9 +258,7 @@ pub fn apply_connection(ui: &AppWindow, workspace: &BrokerWorkspace) {
     );
     ui.set_conn_venue_subtitle(workspace.venue_subtitle.clone().into());
     ui.set_conn_env_label(workspace.env_label.clone().into());
-    ui.set_conn_description(
-        crate::broker_connection::description_line(&workspace.display_name).into(),
-    );
+    ui.set_conn_description(workspace.description().into());
     let (pill_label, pill_tone) = workspace.pill();
     ui.set_conn_pill_label(pill_label.into());
     ui.set_conn_pill_tone(pill_tone);
@@ -315,11 +319,12 @@ pub fn apply_connection(ui: &AppWindow, workspace: &BrokerWorkspace) {
     } else {
         format!("View setup guide for {}.", workspace.display_name.trim()).into()
     });
+    ui.set_conn_saved_sentinel(SAVED_CREDENTIAL_SENTINEL.into());
     // Pre-fill saved-credential sentinel so the user sees which fields already
     // have stored values and does not need to re-enter them on reconnect.
     // The sentinel is a non-empty placeholder that the connect handler
     // recognises as "unchanged — use vault value".
-    const SAVED_SENTINEL: &str = "\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}";
+    const SAVED_SENTINEL: &str = SAVED_CREDENTIAL_SENTINEL;
     let setters: [fn(&AppWindow, slint::SharedString); 6] = [
         AppWindow::set_broker_field_v0,
         AppWindow::set_broker_field_v1,

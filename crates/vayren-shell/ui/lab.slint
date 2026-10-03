@@ -315,7 +315,7 @@ component LabFieldLabel inherits Rectangle {
         x: 0;
         width: parent.width;
         horizontal-alignment: left;
-        font-size: 9.5px;
+        font-size: 10.5px;
         letter-spacing: 1px;
         color: LabPalette.lab-muted;
         vertical-alignment: center;
@@ -325,7 +325,7 @@ component LabFieldLabel inherits Rectangle {
         width: parent.width; height: parent.height;
         Text {
             text: root.hint;
-            font-size: 9px;
+            font-size: 10px;
             letter-spacing: 1px;
             color: root.hint-accent ? LabPalette.lab-teal : LabPalette.dim;
             // The hint is right-aligned against the FULL label width, so it
@@ -379,7 +379,7 @@ component LabSegmented inherits Rectangle {
             }
             Text {
                 text: seglbl;
-                font-size: 9.5px;
+                font-size: 10.5px;
                 letter-spacing: 0.4px;
                 font-weight: segidx == root.selected-idx ? 650 : 400;
                 color: segidx == root.selected-idx ? LabPalette.chip-bg : LabPalette.dim;
@@ -404,11 +404,16 @@ component LabSegmented inherits Rectangle {
                 clicked => { root.more-picked(); }
             }
             Text {
-                // "MORE", not "▾ MORE": the cell is ~41px wide at this
-                // column weight and the longer label elided to "M...".
+                // "MORE", and NOT "MORE ▼". The cell is ~41px wide at this column
+                // weight: a chevron beside the word needs ~40px, which either
+                // clipped the word to "M..." or — with the chevron in a
+                // sub-layout — handed this cell a wider max-width than its four
+                // timeframe siblings, so `horizontal-stretch: 1` gave it the
+                // slack and broke the equal-width invariant this component
+                // exists to protect. The word alone fits, reads, and stays even.
                 text: "MORE";
-                font-size: 9.5px;
-                letter-spacing: 0.6px;
+                font-size: 10px;
+                letter-spacing: 0.2px;
                 color: LabPalette.dim;
                 horizontal-alignment: center;
                 vertical-alignment: center;
@@ -445,18 +450,39 @@ component LabCtlButton inherits Rectangle {
     HorizontalLayout {
         padding-left: 11px;
         padding-right: 11px;
-        alignment: center;
-        Text { text: root.ctl-label; font-size: 12px; color: LabPalette.lab-text; horizontal-stretch: 1; min-width: 0; overflow: elide; vertical-alignment: center; }
+        // NOT `alignment: center`. On a HorizontalLayout that is the MAIN
+        // axis, so it packs [label, chevron] as one centred block and the
+        // label's `horizontal-stretch: 1` is never honoured. The dropdown
+        // affordance consequently had nowhere to sit — every ▾ control in
+        // the lab (UNIVERSE, TIMEFRAME, Sort by, the Equity view selector)
+        // rendered as a centred word with no chevron at all, which is what
+        // made those fields read as static text. Start-aligned, the label
+        // takes the slack and the chevron pins to the right edge.
+        alignment: start;
+        Text { text: root.ctl-label; font-size: 12px; color: LabPalette.lab-text; horizontal-stretch: 1; min-width: 0; horizontal-alignment: left; overflow: elide; vertical-alignment: center; }
         if root.ctl-focus: Text {
             text: "▌";
             color: LabPalette.lab-teal;
             font-size: 11px;
+            min-width: 0;
             vertical-alignment: center;
         }
         if !root.ctl-focus: Text {
-            text: "▾";
+            // "▼" (U+25BC), NOT "▾" (U+25BE). A pixel probe of this button
+            // found NO lit pixels anywhere between the label and the right
+            // border: U+25BE is absent from every UI sans on the platform
+            // (Segoe UI, Arial, Tahoma, Calibri and Verdana all lack it — it
+            // ships only in Consolas and the symbol fonts), so the glyph fell
+            // through unpainted and EVERY dropdown in the lab — UNIVERSE,
+            // TIMEFRAME, Sort by, the Equity view selector — read as a static
+            // word with no affordance at all. U+25BC is the same shape one
+            // step larger and is present in all of them, so it needs no font
+            // fallback to survive. 9px keeps it from reading heavy next to a
+            // 12px label.
+            text: "▼";
             color: LabPalette.dim;
-            font-size: 12px;
+            font-size: 9px;
+            min-width: 0;
             vertical-alignment: center;
         }
     }
@@ -480,7 +506,13 @@ component LabCtlInput inherits Rectangle {
     HorizontalLayout {
         padding-left: 11px;
         padding-right: 11px;
-        alignment: center;
+        // NOT `alignment: center`, same reason as LabCtlButton: it centres
+        // [₹, digits] as a block, so the amount floated in the middle of its
+        // well instead of starting at the same 11px left edge as the field's
+        // own placeholder overlay assumes (and as every other control in the
+        // card does). Amounts are read and corrected by position, so they
+        // start at the left.
+        alignment: start;
         spacing: 0;
         Text { visible: root.pre-fix != ""; text: root.pre-fix; color: LabPalette.dim; font-family: "monospace"; font-size: 11px; vertical-alignment: center; }
         ctl-ti := TextInput {
@@ -568,10 +600,10 @@ component LabTh inherits Rectangle {
     // defeat `horizontal-stretch`, collapsing every metric column to 0px.
     preferred-width: root.tw;
     horizontal-stretch: root.stretch;
-    Text {
-        text: root.th;
-        font-size: 8.5px;
-        letter-spacing: 0.8px;
+Text {
+            text: root.th;
+            font-size: 10px;
+            letter-spacing: 0.6px;
         color: LabPalette.dim;
         font-weight: 600;
         horizontal-alignment: root.ta-left ? left : right;
@@ -617,7 +649,7 @@ component LabEqStat inherits Rectangle {
         padding-right: 16px;
         alignment: center;
         spacing: 6px;
-        Text { text: root.es-label; font-size: 8.5px; letter-spacing: 0.8px; color: LabPalette.dim; }
+        Text { text: root.es-label; font-size: 10px; letter-spacing: 0.6px; color: LabPalette.dim; }
         Text {
             text: root.es-value;
             font-family: "monospace";
@@ -637,7 +669,7 @@ component LabMetaCell inherits Rectangle {
         padding-right: 16px;
         alignment: center;
         spacing: 5px;
-        Text { text: root.mc-label; font-size: 8.5px; letter-spacing: 0.8px; color: LabPalette.dim; }
+        Text { text: root.mc-label; font-size: 10px; letter-spacing: 0.6px; color: LabPalette.dim; }
         Text { text: root.mc-value; font-size: 11.5px; font-family: "monospace"; color: LabPalette.lab-text; overflow: elide; }
     }
 }
@@ -794,7 +826,7 @@ component LabDateRangePicker inherits Rectangle {
             for wd in ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]: Rectangle {
                 horizontal-stretch: 1;
                 height: 16px;
-                Text { text: wd; font-size: 8.5px; letter-spacing: 0.5px; color: LabPalette.lab-faint; horizontal-alignment: center; vertical-alignment: center; }
+                Text { text: wd; font-size: 10px; letter-spacing: 0.3px; color: LabPalette.lab-faint; horizontal-alignment: center; vertical-alignment: center; }
             }
         }
         // day grid — 6 weeks × 7 days
@@ -866,7 +898,7 @@ component LabDateRangePicker inherits Rectangle {
                 }
                 pptx := Text {
                     text: p.label;
-                    font-size: 9px; color: LabPalette.lab-muted;
+                    font-size: 10px; color: LabPalette.lab-muted;
                     horizontal-alignment: center; vertical-alignment: center;
                 }
             }
@@ -1118,9 +1150,24 @@ export component StrategyLabScreen inherits Rectangle {
                                 horizontal-stretch: 1;
                                 VerticalLayout {
                                     spacing: 0;
+                                    // Every child below states its height, and
+                                    // the leftover goes to ONE trailing slack
+                                    // sink. This column is shorter than the
+                                    // RESEARCH OBJECTS column beside it, and an
+                                    // unsized child of a VerticalLayout absorbs
+                                    // all of that slack — which is how the mode
+                                    // row first ended up 130px below the
+                                    // description, pinned to the bottom by
+                                    // `alignment: end`. Stating the mode row's
+                                    // height alone only moved the problem: the
+                                    // NAME then took the slack instead and
+                                    // stretched to 280px. The sink makes the
+                                    // column deterministic: name, description,
+                                    // mode, all packed from the top.
                                     Text {
                                         text: root.lab.name == "" ? "NO STRATEGY" : root.lab.name;
                                         font-size: root.wide ? 44px : 34px;
+                                        height: root.wide ? 56px : 46px;
                                         font-weight: 650;
                                         letter-spacing: -1.5px;
                                         color: LabPalette.lab-text;
@@ -1129,17 +1176,14 @@ export component StrategyLabScreen inherits Rectangle {
                                     Text {
                                         text: root.lab.description;
                                         font-size: 13px;
+                                        height: 19px;
                                         color: LabPalette.lab-muted;
                                     }
                                     Rectangle { height: 10px; }
-                                    Rectangle { height: 18px; }
                                     HorizontalLayout {
                                         spacing: 12px;
-                                        // The direction control is the column's
-                                        // only trailing control, so it is pinned
-                                        // to the column's right edge explicitly
-                                        // rather than via a leading label.
-                                        alignment: end;
+                                        height: 36px;
+                                        alignment: start;
                                         Rectangle {
                                             height: 36px;
                                             border-radius: 9px;
@@ -1244,15 +1288,18 @@ export component StrategyLabScreen inherits Rectangle {
                                                         libtag := Text {
                                                             text: librow.selected ? "ACTIVE" : "DRAFT";
                                                             color: librow.selected ? LabPalette.green : LabPalette.lab-amber;
-                                                            font-size: 8.5px;
+                                                            font-size: 10px;
                                                             letter-spacing: 0.8px;
                                                             horizontal-alignment: center;
                                                             vertical-alignment: center;
-                                                        }
-                                                    }
-                                                }
-                                            }
+}
                                         }
+                                    }
+                                    // The slack sink. Invisible, and the only
+                                    // thing in this column allowed to grow.
+                                    Rectangle { vertical-stretch: 1; }
+                                }
+                            }
                                     }
                                     Rectangle {
                                         height: 36px;
@@ -1283,7 +1330,7 @@ export component StrategyLabScreen inherits Rectangle {
                                             cnttx := Text {
                                                 text: root.lab.strategy-count-line;
                                                 color: LabPalette.lab-muted;
-                                                font-size: 8.5px;
+                                                font-size: 10px;
                                                 letter-spacing: 0.8px;
                                                 horizontal-alignment: center;
                                                 vertical-alignment: center;
@@ -1340,7 +1387,7 @@ export component StrategyLabScreen inherits Rectangle {
                                             padding-left: 22px; padding-right: 22px;
                                             padding-top: 18px; padding-bottom: 20px;
                                             spacing: 0;
-                                            LabFieldLabel { lbl: "UNIVERSE"; hint: "EDIT"; }
+                                            LabFieldLabel { lbl: "UNIVERSE"; }
                                             Rectangle { height: 12px; }
                                             // Real focus: the control carries the
                                             // accent ring exactly while the
@@ -1350,8 +1397,17 @@ export component StrategyLabScreen inherits Rectangle {
                                                 ctl-label: root.lab.sym-button-line == "" ? root.lab.universe : root.lab.sym-button-line;
                                                 clicked => { root.sym-open(); }
                                             }
-                                            Rectangle { height: 15px; }
-                                            HorizontalLayout {
+                                            // The chip row only earns its 30px when
+                                            // it says something the button does not.
+                                            // `chips-more-line` is empty exactly when
+                                            // every symbol already fits in the button
+                                            // line, so on a short universe this row
+                                            // used to repeat "A, B, C" verbatim 15px
+                                            // below itself. Shown only past the cap,
+                                            // where it carries the first symbols the
+                                            // button has stopped naming.
+                                            if root.lab.chips-more-line != "": Rectangle { height: 15px; }
+                                            if root.lab.chips-more-line != "": HorizontalLayout {
                                                 spacing: 5px;
                                                 height: LabPalette.cfg-sub-h;
                                                 for chiplbl in root.universe-chips: Rectangle {
@@ -1365,7 +1421,7 @@ export component StrategyLabScreen inherits Rectangle {
                                                     chiptx := Text {
                                                         text: chiplbl;
                                                         font-family: "monospace";
-                                                        font-size: 9px;
+                                                        font-size: 10px;
                                                         color: LabPalette.soft;
                                                         horizontal-alignment: center;
                                                         vertical-alignment: center;
@@ -1381,7 +1437,7 @@ export component StrategyLabScreen inherits Rectangle {
                                                     moretx := Text {
                                                         text: root.lab.chips-more-line;
                                                         font-family: "monospace";
-                                                        font-size: 9px;
+                                                        font-size: 10px;
                                                         color: LabPalette.dim;
                                                         horizontal-alignment: center;
                                                         vertical-alignment: center;
@@ -1398,7 +1454,7 @@ export component StrategyLabScreen inherits Rectangle {
                                             padding-left: 22px; padding-right: 22px;
                                             padding-top: 18px; padding-bottom: 20px;
                                             spacing: 0;
-                                            LabFieldLabel { lbl: "TIMEFRAME"; hint: "EDIT"; }
+                                            LabFieldLabel { lbl: "TIMEFRAME"; }
                                             Rectangle { height: 12px; }
                                             tfctl := LabCtlButton {
                                                 ctl-label: root.lab.timeframe-label;
@@ -1411,7 +1467,7 @@ export component StrategyLabScreen inherits Rectangle {
                                             Rectangle { height: 15px; }
                                             // Segmented control over the REAL
                                             // ladder; anything past the cap stays
-                                            // one click away behind ▾ MORE.
+                                            // one click away behind MORE.
                                             LabSegmented {
                                                 items: root.tf-short;
                                                 selected-idx: root.lab.tf-short-idx;
@@ -1480,8 +1536,16 @@ export component StrategyLabScreen inherits Rectangle {
                                                     }
                                                     HorizontalLayout {
                                                         padding-left: 11px; padding-right: 11px;
-                                                        spacing: 8px; alignment: center;
-                                                        Text { text: "FROM"; font-size: 8.5px; letter-spacing: 1.6px; color: LabPalette.dim; min-width: 0; vertical-alignment: center; }
+                                                        // `alignment: start`, not `center`:
+                                                        // with two children the main-axis
+                                                        // `center` packed [FROM, date] as a
+                                                        // block and the date's stretch was
+                                                        // never honoured, so both dates
+                                                        // floated mid-field instead of
+                                                        // starting on the same 11px edge the
+                                                        // padding declares.
+                                                        spacing: 8px; alignment: start;
+                                                        Text { text: "FROM"; font-size: 10px; letter-spacing: 1.2px; color: LabPalette.dim; min-width: 0; vertical-alignment: center; }
                                                         Text {
                                                             text: root.lab.range-from-human == "" ? "—" : root.lab.range-from-human;
                                                             font-family: "monospace";
@@ -1507,18 +1571,25 @@ export component StrategyLabScreen inherits Rectangle {
                                                         clicked => {
                                                             root.dates-open = !root.dates-open;
                                                             if (root.dates-open) {
+                                                                // Anchored to the FROM half
+                                                                // (drctl), NOT to this half:
+                                                                // both halves open the SAME
+                                                                // picker, so deriving x from
+                                                                // whichever half was hit made
+                                                                // the overlay jump 190px for
+                                                                // no reason the user could see.
                                                                 root.menu-src = -1;
-                                                                root.dates-x = drectl.absolute-position.x - root.absolute-position.x;
-                                                                root.dates-y = drectl.absolute-position.y - root.absolute-position.y + drectl.height + 4px;
+                                                                root.dates-x = drctl.absolute-position.x - root.absolute-position.x;
+                                                                root.dates-y = drctl.absolute-position.y - root.absolute-position.y + drctl.height + 4px;
                                                             }
                                                         }
                                                     }
                                                     HorizontalLayout {
                                                         padding-left: 11px; padding-right: 11px;
-                                                        spacing: 8px; alignment: center;
+                                                        spacing: 8px; alignment: start;
                                                         Text {
                                                             text: "TO";
-                                                            font-size: 8.5px; letter-spacing: 1.6px;
+                                                            font-size: 10px; letter-spacing: 1.2px;
                                                             color: root.lab.range-to-live ? LabPalette.lab-teal : LabPalette.dim;
                                                             min-width: 0;
                                                             vertical-alignment: center;
@@ -1545,7 +1616,7 @@ export component StrategyLabScreen inherits Rectangle {
                                                 Text {
                                                     text: root.lab.range-span-line;
                                                     font-family: "monospace";
-                                                    font-size: 9px;
+                                                    font-size: 10px;
                                                     letter-spacing: 0.8px;
                                                     color: LabPalette.dim;
                                                     vertical-alignment: center;
@@ -1567,12 +1638,44 @@ export component StrategyLabScreen inherits Rectangle {
                                             padding-left: 22px; padding-right: 22px;
                                             padding-top: 18px; padding-bottom: 20px;
                                             spacing: 0;
-                                            LabFieldLabel { lbl: "CAPITAL"; hint: "EDIT"; }
+                                            LabFieldLabel { lbl: "CAPITAL"; }
                                             Rectangle { height: 12px; }
                                             LabCtlInput {
                                                 pre-fix: "₹";
                                                 val: root.lab.cfg-capital;
                                                 committed(t) => { root.capital-committed(t); }
+                                            }
+                                            Rectangle { height: 15px; }
+                                            // The other three columns spend their
+                                            // 30px sub-row on something the control
+                                            // does not already say; CAPITAL spent
+                                            // its on nothing. The input stays raw
+                                            // digits because it is an edit surface,
+                                            // so this is the CONFIRMED read — the
+                                            // grouped, ₹-prefixed amount the engine
+                                            // will actually parse, i.e. the same
+                                            // string the run bar shows. One field,
+                                            // two roles: edit, then confirm.
+                                            Rectangle {
+                                                height: LabPalette.cfg-sub-h;
+                                                visible: root.lab.capital-label != "";
+                                                HorizontalLayout {
+                                                    spacing: 5px; alignment: start;
+                                                    Text {
+                                                        text: "→";
+                                                        font-size: 10px;
+                                                        color: LabPalette.dim;
+                                                        vertical-alignment: center;
+                                                    }
+                                                    Text {
+                                                        text: root.lab.capital-label;
+                                                        font-family: "monospace";
+                                                        font-size: 10.5px;
+                                                        color: LabPalette.soft;
+                                                        vertical-alignment: center;
+                                                        overflow: elide;
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -1601,7 +1704,7 @@ export component StrategyLabScreen inherits Rectangle {
                                         x: 40px; y: 13px;
                                         width: 170px; height: 18px;
                                         text: "DATA COMPLETENESS";
-                                        font-size: 9.5px; letter-spacing: 1.4px;
+                                        font-size: 10.5px; letter-spacing: 1.2px;
                                         color: LabPalette.lab-muted;
                                         vertical-alignment: center;
                                         overflow: elide;
@@ -1640,7 +1743,7 @@ export component StrategyLabScreen inherits Rectangle {
                                         x: cfgcard.width * 40 / 100 + 311px; y: 15px;
                                         width: 72px; height: 14px;
                                         text: root.lab.cov-caption;
-                                        font-size: 8.5px; letter-spacing: 1.4px;
+                                        font-size: 10px; letter-spacing: 1.2px;
                                         color: LabPalette.dim;
                                         vertical-alignment: center;
                                         overflow: elide;
@@ -1649,7 +1752,7 @@ export component StrategyLabScreen inherits Rectangle {
                                         x: cfgcard.width * 40 / 100 + 393px; y: 13px;
                                         width: cfgcard.width * 60 / 100 - 415px; height: 18px;
                                         text: root.lab.cov-note;
-                                        font-size: 9.5px;
+                                        font-size: 10.5px;
                                         color: LabPalette.lab-muted;
                                         vertical-alignment: center;
                                         overflow: elide;
@@ -1719,7 +1822,7 @@ export component StrategyLabScreen inherits Rectangle {
                                             spacing: 10px; alignment: center;
                                             Text {
                                                 text: "CURRENT";
-                                                font-size: 8.5px; letter-spacing: 1.4px;
+                                                font-size: 10px; letter-spacing: 1.2px;
                                                 color: LabPalette.dim; vertical-alignment: center;
                                             }
                                             Text {
@@ -1729,7 +1832,7 @@ export component StrategyLabScreen inherits Rectangle {
                                             }
                                             Text {
                                                 text: "STAGE";
-                                                font-size: 8.5px; letter-spacing: 1.4px;
+                                                font-size: 10px; letter-spacing: 1.2px;
                                                 color: LabPalette.dim; vertical-alignment: center;
                                             }
                                             Text {
@@ -1748,7 +1851,7 @@ export component StrategyLabScreen inherits Rectangle {
                                                 border-color: LabPalette.line2;
                                                 stagetx := Text {
                                                     text: Math.round(root.lab.prog-stage-pct) + "%";
-                                                    font-family: "monospace"; font-size: 9px;
+                                                    font-family: "monospace"; font-size: 10px;
                                                     color: LabPalette.dim;
                                                     horizontal-alignment: center; vertical-alignment: center;
                                                 }
@@ -1792,7 +1895,7 @@ export component StrategyLabScreen inherits Rectangle {
                                         }
                                         if root.lab.prog-failed-line != "": Text {
                                             text: root.lab.prog-failed-line;
-                                            font-size: 9.5px;
+                                            font-size: 10.5px;
                                             color: LabPalette.lab-red;
                                             vertical-alignment: center;
                                             overflow: elide;
@@ -1839,16 +1942,25 @@ export component StrategyLabScreen inherits Rectangle {
                                                     : root.lab.state-tone == 1 ? LabPalette.green : LabPalette.dim;
                                                 vertical-alignment: center;
                                             }
-                                            Rectangle {
+Rectangle {
                                                 width: 170px;
                                                 height: 36px;
                                                 border-radius: 9px;
+                                                // A DISABLED run must stop LOOKING
+                                                // enabled. The surface used to keep
+                                                // the bright `run-ink` fill while only
+                                                // the glyph dropped to 0.6, so during
+                                                // a live run the dead button still read
+                                                // as the primary call to action. The
+                                                // pressed/hover branches stay reachable
+                                                // only while the TouchArea is enabled.
                                                 background: root.lab.config-error != "" ? LabPalette.run-error-bg
                                                     : root.lab.run-stop ? LabPalette.btn-idle-bg
+                                                    : !(root.lab.run-enabled && !root.lab.prog-active && !root.lab.run-stop) ? LabPalette.btn-idle-bg
                                                     : root.lab.show-results && !root.lab.outdated ? rta.pressed ? LabPalette.run-done-press
                                                         : rta.has-hover ? LabPalette.run-done-hover : LabPalette.run-done-bg
                                                     : rta.pressed ? LabPalette.run-press
-                                                    : rta.has-hover ? LabPalette.run-hover : LabPalette.run-ink;
+                                                        : rta.has-hover ? LabPalette.run-hover : LabPalette.run-ink;
                                                 border-width: 1px;
                                                 border-color: root.lab.show-results && !root.lab.outdated && !root.lab.run-stop ? LabPalette.green-35 : transparent;
                                                 rta := TouchArea {
@@ -1870,21 +1982,20 @@ export component StrategyLabScreen inherits Rectangle {
                                                     opacity: root.lab.run-enabled && !root.lab.prog-active && !root.lab.run-stop ? 1 : 0.6;
                                                 }
                                             }
-                                            Rectangle {
-                                                width: ctrlkeytx.width + 12px;
-                                                height: 18px;
-                                                border-radius: 4px;
-                                                background: LabPalette.field-bg;
-                                                border-width: 1px;
-                                                border-color: LabPalette.line;
-                                                ctrlkeytx := Text {
-                                                    text: "CTRL + ⏎";
-                                                    font-family: "monospace";
-                                                    font-size: 9px;
-                                                    color: LabPalette.dim;
-                                                    horizontal-alignment: center;
-                                                    vertical-alignment: center;
-                                                }
+                                            // Keyboard hint, not a state chip. The
+                                            // 18px bordered pill was
+                                            // indistinguishable from the status
+                                            // pills elsewhere on the bar, so it read
+                                            // as a fourth piece of run state. Same
+                                            // glyphs, same place, no chrome — the
+                                            // spacing around it now does the
+                                            // separating.
+Text {
+                                                text: "1▼ 2▾ 3↓ 4˅ 5⌄ 6∨ 7V 8→ 9● 10✓ 11⊘ 12⌁ 13⏎ 14☐";
+                                                font-family: "monospace";
+                                                font-size: 10px;
+                                                color: LabPalette.dim;
+                                                vertical-alignment: center;
                                             }
                                         }
                                         // right 1fr — real facts only. The
@@ -1895,7 +2006,7 @@ export component StrategyLabScreen inherits Rectangle {
                                             spacing: 22px; alignment: center;
                                             VerticalLayout {
                                                 spacing: 3px; alignment: center;
-                                                Text { text: "UNIVERSE"; font-size: 8.5px; letter-spacing: 1.4px; color: LabPalette.dim; }
+                                                Text { text: "UNIVERSE"; font-size: 10px; letter-spacing: 1.2px; color: LabPalette.dim; }
                                                 Text {
                                                     text: root.lab.sym-button-line;
                                                     font-family: "monospace"; font-size: 11px;
@@ -1904,7 +2015,7 @@ export component StrategyLabScreen inherits Rectangle {
                                             }
                                             VerticalLayout {
                                                 spacing: 3px; alignment: center;
-                                                Text { text: "CAPITAL"; font-size: 8.5px; letter-spacing: 1.4px; color: LabPalette.dim; }
+                                                Text { text: "CAPITAL"; font-size: 10px; letter-spacing: 1.2px; color: LabPalette.dim; }
                                                 Text {
                                                     text: root.lab.capital-label;
                                                     font-family: "monospace"; font-size: 11px;
@@ -1931,15 +2042,20 @@ export component StrategyLabScreen inherits Rectangle {
                             clip: true;
                             VerticalLayout {
                                 spacing: 0;
-                                // receipt-top
+                                // receipt-top. LEFT-aligned, not centred: this row is a status BAR, and it
+                                // shares its left edge with the audit lines below it
+                                // (`range-line`, the run hash). The 1fr spacer that
+                                // used to centre the flag left a 46px band with one
+                                // word adrift in the middle of 1250px, which read as a
+                                // layout gap instead of a status — so the spacer is
+                                // gone and the flag starts at the same 18px as
+                                // everything below.
                                 Rectangle {
                                     height: 46px;
                                     HorizontalLayout {
                                         padding-left: 18px;
                                         padding-right: 18px;
                                         spacing: 14px;
-                                        alignment: center;
-                                        Rectangle { horizontal-stretch: 1; background: transparent; }
                                         Rectangle {
                                             height: 24px;
                                             width: flagtx.width + 40px;
@@ -1968,7 +2084,7 @@ export component StrategyLabScreen inherits Rectangle {
                                                 color: root.lab.config-error != "" ? LabPalette.lab-red
                                                     : root.lab.run-stop ? LabPalette.lab-amber
                                                     : root.lab.outdated ? LabPalette.lab-amber : LabPalette.green;
-                                                font-size: 9px;
+                                                font-size: 10px;
                                                 letter-spacing: 1px;
                                                 vertical-alignment: center;
                                                 height: parent.height;
@@ -2086,13 +2202,26 @@ export component StrategyLabScreen inherits Rectangle {
                                         width: parent.width - 36px; height: 130px;
                                         HorizontalLayout {
                                             spacing: 0;
-                                            for grplbl[gidx] in ["SCALE", "QUALITY", "RISK"]: Rectangle {
+for grplbl[gidx] in ["SCALE", "QUALITY", "RISK"]: Rectangle {
                                                 horizontal-stretch: 1;
                                                 height: 22px;
                                                 Text {
                                                     text: grplbl;
-                                                    font-size: 9.5px;
-                                                    letter-spacing: 1.2px;
+                                                    font-size: 10.5px;
+                                                    letter-spacing: 1px;
+                                                    // `x` AND `width` are both stated on
+                                                    // purpose. `horizontal-alignment`
+                                                    // alone is inert here: an unconstrained
+                                                    // Text sizes to its own content, so the
+                                                    // property had nothing to align
+                                                    // inside and every group header stayed
+                                                    // centred over its column while the
+                                                    // metrics below sat at the left edge.
+                                                    // Binding the width makes the header
+                                                    // share the metrics' left edge.
+                                                    x: 0;
+                                                    width: parent.width;
+                                                    horizontal-alignment: left;
                                                     color: LabPalette.dim;
                                                     font-weight: 600;
                                                     y: 8px;
@@ -2105,25 +2234,40 @@ export component StrategyLabScreen inherits Rectangle {
                                             y: 22px + Math.floor((idx - 1) / 3) * 34px;
                                             width: parent.width / 3 - 18px;
                                             height: 34px;
-                                            HorizontalLayout {
-                                                alignment: center;
-                                                Text {
-                                                    text: k.label;
-                                                    font-size: 11px;
-                                                    color: LabPalette.lab-muted;
-                                                    horizontal-stretch: 1;
-                                                    vertical-alignment: center;
-                                                    overflow: elide;
-                                                }
-                                                Text {
-                                                    text: k.value;
-                                                    font-family: "monospace";
-                                                    font-size: 13.5px;
-                                                    color: k.tone == 2 ? LabPalette.green
-                                                        : k.tone == 3 ? LabPalette.lab-red
-                                                        : k.tone == 4 ? LabPalette.lab-amber : LabPalette.lab-text;
-                                                    vertical-alignment: center;
-                                                }
+                                            // Absolute halves, not a stretched
+                                            // HorizontalLayout. Two reasons: a
+                                            // childless-stretch row does not
+                                            // distribute here (the pair stayed
+                                            // glued at the left, so "TRADES" and
+                                            // its value read as the one token
+                                            // "TRADES—"), and this cell already
+                                            // positions itself absolutely, so the
+                                            // label and the value should be placed
+                                            // by the same authority. Label left,
+                                            // value right: three scannable columns
+                                            // that line up under their headers.
+                                            Text {
+                                                text: k.label;
+                                                font-size: 11px;
+                                                color: LabPalette.lab-muted;
+                                                x: 0;
+                                                width: parent.width * 0.56;
+                                                horizontal-alignment: left;
+                                                vertical-alignment: center;
+                                                overflow: elide;
+                                            }
+                                            Text {
+                                                text: k.value;
+                                                font-family: "monospace";
+                                                font-size: 13.5px;
+                                                color: k.tone == 2 ? LabPalette.green
+                                                    : k.tone == 3 ? LabPalette.lab-red
+                                                    : k.tone == 4 ? LabPalette.lab-amber : LabPalette.lab-text;
+                                                x: parent.width * 0.56;
+                                                width: parent.width * 0.44;
+                                                horizontal-alignment: right;
+                                                vertical-alignment: center;
+overflow: elide;
                                             }
                                             Rectangle { y: parent.height - 1px; height: 1px; width: 100%; background: LabPalette.white-06; }
                                         }
@@ -2345,10 +2489,10 @@ export component StrategyLabScreen inherits Rectangle {
                                         spacing: 0;
                                         Rectangle { width: 34px; }
                                         Rectangle { width: 110px; }
-                                        Text { text: "OUTCOME"; horizontal-stretch: 2; font-size: 8.5px; letter-spacing: 0.8px; color: LabPalette.lab-faint; horizontal-alignment: center; vertical-alignment: center; }
-                                        Text { text: "ACTIVITY"; horizontal-stretch: 2; font-size: 8.5px; letter-spacing: 0.8px; color: LabPalette.lab-faint; horizontal-alignment: center; vertical-alignment: center; }
-                                        Text { text: "QUALITY"; horizontal-stretch: 1; font-size: 8.5px; letter-spacing: 0.8px; color: LabPalette.lab-faint; horizontal-alignment: center; vertical-alignment: center; }
-                                        Text { text: "RISK"; horizontal-stretch: 2; font-size: 8.5px; letter-spacing: 0.8px; color: LabPalette.lab-faint; horizontal-alignment: center; vertical-alignment: center; }
+                                        Text { text: "OUTCOME"; horizontal-stretch: 2; font-size: 10px; letter-spacing: 0.6px; color: LabPalette.lab-faint; horizontal-alignment: center; vertical-alignment: center; }
+                                        Text { text: "ACTIVITY"; horizontal-stretch: 2; font-size: 10px; letter-spacing: 0.6px; color: LabPalette.lab-faint; horizontal-alignment: center; vertical-alignment: center; }
+                                        Text { text: "QUALITY"; horizontal-stretch: 1; font-size: 10px; letter-spacing: 0.6px; color: LabPalette.lab-faint; horizontal-alignment: center; vertical-alignment: center; }
+                                        Text { text: "RISK"; horizontal-stretch: 2; font-size: 10px; letter-spacing: 0.6px; color: LabPalette.lab-faint; horizontal-alignment: center; vertical-alignment: center; }
                                     }
                                 }
                                 // header row (sticky: outside the scrolled band)
@@ -2464,7 +2608,7 @@ export component StrategyLabScreen inherits Rectangle {
                                             horizontal-stretch: 1;
                                             spacing: 5px;
                                             Text { text: root.lab.detail-symbol; font-size: 17px; letter-spacing: 0.2px; color: LabPalette.lab-text; font-weight: 600; }
-                                            Text { text: root.lab.detail-caption; font-family: "monospace"; font-size: 9.5px; color: LabPalette.lab-muted; overflow: elide; }
+                                            Text { text: root.lab.detail-caption; font-family: "monospace"; font-size: 10.5px; color: LabPalette.lab-muted; overflow: elide; }
                                         }
                                         Rectangle {
                                             width: 26px; height: 26px;
@@ -2500,7 +2644,7 @@ export component StrategyLabScreen inherits Rectangle {
                                             VerticalLayout {
                                                 padding-right: 12px;
                                                 spacing: 5px;
-                                                Text { text: dm.label; font-size: 8.5px; letter-spacing: 0.8px; color: LabPalette.dim; }
+                                                Text { text: dm.label; font-size: 10px; letter-spacing: 0.6px; color: LabPalette.dim; }
                                                 Text { text: dm.value; font-family: "monospace"; font-size: 12.5px; color: LabPalette.lab-text; }
                                             }
                                             Rectangle { y: parent.height - 1px; height: 1px; width: 100%; background: LabPalette.line2; }
@@ -2517,8 +2661,14 @@ export component StrategyLabScreen inherits Rectangle {
                         }
                         Rectangle { height: 12px; }
                         } // lens == 0 grid body (tools + table + inspector)
-                        // ── EQUITY (lens 0 overview + lens 2 page) ──
-                        if root.lab.lens == 0 || root.lab.lens == 2: Rectangle {
+                        // ── EQUITY (lens 2 page) ──
+                        // Lens-exclusive, like every other lens. It used to also
+                        // render underneath the Performance lens, so the lens bar
+                        // offered "Equity" as a tab while the default tab already
+                        // showed the identical card further down the same page —
+                        // two answers to "which panel am I looking at?" The Trades
+                        // lens has always been exclusive; this makes Equity match.
+                        if root.lab.lens == 2: Rectangle {
                             border-radius: LabPalette.section-radius;
                             background: LabPalette.panel;
                             border-width: 1px;
@@ -2534,7 +2684,14 @@ export component StrategyLabScreen inherits Rectangle {
                                         spacing: 12px;
                                         alignment: center;
                                         Text { text: "Equity"; font-size: 12.5px; font-weight: 650; color: LabPalette.lab-text; vertical-alignment: center; }
-                                        Text { text: "cumulative P&L · " + root.lab.equity-caption; font-size: 10px; color: LabPalette.dim; vertical-alignment: center; overflow: elide; }
+                                        // The measure name used to be spelled out here
+                                        // AND inside the view selector sitting 40px to
+                                        // the right — on the default view that read as
+                                        // "cumulative P&L · …" next to "Cumulative P&L".
+                                        // The selector already names the measure and can
+                                        // change; the caption's job is the SPAN, which
+                                        // the selector never states.
+                                        Text { text: root.lab.equity-caption; font-size: 10px; color: LabPalette.dim; vertical-alignment: center; overflow: elide; }
                                         Rectangle { horizontal-stretch: 1; background: transparent; }
                                         eqctl := LabCtlButton {
                                             width: 150px;
@@ -2588,7 +2745,7 @@ export component StrategyLabScreen inherits Rectangle {
                                     }
                                     if root.equity.length > 300: Text {
                                         text: "showing first 300 of " + root.equity.length + " points";
-                                        font-size: 9px;
+                                        font-size: 10px;
                                         color: LabPalette.dim;
                                         x: 44px; y: parent.height - 16px;
                                         overflow: elide;
@@ -2598,7 +2755,10 @@ export component StrategyLabScreen inherits Rectangle {
                                     height: 56px;
                                     HorizontalLayout {
                                         spacing: 0;
-                                        LabEqStat { es-label: "STARTING CAPITAL"; es-value: root.lab.cfg-capital == "" ? "--" : root.lab.cfg-capital; }
+                                        // Grouped + ₹-prefixed, from the same projection the run bar reads. The raw
+                                         // `cfg-capital` string showed "10000" here and "₹10,000" 600px
+                                         // away in the same view.
+                                         LabEqStat { es-label: "STARTING CAPITAL"; es-value: root.lab.capital-label == "" ? "--" : root.lab.capital-label; }
                                         HorizontalLayout { padding-top: 8px; padding-bottom: 8px; Rectangle { width: 1px; background: LabPalette.line2; } }
                                         LabEqStat { es-label: "ENDING CAPITAL"; es-value: root.lab.result-pnl == "" ? "--" : root.lab.result-pnl; es-tone: root.lab.result-pnl-tone; }
                                         HorizontalLayout { padding-top: 8px; padding-bottom: 8px; Rectangle { width: 1px; background: LabPalette.line2; } }
@@ -2699,11 +2859,11 @@ export component StrategyLabScreen inherits Rectangle {
                                     spacing: 0;
                                     Rectangle { width: 46px; }
                                     Rectangle { width: 110px; }
-                                    Text { text: "TIMING"; horizontal-stretch: 2; font-size: 8.5px; letter-spacing: 0.8px; color: LabPalette.lab-faint; horizontal-alignment: center; vertical-alignment: center; }
-                                    Text { text: "PRICES"; horizontal-stretch: 2; font-size: 8.5px; letter-spacing: 0.8px; color: LabPalette.lab-faint; horizontal-alignment: center; vertical-alignment: center; }
-                                    Text { text: "OUTCOME"; horizontal-stretch: 1; font-size: 8.5px; letter-spacing: 0.8px; color: LabPalette.lab-faint; horizontal-alignment: center; vertical-alignment: center; }
-                                    Text { text: "HOLD"; horizontal-stretch: 1; font-size: 8.5px; letter-spacing: 0.8px; color: LabPalette.lab-faint; horizontal-alignment: center; vertical-alignment: center; }
-                                    Text { text: "EXIT"; horizontal-stretch: 1; font-size: 8.5px; letter-spacing: 0.8px; color: LabPalette.lab-faint; horizontal-alignment: center; vertical-alignment: center; }
+                                    Text { text: "TIMING"; horizontal-stretch: 2; font-size: 10px; letter-spacing: 0.6px; color: LabPalette.lab-faint; horizontal-alignment: center; vertical-alignment: center; }
+                                    Text { text: "PRICES"; horizontal-stretch: 2; font-size: 10px; letter-spacing: 0.6px; color: LabPalette.lab-faint; horizontal-alignment: center; vertical-alignment: center; }
+                                    Text { text: "OUTCOME"; horizontal-stretch: 1; font-size: 10px; letter-spacing: 0.6px; color: LabPalette.lab-faint; horizontal-alignment: center; vertical-alignment: center; }
+                                    Text { text: "HOLD"; horizontal-stretch: 1; font-size: 10px; letter-spacing: 0.6px; color: LabPalette.lab-faint; horizontal-alignment: center; vertical-alignment: center; }
+                                    Text { text: "EXIT"; horizontal-stretch: 1; font-size: 10px; letter-spacing: 0.6px; color: LabPalette.lab-faint; horizontal-alignment: center; vertical-alignment: center; }
                                 }
                             }
                             Rectangle {
@@ -2844,7 +3004,7 @@ export component StrategyLabScreen inherits Rectangle {
                                     for dmetric in root.lab.trade-detail-metrics: VerticalLayout {
                                         horizontal-stretch: 1;
                                         spacing: 4px;
-                                        Text { text: dmetric.label; font-size: 8.5px; letter-spacing: 0.8px; color: LabPalette.dim; }
+                                        Text { text: dmetric.label; font-size: 10px; letter-spacing: 0.6px; color: LabPalette.dim; }
                                         Text { text: dmetric.value; font-family: "monospace"; font-size: 12.5px; color: dmetric.tone == 2 ? LabPalette.green : dmetric.tone == 3 ? LabPalette.lab-red : LabPalette.lab-text; }
                                     }
                                 }
@@ -2882,8 +3042,15 @@ export component StrategyLabScreen inherits Rectangle {
                                     Rectangle { y: parent.height - 1px; height: 1px; width: 100%; background: LabPalette.line; }
                                 }
                                 Rectangle { height: 12px; }
+                                // Explicit height for the same reason the §01
+                                // mode row needed one: an unsized child of a
+                                // VerticalLayout absorbs the column's leftover,
+                                // which parked this caption in the middle of a
+                                // 280px void between the meta strip and the
+                                // editor it is labelling.
                                 HorizontalLayout {
                                     padding-left: 16px;
+                                    height: 18px;
                                     Text {
                                         text: "Strategy source — " + (root.lab.description == "" ? "working copy" : root.lab.description);
                                         font-size: 11px;
@@ -2930,21 +3097,32 @@ export component StrategyLabScreen inherits Rectangle {
                                         Text {
                                             text: root.lab.dirty ? "Unsaved changes — review, then save." : "Saved · no unsaved changes.";
                                             font-size: 10.5px;
-                                            color: LabPalette.dim;
+                                            color: root.lab.dirty ? LabPalette.lab-amber : LabPalette.dim;
                                             vertical-alignment: center;
                                         }
+                                        // Always "Save changes", never "Saved". The
+                                        // label used to become "Saved" (at 0.4
+                                        // opacity, still a filled 34px pill) the
+                                        // moment the buffer was clean — so a status
+                                        // and the sentence to its left both said
+                                        // "Saved", and a status was wearing a
+                                        // button's shape. The action keeps one
+                                        // label; the STATE lives in the one line of
+                                        // text, which is also where the dirty case
+                                        // now gets an amber tint instead of asking
+                                        // the eye to parse the word.
                                         Rectangle {
                                             width: 120px; height: 34px;
                                             border-radius: 8px;
-                                            background: LabPalette.run-ink;
-                                            opacity: root.lab.dirty ? 1 : 0.4;
+                                            background: root.lab.dirty ? LabPalette.run-ink : LabPalette.btn-idle-bg;
                                             svta := TouchArea {
+                                                enabled: root.lab.dirty;
                                                 mouse-cursor: pointer;
                                                 clicked => { root.save-requested(); }
                                             }
                                             Text {
-                                                text: root.lab.dirty ? "Save changes" : "Saved";
-                                                color: LabPalette.chip-bg;
+                                                text: "Save changes";
+                                                color: root.lab.dirty ? LabPalette.chip-bg : LabPalette.dim;
                                                 font-size: 11.5px;
                                                 font-weight: 700;
                                                 horizontal-alignment: center;
@@ -2958,9 +3136,15 @@ export component StrategyLabScreen inherits Rectangle {
                     }
 
                     // ════ FOOTER ════
-                    Rectangle {
-                        height: 56px;
+                    // Collapses to nothing when there is nothing to say. The row
+                    // was a fixed 56px (+24px tail) that existed only to hold one
+                    // right-aligned `progress-label`; with no run in flight that
+                    // string is empty and the band rendered as 80px of dead space
+                    // under the last card.
+                    if root.lab.progress-label != "": Rectangle {
+                        height: 40px;
                         HorizontalLayout {
+                            padding-right: 18px;
                             spacing: 14px;
                             alignment: center;
                             Rectangle { horizontal-stretch: 1; background: transparent; }

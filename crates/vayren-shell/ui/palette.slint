@@ -158,8 +158,13 @@ export global LabPalette {
     out property <color> lab-text: #eef3f5;
     out property <color> soft:     #c2ccd1;
     out property <color> lab-muted:#7b8790;
-    out property <color> dim:      #525e67;
-    out property <color> lab-faint:#39434b;
+    // `dim` and `lab-faint` are the SAME value on purpose. They used to be a
+    // three-step fade (#525e67 at 2.8:1, #39434b at 1.8:1) and both failed WCAG
+    // AA, which made every eyebrow, table header, placeholder and em-dash
+    // unreadable. Hierarchy now comes from size and weight, not from contrast:
+    // both clear 4.5:1 on panel, panel2, field-bg and lab-bg alike.
+    out property <color> dim:      #75818b;
+    out property <color> lab-faint:#75818b;
     // Accent.
     out property <color> lab-teal: #2dd4bf;
     out property <color> teal-dim: rgba(45,212,191, 0.12);

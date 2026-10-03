@@ -60,10 +60,11 @@ impl ConnectionState {
         }
     }
 
-    /// Pill tone (shared convention).
+    /// Pill tone (shared convention). "Not connected" is an INACTIVE state, not
+    /// an error, so it stays muted; red is reserved for a failed attempt.
     pub fn pill_tone(self) -> i32 {
         match self {
-            ConnectionState::NotConfigured | ConnectionState::Ready => 3,
+            ConnectionState::NotConfigured | ConnectionState::Ready => 0,
             ConnectionState::Authenticating
             | ConnectionState::GettingToken
             | ConnectionState::Verifying => 2,
@@ -159,12 +160,13 @@ impl BrokerListItem {
             .unwrap_or_else(|| "?".to_string())
     }
 
-    /// Sidebar status tone (1 ok when connected, 3 bad otherwise).
+    /// Sidebar status tone: lit only for a live session. A venue nobody has
+    /// connected yet is inactive, not broken, so it never paints red.
     pub fn status_tone(&self) -> i32 {
         if self.connected {
             1
         } else {
-            3
+            0
         }
     }
 }
@@ -369,6 +371,32 @@ impl BrokerWorkspace {
             | ConnectionState::Verifying => "Authenticating with broker API…".to_string(),
             ConnectionState::Ready => "Ready to connect.".to_string(),
             ConnectionState::NotConfigured => "Enter your credentials to connect.".to_string(),
+        }
+    }
+
+    /// Header sub-line under the broker name. It tracks the connection state so
+    /// a live session never keeps reading "connect your account" — every
+    /// branch states only what the backend already reported.
+    pub fn description(&self) -> String {
+        match self.state {
+            ConnectionState::Connected => {
+                if self.reason.trim().is_empty() {
+                    "Account connected and verified. Ready to trade.".to_string()
+                } else {
+                    format!("Connected: {}", self.reason.trim())
+                }
+            }
+            ConnectionState::Authenticating
+            | ConnectionState::GettingToken
+            | ConnectionState::Verifying => {
+                "Authenticating with the broker API. Keep this window open.".to_string()
+            }
+            ConnectionState::Failed => {
+                "Connection failed. Review the details and retry.".to_string()
+            }
+            ConnectionState::NotConfigured | ConnectionState::Ready => {
+                description_line(&self.display_name)
+            }
         }
     }
 
@@ -639,14 +667,19 @@ mod tests {
     #[test]
     fn pill_is_explicit_text_with_restrained_tone() {
         assert_eq!(ConnectionState::NotConfigured.pill_label(), "Not Connected");
-        assert_eq!(ConnectionState::Ready.pill_tone(), 3);
+        // Inactive is muted, not an error: red stays reserved for a real
+        // failed attempt (and the label carries the meaning either way).
+        assert_eq!(ConnectionState::NotConfigured.pill_tone(), 0);
+        assert_eq!(ConnectionState::Ready.pill_tone(), 0);
         assert_eq!(
             ConnectionState::Authenticating.pill_label(),
             "Authenticating"
         );
+        assert_eq!(ConnectionState::Authenticating.pill_tone(), 2);
         assert_eq!(ConnectionState::Connected.pill_label(), "Connected");
         assert_eq!(ConnectionState::Connected.pill_tone(), 1);
         assert_eq!(ConnectionState::Failed.pill_label(), "Connection Failed");
+        assert_eq!(ConnectionState::Failed.pill_tone(), 3);
     }
 
     #[test]
@@ -721,7 +754,7 @@ mod tests {
             ..on.clone()
         };
         assert_eq!(off.status_label(), "Not Connected");
-        assert_eq!(off.status_tone(), 3);
+        assert_eq!(off.status_tone(), 0);
     }
 
     #[test]
@@ -733,6 +766,28 @@ mod tests {
         assert_eq!(
             description_line(""),
             "Connect your account to start trading."
+        );
+    }
+
+    #[test]
+    fn description_follows_the_connection_state() {
+        let ready = BrokerWorkspace::from_json(&workspace_json());
+        assert_eq!(ready.description(), description_line("Fyers"));
+        // A live session must never keep reading as an invitation to connect.
+        let mut connected = workspace_json();
+        connected["status_raw"] = json!("CONNECTED");
+        connected["reason"] = json!("session verified");
+        let live = BrokerWorkspace::from_json(&connected);
+        assert_eq!(live.state, ConnectionState::Connected);
+        assert_eq!(live.description(), "Connected: session verified");
+        assert!(!live.description().contains("Connect your"));
+        // …and a failure never claims a session either.
+        let mut failed = workspace_json();
+        failed["status_raw"] = json!("ERROR");
+        let broken = BrokerWorkspace::from_json(&failed);
+        assert_eq!(
+            broken.description(),
+            "Connection failed. Review the details and retry."
         );
     }
 
@@ -775,7 +830,7 @@ mod tests {
         assert!(workspace.brokers[1].selected);
         assert_eq!(workspace.selected_id, "fyers");
         assert_eq!(workspace.state, ConnectionState::Ready);
-        assert_eq!(workspace.pill(), ("Not Connected", 3));
+        assert_eq!(workspace.pill(), ("Not Connected", 0));
         assert_eq!(workspace.cta(), "Connect to Fyers");
         assert!(workspace.can_connect);
         assert!(workspace.form_enabled());

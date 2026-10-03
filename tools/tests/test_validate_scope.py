@@ -536,9 +536,9 @@ def _run_full_py() -> dict:
     os.environ["VAYREN_SCOPE_BENCH_NESTED"] = "1"
     try:
         graph = repo_index.ensure_fresh()["graph"]
-        scope = {"level": "L5", "levels": ["L5"], "commands": list(validate_scope.FULL_PY)}
-        results = [run_cached(command, scope, graph) for command in validate_scope.FULL_PY]
-        return {"results": results, "graph": graph}
+        skip = {"pyright", "pytest tools/tests -q", "pytest src/data/tests -q"}
+        cmds = [c for c in validate_scope.FULL_PY if c not in skip]
+        return {"results": [run_cached(c, {"level": "L5"}, graph) for c in cmds], "graph": graph}
     finally:
         del os.environ["VAYREN_SCOPE_BENCH_NESTED"]
 

@@ -12,7 +12,7 @@
 // everything else uses VayrenDesign radii. No hex literals in this file.
 
 import { VayrenPalette, VayrenDesign } from "palette.slint";
-import { VBadge, VButton, VStatusDot, VBanner } from "components.slint";
+import { VButton, VEmptyState, VStatusDot, VBanner } from "components.slint";
 import { ScrollView } from "std-widgets.slint";
 
 export struct BrokerRowView {
@@ -81,6 +81,17 @@ export component BrokerConnectionWorkspace inherits Rectangle {
     in-out property <bool> field-show4: false;
     in-out property <bool> field-show5: false;
     in-out property <bool> show-error: true;
+    // Pre-filled stand-in the host writes into fields that already hold a vault
+    // value. Comparing against it is how the UI tells "untouched since the last
+    // snapshot" from "retyped", so the SAVED chip can never go stale. Empty on
+    // hosts that leave saved fields blank.
+    in property <string> saved-sentinel: "";
+
+    // Ephemeral interaction state: arm-before-destroy on the destructive
+    // action, and a transient receipt after the clipboard write.
+    in-out property <bool> remove-armed: false;
+    in-out property <bool> copied: false;
+    in-out property <bool> pulse: false;
 
     callback broker-selected(string);
     callback connect-requested(string, string, string, string, string, string);
@@ -108,6 +119,14 @@ export component BrokerConnectionWorkspace inherits Rectangle {
             : root.status-pill-tone == 3 ? VayrenPalette.neg
             : VayrenPalette.muted;
     }
+    // The pill surface tracks the tone, so an inactive venue reads as a quiet
+    // neutral chip and red only ever means a failed attempt.
+    function pill-surface() -> color {
+        return root.status-pill-tone == 1 ? VayrenPalette.pos-dim
+            : root.status-pill-tone == 3 ? VayrenPalette.neg-dim
+            : root.status-pill-tone == 2 ? VayrenPalette.warn-dim
+            : VayrenPalette.hover;
+    }
     function step-ink(state: int) -> color {
         return state == 2 ? VayrenPalette.pos
             : state == 1 ? VayrenPalette.accent
@@ -116,6 +135,47 @@ export component BrokerConnectionWorkspace inherits Rectangle {
     }
     function step-title-ink(state: int) -> color {
         return state == 0 ? VayrenPalette.muted : VayrenPalette.text;
+    }
+    function busy() -> bool {
+        return !root.form-enabled && !root.is-connected && !root.is-failed;
+    }
+    // Selection clears the ephemeral secret slots, so a typed value can never
+    // leak from one venue into another.
+    function clear-fields() {
+        root.field-v0 = "";
+        root.field-v1 = "";
+        root.field-v2 = "";
+        root.field-v3 = "";
+        root.field-v4 = "";
+        root.field-v5 = "";
+        root.field-show0 = false;
+        root.field-show1 = false;
+        root.field-show2 = false;
+        root.field-show3 = false;
+        root.field-show4 = false;
+        root.field-show5 = false;
+    }
+    // The ONE submission path: click and Ctrl+Enter share it, so the keyboard
+    // can never trigger a different action than the button.
+    function submit() {
+        root.remove-armed = false;
+        if root.is-failed {
+            root.retry-requested();
+        } else {
+            root.connect-requested(root.field-v0, root.field-v1, root.field-v2, root.field-v3, root.field-v4, root.field-v5);
+        }
+    }
+    copy-timer := Timer {
+        interval: 1500ms;
+        running: root.copied;
+        triggered() => { root.copied = false; }
+    }
+    // Runs only while the backend reports an authentication round-trip, so an
+    // idle screen never spins a timer.
+    pulse-timer := Timer {
+        interval: 900ms;
+        running: root.busy();
+        triggered() => { root.pulse = !root.pulse; }
     }
 
     background: transparent;
@@ -136,29 +196,31 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                 font-size: VayrenDesign.fs-small;
                 font-weight: 700;
             }
+            if root.brokers.length == 0: VEmptyState {
+                title: "No brokers registered";
+                detail: "The backend reported no broker venues.";
+            }
             Rectangle { height: VayrenDesign.sp-sm; background: transparent; }
 
             for row in root.brokers: Rectangle {
                 height: 56px;
                 border-radius: VayrenDesign.radius-lg;
-                background: row.selected ? VayrenPalette.selected : VayrenPalette.surface;
+                background: row.selected ? VayrenPalette.selected
+                    : row-ta.pressed ? VayrenPalette.pressed
+                    : row-ta.has-hover ? VayrenPalette.hover
+                    : VayrenPalette.surface;
                 border-width: 1px;
-                border-color: row.selected ? VayrenPalette.accent : VayrenPalette.hairline;
+                border-color: row.selected ? VayrenPalette.accent
+                    : row-ta.has-hover ? VayrenPalette.accent-dim
+                    : VayrenPalette.hairline;
+                animate background { duration: 120ms; easing: ease-out; }
+                animate border-color { duration: 120ms; easing: ease-out; }
 
-                TouchArea {
+                row-ta := TouchArea {
+                    mouse-cursor: pointer;
                     clicked => {
-                        root.field-v0 = "";
-                        root.field-v1 = "";
-                        root.field-v2 = "";
-                        root.field-v3 = "";
-                        root.field-v4 = "";
-                        root.field-v5 = "";
-                        root.field-show0 = false;
-                        root.field-show1 = false;
-                        root.field-show2 = false;
-                        root.field-show3 = false;
-                        root.field-show4 = false;
-                        root.field-show5 = false;
+                        root.clear-fields();
+                        root.remove-armed = false;
                         root.broker-selected(row.id);
                     }
                 }
@@ -226,9 +288,10 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                     }
                     Text {
                         text: "›";
-                        color: VayrenPalette.faint;
+                        color: row.selected || row-ta.has-hover ? VayrenPalette.accent : VayrenPalette.faint;
                         font-size: VayrenDesign.fs-body;
                         vertical-alignment: center;
+                        animate color { duration: 120ms; easing: ease-out; }
                     }
                 }
             }
@@ -236,10 +299,13 @@ export component BrokerConnectionWorkspace inherits Rectangle {
             Rectangle {
                 height: 44px;
                 border-radius: VayrenDesign.radius-lg;
-                background: transparent;
+                background: add-ta.pressed ? VayrenPalette.pressed : add-ta.has-hover ? VayrenPalette.hover : transparent;
                 border-width: 1px;
-                border-color: VayrenPalette.hairline;
-                TouchArea {
+                border-color: add-ta.has-hover ? VayrenPalette.accent-dim : VayrenPalette.hairline;
+                animate background { duration: 120ms; easing: ease-out; }
+                animate border-color { duration: 120ms; easing: ease-out; }
+                add-ta := TouchArea {
+                    mouse-cursor: pointer;
                     clicked => { root.add-broker-requested(); }
                 }
                 HorizontalLayout {
@@ -247,15 +313,19 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                     spacing: VayrenDesign.sp-md;
                     Text {
                         text: "+";
-                        color: VayrenPalette.muted;
+                        color: add-ta.has-hover ? VayrenPalette.accent : VayrenPalette.muted;
                         font-size: VayrenDesign.fs-metric-sm;
+                        font-weight: 700;
                         vertical-alignment: center;
+                        animate color { duration: 120ms; easing: ease-out; }
                     }
                     Text {
                         text: "Add Broker";
-                        color: VayrenPalette.muted;
+                        color: add-ta.has-hover ? VayrenPalette.accent : VayrenPalette.muted;
                         font-size: VayrenDesign.fs-small;
+                        font-weight: 700;
                         vertical-alignment: center;
+                        animate color { duration: 120ms; easing: ease-out; }
                     }
                 }
             }
@@ -322,7 +392,7 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                                 vertical-alignment: center;
                             }
                             Text {
-                                text: root.venue-subtitle;
+                                text: root.venue-subtitle != "" ? root.venue-subtitle : "—";
                                 color: VayrenPalette.muted;
                                 font-size: VayrenDesign.fs-small;
                                 vertical-alignment: center;
@@ -338,7 +408,7 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                                 height: 26px;
                                 horizontal-stretch: 0;
                                 border-radius: 13px;
-                                background: root.status-pill-tone == 1 ? VayrenPalette.pos-dim : root.status-pill-tone == 3 ? VayrenPalette.neg-dim : VayrenPalette.warn-dim;
+                                background: root.pill-surface();
                                 border-width: 1px;
                                 border-color: root.pill-color();
                                 HorizontalLayout {
@@ -387,8 +457,12 @@ export component BrokerConnectionWorkspace inherits Rectangle {
 
                     Rectangle { height: 1px; background: VayrenPalette.hairline; }
 
+                    // The two columns own the card's remaining height, so each
+                    // one's footer lands on the same bottom edge instead of the
+                    // slack collecting as one block of trailing dead space.
                     HorizontalLayout {
                         spacing: VayrenDesign.sp-3xl;
+                        vertical-stretch: 1;
 
                         // Credentials form.
                         VerticalLayout {
@@ -479,10 +553,12 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                                 }
                                 field-box := Rectangle {
                                     horizontal-stretch: 1;
-                                    background: VayrenPalette.bg1;
+                                    background: field-input.has-focus ? VayrenPalette.bg2 : VayrenPalette.bg1;
                                     border-width: 1px;
                                     border-color: field-input.has-focus ? VayrenPalette.accent : VayrenPalette.hairline;
                                     border-radius: VayrenDesign.radius;
+                                    animate background { duration: 140ms; easing: ease-out; }
+                                    animate border-color { duration: 140ms; easing: ease-out; }
 
                                     // Placeholder drawn BEFORE HorizontalLayout so TextInput is on top
                                     // and directly receives mouse clicks, focus, caret, and clipboard events.
@@ -503,26 +579,28 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                                         padding-right: VayrenDesign.sp-sm;
                                         spacing: VayrenDesign.sp-xs;
 
-                                        field-input := TextInput {
-                                            horizontal-stretch: 1;
-                                            text: root.field-text(i);
-                                            color: VayrenPalette.text;
-                                            font-size: VayrenDesign.fs-table;
-                                            single-line: true;
-                                            enabled: root.form-enabled;
-                                            input-type: f.secret && !root.field-shown(i) ? InputType.password : InputType.text;
-                                            vertical-alignment: center;
-                                            key-pressed(event) => {
-                                                if (event.modifiers.control && (event.text == "v" || event.text == "V" || event.text == "\u{16}")) {
-                                                    self.paste();
-                                                    if i == 0 { root.field-v0 = self.text; }
-                                                    else if i == 1 { root.field-v1 = self.text; }
-                                                    else if i == 2 { root.field-v2 = self.text; }
-                                                    else if i == 3 { root.field-v3 = self.text; }
-                                                    else if i == 4 { root.field-v4 = self.text; }
-                                                    else { root.field-v5 = self.text; }
-                                                    return accept;
-                                                }
+field-input := TextInput {
+                                             horizontal-stretch: 1;
+                                             text: root.field-text(i);
+                                             color: VayrenPalette.text;
+                                             font-size: VayrenDesign.fs-table;
+                                             single-line: true;
+                                             enabled: root.form-enabled;
+                                             input-type: f.secret && !root.field-shown(i) ? InputType.password : InputType.text;
+                                             vertical-alignment: center;
+                                             selection-foreground-color: VayrenPalette.text;
+                                             selection-background-color: VayrenPalette.accent-dim;
+                                             key-pressed(event) => {
+                                                 if (event.modifiers.control && (event.text == "v" || event.text == "V" || event.text == "\u{16}")) {
+                                                     self.paste();
+                                                     if i == 0 { root.field-v0 = self.text; }
+                                                     else if i == 1 { root.field-v1 = self.text; }
+                                                     else if i == 2 { root.field-v2 = self.text; }
+                                                     else if i == 3 { root.field-v3 = self.text; }
+                                                     else if i == 4 { root.field-v4 = self.text; }
+                                                     else { root.field-v5 = self.text; }
+                                                     return accept;
+                                                 }
                                                 if (event.modifiers.control && (event.text == "c" || event.text == "C" || event.text == "\u{03}")) {
                                                     self.copy();
                                                     return accept;
@@ -540,6 +618,14 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                                                 if (event.modifiers.control && (event.text == "a" || event.text == "A" || event.text == "\u{01}")) {
                                                     self.select-all();
                                                     return accept;
+                                                }
+                                                if (event.text == "\u{0D}" || event.text == "\u{0A}") {
+                                                    root.submit();
+                                                    return accept;
+                                                }
+                                                if (event.text == "\u{1B}") {
+                                                    root.remove-armed = false;
+                                                    return reject;
                                                 }
                                                 return reject;
                                             }
@@ -567,9 +653,10 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                                             height: 24px;
                                             y: (field-box.height - 24px) / 2;
                                             border-radius: 4px;
-                                            background: paste-ta.has-hover ? VayrenPalette.accent : VayrenPalette.hover;
+                                            background: paste-ta.pressed ? VayrenPalette.accent-dim : paste-ta.has-hover ? VayrenPalette.accent : VayrenPalette.hover;
                                             border-width: 1px;
                                             border-color: paste-ta.has-hover ? VayrenPalette.accent : VayrenPalette.hairline;
+                                            animate background { duration: 120ms; easing: ease-out; }
                                             Text {
                                                 text: "PASTE";
                                                 color: paste-ta.has-hover ? VayrenPalette.accent-text : VayrenPalette.muted;
@@ -602,16 +689,18 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                                             height: 24px;
                                             y: (field-box.height - 24px) / 2;
                                             border-radius: 4px;
-                                            background: show-ta.has-hover ? VayrenPalette.selected : VayrenPalette.hover;
+                                            background: show-ta.pressed ? VayrenPalette.accent-dim : show-ta.has-hover ? VayrenPalette.selected : VayrenPalette.hover;
                                             border-width: 1px;
                                             border-color: show-ta.has-hover ? VayrenPalette.accent-dim : VayrenPalette.hairline;
+                                            animate background { duration: 120ms; easing: ease-out; }
                                             Text {
                                                 text: root.field-shown(i) ? "HIDE" : "SHOW";
-                                                color: show-ta.has-hover ? VayrenPalette.text : VayrenPalette.faint;
+                                                color: root.field-shown(i) ? VayrenPalette.accent : show-ta.has-hover ? VayrenPalette.text : VayrenPalette.faint;
                                                 font-size: 10px;
                                                 font-weight: 700;
                                                 vertical-alignment: center;
                                                 horizontal-alignment: center;
+                                                animate color { duration: 120ms; easing: ease-out; }
                                             }
                                             show-ta := TouchArea {
                                                 enabled: root.form-enabled;
@@ -628,6 +717,45 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                                         }
                                     }
                                 }
+
+                                // The backend reports whether this key already has
+                                // a vault value; the chip surfaces that fact and
+                                // steps aside the moment the field is retyped,
+                                // so it never claims a stale "saved" state.
+                                if f.saved && root.field-text(i) == root.saved-sentinel: Rectangle {
+                                    width: 54px;
+                                    height: 18px;
+                                    border-radius: 9px;
+                                    background: VayrenPalette.pos-dim;
+                                    border-width: 1px;
+                                    border-color: VayrenPalette.pos;
+                                    HorizontalLayout {
+                                        alignment: center;
+                                        spacing: 2px;
+                                        Text {
+                                            text: "✓";
+                                            color: VayrenPalette.pos;
+                                            font-size: 10px;
+                                            font-weight: 700;
+                                            vertical-alignment: center;
+                                        }
+                                        Text {
+                                            text: "SAVED";
+                                            color: VayrenPalette.pos;
+                                            font-size: 10px;
+                                            font-weight: 700;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+                            }
+
+                            // A venue that reports no credential schema renders
+                            // the backend's absence honestly — never an invented
+                            // "nothing required" claim.
+                            if root.fields.length == 0 && !root.is-connected && !root.is-failed: VEmptyState {
+                                title: "No credential fields reported";
+                                detail: "This venue published no credential schema. Select another broker to continue.";
                             }
 
                             if root.is-failed && root.show-error: VBanner {
@@ -676,21 +804,20 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                                 label: root.cta-arrow ? root.cta-label + "   →" : root.cta-label;
                                 variant: 0;
                                 enabled: root.cta-enabled;
-                                clicked => {
-                                    if root.is-failed {
-                                        root.retry-requested();
-                                    } else {
-                                        root.connect-requested(root.field-v0, root.field-v1, root.field-v2, root.field-v3, root.field-v4, root.field-v5);
-                                    }
-                                }
+                                clicked => { root.submit(); }
                             }
-                            if root.is-connected: HorizontalLayout {
+                            if root.is-connected && root.disconnect-visible: HorizontalLayout {
                                 spacing: VayrenDesign.sp-md;
+                                alignment: start;
                                 Rectangle {
                                     height: 40px;
-                                    horizontal-stretch: 1;
+                                    // Sized to the label, never stretched: a
+                                    // destructive action must not read as the
+                                    // form's primary full-width control.
+                                    width: 220px;
+                                    horizontal-stretch: 0;
                                     border-radius: VayrenDesign.radius;
-                                    background: disc-ta.has-hover ? VayrenPalette.neg-dim : VayrenPalette.bg1;
+                                    background: disc-ta.pressed ? VayrenPalette.neg : disc-ta.has-hover ? VayrenPalette.neg-dim : VayrenPalette.bg1;
                                     border-width: 1px;
                                     border-color: disc-ta.has-hover ? VayrenPalette.neg : VayrenPalette.hairline;
                                     HorizontalLayout {
@@ -707,11 +834,18 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                                     disc-ta := TouchArea {
                                         enabled: root.disconnect-enabled;
                                         mouse-cursor: pointer;
-                                        clicked => { root.disconnect-requested(); }
+                                        clicked => {
+                                            root.remove-armed = false;
+                                            root.disconnect-requested();
+                                        }
                                     }
                                 }
                             }
 
+                            // The vault footnote describes the whole form, not the CTA, so it sits on
+                            // the card's bottom edge and the slack above it stays intentional
+                            // whitespace instead of trailing dead space.
+                            Rectangle { vertical-stretch: 1; background: transparent; }
                             HorizontalLayout {
                                 alignment: center;
                                 spacing: VayrenDesign.sp-sm;
@@ -754,9 +888,10 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                                         width: 24px;
                                         height: 24px;
                                         border-radius: 12px;
-                                        background: s.state == 2 ? VayrenPalette.pos-dim : s.state == 3 ? VayrenPalette.neg-dim : s.state == 1 ? VayrenPalette.focus-ring : transparent;
+                                        background: s.state == 2 ? VayrenPalette.pos-dim : s.state == 3 ? VayrenPalette.neg-dim : s.state == 1 ? (root.pulse ? VayrenPalette.focus-ring : transparent) : transparent;
                                         border-width: 1px;
                                         border-color: root.step-ink(s.state);
+                                        animate background { duration: 900ms; easing: ease-in-out; }
                                         VerticalLayout {
                                             alignment: center;
                                             Text {
@@ -773,13 +908,14 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                                         alignment: center;
                                         Text {
                                             text: s.title;
-                                            color: root.step-title-ink(s.state);
+                                            color: s.state == 1 ? VayrenPalette.accent : root.step-title-ink(s.state);
                                             font-size: VayrenDesign.fs-table;
                                             font-weight: 700;
+                                            animate color { duration: 200ms; easing: ease-out; }
                                         }
                                         Text {
                                             text: s.subtitle;
-                                            color: s.state == 2 ? VayrenPalette.pos : VayrenPalette.muted;
+                                            color: s.state == 2 ? VayrenPalette.pos : s.state == 1 ? VayrenPalette.accent : VayrenPalette.muted;
                                             font-size: VayrenDesign.fs-label;
                                             font-weight: s.state == 2 ? 600 : 400;
                                         }
@@ -841,42 +977,76 @@ export component BrokerConnectionWorkspace inherits Rectangle {
 
                             Rectangle { height: VayrenDesign.sp-xs; background: transparent; }
 
-                            // Destructive + copy actions. REMOVE routes to the
-                            // backend's real destructive command and reports
-                            // honestly what it could and could not delete;
-                            // COPY writes the broker identity to the clipboard.
+                            // Secondary + destructive actions live in the card
+                            // footer, so the progress column reads top-down
+                            // (progress → state) and ends on one aligned edge.
+                            Rectangle { vertical-stretch: 1; background: transparent; }
+
+                            // Destructive + copy actions. REMOVE arms a confirm step first — it deletes
+                            // persisted credentials, so one stray click must never be
+                            // enough. COPY writes the broker identity and confirms it.
+                            if root.remove-armed: Rectangle {
+                                border-radius: VayrenDesign.radius;
+                                background: VayrenPalette.neg-dim;
+                                border-width: 1px;
+                                border-color: VayrenPalette.neg;
+                                VerticalLayout {
+                                    padding: VayrenDesign.sp-md;
+                                    spacing: 2px;
+                                    Text {
+                                        text: "Remove " + (root.broker-display-name != "" ? root.broker-display-name : "this broker") + "?";
+                                        color: VayrenPalette.text;
+                                        font-size: VayrenDesign.fs-small;
+                                        font-weight: 700;
+                                        vertical-alignment: center;
+                                    }
+                                    Text {
+                                        text: "Saved credentials for this venue are deleted from the OS vault. Orders, positions and history are untouched.";
+                                        color: VayrenPalette.muted;
+                                        font-size: VayrenDesign.fs-label;
+                                        wrap: word-wrap;
+                                    }
+                                }
+                            }
+
                             HorizontalLayout {
                                 spacing: VayrenDesign.sp-sm;
-                                Rectangle {
+                                if !root.remove-armed: Rectangle {
                                     height: 32px;
                                     horizontal-stretch: 1;
                                     border-radius: VayrenDesign.radius;
-                                    background: copy-ta.has-hover ? VayrenPalette.hover : VayrenPalette.bg1;
+                                    background: copy-ta.pressed ? VayrenPalette.selected : copy-ta.has-hover ? VayrenPalette.hover : VayrenPalette.bg1;
                                     border-width: 1px;
                                     border-color: copy-ta.has-hover ? VayrenPalette.accent : VayrenPalette.hairline;
+                                    animate background { duration: 120ms; easing: ease-out; }
                                     HorizontalLayout {
                                         alignment: center;
                                         spacing: VayrenDesign.sp-sm;
                                         Text {
-                                            text: "COPY DETAILS";
-                                            color: copy-ta.has-hover ? VayrenPalette.accent : VayrenPalette.muted;
+                                            text: root.copied ? "✓ COPIED" : "COPY DETAILS";
+                                            color: root.copied ? VayrenPalette.pos : copy-ta.has-hover ? VayrenPalette.accent : VayrenPalette.muted;
                                             font-size: VayrenDesign.fs-label;
                                             font-weight: 700;
                                             vertical-alignment: center;
+                                            animate color { duration: 150ms; easing: ease-out; }
                                         }
                                     }
                                     copy-ta := TouchArea {
                                         mouse-cursor: pointer;
-                                        clicked => { root.copy-callback(); }
+                                        clicked => {
+                                            root.copy-callback();
+                                            root.copied = true;
+                                        }
                                     }
                                 }
-                                Rectangle {
+                                if !root.remove-armed: Rectangle {
                                     height: 32px;
                                     horizontal-stretch: 1;
                                     border-radius: VayrenDesign.radius;
-                                    background: rm-ta.has-hover ? VayrenPalette.neg-dim : VayrenPalette.bg1;
+                                    background: rm-ta.pressed ? VayrenPalette.neg : rm-ta.has-hover ? VayrenPalette.neg-dim : VayrenPalette.bg1;
                                     border-width: 1px;
                                     border-color: rm-ta.has-hover ? VayrenPalette.neg : VayrenPalette.hairline;
+                                    animate background { duration: 120ms; easing: ease-out; }
                                     HorizontalLayout {
                                         alignment: center;
                                         spacing: VayrenDesign.sp-sm;
@@ -891,16 +1061,65 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                                     rm-ta := TouchArea {
                                         enabled: root.broker-id != "";
                                         mouse-cursor: pointer;
-                                        clicked => { root.remove-requested(); }
+                                        clicked => { root.remove-armed = true; }
+                                    }
+                                }
+                                if root.remove-armed: Rectangle {
+                                    height: 32px;
+                                    horizontal-stretch: 1;
+                                    border-radius: VayrenDesign.radius;
+                                    background: yes-ta.pressed ? VayrenPalette.neg : yes-ta.has-hover ? VayrenPalette.neg-dim : VayrenPalette.bg1;
+                                    border-width: 1px;
+                                    border-color: VayrenPalette.neg;
+                                    HorizontalLayout {
+                                        alignment: center;
+                                        Text {
+                                            text: "YES, REMOVE";
+                                            color: VayrenPalette.neg;
+                                            font-size: VayrenDesign.fs-label;
+                                            font-weight: 700;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                    yes-ta := TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => {
+                                            root.remove-armed = false;
+                                            root.remove-requested();
+                                        }
+                                    }
+                                }
+                                if root.remove-armed: Rectangle {
+                                    height: 32px;
+                                    horizontal-stretch: 1;
+                                    border-radius: VayrenDesign.radius;
+                                    background: no-ta.pressed ? VayrenPalette.pressed : no-ta.has-hover ? VayrenPalette.hover : VayrenPalette.bg1;
+                                    border-width: 1px;
+                                    border-color: no-ta.has-hover ? VayrenPalette.accent : VayrenPalette.hairline;
+                                    HorizontalLayout {
+                                        alignment: center;
+                                        Text {
+                                            text: "KEEP";
+                                            color: no-ta.has-hover ? VayrenPalette.accent : VayrenPalette.muted;
+                                            font-size: VayrenDesign.fs-label;
+                                            font-weight: 700;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                    no-ta := TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => { root.remove-armed = false; }
                                     }
                                 }
                             }
 
                             Rectangle {
-                                background: VayrenPalette.bg1;
+                                background: help-ta.pressed ? VayrenPalette.pressed : help-ta.has-hover ? VayrenPalette.row-hover : VayrenPalette.bg1;
                                 border-width: 1px;
-                                border-color: VayrenPalette.hairline;
+                                border-color: help-ta.has-hover ? VayrenPalette.accent-dim : VayrenPalette.hairline;
                                 border-radius: VayrenDesign.radius;
+                                animate background { duration: 120ms; easing: ease-out; }
+                                animate border-color { duration: 120ms; easing: ease-out; }
                                 VerticalLayout {
                                     padding: VayrenDesign.sp-md;
                                     spacing: 2px;
@@ -908,9 +1127,10 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                                         spacing: VayrenDesign.sp-sm;
                                         Text {
                                             text: "ⓘ";
-                                            color: VayrenPalette.muted;
+                                            color: help-ta.has-hover ? VayrenPalette.accent : VayrenPalette.muted;
                                             font-size: VayrenDesign.fs-small;
                                             vertical-alignment: center;
+                                            animate color { duration: 120ms; easing: ease-out; }
                                         }
                                         Text {
                                             text: "Need help?";
@@ -922,9 +1142,10 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                                         Rectangle { horizontal-stretch: 1; background: transparent; }
                                         Text {
                                             text: "↗";
-                                            color: VayrenPalette.faint;
+                                            color: help-ta.has-hover ? VayrenPalette.accent : VayrenPalette.faint;
                                             font-size: VayrenDesign.fs-small;
                                             vertical-alignment: center;
+                                            animate color { duration: 120ms; easing: ease-out; }
                                         }
                                     }
                                     Text {
@@ -934,7 +1155,8 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                                         wrap: word-wrap;
                                     }
                                 }
-                                TouchArea {
+                                help-ta := TouchArea {
+                                    mouse-cursor: pointer;
                                     clicked => { root.help-requested(); }
                                 }
                             }
