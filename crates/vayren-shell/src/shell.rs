@@ -18,17 +18,17 @@ use crate::view_model::{BrokerPanel, CapabilityStatus, Environment};
 use crate::viewport::ChartViewportZoom;
 use crate::{
     AppWindow, BrokerCheckRow, BrokerRowView, CapabilityRowView, CredentialFieldView, DlCalDay,
-    DlCredField, DlPlan, DlStatus, DlStock, LabBoardCell, LabCheckData, LabDetailMetric, LabHeader,
-    LabKpi, LabLibraryRow, LabMatrixRow, LabParam, LabPoint, LabPreset, LabRankRow, LabTradeMetric,
-    LabTradeRow, LiveBar, LiveCandle, LiveEventRow, LiveFill, LiveGate, LiveKv, LiveMarket,
-    LiveOrder, LivePosition, LiveSetup, LiveStat, LiveSymbolRow, MarketCandle, MarketIndicator,
-    MarketMarker, MarketPlotSeg, MarketPopupRow, MarketRayLevel, MarketSettingsRow,
-    MarketStatusRow, MarketTick, MarketTimeframe, MarketTradeContext, MarketWatchRow,
-    PortfolioAlloc, PortfolioFill, PortfolioGate, PortfolioKpi, PortfolioOrder, PortfolioPosition,
-    PortfolioRisk, ProgressStepView, RankWindow, ResearchCompareRow, ResearchConfigGroup,
-    ResearchEvidenceDim, ResearchEvidenceWhy, ResearchExperimentRow, ResearchField, ResearchKv,
-    ResearchKvGroup, ResearchMetric, ResearchRobustRow, ResearchSignalRow, ResearchStrategyRow,
-    ResearchTradeRow, ShellScreen,
+    DlCredField, DlPlan, DlStatus, DlStock, LabCheckData, LabDetailMetric, LabHeader, LabKpi,
+    LabLibraryRow, LabPoint, LabPreset, LabRankRow, LabTradeMetric, LabTradeRow, LiveBar,
+    LiveEventRow, LiveFill, LiveGate, LiveKv, LiveMarket, LiveOrder, LivePosition, LiveSetup,
+    LiveStat, LiveSymbolRow, MarketCandle, MarketIndicator, MarketMarker, MarketPlotSeg,
+    MarketPopupRow, MarketRayLevel, MarketSettingsRow, MarketStatusRow, MarketTick,
+    MarketTimeframe, MarketTradeContext, MarketWatchRow, PortfolioAlloc, PortfolioFill,
+    PortfolioGate, PortfolioKpi, PortfolioOrder, PortfolioPosition, PortfolioRisk,
+    ProgressStepView, RankWindow, ResearchCompareRow, ResearchConfigGroup, ResearchEvidenceDim,
+    ResearchEvidenceWhy, ResearchExperimentRow, ResearchField, ResearchKv, ResearchKvGroup,
+    ResearchMetric, ResearchRobustRow, ResearchSignalRow, ResearchStrategyRow, ResearchTradeRow,
+    ShellScreen,
 };
 use slint::ComponentHandle;
 #[cfg(test)]
@@ -360,6 +360,7 @@ pub fn apply_market(ui: &AppWindow, state: &market::MarketState) {
     ui.set_market_exchange_label(view.exchange_label.into());
     ui.set_market_status_message(view.status_message.into());
     ui.set_market_has_data(view.has_data);
+    ui.set_market_bars_stale(view.bars_stale);
     ui.set_market_watch_rows(market_model(
         view.watch_rows
             .into_iter()
@@ -622,6 +623,7 @@ pub fn apply_market(ui: &AppWindow, state: &market::MarketState) {
     ));
     ui.set_market_dl_cred_has_stored(dl.cred_has_stored);
     ui.set_market_dl_cred_status(dl.cred_status.clone().into());
+    ui.set_market_dl_cred_test_running(dl.test_running);
     ui.set_market_dl_confirm_clear(dl.confirm_clear);
 }
 
@@ -750,6 +752,7 @@ pub fn apply_market_viewport(ui: &AppWindow, state: &market::MarketState) {
     ui.set_market_markers(markers_model(view.markers));
     ui.set_market_status_message(view.status_message.into());
     ui.set_market_has_data(view.has_data);
+    ui.set_market_bars_stale(view.bars_stale);
     apply_flags_props(
         ui,
         view.scale_mode,
@@ -1005,7 +1008,11 @@ pub fn wire_market(
                 &format!("symbol:select:{name}"),
                 market::MarketAction::SelectSymbol(name.to_string()),
             );
-            refresh_viewport(&ui, &strong);
+            // FULL tier, not the viewport fast path: the header title, the
+            // watchlist highlight and the timeframe tab are selection facts.
+            // A viewport-only refresh left them naming the previous symbol
+            // until the snapshot arrived — and forever if the fetch failed.
+            apply_market(&ui, &strong.borrow());
             fetch(Some(name.to_string()), Some(timeframe));
         });
     }
@@ -1020,7 +1027,9 @@ pub fn wire_market(
                 &format!("timeframe:select:{timeframe}"),
                 market::MarketAction::SelectTimeframe(timeframe.to_string()),
             );
-            refresh_viewport(&ui, &strong);
+            // Full tier: the timeframe tab highlight and the axis labels both
+            // follow the selection, not just the geometry.
+            apply_market(&ui, &strong.borrow());
             fetch(Some(symbol), Some(timeframe.to_string()));
         });
     }
@@ -1330,190 +1339,205 @@ pub fn wire_zoom(ui: &AppWindow, zoom: Rc<RefCell<ChartViewportZoom>>) {
     });
 }
 
+/// Build the single header struct the Strategy Lab screen renders from. Shared
+/// by the full push and the editor-only push so the two can never disagree on
+/// what a header field means.
+fn build_lab_header(view: &lab::LabView) -> LabHeader {
+    LabHeader {
+    has_strategy: view.has_strategy,
+    name: view.name.clone().into(),
+    description: view.description.clone().into(),
+    tags: view.tags.clone().into(),
+    version: view.version.clone().into(),
+    modified: view.modified.clone().into(),
+    last_backtest: view.last_backtest.clone().into(),
+    state_label: view.state_label.clone().into(),
+    state_tone: view.state_tone,
+    mode: view.mode,
+    outdated: view.outdated,
+    run_enabled: view.run_enabled,
+    universe: view.universe.clone().into(),
+    timeframe: view.timeframe.clone().into(),
+    dates: view.dates.clone().into(),
+    capital: view.capital.clone().into(),
+    show_results: view.show_results,
+    tab: view.tab as i32,
+    summary_line: view.summary_line.clone().into(),
+    empty_reason: view.empty_reason.clone().into(),
+    equity_caption: view.equity_caption.clone().into(),
+    drawdown_caption: view.drawdown_caption.clone().into(),
+    ranking_count: view.ranking_count.clone().into(),
+    run_stop: view.run_stop,
+    verdict_label: view.verdict_label.clone().into(),
+    verdict_note: view.verdict_note.clone().into(),
+    verdict_tone: view.verdict_tone,
+    progress_label: view.progress_label.clone().into(),
+    run_label: view.run_label.clone().into(),
+    dirty: view.dirty,
+    cfg_universe_csv: view.cfg_universe_csv.clone().into(),
+    timeframe_index: view.timeframe_index,
+    cfg_dates_start: view.cfg_dates_start.clone().into(),
+    cfg_dates_end: view.cfg_dates_end.clone().into(),
+    cfg_capital: view.cfg_capital.clone().into(),
+    config_error: view.config_error.clone().into(),
+    rank_search: view.rank_search.clone().into(),
+    rank_desc: view.rank_desc,
+    rankby_current: view.rankby_current,
+    trade_symbol: view.trade_symbol.clone().into(),
+    trade_filters_active: view.trade_filters_active,
+    selected_trade: view.selected_trade,
+    compare_side: view.compare_side,
+    is_compare: view.is_compare,
+    detail_symbol: view
+        .detail
+        .as_ref()
+        .map(|d| d.symbol.clone().into())
+        .unwrap_or_default(),
+    detail_title: view
+        .detail
+        .as_ref()
+        .map(|d| d.title.clone().into())
+        .unwrap_or_default(),
+    detail_stats: view
+        .detail
+        .as_ref()
+        .map(|d| d.stats.clone().into())
+        .unwrap_or_default(),
+    detail_caption: view
+        .detail
+        .as_ref()
+        .map(|d| d.caption.clone().into())
+        .unwrap_or_default(),
+    cmp_verdict: view.compare.banner_verdict.clone().into(),
+    cmp_reason: view.compare.banner_reason.clone().into(),
+    cmp_tone: view.compare.banner_tone,
+    cmp_trade_summary: view.compare.trade_summary.clone().into(),
+    cmp_stale: view.compare.stale_notice.clone().into(),
+    cmp_scope: view.compare.board_scope.clone().into(),
+    cmp_leader: view.compare.board_leader.clone().into(),
+    cmp_has_sides: view.compare.has_sides,
+    sym_open: view.sym_open,
+    sym_search: view.sym_search.clone().into(),
+    sym_button_line: view.sym_button_line.clone().into(),
+    sym_count_line: view.sym_count_line.clone().into(),
+    sym_selected_line: view.sym_selected_line.clone().into(),
+    // Trade blotter: honest counters, filter/sort state and the ONE
+    // selected trade's facts (`spec §2/§27`).
+    trade_summary: view.trade_summary.clone().into(),
+    trade_needle: view.trade_needle.clone().into(),
+    trade_side_filter: view.trade_side_filter,
+    trade_result_filter: view.trade_result_filter,
+    trade_sort: view.trade_sort,
+    trade_sort_labels: Rc::new(slint::VecModel::from(
+        view.clone().trade_sort_labels
+            .into_iter()
+            .map(slint::SharedString::from)
+            .collect::<Vec<_>>(),
+    ))
+    .into(),
+    trade_total: view.trade_total,
+    trade_detail_symbol: view.trade_detail.symbol.clone().into(),
+    trade_detail_side: view.trade_detail.side.clone().into(),
+    trade_detail_metrics: Rc::new(slint::VecModel::from(
+        view.clone().trade_detail
+            .metrics
+            .into_iter()
+            .map(|m| LabTradeMetric {
+                label: m.label.into(),
+                value: m.value.into(),
+                tone: m.tone,
+            })
+            .collect::<Vec<_>>(),
+    ))
+    .into(),
+    run_id: view.run_id.clone().into(),
+    run_ts: view.run_ts.clone().into(),
+    cfg_hash: view.cfg_hash.clone().into(),
+    result_pnl: view.result_pnl.clone().into(),
+    result_return: view.result_return.clone().into(),
+    result_pnl_tone: view.result_pnl_tone,
+    result_exec_line: view.result_exec_line.clone().into(),
+    stale_exec_line: view.stale_exec_line.clone().into(),
+    stale_cur_line: view.stale_cur_line.clone().into(),
+    range_line: view.range_line.clone().into(),
+    diag_show: view.diag_show,
+    diag_title: view.diag_title.clone().into(),
+    diag_detail: view.diag_detail.clone().into(),
+    diag_stale: view.diag_stale,
+    risk_gate_show: view.risk_gate_show,
+    risk_gate_text: view.risk_gate_text.clone().into(),
+    lens: view.lens,
+    strategy_count_line: view.strategy_count_line.clone().into(),
+    editing_hint: view.editing_hint.clone().into(),
+    studio_ref_pf: view.studio_ref_pf.clone().into(),
+    studio_source: view.studio_source.clone().into(),
+    equity_select: view.equity_select,
+    dates_human: view.dates_human.clone().into(),
+    dates_error: view.dates_error.clone().into(),
+    today_days: view.today_days,
+    dates_start_days: view.dates_start_days,
+    dates_end_days: view.dates_end_days,
+    // §02 CONFIGURE — the three-row structured config card.
+    tf_short_idx: view.tf_short_idx,
+    range_preset_idx: view.range_preset_idx,
+    range_from_human: view.range_from_human.clone().into(),
+    range_to_human: view.range_to_human.clone().into(),
+    range_to_live: view.range_to_live,
+    range_span_line: view.range_span_line.clone().into(),
+    timeframe_label: view.timeframe_label.clone().into(),
+    capital_label: view.capital_label.clone().into(),
+    capital_ok: view.capital_ok,
+    chips_more_line: view.chips_more_line.clone().into(),
+    cfg_checks: Rc::new(slint::VecModel::from(
+        view.clone().cfg_checks
+            .into_iter()
+            .map(|c| LabCheckData {
+                label: c.label.into(),
+                kind: c.kind,
+            })
+            .collect::<Vec<_>>(),
+    ))
+    .into(),
+    cov_pct: view.coverage.pct,
+    cov_note: view.coverage.note.clone().into(),
+    cov_kind: view.coverage.kind,
+    cov_on: view.coverage.on,
+    cov_caption: view.cov_caption.clone().into(),
+    // Live run progress — formatted in Rust from the measured events.
+    prog_active: view.prog_active,
+    prog_headline: view.prog_headline.clone().into(),
+    prog_counts: view.prog_counts.clone().into(),
+    prog_current: view.prog_current.clone().into(),
+    prog_stage: view.prog_stage.clone().into(),
+    prog_stage_pct: view.prog_stage_pct,
+    prog_elapsed: view.prog_elapsed.clone().into(),
+    prog_eta: view.prog_eta.clone().into(),
+    prog_speed: view.prog_speed.clone().into(),
+    prog_throughput: view.prog_throughput.clone().into(),
+    prog_failed_line: view.prog_failed_line.clone().into(),
+    prog_pct: view.prog_pct,
+    prog_cancelled: view.prog_cancelled,
+    prog_long: view.prog_long,
+    prog_watchdog: view.prog_watchdog.clone().into(),
+    }
+}
 /// Project the Strategy Lab view-model onto the Slint screen. Every rendered
 /// value comes from `LabState` (selection, mode, results) — the screen never
 /// infers state, so a selected strategy can never coexist with a
 /// "no strategy" workspace.
 pub fn apply_lab(ui: &AppWindow, state: &LabState) {
     let view = lab::project(state);
-    ui.set_lab(LabHeader {
-        has_strategy: view.has_strategy,
-        name: view.name.into(),
-        description: view.description.into(),
-        tags: view.tags.into(),
-        version: view.version.into(),
-        modified: view.modified.into(),
-        last_backtest: view.last_backtest.into(),
-        state_label: view.state_label.into(),
-        state_tone: view.state_tone,
-        mode: view.mode,
-        outdated: view.outdated,
-        run_enabled: view.run_enabled,
-        universe: view.universe.into(),
-        timeframe: view.timeframe.into(),
-        dates: view.dates.into(),
-        capital: view.capital.into(),
-        show_results: view.show_results,
-        tab: view.tab as i32,
-        summary_line: view.summary_line.into(),
-        empty_reason: view.empty_reason.into(),
-        equity_caption: view.equity_caption.into(),
-        drawdown_caption: view.drawdown_caption.into(),
-        ranking_count: view.ranking_count.into(),
-        run_stop: view.run_stop,
-        verdict_label: view.verdict_label.into(),
-        verdict_note: view.verdict_note.into(),
-        verdict_tone: view.verdict_tone,
-        progress_label: view.progress_label.into(),
-        run_label: view.run_label.into(),
-        code: view.code.into(),
-        dirty: view.dirty,
-        cfg_universe_csv: view.cfg_universe_csv.into(),
-        timeframe_index: view.timeframe_index,
-        cfg_dates_start: view.cfg_dates_start.into(),
-        cfg_dates_end: view.cfg_dates_end.into(),
-        cfg_capital: view.cfg_capital.into(),
-        config_error: view.config_error.into(),
-        rank_search: view.rank_search.into(),
-        rank_desc: view.rank_desc,
-        rankby_current: view.rankby_current,
-        trade_symbol: view.trade_symbol.into(),
-        trade_filters_active: view.trade_filters_active,
-        selected_trade: view.selected_trade,
-        compare_side: view.compare_side,
-        is_compare: view.is_compare,
-        detail_symbol: view
-            .detail
-            .as_ref()
-            .map(|d| d.symbol.clone().into())
-            .unwrap_or_default(),
-        detail_title: view
-            .detail
-            .as_ref()
-            .map(|d| d.title.clone().into())
-            .unwrap_or_default(),
-        detail_stats: view
-            .detail
-            .as_ref()
-            .map(|d| d.stats.clone().into())
-            .unwrap_or_default(),
-        detail_caption: view
-            .detail
-            .as_ref()
-            .map(|d| d.caption.clone().into())
-            .unwrap_or_default(),
-        cmp_verdict: view.compare.banner_verdict.into(),
-        cmp_reason: view.compare.banner_reason.into(),
-        cmp_tone: view.compare.banner_tone,
-        cmp_trade_summary: view.compare.trade_summary.into(),
-        cmp_stale: view.compare.stale_notice.into(),
-        cmp_scope: view.compare.board_scope.into(),
-        cmp_leader: view.compare.board_leader.into(),
-        cmp_has_sides: view.compare.has_sides,
-        sym_open: view.sym_open,
-        sym_search: view.sym_search.into(),
-        sym_button_line: view.sym_button_line.into(),
-        sym_count_line: view.sym_count_line.into(),
-        sym_selected_line: view.sym_selected_line.into(),
-        // Trade blotter: honest counters, filter/sort state and the ONE
-        // selected trade's facts (`spec §2/§27`).
-        trade_summary: view.trade_summary.into(),
-        trade_needle: view.trade_needle.clone().into(),
-        trade_side_filter: view.trade_side_filter,
-        trade_result_filter: view.trade_result_filter,
-        trade_sort: view.trade_sort,
-        trade_sort_labels: Rc::new(slint::VecModel::from(
-            view.trade_sort_labels
-                .into_iter()
-                .map(slint::SharedString::from)
-                .collect::<Vec<_>>(),
-        ))
-        .into(),
-        trade_total: view.trade_total,
-        trade_detail_symbol: view.trade_detail.symbol.into(),
-        trade_detail_side: view.trade_detail.side.into(),
-        trade_detail_metrics: Rc::new(slint::VecModel::from(
-            view.trade_detail
-                .metrics
-                .into_iter()
-                .map(|m| LabTradeMetric {
-                    label: m.label.into(),
-                    value: m.value.into(),
-                    tone: m.tone,
-                })
-                .collect::<Vec<_>>(),
-        ))
-        .into(),
-        run_id: view.run_id.into(),
-        run_ts: view.run_ts.into(),
-        cfg_hash: view.cfg_hash.into(),
-        result_pnl: view.result_pnl.into(),
-        result_return: view.result_return.into(),
-        result_pnl_tone: view.result_pnl_tone,
-        result_exec_line: view.result_exec_line.into(),
-        stale_exec_line: view.stale_exec_line.into(),
-        stale_cur_line: view.stale_cur_line.into(),
-        range_line: view.range_line.into(),
-        diag_show: view.diag_show,
-        diag_title: view.diag_title.into(),
-        diag_detail: view.diag_detail.into(),
-        diag_stale: view.diag_stale,
-        risk_gate_show: view.risk_gate_show,
-        risk_gate_text: view.risk_gate_text.into(),
-        lens: view.lens,
-        strategy_count_line: view.strategy_count_line.into(),
-        editing_hint: view.editing_hint.into(),
-        studio_ref_pf: view.studio_ref_pf.into(),
-        studio_source: view.studio_source.into(),
-        equity_select: view.equity_select,
-        dates_human: view.dates_human.into(),
-        dates_error: view.dates_error.into(),
-        today_days: view.today_days,
-        dates_start_days: view.dates_start_days,
-        dates_end_days: view.dates_end_days,
-        // §02 CONFIGURE — the three-row structured config card.
-        tf_short_idx: view.tf_short_idx,
-        range_preset_idx: view.range_preset_idx,
-        range_from_human: view.range_from_human.into(),
-        range_to_human: view.range_to_human.into(),
-        range_to_live: view.range_to_live,
-        range_span_line: view.range_span_line.into(),
-        timeframe_label: view.timeframe_label.into(),
-        capital_label: view.capital_label.into(),
-        capital_ok: view.capital_ok,
-        chips_more_line: view.chips_more_line.into(),
-        cfg_checks: Rc::new(slint::VecModel::from(
-            view.cfg_checks
-                .into_iter()
-                .map(|c| LabCheckData {
-                    label: c.label.into(),
-                    kind: c.kind,
-                })
-                .collect::<Vec<_>>(),
-        ))
-        .into(),
-        cov_pct: view.coverage.pct,
-        cov_note: view.coverage.note.into(),
-        cov_kind: view.coverage.kind,
-        cov_on: view.coverage.on,
-        cov_caption: view.cov_caption.into(),
-        // Live run progress — formatted in Rust from the measured events.
-        prog_active: view.prog_active,
-        prog_headline: view.prog_headline.into(),
-        prog_counts: view.prog_counts.into(),
-        prog_current: view.prog_current.into(),
-        prog_stage: view.prog_stage.into(),
-        prog_stage_pct: view.prog_stage_pct,
-        prog_elapsed: view.prog_elapsed.into(),
-        prog_eta: view.prog_eta.into(),
-        prog_speed: view.prog_speed.into(),
-        prog_throughput: view.prog_throughput.into(),
-        prog_failed_line: view.prog_failed_line.into(),
-        prog_pct: view.prog_pct,
-        prog_cancelled: view.prog_cancelled,
-        prog_long: view.prog_long,
-        prog_watchdog: view.prog_watchdog.into(),
-    });
+    ui.set_lab(build_lab_header(&view));
+    // Editor buffer (`bug #5`). `code` is bound to the editor's `text`, so
+    // writing an unchanged value back re-fires `edited` -> `on_lab_code_changed`
+    // -> another full projection, once per keystroke. Comparing first makes a
+    // USER EDIT stop at one projection while a PROGRAMMATIC update of a
+    // genuinely different buffer still lands.
+    if ui.get_lab_code() != view.code.as_str() {
+        #[cfg(feature = "labperf")]
+        vayren_domain::labperf::bump(&vayren_domain::labperf::CODE_WRITES);
+        ui.set_lab_code(view.code.into());
+    }
     // Signature of the band the UI currently shows — captured BEFORE the window
     // prop is overwritten, so the model-push guard below compares against what
     // is really on screen.
@@ -1587,6 +1611,11 @@ pub fn apply_lab(ui: &AppWindow, state: &LabState) {
                     state_label: r.state_label.into(),
                     favorite: r.favorite,
                     selected: r.selected,
+                    status: r.status.into(),
+                    timeframe: r.timeframe.into(),
+                    direction: r.direction.into(),
+                    symbol_count: r.symbol_count,
+                    runtime_state: r.runtime_state.into(),
                 })
                 .collect::<Vec<_>>(),
         ))
@@ -1666,6 +1695,8 @@ pub fn apply_lab(ui: &AppWindow, state: &LabState) {
     // view coordinates scaled to the fixed 1000x300 chart box (presentation
     // transform only — the engine data itself is untouched).
     let to_points = |series: &Vec<(f32, f32)>| -> Vec<LabPoint> {
+        #[cfg(feature = "labperf")]
+        vayren_domain::labperf::add(&vayren_domain::labperf::MODEL_POINTS, series.len() as u64);
         series
             .iter()
             .map(|(x, y)| LabPoint {
@@ -1674,22 +1705,9 @@ pub fn apply_lab(ui: &AppWindow, state: &LabState) {
             })
             .collect()
     };
-    ui.set_lab_equity(Rc::new(slint::VecModel::from(to_points(&view.equity))).into());
-    ui.set_lab_drawdown(Rc::new(slint::VecModel::from(to_points(&view.drawdown))).into());
-    ui.set_lab_params(
-        Rc::new(slint::VecModel::from(
-            view.params
-                .into_iter()
-                .map(|p| LabParam {
-                    key: p.key.into(),
-                    label: p.label.into(),
-                    value: p.value.into(),
-                })
-                .collect::<Vec<_>>(),
-        ))
-        .into(),
-    );
     let strings = |items: Vec<String>| {
+        #[cfg(feature = "labperf")]
+        vayren_domain::labperf::bump(&vayren_domain::labperf::MODEL_BUILDS);
         Rc::new(slint::VecModel::from(
             items
                 .into_iter()
@@ -1697,11 +1715,10 @@ pub fn apply_lab(ui: &AppWindow, state: &LabState) {
                 .collect::<Vec<_>>(),
         ))
     };
+    ui.set_lab_equity(Rc::new(slint::VecModel::from(to_points(&view.equity))).into());
     ui.set_lab_timeframes(strings(view.timeframes).into());
     ui.set_lab_tf_short(strings(view.tf_short).into());
     ui.set_lab_rankby_labels(strings(view.rankby_labels).into());
-    ui.set_lab_rank_heads(strings(view.rank_heads).into());
-    ui.set_lab_trade_heads(strings(view.trade_heads).into());
     let detail = view.detail.unwrap_or_default();
     ui.set_lab_detail_metrics(
         Rc::new(slint::VecModel::from(
@@ -1714,82 +1731,6 @@ pub fn apply_lab(ui: &AppWindow, state: &LabState) {
                 })
                 .collect::<Vec<_>>(),
         ))
-        .into(),
-    );
-    ui.set_lab_detail_equity(Rc::new(slint::VecModel::from(to_points(&detail.equity))).into());
-    ui.set_lab_board_labels(
-        strings(view.compare.board.iter().map(|r| r.label.clone()).collect()).into(),
-    );
-    ui.set_lab_board_columns(strings(view.compare.board_symbols.clone()).into());
-    ui.set_lab_board_trades(strings(view.compare.board_trades.clone()).into());
-    ui.set_lab_board_cols(view.compare.board_symbols.len().max(1) as i32);
-    ui.set_lab_board_cells(
-        Rc::new(slint::VecModel::from(
-            view.compare
-                .board
-                .iter()
-                .flat_map(|r| r.cells.iter())
-                .map(|c| LabBoardCell {
-                    symbol: c.symbol.clone().into(),
-                    text: c.text.clone().into(),
-                    best: c.best,
-                })
-                .collect::<Vec<_>>(),
-        ))
-        .into(),
-    );
-    ui.set_lab_matrix(
-        Rc::new(slint::VecModel::from(
-            view.compare
-                .matrix
-                .into_iter()
-                .map(|m| LabMatrixRow {
-                    key: m.key.into(),
-                    buy: m.buy.into(),
-                    sell: m.sell.into(),
-                    winner: m.winner,
-                })
-                .collect::<Vec<_>>(),
-        ))
-        .into(),
-    );
-    let rank_row = |r: lab::RankRow| LabRankRow {
-        rank: r.rank.into(),
-        symbol: r.symbol.into(),
-        pnl: r.pnl.into(),
-        ret: r.ret.into(),
-        trades: r.trades.into(),
-        win: r.win.into(),
-        pf: r.pf.into(),
-        dd: r.dd.into(),
-        sharpe: r.sharpe.into(),
-        pnl_tone: r.pnl_tone.cell(),
-        pf_tone: r.pf_tone.cell(),
-        unranked: r.unranked,
-    };
-    ui.set_lab_compare_ranking(
-        Rc::new(slint::VecModel::from(
-            view.compare
-                .ranking
-                .into_iter()
-                .map(rank_row)
-                .collect::<Vec<_>>(),
-        ))
-        .into(),
-    );
-    ui.set_lab_equity_buy(
-        Rc::new(slint::VecModel::from(to_points(&view.compare.equity_buy))).into(),
-    );
-    ui.set_lab_equity_sell(
-        Rc::new(slint::VecModel::from(to_points(&view.compare.equity_sell))).into(),
-    );
-    ui.set_lab_drawdown_buy(
-        Rc::new(slint::VecModel::from(to_points(&view.compare.drawdown_buy))).into(),
-    );
-    ui.set_lab_drawdown_sell(
-        Rc::new(slint::VecModel::from(to_points(
-            &view.compare.drawdown_sell,
-        )))
         .into(),
     );
     ui.set_lab_sym_visible(
@@ -1811,15 +1752,24 @@ pub fn apply_lab(ui: &AppWindow, state: &LabState) {
         ))
         .into(),
     );
-    ui.set_lab_filter_active(filter_kind(state.filter));
 }
 
-fn filter_kind(filter: LibFilter) -> i32 {
-    match filter {
-        LibFilter::All => 0,
-        LibFilter::Favorites => 1,
-        LibFilter::Recent => 2,
-    }
+/// Push ONLY what an editor keystroke can change (`bug #5`).
+///
+/// The editor buffer reaches exactly three header fields — `code`, `dirty` and
+/// `editing_hint`. `code` is deliberately NOT written here: the editor already
+/// holds the user's text, and writing it back is what re-entered the feedback
+/// loop (and would disturb the caret). Everything a keystroke cannot change —
+/// every model, both virtual windows, the ranking and trade bands — is left
+/// completely alone, so typing rebuilds no `VecModel` at all.
+///
+/// Still one projection: the domain stays the only thing that decides what
+/// `dirty` and `editing_hint` mean, so the UI never infers them.
+pub fn apply_lab_editor(ui: &AppWindow, state: &LabState) {
+    #[cfg(feature = "labperf")]
+    vayren_domain::labperf::bump(&vayren_domain::labperf::EDITOR_PUSHES);
+    let view = lab::project(state);
+    ui.set_lab(build_lab_header(&view));
 }
 
 /// Wire Strategy Lab interactions: the Slint surface only reports actions;
@@ -2068,12 +2018,12 @@ pub fn wire_lab(
                     LabRunRequest::gather(&guard)
                 }
             };
+            // ONE authoritative projection for this transition. The previous
+            // shape called `apply_lab` twice with no state change in between —
+            // two full projections and two model sets for one RUN.
+            apply_lab(&ui, &strong.borrow());
             if let Some(request) = request {
-                apply_lab(&ui, &strong.borrow());
                 fetch(request);
-            }
-            if let Some(ui) = handle.upgrade() {
-                apply_lab(&ui, &strong.borrow());
             }
         });
     }
@@ -2283,7 +2233,32 @@ pub fn wire_lab(
             });
         }};
     }
-    on_lab_text!(on_lab_code_changed, LabState::interaction_codeedit);
+    // Editor keystrokes get their own path (`bug #5`). Two guards, no timers:
+    //
+    // 1. ECHO GUARD — a write Rust just made comes back through `edited`
+    //    carrying exactly the value Rust wrote. That is a PROGRAMMATIC update
+    //    echoing, not a user edit, so it is dropped: it must not mark the
+    //    freshly-loaded buffer dirty and must not project again. Stateless, so
+    //    it cannot get stuck.
+    // 2. NARROW PUSH — a real edit updates only the header (`dirty` /
+    //    `editing_hint`); the buffer itself is never written back, so the
+    //    caret and selection are untouched and no model is rebuilt.
+    {
+        let strong = state.clone();
+        let handle = ui.as_weak();
+        ui.on_lab_code_changed(move |text: slint::SharedString| {
+            let Some(ui) = handle.upgrade() else { return };
+            if text.as_str() == ui.get_lab_code().as_str() {
+                #[cfg(feature = "labperf")]
+                vayren_domain::labperf::bump(&vayren_domain::labperf::CODE_ECHO_DROPPED);
+                return;
+            }
+            #[cfg(feature = "labperf")]
+            vayren_domain::labperf::bump(&vayren_domain::labperf::CODE_EDITS);
+            strong.borrow_mut().interaction_codeedit(text.as_str());
+            apply_lab_editor(&ui, &strong.borrow());
+        });
+    }
     on_lab_text!(on_lab_sym_search_changed, LabState::interaction_symsearch);
     on_lab_text!(on_lab_timeframe_picked, LabState::interaction_timeframe);
     on_lab_text!(on_lab_capital_committed, LabState::interaction_capital);
@@ -2376,11 +2351,26 @@ impl Tap for LabState {
 }
 
 /// Representative lab state for the standalone shell binary: the real
-/// workstation library (OBR + SMA records), no fabricated results — results
-/// appear only via `LabState::apply_result` from the engine bridge.
+/// workstation library (registered OBR C1C4 + library OBR + the three
+/// original built-in strategies), no fabricated results — results appear
+/// only via `LabState::apply_result` from the engine bridge.
 pub fn demo_lab_state() -> LabState {
     LabState {
         strategies: vec![
+            lab::LabStrategy {
+                name: "OBR C1C4".into(),
+                description: "30m · SHORT · 22 symbols".into(),
+                tags: vec!["BREAKOUT".into(), "INTRADAY".into(), "OBR".into()],
+                version: "1.0.0".into(),
+                modified: "11 Sep 26".into(),
+                favorite: true,
+                last_backtest: "—".into(),
+                status: "ACTIVE".into(),
+                timeframe: "30m".into(),
+                direction: "SHORT".into(),
+                symbol_count: 22,
+                runtime_state: "IDLE".into(),
+            },
             lab::LabStrategy {
                 name: "OBR".into(),
                 description: "Opening Range Breakout".into(),
@@ -2389,21 +2379,56 @@ pub fn demo_lab_state() -> LabState {
                 modified: "11 Sep 26".into(),
                 favorite: true,
                 last_backtest: "—".into(),
+                status: "ACTIVE".into(),
+                timeframe: "15m".into(),
+                direction: "SHORT".into(),
+                symbol_count: 0,
+                runtime_state: "IDLE".into(),
             },
             lab::LabStrategy {
-                name: "SMA".into(),
-                description: "SMA crossover".into(),
-                tags: vec!["TREND".into()],
+                name: "SMA Crossover".into(),
+                description:
+                    "Buys when the fast SMA crosses above the slow SMA; sells on cross under."
+                        .into(),
+                tags: vec!["built-in".into(), "trend".into(), "crossover".into()],
                 version: "1.0".into(),
-                modified: "—".into(),
-                favorite: false,
-                last_backtest: "—".into(),
+                modified: "built-in".into(),
+                timeframe: String::new(),
+                direction: String::new(),
+                ..lab::LabStrategy::default()
+            },
+            lab::LabStrategy {
+                name: "EMA Crossover".into(),
+                description:
+                    "Buys when the fast EMA crosses above the slow EMA; sells on cross under."
+                        .into(),
+                tags: vec!["built-in".into(), "trend".into(), "crossover".into()],
+                version: "1.0".into(),
+                modified: "built-in".into(),
+                timeframe: String::new(),
+                direction: String::new(),
+                ..lab::LabStrategy::default()
+            },
+            lab::LabStrategy {
+                name: "RSI Strategy".into(),
+                description: "Buys oversold RSI readings and exits back to flat on overbought."
+                    .into(),
+                tags: vec![
+                    "built-in".into(),
+                    "momentum".into(),
+                    "mean-reversion".into(),
+                ],
+                version: "1.0".into(),
+                modified: "built-in".into(),
+                timeframe: String::new(),
+                direction: String::new(),
+                ..lab::LabStrategy::default()
             },
         ],
         selected: Some(0),
         config: lab::LabConfig {
-            universe: "RELIANCE".into(),
-            timeframe: "15m".into(),
+            universe: "NSE:KAYNES".into(),
+            timeframe: "30m".into(),
             dates: "02 Jan '26 → 11 Sep '26".into(),
             capital: "₹10,00,000".into(),
         },
@@ -3181,10 +3206,12 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
         conn_tone: view.bar.conn_tone,
         strategy_label: view.bar.strategy_label.into(),
         strategy_tone: view.bar.strategy_tone,
+        strategy_sub: view.bar.strategy_sub.into(),
         risk_label: view.bar.risk_label.into(),
         risk_tone: view.bar.risk_tone,
         recon_label: view.bar.recon_label.into(),
         recon_tone: view.bar.recon_tone,
+        recon_sub: view.bar.recon_sub.into(),
         exec_label: view.bar.exec_label.into(),
         exec_tone: view.bar.exec_tone,
         halted: view.bar.halted,
@@ -3234,23 +3261,10 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
         title: view.market.title.into(),
         detail: view.market.detail.into(),
         header: view.market.header.into(),
+        feed_label: view.market.feed_label.into(),
+        feed_tone: view.market.feed_tone,
+        updated_label: view.market.updated_label.into(),
     });
-    ui.set_live_candles(
-        Rc::new(slint::VecModel::from(
-            view.candles
-                .into_iter()
-                .map(|c| LiveCandle {
-                    x: c.x,
-                    open: c.open,
-                    high: c.high,
-                    low: c.low,
-                    close: c.close,
-                    up: c.up,
-                })
-                .collect::<Vec<_>>(),
-        ))
-        .into(),
-    );
     ui.set_live_symbols(
         Rc::new(slint::VecModel::from(
             view.symbols
@@ -3259,6 +3273,11 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
                     real_index: s.real_index,
                     name: s.name.into(),
                     checked: s.checked,
+                    ltp: s.ltp.into(),
+                    change: s.change.into(),
+                    change_tone: s.change_tone,
+                    status: s.status.into(),
+                    status_tone: s.status_tone,
                 })
                 .collect::<Vec<_>>(),
         ))
@@ -3306,6 +3325,7 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
     ui.set_live_risk_rows(kv_model(view.risk_rows).into());
     ui.set_live_broker_rows(kv_model(view.broker_rows).into());
     ui.set_live_recon_rows(kv_model(view.recon_rows).into());
+    ui.set_live_account_rows(kv_model(view.account_rows).into());
     ui.set_live_positions(
         Rc::new(slint::VecModel::from(
             view.positions
@@ -3313,11 +3333,13 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
                 .map(|p| LivePosition {
                     symbol: p.symbol.into(),
                     side: p.side.into(),
+                    side_tone: p.side_tone,
                     qty: p.qty.into(),
                     entry: p.entry.into(),
                     current: p.current.into(),
                     pnl: p.pnl.into(),
                     pnl_tone: p.pnl_tone,
+                    pnl_pct: p.pnl_pct.into(),
                     status: p.status.into(),
                 })
                 .collect::<Vec<_>>(),
@@ -3333,6 +3355,7 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
                     strategy: o.strategy.into(),
                     symbol: o.symbol.into(),
                     side: o.side.into(),
+                    side_tone: o.side_tone,
                     qty: o.qty.into(),
                     order_type: o.order_type.into(),
                     price: o.price.into(),
@@ -3387,6 +3410,8 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
                     event: e.event.into(),
                     status: e.status.into(),
                     status_tone: e.status_tone,
+                    level: e.level.into(),
+                    category: e.category.into(),
                 })
                 .collect::<Vec<_>>(),
         ))
@@ -3454,7 +3479,7 @@ pub fn wire_live(ui: &AppWindow, state: Rc<RefCell<LiveState>>) {
         s.toggle_symbol(i.max(0) as usize);
     });
     wire_text!(on_live_timeframe_picked, LiveState::select_timeframe_value);
-    wire_text!(on_live_event_type_picked, LiveState::apply_event_type);
+    wire_text!(on_live_event_type_picked, LiveState::apply_event_category);
     wire_text!(on_live_symbol_filter_changed, LiveState::set_symbol_filter);
     wire_text!(on_live_event_filter_changed, LiveState::set_event_filter);
     {
@@ -3472,6 +3497,17 @@ pub fn wire_live(ui: &AppWindow, state: Rc<RefCell<LiveState>>) {
     wire_unit!(on_live_confirm_requested, LiveState::confirm_live);
     wire_unit!(on_live_inspector_toggled, LiveState::toggle_inspector);
     {
+        // CLEAR EVENTS is UI-hygiene only: it drops the rendered event
+        // history and never queues a host action — backend trading state
+        // (sessions, positions, journal) is untouched.
+        let strong = state.clone();
+        let handle = ui.as_weak();
+        ui.on_live_clear_events(move || {
+            strong.borrow_mut().clear_events();
+            refresh_live(&handle, &strong);
+        });
+    }
+    {
         // CONFIGURE BROKER is navigation intent — the shell owns the
         // screen switch; no broker logic lives in the LIVE surface.
         let handle = ui.as_weak();
@@ -3485,8 +3521,11 @@ pub fn wire_live(ui: &AppWindow, state: Rc<RefCell<LiveState>>) {
 
 /// Representative LIVE state for the standalone shell binary — the exact
 /// static readiness of this workstation (`--check-live` facts): no live
-/// venue adapter, PAPER default, real strategy library and store head,
-/// empty execution tables. Nothing is fabricated.
+/// venue adapter, PAPER default, empty execution tables. Nothing is
+/// fabricated: the watchlist starts EMPTY (the universe is registry-owned
+/// and arrives with the first backend snapshot — a stale built-in list
+/// would pose as the strategy's universe), while the strategy option names
+/// the registry-canonical default the backend will confirm or replace.
 pub fn demo_live_state() -> LiveState {
     let gate = |name: &str, reason: &str| Gate {
         name: name.into(),
@@ -3509,6 +3548,7 @@ pub fn demo_live_state() -> LiveState {
             capabilities: vec!["historical_data.candles".into()],
             latency_ms: None,
             last_heartbeat: String::new(),
+            account_id: String::new(),
         },
         gates: vec![
             blocked(
@@ -3537,28 +3577,18 @@ pub fn demo_live_state() -> LiveState {
             mismatches: String::new(),
             blocks_live: true,
         },
-        strategies: vec!["OBR".into(), "Untitled Strategy".into()],
-        symbols: [
-            "360ONE", "AARTIIND", "ABCAPITAL", "ABFRL", "ADANIENT", "ADANIPORTS", "AMBUJACEM",
-            "ANGELONE", "APOLLOHOSP", "ASIANPAINT", "BAJFINANCE", "BHARTIARTL", "DMART", "HAL",
-            "HDFCBANK", "ICICIBANK", "INFY", "IRCTC", "ITC", "JSWSTEEL", "LT", "NESTLEIND",
-            "RELIANCE", "SBIN", "SUNPHARMA", "TATACHEM", "TATASTEEL", "TCS", "TITAN",
-        ]
-        .into_iter()
-        .map(|symbol| SymbolPick {
-            symbol: symbol.into(),
-            checked: false,
-        })
-        .collect(),
-        store_total: Some(527),
+        strategies: vec!["OBR C1C4".into()],
+        symbols: Vec::new(),
+        store_total: None,
         timeframes: [
             "1m", "3m", "5m", "15m", "30m", "45m", "1h", "2h", "4h", "1D", "1W",
         ]
         .into_iter()
         .map(String::from)
         .collect(),
-        timeframe_index: Some(3),
-        market_timeframe: "15m".into(),
+        timeframe_index: Some(4),
+        market_timeframe: "30m".into(),
+        market_symbol: String::new(),
         ..LiveState::default()
     }
 }
@@ -3587,6 +3617,9 @@ pub fn demo_live_state_running() -> LiveState {
         .map(|symbol| SymbolPick {
             symbol: symbol.into(),
             checked: matches!(symbol, "RELIANCE" | "TCS"),
+            ltp: None,
+            change_pct: None,
+            in_store: true,
         })
         .collect(),
         store_total: Some(527),
@@ -3600,6 +3633,7 @@ pub fn demo_live_state_running() -> LiveState {
             current: "2812.40".into(),
             pnl: "+113.00".into(),
             status: "OPEN".into(),
+            pnl_pct: Some(0.40),
         }],
         position_facts: Some(live::PositionFacts {
             instrument: "RELIANCE".into(),
@@ -3644,6 +3678,10 @@ pub fn demo_live_state_running() -> LiveState {
             warmup: Some(60),
             state: "RELIANCE: no signal yet; TCS: no signal yet".into(),
             params: vec!["range_minutes=15".into(), "target_atr=2.0".into()],
+            direction: String::new(),
+            runtime_state: String::new(),
+            reference_window: String::new(),
+            universe: None,
         }),
         pnl: live::Pnl {
             realized: Some(0.0),
@@ -3661,6 +3699,7 @@ pub fn demo_live_state_running() -> LiveState {
                 symbol: "RELIANCE".into(),
                 event: "ORDER_SUBMITTED".into(),
                 status: "ok".into(),
+                category: "ORDERS".into(),
             },
             live::LiveEvent {
                 timestamp: "13:00:04".into(),
@@ -3668,6 +3707,7 @@ pub fn demo_live_state_running() -> LiveState {
                 symbol: "RELIANCE".into(),
                 event: "ORDER_FILL".into(),
                 status: "ok".into(),
+                category: "ORDERS".into(),
             },
         ],
         market_state: live::DataState::Ready,
@@ -3899,13 +3939,24 @@ mod tests {
         apply_lab(&ui, &lab_state.borrow());
         let header = ui.get_lab();
         assert!(header.has_strategy);
-        assert_eq!(header.name, "OBR");
+        assert_eq!(header.name, "OBR C1C4");
         // Selection is reflected immediately — no "no strategy" mismatch.
         assert_eq!(header.state_label, "● READY");
         assert!(!header.show_results);
         assert!(!header.run_enabled); // engine bridge not wired yet: no fake run
-        assert_eq!(ui.get_lab_library().row_count(), 2);
-        assert!(ui.get_lab_library().row_data(0).unwrap().selected);
+                                      // The demo library carries the registered OBR C1C4 plus the library
+                                      // OBR and the three original built-in strategies. Rows reach the UI
+                                      // sorted by name, so exactly one row is selected: the OBR C1C4.
+        assert_eq!(ui.get_lab_library().row_count(), 5);
+        let selected_rows = || -> Vec<_> {
+            (0..ui.get_lab_library().row_count())
+                .filter_map(|i| ui.get_lab_library().row_data(i))
+                .filter(|r| r.selected)
+                .collect()
+        };
+        let picked = selected_rows();
+        assert_eq!(picked.len(), 1);
+        assert_eq!(picked[0].name, "OBR C1C4");
 
         let no_fetch: Rc<dyn Fn(LabSelectRequest)> = Rc::new(|_| ());
         let no_run: Rc<dyn Fn(LabRunRequest)> = Rc::new(|_| ());
@@ -3919,17 +3970,24 @@ mod tests {
             no_coverage,
             no_cancel,
         );
-        ui.invoke_lab_library_picked(1);
-        assert_eq!(ui.get_lab().name, "SMA");
-        assert!(ui.get_lab_library().row_data(1).unwrap().selected);
-        assert!(!ui.get_lab_library().row_data(0).unwrap().selected);
+        ui.invoke_lab_library_picked(0);
+        assert_eq!(ui.get_lab().name, "OBR C1C4");
+        let picked = selected_rows();
+        assert_eq!(picked.len(), 1);
+        assert_eq!(picked[0].name, "OBR C1C4");
 
         ui.invoke_lab_mode_picked(1);
         assert_eq!(ui.get_lab().mode, 1);
         assert_eq!(lab_state.borrow().mode, LabMode::Short);
 
-        ui.invoke_lab_search_changed("ob".into());
-        assert_eq!(ui.get_lab_library().row_count(), 1);
+        // "obr" narrows to the two opening-range rows, which stay separate.
+        ui.invoke_lab_search_changed("obr".into());
+        assert_eq!(ui.get_lab_library().row_count(), 2);
+        let names: Vec<_> = (0..2)
+            .filter_map(|i| ui.get_lab_library().row_data(i))
+            .map(|r| r.name.to_string())
+            .collect();
+        assert_eq!(names, vec!["OBR".to_string(), "OBR C1C4".to_string()]);
         ui.invoke_lab_search_changed("".into());
 
         // KPI placeholders use the legacy tile vocabulary ("--", 8 tiles —
@@ -4191,7 +4249,7 @@ mod tests {
         assert_eq!(ui.get_active_screen(), ShellScreen::Live);
         let bar = ui.get_live_bar();
         assert_eq!(bar.exec_label, "● ENABLED");
-        assert_eq!(bar.broker_label, "Broker: NOT CONFIGURED");
+        assert_eq!(bar.broker_label, "NOT CONFIGURED");
         assert_eq!(bar.conn_label, "Connection: N/A");
         assert!(!bar.halted);
         // Halt follows real state: an idle session cannot be halted.
@@ -4217,21 +4275,48 @@ mod tests {
         assert_eq!(ui.get_live_market().state_label, "NO DATA");
 
         wire_live(&ui, live_state.clone());
+        // Boot carries no universe (registry-owned, backend-fed) — the
+        // watchlist fills when the first backend snapshot lands.
+        assert_eq!(ui.get_live_symbols().row_count(), 0);
+        live_state.borrow_mut().apply_snapshot(&serde_json::json!({
+            "available_symbols": ["NSE:KAYNES", "NSE:TCS"],
+            "selected_symbols": [],
+            "quotes": [
+                {"symbol": "NSE:KAYNES", "ltp": 7234.8, "change_pct": 1.25,
+                 "status": "AVAILABLE"},
+                {"symbol": "NSE:TCS", "ltp": null, "change_pct": null,
+                 "status": "NO MARKET DATA"},
+            ],
+        }));
+        refresh_live(&ui.as_weak(), &live_state);
         // Watchlist filter keeps real indices; toggling selects the store row.
-        ui.invoke_live_symbol_filter_changed("reliance".into());
+        ui.invoke_live_symbol_filter_changed("kaynes".into());
         let symbols = ui.get_live_symbols();
         assert_eq!(symbols.row_count(), 1);
-        let reliance = symbols.row_data(0).unwrap();
-        assert_eq!(reliance.name, "RELIANCE");
-        ui.invoke_live_symbol_toggled(reliance.real_index);
+        let kaynes = symbols.row_data(0).unwrap();
+        assert_eq!(kaynes.name, "NSE:KAYNES");
+        assert_eq!(kaynes.ltp, "7,234.80");
+        assert_eq!(kaynes.change, "+1.25%");
+        assert_eq!(kaynes.status, "AVAILABLE");
+        ui.invoke_live_symbol_toggled(kaynes.real_index);
         assert!(ui.get_live_symbols().row_data(0).unwrap().checked);
-        assert_eq!(live_state.borrow().checked_symbols(), vec!["RELIANCE"]);
+        assert_eq!(live_state.borrow().checked_symbols(), vec!["NSE:KAYNES"]);
         ui.invoke_live_symbol_filter_changed("".into());
+        // Category chips filter the real stream; Clear drops UI history only.
+        ui.invoke_live_event_type_picked("ORDERS".into());
+        assert_eq!(live_state.borrow().event_category, "ORDERS");
+        ui.invoke_live_clear_events();
+        assert!(live_state.borrow().events.is_empty());
 
-        // LIVE mode intent is fail-closed while venue gates block.
+        // LIVE mode intent is fail-closed while venue gates block (non-host
+        // path says so outright; the host path asks the backend instead).
+        let mut local = demo_live_state();
+        local.set_mode(live::ExecMode::Live);
+        assert_eq!(local.mode, live::ExecMode::Paper);
+        assert!(local.action_note.unwrap().contains("LIVE refused"));
         ui.invoke_live_mode_picked(2);
-        assert_eq!(live_state.borrow().mode, live::ExecMode::Paper);
-        assert!(ui.get_live_bar().note.contains("LIVE refused"));
+        assert_eq!(live_state.borrow().mode, live::ExecMode::Paper); // backend decides
+        assert!(ui.get_live_bar().note.contains("awaiting backend"));
 
         // Quantity edits validate centrally; garbage keeps the old value.
         ui.invoke_live_quantity_edited("25".into());
@@ -4251,16 +4336,18 @@ mod tests {
         // idle shape — content must survive every recomposition tier.
         harness.set_bar(LiveBar {
             mode: 0,
-            broker_label: "Broker: NOT CONFIGURED".into(),
+            broker_label: "NOT CONFIGURED".into(),
             broker_tone: 0,
             conn_label: "Connection: N/A".into(),
             conn_tone: 0,
-            strategy_label: "Strategy: —".into(),
+            strategy_label: "—".into(),
             strategy_tone: 0,
-            risk_label: "Risk: READY".into(),
+            strategy_sub: "".into(),
+            risk_label: "READY".into(),
             risk_tone: 1,
-            recon_label: "Reconciliation: NOT CONFIGURED".into(),
+            recon_label: "NOT CONFIGURED".into(),
             recon_tone: 0,
+            recon_sub: "Positions: N/A | Orders: N/A".into(),
             exec_label: "● ENABLED".into(),
             exec_tone: 1,
             halted: false,
@@ -4278,7 +4365,7 @@ mod tests {
             can_arm: false,
             needs_live_confirm: false,
             confirmed_live: false,
-            symbol_total: "527 in store · 0 selected".into(),
+            symbol_total: "527 symbols (OBR C1C4)".into(),
         });
         harness.set_market(LiveMarket {
             has_data: false,
@@ -4287,6 +4374,9 @@ mod tests {
             title: "NO MARKET DATA".into(),
             detail: "Symbol: — · Timeframe: 15m".into(),
             header: "— 15m".into(),
+            feed_label: "".into(),
+            feed_tone: 0,
+            updated_label: "".into(),
         });
         harness.set_inspector_open(true);
 
@@ -4365,8 +4455,11 @@ mod tests {
         harness.set_inspector_open(true);
         assert!(harness.get_show_inspector());
 
-        // With real bars the chart expands into the remaining height (§8) —
-        // the same screen, data-driven, no mode switch.
+        // With real bars the blotter keeps its tall tier (§8) —
+        // the same screen, data-driven, no mode switch. The tiers are harness
+        // INPUTS (app.slint drives them from the window), so they must be
+        // re-driven for the size under assertion — the matrix above left them
+        // at its last (360x640) row.
         harness.set_market(LiveMarket {
             has_data: true,
             state_label: "READY".into(),
@@ -4374,10 +4467,14 @@ mod tests {
             title: "RELIANCE · 15m".into(),
             detail: "500 bars · source: market store (SQLite)".into(),
             header: "RELIANCE 15m".into(),
+            feed_label: "FEED: LOCAL TAIL".into(),
+            feed_tone: 2,
+            updated_label: "13:00:05".into(),
         });
         harness
             .window()
             .set_size(slint::PhysicalSize::new(1600, 900));
+        harness.set_tier_tall(harness.window().size().height as f64 >= 720.0);
         assert!(
             harness.get_chart_h() > 300.0,
             "chart owns remaining height with data"
@@ -4385,6 +4482,7 @@ mod tests {
         harness
             .window()
             .set_size(slint::PhysicalSize::new(1600, 620));
+        harness.set_tier_tall(harness.window().size().height as f64 >= 720.0);
         assert!(
             harness.get_chart_h() >= 220.0,
             "chart keeps its usable floor; page scrolls"
@@ -4401,7 +4499,7 @@ mod tests {
         state.selected = None;
         assert!(LabRunRequest::gather(&state).is_none());
         // Selection + backend echoes → a complete request.
-        state.selected = Some(1);
+        state.selected = Some(0);
         state.engine_wired = true;
         state.universe_symbols = vec!["RELIANCE".into(), "TCS".into()];
         state.universe_selected = vec!["TCS".into()];
@@ -4411,7 +4509,7 @@ mod tests {
         state.cfg_dates_end = "2026-06-10".into();
         state.cfg_capital = "₹10,00,000".into();
         let request = LabRunRequest::gather(&state).expect("request");
-        assert_eq!(request.strategy, "SMA");
+        assert_eq!(request.strategy, "OBR C1C4");
         assert_eq!(request.symbols, vec!["TCS".to_string()]);
         assert_eq!(request.timeframe, "1h");
         assert_eq!(request.start, "2026-01-01");
@@ -4479,7 +4577,7 @@ mod tests {
         state.universe_selected = vec!["RELIANCE".into()];
         state.timeframes = vec!["5m".into(), "15m".into(), "1h".into()];
         state.timeframe_index = 1;
-        assert!(state.interaction_select(1));
+        assert!(state.interaction_select(0));
         state.interaction_symopen();
         state.interaction_symsearch("tcs");
         state.interaction_symtoggle("TCS");
@@ -4490,7 +4588,7 @@ mod tests {
         state.interaction_capital("500000");
         state.interaction_mode(LabMode::Short);
         let select = LabSelectRequest::gather(&state).expect("select request");
-        assert_eq!(select.strategy, "SMA");
+        assert_eq!(select.strategy, "OBR C1C4");
         assert_eq!(
             select.symbols,
             vec!["RELIANCE".to_string(), "TCS".to_string()]

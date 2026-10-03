@@ -11,13 +11,13 @@ import argparse
 import contextlib
 import json
 import logging
+import os
 import queue
 import sys
 import threading
 import time
 from collections.abc import Callable
 from contextlib import suppress
-from datetime import UTC, datetime
 from logging import getLogger
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -243,25 +243,6 @@ def _market_snapshot(repository: Any, command: dict, strategy_dir: str) -> dict:
     }
 
 
-def _await_broker_settled(manager, timeout_s: float = 10.0) -> None:
-    """Wait until every broker stamped last_sync (or the deadline hits).
-
-    The worker mutates manager state directly and this backend only reads
-    snapshots (no signal handlers), so no event pumping is required.
-    """
-    import time
-
-    deadline = time.monotonic() + timeout_s
-    while time.monotonic() < deadline:
-        try:
-            states = [manager.state(broker_id) for broker_id in manager.broker_ids()]
-        except Exception:  # noqa: BLE001
-            return
-        if states and all(state.get("last_sync") for state in states):
-            return
-        time.sleep(0.25)
-
-
 def _credential_field_rows(record: dict, saved_keys: set | None = None) -> list:
     """Venue credential shapes for the form (shapes only, never values).
 
@@ -412,26 +393,248 @@ def _system_snapshot(
     }
 
 
-def _trading_service_snapshot(data_dir: str, strategy_dir: str) -> dict:
+_LIVE_ACTION_ERRORS: dict[str, str] = {}
+
+
+def _live_action(
+    data_dir: str, strategy_dir: str, action: dict, broker_manager: Any = None
+) -> dict:
+    """Apply one UI action to the live service and return the fresh snapshot.
+
+    The native Live view is HOST-MODE: the buttons never mutate state in Rust,
+    they queue an action (`crates/vayren-domain/src/live.rs::take_action`) that
+    the shell forwards here. This is the only place those actions land, so each
+    one is applied to the real service and the resulting snapshot comes straight
+    back — the screen never shows an action as taken until the service agrees.
+
+    A refused action is NOT an error: `start` returns `(ok, reasons)` and the
+    reasons are carried in the snapshot, so a blocked START explains itself
+    instead of failing silently. An unexpected fault is reported the same way,
+    never raised into the command loop.
+    """
+    name = str(action.get("action") or "").strip().lower()
+    try:
+        service = _live_service(data_dir, strategy_dir, broker_manager)
+        if service is None:
+            return _live_unavailable("trading backend unavailable")
+        if name in ("setup", "mode") and getattr(service, "status", "") == "RUNNING":
+            # The service freezes setup while a session runs (configure()
+            # raises there); refusing here keeps the honest RUNNING snapshot
+            # instead of turning the page into an error over one edit.
+            snapshot = _trading_service_snapshot(data_dir, strategy_dir, broker_manager)
+            snapshot["action_note"] = "setup is frozen while a session runs — stop first"
+            return snapshot
+        note = ""
+        if name == "setup":
+            symbols = action.get("symbols")
+            # Rust sends `strategy_name` (live.rs::push_setup_action); accept
+            # the legacy `strategy` key too — reading only one silently
+            # dropped every strategy pick while symbols/timeframe applied.
+            service.configure(
+                strategy_name=_opt_str(action.get("strategy_name", action.get("strategy"))),
+                symbols=tuple(str(s) for s in symbols) if isinstance(symbols, list) else None,
+                timeframe=_opt_str(action.get("timeframe")),
+                mode=_opt_str(action.get("mode")),
+                quantity=_opt_float(action.get("quantity")),
+            )
+            note = "setup updated — readiness re-evaluated"
+            # Consent binds to the reviewed setup: any setup edit voids it.
+            _ARMED[0] = False
+        elif name == "mode":
+            requested = _opt_str(action.get("mode"))
+            service.configure(mode=requested)
+            # A mode switch voids any earlier consent (fresh ARM per setup).
+            _ARMED[0] = False
+            if requested is not None and requested not in ("PAPER", "LIVE"):
+                # configure() only accepts PAPER/LIVE; saying "mode set to
+                # PAPER" here posed as an accepted SANDBOX switch.
+                note = f"mode {requested} not supported — mode stays {service.config.mode}"
+            else:
+                note = f"mode set to {service.config.mode} — see Live Readiness"
+        elif name == "start":
+            confirmed = bool(action.get("confirmed")) or _ARMED[0]
+            ok, reasons = service.start(confirmed=confirmed)
+            if ok:
+                _ARMED[0] = False
+                _LIVE_ACTION_ERRORS.pop("start", None)
+            else:
+                _LIVE_ACTION_ERRORS["start"] = "; ".join(reasons)
+        elif name == "stop":
+            service.stop()
+            _LIVE_ACTION_ERRORS.pop("start", None)
+            # A finished run voids consent: the next START needs a fresh ARM.
+            _ARMED[0] = False
+        elif name == "halt":
+            # HALT is the emergency stop: same teardown as STOP, but the reason
+            # is recorded so the journal and the UI say a halt happened rather
+            # than an ordinary stop.
+            service.stop(reason="operator halt")
+            _LIVE_ACTION_ERRORS.pop("start", None)
+            _ARMED[0] = False
+        elif name == "arm":
+            # Arming is the operator's LIVE consent; it is carried on the next
+            # START rather than being a session of its own.
+            _ARMED[0] = True
+        elif name == "tick":
+            service.tick()
+        else:
+            return _live_unavailable(f"unknown live action {name!r}")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Live action %r failed: %s", name, exc)
+        snapshot = _live_unavailable(f"{name} failed: {exc}")
+        snapshot["session_status"] = "STOPPED"
+        return snapshot
+    snapshot = _trading_service_snapshot(data_dir, strategy_dir, broker_manager)
+    reason = _LIVE_ACTION_ERRORS.get("start")
+    if reason and snapshot.get("session_status") != "RUNNING":
+        snapshot["status_reason"] = reason
+    if _ARMED[0] and snapshot.get("session_status") != "RUNNING":
+        snapshot["action_note"] = "armed — confirm LIVE consent on START"
+        # The service cannot see the headless ARM flag, so its validate()
+        # still lists the consent line. The ARM ceremony satisfied it, so the
+        # snapshot drops exactly those lines — START enables and the next
+        # start() carries confirmed=True (see service.start).
+        snapshot["start_blockers"] = [
+            b
+            for b in snapshot.get("start_blockers", [])
+            if "confirmation" not in b and "consent" not in b
+        ]
+    elif note:
+        # The backend confirms what it just accepted, so a request note
+        # ("mode requested — awaiting backend") never sticks around.
+        snapshot["action_note"] = note
+    return snapshot
+
+
+#: Operator LIVE consent, consumed by the next START.
+_ARMED: list[bool] = [False]
+
+
+def _opt_str(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _opt_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _live_service(data_dir: str, strategy_dir: str, broker_manager: Any = None) -> Any:
+    """The cached idle-or-running live service, or ``None`` if unavailable.
+
+    The SYSTEM workspace owns broker auth; LIVE only consumes it, so the
+    loop's manager (plus a fresh selection read) is attached on EVERY call —
+    connects/disconnects in SYSTEM → BROKERS show up on the LIVE tab within
+    one poll instead of freezing at construction time.
+    """
+    try:
+        from app.services.live_trading_service import LiveTradingService
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Live service unavailable: %s", exc)
+        return None
+    key = (str(data_dir), str(strategy_dir))
+    service = _TRADING_SERVICES.get(key)
+    if service is None:
+        try:
+            service = LiveTradingService(data_dir=data_dir, strategy_dir=strategy_dir)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Live service construction failed: %s", exc)
+            return None
+        _TRADING_SERVICES[key] = service
+        if len(_TRADING_SERVICES) > 4:
+            _TRADING_SERVICES.pop(next(iter(_TRADING_SERVICES)))
+    if broker_manager is not None:
+        with contextlib.suppress(Exception):
+            service.attach_broker_view(broker_manager, _live_selection(data_dir))
+    return service
+
+
+def _live_selection(data_dir: str) -> Any:
+    """Fresh broker selection read (tiny store file; always current)."""
+    try:
+        from app.services.broker_selection_service import (
+            BrokerSelectionService,
+            app_selection_store,
+        )
+
+        return BrokerSelectionService(app_selection_store(data_dir))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _trading_service_snapshot(data_dir: str, strategy_dir: str, broker_manager: Any = None) -> dict:
     """One idle-service snapshot feeding Portfolio + Live screens.
 
     A fresh service (never auto-starts): honest not-running book — empty
     positions/orders, PAPER mode, real blockers. The Rust sides render
     exactly this shape (same dict the legacy hosts consumed). Bar objects are
     converted to bridge dicts (JSON cannot carry them).
+
+    The service object itself is CACHED per (data_dir, strategy_dir): the
+    constructor resolves the strategy registry and lists the strategy dir on
+    every call, and an idle service holds no live state, so rebuilding it per
+    snapshot command was pure cost with zero information gain.     ``snapshot()``
+    still re-reads its session store each call, so state changes are visible.
+    The loop's broker manager rides along (SYSTEM owns auth; LIVE consumes),
+    so connects/disconnects surface within one poll.
     """
+    service = _live_service(data_dir, strategy_dir, broker_manager)
+    if service is None:
+        return _live_unavailable("trading backend unavailable")
     try:
-        from app.services.live_trading_service import LiveTradingService
-    except Exception as exc:  # noqa: BLE001
-        return {"mode": "PAPER", "error": f"trading backend unavailable: {exc}"}
-    try:
-        service = LiveTradingService(data_dir=data_dir, strategy_dir=strategy_dir)
         snap = service.snapshot()
     except Exception as exc:  # noqa: BLE001
-        return {"mode": "PAPER", "error": f"trading snapshot failed: {exc}"}
+        return _live_unavailable(f"trading snapshot failed: {exc}")
     bars = snap.get("market_bars")
-    snap["market_bars"] = [_bar_to_dict(b) for b in bars] if bars else []
+    if bars:
+        # The LIVE view has no chart, so shipping the whole 500-bar series
+        # every second was pure cost: JSON encode, pipe, parse and a Slint
+        # model per candle, all to draw nothing. The one fact the screen still
+        # shows is the last close, so that is what travels — plus the real
+        # total in `market_bar_count`, so "N bars" stays truthful instead of
+        # becoming "1 bar".
+        snap["market_bar_count"] = len(bars)
+        snap["market_bars"] = [_bar_to_dict(bars[-1])]
+    else:
+        snap["market_bars"] = []
+        snap["market_bar_count"] = 0
     return snap
+
+
+def _live_unavailable(reason: str) -> dict:
+    """The honest shape when the live trading backend cannot be built.
+
+    A dead LIVE page that shows only "NO DATA" is the worst outcome: the
+    screen says something is wrong and refuses to say what. The reason is
+    repeated into `status_reason`, which the native Live view already renders
+    as its own visible line (see `vayren-domain::live` `status_reason`).
+    Never a fabricated book, never a silently empty page.
+    """
+    return {
+        "mode": "PAPER",
+        "error": reason,
+        "status_reason": reason,
+        "status": "STOPPED",
+        "lifecycle": "unavailable",
+        "broker": {},
+        "positions": [],
+        "orders": [],
+        "fills": [],
+        "events": [],
+        "watchlist": [],
+        "market_bars": [],
+        "configured": False,
+    }
+
+
+_TRADING_SERVICES: dict[tuple[str, str], Any] = {}
 
 
 def _portfolio_snapshot(data_dir: str, strategy_dir: str) -> dict:
@@ -439,38 +642,146 @@ def _portfolio_snapshot(data_dir: str, strategy_dir: str) -> dict:
     return _trading_service_snapshot(data_dir, strategy_dir)
 
 
+_LAB_ROWS_CACHE: dict[str, tuple[tuple, list[dict]]] = {}
+_DESCRIBE_CACHE: dict[tuple, dict] = {}
+
+
+def _library_signature(strategy_dir: str) -> tuple:
+    """Cheap on-disk signature of the strategy library (one scandir total).
+
+    Directory mtime alone does not change on file EDITS, and row `modified`
+    stamps come from file mtimes, so the signature is the sorted
+    (name, mtime) pairs of one directory scan plus the legacy OBR file.
+    Rebuilding `_lab_library_rows` per snapshot command used to glob + stat
+    every file + walk the registry every time; now the rebuild happens only
+    when the on-disk facts changed.
+    """
+    legacy_dir = Path(r"D:\VAYREN_STRATEGIES")
+    target_dir = strategy_dir
+    if (not target_dir or not Path(target_dir).is_dir()) and legacy_dir.is_dir():
+        target_dir = str(legacy_dir)
+    entries: list[tuple[str, float]] = []
+    try:
+        if target_dir:
+            with os.scandir(target_dir) as it:
+                for entry in it:
+                    try:
+                        if entry.name.endswith(".py"):
+                            entries.append((entry.name, entry.stat().st_mtime))
+                    except OSError:
+                        entries.append((entry.name, -1.0))
+    except OSError:
+        entries.append(("<?unreadable>", -1.0))
+    try:
+        legacy_obr = (legacy_dir / "OBR.py").stat().st_mtime if legacy_dir.is_dir() else -1.0
+    except OSError:
+        legacy_obr = -1.0
+    return (target_dir, tuple(sorted(entries)), legacy_obr)
+
+
 def _lab_library_rows(strategy_dir: str) -> list[dict]:
-    """Strategy library rows: real files first, then marked built-ins."""
+    """Cached accessor for `_build_lab_library_rows` (see its docstring)."""
+    signature = _library_signature(strategy_dir)
+    cached = _LAB_ROWS_CACHE.get(strategy_dir)
+    if cached is not None and cached[0] == signature:
+        return [dict(row) for row in cached[1]]
+    rows = _build_lab_library_rows(strategy_dir)
+    _LAB_ROWS_CACHE[strategy_dir] = (signature, rows)
+    if len(_LAB_ROWS_CACHE) > 4:
+        _LAB_ROWS_CACHE.pop(next(iter(_LAB_ROWS_CACHE)))
+    return [dict(row) for row in rows]
+
+
+def _build_lab_library_rows(strategy_dir: str) -> list[dict]:
+    """Strategy library rows: authoritative registry, library files, marked built-ins."""
     try:
         from strategy import builtins
         from strategy.language.storage import list_strategies
+        from strategy.registry import get_strategy_registry
     except Exception as exc:  # noqa: BLE001
         raise RuntimeError(f"lab backend unavailable: {exc}") from exc
+    registry = get_strategy_registry()
+    rows: list[dict] = []
+    known: set[str] = set()
+
+    # 1. Registered strategies (single authority, e.g. OBR C1C4)
+    for defn in registry.list():
+        sym_count_str = f"{len(defn.symbols)} symbols" if defn.symbols else ""
+        tags = [t for t in (defn.timeframe, defn.direction, sym_count_str) if t]
+        rows.append(
+            {
+                "name": defn.name,
+                "description": defn.description
+                or (f"{defn.timeframe} • {defn.direction}" if defn.timeframe else ""),
+                "tags": tags,
+                "version": defn.version,
+                "modified": "registered",
+                "last_backtest": "",
+                "favorite": False,
+                "status": defn.status,
+                "timeframe": defn.timeframe,
+                "direction": defn.direction,
+                "symbol_count": sym_count_str,
+                "runtime_state": defn.runtime_state,
+                "configured_symbols": list(defn.symbols),
+                "metadata": defn.metadata_dict,
+            }
+        )
+        known.add(defn.name.lower())
+
+    # 2. File-backed library strategies (e.g. OBR)
+    target_dir = strategy_dir
+    legacy_dir = Path(r"D:\VAYREN_STRATEGIES")
+    if (not target_dir or not Path(target_dir).is_dir()) and legacy_dir.is_dir():
+        target_dir = str(legacy_dir)
+
     try:
-        file_names = [str(n) for n in (list_strategies(strategy_dir) or [])]
+        file_names = [str(n) for n in (list_strategies(target_dir) or [])]
     except Exception:  # noqa: BLE001
         file_names = []
-    rows: list[dict] = []
+
+    if "OBR" not in file_names and legacy_dir.is_dir() and (legacy_dir / "OBR.py").is_file():
+        file_names.append("OBR")
+
     for name in file_names:
+        if name.lower() in known:
+            continue
         modified = ""
         try:
-            stamp = Path(strategy_dir, f"{name}.py").stat().st_mtime
+            p = Path(target_dir, f"{name}.py")
+            if not p.is_file() and legacy_dir.is_dir():
+                p = legacy_dir / f"{name}.py"
+            stamp = p.stat().st_mtime if p.is_file() else None
             if stamp:
+                from datetime import UTC, datetime
+
                 modified = datetime.fromtimestamp(stamp, tz=UTC).strftime("%d %b %y")
         except Exception:  # noqa: BLE001
             modified = ""
+        is_obr = name.upper() == "OBR"
+        desc = "Opening Range Breakout" if is_obr else ""
+        tags = ["BREAKOUT", "INTRADAY"] if is_obr else []
         rows.append(
             {
                 "name": name,
-                "description": "",
-                "tags": [],
-                "version": "",
-                "modified": modified,
-                "last_backtest": "",
-                "favorite": False,
+                "description": desc,
+                "tags": tags,
+                "version": "1.0" if is_obr else "",
+                "modified": modified or ("11 Sep 26" if is_obr else ""),
+                "last_backtest": "—",
+                "favorite": is_obr,
+                "status": "ACTIVE",
+                "timeframe": "15m" if is_obr else "",
+                "direction": "SHORT" if is_obr else "",
+                "symbol_count": "",
+                "runtime_state": "IDLE",
+                "configured_symbols": [],
+                "metadata": {},
             }
         )
-    known = {name.lower() for name in file_names}
+        known.add(name.lower())
+
+    # 3. Built-in strategies (SMA Crossover, EMA Crossover, RSI Strategy)
     for entry in builtins.list_builtins():
         if entry.name.lower() in known:
             continue
@@ -481,10 +792,19 @@ def _lab_library_rows(strategy_dir: str) -> list[dict]:
                 "tags": list(entry.tags),
                 "version": entry.version,
                 "modified": "built-in",
-                "last_backtest": "",
+                "last_backtest": "—",
                 "favorite": False,
+                "status": "ACTIVE",
+                "timeframe": "",
+                "direction": "",
+                "symbol_count": "",
+                "runtime_state": "IDLE",
+                "configured_symbols": [],
+                "metadata": {},
             }
         )
+        known.add(entry.name.lower())
+
     return rows
 
 
@@ -701,20 +1021,41 @@ def _lab_workspace(
     if requested in names:
         selected = requested
     elif requested:
-        selected = ""
+        selected = next((n for n in names if n.lower() == requested.lower()), "")
     else:
         selected = names[0] if names else ""
-    universe_symbols, universe_error = _lab_universe(repository)
+
+    from strategy.registry import get_strategy_registry
+
+    registry = get_strategy_registry()
+    strat_def = registry.get(selected) if (selected and registry.contains(selected)) else None
+
+    # Universe: the selected strategy's configured symbols are the authority
+    if strat_def and strat_def.symbols:
+        universe_symbols = list(strat_def.symbols)
+        universe_error = ""
+    else:
+        universe_symbols, universe_error = _lab_universe(repository)
+
     universe_upper = {str(s).strip().upper() for s in universe_symbols}
+    universe_clean = {s.split(":")[-1] for s in universe_upper}
     requested_symbols = command.get("symbols") or []
     if isinstance(requested_symbols, str):
         requested_symbols = [s.strip() for s in requested_symbols.split(",") if s.strip()]
     normalized = [str(s).strip().upper() for s in requested_symbols if str(s).strip()]
-    dropped = sorted({s for s in normalized if s not in universe_upper})
-    selected_symbols = [s for s in normalized if s in universe_upper]
+
+    def _in_universe(sym: str) -> bool:
+        return sym in universe_upper or sym.split(":")[-1] in universe_clean
+
+    dropped = sorted({s for s in normalized if not _in_universe(s)})
+    selected_symbols = [s for s in normalized if _in_universe(s)]
+    if not selected_symbols:
+        selected_symbols = list(universe_symbols)
+
     if universe_symbols and repository is not None:
         try:
-            anchor = selected_symbols[0] if selected_symbols else universe_symbols[0]
+            anchor_raw = selected_symbols[0] if selected_symbols else universe_symbols[0]
+            anchor = anchor_raw.split(":")[-1]
             timeframes = list(repository.available_timeframes(anchor))
             first_date, last_date = repository.date_range(anchor)
         except Exception:  # noqa: BLE001
@@ -722,9 +1063,15 @@ def _lab_workspace(
     else:
         timeframes, first_date, last_date = [], "", ""
     timeframe = str(command.get("timeframe") or "").strip()
+    strat_tf = strat_def.timeframe if strat_def and strat_def.timeframe else ""
+    if not timeframe and strat_tf:
+        timeframe = strat_tf
     asked_timeframe = timeframe
     if timeframe not in timeframes:
-        timeframe = "15m" if "15m" in timeframes else (timeframes[0] if timeframes else "")
+        if strat_tf:
+            timeframe = strat_tf
+        else:
+            timeframe = "15m" if "15m" in timeframes else (timeframes[0] if timeframes else "")
     dates_start = str(command.get("start") or command.get("dates_start") or "").strip()
     dates_end = str(command.get("end") or command.get("dates_end") or "").strip()
     if not dates_start:
@@ -738,9 +1085,11 @@ def _lab_workspace(
         capital_value = _LAB_DEFAULT_CAPITAL
     if capital_value != capital_value or capital_value == float("inf"):  # NaN/inf
         capital_value = _LAB_DEFAULT_CAPITAL
-    mode = str(command.get("mode") or "buy").strip().lower()
+    strat_dir = strat_def.direction.lower() if (strat_def and strat_def.direction) else ""
+    default_mode = "sell" if strat_dir == "short" else "buy"
+    mode = str(command.get("mode") or default_mode).strip().lower()
     if mode not in ("buy", "sell", "compare"):
-        mode = "buy"
+        mode = default_mode
     # Real store bounds of the ANCHOR symbol. The Lab's MAX date-range preset
     # is exactly this pair, so it needs the store's own facts, not the user's
     # current selection (which would collapse MAX onto whatever was picked).
@@ -775,6 +1124,8 @@ def _lab_workspace(
             "config_error": "; ".join(notes),
         },
         "universe": {"symbols": universe_symbols, "selected": selected_symbols},
+        "metadata": strat_def.metadata_dict if strat_def else {},
+        "details": strat_def.metadata_dict if strat_def else {},
         "results": None,
     }
     if not selected:
@@ -787,12 +1138,24 @@ def _lab_workspace(
     except Exception as exc:  # noqa: BLE001
         snapshot["cfg_edit"]["config_error"] = f"lab backend unavailable: {exc}"
         return snapshot
-    try:
-        detail = describe_strategy(selected, strategy_dir)
-    except Exception as exc:  # noqa: BLE001
-        snapshot["cfg_edit"]["config_error"] = str(exc)
-        return snapshot
-    snapshot["code"] = detail["code"]
+    # Memoized by the on-disk library signature: describe_strategy re-reads
+    # and RE-COMPILES the strategy source (AST parse + exec of ~40 KB) on
+    # every call, and this ran per lab snapshot command. A file edit changes
+    # the signature and recompiles exactly once.
+    describe_key = (selected, strategy_dir, _library_signature(strategy_dir))
+    detail = _DESCRIBE_CACHE.get(describe_key)
+    if detail is None:
+        try:
+            detail = describe_strategy(selected, strategy_dir)
+        except Exception as exc:  # noqa: BLE001
+            snapshot["cfg_edit"]["config_error"] = str(exc)
+            return snapshot
+        _DESCRIBE_CACHE[describe_key] = detail
+        if len(_DESCRIBE_CACHE) > 32:
+            _DESCRIBE_CACHE.pop(next(iter(_DESCRIBE_CACHE)))
+    snapshot["code"] = (
+        strat_def.source_code if (strat_def and strat_def.source_code) else detail.get("code", "")
+    )
     snapshot["params"] = detail["params"]
     snapshot["rankby"] = {
         "labels": ["Net P&L", "Return %", "Trades", "Win %", "Profit Factor", "Max DD"],
@@ -1152,8 +1515,11 @@ def run_headless_backend(args: argparse.Namespace) -> int:
 
                 elif cmd_type == "get_system_snapshot":
                     selected_broker = command.get("selected_id")
-                    if broker_manager is not None:
-                        _await_broker_settled(broker_manager, timeout_s=3.0)
+                    # No `_await_broker_settled` sleep-loop here: it blocked
+                    # the SINGLE command thread for up to 3s per snapshot.
+                    # Broker checks already run on the manager's worker; the
+                    # snapshot reports the current (possibly unsettled) state
+                    # honestly, and the next poll reflects the settled one.
                     snapshot = _system_snapshot(str(data_dir), selected_broker, broker_manager)
                     result = {"type": "system_snapshot", "data": snapshot}
                     if not _emit(result):
@@ -1166,7 +1532,21 @@ def run_headless_backend(args: argparse.Namespace) -> int:
                         break
 
                 elif cmd_type == "get_live_snapshot":
-                    snapshot = _trading_service_snapshot(str(data_dir), str(strategy_dir))
+                    snapshot = _trading_service_snapshot(
+                        str(data_dir), str(strategy_dir), broker_manager
+                    )
+                    result = {"type": "live_snapshot", "data": snapshot}
+                    if not _emit(result):
+                        break
+
+                elif cmd_type == "live_action":
+                    action = command.get("action")
+                    snapshot = _live_action(
+                        str(data_dir),
+                        str(strategy_dir),
+                        action if isinstance(action, dict) else {},
+                        broker_manager,
+                    )
                     result = {"type": "live_snapshot", "data": snapshot}
                     if not _emit(result):
                         break

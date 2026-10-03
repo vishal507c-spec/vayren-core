@@ -271,9 +271,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         /// the new run, showing a completed count that belongs to a backtest
         /// the user no longer has on screen.
         LabProgress(u64, serde_json::Value),
+        /// Broker select/refresh answers: moved OFF the UI thread (the old
+        /// handlers blocked on `lock_send` inside the callback, freezing the
+        /// window for the whole backend round-trip).
+        System(Option<serde_json::Value>),
+        /// The live service's own answer to a host-mode UI action, or to the
+        /// periodic live poll below. It is the truth about what happened,
+        /// so it replaces the optimistic local state instead of layering
+        /// on top of it. The sequence keeps overlapping answers ordered:
+        /// a stale arrival never overwrites a newer snapshot.
+        Live(u64, Option<serde_json::Value>),
     }
     let (fetch_tx, fetch_rx) = mpsc::channel::<FetchResult>();
     let market_seq = Arc::new(AtomicU64::new(0));
+    let live_seq = Arc::new(AtomicU64::new(0));
     let lab_coverage_seq = Arc::new(AtomicU64::new(0));
     let lab_select_seq = Arc::new(AtomicU64::new(0));
     let lab_run_seq = Arc::new(AtomicU64::new(0));
@@ -290,7 +301,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(response) => match response {
                     BackendResponse::MarketSnapshot { data }
                     | BackendResponse::LabSnapshot { data }
-                    | BackendResponse::LabCoverage { data } => Some(data),
+                    | BackendResponse::LabCoverage { data }
+                    | BackendResponse::SystemSnapshot { data } => Some(data),
                     BackendResponse::Error { data } => {
                         eprintln!("Fetch backend error: {}", data.message);
                         None
@@ -559,6 +571,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
     let market_state = Rc::new(RefCell::new(market_state));
+    let current_workspace = Rc::new(RefCell::new(connection_workspace));
     shell::apply_market(&ui, &market_state.borrow());
     shell::wire_market(&ui, market_state.clone(), fetch_market);
     // Fetch-result pump: drains worker snapshots on the UI thread (50ms —
@@ -569,7 +582,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let weak = ui.as_weak();
         let market_state = market_state.clone();
         let lab_state = lab_state.clone();
+        let live_state = live_state.clone();
+        let current_workspace = current_workspace.clone();
+        let backend = backend.clone();
+        let tx = fetch_tx.clone();
+        let live_seq = Arc::clone(&live_seq);
         let mut last_market: u64 = 0;
+        let mut last_live: u64 = 0;
+        // In-flight live answers (poll + actions) bound the backend load:
+        // a new poll never starts while an answer is still travelling, so
+        // a slow snapshot degrades to a slower cadence instead of a queue.
+        let mut live_busy: u32 = 0;
+        // The backend owns session truth (fills, P&L, events, broker edges,
+        // kill-switch halts) and documents a 1s UI poll while idle — but no
+        // poll existed, so a RUNNING session looked frozen until the next
+        // click. The startup fetch just landed, so the first poll is one
+        // interval out.
+        let mut next_live_poll = std::time::Instant::now() + std::time::Duration::from_secs(1);
         let mut last_select: u64 = 0;
         let mut last_run: u64 = 0;
         let mut last_coverage: u64 = 0;
@@ -578,10 +607,74 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             std::time::Duration::from_millis(50),
             move || {
                 let Some(ui) = weak.upgrade() else { return };
+                // LIVE is HOST-MODE: the buttons queue an action and the
+                // backend owns the transition. Drain them here and forward
+                // each on a worker thread — a blocking round-trip on the UI
+                // thread would freeze the window, and dropping them would make
+                // every LIVE control a silent no-op.
+                while let Some(raw) = live_state.borrow_mut().take_action() {
+                    let action: serde_json::Value = match serde_json::from_str(&raw) {
+                        Ok(value) => value,
+                        Err(err) => {
+                            eprintln!("Live action is not valid JSON ({err}): {raw}");
+                            continue;
+                        }
+                    };
+                    let backend = Arc::clone(&backend);
+                    let tx = tx.clone();
+                    let id = live_seq.fetch_add(1, Ordering::SeqCst) + 1;
+                    live_busy += 1;
+                    std::thread::spawn(move || {
+                        let data = match PythonBackend::lock_send(
+                            &backend,
+                            BackendCommand::LiveAction { action },
+                        ) {
+                            Ok(BackendResponse::LiveSnapshot { data }) => Some(data),
+                            Ok(other) => {
+                                eprintln!("Live action: unexpected response ({other:?})");
+                                None
+                            }
+                            Err(err) => {
+                                eprintln!("Live action failed: {err}");
+                                None
+                            }
+                        };
+                        let _ = tx.send(FetchResult::Live(id, data));
+                    });
+                }
+                // Periodic LIVE snapshot poll (see `next_live_poll`): keeps
+                // fills, P&L, positions, events, quotes and broker edges
+                // live while a session runs — and re-reads the broker
+                // selection, so SYSTEM connects surface within one tick.
+                if live_busy == 0 && std::time::Instant::now() >= next_live_poll {
+                    let id = live_seq.fetch_add(1, Ordering::SeqCst) + 1;
+                    live_busy += 1;
+                    let backend = Arc::clone(&backend);
+                    let tx = tx.clone();
+                    std::thread::spawn(move || {
+                        let data = match PythonBackend::lock_send(
+                            &backend,
+                            BackendCommand::GetLiveSnapshot,
+                        ) {
+                            Ok(BackendResponse::LiveSnapshot { data }) => Some(data),
+                            Ok(other) => {
+                                eprintln!("Live poll: unexpected response ({other:?})");
+                                None
+                            }
+                            Err(err) => {
+                                eprintln!("Live poll failed: {err}");
+                                None
+                            }
+                        };
+                        let _ = tx.send(FetchResult::Live(id, data));
+                    });
+                    next_live_poll = std::time::Instant::now() + std::time::Duration::from_secs(1);
+                }
                 let mut latest_market: Option<(u64, Option<serde_json::Value>)> = None;
                 let mut latest_lab_select: Option<(u64, Option<serde_json::Value>)> = None;
                 let mut latest_lab_run: Option<(u64, Option<serde_json::Value>)> = None;
                 let mut latest_lab_coverage: Option<(u64, Option<serde_json::Value>)> = None;
+                let mut latest_system: Option<Option<serde_json::Value>> = None;
 
                 for result in fetch_rx.try_iter() {
                     match result {
@@ -635,6 +728,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             lab_state.borrow_mut().apply_progress(&event);
                             shell::apply_lab(&ui, &lab_state.borrow());
                         }
+                        // No sequence: every system answer supersedes the
+                        // previous one (it IS the latest backend truth), so
+                        // the last arrival in this drain wins.
+                        FetchResult::System(data) => {
+                            latest_system = Some(data);
+                        }
+                        // The service's own snapshot replaces local state: it
+                        // reports what actually happened, so a refused START
+                        // comes back as a refusal, not as an optimistic toggle.
+                        // Sequenced latest-wins: an answer older than the
+                        // newest applied one is stale (a slow poll must not
+                        // paint over a fresher action result).
+                        FetchResult::Live(id, data) => {
+                            live_busy = live_busy.saturating_sub(1);
+                            if id > last_live {
+                                last_live = id;
+                                if let Some(data) = data {
+                                    live_state.borrow_mut().apply_snapshot(&data);
+                                    shell::apply_live(&ui, &live_state.borrow());
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if let Some(data) = latest_system {
+                    if let Some(data) = data {
+                        let workspace = BrokerWorkspace::from_json(&data);
+                        *current_workspace.borrow_mut() = workspace.clone();
+                        shell::apply_connection(&ui, &workspace);
                     }
                 }
 
@@ -680,63 +803,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
         );
     }
-    shell::apply_connection(&ui, &connection_workspace);
-    let current_workspace = Rc::new(RefCell::new(connection_workspace));
+    shell::apply_connection(&ui, &current_workspace.borrow());
 
     // Wire broker connection interactions
     {
-        let handle = ui.as_weak();
         let backend = Arc::clone(&backend);
-        let cur_ws = current_workspace.clone();
+        let tx = fetch_tx.clone();
         ui.on_broker_select_requested(move |id: slint::SharedString| {
             let id_str = id.as_str().to_string();
             println!("Broker select requested: {}", id_str);
-            match PythonBackend::lock_send(
+            // Background worker + fetch pump (same as the market refetch):
+            // the backend round-trip used to run on the UI thread here
+            // (lock_send blocks until the response arrives), freezing the
+            // window for the whole round-trip. The answer lands as
+            // FetchResult::System and applies on the 50ms pump.
+            spawn_fetch(
                 &backend,
+                &tx,
                 BackendCommand::GetSystemSnapshot {
                     selected_id: Some(id_str),
                 },
-            ) {
-                Ok(BackendResponse::SystemSnapshot { data }) => {
-                    let workspace = BrokerWorkspace::from_json(&data);
-                    *cur_ws.borrow_mut() = workspace.clone();
-                    if let Some(ui) = handle.upgrade() {
-                        shell::apply_connection(&ui, &workspace);
-                    }
-                }
-                Ok(other) => {
-                    eprintln!("Broker select: unexpected response ({other:?})");
-                }
-                Err(err) => {
-                    eprintln!("Broker select failed: {err}");
-                }
-            }
+                FetchResult::System,
+            );
         });
     }
     {
-        let handle = ui.as_weak();
         let backend = Arc::clone(&backend);
-        let cur_ws = current_workspace.clone();
+        let tx = fetch_tx.clone();
         ui.on_broker_refresh_requested(move || {
             println!("Broker refresh requested");
-            match PythonBackend::lock_send(
+            spawn_fetch(
                 &backend,
+                &tx,
                 BackendCommand::GetSystemSnapshot { selected_id: None },
-            ) {
-                Ok(BackendResponse::SystemSnapshot { data }) => {
-                    let workspace = BrokerWorkspace::from_json(&data);
-                    *cur_ws.borrow_mut() = workspace.clone();
-                    if let Some(ui) = handle.upgrade() {
-                        shell::apply_connection(&ui, &workspace);
-                    }
-                }
-                Ok(other) => {
-                    eprintln!("Broker refresh: unexpected response ({other:?})");
-                }
-                Err(err) => {
-                    eprintln!("Broker refresh failed: {err}");
-                }
-            }
+                FetchResult::System,
+            );
         });
     }
     {
