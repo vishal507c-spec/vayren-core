@@ -411,7 +411,7 @@ def check_authorities(files: dict[str, str]) -> list[AuthorityViolation]:
         if _is_test(rel):
             continue
         tree = _parse(source)
-        if tree is None:
+        if not isinstance(tree, ast.Module):
             continue
         flagged: set[str] = set()
         for node in tree.body:
