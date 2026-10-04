@@ -607,6 +607,7 @@ export component AppWindow inherits Window {
     in-out property <LiveFooter> live-footer;
     in-out property <int> live-filter-chip-selected: 0;
     in-out property <string> live-filter-chip-counts: "";
+    in-out property <[string]> live-filter-chips: ["All", "Ready", "Signal", "Order", "In Pos", "Waiting", "No Data"];
     callback live-watchlist-selected(string);
     callback live-filter-chip-picked(int);
     callback live-watchlist-search-changed(string);
@@ -1132,6 +1133,7 @@ export component AppWindow inherits Window {
                     footer: root.live-footer;
                     filter-chip-selected: root.live-filter-chip-selected;
                     filter-chip-counts: root.live-filter-chip-counts;
+                    filter-chips: root.live-filter-chips;
                     watchlist-selected(s) => { root.live-watchlist-selected(s); }
                     filter-chip-picked(i) => { root.live-filter-chip-picked(i); }
                     watchlist-search-changed(s) => { root.live-watchlist-search-changed(s); }

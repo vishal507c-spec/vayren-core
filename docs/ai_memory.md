@@ -6,22 +6,23 @@
 **Owns:** Current state, open items, verified facts, oddities. **Not owns:** Rules/architecture/events/contracts ΓåÆ `AGENTS.md`, `AI_ENTRY.md`, `architecture.md`, `module_contracts.md`, `event_catalog.md`.
 
 
-**Latest update (build-and-check-speed-optimization, 2026-10-04):** FULL SPEED OPTIMIZATION APPLIED & VERIFIED (local only, no commit/push).
-1. **Linker Acceleration (`.cargo/config.toml`):**
-   - Configured `rust-lld.exe` on Windows MSVC. Linker times for test binaries and debug builds dropped from minutes to under 1 second (`Finished test profile in 0.80s`, `live_render_snapshot` test executes in ~5s).
-2. **Slint Build Caching (`crates/vayren-shell/build.rs`):**
-   - Added `is_stale()` mtime-based dependency tracking for `research_harness.slint` and `live_harness.slint`. Prevents Slint from redundantly re-parsing, type-checking, and overwriting 13.7 MB of generated Rust code when only app or other views are touched, cutting rustc incremental rebuild and re-parse overhead.
-3. **Inner Loop Validation Speeds:**
-   - Incremental warm `cargo check -p vayren-shell`: dropped from 24.10s to **0.70s**.
-   - Modular view check (`cargo check -p vayren-live-view`): **0.74s** (incremental touch: 4.3s).
-   - Domain logic check (`cargo check -p vayren-domain`): **3.0s**.
-   - Core check (`cargo check -p vayren-core`): **0.16s**.
-4. **VAYREN Live UI Upgrade & Verification:**
-   - All 15 operational checklist items implemented and verified across `vayren-domain/src/live.rs`, `vayren-shell/ui/live.slint`, `vayren-shell/ui/app.slint`, and `vayren-shell/src/shell.rs`.
-   - `cargo test -p vayren-shell --test live_render_snapshot`: 1/1 PASSED across all 8 responsive viewport tiers.
-   - `cargo test -p vayren-domain`: 226/226 PASSED.
-   - `pytest src/app/tests/test_live_actions.py`: 8/8 PASSED.
-   - `validate_language_ownership.py` & `validate_repo_graph.py`: ALL PASSED.
+**Latest update (live-watchlist-upgrade-7-chips-order-pnl, 2026-10-04):** LIVE WATCHLIST ORDER/PNL COLUMNS & 7-CHIP DYNAMIC FILTER COMPLETED & VERIFIED.
+1. **Dynamic 7-Filter Chips:**
+   - Expanded filter chip taxonomy to 7 institutional categories: `ALL` / `READY` / `SIGNAL` / `ORDER` / `IN POSITION` / `WAITING` / `NO DATA` with live count badges in `crates/vayren-domain/src/live.rs`.
+   - Dynamic `filter_chips: Vec<String>` projected into Slint `live-filter-chips` model; `live.slint` dynamically binds chips.
+   - Robust order filtering covers `WORKING`, `SUBMITTING`, and active broker orders.
+2. **ORDER and P&L Columns in Watchlist:**
+   - Extended `WatchlistStockRow` and `WatchlistRowView` with `order: String`, `order_tone: i32`, `pnl: String`, `pnl_tone: i32`.
+   - Updated `LiveWatchlistRow` Slint struct in `live.slint` and mapping in `crates/vayren-shell/src/shell.rs`.
+   - Added `ORDER` (70px) and `P&L` (65px) header columns and data cells with semantic tones (green/cyan/red).
+3. **Verification & Gates:**
+   - `cargo test -p vayren-domain`: 228/228 passed in 0.44s (including dedicated `test_seven_filter_chips_and_order_pnl_projection`).
+   - `cargo test -p vayren-shell --test live_render_snapshot`: 1/1 passed across all 8 viewport tiers (1920x1080 down to 1024x560 and narrow 900x700).
+   - `pytest src/app/tests/test_live_actions.py`: 8/8 passed in 3.43s.
+   - `python tools/validate_language_ownership.py`: PASSED (322 files).
+   - `python tools/repo_graph.py --build` & `python tools/validate_repo_graph.py`: PASS (4622 entities, 7865 relationships).
+
+**Previous update (build-and-check-speed-optimization, 2026-10-04):** FULL SPEED OPTIMIZATION APPLIED & VERIFIED.
 
 
 **Previous update (stock-backtest-failure-fixed, 2026-10-04):** STOCK BACKTEST MULTI-SYMBOL CRASH & WATCHDOG FIXED (local only, no commit/push).

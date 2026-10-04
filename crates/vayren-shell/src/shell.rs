@@ -3581,6 +3581,10 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
                     status_tone: r.status_tone,
                     signal: r.signal.into(),
                     signal_tone: r.signal_tone,
+                    order: r.order.into(),
+                    order_tone: r.order_tone,
+                    pnl: r.pnl.into(),
+                    pnl_tone: r.pnl_tone,
                     last_update: r.last_update.into(),
                     selected: r.selected,
                 })
@@ -3623,6 +3627,15 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
     });
     ui.set_live_filter_chip_selected(view.filter_chip_selected);
     ui.set_live_filter_chip_counts(view.filter_chip_counts.into());
+    ui.set_live_filter_chips(
+        Rc::new(slint::VecModel::from(
+            view.filter_chips
+                .into_iter()
+                .map(<_>::into)
+                .collect::<Vec<_>>(),
+        ))
+        .into(),
+    );
 }
 
 fn refresh_live(handle: &slint::Weak<AppWindow>, state: &Rc<RefCell<LiveState>>) {
@@ -3956,6 +3969,8 @@ pub fn demo_live_state_running() -> LiveState {
                 position: "SHORT 18".into(),
                 status: "IN POSITION".into(),
                 signal: "SELL".into(),
+                order: Some("FILLED".into()),
+                pnl: Some(450.0),
                 last_update: "09:42:15".into(),
             },
             live::WatchlistStockRow {
@@ -3975,6 +3990,8 @@ pub fn demo_live_state_running() -> LiveState {
                 position: "FLAT".into(),
                 status: "READY".into(),
                 signal: "--".into(),
+                order: None,
+                pnl: None,
                 last_update: "09:42:10".into(),
             },
         ],

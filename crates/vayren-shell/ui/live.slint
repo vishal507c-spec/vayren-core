@@ -192,6 +192,10 @@ export struct LiveWatchlistRow {
     status-tone: int,
     signal: string,
     signal-tone: int,
+    order: string,
+    order-tone: int,
+    pnl: string,
+    pnl-tone: int,
     last-update: string,
     selected: bool,
 }
@@ -531,6 +535,7 @@ export component LiveScreen inherits Rectangle {
     in property <LiveFooter> footer;
     in property <int> filter-chip-selected: 0;
     in property <string> filter-chip-counts: "";
+    in property <[string]> filter-chips: ["All", "Ready", "Signal", "Order", "In Pos", "Waiting", "No Data"];
 
     // Breakpoint inputs
     in property <bool> dock-inspector: true;
@@ -852,7 +857,7 @@ export component LiveScreen inherits Rectangle {
                                 Rectangle { width: 8px; background: transparent; }
 
                                 // Filter chips
-                                for chip[c-idx] in ["All", "Ready", "Waiting", "In Pos", "No Data"]: Rectangle {
+                                for chip[c-idx] in root.filter-chips: Rectangle {
                                     height: 22px;
                                     border-radius: 11px;
                                     background: root.filter-chip-selected == c-idx ? VayrenPalette.live-teal-deep : VayrenPalette.live-panel-deep;
@@ -909,6 +914,8 @@ export component LiveScreen inherits Rectangle {
                                     Text { width: 65px; text: "MAX RISK"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
                                     Text { width: 75px; text: "STATUS"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
                                     Text { width: 52px; text: "SIGNAL"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+                                    Text { width: 70px; text: "ORDER"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+                                    Text { width: 65px; text: "P&L"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
                                     Text { horizontal-stretch: 1; text: "POS"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
                                 }
                             }
@@ -952,6 +959,8 @@ export component LiveScreen inherits Rectangle {
                                                 Text { width: 65px; text: row.planned-risk; color: VayrenPalette.live-ink; font-size: 10px; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
                                                 Text { width: 75px; text: row.status; color: LiveTone.ink(row.status-tone); font-size: 10px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
                                                 Text { width: 52px; text: row.signal; color: LiveTone.ink(row.signal-tone); font-size: 10px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
+                                                Text { width: 70px; text: row.order; color: LiveTone.ink(row.order-tone); font-size: 10px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
+                                                Text { width: 65px; text: row.pnl; color: LiveTone.ink(row.pnl-tone); font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
                                                 Text { horizontal-stretch: 1; text: row.position; color: VayrenPalette.text; font-size: 10px; vertical-alignment: center; overflow: elide; }
                                             }
                                         }

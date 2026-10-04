@@ -2938,6 +2938,7 @@ pub fn project(state: &LiveState) -> LiveView {
                 || r.status == "WORKING"
                 || r.status == "SUBMITTING"
                 || r.order.as_deref().unwrap_or("").contains("WORKING")
+                || r.order.as_deref().unwrap_or("").contains("SUBMITTING")
         })
         .count();
     let in_pos_count = state
@@ -2984,6 +2985,7 @@ pub fn project(state: &LiveState) -> LiveView {
                     || row.status == "WORKING"
                     || row.status == "SUBMITTING"
                     || row.order.as_deref().unwrap_or("").contains("WORKING")
+                    || row.order.as_deref().unwrap_or("").contains("SUBMITTING")
             }
             4 => row.position != "FLAT" && !row.position.is_empty(),
             5 => row.status == "WAITING" || row.status == "WAIT",
@@ -4182,4 +4184,126 @@ mod tests {
         assert_eq!(view.selected_stock.risk_validated, true);
         assert!(view.selected_stock.risk_banner_text.contains("[✓] RISK VALIDATED"));
     }
+
+    #[test]
+    fn test_seven_filter_chips_and_order_pnl_projection() {
+        let mut st = LiveState::default();
+        st.watchlist_rows = vec![
+            WatchlistStockRow {
+                symbol: "NSE:KAYNES".into(),
+                clean_symbol: "KAYNES".into(),
+                ltp: Some(5410.0),
+                change_pct: Some(1.25),
+                ref_high: Some(5420.0),
+                ref_low: Some(5310.0),
+                break_low: Some(5309.50),
+                entry_price: Some(5309.50),
+                stop_price: Some(5420.0),
+                risk_per_share: Some(110.50),
+                qty: Some(18),
+                planned_risk: Some(1989.0),
+                risk_util: Some(99.45),
+                position: "SHORT 18".into(),
+                status: "IN POSITION".into(),
+                signal: "SELL".into(),
+                order: Some("FILLED".into()),
+                pnl: Some(450.0),
+                last_update: "09:42:15".into(),
+            },
+            WatchlistStockRow {
+                symbol: "NSE:TATASTEEL".into(),
+                clean_symbol: "TATASTEEL".into(),
+                ltp: Some(150.0),
+                change_pct: Some(-0.5),
+                ref_high: Some(152.0),
+                ref_low: Some(148.0),
+                break_low: Some(147.9),
+                entry_price: Some(147.9),
+                stop_price: Some(152.0),
+                risk_per_share: Some(4.1),
+                qty: Some(200),
+                planned_risk: Some(820.0),
+                risk_util: Some(82.0),
+                position: "FLAT".into(),
+                status: "READY".into(),
+                signal: "--".into(),
+                order: None,
+                pnl: None,
+                last_update: "09:42:10".into(),
+            },
+            WatchlistStockRow {
+                symbol: "NSE:INFY".into(),
+                clean_symbol: "INFY".into(),
+                ltp: Some(1800.0),
+                change_pct: Some(2.1),
+                ref_high: Some(1810.0),
+                ref_low: Some(1790.0),
+                break_low: None,
+                entry_price: None,
+                stop_price: None,
+                risk_per_share: None,
+                qty: None,
+                planned_risk: None,
+                risk_util: None,
+                position: "FLAT".into(),
+                status: "SIGNAL ACTIVE".into(),
+                signal: "BUY".into(),
+                order: Some("SUBMITTING".into()),
+                pnl: Some(-50.0),
+                last_update: "09:42:12".into(),
+            },
+        ];
+
+        let view = project(&st);
+
+        // 7 filter chips verification
+        assert_eq!(view.filter_chips.len(), 7);
+        assert_eq!(view.filter_chips[0], "ALL (3)");
+        assert_eq!(view.filter_chips[1], "READY (1)");
+        assert_eq!(view.filter_chips[2], "SIGNAL (2)"); // KAYNES (SELL) + INFY (BUY)
+        assert_eq!(view.filter_chips[3], "ORDER (1)"); // INFY (order=SUBMITTING)
+        assert_eq!(view.filter_chips[4], "IN POSITION (1)"); // KAYNES (SHORT 18)
+        assert_eq!(view.filter_chips[5], "WAITING (0)");
+        assert_eq!(view.filter_chips[6], "NO DATA (0)");
+
+        // Row projection verification
+        assert_eq!(view.watchlist.len(), 3);
+
+        // KAYNES
+        let kaynes = &view.watchlist[0];
+        assert_eq!(kaynes.symbol, "KAYNES");
+        assert_eq!(kaynes.order, "FILLED");
+        assert_eq!(kaynes.order_tone, 1); // Tone 1 = green
+        assert_eq!(kaynes.pnl, "+450.00");
+        assert_eq!(kaynes.pnl_tone, 1); // Tone 1 = positive/green
+
+        // TATASTEEL
+        let tatasteel = &view.watchlist[1];
+        assert_eq!(tatasteel.symbol, "TATASTEEL");
+        assert_eq!(tatasteel.order, "—");
+        assert_eq!(tatasteel.order_tone, 0);
+        assert_eq!(tatasteel.pnl, "—");
+        assert_eq!(tatasteel.pnl_tone, 0);
+
+        // INFY
+        let infy = &view.watchlist[2];
+        assert_eq!(infy.symbol, "INFY");
+        assert_eq!(infy.order, "SUBMITTING");
+        assert_eq!(infy.order_tone, 2); // Tone 2 = amber/submitting
+        assert_eq!(infy.pnl, "-50.00");
+        assert_eq!(infy.pnl_tone, 3); // Tone 3 = negative/red
+
+        // Test filter chip 3 selection (ORDER)
+        st.set_filter_chip(3);
+        let filtered_order = project(&st);
+        assert_eq!(filtered_order.watchlist.len(), 1);
+        assert_eq!(filtered_order.watchlist[0].symbol, "INFY");
+
+        // Test filter chip 4 selection (IN POSITION)
+        st.set_filter_chip(4);
+        let filtered_pos = project(&st);
+        assert_eq!(filtered_pos.watchlist.len(), 1);
+        assert_eq!(filtered_pos.watchlist[0].symbol, "KAYNES");
+    }
 }
+
