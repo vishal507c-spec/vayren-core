@@ -570,7 +570,15 @@ def _commands_for_levels(levels: list[str], change: dict, impact: dict, graph: d
         for command in commands
         if command.startswith("pytest ") and (parts := command.split()) and len(parts) > 2
     }
+    cargo_lib_counts: dict[str, int] = {}
+    for c in commands:
+        if c.startswith("cargo test -p ") and " --lib" in c:
+            parts = c.split()
+            if len(parts) >= 4 and parts[1] == "test" and parts[2] == "-p":
+                cargo_lib_counts[parts[3]] = cargo_lib_counts.get(parts[3], 0) + 1
+
     pruned: list[str] = []
+    seen_cargo_libs: set[str] = set()
     for command in commands:
         parts = command.split()
         if (
@@ -580,6 +588,14 @@ def _commands_for_levels(levels: list[str], change: dict, impact: dict, graph: d
             and any(parts[1].startswith(d.rstrip("/") + "/") for d in partitions)
         ):
             continue
+        if command.startswith("cargo test -p ") and " --lib" in command and len(parts) >= 4:
+            pkg = parts[3]
+            if cargo_lib_counts.get(pkg, 0) > 1:
+                collapsed = f"cargo test -p {pkg} --lib"
+                if collapsed not in seen_cargo_libs:
+                    seen_cargo_libs.add(collapsed)
+                    pruned.append(collapsed)
+                continue
         pruned.append(command)
     commands[:] = pruned
 

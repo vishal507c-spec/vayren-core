@@ -192,7 +192,7 @@ def test_real_chrome_completes_mock_fyers_login(mock_pages: Any, tmp_path: Any) 
     credentials = FyersCredentials(
         "SPXXXXE7-100",
         "SHH-SECRET-9",
-        redirect_uri="http://127.0.0.1:9/dead",
+        redirect_uri=f"{mock_pages.base}/callback",
         client_id="BROWSER-USER",
         totp_secret="JBSWY3DPEHPK3PXP",
         pin="1357",

@@ -323,6 +323,7 @@ export component AppWindow inherits Window {
     in-out property <bool> conn-disconnect-visible: false;
     in-out property <bool> conn-disconnect-enabled: false;
     in-out property <string> conn-help-caption: "View setup guide.";
+    in-out property <string> conn-saved-sentinel: "";
     in-out property <string> broker-field-v0: "";
     in-out property <string> broker-field-v1: "";
     in-out property <string> broker-field-v2: "";
@@ -838,6 +839,7 @@ export component AppWindow inherits Window {
                     disconnect-visible: root.conn-disconnect-visible;
                     disconnect-enabled: root.conn-disconnect-enabled;
                     help-caption: root.conn-help-caption;
+                    saved-sentinel: root.conn-saved-sentinel;
                     field-v0 <=> root.broker-field-v0;
                     field-v1 <=> root.broker-field-v1;
                     field-v2 <=> root.broker-field-v2;

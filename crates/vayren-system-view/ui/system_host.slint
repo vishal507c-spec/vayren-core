@@ -114,6 +114,7 @@ export component SystemHostWindow inherits Window {
     in-out property <bool> conn-disconnect-visible: false;
     in-out property <bool> conn-disconnect-enabled: false;
     in-out property <string> conn-help-caption: "View setup guide.";
+    in-out property <string> conn-saved-sentinel: "";
 
     VerticalLayout {
         spacing: 0;
@@ -237,6 +238,7 @@ export component SystemHostWindow inherits Window {
                 disconnect-visible: root.conn-disconnect-visible;
                 disconnect-enabled: root.conn-disconnect-enabled;
                 help-caption: root.conn-help-caption;
+                saved-sentinel: root.conn-saved-sentinel;
                 broker-selected(id) => { root.select-requested(id); }
                 connect-requested(v0, v1, v2, v3, v4, v5) => { root.connect-requested(v0, v1, v2, v3, v4, v5); }
                 retry-requested() => { root.login-requested(); }

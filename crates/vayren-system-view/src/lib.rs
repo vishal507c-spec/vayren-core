@@ -204,9 +204,7 @@ fn apply_connection_view(ui: &SystemHostWindow, workspace: &BrokerWorkspace) -> 
     );
     ui.set_conn_venue_subtitle(workspace.venue_subtitle.clone().into());
     ui.set_conn_env_label(workspace.env_label.clone().into());
-    ui.set_conn_description(
-        vayren_domain::broker_connection::description_line(&workspace.display_name).into(),
-    );
+    ui.set_conn_description(workspace.description().into());
     let (pill_label, pill_tone) = workspace.pill();
     ui.set_conn_pill_label(pill_label.into());
     ui.set_conn_pill_tone(pill_tone);
