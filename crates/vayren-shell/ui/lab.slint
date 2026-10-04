@@ -1410,9 +1410,18 @@ export component StrategyLabScreen inherits Rectangle {
                                             // where it carries the first symbols the
                                             // button has stopped naming.
                                             if root.lab.chips-more-line != "": Rectangle { height: 15px; }
-                                            if root.lab.chips-more-line != "": HorizontalLayout {
-                                                spacing: 5px;
+                                            // Clipping wrapper: six pills overflow a 105/383
+                                            // share and used to paint over the TIMEFRAME
+                                            // segmented control (`clip` lives on Rectangles in
+                                            // Slint 1.17, so the row sits one level in and the
+                                            // wrapper does the cutting). The count survives in
+                                            // the button ("526 STOCKS").
+                                            if root.lab.chips-more-line != "": Rectangle {
+                                                clip: true;
                                                 height: LabPalette.cfg-sub-h;
+                                            HorizontalLayout {
+                                                spacing: 5px;
+                                                height: 100%;
                                                 for chiplbl in root.universe-chips: Rectangle {
                                                     visible: chiplbl != "";
                                                     height: 18px;
@@ -1446,6 +1455,7 @@ export component StrategyLabScreen inherits Rectangle {
                                                         vertical-alignment: center;
                                                     }
                                                 }
+                                            }
                                             }
                                         }
                                         LabFieldDivider { x: parent.width - 1px; }
@@ -1913,9 +1923,20 @@ export component StrategyLabScreen inherits Rectangle {
                                     HorizontalLayout {
                                         padding-left: 22px; padding-right: 22px;
                                         spacing: 20px; alignment: center;
-                                        // left 1fr
-                                        HorizontalLayout {
+                                        // left 1fr — a horizontal ScrollView, not a bare
+                                        // row: a long fail reason (the backend's verbatim
+                                        // `config-error`, which the operator MUST see) used
+                                        // to shove the state label, RUN control and the
+                                        // universe/capital facts off the card edge. Now the
+                                        // verdicts scroll in place and the controls stay put.
+                                        // Clean states fit without scrolling, so the strip
+                                        // looks exactly as before when nothing is wrong.
+                                        ScrollView {
                                             horizontal-stretch: 1;
+                                            height: 22px;
+                                            horizontal-scrollbar-policy: always-off;
+                                            vertical-scrollbar-policy: always-off;
+                                            HorizontalLayout {
                                             spacing: 16px; alignment: start;
                                             for chk in root.lab.cfg-checks: HorizontalLayout {
                                                 spacing: 6px; alignment: center;
@@ -1931,6 +1952,7 @@ export component StrategyLabScreen inherits Rectangle {
                                                     color: chk.kind == 2 ? LabPalette.red-soft : LabPalette.lab-muted;
                                                     vertical-alignment: center;
                                                 }
+                                            }
                                             }
                                         }
                                         // centre auto — the whole run-button
@@ -2001,11 +2023,14 @@ Text {
                                                 vertical-alignment: center;
                                             }
                                         }
-                                        // right 1fr — real facts only. The
+                                        // right auto — real facts only. The
                                         // mock's "Est. runtime" is gone: nothing
                                         // in this state ever measured one.
+                                        // Auto-sized (never stretched): the left verdicts
+                                        // own every spare pixel, so a long fail reason
+                                        // scrolls inside its own cell instead of stealing
+                                        // the facts' share.
                                         HorizontalLayout {
-                                            horizontal-stretch: 1;
                                             spacing: 22px; alignment: center;
                                             VerticalLayout {
                                                 spacing: 3px; alignment: center;
