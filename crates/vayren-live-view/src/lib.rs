@@ -127,6 +127,7 @@ fn apply_view(ui: &LiveHostWindow, state: &LiveState) {
         strategy_sub: view.bar.strategy_sub.into(),
         risk_label: view.bar.risk_label.into(),
         risk_tone: view.bar.risk_tone,
+        risk_sub: view.bar.risk_sub.into(),
         recon_label: view.bar.recon_label.into(),
         recon_tone: view.bar.recon_tone,
         recon_sub: view.bar.recon_sub.into(),

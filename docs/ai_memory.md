@@ -6,7 +6,33 @@
 **Owns:** Current state, open items, verified facts, oddities. **Not owns:** Rules/architecture/events/contracts ΓåÆ `AGENTS.md`, `AI_ENTRY.md`, `architecture.md`, `module_contracts.md`, `event_catalog.md`.
 
 
-**Latest update (live-watchlist-upgrade-7-chips-order-pnl, 2026-10-04):** LIVE WATCHLIST ORDER/PNL COLUMNS & 7-CHIP DYNAMIC FILTER COMPLETED & VERIFIED.
+**Latest update (live-risk-engine-source-of-truth, 2026-10-04):** VAYREN CAPITAL RISK ENGINE AUTHORITATIVE SEMANTICS & UI FAIL-CLOSED SIZING COMPLETED & VERIFIED.
+1. **CapitalRiskEngine Authoritative Semantics (`crates/vayren-domain/src/live.rs`):**
+   - Price risk is completely decoupled from broker capital: `risk_per_share = abs(stop_price - entry_price)`. It is displayed for every stock whenever entry and stop prices exist.
+   - Broker capital determines `raw_capital`, `effective_capital`, `max_allowed_risk`.
+   - Capital + price risk determine `calculated_qty` and `planned_risk`.
+   - Enforced fail-closed behavior: `has_valid_capital(&self) -> bool` strictly checks positive broker capital in LIVE mode and valid capital sources in paper/sandbox modes.
+   - If broker capital is unavailable or 0: displays `CAPITAL: NOT AVAILABLE`, `MAX RISK: —`, `QTY: —`, `PLANNED RISK: —`, and `RISK STATUS: NOT READY` (badge tone 3).
+   - Removed all hardcoded sample capital fallbacks (₹600 / 22 / ₹583).
+   - Added explicit label `CAPITAL SOURCE: BROKER` (or matching capital source).
+2. **Native Slint UI Separation (`crates/vayren-shell/ui/live.slint`):**
+   - Top Card 5 (RISK ENGINE): dynamically binds `root.bar.risk-label` and `root.bar.risk-sub` (e.g. `4x LEV · ₹600 MAX` or `CAPITAL: NOT AVAILABLE` when blocked).
+   - Selected Stock Details Inspector: clearly separates 3 distinct sections:
+     a) `CAPITAL & RISK LIMITS`: `CAPITAL SOURCE: BROKER` badge, Broker Capital, Effective Capital, Max Risk / Trade.
+     b) `REFERENCE LEVELS & PRICE RISK (C1-C4)`: Ref High, Ref Low, Trigger/Entry, Stop Loss, Risk / Share.
+     c) `POSITION & RISK SIZING`: Computed Qty, Planned Risk, Risk Util, and dynamic validation banner (`[✓] RISK VALIDATED` or `[✕] RISK STATUS: NOT READY · Capital not available`).
+3. **Bridge & Host Windows Updates:**
+   - Synchronized `crates/vayren-shell/src/shell.rs` and `crates/vayren-live-view/src/lib.rs` with `risk_sub`, `broker_capital`, `effective_capital`, `max_allowed_risk`, and `capital_source`.
+4. **Verification & Gates:**
+   - `cargo test -p vayren-domain`: 229/229 passed in 0.42s (including `test_capital_unavailable_fails_closed_in_live`).
+   - `cargo check -p vayren-shell`: PASSED.
+   - `cargo check -p vayren-live-view`: PASSED.
+   - `cargo test -p vayren-shell --test live_render_snapshot`: 1/1 passed across all 8 viewport tiers.
+   - `pytest src/app/tests/test_live_actions.py`: 8/8 passed in 2.25s.
+   - `python tools/validate_language_ownership.py`: PASSED (322 files).
+   - `python tools/repo_graph.py --build` & `python tools/validate_repo_graph.py`: PASS (4622 entities, 7865 relationships).
+
+**Previous update (live-watchlist-upgrade-7-chips-order-pnl, 2026-10-04):** LIVE WATCHLIST ORDER/PNL COLUMNS & 7-CHIP DYNAMIC FILTER COMPLETED & VERIFIED.
 1. **Dynamic 7-Filter Chips:**
    - Expanded filter chip taxonomy to 7 institutional categories: `ALL` / `READY` / `SIGNAL` / `ORDER` / `IN POSITION` / `WAITING` / `NO DATA` with live count badges in `crates/vayren-domain/src/live.rs`.
    - Dynamic `filter_chips: Vec<String>` projected into Slint `live-filter-chips` model; `live.slint` dynamically binds chips.

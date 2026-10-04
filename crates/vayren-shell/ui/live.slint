@@ -26,6 +26,7 @@ export struct LiveBar {
     strategy-sub: string,
     risk-label: string,
     risk-tone: int,
+    risk-sub: string,
     recon-label: string,
     recon-tone: int,
     recon-sub: string,
@@ -223,6 +224,10 @@ export struct LiveSelectedStock {
     risk-validated: bool,
     risk-banner-text: string,
     pipeline-stage: string,
+    broker-capital: string,
+    effective-capital: string,
+    max-allowed-risk: string,
+    capital-source: string,
 }
 
 export struct LiveFooter {
@@ -688,10 +693,10 @@ export component LiveScreen inherits Rectangle {
                     icon-char: "R";
                     show-icon: root.bar-extended;
                     label: "RISK ENGINE";
-                    value-text: root.bar.risk-label != "" ? root.bar.risk-label : "READY";
+                    value-text: root.bar.risk-label != "" ? root.bar.risk-label : "NOT READY";
                     tone: root.bar.risk-tone;
-                    sub-text: "4x LEV · ₹600 MAX";
-                    sub-tone: 0;
+                    sub-text: root.bar.risk-sub != "" ? root.bar.risk-sub : "CAPITAL: NOT AVAILABLE";
+                    sub-tone: root.bar.risk-tone == 3 ? 3 : 0;
                 }
 
                 // Card 6: Reconciliation verdict + venue counts.
@@ -1400,7 +1405,7 @@ export component LiveScreen inherits Rectangle {
 
                         // 3.2 SELECTED STOCK DETAILS CARD
                         Rectangle {
-                            min-height: 180px;
+                            min-height: 220px;
                             background: VayrenPalette.live-panel;
                             border-radius: 6px;
                             border-width: 1px;
@@ -1416,7 +1421,7 @@ export component LiveScreen inherits Rectangle {
                                     alignment: center;
 
                                     Text {
-                                        text: (root.selected-stock.symbol != "" ? root.selected-stock.symbol : "KAYNES") + " — DETAILS";
+                                        text: (root.selected-stock.symbol != "" ? root.selected-stock.symbol : "NO STOCK SELECTED") + " — DETAILS";
                                         color: VayrenPalette.text-bright;
                                         font-size: 11px;
                                         font-weight: 700;
@@ -1424,7 +1429,7 @@ export component LiveScreen inherits Rectangle {
                                     }
 
                                     VBadge {
-                                        text: root.selected-stock.current-position != "" ? root.selected-stock.current-position : "READY";
+                                        text: root.selected-stock.current-position != "" ? root.selected-stock.current-position : "FLAT";
                                         tone: 1;
                                         vertical-alignment: center;
                                     }
@@ -1432,7 +1437,7 @@ export component LiveScreen inherits Rectangle {
                                     Rectangle { horizontal-stretch: 1; background: transparent; }
 
                                     Text {
-                                        text: root.selected-stock.ltp != "" ? ("LTP " + root.selected-stock.ltp) : "LTP ₹5,410.00";
+                                        text: root.selected-stock.ltp != "" ? ("LTP " + root.selected-stock.ltp) : "LTP —";
                                         color: VayrenPalette.live-teal;
                                         font-size: 11px;
                                         font-weight: 700;
@@ -1440,54 +1445,93 @@ export component LiveScreen inherits Rectangle {
                                     }
                                 }
 
-                                // Reference Levels (C1-C4)
-                                Text { text: "REFERENCE LEVELS (C1-C4)"; color: VayrenPalette.live-ink-dim; font-size: 9px; font-weight: 700; }
+                                Rectangle { height: 1px; background: VayrenPalette.live-line; }
+
+                                // 1. Capital & Risk Limits
+                                HorizontalLayout {
+                                    height: 14px;
+                                    Text { text: "CAPITAL & RISK LIMITS"; color: VayrenPalette.live-ink-dim; font-size: 9px; font-weight: 700; vertical-alignment: center; }
+                                    Rectangle { horizontal-stretch: 1; background: transparent; }
+                                    Text {
+                                        text: root.selected-stock.capital-source != "" ? root.selected-stock.capital-source : "CAPITAL SOURCE: BROKER";
+                                        color: VayrenPalette.live-teal;
+                                        font-size: 9px;
+                                        font-weight: 700;
+                                        vertical-alignment: center;
+                                    }
+                                }
+
+                                HorizontalLayout {
+                                    height: 16px;
+                                    spacing: 4px;
+                                    Text { width: 90px; text: "Broker Capital"; color: VayrenPalette.live-ink-dim; font-size: 10px; vertical-alignment: center; }
+                                    Text { horizontal-stretch: 1; text: root.selected-stock.broker-capital != "" ? root.selected-stock.broker-capital : "NOT AVAILABLE"; color: VayrenPalette.text; font-size: 10px; font-weight: 600; vertical-alignment: center; }
+                                    Text { width: 85px; text: "Max Risk / Trade"; color: VayrenPalette.live-ink-dim; font-size: 10px; vertical-alignment: center; }
+                                    Text { width: 65px; text: root.selected-stock.max-allowed-risk != "" ? root.selected-stock.max-allowed-risk : "—"; color: VayrenPalette.text; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
+                                }
+
+                                HorizontalLayout {
+                                    height: 16px;
+                                    spacing: 4px;
+                                    Text { width: 90px; text: "Effective Capital"; color: VayrenPalette.live-ink-dim; font-size: 10px; vertical-alignment: center; }
+                                    Text { horizontal-stretch: 1; text: root.selected-stock.effective-capital != "" ? root.selected-stock.effective-capital : "—"; color: VayrenPalette.text; font-size: 10px; font-weight: 600; vertical-alignment: center; }
+                                }
+
+                                Rectangle { height: 1px; background: VayrenPalette.live-line; }
+
+                                // 2. Reference Levels & Price Risk (C1-C4)
+                                Text { text: "REFERENCE LEVELS & PRICE RISK (C1-C4)"; color: VayrenPalette.live-ink-dim; font-size: 9px; font-weight: 700; }
 
                                 HorizontalLayout {
                                     height: 16px;
                                     spacing: 4px;
                                     Text { width: 90px; text: "Ref High (C1-C4)"; color: VayrenPalette.live-ink-dim; font-size: 10px; vertical-alignment: center; }
-                                    Text { horizontal-stretch: 1; text: root.selected-stock.ref-high != "" ? root.selected-stock.ref-high : "₹5,420.00"; color: VayrenPalette.text; font-size: 10px; font-weight: 600; vertical-alignment: center; }
+                                    Text { horizontal-stretch: 1; text: root.selected-stock.ref-high != "" ? root.selected-stock.ref-high : "—"; color: VayrenPalette.text; font-size: 10px; font-weight: 600; vertical-alignment: center; }
                                     Text { width: 85px; text: "Ref Low (C1-C4)"; color: VayrenPalette.live-ink-dim; font-size: 10px; vertical-alignment: center; }
-                                    Text { width: 65px; text: root.selected-stock.ref-low != "" ? root.selected-stock.ref-low : "₹5,310.00"; color: VayrenPalette.text; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
+                                    Text { width: 65px; text: root.selected-stock.ref-low != "" ? root.selected-stock.ref-low : "—"; color: VayrenPalette.text; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
                                 }
 
                                 HorizontalLayout {
                                     height: 16px;
                                     spacing: 4px;
                                     Text { width: 90px; text: "Trigger (Break Low)"; color: VayrenPalette.live-ink-dim; font-size: 10px; vertical-alignment: center; }
-                                    Text { horizontal-stretch: 1; text: root.selected-stock.entry-price != "" ? root.selected-stock.entry-price : "₹5,309.50"; color: VayrenPalette.text; font-size: 10px; font-weight: 700; vertical-alignment: center; }
+                                    Text { horizontal-stretch: 1; text: root.selected-stock.entry-price != "" ? root.selected-stock.entry-price : "—"; color: VayrenPalette.text; font-size: 10px; font-weight: 700; vertical-alignment: center; }
                                     Text { width: 85px; text: "Stop Loss"; color: VayrenPalette.live-ink-dim; font-size: 10px; vertical-alignment: center; }
-                                    Text { width: 65px; text: root.selected-stock.stop-price != "" ? root.selected-stock.stop-price : "₹5,420.00"; color: VayrenPalette.neg; font-size: 10px; font-weight: 700; horizontal-alignment: right; vertical-alignment: center; }
+                                    Text { width: 65px; text: root.selected-stock.stop-price != "" ? root.selected-stock.stop-price : "—"; color: VayrenPalette.neg; font-size: 10px; font-weight: 700; horizontal-alignment: right; vertical-alignment: center; }
                                 }
-
-                                Rectangle { height: 1px; background: VayrenPalette.live-line; }
-
-                                // Position & Risk Calculation
-                                Text { text: "POSITION & RISK SIZING"; color: VayrenPalette.live-ink-dim; font-size: 9px; font-weight: 700; }
 
                                 HorizontalLayout {
                                     height: 16px;
                                     spacing: 4px;
                                     Text { width: 90px; text: "Risk / Share"; color: VayrenPalette.live-ink-dim; font-size: 10px; vertical-alignment: center; }
-                                    Text { horizontal-stretch: 1; text: root.selected-stock.risk-share != "" ? root.selected-stock.risk-share : "₹110.50"; color: VayrenPalette.text; font-size: 10px; font-weight: 600; vertical-alignment: center; }
-                                    Text { width: 85px; text: "Computed Qty"; color: VayrenPalette.live-ink-dim; font-size: 10px; vertical-alignment: center; }
-                                    Text { width: 65px; text: root.selected-stock.calculated-qty != "" ? root.selected-stock.calculated-qty : "18 shares"; color: VayrenPalette.live-teal; font-size: 10px; font-weight: 800; horizontal-alignment: right; vertical-alignment: center; }
+                                    Text { horizontal-stretch: 1; text: root.selected-stock.risk-share != "" ? root.selected-stock.risk-share : "—"; color: VayrenPalette.live-teal; font-size: 10px; font-weight: 700; vertical-alignment: center; }
+                                }
+
+                                Rectangle { height: 1px; background: VayrenPalette.live-line; }
+
+                                // 3. Position & Risk Sizing
+                                Text { text: "POSITION & RISK SIZING"; color: VayrenPalette.live-ink-dim; font-size: 9px; font-weight: 700; }
+
+                                HorizontalLayout {
+                                    height: 16px;
+                                    spacing: 4px;
+                                    Text { width: 90px; text: "Computed Qty"; color: VayrenPalette.live-ink-dim; font-size: 10px; vertical-alignment: center; }
+                                    Text { width: 65px; text: root.selected-stock.calculated-qty != "" ? root.selected-stock.calculated-qty : "—"; color: VayrenPalette.live-teal; font-size: 10px; font-weight: 800; vertical-alignment: center; }
+                                    Text { width: 85px; text: "Planned Risk"; color: VayrenPalette.live-ink-dim; font-size: 10px; vertical-alignment: center; }
+                                    Text { horizontal-stretch: 1; text: root.selected-stock.planned-risk != "" ? root.selected-stock.planned-risk : "—"; color: VayrenPalette.text; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
                                 }
 
                                 HorizontalLayout {
                                     height: 16px;
                                     spacing: 4px;
-                                    Text { width: 90px; text: "Planned Risk"; color: VayrenPalette.live-ink-dim; font-size: 10px; vertical-alignment: center; }
-                                    Text { horizontal-stretch: 1; text: root.selected-stock.planned-risk != "" ? root.selected-stock.planned-risk : "₹1,989.00"; color: VayrenPalette.text; font-size: 10px; font-weight: 600; vertical-alignment: center; }
-                                    Text { width: 85px; text: "Risk Util"; color: VayrenPalette.live-ink-dim; font-size: 10px; vertical-alignment: center; }
-                                    Text { width: 65px; text: root.selected-stock.risk-util != "" ? root.selected-stock.risk-util : "99.4%"; color: VayrenPalette.text; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
+                                    Text { width: 90px; text: "Risk Util"; color: VayrenPalette.live-ink-dim; font-size: 10px; vertical-alignment: center; }
+                                    Text { horizontal-stretch: 1; text: root.selected-stock.risk-util != "" ? root.selected-stock.risk-util : "—"; color: VayrenPalette.text; font-size: 10px; font-weight: 600; vertical-alignment: center; }
                                 }
 
                                 // Risk validation banner
                                 VBanner {
                                     height: 20px;
-                                    message: root.selected-stock.risk-banner-text != "" ? root.selected-stock.risk-banner-text : (root.selected-stock.risk-validated ? "[✓] RISK VALIDATED (Under limit)" : "[✕] RISK BLOCKED");
+                                    message: root.selected-stock.risk-banner-text != "" ? root.selected-stock.risk-banner-text : (root.selected-stock.risk-validated ? "[✓] RISK VALIDATED (Under limit)" : "[✕] RISK STATUS: NOT READY · Capital not available");
                                     tone: root.selected-stock.risk-validated ? 1 : 3;
                                 }
 

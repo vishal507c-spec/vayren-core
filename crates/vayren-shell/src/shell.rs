@@ -3311,6 +3311,7 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
         strategy_sub: view.bar.strategy_sub.into(),
         risk_label: view.bar.risk_label.into(),
         risk_tone: view.bar.risk_tone,
+        risk_sub: view.bar.risk_sub.into(),
         recon_label: view.bar.recon_label.into(),
         recon_tone: view.bar.recon_tone,
         recon_sub: view.bar.recon_sub.into(),
@@ -3615,6 +3616,10 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
         risk_validated: view.selected_stock.risk_validated,
         risk_banner_text: view.selected_stock.risk_banner_text.into(),
         pipeline_stage: view.selected_stock.pipeline_stage.into(),
+        broker_capital: view.selected_stock.broker_capital.into(),
+        effective_capital: view.selected_stock.effective_capital.into(),
+        max_allowed_risk: view.selected_stock.max_allowed_risk.into(),
+        capital_source: view.selected_stock.capital_source.into(),
     });
     ui.set_live_footer(LiveFooter {
         broker: view.footer.broker.into(),
@@ -3999,6 +4004,13 @@ pub fn demo_live_state_running() -> LiveState {
             raw_capital: 100_000.0,
             leverage: 4.0,
             per_trade_risk_pct: 0.005,
+        },
+        capital: live::CapitalFacts {
+            source: "broker".into(),
+            broker_capital: Some(100_000.0),
+            available_margin: Some(100_000.0),
+            used_margin: Some(0.0),
+            configured_capital: Some(100_000.0),
         },
         bars: (0..48)
             .map(|i| {
