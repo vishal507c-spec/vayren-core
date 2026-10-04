@@ -10,12 +10,13 @@ import { StrategyLabScreen, LabHeader, LabLibraryRow, LabKpi, LabRankRow, LabTra
 import { MarketScreen, MarketWatchRow, MarketCandle, MarketTick, MarketRayLevel, MarketTimeframe, MarketIndicator, MarketStatusRow, MarketSettingsRow, MarketPopupRow, MarketPlotSeg, MarketMarker, MarketTradeContext, DlPlan, DlStatus, DlCalDay, DlCredField, DlStock } from "market.slint";
 import { ResearchScreen, ResearchMetric, ResearchSignalRow, ResearchTradeRow, ResearchRobustRow, ResearchKv, ResearchCompareRow, ResearchStrategyRow, ResearchExperimentRow, ResearchField, ResearchConfigGroup, ResearchEvidenceDim, ResearchEvidenceWhy, ResearchKvGroup } from "research.slint";
 import { PortfolioScreen, PortfolioKpi, PortfolioGate, PortfolioPosition, PortfolioAlloc, PortfolioOrder, PortfolioFill, PortfolioRisk } from "portfolio.slint";
-import { LiveScreen, LiveBar, LiveSetup, LiveMarket, LiveSymbolRow, LiveGate, LiveKv, LiveStat, LivePosition, LiveOrder, LiveFill, LiveEventRow, LiveTiers } from "live.slint";
+import { LiveScreen, LiveBar, LiveSetup, LiveMarket, LiveSymbolRow, LiveGate, LiveKv, LiveStat, LivePosition, LiveOrder, LiveFill, LiveEventRow, LiveTiers, LiveWebSocket, LiveMarketData, LiveActiveStrategy, LiveWatchlistRow, LiveSelectedStock, LiveFooter } from "live.slint";
 import { BrokerPanel, BrokerCheckRow } from "broker.slint";
 import { BrokerConnectionWorkspace, BrokerRowView, CredentialFieldView, ProgressStepView } from "broker_connection.slint";
 
 import { ShellScreen, VGlobalHeader, VGlobalNavItem } from "global_header.slint";
 export { ShellScreen }
+export { LiveWebSocket, LiveMarketData, LiveActiveStrategy, LiveWatchlistRow, LiveSelectedStock, LiveFooter }
 
 export struct CapabilityRowView {
     id: string,
@@ -598,6 +599,17 @@ export component AppWindow inherits Window {
     in-out property <[string]> live-event-types;
     in-out property <int> live-event-type-index: 0;
     in-out property <string> live-event-filter;
+    in-out property <LiveWebSocket> live-ws;
+    in-out property <LiveMarketData> live-md;
+    in-out property <LiveActiveStrategy> live-active-strat;
+    in-out property <[LiveWatchlistRow]> live-watchlist;
+    in-out property <LiveSelectedStock> live-selected-stock;
+    in-out property <LiveFooter> live-footer;
+    in-out property <int> live-filter-chip-selected: 0;
+    in-out property <string> live-filter-chip-counts: "";
+    callback live-watchlist-selected(string);
+    callback live-filter-chip-picked(int);
+    callback live-watchlist-search-changed(string);
     in-out property <bool> live-inspector-open: true;
     // LIVE recomposition tiers evaluated against the content column width
     // (the window size is platform-owned — screens derive layout from these
@@ -1112,6 +1124,17 @@ export component AppWindow inherits Window {
                     event-types: root.live-event-types;
                     event-type-index: root.live-event-type-index;
                     event-filter: root.live-event-filter;
+                    ws: root.live-ws;
+                    md: root.live-md;
+                    active-strat: root.live-active-strat;
+                    watchlist: root.live-watchlist;
+                    selected-stock: root.live-selected-stock;
+                    footer: root.live-footer;
+                    filter-chip-selected: root.live-filter-chip-selected;
+                    filter-chip-counts: root.live-filter-chip-counts;
+                    watchlist-selected(s) => { root.live-watchlist-selected(s); }
+                    filter-chip-picked(i) => { root.live-filter-chip-picked(i); }
+                    watchlist-search-changed(s) => { root.live-watchlist-search-changed(s); }
                     mode-picked(k) => { root.live-mode-picked(k); }
                     strategy-picked(i) => { root.live-strategy-picked(i); }
                     symbol-toggled(i) => { root.live-symbol-toggled(i); }

@@ -20,8 +20,8 @@ use crate::{
     AppWindow, BrokerCheckRow, BrokerRowView, CapabilityRowView, CredentialFieldView, DlCalDay,
     DlCredField, DlPlan, DlStatus, DlStock, LabBoardCell, LabCheckData, LabDetailMetric, LabHeader,
     LabKpi, LabLibraryRow, LabMatrixRow, LabParam, LabPoint, LabPreset, LabRankRow, LabTradeMetric,
-    LabTradeRow, LiveBar, LiveEventRow, LiveFill, LiveGate, LiveKv, LiveMarket, LiveOrder,
-    LivePosition, LiveSetup, LiveStat, LiveSymbolRow, MarketCandle, MarketIndicator, MarketMarker,
+    LabTradeRow, LiveActiveStrategy, LiveBar, LiveEventRow, LiveFill, LiveFooter, LiveGate, LiveKv, LiveMarket, LiveMarketData, LiveOrder,
+    LivePosition, LiveSelectedStock, LiveSetup, LiveStat, LiveSymbolRow, LiveWatchlistRow, LiveWebSocket, MarketCandle, MarketIndicator, MarketMarker,
     MarketPlotSeg, MarketPopupRow, MarketRayLevel, MarketSettingsRow, MarketStatusRow, MarketTick,
     MarketTimeframe, MarketTradeContext, MarketWatchRow, PortfolioAlloc, PortfolioFill,
     PortfolioGate, PortfolioKpi, PortfolioOrder, PortfolioPosition, PortfolioRisk,
@@ -3530,6 +3530,99 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
     );
     ui.set_live_event_type_index(view.event_type_index);
     ui.set_live_event_filter(view.event_filter.into());
+    ui.set_live_ws(LiveWebSocket {
+        status: view.ws.status.into(),
+        tone: view.ws.tone,
+        latency: view.ws.latency.into(),
+        sub: view.ws.sub.into(),
+        last_tick: view.ws.last_tick.into(),
+    });
+    ui.set_live_md(LiveMarketData {
+        status: view.md.status.into(),
+        tone: view.md.tone,
+        sub: view.md.sub.into(),
+        last_tick: view.md.last_tick.into(),
+        freshness: view.md.freshness.into(),
+    });
+    ui.set_live_active_strat(LiveActiveStrategy {
+        name: view.active_strat.name.into(),
+        status: view.active_strat.status.into(),
+        status_tone: view.active_strat.status_tone,
+        mode: view.active_strat.mode.into(),
+        mode_tone: view.active_strat.mode_tone,
+        started_at: view.active_strat.started_at.into(),
+        symbols_count: view.active_strat.symbols_count.into(),
+        today_signals: view.active_strat.today_signals.into(),
+        current_position: view.active_strat.current_position.into(),
+        orders_today: view.active_strat.orders_today.into(),
+        strategy_logic: view.active_strat.strategy_logic.into(),
+    });
+    ui.set_live_watchlist(
+        Rc::new(slint::VecModel::from(
+            view.watchlist
+                .into_iter()
+                .map(|r| LiveWatchlistRow {
+                    index: r.index,
+                    symbol: r.symbol.into(),
+                    full_symbol: r.full_symbol.into(),
+                    ltp: r.ltp.into(),
+                    change: r.change.into(),
+                    change_tone: r.change_tone,
+                    ref_high: r.ref_high.into(),
+                    ref_low: r.ref_low.into(),
+                    break_low: r.break_low.into(),
+                    entry: r.entry.into(),
+                    stop: r.stop.into(),
+                    risk_share: r.risk_share.into(),
+                    qty: r.qty.into(),
+                    planned_risk: r.planned_risk.into(),
+                    position: r.position.into(),
+                    status: r.status.into(),
+                    status_tone: r.status_tone,
+                    signal: r.signal.into(),
+                    signal_tone: r.signal_tone,
+                    last_update: r.last_update.into(),
+                    selected: r.selected,
+                })
+                .collect::<Vec<_>>(),
+        ))
+        .into(),
+    );
+    ui.set_live_selected_stock(LiveSelectedStock {
+        symbol: view.selected_stock.symbol.into(),
+        ltp: view.selected_stock.ltp.into(),
+        change: view.selected_stock.change.into(),
+        change_tone: view.selected_stock.change_tone,
+        ref_high: view.selected_stock.ref_high.into(),
+        ref_low: view.selected_stock.ref_low.into(),
+        break_low: view.selected_stock.break_low.into(),
+        entry_price: view.selected_stock.entry_price.into(),
+        stop_price: view.selected_stock.stop_price.into(),
+        risk_share: view.selected_stock.risk_share.into(),
+        calculated_qty: view.selected_stock.calculated_qty.into(),
+        planned_risk: view.selected_stock.planned_risk.into(),
+        risk_util: view.selected_stock.risk_util.into(),
+        current_position: view.selected_stock.current_position.into(),
+        avg_price: view.selected_stock.avg_price.into(),
+        qty: view.selected_stock.qty.into(),
+        unrealized_pnl: view.selected_stock.unrealized_pnl.into(),
+        realized_pnl: view.selected_stock.realized_pnl.into(),
+        recent_orders: view.selected_stock.recent_orders.into(),
+        risk_validated: view.selected_stock.risk_validated,
+        risk_banner_text: view.selected_stock.risk_banner_text.into(),
+        pipeline_stage: view.selected_stock.pipeline_stage.into(),
+    });
+    ui.set_live_footer(LiveFooter {
+        broker: view.footer.broker.into(),
+        websocket: view.footer.websocket.into(),
+        market_data: view.footer.market_data.into(),
+        strategy: view.footer.strategy.into(),
+        risk: view.footer.risk.into(),
+        reconciliation: view.footer.reconciliation.into(),
+        clock: view.footer.clock.into(),
+    });
+    ui.set_live_filter_chip_selected(view.filter_chip_selected);
+    ui.set_live_filter_chip_counts(view.filter_chip_counts.into());
 }
 
 fn refresh_live(handle: &slint::Weak<AppWindow>, state: &Rc<RefCell<LiveState>>) {
@@ -3619,6 +3712,15 @@ pub fn wire_live(ui: &AppWindow, state: Rc<RefCell<LiveState>>) {
             }
         });
     }
+    wire_text!(on_live_watchlist_selected, |s: &mut LiveState, symbol| {
+        s.select_watchlist_symbol(symbol);
+    });
+    wire_int!(on_live_filter_chip_picked, |s: &mut LiveState, idx: i32| {
+        s.set_filter_chip(idx.max(0) as usize);
+    });
+    wire_text!(on_live_watchlist_search_changed, |s: &mut LiveState, q| {
+        s.set_watchlist_search(q);
+    });
 }
 
 /// Representative LIVE state for the standalone shell binary — the exact
@@ -3817,6 +3919,70 @@ pub fn demo_live_state_running() -> LiveState {
         market_timeframe: "15m".into(),
         market_last_price: Some(2812.4),
         market_bar_count: 480,
+        websocket: live::WebSocketFacts {
+            status: "CONNECTED".into(),
+            latency_ms: Some(42.0),
+            channel: "NSE LIVE".into(),
+            timeframe: "1s".into(),
+            subscribed_symbols: 52,
+            last_tick_time: "09:42:15".into(),
+            reconnect_count: 0,
+            last_error: String::new(),
+        },
+        market_data: live::MarketDataFacts {
+            status: "STREAMING".into(),
+            exchange: "NSE".into(),
+            timeframe: "1s".into(),
+            subscribed_symbols: 52,
+            last_tick_time: "09:42:15".into(),
+            freshness_age_s: Some(0.4),
+        },
+        selected_symbol: "NSE:KAYNES".into(),
+        watchlist_rows: vec![
+            live::WatchlistStockRow {
+                symbol: "NSE:KAYNES".into(),
+                clean_symbol: "KAYNES".into(),
+                ltp: Some(5410.0),
+                change_pct: Some(1.25),
+                ref_high: Some(5420.0),
+                ref_low: Some(5310.0),
+                break_low: Some(5309.50),
+                entry_price: Some(5309.50),
+                stop_price: Some(5420.0),
+                risk_per_share: Some(110.50),
+                qty: Some(18),
+                planned_risk: Some(1989.0),
+                risk_util: Some(99.45),
+                position: "SHORT 18".into(),
+                status: "IN POSITION".into(),
+                signal: "SELL".into(),
+                last_update: "09:42:15".into(),
+            },
+            live::WatchlistStockRow {
+                symbol: "NSE:DREDGECORP".into(),
+                clean_symbol: "DREDGECORP".into(),
+                ltp: Some(985.40),
+                change_pct: Some(0.85),
+                ref_high: Some(992.0),
+                ref_low: Some(975.0),
+                break_low: Some(974.80),
+                entry_price: Some(974.80),
+                stop_price: Some(992.0),
+                risk_per_share: Some(17.20),
+                qty: Some(116),
+                planned_risk: Some(1995.2),
+                risk_util: Some(99.76),
+                position: "FLAT".into(),
+                status: "READY".into(),
+                signal: "--".into(),
+                last_update: "09:42:10".into(),
+            },
+        ],
+        risk_engine: live::CapitalRiskEngine {
+            raw_capital: 100_000.0,
+            leverage: 4.0,
+            per_trade_risk_pct: 0.005,
+        },
         bars: (0..48)
             .map(|i| {
                 let base = 2790.0 + (i as f64) * 0.6 + ((i * i) as f64 % 7.0);

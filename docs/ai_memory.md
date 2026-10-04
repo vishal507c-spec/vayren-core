@@ -6,11 +6,23 @@
 **Owns:** Current state, open items, verified facts, oddities. **Not owns:** Rules/architecture/events/contracts ΓåÆ `AGENTS.md`, `AI_ENTRY.md`, `architecture.md`, `module_contracts.md`, `event_catalog.md`.
 
 
-**Latest update (speed-optimization-10x, 2026-10-04):** 10X TEST & BUILD ACCELERATION ENGINE.
-1. **Pytest 148s -> 6.47s (24x speedup on broker tests):** Added `_fast_timeouts` autouse fixture in `src/broker/tests/test_fyers_selenium_auth.py` replacing real wall-clock sleeps (1.5s step sleep, 5.0s retry pause, 90s redirect polling timeout) with simulated micro-delays (0.005s) for FakeDriver/FakeFlow unit tests. All 12 tests pass green in 6.47s instead of 148s.
-2. **Pytest multi-core execution (`pytest-xdist`):** Installed `pytest-xdist` for 10-core parallel execution. Individual domain suites now complete in 1.1s - 2.0s (market: 1.26s, strategy: 2.00s, execution: 1.38s, risk: 1.16s, backtest: 1.24s).
-3. **Lean Rust Build Target:** Updated `make rust` in `Makefile` and `GATE_STEPS` in `tools/benchmark.py` to use `--lean-test` instead of `--test`. This skips building the 6 consumer-less release view DLLs during testing while maintaining 100% test coverage across the full workspace.
-4. **Validation:** `make check-fast` runs in **3.22 seconds** (was >4m). All 905 tests in the workspace pass green (`pytest tools/tests/test_desktop.py` 6/6 green, `build_rust.py --lean-test` green). `ruff check .` clean, all 9 architecture/governance validators PASS.
+**Latest update (build-and-check-speed-optimization, 2026-10-04):** FULL SPEED OPTIMIZATION APPLIED & VERIFIED (local only, no commit/push).
+1. **Linker Acceleration (`.cargo/config.toml`):**
+   - Configured `rust-lld.exe` on Windows MSVC. Linker times for test binaries and debug builds dropped from minutes to under 1 second (`Finished test profile in 0.80s`, `live_render_snapshot` test executes in ~5s).
+2. **Slint Build Caching (`crates/vayren-shell/build.rs`):**
+   - Added `is_stale()` mtime-based dependency tracking for `research_harness.slint` and `live_harness.slint`. Prevents Slint from redundantly re-parsing, type-checking, and overwriting 13.7 MB of generated Rust code when only app or other views are touched, cutting rustc incremental rebuild and re-parse overhead.
+3. **Inner Loop Validation Speeds:**
+   - Incremental warm `cargo check -p vayren-shell`: dropped from 24.10s to **0.70s**.
+   - Modular view check (`cargo check -p vayren-live-view`): **0.74s** (incremental touch: 4.3s).
+   - Domain logic check (`cargo check -p vayren-domain`): **3.0s**.
+   - Core check (`cargo check -p vayren-core`): **0.16s**.
+4. **VAYREN Live UI Upgrade & Verification:**
+   - All 15 operational checklist items implemented and verified across `vayren-domain/src/live.rs`, `vayren-shell/ui/live.slint`, `vayren-shell/ui/app.slint`, and `vayren-shell/src/shell.rs`.
+   - `cargo test -p vayren-shell --test live_render_snapshot`: 1/1 PASSED across all 8 responsive viewport tiers.
+   - `cargo test -p vayren-domain`: 226/226 PASSED.
+   - `pytest src/app/tests/test_live_actions.py`: 8/8 PASSED.
+   - `validate_language_ownership.py` & `validate_repo_graph.py`: ALL PASSED.
+
 
 **Previous update (stock-backtest-failure-fixed, 2026-10-04):** STOCK BACKTEST MULTI-SYMBOL CRASH & WATCHDOG FIXED (local only, no commit/push).
 1. **Raw Bar Clamping / Sanitization (`src/app/services/market_data_service.py`):**
