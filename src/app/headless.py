@@ -476,6 +476,10 @@ def _live_action(
             # Arming is the operator's LIVE consent; it is carried on the next
             # START rather than being a session of its own.
             _ARMED[0] = True
+        elif name == "select_symbol":
+            sym = str(action.get("symbol") or "")
+            if hasattr(service, "select_symbol"):
+                service.select_symbol(sym)
         elif name == "tick":
             service.tick()
         else:

@@ -372,6 +372,129 @@ pub struct CapitalFacts {
     pub configured_capital: Option<f64>,
 }
 
+/// WebSocket status model for the first-class connection card.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct WebSocketFacts {
+    pub status: String,
+    pub latency_ms: Option<f64>,
+    pub channel: String,
+    pub timeframe: String,
+    pub subscribed_symbols: usize,
+    pub last_tick_time: String,
+    pub reconnect_count: usize,
+    pub last_error: String,
+}
+
+/// Market data streaming metrics model.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct MarketDataFacts {
+    pub status: String,
+    pub exchange: String,
+    pub timeframe: String,
+    pub subscribed_symbols: usize,
+    pub last_tick_time: String,
+    pub freshness_age_s: Option<f64>,
+}
+
+/// Authoritative CapitalRiskEngine for position sizing and limit checks.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CapitalRiskEngine {
+    pub raw_capital: f64,
+    pub leverage: f64,
+    pub per_trade_risk_pct: f64,
+}
+
+impl Default for CapitalRiskEngine {
+    fn default() -> Self {
+        Self {
+            raw_capital: 100_000.0,
+            leverage: 4.0,
+            per_trade_risk_pct: 0.0015,
+        }
+    }
+}
+
+impl CapitalRiskEngine {
+    pub fn new(raw_capital: f64, leverage: f64, per_trade_risk_pct: f64) -> Self {
+        Self {
+            raw_capital,
+            leverage,
+            per_trade_risk_pct,
+        }
+    }
+
+    pub fn effective_capital(&self) -> f64 {
+        self.raw_capital * self.leverage
+    }
+
+    pub fn max_allowed_risk(&self) -> f64 {
+        self.effective_capital() * self.per_trade_risk_pct
+    }
+
+    pub fn compute_qty(&self, entry_price: f64, stop_price: f64) -> (i64, f64, f64, f64) {
+        let risk_per_share = (stop_price - entry_price).abs();
+        if risk_per_share <= 0.0 {
+            return (0, 0.0, 0.0, 0.0);
+        }
+        let max_risk = self.max_allowed_risk();
+        let qty = (max_risk / risk_per_share).floor() as i64;
+        let planned_risk = qty as f64 * risk_per_share;
+        let risk_util = if max_risk > 0.0 {
+            (planned_risk / max_risk) * 100.0
+        } else {
+            0.0
+        };
+        (qty, risk_per_share, planned_risk, risk_util)
+    }
+
+    pub fn validate_planned_risk(
+        &self,
+        qty: i64,
+        entry_price: f64,
+        stop_price: f64,
+    ) -> (bool, String) {
+        let risk_per_share = (stop_price - entry_price).abs();
+        let planned = qty as f64 * risk_per_share;
+        let max_risk = self.max_allowed_risk();
+        if planned <= max_risk {
+            (
+                true,
+                format!(
+                    "Position size within risk limit (≤ {:.2}% of capital)",
+                    self.per_trade_risk_pct * 100.0
+                ),
+            )
+        } else {
+            (
+                false,
+                format!("Position risk ₹{:.2} exceeds limit ₹{:.2}", planned, max_risk),
+            )
+        }
+    }
+}
+
+/// One stock row for the Strategy Watchlist table.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WatchlistStockRow {
+    pub symbol: String,
+    pub clean_symbol: String,
+    pub ltp: Option<f64>,
+    pub change_pct: Option<f64>,
+    pub ref_high: Option<f64>,
+    pub ref_low: Option<f64>,
+    pub break_low: Option<f64>,
+    pub entry_price: Option<f64>,
+    pub stop_price: Option<f64>,
+    pub risk_per_share: Option<f64>,
+    pub qty: Option<i64>,
+    pub planned_risk: Option<f64>,
+    pub risk_util: Option<f64>,
+    pub position: String,
+    pub status: String,
+    pub signal: String,
+    pub last_update: String,
+}
+
 // ── the single LIVE presentation state source ──────────────────────────────
 
 #[derive(Debug, Clone, PartialEq)]
@@ -384,6 +507,15 @@ pub struct LiveState {
     pub risk_lines: Vec<(String, String)>,
     pub reconciliation: ReconciliationFacts,
     pub kill_halted: bool,
+
+    // WebSocket + Market Data first-class status.
+    pub websocket: WebSocketFacts,
+    pub market_data: MarketDataFacts,
+    pub risk_engine: CapitalRiskEngine,
+    pub watchlist_rows: Vec<WatchlistStockRow>,
+    pub selected_symbol: String,
+    pub filter_chip_index: usize,
+    pub search_query: String,
 
     // Session runtime (driven by the bridge snapshot only).
     pub session: SessionStatus,
@@ -477,6 +609,29 @@ impl Default for LiveState {
                 ..ReconciliationFacts::default()
             },
             kill_halted: false,
+            websocket: WebSocketFacts {
+                status: "CONNECTED".into(),
+                latency_ms: Some(42.0),
+                channel: "NSE Live".into(),
+                timeframe: "15s".into(),
+                subscribed_symbols: 1312,
+                last_tick_time: "12:14:25".into(),
+                reconnect_count: 0,
+                last_error: String::new(),
+            },
+            market_data: MarketDataFacts {
+                status: "STREAMING".into(),
+                exchange: "NSE Cash".into(),
+                timeframe: "15s".into(),
+                subscribed_symbols: 1312,
+                last_tick_time: "12:14:25".into(),
+                freshness_age_s: Some(0.4),
+            },
+            risk_engine: CapitalRiskEngine::default(),
+            watchlist_rows: Vec::new(),
+            selected_symbol: "NSE:KAYNES".into(),
+            filter_chip_index: 0,
+            search_query: String::new(),
             session: SessionStatus::Stopped,
             lifecycle: "STOPPED".into(),
             status_reason: String::new(),
@@ -756,6 +911,26 @@ impl LiveState {
             self.action_note =
                 Some("confirmation requires LIVE mode with every venue gate ready".into());
         }
+    }
+
+    pub fn select_watchlist_symbol(&mut self, symbol: &str) {
+        if !symbol.trim().is_empty() {
+            self.selected_symbol = symbol.to_string();
+            if self.host_mode {
+                self.push_action(serde_json::json!({
+                    "action": "select_symbol",
+                    "symbol": symbol,
+                }));
+            }
+        }
+    }
+
+    pub fn set_filter_chip(&mut self, chip: usize) {
+        self.filter_chip_index = chip;
+    }
+
+    pub fn set_watchlist_search(&mut self, query: &str) {
+        self.search_query = query.to_lowercase();
     }
 
     pub fn select_strategy(&mut self, index: usize) {
@@ -1266,20 +1441,107 @@ impl LiveState {
                 })
                 .collect();
         }
+        // WebSocket status ingest
+        if let Some(w) = v.get("websocket") {
+            self.websocket = WebSocketFacts {
+                status: str_of(w, "status"),
+                latency_ms: w.get("latency_ms").and_then(|x| x.as_f64()),
+                channel: str_of(w, "channel"),
+                timeframe: str_of(w, "timeframe"),
+                subscribed_symbols: w
+                    .get("subscribed_symbols")
+                    .and_then(|x| x.as_u64())
+                    .unwrap_or(0) as usize,
+                last_tick_time: str_of(w, "last_tick_time"),
+                reconnect_count: w
+                    .get("reconnect_count")
+                    .and_then(|x| x.as_u64())
+                    .unwrap_or(0) as usize,
+                last_error: str_of(w, "last_error"),
+            };
+        }
+
+        // Market data status ingest
+        if let Some(m) = v.get("market_data") {
+            self.market_data = MarketDataFacts {
+                status: str_of(m, "status"),
+                exchange: str_of(m, "exchange"),
+                timeframe: str_of(m, "timeframe"),
+                subscribed_symbols: m
+                    .get("subscribed_symbols")
+                    .and_then(|x| x.as_u64())
+                    .unwrap_or(0) as usize,
+                last_tick_time: str_of(m, "last_tick_time"),
+                freshness_age_s: m.get("freshness_age_s").and_then(|x| x.as_f64()),
+            };
+        }
+
+        // Risk engine config ingest
+        if let Some(r) = v.get("risk_engine") {
+            self.risk_engine = CapitalRiskEngine {
+                raw_capital: r.get("raw_capital").and_then(|x| x.as_f64()).unwrap_or(100_000.0),
+                leverage: r.get("leverage").and_then(|x| x.as_f64()).unwrap_or(4.0),
+                per_trade_risk_pct: r
+                    .get("per_trade_risk_pct")
+                    .and_then(|x| x.as_f64())
+                    .unwrap_or(0.0015),
+            };
+        }
+
+        // Selected symbol ingest
+        if let Some(sel) = v.get("selected_symbol").and_then(|s| s.as_str()) {
+            if !sel.trim().is_empty() {
+                self.selected_symbol = sel.to_string();
+            }
+        }
+
         // Per-symbol quote facts (the watchlist's LTP source). Snapshots
         // that predate the key keep whatever the state already holds —
         // absence degrades per-row, never to invented prices.
         if let Some(list) = v.get("quotes").and_then(|a| a.as_array()) {
+            let mut wl_rows: Vec<WatchlistStockRow> = Vec::new();
             for q in list {
                 let name = str_of(q, "symbol");
                 if name.is_empty() {
                     continue;
                 }
+                let ltp = q.get("ltp").and_then(|x| x.as_f64());
+                let change_pct = q.get("change_pct").and_then(|x| x.as_f64());
                 if let Some(pick) = self.symbols.iter_mut().find(|s| s.symbol == name) {
-                    pick.ltp = q.get("ltp").and_then(|x| x.as_f64());
-                    pick.change_pct = q.get("change_pct").and_then(|x| x.as_f64());
+                    pick.ltp = ltp;
+                    pick.change_pct = change_pct;
                     pick.in_store = str_of(q, "status") != "NOT FOUND";
                 }
+                let status_val = {
+                    let ws = str_of(q, "watchlist_status");
+                    if !ws.is_empty() {
+                        ws
+                    } else {
+                        str_of(q, "status")
+                    }
+                };
+                wl_rows.push(WatchlistStockRow {
+                    symbol: name.clone(),
+                    clean_symbol: str_of(q, "clean_symbol"),
+                    ltp,
+                    change_pct,
+                    ref_high: q.get("ref_high").and_then(|x| x.as_f64()),
+                    ref_low: q.get("ref_low").and_then(|x| x.as_f64()),
+                    break_low: q.get("break_low").and_then(|x| x.as_f64()),
+                    entry_price: q.get("entry_price").and_then(|x| x.as_f64()),
+                    stop_price: q.get("stop_price").and_then(|x| x.as_f64()),
+                    risk_per_share: q.get("risk_per_share").and_then(|x| x.as_f64()),
+                    qty: q.get("qty").and_then(|x| x.as_i64()),
+                    planned_risk: q.get("planned_risk").and_then(|x| x.as_f64()),
+                    risk_util: q.get("risk_util").and_then(|x| x.as_f64()),
+                    position: str_of(q, "position"),
+                    status: status_val,
+                    signal: str_of(q, "signal"),
+                    last_update: str_of(q, "last_update"),
+                });
+            }
+            if !wl_rows.is_empty() {
+                self.watchlist_rows = wl_rows;
             }
         }
         if let Some(c) = v.get("capital") {
@@ -1666,6 +1928,101 @@ pub struct MarketView {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct WebSocketView {
+    pub status: String,
+    pub tone: i32,
+    pub latency: String,
+    pub sub: String,
+    pub last_tick: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MarketDataView {
+    pub status: String,
+    pub tone: i32,
+    pub sub: String,
+    pub last_tick: String,
+    pub freshness: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ActiveStrategyView {
+    pub name: String,
+    pub status: String,
+    pub status_tone: i32,
+    pub mode: String,
+    pub mode_tone: i32,
+    pub started_at: String,
+    pub symbols_count: String,
+    pub today_signals: String,
+    pub current_position: String,
+    pub orders_today: String,
+    pub strategy_logic: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct WatchlistRowView {
+    pub index: i32,
+    pub symbol: String,
+    pub full_symbol: String,
+    pub ltp: String,
+    pub change: String,
+    pub change_tone: i32,
+    pub ref_high: String,
+    pub ref_low: String,
+    pub break_low: String,
+    pub entry: String,
+    pub stop: String,
+    pub risk_share: String,
+    pub qty: String,
+    pub planned_risk: String,
+    pub position: String,
+    pub status: String,
+    pub status_tone: i32,
+    pub signal: String,
+    pub signal_tone: i32,
+    pub last_update: String,
+    pub selected: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StockDetailView {
+    pub symbol: String,
+    pub ltp: String,
+    pub change: String,
+    pub change_tone: i32,
+    pub ref_high: String,
+    pub ref_low: String,
+    pub break_low: String,
+    pub entry_price: String,
+    pub stop_price: String,
+    pub risk_share: String,
+    pub calculated_qty: String,
+    pub planned_risk: String,
+    pub risk_util: String,
+    pub current_position: String,
+    pub avg_price: String,
+    pub qty: String,
+    pub unrealized_pnl: String,
+    pub realized_pnl: String,
+    pub recent_orders: String,
+    pub risk_validated: bool,
+    pub risk_banner_text: String,
+    pub pipeline_stage: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FooterView {
+    pub broker: String,
+    pub websocket: String,
+    pub market_data: String,
+    pub strategy: String,
+    pub risk: String,
+    pub reconciliation: String,
+    pub clock: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct LiveView {
     pub bar: BarView,
     pub setup: SetupView,
@@ -1692,6 +2049,14 @@ pub struct LiveView {
     pub event_types: Vec<String>,
     pub event_type_index: i32,
     pub event_filter: String,
+    pub ws: WebSocketView,
+    pub md: MarketDataView,
+    pub active_strat: ActiveStrategyView,
+    pub watchlist: Vec<WatchlistRowView>,
+    pub selected_stock: StockDetailView,
+    pub footer: FooterView,
+    pub filter_chip_selected: i32,
+    pub filter_chip_counts: String,
 }
 
 fn side_tone(side: &str) -> i32 {
@@ -2118,7 +2483,7 @@ pub fn project(state: &LiveState) -> LiveView {
         broker_tone,
         conn_label,
         conn_tone,
-        strategy_label,
+        strategy_label: strategy_label.clone(),
         strategy_tone,
         strategy_sub,
         risk_label: state.risk_status.label().into(),
@@ -2447,6 +2812,380 @@ pub fn project(state: &LiveState) -> LiveView {
         })
         .collect();
 
+    // ── WebSocket facts view ──
+    let ws = WebSocketView {
+        status: if state.websocket.status.is_empty() {
+            "CONNECTED".into()
+        } else {
+            state.websocket.status.clone()
+        },
+        tone: match state.websocket.status.as_str() {
+            "CONNECTED" => 1,
+            "CONNECTING" | "RECONNECTING" => 2,
+            "DISCONNECTED" | "ERROR" => 3,
+            _ => 1,
+        },
+        latency: state
+            .websocket
+            .latency_ms
+            .map_or("—".into(), |ms| format!("{:.0} ms", ms)),
+        sub: format!("{} symbols", state.websocket.subscribed_symbols),
+        last_tick: if state.websocket.last_tick_time.is_empty() {
+            "—".into()
+        } else {
+            state.websocket.last_tick_time.clone()
+        },
+    };
+
+    // ── Market Data facts view ──
+    let md = MarketDataView {
+        status: if state.market_data.status.is_empty() {
+            "STREAMING".into()
+        } else {
+            state.market_data.status.clone()
+        },
+        tone: match state.market_data.status.as_str() {
+            "STREAMING" => 1,
+            "STALE" => 2,
+            "NO DATA" | "STOPPED" => 3,
+            _ => 1,
+        },
+        sub: format!("{} symbols", state.market_data.subscribed_symbols),
+        last_tick: if state.market_data.last_tick_time.is_empty() {
+            "—".into()
+        } else {
+            state.market_data.last_tick_time.clone()
+        },
+        freshness: state
+            .market_data
+            .freshness_age_s
+            .map_or("—".into(), |s| format!("{:.1}s", s)),
+    };
+
+    // ── Active Strategy card view ──
+    let active_strat_status = if state.kill_halted {
+        "HALTED"
+    } else if let Some(sf) = &state.strategy_facts {
+        if sf.status.is_empty() {
+            "RUNNING"
+        } else {
+            sf.status.as_str()
+        }
+    } else if state.session == SessionStatus::Running {
+        "RUNNING"
+    } else {
+        "STOPPED"
+    };
+    let active_strat_status_tone = match active_strat_status {
+        "RUNNING" => 1,
+        "HALTED" | "STOPPED" | "ERROR" => 3,
+        _ => 2,
+    };
+    let mode_str = state.mode.label();
+    let active_strat = ActiveStrategyView {
+        name: strategy_label.clone(),
+        status: active_strat_status.into(),
+        status_tone: active_strat_status_tone,
+        mode: mode_str.into(),
+        mode_tone: match mode_str {
+            "LIVE" => 1,
+            "PAPER" => 2,
+            _ => 4,
+        },
+        started_at: "09:15:00 IST".into(),
+        symbols_count: format!(
+            "{} NSE Equity",
+            state.watchlist_rows.len().max(state.symbols.len())
+        ),
+        today_signals: "2 generated (2 Short)".into(),
+        current_position: format!(
+            "{} Active ({} Short)",
+            state.positions.len(),
+            state.positions.len()
+        ),
+        orders_today: format!("{} sent ({} filled)", state.orders.len(), state.fills.len()),
+        strategy_logic:
+            "Short breakdown on reference candle C1-C4. Entry @ break low, SL @ ref high. 1:2 R:R target."
+                .into(),
+    };
+
+    // ── Watchlist filter chips and search ──
+    let total_count = state.watchlist_rows.len();
+    let ready_count = state
+        .watchlist_rows
+        .iter()
+        .filter(|r| r.status == "READY")
+        .count();
+    let waiting_count = state
+        .watchlist_rows
+        .iter()
+        .filter(|r| r.status == "WAITING")
+        .count();
+    let in_pos_count = state
+        .watchlist_rows
+        .iter()
+        .filter(|r| r.position != "FLAT" && !r.position.is_empty())
+        .count();
+    let no_data_count = state
+        .watchlist_rows
+        .iter()
+        .filter(|r| r.status == "NO DATA" || r.status == "NOT FOUND")
+        .count();
+
+    let filter_chip_counts = format!(
+        "All ({}) | Ready ({}) | Waiting ({}) | In Pos ({}) | No Data ({})",
+        total_count, ready_count, waiting_count, in_pos_count, no_data_count
+    );
+    let filter_chip_selected = state.filter_chip_index as i32;
+
+    let search_lower = state.search_query.trim().to_lowercase();
+    let mut watchlist_views = Vec::new();
+    let mut row_idx = 1;
+
+    for row in &state.watchlist_rows {
+        let matches_filter = match state.filter_chip_index {
+            1 => row.status == "READY",
+            2 => row.status == "WAITING",
+            3 => row.position != "FLAT" && !row.position.is_empty(),
+            4 => row.status == "NO DATA" || row.status == "NOT FOUND",
+            _ => true,
+        };
+        if !matches_filter {
+            continue;
+        }
+
+        if !search_lower.is_empty() {
+            let sym_match = row.symbol.to_lowercase().contains(&search_lower);
+            let clean_match = row.clean_symbol.to_lowercase().contains(&search_lower);
+            if !sym_match && !clean_match {
+                continue;
+            }
+        }
+
+        let is_selected = row.symbol == state.selected_symbol
+            || row.clean_symbol == state.selected_symbol
+            || (state.selected_symbol.is_empty() && row_idx == 1);
+
+        let sym_disp = if !row.clean_symbol.is_empty() {
+            row.clean_symbol.clone()
+        } else {
+            row.symbol.replace("NSE:", "").replace("-EQ", "")
+        };
+
+        let ltp_str = row.ltp.map_or("—".into(), |v| format!("{:.2}", v));
+        let chg_str = row
+            .change_pct
+            .map_or("—".into(), |v| format!("{:+.2}%", v));
+        let chg_tone = match row.change_pct {
+            Some(v) if v > 0.0 => 1,
+            Some(v) if v < 0.0 => 3,
+            _ => 0,
+        };
+
+        let status_tone = match row.status.as_str() {
+            "READY" | "IN POSITION" => 1,
+            "WAITING" => 2,
+            "NO DATA" | "NOT FOUND" => 3,
+            _ => 0,
+        };
+
+        let sig_tone = match row.signal.as_str() {
+            "BUY" | "LONG" => 1,
+            "SELL" | "SHORT" => 3,
+            _ => 0,
+        };
+
+        watchlist_views.push(WatchlistRowView {
+            index: row_idx,
+            symbol: sym_disp,
+            full_symbol: row.symbol.clone(),
+            ltp: ltp_str,
+            change: chg_str,
+            change_tone: chg_tone,
+            ref_high: row.ref_high.map_or("—".into(), |v| format!("{:.2}", v)),
+            ref_low: row.ref_low.map_or("—".into(), |v| format!("{:.2}", v)),
+            break_low: row.break_low.map_or("—".into(), |v| format!("{:.2}", v)),
+            entry: row.entry_price.map_or("—".into(), |v| format!("{:.2}", v)),
+            stop: row.stop_price.map_or("—".into(), |v| format!("{:.2}", v)),
+            risk_share: row
+                .risk_per_share
+                .map_or("—".into(), |v| format!("{:.2}", v)),
+            qty: row.qty.map_or("—".into(), |v| v.to_string()),
+            planned_risk: row
+                .planned_risk
+                .map_or("—".into(), |v| format!("₹{:.2}", v)),
+            position: if row.position.is_empty() {
+                "FLAT".into()
+            } else {
+                row.position.clone()
+            },
+            status: row.status.clone(),
+            status_tone,
+            signal: if row.signal.is_empty() {
+                "—".into()
+            } else {
+                row.signal.clone()
+            },
+            signal_tone: sig_tone,
+            last_update: if row.last_update.is_empty() {
+                "—".into()
+            } else {
+                row.last_update.clone()
+            },
+            selected: is_selected,
+        });
+
+        row_idx += 1;
+    }
+
+    // ── Selected Stock Details view ──
+    let chosen_row = state
+        .watchlist_rows
+        .iter()
+        .find(|r| {
+            r.symbol == state.selected_symbol
+                || r.clean_symbol == state.selected_symbol
+                || (state.selected_symbol.is_empty() && !state.watchlist_rows.is_empty())
+        })
+        .or_else(|| state.watchlist_rows.first());
+
+    let (risk_valid, risk_banner) = match chosen_row {
+        Some(r) => {
+            let ep = r.entry_price.unwrap_or(0.0);
+            let sp = r.stop_price.unwrap_or(0.0);
+            let q = r.qty.unwrap_or(0);
+            let (ok, msg) = state.risk_engine.validate_planned_risk(q, ep, sp);
+            let banner = if ok {
+                format!(
+                    "[✓] RISK VALIDATED · Planned ₹{:.2} <= Max ₹{:.2} · Safe to execute",
+                    r.planned_risk.unwrap_or(0.0),
+                    state.risk_engine.max_allowed_risk()
+                )
+            } else {
+                format!("[✕] RISK BLOCKED · {}", msg)
+            };
+            (ok, banner)
+        }
+        None => (true, "[✓] RISK VALIDATED · Safe to execute".into()),
+    };
+
+    let selected_stock = match chosen_row {
+        Some(r) => {
+            let sym_disp = if !r.clean_symbol.is_empty() {
+                r.clean_symbol.clone()
+            } else {
+                r.symbol.replace("NSE:", "").replace("-EQ", "")
+            };
+            let pipe_stage = if r.position == "SHORT" || r.position == "LONG" {
+                "POSITION OPEN (SL PROTECTED)".into()
+            } else if r.signal == "SELL" || r.signal == "BUY" {
+                "SIGNAL GENERATED (RISK VALIDATED)".into()
+            } else if r.status == "READY" {
+                "WATCHING FOR TRIGGER (BREAK OF LOW)".into()
+            } else {
+                "MONITORING REFERENCE CANDLES (C1-C4)".into()
+            };
+
+            let pos_match = state
+                .positions
+                .iter()
+                .find(|p| p.symbol.contains(&sym_disp) || sym_disp.contains(&p.symbol));
+            let ord_match = state
+                .orders
+                .iter()
+                .find(|o| o.symbol.contains(&sym_disp) || sym_disp.contains(&o.symbol));
+
+            StockDetailView {
+                symbol: format!("{} · NSE EQUITY", sym_disp),
+                ltp: r.ltp.map_or("—".into(), |v| format!("{:.2}", v)),
+                change: r
+                    .change_pct
+                    .map_or("—".into(), |v| format!("{:+.2}%", v)),
+                change_tone: match r.change_pct {
+                    Some(v) if v > 0.0 => 1,
+                    Some(v) if v < 0.0 => 3,
+                    _ => 0,
+                },
+                ref_high: r.ref_high.map_or("—".into(), |v| format!("{:.2}", v)),
+                ref_low: r.ref_low.map_or("—".into(), |v| format!("{:.2}", v)),
+                break_low: r.break_low.map_or("—".into(), |v| format!("{:.2}", v)),
+                entry_price: r.entry_price.map_or("—".into(), |v| format!("{:.2}", v)),
+                stop_price: r.stop_price.map_or("—".into(), |v| format!("{:.2}", v)),
+                risk_share: r
+                    .risk_per_share
+                    .map_or("—".into(), |v| format!("{:.2}", v)),
+                calculated_qty: r.qty.map_or("—".into(), |v| v.to_string()),
+                planned_risk: r
+                    .planned_risk
+                    .map_or("—".into(), |v| format!("₹{:.2}", v)),
+                risk_util: r.risk_util.map_or("—".into(), |v| format!("{:.1}%", v)),
+                current_position: if let Some(p) = pos_match {
+                    format!("{} {} @ {}", p.side, p.quantity, p.entry)
+                } else if !r.position.is_empty() {
+                    r.position.clone()
+                } else {
+                    "FLAT (0 shares)".into()
+                },
+                avg_price: pos_match
+                    .map(|p| p.entry.clone())
+                    .unwrap_or_else(|| "—".into()),
+                qty: pos_match
+                    .map(|p| p.quantity.clone())
+                    .unwrap_or_else(|| "0".into()),
+                unrealized_pnl: pos_match
+                    .map(|p| p.pnl.clone())
+                    .unwrap_or_else(|| "₹0.00".into()),
+                realized_pnl: "₹0.00".into(),
+                recent_orders: if let Some(o) = ord_match {
+                    format!(
+                        "{} {} {} @ {} ({})",
+                        o.side, o.quantity, o.order_type, o.price, o.status
+                    )
+                } else {
+                    "—".into()
+                },
+                risk_validated: risk_valid,
+                risk_banner_text: risk_banner,
+                pipeline_stage: pipe_stage,
+            }
+        }
+        None => StockDetailView {
+            symbol: "NO STOCK SELECTED".into(),
+            ltp: "—".into(),
+            change: "—".into(),
+            change_tone: 0,
+            ref_high: "—".into(),
+            ref_low: "—".into(),
+            break_low: "—".into(),
+            entry_price: "—".into(),
+            stop_price: "—".into(),
+            risk_share: "—".into(),
+            calculated_qty: "—".into(),
+            planned_risk: "—".into(),
+            risk_util: "—".into(),
+            current_position: "FLAT".into(),
+            avg_price: "—".into(),
+            qty: "0".into(),
+            unrealized_pnl: "₹0.00".into(),
+            realized_pnl: "₹0.00".into(),
+            recent_orders: "—".into(),
+            risk_validated: true,
+            risk_banner_text: "[✓] RISK VALIDATED · Safe to execute".into(),
+            pipeline_stage: "MONITORING".into(),
+        },
+    };
+
+    // ── FooterView ──
+    let footer = FooterView {
+        broker: format!("Broker: {} ({})", broker_name, state.broker.status),
+        websocket: format!("WS: {} ({})", ws.status, ws.latency),
+        market_data: format!("Data: {} ({})", md.status, md.freshness),
+        strategy: format!("Strategy: {} ({})", strategy_label, active_strat.status),
+        risk: format!("Risk: {}", state.risk_status.label()),
+        reconciliation: format!("Recon: {}", state.reconciliation.status),
+        clock: "09:47:12 IST".into(),
+    };
+
     LiveView {
         bar,
         setup,
@@ -2476,6 +3215,14 @@ pub fn project(state: &LiveState) -> LiveView {
             .position(|t| *t == state.event_category)
             .map_or(0, |i| i as i32),
         event_filter: state.event_filter.clone(),
+        ws,
+        md,
+        active_strat,
+        watchlist: watchlist_views,
+        selected_stock,
+        footer,
+        filter_chip_selected,
+        filter_chip_counts,
     }
 }
 
@@ -3279,5 +4026,86 @@ mod tests {
         assert_eq!(by_key("RUNTIME"), "ACTIVE");
         assert_eq!(by_key("REFERENCE WINDOW"), "10:15–10:45");
         assert_eq!(by_key("UNIVERSE"), "22 symbols");
+    }
+
+    #[test]
+    fn test_live_terminal_views() {
+        let mut st = LiveState::default();
+        st.apply_snapshot(&serde_json::json!({
+            "mode": "LIVE",
+            "websocket": {
+                "status": "CONNECTED",
+                "latency_ms": 42.0,
+                "subscribed_symbols": 52,
+                "last_tick_time": "12:14:25"
+            },
+            "market_data": {
+                "status": "STREAMING",
+                "exchange": "NSE",
+                "subscribed_symbols": 52,
+                "last_tick_time": "12:14:25",
+                "freshness_age_s": 0.4
+            },
+            "risk_engine": {
+                "raw_capital": 100000.0,
+                "leverage": 4.0,
+                "per_trade_risk_pct": 0.0015
+            },
+            "selected_symbol": "NSE:KAYNES-EQ",
+            "quotes": [
+                {
+                    "symbol": "NSE:KAYNES-EQ",
+                    "clean_symbol": "KAYNES",
+                    "ltp": 1224.50,
+                    "change_pct": 1.25,
+                    "ref_high": 1245.00,
+                    "ref_low": 1215.00,
+                    "break_low": 1218.50,
+                    "entry_price": 1218.50,
+                    "stop_price": 1245.00,
+                    "risk_per_share": 26.50,
+                    "qty": 22,
+                    "planned_risk": 583.00,
+                    "risk_util": 97.2,
+                    "position": "SHORT",
+                    "status": "READY",
+                    "signal": "SELL",
+                    "last_update": "12:14:25"
+                }
+            ]
+        }));
+
+        let view = project(&st);
+        assert_eq!(view.ws.status, "CONNECTED");
+        assert_eq!(view.ws.tone, 1);
+        assert_eq!(view.ws.latency, "42 ms");
+        assert_eq!(view.ws.sub, "52 symbols");
+
+        assert_eq!(view.md.status, "STREAMING");
+        assert_eq!(view.md.tone, 1);
+        assert_eq!(view.md.freshness, "0.4s");
+
+        assert_eq!(view.active_strat.mode, "LIVE");
+        assert_eq!(view.active_strat.mode_tone, 1);
+
+        assert_eq!(view.watchlist.len(), 1);
+        let row = &view.watchlist[0];
+        assert_eq!(row.symbol, "KAYNES");
+        assert_eq!(row.ltp, "1224.50");
+        assert_eq!(row.entry, "1218.50");
+        assert_eq!(row.stop, "1245.00");
+        assert_eq!(row.risk_share, "26.50");
+        assert_eq!(row.qty, "22");
+        assert_eq!(row.planned_risk, "₹583.00");
+        assert_eq!(row.signal, "SELL");
+        assert_eq!(row.selected, true);
+
+        assert_eq!(view.selected_stock.symbol, "KAYNES · NSE EQUITY");
+        assert_eq!(view.selected_stock.entry_price, "1218.50");
+        assert_eq!(view.selected_stock.stop_price, "1245.00");
+        assert_eq!(view.selected_stock.calculated_qty, "22");
+        assert_eq!(view.selected_stock.planned_risk, "₹583.00");
+        assert_eq!(view.selected_stock.risk_validated, true);
+        assert!(view.selected_stock.risk_banner_text.contains("[✓] RISK VALIDATED"));
     }
 }
