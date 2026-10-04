@@ -1000,58 +1000,24 @@ impl LabState {
             filter_c: compare_side,
         };
         let previous = self.trade_win.key();
-        let order_changed = previous.rows != key.rows
+        let order_changed = self.trade_win.order.len() != rows.len()
+            || previous.rows != key.rows
             || previous.criterion != key.criterion
             || previous.desc != key.desc;
-        // How many filters are ACTIVE. If the new set is LESS restrictive than
-        // the previous one, the current view is a strict subset and cannot be
-        // the base — a cleared search must bring the whole dataset back, not
-        // just the rows that already matched.
-        let restrictiveness = |k: &ViewKey, needle: &str| {
-            usize::from(!needle.is_empty())
-                + usize::from(k.filter_a > 0)
-                + usize::from(k.filter_b > 0)
-                + usize::from(k.filter_c > 0)
-        };
-        let relaxed = restrictiveness(&key, &needle) < restrictiveness(&previous, &previous.search);
-        let filters_changed = relaxed
-            || side != previous.filter_a
-            || result != previous.filter_b
-            || compare_side != previous.filter_c
-            || needle != previous.search;
-        // A keystroke or a filter edit filters the EXISTING order instead of
-        // re-sorting it: typing never reorders what the user is reading
-        // (`spec §15`), and it is the difference between O(N) and O(N log N)
-        // per character.
-        let base: Vec<u32> = if previous.rows == key.rows
-            && !order_changed
-            && !relaxed
-            && !self.trade_win.view.is_empty()
-        {
-            if !filters_changed {
-                self.trade_win.view.clone()
-            } else {
-                self.trade_win
-                    .view
-                    .iter()
-                    .copied()
-                    .filter(|index| {
-                        trade_matches(&rows[*index as usize], &needle, side, result, compare_side)
-                    })
-                    .collect()
-            }
-        } else {
-            (0..rows.len() as u32)
-                .filter(|index| {
-                    trade_matches(&rows[*index as usize], &needle, side, result, compare_side)
-                })
-                .collect()
-        };
 
-        let mut view = base;
         if order_changed {
-            view = sort_trade_indices(view, rows, sort, desc);
+            let all_indices: Vec<u32> = (0..rows.len() as u32).collect();
+            self.trade_win.order = sort_trade_indices(all_indices, rows, sort, desc);
         }
+
+        let view: Vec<u32> = self.trade_win.order
+            .iter()
+            .copied()
+            .filter(|&index| {
+                trade_matches(&rows[index as usize], &needle, side, result, compare_side)
+            })
+            .collect();
+
         self.trade_win.set_view(view, key);
     }
 
@@ -1979,6 +1945,8 @@ const RANK_OVERSCAN_MAX: usize = 8;
 /// window arithmetic, overscan policy and scrollbar maths.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VirtualWindow {
+    /// Sorted order over all rows in the dataset (row indices).
+    pub order: Vec<u32>,
     /// Sorted+filtered order over the dataset (row indices).
     pub view: Vec<u32>,
     /// Rows in `view` (the true count, never a truncated one).
@@ -2023,6 +1991,7 @@ pub type RankWindow = VirtualWindow;
 impl Default for VirtualWindow {
     fn default() -> Self {
         Self {
+            order: Vec::new(),
             view: Vec::new(),
             total: 0,
             first: 0,
@@ -2211,52 +2180,19 @@ impl VirtualWindow {
         // The order only changes when the DATA or the SORT changes. A keystroke
         // filters the existing order instead of re-sorting it (`spec §15/§16`),
         // so typing never reorders what the user is reading.
-        let order_changed = previous.rows != key.rows
+        let order_changed = self.order.len() != rows.len()
+            || previous.rows != key.rows
             || previous.criterion != key.criterion
             || previous.desc != key.desc;
-        let same_shape = previous.rows == key.rows && !order_changed;
-        // A RELAXED filter (cleared search, side/result back to "all") must
-        // rebuild from identity: the current view is a strict subset, so
-        // filtering it could only ever narrow further. Narrowing keeps the
-        // existing order, so typing never re-sorts what the user reads.
-        let restrictiveness = |k: &ViewKey, needle: &str| {
-            usize::from(!needle.is_empty())
-                + usize::from(k.filter_a > 0)
-                + usize::from(k.filter_b > 0)
-        };
-        let relaxed = restrictiveness(&key, key.search.as_str())
-            < restrictiveness(&previous, previous.search.as_str());
-        let needle = key.search.as_str();
-        // The sorted order survives a search edit: filtering walks the existing
-        // order so a keystroke can never reorder what the user is reading.
-        let base: Vec<u32> = if same_shape && !relaxed && !self.view.is_empty() {
-            if needle.is_empty() {
-                self.view.clone()
-            } else {
-                self.view
-                    .iter()
-                    .copied()
-                    .filter(|index| {
-                        contains_ignore_ascii_case(&rows[*index as usize].symbol, needle)
-                    })
-                    .collect()
-            }
-        } else {
-            (0..rows.len() as u32).collect()
-        };
-        let mut view = base;
+
         if order_changed {
+            let all_indices: Vec<u32> = (0..rows.len() as u32).collect();
             if let Some(field) = criterion {
-                // Sort a (key, index) array, not row objects (`spec §6`): one pass
-                // to read the cached keys, then a compare that never chases a
-                // pointer back into the dataset. "—" rows get a sentinel so they
-                // sink without a per-comparison branch. The index is the tiebreaker,
-                // so the result is deterministic even though the sort is unstable.
                 let descending = desc;
-                let mut keyed: Vec<(f64, u32)> = view
-                    .iter()
+                let mut keyed: Vec<(f64, u32)> = all_indices
+                    .into_iter()
                     .filter_map(|index| {
-                        let row = rows.get(*index as usize)?;
+                        let row = rows.get(index as usize)?;
                         let raw = row.sort[field];
                         let key = if row.unranked {
                             if descending {
@@ -2267,7 +2203,7 @@ impl VirtualWindow {
                         } else {
                             raw
                         };
-                        Some((key, *index))
+                        Some((key, index))
                     })
                     .collect();
                 keyed.sort_unstable_by(|a, b| {
@@ -2278,9 +2214,24 @@ impl VirtualWindow {
                         order
                     }
                 });
-                view = keyed.into_iter().map(|(_, index)| index).collect();
+                self.order = keyed.into_iter().map(|(_, index)| index).collect();
+            } else {
+                self.order = all_indices;
             }
         }
+
+        let needle = key.search.as_str();
+        let view: Vec<u32> = if needle.is_empty() {
+            self.order.clone()
+        } else {
+            self.order
+                .iter()
+                .copied()
+                .filter(|&index| {
+                    contains_ignore_ascii_case(&rows[index as usize].symbol, needle)
+                })
+                .collect()
+        };
         self.set_view(view, key);
     }
 
@@ -5167,6 +5118,47 @@ mod tests {
         assert_eq!(clock_label(134.0), "02:14");
         assert_eq!(clock_label(392.0), "06:32");
         assert_eq!(clock_label(3_671.0), "1:01:11");
+    }
+
+    #[test]
+    fn search_filter_transitions_preserve_sort_and_find_results() {
+        let mock = |symbol: &str, sort_val: f64| RankRow {
+            rank: "1".to_string(),
+            symbol: symbol.to_string(),
+            pnl: "+100".to_string(),
+            ret: "+10%".to_string(),
+            trades: "5".to_string(),
+            win: "60%".to_string(),
+            pf: "1.5".to_string(),
+            dd: "-5%".to_string(),
+            sharpe: "2.1".to_string(),
+            pnl_tone: Tone::Positive,
+            pf_tone: Tone::Neutral,
+            unranked: false,
+            sort: [sort_val, 10.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+        };
+        let mut window = VirtualWindow::default();
+        let rows = vec![
+            mock("INFY", 100.0),
+            mock("TCS", 200.0),
+            mock("RELIANCE", 50.0),
+        ];
+
+        // 1. Initial sort by criterion 0 descending -> TCS (200), INFY (100), RELIANCE (50)
+        window.rebuild(&rows, "", Some(0), true);
+        assert_eq!(window.view, vec![1, 0, 2]);
+
+        // 2. Search for "INF" -> only INFY
+        window.rebuild(&rows, "INF", Some(0), true);
+        assert_eq!(window.view, vec![0]);
+
+        // 3. Search switched to "TCS" (must NOT be empty from previous INFY filter)
+        window.rebuild(&rows, "TCS", Some(0), true);
+        assert_eq!(window.view, vec![1]);
+
+        // 4. Search cleared -> all 3 rows restored in descending sort order
+        window.rebuild(&rows, "", Some(0), true);
+        assert_eq!(window.view, vec![1, 0, 2]);
     }
 }
 

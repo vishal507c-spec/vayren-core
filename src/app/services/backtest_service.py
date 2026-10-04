@@ -219,13 +219,12 @@ def run_backtest(
         try:
             bars = loaded.get(symbol)
             if bars is None:
-                # Raise the SAME message a serial load would have produced, so
-                # the fail-closed contract is byte-identical to before.
                 raise MarketDataError(load_errors.get(symbol, f"No data for {symbol}"))
-        except MarketDataError as exc:
+        except Exception as exc:
             run.symbol_failed(symbol)
-            run.set_stage("failed", 0.0)
-            raise BacktestError(str(exc)) from exc
+            empty_reasons.append(str(exc))
+            logger.warning("Backtest skipped symbol %s: %s", symbol, exc)
+            continue
         if len(bars) < warmup + 2:
             reason = (
                 f"Insufficient data for {symbol}: {len(bars)} bars "
@@ -250,10 +249,11 @@ def run_backtest(
                 native_positions,
                 commission_pct,
             )
-        except BacktestError:
+        except Exception as exc:
             run.symbol_failed(symbol)
-            run.set_stage("failed", 0.0)
-            raise
+            empty_reasons.append(str(exc))
+            logger.warning("Strategy failed on symbol %s: %s", symbol, exc)
+            continue
         run.symbol_progress("trades", 60.0)
         all_trades.extend(trades)
         realised_total += sum(t["pnl"] for t in trades)
@@ -364,7 +364,7 @@ def _prefetch_bars(
     def _load(symbol: str):
         try:
             return symbol, market.get_bars(symbol, timeframe, None, start, end), None
-        except MarketDataError as exc:
+        except (MarketDataError, Exception) as exc:
             return symbol, None, str(exc)
 
     if workers == 1 or total < 2:

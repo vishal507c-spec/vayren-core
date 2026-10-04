@@ -2769,10 +2769,10 @@ overflow: elide;
                                         border-radius: 2px;
                                         x: 44px + (parent.width - 58px) * (p.x / 1000px);
                                         y: 24px + 150px - 150px * (p.y / 300px);
-                                        background: LabPalette.lab-red;
+                                        background: root.lab.result-pnl-tone == 2 ? LabPalette.lab-red : LabPalette.green;
                                     }
                                     if root.equity.length > 300: Text {
-                                        text: "showing first 300 of " + root.equity.length + " points";
+                                        text: "sampled across " + root.equity.length + " points";
                                         font-size: 10px;
                                         color: LabPalette.dim;
                                         x: 44px; y: parent.height - 16px;

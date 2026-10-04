@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-import numbers
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -14,10 +13,10 @@ from market.native_timeframe import seconds_of
 
 def _is_number(value: object) -> bool:
     """Real numbers only — bools are not prices, complex has no order."""
-    return isinstance(value, numbers.Real) and not isinstance(value, bool)
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Bar:
     """OHLCV bar data point.
 

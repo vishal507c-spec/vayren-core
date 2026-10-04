@@ -271,6 +271,7 @@ class RunProgress:
         self.load_total = total
         self.stage = "data"
         self.current = symbol
+        self._symbol_started = time.monotonic()
         self.stage_pct = 0.0 if total <= 0 else round(done * 100.0 / total, 1)
         self._load_mean = mean_secs
         self._load_eta = eta_secs

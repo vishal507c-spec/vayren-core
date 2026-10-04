@@ -1678,13 +1678,28 @@ pub fn apply_lab(ui: &AppWindow, state: &LabState) {
     // view coordinates scaled to the fixed 1000x300 chart box (presentation
     // transform only — the engine data itself is untouched).
     let to_points = |series: &Vec<(f32, f32)>| -> Vec<LabPoint> {
-        series
-            .iter()
-            .map(|(x, y)| LabPoint {
-                x: x * 1000.0,
-                y: y * 300.0,
-            })
-            .collect()
+        let max_points = 300;
+        if series.len() <= max_points {
+            series
+                .iter()
+                .map(|(x, y)| LabPoint {
+                    x: x * 1000.0,
+                    y: y * 300.0,
+                })
+                .collect()
+        } else {
+            let step = (series.len() - 1) as f32 / (max_points - 1) as f32;
+            (0..max_points)
+                .map(|i| {
+                    let idx = ((i as f32 * step).round() as usize).min(series.len() - 1);
+                    let (x, y) = series[idx];
+                    LabPoint {
+                        x: x * 1000.0,
+                        y: y * 300.0,
+                    }
+                })
+                .collect()
+        }
     };
     ui.set_lab_equity(Rc::new(slint::VecModel::from(to_points(&view.equity))).into());
     ui.set_lab_drawdown(Rc::new(slint::VecModel::from(to_points(&view.drawdown))).into());
@@ -1824,6 +1839,33 @@ pub fn apply_lab(ui: &AppWindow, state: &LabState) {
         .into(),
     );
     ui.set_lab_filter_active(filter_kind(state.filter));
+}
+
+/// Lightweight progress update for the Strategy Lab: updates scalar properties
+/// on LabHeader without allocating or resetting the 12+ Slint VecModels.
+pub fn apply_lab_progress(ui: &AppWindow, state: &LabState) {
+    let mut header = ui.get_lab();
+    let view = lab::project(state);
+    header.state_label = view.state_label.into();
+    header.state_tone = view.state_tone;
+    header.prog_active = view.prog_active;
+    header.prog_headline = view.prog_headline.into();
+    header.prog_counts = view.prog_counts.into();
+    header.prog_current = view.prog_current.into();
+    header.prog_stage = view.prog_stage.into();
+    header.prog_stage_pct = view.prog_stage_pct;
+    header.prog_elapsed = view.prog_elapsed.into();
+    header.prog_eta = view.prog_eta.into();
+    header.prog_speed = view.prog_speed.into();
+    header.prog_throughput = view.prog_throughput.into();
+    header.prog_failed_line = view.prog_failed_line.into();
+    header.prog_pct = view.prog_pct;
+    header.prog_cancelled = view.prog_cancelled;
+    header.prog_long = view.prog_long;
+    header.prog_watchdog = view.prog_watchdog.into();
+    header.run_stop = view.run_stop;
+    header.run_label = view.run_label.into();
+    ui.set_lab(header);
 }
 
 fn filter_kind(filter: LibFilter) -> i32 {
@@ -2009,6 +2051,7 @@ pub fn wire_lab(
     fetch_run: Rc<dyn Fn(LabRunRequest)>,
     fetch_coverage: Rc<dyn Fn(LabCoverageRequest)>,
     fetch_cancel: Rc<dyn Fn()>,
+    fetch_save: Rc<dyn Fn(String, String)>,
 ) {
     let bind = |ui: &AppWindow, state: &Rc<RefCell<LabState>>, handler: fn(&mut LabState, i32)| {
         let strong = state.clone();
@@ -2137,7 +2180,26 @@ pub fn wire_lab(
         }};
     }
     on_lab_text_debounced!(on_lab_search_changed, LabState::set_search, 150);
-    ui.on_lab_save_requested(bind0(ui, &state, |s| s.interaction_save()));
+    {
+        let strong = state.clone();
+        let handle = ui.as_weak();
+        let fetch = fetch_save.clone();
+        ui.on_lab_save_requested(move || {
+            let (name, code) = {
+                let mut guard = strong.borrow_mut();
+                guard.interaction_save();
+                let strat_name = guard.selected_strategy().map(|s| s.name.clone()).unwrap_or_default();
+                let code = guard.code.clone();
+                (strat_name, code)
+            };
+            if !name.is_empty() {
+                fetch(name, code);
+            }
+            if let Some(ui) = handle.upgrade() {
+                apply_lab(&ui, &strong.borrow());
+            }
+        });
+    }
     ui.on_lab_compile_requested(bind0(ui, &state, |s| s.interaction_compile()));
     ui.on_lab_new_requested(bind0(ui, &state, |s| s.interaction_simple("new")));
     ui.on_lab_row_menu(bind(ui, &state, |s, i| {
@@ -3991,6 +4053,7 @@ mod tests {
         let no_run: Rc<dyn Fn(LabRunRequest)> = Rc::new(|_| ());
         let no_coverage: Rc<dyn Fn(LabCoverageRequest)> = Rc::new(|_| ());
         let no_cancel: Rc<dyn Fn()> = Rc::new(|| ());
+        let no_save: Rc<dyn Fn(String, String)> = Rc::new(|_, _| ());
         wire_lab(
             &ui,
             lab_state.clone(),
@@ -3998,6 +4061,7 @@ mod tests {
             no_run,
             no_coverage,
             no_cancel,
+            no_save,
         );
         ui.invoke_lab_library_picked(1);
         assert_eq!(ui.get_lab().name, "SMA");

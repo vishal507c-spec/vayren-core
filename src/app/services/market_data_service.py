@@ -105,7 +105,7 @@ def _parse_stamp(raw: object) -> datetime | None:
     text = raw.strip()
     if len(text) == 16:  # "YYYY-MM-DD HH:MM" → pad seconds
         text += ":00"
-    if len(text) == 19 and text[4] == "-" and text[7] == "-" and text[13] == ":":
+    if len(text) >= 19 and text[4] == "-" and text[7] == "-" and text[13] == ":":
         try:
             return datetime(
                 int(text[0:4]),
@@ -141,10 +141,16 @@ def _epoch(date_value: date) -> int:
 
 
 def _valid_ohlcv(o: float, h: float, lo: float, c: float) -> bool:
-    values = (o, h, lo, c)
-    if any(not isinstance(v, (int, float)) or not math.isfinite(v) for v in values):
+    if not (
+        isinstance(o, (int, float))
+        and isinstance(h, (int, float))
+        and isinstance(lo, (int, float))
+        and isinstance(c, (int, float))
+    ):
         return False
     if o <= 0 or h <= 0 or lo <= 0 or c <= 0:
+        return False
+    if not (math.isfinite(o) and math.isfinite(h) and math.isfinite(lo) and math.isfinite(c)):
         return False
     return h >= lo
 
@@ -160,6 +166,7 @@ class MarketDataService:
         self._discovery: DiscoveryReport | None = None
         self._row_cache: dict[str, tuple[float, _CachedRows]] = {}
         self._quote_cache: dict[str, tuple[float, Quote]] = {}
+        self._base_seconds_cache: dict[str, int] = {}
         report = self.discovery_report()
         logger.info(
             "Market data ready: data_dir=%s discovered=%d valid=%d skipped=%d",
@@ -175,6 +182,7 @@ class MarketDataService:
         """Rescan the store (new downloads); returns the fresh report."""
         self._discovery = None
         self._row_cache.clear()
+        self._base_seconds_cache.clear()
         return self.discovery_report()
 
     @property
@@ -322,8 +330,13 @@ class MarketDataService:
             if moment is None:
                 invalid += 1
                 continue
-            stamp = moment.strftime(_STAMP_FORMAT)
-            if any(isinstance(v, bool) for v in (o, h, lo, c)):
+            stamp = _format_stamp(moment)
+            if (
+                isinstance(o, bool)
+                or isinstance(h, bool)
+                or isinstance(lo, bool)
+                or isinstance(c, bool)
+            ):
                 invalid += 1
                 continue
             try:
@@ -334,6 +347,8 @@ class MarketDataService:
             if not _valid_ohlcv(fo, fh, fl, fc):
                 invalid += 1
                 continue
+            fh = max(fh, fo, fc)
+            fl = min(fl, fo, fc)
             try:
                 volume = int(v) if v is not None and not isinstance(v, bool) else 0
             except (TypeError, ValueError):
@@ -372,6 +387,9 @@ class MarketDataService:
 
     def _base_seconds(self, symbol: str) -> int:
         """Detected base bar duration via the kernel mode of timestamp deltas."""
+        sym_key = symbol.upper()
+        if sym_key in self._base_seconds_cache:
+            return self._base_seconds_cache[sym_key]
         from market.native_aggregate import mode
 
         rows = self._read_rows(symbol, None, None, limit=200)
@@ -388,7 +406,9 @@ class MarketDataService:
         base = mode(deltas)
         if base is None or base <= 0:
             raise MarketDataError(f"Cannot detect base timeframe for {symbol}")
-        return int(base)
+        res = int(base)
+        self._base_seconds_cache[sym_key] = res
+        return res
 
     def available_timeframes(self, symbol: str) -> tuple[str, ...]:
         """Producible timeframes for `symbol` (kernel ladder, never invented)."""
@@ -517,20 +537,27 @@ class MarketDataService:
         anchor = native_aggregate.session_anchor_seconds(_SESSION_ANCHOR)
         days: list[int] = []
         secs: list[int] = []
-        for stamp, _o, _h, _l, _c, _v in rows:
-            # `_read_rows` already normalised every stamp to the fixed
-            # "%Y-%m-%d %H:%M:%S" shape, so the kernel's two inputs are integer
-            # slices — a full `strptime` per row was 40% of the run.
+        opens: list[float] = []
+        highs: list[float] = []
+        lows: list[float] = []
+        closes: list[float] = []
+        volumes: list[float] = []
+        for stamp, o, h, lo, c, v in rows:
             days.append(date(int(stamp[0:4]), int(stamp[5:7]), int(stamp[8:10])).toordinal())
             secs.append(int(stamp[11:13]) * 3600 + int(stamp[14:16]) * 60 + int(stamp[17:19]))
+            opens.append(o)
+            highs.append(h)
+            lows.append(lo)
+            closes.append(c)
+            volumes.append(float(v))
         buckets = native_aggregate.aggregate(
             days,
             secs,
-            [r[1] for r in rows],
-            [r[2] for r in rows],
-            [r[3] for r in rows],
-            [r[4] for r in rows],
-            [float(r[5]) for r in rows],
+            opens,
+            highs,
+            lows,
+            closes,
+            volumes,
             plan.seconds,
             anchor,
         )
@@ -561,12 +588,13 @@ class MarketDataService:
         else:
             day_text = f"{date.fromordinal(int(day)).isoformat()} 00:00:00"
             text = day_text
+        bo, bh, bl, bc = float(o), float(h), float(lo), float(c)
         return Bar(
             symbol=symbol.upper(),
-            open=float(o),
-            high=float(h),
-            low=float(lo),
-            close=float(c),
+            open=bo,
+            high=max(bh, bo, bc),
+            low=min(bl, bo, bc),
+            close=bc,
             volume=int(v),
             timestamp=text,
             bar_size=label,

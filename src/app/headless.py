@@ -1626,7 +1626,27 @@ def run_headless_backend(args: argparse.Namespace) -> int:
                     if not _emit(result):
                         break
 
-                elif cmd_type in ("get_lab_snapshot", "select_lab_strategy"):
+                elif cmd_type in ("get_lab_snapshot", "select_lab_strategy", "save_lab_strategy"):
+                    if cmd_type == "save_lab_strategy":
+                        strategy_name = str(command.get("strategy") or "").strip()
+                        code = str(command.get("code") or "")
+                        if strategy_name and code:
+                            target = Path(strategy_dir)
+                            if not target.is_dir():
+                                target = Path(r"D:\VAYREN_STRATEGIES")
+                            file_name = (
+                                strategy_name
+                                if strategy_name.endswith(".py")
+                                else f"{strategy_name}.py"
+                            )
+                            file_path = target / file_name
+                            try:
+                                file_path.write_text(code, encoding="utf-8")
+                                logger.info("Saved strategy %s to %s", strategy_name, file_path)
+                            except Exception as exc:  # noqa: BLE001
+                                logger.error("Failed to save strategy %s: %s", strategy_name, exc)
+                            _LAB_ROWS_CACHE.clear()
+                            _DESCRIBE_CACHE.clear()
                     snapshot = _lab_snapshot(str(strategy_dir), command, repository)
                     result = {"type": "lab_snapshot", "data": snapshot}
                     if not _emit(result):

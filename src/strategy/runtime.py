@@ -17,7 +17,7 @@ from strategy.models.signal import Signal
 from strategy.models.state import StrategyState
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class BarView:
     """Read-only per-bar context handed to strategy logic.
 

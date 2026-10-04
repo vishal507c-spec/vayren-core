@@ -435,6 +435,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
+    let fetch_lab_save: Rc<dyn Fn(String, String)> = Rc::new({
+        let backend = Arc::clone(&backend);
+        let tx = fetch_tx.clone();
+        let seq = Arc::clone(&lab_select_seq);
+        move |strategy: String, code: String| {
+            let id = seq.fetch_add(1, Ordering::SeqCst) + 1;
+            spawn_fetch(
+                &backend,
+                &tx,
+                BackendCommand::SaveLabStrategy { strategy, code },
+                move |data| FetchResult::LabSelect(id, data),
+            );
+        }
+    });
     // Portfolio production wiring (SLICE 4b): the idle trading service
     // snapshot feeds the native portfolio state (honest not-running book).
     println!("Requesting portfolio snapshot...");
@@ -529,6 +543,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         fetch_lab_run,
         fetch_lab_coverage,
         fetch_lab_cancel,
+        fetch_lab_save,
     );
     shell::wire_portfolio(&ui, portfolio_state.clone());
     shell::wire_research(&ui, research_state.clone());
@@ -812,7 +827,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // One coalesced progress apply per tick (latest wins).
                 if let Some((_, event)) = latest_progress {
                     lab_state.borrow_mut().apply_progress(&event);
-                    shell::apply_lab(&ui, &lab_state.borrow());
+                    shell::apply_lab_progress(&ui, &lab_state.borrow());
                 }
                 if let Some((id, data)) = latest_lab_coverage {
                     last_coverage = id;

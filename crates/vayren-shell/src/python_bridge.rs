@@ -188,6 +188,10 @@ pub enum BackendCommand {
     /// Cooperative stop of an in-flight run. The backend polls the flag
     /// between symbols, so a cancel can never leave a half-written result.
     CancelBacktest,
+    SaveLabStrategy {
+        strategy: String,
+        code: String,
+    },
     Shutdown,
 }
 
