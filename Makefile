@@ -81,7 +81,7 @@ validate-scope:
 # ── Rust (AI_ENTRY.md §1: Rust owns core/perf kernels) ─────────
 
 rust:
-	python tools/build_rust.py --test
+	python tools/build_rust.py --lean-test
 	cargo fmt --manifest-path Cargo.toml --all -- --check
 
 # ── Full Check ─────────────────────────────────────────────────

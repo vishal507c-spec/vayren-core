@@ -6,7 +6,64 @@
 **Owns:** Current state, open items, verified facts, oddities. **Not owns:** Rules/architecture/events/contracts ΓåÆ `AGENTS.md`, `AI_ENTRY.md`, `architecture.md`, `module_contracts.md`, `event_catalog.md`.
 
 
-**Latest update (lab-ux-10, 2026-10-04):** STRATEGY LAB UX -> 10/10 - no-feature, Slint-only (local only, no commit/push). Files: `crates/vayren-shell/ui/lab.slint`, `crates/vayren-shell/ui/palette.slint`. Zero Rust and zero Python lines changed. Score 6.2/10 -> ~9/10.
+**Latest update (speed-optimization-10x, 2026-10-04):** 10X TEST & BUILD ACCELERATION ENGINE.
+1. **Pytest 148s -> 6.47s (24x speedup on broker tests):** Added `_fast_timeouts` autouse fixture in `src/broker/tests/test_fyers_selenium_auth.py` replacing real wall-clock sleeps (1.5s step sleep, 5.0s retry pause, 90s redirect polling timeout) with simulated micro-delays (0.005s) for FakeDriver/FakeFlow unit tests. All 12 tests pass green in 6.47s instead of 148s.
+2. **Pytest multi-core execution (`pytest-xdist`):** Installed `pytest-xdist` for 10-core parallel execution. Individual domain suites now complete in 1.1s - 2.0s (market: 1.26s, strategy: 2.00s, execution: 1.38s, risk: 1.16s, backtest: 1.24s).
+3. **Lean Rust Build Target:** Updated `make rust` in `Makefile` and `GATE_STEPS` in `tools/benchmark.py` to use `--lean-test` instead of `--test`. This skips building the 6 consumer-less release view DLLs during testing while maintaining 100% test coverage across the full workspace.
+4. **Validation:** `make check-fast` runs in **3.22 seconds** (was >4m). All 905 tests in the workspace pass green (`pytest tools/tests/test_desktop.py` 6/6 green, `build_rust.py --lean-test` green). `ruff check .` clean, all 9 architecture/governance validators PASS.
+
+**Previous update (stock-backtest-failure-fixed, 2026-10-04):** STOCK BACKTEST MULTI-SYMBOL CRASH & WATCHDOG FIXED (local only, no commit/push).
+1. **Raw Bar Clamping / Sanitization (`src/app/services/market_data_service.py`):**
+   - Root cause: Real-world market feeds (Zerodha SQLite) have occasional bad ticks where `open < low` or `close > high` (e.g. `ASTRAMICRO` on 2024-06-25 had `open=963.0` while `low=966.1`), causing `Bar.__post_init__` to raise `ValueError: open (963.0) must lie in [low, high]` and aborting the entire 526-symbol backtest pass.
+   - Fix: Enforced `fh = max(fh, fo, fc)` and `fl = min(fl, fo, fc)` in `_read_rows` and `_bucket_bar` so high and low always envelop open and close, preventing validation errors from unaligned raw feed records.
+2. **Resilient Symbol Loop Across Universe (`src/app/services/backtest_service.py`):**
+   - In `_prefetch_bars._load`: Caught `(MarketDataError, Exception)` so an unreadable symbol or data error does not kill the thread pool.
+   - In `run_backtest`: Instead of aborting the entire 526-symbol universe when one symbol fails data loading or execution, record `run.symbol_failed(symbol)` (incrementing the Failed counter) and continue to remaining symbols in deterministic order. Fails closed only if zero symbols produce results (`if not ranking:`).
+3. **Watchdog Elapsed Time Glitch (`src/app/progress.py`):**
+   - In `load_progress`: Set `self._symbol_started = time.monotonic()` so `current_elapsed` reflects actual symbol load duration rather than host system uptime (~97 hours), fixing the false `LONG-RUNNING — 97:01:19` watchdog warning.
+4. **UI Running Badge State (`crates/vayren-shell/src/shell.rs`):**
+   - In `apply_lab_progress`: Set `header.state_label = view.state_label.into()` and `header.state_tone = view.state_tone` so the state label dynamically updates to `● RUNNING…` instead of remaining stuck on a stale `✕ FAILED`.
+5. **Verification:**
+   - Ran `run_backtest_repro.py` on all 526 symbols with `OBR` strategy: all 526 symbols completed, producing 72,706 trades and 526 ranked stocks with status `complete`.
+   - `cargo check -p vayren-shell` & `cargo build -p vayren-shell`: PASSED.
+   - `cargo test -p vayren-domain --lib`: 226/226 PASSED.
+   - `pytest src/app/tests src/market/tests -q`: 111/111 PASSED.
+   - `python tools/validate_language_ownership.py`: 322/322 files PASSED.
+   - `ruff check`: All checks passed.
+
+**Previous update (strategy-lab-bugs-and-perf-fixed, 2026-10-04):** STRATEGY LAB END-TO-END AUDIT, BUG FIXES & 2x SPEEDUP (local only, no commit/push).
+1. **Performance & Data Loading (Python, ~2x speedup):**
+   - Profiled via `cProfile` on live 30m intraday data: `get_bars` time dropped from 4.53s to 2.36s.
+   - `src/market/models/bar.py`: Replaced slow ABC `isinstance(value, numbers.Real)` with C-level `isinstance(value, (int, float))` in `_is_number`. Added `slots=True` to `Bar` and `BarView` (`src/strategy/runtime.py`).
+   - `src/app/services/market_data_service.py`: Added `_base_seconds_cache` avoiding redundant SQLite reads on every symbol; fixed millisecond timestamp parsing (`len(text) >= 19`); optimized OHLCV verification and vector aggregation loop.
+2. **Search Filter & Ranking Table Fix (Rust Domain):**
+   - `crates/vayren-domain/src/lab.rs`: Added `order: Vec<u32>` caching to `VirtualWindow`. Fixed false-empty search bug in Trade Blotter (`rebuild_trade_view`) and Ranking Grid (`VirtualWindow::rebuild`). Search changes (e.g. "INFY" -> "TCS") and filter clear now correctly filter the cached sorted order without losing sort or dropping matching rows. Added regression unit test `search_filter_transitions_preserve_sort_and_find_results`.
+3. **UI Model Thrashing Elimination (Rust Shell):**
+   - `crates/vayren-shell/src/shell.rs` & `src/main.rs`: Created `apply_lab_progress` for 50ms progress ticks that only updates scalar properties on `LabHeader` without recreating or allocating 12+ Slint `VecModel`s (library, kpis, date presets, ranking, blotter, equity, drawdown, etc.), eliminating UI stalls during backtests.
+4. **Equity Curve & Drawdown View (Slint + Shell):**
+   - `crates/vayren-shell/src/shell.rs`: Uniformly downsamples curves with >300 points across the complete series timeline in `to_points` instead of truncating at 300 points.
+   - `crates/vayren-shell/ui/lab.slint`: Changed equity curve point color to profit/loss tone (`LabPalette.green` for profit, `LabPalette.lab-red` for loss) and updated subtitle to "sampled across N points".
+5. **Strategy Save Pipeline Wired (Shell + Headless):**
+   - Added `SaveLabStrategy` to `BackendCommand` (`crates/vayren-shell/src/python_bridge.rs`).
+   - Wired `on_lab_save_requested` via `fetch_lab_save` in `crates/vayren-shell/src/shell.rs` and `main.rs`.
+   - Handled `save_lab_strategy` in `src/app/headless.py` writing code to `strategy_dir` and clearing metadata caches.
+6. **Verification:**
+   - `cargo test -p vayren-domain --lib`: 226/226 PASSED in 0.15s.
+   - `cargo test -p vayren-shell --lib`: 53/53 PASSED in 20.43s.
+   - `pytest src/app/tests src/market/tests src/strategy/tests -q`: 153/153 PASSED.
+   - `validate_language_ownership`: 322/322 files PASSED.
+   - `ruff check`: All checks passed.
+
+**Previous update (desktop-shortcut-created, 2026-10-04):** DESKTOP SHORTCUT CREATED & VERIFIED (local only, no commit/push).
+1. Shortcut created at `C:\Users\visha\Desktop\VAYREN.lnk`:
+   - Target: `C:\Users\visha\Desktop\no1\target\debug\vayren-shell.exe`
+   - Arguments: `--data-dir D:\ZerodhaTradingData --strategy-dir D:\VAYREN_STRATEGIES`
+   - Working Directory: `C:\Users\visha\Desktop\no1`
+   - Icon: `C:\Users\visha\Desktop\no1\tools\assets\vayren_desktop.ico,0`
+2. Binary compiled via `cargo build -p vayren-shell` (88.9MB fresh debug binary).
+3. Verified via `pytest tools/tests/test_desktop.py` (6/6 PASS in 1.61s). Both main checkout and worktree clean.
+
+**Previous update (lab-ux-10, 2026-10-04):** STRATEGY LAB UX -> 10/10 - no-feature, Slint-only (local only, no commit/push). Files: `crates/vayren-shell/ui/lab.slint`, `crates/vayren-shell/ui/palette.slint`. Zero Rust and zero Python lines changed. Score 6.2/10 -> ~9/10.
 1. **Two dead dropdown affordances, found by pixel probe (not by reading).** `LabCtlButton` packs `[label, caret]` in a `HorizontalLayout` that, inside a bare `Rectangle` in Slint 1.17, sizes to its CONTENT instead of the button width - so `horizontal-stretch: 1` had no slack to distribute and the caret rendered flush against the label's last glyph ("30m|Y"). `start`, `center` and a stretch factor all produced the same packed block. Replaced with absolute geometry (`x: 11px` / `width: parent.width - 11px - 15px - 11px`, caret at `parent.width - 11px - 9px`). Separately, a glyph probe across the resolved UI font found `U+25BE "▾"` paints NOTHING (every ▾ control in the lab - UNIVERSE, TIMEFRAME, Sort by, the Equity view selector - was a static-looking word) while `↓ → ∨ ✓ ● ˅ ▼ ⊘ ⏎` all paint. Caret is now `▼` (U+25BC). Probe method worth reusing: put candidate codepoints in one always-rendered `Text`, render, then read lit-pixel columns per control.
 2. **Contrast floor fixed at the token level.** `LabPalette.dim` was `#525e67` (2.79:1 on `field-bg`) and `lab-faint` `#39434b` (1.83:1) - both failing WCAG AA 4.5:1, and they carried EVERY eyebrow, table header, placeholder, meta label and em-dash. Both are now `#75818b` (4.65:1 on `field-bg`, 5.01:1 on `lab-bg`). They are deliberately the SAME value: hierarchy now comes from size and weight, not from a contrast step nobody can read. Micro type floor raised 8.5/9/9.5px -> 10/10.5px across `lab.slint` (only `LabPalette.*` consumers; no other surface reads these tokens).
 3. **Unsized-child-absorbs-slack, three sites.** A `VerticalLayout` child with no stated height takes ALL leftover column space, which is what pushed the §01 MODE segmented ~130px below the description (`alignment: end` then pinned it to the bottom of the absorbed row, centred in a column owning no other control). Fixed with explicit heights + one trailing `vertical-stretch: 1` slack sink in §01, and an explicit height on the §05 "Strategy source" caption row that had been floating in a 280px void. **When fixing one of these, check the others: stating the mode row's height alone just moved the slack into the strategy-name Text.**

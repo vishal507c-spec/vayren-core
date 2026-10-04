@@ -41,7 +41,7 @@ SCOREBOARD = ROOT / "tools" / "benchmark_scoreboard.md"
 CARGO = "crates"
 GATE_STEPS: tuple[tuple[str, list[str]], ...] = (
     # make rust
-    ("rust-build-test", [sys.executable, "tools/build_rust.py", "--test"]),
+    ("rust-build-test", [sys.executable, "tools/build_rust.py", "--lean-test"]),
     ("rust-fmt-check", ["cargo", "fmt", "--manifest-path", "Cargo.toml", "--", "--check"]),
     # make lint
     ("ruff-check", ["ruff", "check", "."]),

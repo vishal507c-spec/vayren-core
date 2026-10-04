@@ -30,6 +30,23 @@ FULL = FyersCredentials(APP_ID, SECRET, client_id="AB1234", totp_secret="JBSWY3D
 CALLBACK = "http://127.0.0.1:9475/vayren/fyers-callback"
 
 
+@pytest.fixture(autouse=True)
+def _fast_timeouts(monkeypatch: pytest.MonkeyPatch) -> None:
+    import time
+
+    import broker.common.selenium_driver as sel_driver
+    import broker.providers.fyers.selenium_auth as fyers_sel
+
+    monkeypatch.setattr(sel_driver, "ATTEMPT_PAUSE_S", 0.001)
+    monkeypatch.setattr(fyers_sel, "ATTEMPT_PAUSE_S", 0.001)
+    monkeypatch.setattr(sel_driver, "DEFAULT_REDIRECT_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(fyers_sel, "_REDIRECT_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(sel_driver, "DEFAULT_WAIT_S", 0.05)
+    monkeypatch.setattr(fyers_sel, "_TIMEOUT_S", 0.05)
+    real_sleep = time.sleep
+    monkeypatch.setattr(time, "sleep", lambda s: real_sleep(min(s, 0.005)))
+
+
 class FakeElement:
     """Minimal WebElement double (visible, records input).
 
