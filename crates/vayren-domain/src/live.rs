@@ -492,6 +492,8 @@ pub struct WatchlistStockRow {
     pub position: String,
     pub status: String,
     pub signal: String,
+    pub order: Option<String>,
+    pub pnl: Option<f64>,
     pub last_update: String,
 }
 
@@ -1537,6 +1539,8 @@ impl LiveState {
                     position: str_of(q, "position"),
                     status: status_val,
                     signal: str_of(q, "signal"),
+                    order: q.get("order").and_then(|x| x.as_str()).map(str::to_string),
+                    pnl: q.get("pnl").and_then(|x| x.as_f64()),
                     last_update: str_of(q, "last_update"),
                 });
             }
@@ -1981,6 +1985,10 @@ pub struct WatchlistRowView {
     pub status_tone: i32,
     pub signal: String,
     pub signal_tone: i32,
+    pub order: String,
+    pub order_tone: i32,
+    pub pnl: String,
+    pub pnl_tone: i32,
     pub last_update: String,
     pub selected: bool,
 }
@@ -2057,6 +2065,7 @@ pub struct LiveView {
     pub footer: FooterView,
     pub filter_chip_selected: i32,
     pub filter_chip_counts: String,
+    pub filter_chips: Vec<String>,
 }
 
 fn side_tone(side: &str) -> i32 {
@@ -2916,15 +2925,30 @@ pub fn project(state: &LiveState) -> LiveView {
         .iter()
         .filter(|r| r.status == "READY")
         .count();
-    let waiting_count = state
+    let signal_count = state
         .watchlist_rows
         .iter()
-        .filter(|r| r.status == "WAITING")
+        .filter(|r| r.signal != "—" && r.signal != "--" && !r.signal.is_empty())
+        .count();
+    let order_count = state
+        .watchlist_rows
+        .iter()
+        .filter(|r| {
+            r.status.contains("ORDER")
+                || r.status == "WORKING"
+                || r.status == "SUBMITTING"
+                || r.order.as_deref().unwrap_or("").contains("WORKING")
+        })
         .count();
     let in_pos_count = state
         .watchlist_rows
         .iter()
         .filter(|r| r.position != "FLAT" && !r.position.is_empty())
+        .count();
+    let waiting_count = state
+        .watchlist_rows
+        .iter()
+        .filter(|r| r.status == "WAITING" || r.status == "WAIT")
         .count();
     let no_data_count = state
         .watchlist_rows
@@ -2933,9 +2957,18 @@ pub fn project(state: &LiveState) -> LiveView {
         .count();
 
     let filter_chip_counts = format!(
-        "All ({}) | Ready ({}) | Waiting ({}) | In Pos ({}) | No Data ({})",
-        total_count, ready_count, waiting_count, in_pos_count, no_data_count
+        "ALL ({}) | READY ({}) | SIGNAL ({}) | ORDER ({}) | IN POSITION ({}) | WAITING ({}) | NO DATA ({})",
+        total_count, ready_count, signal_count, order_count, in_pos_count, waiting_count, no_data_count
     );
+    let filter_chips = vec![
+        format!("ALL ({})", total_count),
+        format!("READY ({})", ready_count),
+        format!("SIGNAL ({})", signal_count),
+        format!("ORDER ({})", order_count),
+        format!("IN POSITION ({})", in_pos_count),
+        format!("WAITING ({})", waiting_count),
+        format!("NO DATA ({})", no_data_count),
+    ];
     let filter_chip_selected = state.filter_chip_index as i32;
 
     let search_lower = state.search_query.trim().to_lowercase();
@@ -2945,9 +2978,16 @@ pub fn project(state: &LiveState) -> LiveView {
     for row in &state.watchlist_rows {
         let matches_filter = match state.filter_chip_index {
             1 => row.status == "READY",
-            2 => row.status == "WAITING",
-            3 => row.position != "FLAT" && !row.position.is_empty(),
-            4 => row.status == "NO DATA" || row.status == "NOT FOUND",
+            2 => row.signal != "—" && row.signal != "--" && !row.signal.is_empty(),
+            3 => {
+                row.status.contains("ORDER")
+                    || row.status == "WORKING"
+                    || row.status == "SUBMITTING"
+                    || row.order.as_deref().unwrap_or("").contains("WORKING")
+            }
+            4 => row.position != "FLAT" && !row.position.is_empty(),
+            5 => row.status == "WAITING" || row.status == "WAIT",
+            6 => row.status == "NO DATA" || row.status == "NOT FOUND",
             _ => true,
         };
         if !matches_filter {
@@ -2984,7 +3024,7 @@ pub fn project(state: &LiveState) -> LiveView {
 
         let status_tone = match row.status.as_str() {
             "READY" | "IN POSITION" => 1,
-            "WAITING" => 2,
+            "WAITING" | "WAIT" => 2,
             "NO DATA" | "NOT FOUND" => 3,
             _ => 0,
         };
@@ -2992,6 +3032,35 @@ pub fn project(state: &LiveState) -> LiveView {
         let sig_tone = match row.signal.as_str() {
             "BUY" | "LONG" => 1,
             "SELL" | "SHORT" => 3,
+            _ => 0,
+        };
+
+        let order_str = if let Some(ref o) = row.order {
+            o.clone()
+        } else if row.status == "WORKING" || row.status == "ORDER WORKING" {
+            "WORKING".into()
+        } else if row.status == "IN POSITION" {
+            "FILLED".into()
+        } else if row.status == "REJECTED" {
+            "REJECTED".into()
+        } else {
+            "—".into()
+        };
+        let order_tone = match order_str.as_str() {
+            "WORKING" | "SUBMITTING" => 2,
+            "FILLED" => 1,
+            "REJECTED" | "FAILED" => 3,
+            _ => 0,
+        };
+
+        let pnl_str = if let Some(p) = row.pnl {
+            format!("{:+.2}", p)
+        } else {
+            "—".into()
+        };
+        let pnl_tone = match row.pnl {
+            Some(v) if v > 0.0 => 1,
+            Some(v) if v < 0.0 => 3,
             _ => 0,
         };
 
@@ -3027,6 +3096,10 @@ pub fn project(state: &LiveState) -> LiveView {
                 row.signal.clone()
             },
             signal_tone: sig_tone,
+            order: order_str,
+            order_tone,
+            pnl: pnl_str,
+            pnl_tone,
             last_update: if row.last_update.is_empty() {
                 "—".into()
             } else {
@@ -3223,6 +3296,7 @@ pub fn project(state: &LiveState) -> LiveView {
         footer,
         filter_chip_selected,
         filter_chip_counts,
+        filter_chips,
     }
 }
 
