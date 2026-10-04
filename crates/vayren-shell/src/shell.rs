@@ -4647,6 +4647,7 @@ mod tests {
             strategy_sub: "".into(),
             risk_label: "READY".into(),
             risk_tone: 1,
+            risk_sub: "".into(),
             recon_label: "NOT CONFIGURED".into(),
             recon_tone: 0,
             recon_sub: "Positions: N/A | Orders: N/A".into(),

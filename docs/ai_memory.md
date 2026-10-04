@@ -6,15 +6,18 @@
 **Owns:** Current state, open items, verified facts, oddities. **Not owns:** Rules/architecture/events/contracts ΓåÆ `AGENTS.md`, `AI_ENTRY.md`, `architecture.md`, `module_contracts.md`, `event_catalog.md`.
 
 
-**Latest update (ci-green-fix-pyright-and-cargo-fmt, 2026-10-04):** GITHUB ACTIONS CI FIXES APPLIED & VERIFIED LOCALLY.
+**Latest update (ci-green-fix-pyright-cargo-fmt-and-shell-test, 2026-10-04):** GITHUB ACTIONS CI ALL-GREEN FIXES APPLIED & VERIFIED.
 1. **Pyright Typecheck (`src/app/services/live_trading_service.py`):**
    - Fixed attribute error on `Position`: `Position` has `quantity: float` (signed) without a `.side` attribute. Corrected to `side = "LONG" if pos.quantity > 0 else "SHORT"` and `pos_side = f"{side} ({pos_qty})"`.
 2. **Cargo Formatting (`cargo fmt --all`):**
    - Formatted all multi-line closures and expressions across `crates/vayren-shell/src/shell.rs`, `crates/vayren-domain/src/live.rs`, and `crates/vayren-domain/src/lab.rs`.
-3. **Verification:**
+3. **Shell Test LiveBar Initializer (`crates/vayren-shell/src/shell.rs`):**
+   - Added missing `risk_sub: "".into()` to `LiveBar` literal in unit test (line 4649), fixing `cargo test -p vayren-shell --lib` compilation error `[E0063] missing risk_sub`.
+4. **Verification:**
    - `cargo fmt --all -- --check`: PASSED with 0 diffs.
+   - `cargo test -p vayren-shell --lib --no-run`: PASSED in 10m 08s (all test executables linked).
    - `python -m ruff check .`: PASSED.
-   - `python -m ruff format --check .`: PASSED (322 files).
+   - `python -m ruff format --check .`: PASSED.
    - `pyright`: PASSED (0 errors, 0 warnings).
    - `python tools/repo_graph.py --build` & `python tools/validate_repo_graph.py`: PASSED (4622 entities, 7865 relationships).
 
