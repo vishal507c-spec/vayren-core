@@ -1010,7 +1010,9 @@ impl LabState {
             self.trade_win.order = sort_trade_indices(all_indices, rows, sort, desc);
         }
 
-        let view: Vec<u32> = self.trade_win.order
+        let view: Vec<u32> = self
+            .trade_win
+            .order
             .iter()
             .copied()
             .filter(|&index| {
@@ -2227,9 +2229,7 @@ impl VirtualWindow {
             self.order
                 .iter()
                 .copied()
-                .filter(|&index| {
-                    contains_ignore_ascii_case(&rows[index as usize].symbol, needle)
-                })
+                .filter(|&index| contains_ignore_ascii_case(&rows[index as usize].symbol, needle))
                 .collect()
         };
         self.set_view(view, key);

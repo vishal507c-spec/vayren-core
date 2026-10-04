@@ -20,8 +20,9 @@ use crate::{
     AppWindow, BrokerCheckRow, BrokerRowView, CapabilityRowView, CredentialFieldView, DlCalDay,
     DlCredField, DlPlan, DlStatus, DlStock, LabBoardCell, LabCheckData, LabDetailMetric, LabHeader,
     LabKpi, LabLibraryRow, LabMatrixRow, LabParam, LabPoint, LabPreset, LabRankRow, LabTradeMetric,
-    LabTradeRow, LiveActiveStrategy, LiveBar, LiveEventRow, LiveFill, LiveFooter, LiveGate, LiveKv, LiveMarket, LiveMarketData, LiveOrder,
-    LivePosition, LiveSelectedStock, LiveSetup, LiveStat, LiveSymbolRow, LiveWatchlistRow, LiveWebSocket, MarketCandle, MarketIndicator, MarketMarker,
+    LabTradeRow, LiveActiveStrategy, LiveBar, LiveEventRow, LiveFill, LiveFooter, LiveGate, LiveKv,
+    LiveMarket, LiveMarketData, LiveOrder, LivePosition, LiveSelectedStock, LiveSetup, LiveStat,
+    LiveSymbolRow, LiveWatchlistRow, LiveWebSocket, MarketCandle, MarketIndicator, MarketMarker,
     MarketPlotSeg, MarketPopupRow, MarketRayLevel, MarketSettingsRow, MarketStatusRow, MarketTick,
     MarketTimeframe, MarketTradeContext, MarketWatchRow, PortfolioAlloc, PortfolioFill,
     PortfolioGate, PortfolioKpi, PortfolioOrder, PortfolioPosition, PortfolioRisk,
@@ -2188,7 +2189,10 @@ pub fn wire_lab(
             let (name, code) = {
                 let mut guard = strong.borrow_mut();
                 guard.interaction_save();
-                let strat_name = guard.selected_strategy().map(|s| s.name.clone()).unwrap_or_default();
+                let strat_name = guard
+                    .selected_strategy()
+                    .map(|s| s.name.clone())
+                    .unwrap_or_default();
                 let code = guard.code.clone();
                 (strat_name, code)
             };

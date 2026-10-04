@@ -1671,7 +1671,8 @@ class LiveTradingService:
                     pos = session.ledger.position(symbol)
                     if not pos.flat:
                         pos_qty = abs(pos.quantity)
-                        pos_side = f"{pos.side} ({pos_qty})"
+                        side = "LONG" if pos.quantity > 0 else "SHORT"
+                        pos_side = f"{side} ({pos_qty})"
                 except Exception:
                     pass
 

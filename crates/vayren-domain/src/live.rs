@@ -470,7 +470,10 @@ impl CapitalRiskEngine {
         } else {
             (
                 false,
-                format!("Position risk ₹{:.2} exceeds limit ₹{:.2}", planned, max_risk),
+                format!(
+                    "Position risk ₹{:.2} exceeds limit ₹{:.2}",
+                    planned, max_risk
+                ),
             )
         }
     }
@@ -1517,7 +1520,11 @@ impl LiveState {
         // Risk engine config ingest
         if let Some(r) = v.get("risk_engine") {
             let parsed_raw = r.get("raw_capital").and_then(|x| x.as_f64());
-            let raw_cap = self.capital.broker_capital.or(parsed_raw).unwrap_or(100_000.0);
+            let raw_cap = self
+                .capital
+                .broker_capital
+                .or(parsed_raw)
+                .unwrap_or(100_000.0);
             self.risk_engine = CapitalRiskEngine {
                 raw_capital: raw_cap,
                 leverage: r.get("leverage").and_then(|x| x.as_f64()).unwrap_or(4.0),
@@ -3095,9 +3102,7 @@ pub fn project(state: &LiveState) -> LiveView {
         };
 
         let ltp_str = row.ltp.map_or("—".into(), |v| format!("{:.2}", v));
-        let chg_str = row
-            .change_pct
-            .map_or("—".into(), |v| format!("{:+.2}%", v));
+        let chg_str = row.change_pct.map_or("—".into(), |v| format!("{:+.2}%", v));
         let chg_tone = match row.change_pct {
             Some(v) if v > 0.0 => 1,
             Some(v) if v < 0.0 => 3,
@@ -3146,57 +3151,60 @@ pub fn project(state: &LiveState) -> LiveView {
             _ => 0,
         };
 
-            let rps = row.risk_per_share.or_else(|| match (row.entry_price, row.stop_price) {
+        let rps = row
+            .risk_per_share
+            .or_else(|| match (row.entry_price, row.stop_price) {
                 (Some(ep), Some(sp)) => Some((sp - ep).abs()),
                 _ => None,
             });
-            watchlist_views.push(WatchlistRowView {
-                index: row_idx,
-                symbol: sym_disp,
-                full_symbol: row.symbol.clone(),
-                ltp: ltp_str,
-                change: chg_str,
-                change_tone: chg_tone,
-                ref_high: row.ref_high.map_or("—".into(), |v| format!("{:.2}", v)),
-                ref_low: row.ref_low.map_or("—".into(), |v| format!("{:.2}", v)),
-                break_low: row.break_low.map_or("—".into(), |v| format!("{:.2}", v)),
-                entry: row.entry_price.map_or("—".into(), |v| format!("{:.2}", v)),
-                stop: row.stop_price.map_or("—".into(), |v| format!("{:.2}", v)),
-                risk_share: rps.map_or("—".into(), |v| format!("{:.2}", v)),
-                qty: if capital_valid {
-                    row.qty.map_or("—".into(), |v| v.to_string())
-                } else {
-                    "—".into()
-                },
-                planned_risk: if capital_valid {
-                    row.planned_risk.map_or("—".into(), |v| format!("₹{:.2}", v))
-                } else {
-                    "—".into()
-                },
-                position: if row.position.is_empty() {
-                    "FLAT".into()
-                } else {
-                    row.position.clone()
-                },
-                status: row.status.clone(),
-                status_tone,
-                signal: if row.signal.is_empty() {
-                    "—".into()
-                } else {
-                    row.signal.clone()
-                },
-                signal_tone: sig_tone,
-                order: order_str,
-                order_tone,
-                pnl: pnl_str,
-                pnl_tone,
-                last_update: if row.last_update.is_empty() {
-                    "—".into()
-                } else {
-                    row.last_update.clone()
-                },
-                selected: is_selected,
-            });
+        watchlist_views.push(WatchlistRowView {
+            index: row_idx,
+            symbol: sym_disp,
+            full_symbol: row.symbol.clone(),
+            ltp: ltp_str,
+            change: chg_str,
+            change_tone: chg_tone,
+            ref_high: row.ref_high.map_or("—".into(), |v| format!("{:.2}", v)),
+            ref_low: row.ref_low.map_or("—".into(), |v| format!("{:.2}", v)),
+            break_low: row.break_low.map_or("—".into(), |v| format!("{:.2}", v)),
+            entry: row.entry_price.map_or("—".into(), |v| format!("{:.2}", v)),
+            stop: row.stop_price.map_or("—".into(), |v| format!("{:.2}", v)),
+            risk_share: rps.map_or("—".into(), |v| format!("{:.2}", v)),
+            qty: if capital_valid {
+                row.qty.map_or("—".into(), |v| v.to_string())
+            } else {
+                "—".into()
+            },
+            planned_risk: if capital_valid {
+                row.planned_risk
+                    .map_or("—".into(), |v| format!("₹{:.2}", v))
+            } else {
+                "—".into()
+            },
+            position: if row.position.is_empty() {
+                "FLAT".into()
+            } else {
+                row.position.clone()
+            },
+            status: row.status.clone(),
+            status_tone,
+            signal: if row.signal.is_empty() {
+                "—".into()
+            } else {
+                row.signal.clone()
+            },
+            signal_tone: sig_tone,
+            order: order_str,
+            order_tone,
+            pnl: pnl_str,
+            pnl_tone,
+            last_update: if row.last_update.is_empty() {
+                "—".into()
+            } else {
+                row.last_update.clone()
+            },
+            selected: is_selected,
+        });
 
         row_idx += 1;
     }
@@ -3223,11 +3231,7 @@ pub fn project(state: &LiveState) -> LiveView {
             format!("₹{:.2}", state.risk_engine.max_allowed_risk()),
         )
     } else {
-        (
-            "NOT AVAILABLE".into(),
-            "—".into(),
-            "—".into(),
-        )
+        ("NOT AVAILABLE".into(), "—".into(), "—".into())
     };
     let capital_source_label = if !state.capital.source.is_empty() {
         format!("CAPITAL SOURCE: {}", state.capital.source.to_uppercase())
@@ -3288,17 +3292,17 @@ pub fn project(state: &LiveState) -> LiveView {
                 .iter()
                 .find(|o| o.symbol.contains(&sym_disp) || sym_disp.contains(&o.symbol));
 
-            let rps = r.risk_per_share.or_else(|| match (r.entry_price, r.stop_price) {
-                (Some(ep), Some(sp)) => Some((sp - ep).abs()),
-                _ => None,
-            });
+            let rps = r
+                .risk_per_share
+                .or_else(|| match (r.entry_price, r.stop_price) {
+                    (Some(ep), Some(sp)) => Some((sp - ep).abs()),
+                    _ => None,
+                });
 
             StockDetailView {
                 symbol: format!("{} · NSE EQUITY", sym_disp),
                 ltp: r.ltp.map_or("—".into(), |v| format!("{:.2}", v)),
-                change: r
-                    .change_pct
-                    .map_or("—".into(), |v| format!("{:+.2}%", v)),
+                change: r.change_pct.map_or("—".into(), |v| format!("{:+.2}%", v)),
                 change_tone: match r.change_pct {
                     Some(v) if v > 0.0 => 1,
                     Some(v) if v < 0.0 => 3,
@@ -4337,7 +4341,10 @@ mod tests {
         assert_eq!(view.selected_stock.calculated_qty, "22");
         assert_eq!(view.selected_stock.planned_risk, "₹583.00");
         assert_eq!(view.selected_stock.risk_validated, true);
-        assert!(view.selected_stock.risk_banner_text.contains("[✓] RISK VALIDATED"));
+        assert!(view
+            .selected_stock
+            .risk_banner_text
+            .contains("[✓] RISK VALIDATED"));
     }
 
     #[test]
@@ -4379,7 +4386,10 @@ mod tests {
         assert_eq!(view.selected_stock.planned_risk, "—");
         assert_eq!(view.selected_stock.risk_share, "26.50");
         assert_eq!(view.selected_stock.risk_validated, false);
-        assert!(view.selected_stock.risk_banner_text.contains("[✕] RISK STATUS: NOT READY"));
+        assert!(view
+            .selected_stock
+            .risk_banner_text
+            .contains("[✕] RISK STATUS: NOT READY"));
     }
 
     #[test]
@@ -4503,4 +4513,3 @@ mod tests {
         assert_eq!(filtered_pos.watchlist[0].symbol, "KAYNES");
     }
 }
-
