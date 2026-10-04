@@ -262,6 +262,12 @@ TARGETED_FILE_TESTS: dict[str, tuple[str, ...]] = {
         "src/broker/tests/test_broker_boundary.py",
         "src/broker/tests/test_auth.py",
     ),
+    "src/broker/registry.py": (
+        "src/broker/tests/test_broker_contracts.py",
+        "src/broker/tests/test_broker_boundary.py",
+        "src/broker/tests/test_final_phase.py",
+        "src/broker/tests/test_fyers_adapter.py",
+    ),
 }
 
 

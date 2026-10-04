@@ -1189,6 +1189,31 @@ export component LiveScreen inherits Rectangle {
                                 }
                             }
 
+                            // LIVE STATUS — primary truth: selected mode vs
+                            // confirmed runtime, never conflated. Both lines
+                            // are backend facts (bar.mode + session/exec
+                            // badges); selecting LIVE never reads as RUNNING.
+                            Text {
+                                text: "LIVE STATUS";
+                                color: VayrenPalette.live-ink-faint;
+                                font-size: 10px;
+                                font-weight: 700;
+                            }
+
+                            Text {
+                                text: root.setup.session-label;
+                                color: LiveTone.ink(root.setup.session-tone);
+                                font-size: 18px;
+                                font-weight: 800;
+                            }
+
+                            Text {
+                                text: "Mode " + (root.bar.mode == 2 ? "LIVE" : root.bar.mode == 1 ? "SANDBOX" : "PAPER") + " · " + root.bar.exec-label;
+                                color: LiveTone.ink(root.bar.exec-tone);
+                                font-size: 11px;
+                                font-weight: 600;
+                            }
+
                             // Start blockers: the backend's own refusal list.
                             // Fail-closed - this is the reason START is inert.
                             if root.blockers.length > 0: VBanner {
