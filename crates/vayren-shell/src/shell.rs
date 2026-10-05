@@ -21,15 +21,15 @@ use crate::{
     DlCredField, DlPlan, DlStatus, DlStock, LabBoardCell, LabCheckData, LabDetailMetric, LabHeader,
     LabKpi, LabLibraryRow, LabMatrixRow, LabParam, LabPoint, LabPreset, LabRankRow, LabTradeMetric,
     LabTradeRow, LiveActiveStrategy, LiveBar, LiveEventRow, LiveFill, LiveFooter, LiveGate, LiveKv,
-    LiveMarket, LiveMarketData, LiveOrder, LivePosition, LiveSelectedStock, LiveSetup, LiveStat,
-    LiveSymbolRow, LiveWatchlistRow, LiveWebSocket, MarketCandle, MarketIndicator, MarketMarker,
-    MarketPlotSeg, MarketPopupRow, MarketRayLevel, MarketSettingsRow, MarketStatusRow, MarketTick,
-    MarketTimeframe, MarketTradeContext, MarketWatchRow, PortfolioAlloc, PortfolioFill,
-    PortfolioGate, PortfolioKpi, PortfolioOrder, PortfolioPosition, PortfolioRisk,
-    ProgressStepView, RankWindow, ResearchCompareRow, ResearchConfigGroup, ResearchEvidenceDim,
-    ResearchEvidenceWhy, ResearchExperimentRow, ResearchField, ResearchKv, ResearchKvGroup,
-    ResearchMetric, ResearchRobustRow, ResearchSignalRow, ResearchStrategyRow, ResearchTradeRow,
-    ShellScreen,
+    LiveMarket, LiveMarketData, LiveOrder, LivePipelineStep, LivePosition, LiveSelectedStock,
+    LiveSetup, LiveStat, LiveSymbolRow, LiveWatchlistRow, LiveWebSocket, MarketCandle,
+    MarketIndicator, MarketMarker, MarketPlotSeg, MarketPopupRow, MarketRayLevel,
+    MarketSettingsRow, MarketStatusRow, MarketTick, MarketTimeframe, MarketTradeContext,
+    MarketWatchRow, PortfolioAlloc, PortfolioFill, PortfolioGate, PortfolioKpi, PortfolioOrder,
+    PortfolioPosition, PortfolioRisk, ProgressStepView, RankWindow, ResearchCompareRow,
+    ResearchConfigGroup, ResearchEvidenceDim, ResearchEvidenceWhy, ResearchExperimentRow,
+    ResearchField, ResearchKv, ResearchKvGroup, ResearchMetric, ResearchRobustRow,
+    ResearchSignalRow, ResearchStrategyRow, ResearchTradeRow, ShellScreen,
 };
 use slint::ComponentHandle;
 #[cfg(test)]
@@ -3580,7 +3580,10 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
                     stop: r.stop.into(),
                     risk_share: r.risk_share.into(),
                     qty: r.qty.into(),
+                    max_allowed_risk: r.max_allowed_risk.into(),
                     planned_risk: r.planned_risk.into(),
+                    risk_util: r.risk_util.into(),
+                    risk_util_tone: r.risk_util_tone,
                     position: r.position.into(),
                     status: r.status.into(),
                     status_tone: r.status_tone,
@@ -3611,6 +3614,8 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
         calculated_qty: view.selected_stock.calculated_qty.into(),
         planned_risk: view.selected_stock.planned_risk.into(),
         risk_util: view.selected_stock.risk_util.into(),
+        signal: view.selected_stock.signal.into(),
+        order: view.selected_stock.order.into(),
         current_position: view.selected_stock.current_position.into(),
         avg_price: view.selected_stock.avg_price.into(),
         qty: view.selected_stock.qty.into(),
@@ -3619,6 +3624,31 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
         recent_orders: view.selected_stock.recent_orders.into(),
         risk_validated: view.selected_stock.risk_validated,
         risk_banner_text: view.selected_stock.risk_banner_text.into(),
+        // The engine-derived pipeline is rebuilt as a Slint model so each step
+        // keeps its own reached/current/failed flags (a joined string could not
+        // carry per-step state).
+        pipeline: Rc::new(slint::VecModel::from(
+            view.selected_stock
+                .pipeline
+                .iter()
+                .map(|s| LivePipelineStep {
+                    label: s.label.into(),
+                    reached: s.reached,
+                    current: s.current,
+                    failed: s.failed,
+                })
+                .collect::<Vec<_>>(),
+        ))
+        .into(),
+        order_reason: view.selected_stock.order_reason.into(),
+        // STEP 29: absent stays absent — the panel shows an em-dash rather
+        // than a number the backend never computed.
+        current_open_risk: view
+            .selected_stock
+            .current_open_risk
+            .map(|v| format!("₹{v:.2}"))
+            .unwrap_or_default()
+            .into(),
         pipeline_stage: view.selected_stock.pipeline_stage.into(),
         broker_capital: view.selected_stock.broker_capital.into(),
         effective_capital: view.selected_stock.effective_capital.into(),
@@ -3880,9 +3910,18 @@ pub fn demo_live_state_running() -> LiveState {
             quantity: "10".into(),
             order_type: "LIMIT".into(),
             price: "2801.10".into(),
-            status: "COMPLETE".into(),
+            status: "FILLED".into(),
             time: "13:00:02".into(),
             broker: "paper".into(),
+            reason: String::new(),
+            filled_qty: "10".into(),
+            history: vec![
+                "CREATED".into(),
+                "VALIDATED".into(),
+                "SUBMITTED".into(),
+                "ACKNOWLEDGED".into(),
+                "FILLED".into(),
+            ],
         }],
         fills: vec![live::FillRow {
             time: "13:00:04".into(),
@@ -4528,7 +4567,11 @@ mod tests {
         assert!(ui.get_live_bar_secondary());
         assert!(ui.get_live_blotter_side());
         assert!(ui.get_live_tall_inspector());
-        assert!((ui.get_live_inspector_w() - 400.0).abs() < 1.0); // capped
+        // The inspector CLIPS its content, so its width tracks the content
+        // minimum (440 px floor / 520 px cap) rather than a tighter visual
+        // preference — at 1920x1080 @150% a 400 px cap cut the right-hand
+        // VALUE column off-frame.
+        assert!((ui.get_live_inspector_w() - 520.0).abs() < 1.0); // capped
         ui.window().set_size(slint::PhysicalSize::new(1176, 720));
         assert!(ui.get_live_dock_inspector()); // 1176 content ≥ 800 floor
         assert!(ui.get_live_bar_extended());
@@ -4540,7 +4583,7 @@ mod tests {
         assert!(!ui.get_live_bar_extended());
         assert!(ui.get_live_bar_core()); // HALT spine + mode stay
         assert!(
-            (ui.get_live_inspector_w() - 340.0).abs() < 1.0,
+            (ui.get_live_inspector_w() - 440.0).abs() < 1.0,
             "inspector holds its usable floor"
         );
         let live_state = Rc::new(RefCell::new(demo_live_state()));

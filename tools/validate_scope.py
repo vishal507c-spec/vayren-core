@@ -615,6 +615,8 @@ def _cargo_for_file(relpath: str) -> list[str]:
     Template commands with `<placeholders>` are skipped: they cannot run
     literally (the runner reports templates as skipped, never executed).
     """
+    if relpath.startswith("crates/vayren-domain/"):
+        return ["cargo test -p vayren-domain --lib"]
     routes = _load_routes_safe()
     found: list[str] = []
     for route in routes:

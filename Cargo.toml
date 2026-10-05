@@ -29,7 +29,7 @@ clipboard-win = "5"
 i-slint-backend-testing = "~1.17.0"
 
 [profile.dev]
-debug = 1
+debug = 0
 
 [profile.test]
 debug = 0

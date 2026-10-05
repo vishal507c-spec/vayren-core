@@ -994,20 +994,32 @@ class LiveTradingService:
                 with contextlib.suppress(Exception):
                     snap = session.engine.snapshot()
                     for item in snap.get("orders", ()):
-                        orders.append(
-                            {
-                                "order_id": str(item.get("client_order_id", "")),
-                                "strategy": self._config.strategy_name,
-                                "symbol": str(item.get("symbol", "")),
-                                "side": str(item.get("side", "")),
-                                "quantity": float(item.get("quantity", 0.0) or 0.0),
-                                "type": str(item.get("order_type", "")),
-                                "price": float(item.get("avg_fill_price") or 0.0),
-                                "status": str(item.get("state", "")),
-                                "time": self._history_time(item),
-                                "broker": broker_name,
-                            }
-                        )
+                        # `reason` and `history` are REAL engine facts (the
+                        # reject text and the full legal transition sequence).
+                        # They were dropped here, so the LIVE tab had to invent
+                        # an order pipeline and could not show why an order
+                        # failed. Forwarding both lets the UI render the
+                        # backend's own lifecycle instead of a guess.
+                        order_row = {
+                            "order_id": str(item.get("client_order_id", "")),
+                            "strategy": self._config.strategy_name,
+                            "symbol": str(item.get("symbol", "")),
+                            "side": str(item.get("side", "")),
+                            "quantity": float(item.get("quantity", 0.0) or 0.0),
+                            "type": str(item.get("order_type", "")),
+                            "price": float(item.get("avg_fill_price") or 0.0),
+                            "status": str(item.get("state", "")),
+                            "time": self._history_time(item),
+                            "broker": broker_name,
+                            "reason": str(item.get("reason", "") or ""),
+                            "filled_qty": float(item.get("filled_qty", 0.0) or 0.0),
+                        }
+                        history = item.get("history")
+                        if isinstance(history, (list, tuple)):
+                            order_row["history"] = [
+                                str(stage) for stage, _ts in history if str(stage)
+                            ]
+                        orders.append(order_row)
                     open_count += len(session.engine.open_orders())
                 with contextlib.suppress(Exception):
                     broker = getattr(session, "_broker", None)
@@ -1522,27 +1534,48 @@ class LiveTradingService:
 
     @staticmethod
     def _describe_entry(kind: str, payload: dict[str, Any]) -> str:
+        # Every string here is built from the journal entry's OWN payload, and
+        # the wording is an explicit operational verb so the stream reads as a
+        # sequence of things that happened rather than lowercase debug prose.
+        # No value is ever filled in when the entry did not carry it.
+        def _qty(value: Any) -> str:
+            try:
+                return f"{float(value):g}"
+            except (TypeError, ValueError):
+                return str(value) if value not in (None, "") else "—"
+
         if kind == "SIGNAL_GENERATED":
-            return f"signal {payload.get('signal_id', '')}"
+            return f"SELL SIGNAL GENERATED · {payload.get('signal_id', '')}".strip(" ·")
         if kind == "ORDER_SUBMITTED":
-            return f"order submitted {payload.get('client_order_id', '')}"
-        if kind == "ORDER_FILL":
-            return (
-                f"fill {payload.get('client_order_id', '')} "
-                f"{payload.get('fill_qty', '')} @ {payload.get('fill_price', '')}"
+            return f"ORDER SUBMITTED · {payload.get('client_order_id', '')}".strip(" ·")
+        if kind == "ORDER_ACKNOWLEDGED":
+            return f"ORDER ACKNOWLEDGED BY BROKER · {payload.get('client_order_id', '')}".strip(
+                " ·"
             )
+        if kind == "ORDER_FILL":
+            return f"FILLED · {_qty(payload.get('fill_qty', ''))} @ {payload.get('fill_price', '')}"
         if kind == "ORDER_REJECTED":
-            return f"rejected {payload.get('client_order_id', '')}: {payload.get('reason', '')}"
+            order_id = payload.get("client_order_id", "")
+            reason = payload.get("reason", "")
+            return f"REJECTED · {order_id}: {reason}".strip(" ·:")
         if kind == "RISK_DENIED":
-            reasons = payload.get("reasons", "")
-            return f"risk denied: {reasons}"
+            return f"RISK BLOCKED · {payload.get('reasons', '')}".strip(" ·")
+        if kind == "RISK_VALIDATED":
+            planned = payload.get("planned_risk")
+            return f"RISK VALIDATED · Qty {_qty(payload.get('quantity', ''))}" + (
+                f" · Planned Risk ₹{planned}" if planned not in (None, "") else ""
+            )
         if kind == "ORDER_BLOCKED_UNARMED":
-            return "order blocked: live not armed"
+            return "ORDER NOT SENT · live not armed"
         if kind == "STALE_DATA":
-            return f"stale data (seq {payload.get('seq', '')})"
+            return f"STALE DATA · seq {payload.get('seq', '')}"
         if kind == "STRATEGY_ERROR":
-            return f"strategy error: {payload.get('reason', '')}"
-        return kind.lower().replace("_", " ")
+            return f"STRATEGY ERROR · {payload.get('reason', '')}".strip(" ·")
+        if kind == "LIVE_READY":
+            return "LIVE READY"
+        if kind == "RECONCILED":
+            return "RECONCILED"
+        return kind.replace("_", " ")
 
     def _record_activity(
         self, strategy: str, symbol: str, event: str, status: str, category: str = ""
@@ -1688,52 +1721,55 @@ class LiveTradingService:
             signal = "--"
             last_update = now_time if price is not None else ""
 
+            # Reference levels, entry and stop come from REAL state only.
+            #
+            # This block used to carry three hardcoded demo symbols (KAYNES at
+            # 1218.50/1245.00, RVNL, POWERGRID) and, for every other symbol,
+            # invented a "reference high" as `ltp * 1.006` and a "reference
+            # low" as `ltp * 0.986`. Those numbers then drove the REAL risk
+            # engine, so the screen showed a confident per-stock risk/share,
+            # qty and planned risk for a stock whose C1-C4 levels the backend
+            # had never computed. A risk figure derived from a made-up level is
+            # worse than no figure: it looks validated and it is not.
+            #
+            # The strategy's reference window is not exposed to this layer, so
+            # the honest answer today is "not yet known" — entry/stop stay None
+            # and every derived risk cell renders as unavailable. The moment the
+            # session reports real levels they flow through unchanged, because
+            # everything below is already keyed off those two fields.
+            signal_present = self._last_signal.get(symbol, "") not in ("", "no signal yet")
+
             if clean and clean in store and price is not None:
                 status = "AVAILABLE"
-                if clean == "KAYNES":
-                    ref_high = 1245.00
-                    ref_low = 1220.00
-                    break_low = 1218.50
-                    entry_price = 1218.50
-                    stop_price = 1245.00
-                    qty, risk_per_share, planned_risk, risk_util = self._risk_engine.compute_qty(
-                        entry_price, stop_price
-                    )
-                    watchlist_status = "READY"
-                elif clean == "RVNL":
-                    ref_high = 462.30
-                    ref_low = 452.10
-                    break_low = 451.20
-                    entry_price = 451.20
-                    stop_price = 462.30
-                    qty, risk_per_share, planned_risk, risk_util = self._risk_engine.compute_qty(
-                        entry_price, stop_price
-                    )
-                    pos_side = "LONG (54)"
+                # An OPEN position is the one case where the entry price is a
+                # real, ledger-owned number rather than a strategy level.
+                if pos_qty > 0 and session is not None:
+                    try:
+                        entry_price = round(float(session.ledger.position(symbol).avg_price), 2)
+                    except Exception:
+                        entry_price = None
+                if signal_present:
+                    watchlist_status = "SIGNAL"
+                    signal = "SELL"
+                elif pos_qty > 0:
                     watchlist_status = "IN POSITION"
-                    signal = "BUY"
-                elif clean == "POWERGRID":
-                    ref_high = 316.20
-                    ref_low = 309.50
-                    break_low = 308.90
-                    entry_price = 308.90
-                    stop_price = 316.20
-                    qty, risk_per_share, planned_risk, risk_util = self._risk_engine.compute_qty(
-                        entry_price, stop_price
-                    )
-                    pos_side = "LONG (82)"
-                    watchlist_status = "IN POSITION"
-                    signal = "BUY"
                 else:
-                    ref_high = round(price * 1.006, 2)
-                    ref_low = round(price * 0.986, 2)
-                    watchlist_status = "IN POSITION" if pos_qty > 0 else "WAIT"
+                    watchlist_status = "WAITING"
             elif clean and clean in store:
                 status = "NO MARKET DATA"
                 watchlist_status = "NO DATA"
             else:
                 status = "NOT FOUND"
                 watchlist_status = "NO DATA"
+
+            # Size ONLY from real levels, through the one existing engine. With
+            # a known entry and a known stop the same CapitalRiskEngine that
+            # gates real orders produces the numbers; without them it is not
+            # called at all, so no figure is ever invented here.
+            if entry_price is not None and stop_price is not None and entry_price > 0:
+                qty, risk_per_share, planned_risk, risk_util = self._risk_engine.compute_qty(
+                    entry_price, stop_price
+                )
 
             out.append(
                 {

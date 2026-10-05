@@ -1,4 +1,4 @@
-"""Risk policy, decisions and requests ΓÇö frozen, auditable value objects."""
+"""Risk policy, decisions and requests \u2014 frozen, auditable value objects."""
 
 from __future__ import annotations
 

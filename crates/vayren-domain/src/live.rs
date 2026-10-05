@@ -250,6 +250,16 @@ pub struct OrderRow {
     pub status: String,
     pub time: String,
     pub broker: String,
+    /// The engine's own rejection text (`BrokerOrder::reason`) — empty when
+    /// the order did not fail. Shown verbatim; never a UI-authored excuse.
+    pub reason: String,
+    /// Filled quantity from the venue (`filled_qty`), so a partial fill
+    /// reports how much actually landed instead of implying the full size.
+    pub filled_qty: String,
+    /// The real transition sequence the engine recorded for this order
+    /// (`OrderSnapshot::history`). This IS the order pipeline — the UI walks
+    /// it rather than assuming a lifecycle.
+    pub history: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -571,8 +581,8 @@ pub struct LiveState {
     /// True symbol count in the market store (the displayed watchlist may be
     /// a head slice — the count label always states the truth).
     pub store_total: Option<usize>,
-
     /// Execution bridge present (false until the native bridge is wired —
+
     /// every mutating control stays honestly inert, same contract as the
     /// Strategy Lab RUN gate).
     pub bridge_wired: bool,
@@ -710,7 +720,131 @@ pub const EVENT_CATEGORIES: [&str; 6] = [
     "SYSTEM",
 ];
 
+// ── order pipeline (driven ONLY by the engine's recorded state machine) ────
+
+/// The order lifecycle as `vayren-core/src/order_state.rs` defines it, in the
+/// order the engine is allowed to walk them. The UI is a READER of this
+/// machine: a step is complete only when the order's own `history` says the
+/// engine reached that state. Nothing here is inferred, so the pipeline can
+/// never show a step the backend did not actually perform.
+pub const ORDER_PIPELINE_STAGES: [&str; 8] = [
+    "CREATED",
+    "VALIDATED",
+    "SUBMITTED",
+    "ACKNOWLEDGED",
+    "FILLED",
+    "REJECTED",
+    "CANCELLED",
+    "EXPIRED",
+];
+
+/// Pipeline step rendered for the selected stock. `reached` is the ENGINE's
+/// own verdict for that stage; `current` marks the one live step.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PipelineStep {
+    pub label: &'static str,
+    pub reached: bool,
+    pub current: bool,
+    pub failed: bool,
+}
+
+/// Build the pipeline from real facts only.
+///
+/// `history` is the transition sequence the engine actually recorded;
+/// `position_open` / `sl_known` come from the live book. A stage the engine
+/// never reached is `reached: false` and renders dim, which is precisely how
+/// "do not show a pipeline if its backend state does not exist" is honoured:
+/// with no order there is no history, so every step stays unreached.
+pub fn order_pipeline(
+    order: Option<&OrderRow>,
+    signal_present: bool,
+    position_open: bool,
+    sl_known: bool,
+) -> Vec<PipelineStep> {
+    let reached: Vec<&str> = order
+        .map(|o| o.history.iter().map(String::as_str).collect())
+        .unwrap_or_default();
+    let contains = |s: &str| reached.iter().any(|r| r.eq_ignore_ascii_case(s));
+    let failed = order
+        .map(|o| {
+            matches!(
+                o.status.to_ascii_uppercase().as_str(),
+                "REJECTED" | "CANCELLED" | "EXPIRED"
+            )
+        })
+        .unwrap_or(false);
+
+    // The order pipeline proper: engine states only. `signal_present` gates the
+    // two pre-order steps, which live OUTSIDE the engine (strategy + risk).
+    let mut steps: Vec<PipelineStep> = Vec::new();
+    let push = |steps: &mut Vec<PipelineStep>, label: &'static str, reached: bool, failed: bool| {
+        steps.push(PipelineStep {
+            label,
+            reached,
+            // `current` is resolved after the walk: exactly ONE step is live,
+            // the furthest the engine actually got.
+            current: false,
+            failed,
+        });
+    };
+
+    push(
+        &mut steps,
+        "SIGNAL",
+        signal_present || contains("CREATED"),
+        false,
+    );
+    push(
+        &mut steps,
+        "RISK VALIDATED",
+        contains("VALIDATED") || contains("CREATED"),
+        false,
+    );
+    for label in ["CREATED", "SUBMITTED", "ACKNOWLEDGED"] {
+        let r = contains(label);
+        push(&mut steps, label, r, false);
+    }
+    // FILLED and the failure states are mutually exclusive outcomes, so only
+    // the one the engine actually reached is present.
+    if contains("FILLED") || contains("PARTIALLY_FILLED") {
+        push(&mut steps, "FILLED", true, false);
+    } else if failed {
+        let label: &'static str = match order.map(|o| o.status.to_ascii_uppercase()) {
+            Some(ref s) if s == "REJECTED" => "REJECTED",
+            Some(ref s) if s == "CANCELLED" => "CANCELLED",
+            Some(ref s) if s == "EXPIRED" => "EXPIRED",
+            _ => "REJECTED",
+        };
+        push(&mut steps, label, true, true);
+    }
+    push(&mut steps, "POSITION OPEN", position_open, false);
+    if position_open {
+        push(&mut steps, "SL PROTECTED", sl_known, false);
+    }
+    // The live step is the LAST one the engine reached, and a failure is never
+    // "current" (it is terminal, and is styled as such). With nothing reached
+    // there is no current step at all, so the screen cannot point at a stage
+    // the backend never entered.
+    if let Some(index) = steps.iter().rposition(|s| s.reached && !s.failed) {
+        steps[index].current = true;
+    }
+    steps
+}
+
 impl LiveState {
+    /// Does the REAL risk engine agree this row could be sized and sent?
+    ///
+    /// Used by the READY and RISK BLOCKED filters so both counts come from one
+    /// verdict instead of a status string that may lag the capital state. A row
+    /// with no entry/stop has nothing to validate, so it is not "blocked" —
+    /// it is simply not ready either, and the WAITING bucket owns it.
+    pub fn risk_engine_agrees(&self, row: &WatchlistStockRow) -> bool {
+        if row.entry_price.is_none() || row.stop_price.is_none() {
+            return false;
+        }
+        self.has_valid_capital()
+    }
+
     // ── derived safety verdicts (fail-closed, computed from facts only) ──
 
     pub fn selected_strategy(&self) -> Option<&str> {
@@ -1317,6 +1451,16 @@ impl LiveState {
                     status: str_of(o, "status"),
                     time: str_of(o, "time"),
                     broker: str_of(o, "broker"),
+                    reason: str_of(o, "reason"),
+                    filled_qty: o
+                        .get("filled_qty")
+                        .and_then(|v| v.as_f64())
+                        .map_or_else(|| "—".into(), |v| grouped(v)),
+                    history: o
+                        .get("history")
+                        .and_then(|h| h.as_array())
+                        .map(|list| list.iter().map(value_to_text).collect())
+                        .unwrap_or_default(),
                 })
                 .collect();
         }
@@ -2045,7 +2189,14 @@ pub struct WatchlistRowView {
     pub stop: String,
     pub risk_share: String,
     pub qty: String,
+    /// Per-stock rupee ceiling from the SAME engine every other size uses
+    /// (STEP 9: never one global number reused across rows).
+    pub max_allowed_risk: String,
     pub planned_risk: String,
+    pub risk_util: String,
+    /// 3 once planned risk approaches the ceiling — the row states its own
+    /// pressure instead of the operator comparing two numbers by eye.
+    pub risk_util_tone: i32,
     pub position: String,
     pub status: String,
     pub status_tone: i32,
@@ -2074,6 +2225,14 @@ pub struct StockDetailView {
     pub calculated_qty: String,
     pub planned_risk: String,
     pub risk_util: String,
+    /// STEP 11/27: SIGNAL, ORDER and POSITION are three INDEPENDENT facts and
+    /// each gets its own field. Previously only POSITION had one, so the panel
+    /// could not answer "is there a signal?" or "what happened to my order?"
+    /// without the operator cross-reading the watchlist row.
+    pub signal: String,
+    /// The real order state for this symbol (`NONE` when the backend has no
+    /// order). Never inferred from the position or the signal.
+    pub order: String,
     pub current_position: String,
     pub avg_price: String,
     pub qty: String,
@@ -2082,6 +2241,19 @@ pub struct StockDetailView {
     pub recent_orders: String,
     pub risk_validated: bool,
     pub risk_banner_text: String,
+    /// Engine-derived pipeline. Empty means the backend has no order for this
+    /// symbol, and the screen then renders NO pipeline rather than a
+    /// decorative one (STEP 12's explicit "use real state" rule).
+    pub pipeline: Vec<PipelineStep>,
+    /// Real rejection text from the engine, or the risk verdict that stopped
+    /// the order from being created. Empty when the order is fine.
+    pub order_reason: String,
+    /// STEP 29: PLANNED risk (the pre-trade ceiling for this symbol) versus
+    /// CURRENT open risk (what the live position actually stands to lose at
+    /// the present stop). `None` renders `—`: the backend does not expose a
+    /// live stop distance for an open position, and guessing one from LTP
+    /// would invent the single number an operator most needs to be true.
+    pub current_open_risk: Option<f64>,
     pub pipeline_stage: String,
     pub broker_capital: String,
     pub effective_capital: String,
@@ -2538,14 +2710,25 @@ pub fn project(state: &LiveState) -> LiveView {
     let strategy_label = strategy_id.clone().unwrap_or_else(|| "—".into());
     let strategy_tone = if strategy_id.is_some() { 4 } else { 0 };
     let strategy_sub = match &state.strategy_facts {
-        Some(facts) if !facts.status.trim().is_empty() || !facts.timeframe.trim().is_empty() => {
-            format!(
-                "{} · {}",
-                text_or_na(&facts.status),
-                text_or_na(&facts.timeframe)
-            )
+        // Registry runtime_state is the loaded/armed registry word ("ACTIVE"),
+        // NOT the execution state. Printing it under the strategy name made a
+        // stopped session look live, so only genuinely descriptive facts ride
+        // this line — the lifecycle itself lives in its own STATUS field.
+        Some(facts) => {
+            let mut parts: Vec<String> = Vec::new();
+            if !facts.timeframe.trim().is_empty() {
+                parts.push(facts.timeframe.clone());
+            }
+            if !facts.direction.trim().is_empty() {
+                parts.push(facts.direction.clone());
+            }
+            if parts.is_empty() {
+                String::new()
+            } else {
+                parts.join(" · ")
+            }
         }
-        _ => String::new(),
+        None => String::new(),
     };
     let blockers = state.start_blockers();
 
@@ -2557,16 +2740,24 @@ pub fn project(state: &LiveState) -> LiveView {
         None => 0,
     };
     let capital_valid = state.has_valid_capital();
+    // STEP 6: "NOT READY" alone did not say WHY. The sub-line names the
+    // missing fact (the capital source and its value), so the operator never
+    // has to cross-reference the inspector to learn that sizing is blocked
+    // because the broker reported no funds — not because the engine failed.
     let (risk_label, risk_tone, risk_sub) = if !capital_valid {
         (
-            "NOT READY".to_string(),
+            "● NOT READY".to_string(),
             3,
-            "CAPITAL: NOT AVAILABLE".to_string(),
+            match state.capital.source.as_str() {
+                "broker" => "BROKER CAPITAL: NOT AVAILABLE".to_string(),
+                "" => "CAPITAL: NOT AVAILABLE".to_string(),
+                other => format!("CAPITAL: NOT AVAILABLE ({})", other.to_uppercase()),
+            },
         )
     } else {
         let (raw_label, raw_tone) = (state.risk_status.label(), state.risk_status.badge());
         let sub = format!(
-            "{:.0}x LEV · ₹{:.0} MAX",
+            "{:.0}x LEV · ₹{:.0} MAX RISK/STOCK",
             state.risk_engine.leverage,
             state.risk_engine.max_allowed_risk()
         );
@@ -2959,95 +3150,165 @@ pub fn project(state: &LiveState) -> LiveView {
     };
 
     // ── Active Strategy card view ──
-    let active_strat_status = if state.kill_halted {
+    // STRATEGY STATUS is the SESSION's real lifecycle, never the registry's
+    // own status word. The registry reports "ACTIVE" for a strategy that is
+    // merely LOADED — printing that next to the strategy name made a
+    // configured-but-stopped session read as if it were executing. The only
+    // authority for "is it running" is the backend session fact, and a kill
+    // switch outranks even that.
+    let active_strat_status: &'static str = if state.kill_halted {
         "HALTED"
-    } else if let Some(sf) = &state.strategy_facts {
-        if sf.status.is_empty() {
-            "RUNNING"
-        } else {
-            sf.status.as_str()
-        }
-    } else if state.session == SessionStatus::Running {
-        "RUNNING"
     } else {
-        "STOPPED"
+        state.session.label()
     };
-    let active_strat_status_tone = match active_strat_status {
-        "RUNNING" => 1,
-        "HALTED" | "STOPPED" | "ERROR" => 3,
-        _ => 2,
-    };
+    let active_strat_status_tone = state.session.badge();
     let mode_str = state.mode.label();
+    // Counts come from the real book. The registry reports a configured
+    // universe size; the signal/order tallies are only printed when the
+    // backend actually reported them, never a hardcoded example.
+    let signals_today = state
+        .watchlist_rows
+        .iter()
+        .filter(|r| !r.signal.is_empty() && r.signal != "—" && r.signal != "--")
+        .count();
+    let orders_sent = state.pnl.orders.map(|n| n as usize).unwrap_or(0);
     let active_strat = ActiveStrategyView {
         name: strategy_label.clone(),
         status: active_strat_status.into(),
         status_tone: active_strat_status_tone,
         mode: mode_str.into(),
         mode_tone: match mode_str {
-            "LIVE" => 1,
-            "PAPER" => 2,
-            _ => 4,
+            "LIVE" => 3,
+            "PAPER" => 4,
+            _ => 2,
         },
-        started_at: "09:15:00 IST".into(),
-        symbols_count: format!(
-            "{} NSE Equity",
-            state.watchlist_rows.len().max(state.symbols.len())
-        ),
-        today_signals: "2 generated (2 Short)".into(),
-        current_position: format!(
-            "{} Active ({} Short)",
-            state.positions.len(),
-            state.positions.len()
-        ),
-        orders_today: format!("{} sent ({} filled)", state.orders.len(), state.fills.len()),
-        strategy_logic:
-            "Short breakdown on reference candle C1-C4. Entry @ break low, SL @ ref high. 1:2 R:R target."
-                .into(),
+        started_at: state
+            .snapshot_time
+            .rsplit_once(' ')
+            .map(|(_, t)| t.to_string())
+            .unwrap_or_else(|| "—".into()),
+        symbols_count: state
+            .strategy_facts
+            .as_ref()
+            .and_then(|f| f.universe)
+            .map(|n| format!("{n}"))
+            .unwrap_or_else(|| format!("{}", state.watchlist_rows.len().max(state.symbols.len()))),
+        today_signals: signals_today.to_string(),
+        current_position: state.positions.len().to_string(),
+        orders_today: format!("{} sent ({} filled)", orders_sent, state.fills.len()),
+        strategy_logic: state
+            .strategy_facts
+            .as_ref()
+            .filter(|f| !f.reference_window.trim().is_empty())
+            .map(|f| {
+                format!(
+                    "Direction {} · Reference window {} · Timeframe {}",
+                    text_or_na(&f.direction),
+                    f.reference_window,
+                    text_or_na(&f.timeframe)
+                )
+            })
+            .unwrap_or_default(),
     };
 
     // ── Watchlist filter chips and search ──
+    // STEP 26: the chip set is the EXECUTION vocabulary the operator filters
+    // by. Counts are computed from the rows every projection, so a chip can
+    // never claim a total the table does not hold. "ORDER" additionally counts
+    // any live working order, which is what an operator means by it.
     let total_count = state.watchlist_rows.len();
+    let has_signal =
+        |r: &WatchlistStockRow| !r.signal.is_empty() && r.signal != "—" && r.signal != "--";
+    let has_order = |r: &WatchlistStockRow| {
+        r.order
+            .as_deref()
+            .map(|o| {
+                let o = o.to_ascii_uppercase();
+                o.contains("WORKING")
+                    || o.contains("SUBMIT")
+                    || o.contains("SENT")
+                    || o.contains("ACKNOWLEDG")
+                    || o.contains("PENDING")
+            })
+            .unwrap_or(false)
+    };
+    let in_position = |r: &WatchlistStockRow| !r.position.is_empty() && r.position != "FLAT";
+    let risk_ok = |r: &WatchlistStockRow| state.risk_engine_agrees(r);
+    let rejected = |r: &WatchlistStockRow| {
+        r.order
+            .as_deref()
+            .map(|o| {
+                let o = o.to_ascii_uppercase();
+                o.contains("REJECT") || o.contains("FAIL") || o.contains("DENIED")
+            })
+            .unwrap_or(false)
+    };
+    // READY means "the engine would size this and nothing blocks it". It is
+    // deliberately DISJOINT from WAITING, which owns the rows that are simply
+    // watching with nothing to act on — otherwise one row would appear under
+    // two chips and the counts would read like a contradiction.
     let ready_count = state
         .watchlist_rows
         .iter()
-        .filter(|r| r.status == "READY")
+        .filter(|r| risk_ok(r) && !has_signal(r) && !in_position(r) && !has_order(r))
         .count();
     let signal_count = state
         .watchlist_rows
         .iter()
-        .filter(|r| r.signal != "—" && r.signal != "--" && !r.signal.is_empty())
+        .filter(|r| has_signal(r))
         .count();
-    let order_count = state
-        .watchlist_rows
-        .iter()
-        .filter(|r| {
-            r.status.contains("ORDER")
-                || r.status == "WORKING"
-                || r.status == "SUBMITTING"
-                || r.order.as_deref().unwrap_or("").contains("WORKING")
-                || r.order.as_deref().unwrap_or("").contains("SUBMITTING")
-        })
-        .count();
+    let order_count = state.watchlist_rows.iter().filter(|r| has_order(r)).count();
     let in_pos_count = state
         .watchlist_rows
         .iter()
-        .filter(|r| r.position != "FLAT" && !r.position.is_empty())
+        .filter(|r| in_position(r))
         .count();
+    // WAITING owns only the rows that have NOTHING actionable: no signal, no
+    // position, no order, and no real entry/stop for the engine to judge. A
+    // row WITH levels that the engine refused belongs to RISK BLOCKED alone —
+    // counting it here too would let one row appear under two chips and the
+    // counts would read like a contradiction.
     let waiting_count = state
         .watchlist_rows
         .iter()
-        .filter(|r| r.status == "WAITING" || r.status == "WAIT")
+        .filter(|r| {
+            !has_signal(r)
+                && !in_position(r)
+                && !has_order(r)
+                && !rejected(r)
+                && !(r.entry_price.is_some() && r.stop_price.is_some())
+                && !matches!(r.status.as_str(), "NO DATA" | "NOT FOUND")
+        })
         .count();
     let no_data_count = state
         .watchlist_rows
         .iter()
-        .filter(|r| r.status == "NO DATA" || r.status == "NOT FOUND")
+        .filter(|r| matches!(r.status.as_str(), "NO DATA" | "NOT FOUND"))
         .count();
+    // RISK BLOCKED is reserved for rows the ENGINE refused: it needs real
+    // entry/stop to judge. A row with no levels yet has nothing to block, so
+    // it stays in WAITING rather than being reported as a risk failure.
+    let risk_blocked_count = state
+        .watchlist_rows
+        .iter()
+        .filter(|r| r.entry_price.is_some() && r.stop_price.is_some() && !risk_ok(r))
+        .count();
+    let rejected_count = state.watchlist_rows.iter().filter(|r| rejected(r)).count();
 
     let filter_chip_counts = format!(
-        "ALL ({}) | READY ({}) | SIGNAL ({}) | ORDER ({}) | IN POSITION ({}) | WAITING ({}) | NO DATA ({})",
-        total_count, ready_count, signal_count, order_count, in_pos_count, waiting_count, no_data_count
+        "ALL ({}) | READY ({}) | SIGNAL ({}) | ORDER ({}) | IN POSITION ({}) | WAITING ({}) | NO DATA ({}) | RISK BLOCKED ({}) | REJECTED ({})",
+        total_count,
+        ready_count,
+        signal_count,
+        order_count,
+        in_pos_count,
+        waiting_count,
+        no_data_count,
+        risk_blocked_count,
+        rejected_count
     );
+    // STEP 26 asks for nine runtime-driven filters; the list is built (not
+    // hardcoded to nine entries) so adding one later needs no layout change.
     let filter_chips = vec![
         format!("ALL ({})", total_count),
         format!("READY ({})", ready_count),
@@ -3056,6 +3317,8 @@ pub fn project(state: &LiveState) -> LiveView {
         format!("IN POSITION ({})", in_pos_count),
         format!("WAITING ({})", waiting_count),
         format!("NO DATA ({})", no_data_count),
+        format!("RISK BLOCKED ({})", risk_blocked_count),
+        format!("REJECTED ({})", rejected_count),
     ];
     let filter_chip_selected = state.filter_chip_index as i32;
 
@@ -3064,19 +3327,25 @@ pub fn project(state: &LiveState) -> LiveView {
     let mut row_idx = 1;
 
     for row in &state.watchlist_rows {
+        // STEP 26: the chip index selects ONE bucket, and each predicate below
+        // is literally the same closure the chip's count used, so a chip can
+        // never show N and then reveal a different number of rows.
         let matches_filter = match state.filter_chip_index {
-            1 => row.status == "READY",
-            2 => row.signal != "—" && row.signal != "--" && !row.signal.is_empty(),
-            3 => {
-                row.status.contains("ORDER")
-                    || row.status == "WORKING"
-                    || row.status == "SUBMITTING"
-                    || row.order.as_deref().unwrap_or("").contains("WORKING")
-                    || row.order.as_deref().unwrap_or("").contains("SUBMITTING")
+            1 => risk_ok(row) && !has_signal(row) && !in_position(row) && !has_order(row),
+            2 => has_signal(row),
+            3 => has_order(row),
+            4 => in_position(row),
+            5 => {
+                !has_signal(row)
+                    && !in_position(row)
+                    && !has_order(row)
+                    && !rejected(row)
+                    && !(row.entry_price.is_some() && row.stop_price.is_some())
+                    && !matches!(row.status.as_str(), "NO DATA" | "NOT FOUND")
             }
-            4 => row.position != "FLAT" && !row.position.is_empty(),
-            5 => row.status == "WAITING" || row.status == "WAIT",
-            6 => row.status == "NO DATA" || row.status == "NOT FOUND",
+            6 => matches!(row.status.as_str(), "NO DATA" | "NOT FOUND"),
+            7 => row.entry_price.is_some() && row.stop_price.is_some() && !risk_ok(row),
+            8 => rejected(row),
             _ => true,
         };
         if !matches_filter {
@@ -3175,11 +3444,30 @@ pub fn project(state: &LiveState) -> LiveView {
             } else {
                 "—".into()
             },
+            max_allowed_risk: if capital_valid {
+                format!("₹{:.2}", state.risk_engine.max_allowed_risk())
+            } else {
+                "—".into()
+            },
             planned_risk: if capital_valid {
                 row.planned_risk
                     .map_or("—".into(), |v| format!("₹{:.2}", v))
             } else {
                 "—".into()
+            },
+            risk_util: if capital_valid {
+                row.risk_util.map_or("—".into(), |v| format!("{:.1}%", v))
+            } else {
+                "—".into()
+            },
+            risk_util_tone: if capital_valid {
+                match row.risk_util {
+                    Some(v) if v >= 95.0 => 3,
+                    Some(v) if v >= 80.0 => 2,
+                    _ => 0,
+                }
+            } else {
+                0
             },
             position: if row.position.is_empty() {
                 "FLAT".into()
@@ -3273,24 +3561,64 @@ pub fn project(state: &LiveState) -> LiveView {
             } else {
                 r.symbol.replace("NSE:", "").replace("-EQ", "")
             };
-            let pipe_stage = if r.position == "SHORT" || r.position == "LONG" {
-                "POSITION OPEN (SL PROTECTED)".into()
-            } else if r.signal == "SELL" || r.signal == "BUY" {
-                "SIGNAL GENERATED (RISK VALIDATED)".into()
-            } else if r.status == "READY" {
-                "WATCHING FOR TRIGGER (BREAK OF LOW)".into()
-            } else {
-                "MONITORING REFERENCE CANDLES (C1-C4)".into()
-            };
 
             let pos_match = state
                 .positions
                 .iter()
                 .find(|p| p.symbol.contains(&sym_disp) || sym_disp.contains(&p.symbol));
+            // The MOST RECENT order for this symbol, not the first match: the
+            // pipeline must describe the order the operator is watching, and a
+            // stale earlier order would render a lifecycle that already ended.
             let ord_match = state
                 .orders
                 .iter()
+                .rev()
                 .find(|o| o.symbol.contains(&sym_disp) || sym_disp.contains(&o.symbol));
+
+            // STEP 12/13: the pipeline and the failure reason both come from the
+            // engine's own record. `history` is empty for an order the backend
+            // has not created, so the pipeline stays empty and the screen shows
+            // no lifecycle at all rather than a decorative one.
+            let pipeline = order_pipeline(
+                ord_match,
+                !r.signal.is_empty() && r.signal != "—" && r.signal != "--",
+                pos_match.is_some() || (!r.position.is_empty() && r.position != "FLAT"),
+                r.stop_price.map(|s| s > 0.0).unwrap_or(false),
+            );
+            let order_reason = match ord_match {
+                // A real broker/engine rejection text wins, verbatim.
+                Some(o) if !o.reason.trim().is_empty() => o.reason.clone(),
+                // Risk refused to let the order exist: say so, with the engine's
+                // own limit numbers, instead of leaving ORDER blank.
+                _ if !risk_valid && ord_match.is_none() && !capital_valid => {
+                    format!(
+                        "RISK NOT READY · broker capital unavailable, so no order was created (max risk would be {})",
+                        money(state.risk_engine.max_allowed_risk())
+                    )
+                }
+                _ => String::new(),
+            };
+            let pipe_stage = match pipeline.iter().find(|s| s.current) {
+                Some(step) => step.label.to_string(),
+                None if pipeline.is_empty() => "NO ORDER".into(),
+                None => String::new(),
+            };
+
+            // STEP 29: current open risk = live distance to the REAL stop,
+            // times the live quantity. Every input must exist; if the backend
+            // has no stop for this position the answer is None (renders —),
+            // never a number derived from LTP.
+            let current_open_risk = match (pos_match, r.stop_price, r.entry_price) {
+                (Some(p), Some(stop), Some(entry)) if stop > 0.0 && entry > 0.0 => {
+                    let qty = p.quantity.replace(',', "").parse::<f64>().unwrap_or(0.0);
+                    if qty > 0.0 {
+                        Some(qty * (stop - entry).abs())
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            };
 
             let rps = r
                 .risk_per_share
@@ -3329,6 +3657,22 @@ pub fn project(state: &LiveState) -> LiveView {
                 } else {
                     "—".into()
                 },
+                // The three independent facts, each from its own source.
+                signal: if r.signal.is_empty() || r.signal == "--" {
+                    "NONE".into()
+                } else {
+                    r.signal.clone()
+                },
+                order: ord_match
+                    .map(|o| {
+                        let state = o.status.trim();
+                        if state.is_empty() {
+                            "NONE".to_string()
+                        } else {
+                            state.to_string()
+                        }
+                    })
+                    .unwrap_or_else(|| "NONE".into()),
                 current_position: if let Some(p) = pos_match {
                     format!("{} {} @ {}", p.side, p.quantity, p.entry)
                 } else if !r.position.is_empty() {
@@ -3356,6 +3700,9 @@ pub fn project(state: &LiveState) -> LiveView {
                 },
                 risk_validated: risk_valid,
                 risk_banner_text: risk_banner,
+                pipeline,
+                order_reason,
+                current_open_risk,
                 pipeline_stage: pipe_stage,
                 broker_capital: broker_cap_str,
                 effective_capital: eff_cap_str,
@@ -3377,6 +3724,8 @@ pub fn project(state: &LiveState) -> LiveView {
             calculated_qty: "—".into(),
             planned_risk: "—".into(),
             risk_util: "—".into(),
+            signal: "NONE".into(),
+            order: "NONE".into(),
             current_position: "FLAT".into(),
             avg_price: "—".into(),
             qty: "0".into(),
@@ -3389,7 +3738,10 @@ pub fn project(state: &LiveState) -> LiveView {
             } else {
                 "[✕] RISK STATUS: NOT READY · Capital not available".into()
             },
-            pipeline_stage: "MONITORING".into(),
+            pipeline: Vec::new(),
+            order_reason: String::new(),
+            current_open_risk: None,
+            pipeline_stage: "NO ORDER".into(),
             broker_capital: broker_cap_str,
             effective_capital: eff_cap_str,
             max_allowed_risk: max_risk_str,
@@ -3810,6 +4162,199 @@ mod tests {
     }
 
     #[test]
+    fn order_pipeline_is_built_from_the_engines_recorded_states() {
+        // A resting order: the engine recorded up to ACKNOWLEDGED and no more.
+        let working = OrderRow {
+            order_id: "c1".into(),
+            strategy: "OBR".into(),
+            symbol: "KAYNES".into(),
+            side: "SELL".into(),
+            quantity: "22".into(),
+            order_type: "SLM".into(),
+            price: "1218.50".into(),
+            status: "ACKNOWLEDGED".into(),
+            time: "12:14:25".into(),
+            broker: "fyers".into(),
+            reason: String::new(),
+            filled_qty: "0".into(),
+            history: vec![
+                "CREATED".into(),
+                "VALIDATED".into(),
+                "SUBMITTED".into(),
+                "ACKNOWLEDGED".into(),
+            ],
+        };
+        let steps = order_pipeline(Some(&working), true, false, false);
+        let reached: Vec<&str> = steps
+            .iter()
+            .filter(|s| s.reached)
+            .map(|s| s.label)
+            .collect();
+        assert_eq!(
+            reached,
+            vec![
+                "SIGNAL",
+                "RISK VALIDATED",
+                "CREATED",
+                "SUBMITTED",
+                "ACKNOWLEDGED"
+            ]
+        );
+        // The stage is VISIBLE (the operator sees what has not happened yet)
+        // but never claimed as done while the order is still working.
+        assert!(!steps.iter().any(|s| s.label == "FILLED" && s.reached));
+        assert!(!steps
+            .iter()
+            .any(|s| s.label == "POSITION OPEN" && s.reached));
+        // The live step is the last one the engine actually reached.
+        assert_eq!(
+            steps.iter().find(|s| s.current).map(|s| s.label),
+            Some("ACKNOWLEDGED")
+        );
+    }
+
+    #[test]
+    fn a_rejection_shows_the_real_engine_reason_and_no_pipeline_tail() {
+        let rejected = OrderRow {
+            order_id: "c2".into(),
+            strategy: "OBR".into(),
+            symbol: "KAYNES".into(),
+            side: "SELL".into(),
+            quantity: "22".into(),
+            order_type: "SLM".into(),
+            price: "1218.50".into(),
+            status: "REJECTED".into(),
+            time: "12:14:26".into(),
+            broker: "fyers".into(),
+            reason: "insufficient margin".into(),
+            filled_qty: "0".into(),
+            history: vec![
+                "CREATED".into(),
+                "VALIDATED".into(),
+                "SUBMITTED".into(),
+                "REJECTED".into(),
+            ],
+        };
+        let steps = order_pipeline(Some(&rejected), true, false, false);
+        // REJECTED is reached and marked failed; FILLED is never invented.
+        let rejected_step = steps.iter().find(|s| s.label == "REJECTED").unwrap();
+        assert!(rejected_step.reached);
+        assert!(rejected_step.failed);
+        assert!(!steps.iter().any(|s| s.label == "FILLED"));
+        // The reason is the ENGINE's text, passed through untouched.
+        assert_eq!(rejected.reason, "insufficient margin");
+    }
+
+    #[test]
+    fn no_backend_order_means_no_pipeline_at_all() {
+        // STEP 12's rule: never paint a lifecycle the backend does not have.
+        let steps = order_pipeline(None, false, false, false);
+        assert!(steps.iter().all(|s| !s.reached));
+        assert!(steps.iter().all(|s| !s.current));
+    }
+
+    #[test]
+    fn filled_order_reaches_position_and_sl_stages() {
+        let filled = OrderRow {
+            order_id: "c3".into(),
+            strategy: "OBR".into(),
+            symbol: "KAYNES".into(),
+            side: "SELL".into(),
+            quantity: "22".into(),
+            order_type: "SLM".into(),
+            price: "1218.50".into(),
+            status: "FILLED".into(),
+            time: "12:15:00".into(),
+            broker: "fyers".into(),
+            reason: String::new(),
+            filled_qty: "22".into(),
+            history: vec![
+                "CREATED".into(),
+                "VALIDATED".into(),
+                "SUBMITTED".into(),
+                "ACKNOWLEDGED".into(),
+                "FILLED".into(),
+            ],
+        };
+        let steps = order_pipeline(Some(&filled), true, true, true);
+        let labels: Vec<&str> = steps.iter().map(|s| s.label).collect();
+        assert!(labels.contains(&"FILLED"));
+        assert!(labels.contains(&"POSITION OPEN"));
+        // SL PROTECTED only exists once a position is actually open.
+        assert!(steps.iter().any(|s| s.label == "SL PROTECTED" && s.reached));
+    }
+
+    #[test]
+    fn partial_fill_is_not_reported_as_a_full_fill() {
+        let partial = OrderRow {
+            order_id: "c4".into(),
+            strategy: "OBR".into(),
+            symbol: "KAYNES".into(),
+            side: "SELL".into(),
+            quantity: "22".into(),
+            order_type: "SLM".into(),
+            price: "1218.50".into(),
+            status: "PARTIALLY_FILLED".into(),
+            time: "12:14:40".into(),
+            broker: "fyers".into(),
+            reason: String::new(),
+            filled_qty: "9".into(),
+            history: vec![
+                "CREATED".into(),
+                "VALIDATED".into(),
+                "SUBMITTED".into(),
+                "ACKNOWLEDGED".into(),
+                "PARTIALLY_FILLED".into(),
+            ],
+        };
+        // A partial counts as reached-fill, but the position/sl stages must NOT
+        // claim the whole size landed while the venue reports 9 of 22.
+        let steps = order_pipeline(Some(&partial), true, false, false);
+        assert!(steps.iter().any(|s| s.label == "FILLED" && s.reached));
+        assert!(!steps
+            .iter()
+            .any(|s| s.label == "POSITION OPEN" && s.reached));
+        assert_eq!(partial.filled_qty, "9");
+    }
+
+    #[test]
+    fn order_snapshot_ingests_reason_and_history_from_the_backend() {
+        let mut st = configured(LiveState::default());
+        st.apply_snapshot(&serde_json::json!({
+            "orders": [{
+                "order_id": "c9", "symbol": "NSE:KAYNES", "side": "SELL",
+                "quantity": 22, "type": "SLM", "price": 1218.5,
+                "status": "REJECTED", "time": "12:14:26", "broker": "fyers",
+                "reason": "insufficient margin",
+                "filled_qty": 0,
+                "history": ["CREATED", "VALIDATED", "SUBMITTED", "REJECTED"],
+            }],
+        }));
+        let order = &st.orders[0];
+        assert_eq!(order.reason, "insufficient margin");
+        assert_eq!(order.history.len(), 4);
+        assert_eq!(order.history[3], "REJECTED");
+        assert_eq!(order.filled_qty, "0.00");
+    }
+
+    #[test]
+    fn order_rows_without_the_new_keys_degrade_to_honest_absence() {
+        // An older backend snapshot must still ingest; the new facts are simply
+        // absent (no invented reason, no invented lifecycle).
+        let mut st = configured(LiveState::default());
+        st.apply_snapshot(&serde_json::json!({
+            "orders": [{
+                "order_id": "c1", "symbol": "NSE:KAYNES", "side": "BUY",
+                "quantity": 10, "type": "LIMIT", "price": 100.0,
+                "status": "WORKING", "time": "12:00:00", "broker": "paper",
+            }],
+        }));
+        assert_eq!(st.orders[0].reason, "");
+        assert!(st.orders[0].history.is_empty());
+        assert_eq!(st.orders[0].filled_qty, "—");
+    }
+
+    #[test]
     fn money_and_text_renderings_match_the_terminal_conventions() {
         assert_eq!(money(123.456), "+123.46");
         assert_eq!(money(-7.5), "-7.50");
@@ -3852,9 +4397,20 @@ mod tests {
             quantity: "10".into(),
             order_type: "LIMIT".into(),
             price: "2801.10".into(),
-            status: "COMPLETE".into(),
+            status: "FILLED".into(),
             time: "13:00:02".into(),
             broker: "paper".into(),
+            reason: String::new(),
+            filled_qty: "10".into(),
+            // The engine's own recorded transitions: this is what the pipeline
+            // renders, so the test pins real lifecycle data, not a guess.
+            history: vec![
+                "CREATED".into(),
+                "VALIDATED".into(),
+                "SUBMITTED".into(),
+                "ACKNOWLEDGED".into(),
+                "FILLED".into(),
+            ],
         }];
         st.pnl = Pnl {
             realized: Some(50.0),
@@ -4210,9 +4766,14 @@ mod tests {
         assert_eq!(view.bar.broker_tone, 1);
         assert_eq!(view.bar.conn_label, "● Connected · ACC: VA1234");
         assert_eq!(view.bar.conn_tone, 1);
-        // Strategy card: bare id + status/timeframe sub-line.
+        // Strategy card: bare id + descriptive sub-line. The registry's own
+        // "ACTIVE" is deliberately NOT here — it names a loaded strategy, not
+        // a running one; the lifecycle is the card's STATUS field.
         assert_eq!(view.bar.strategy_label, "OBR C1C4");
-        assert_eq!(view.bar.strategy_sub, "ACTIVE · 30m");
+        assert_eq!(view.bar.strategy_sub, "30m");
+        // A configured-but-stopped session reads STOPPED, never ACTIVE.
+        assert_eq!(view.active_strat.status, "● STOPPED");
+        assert_eq!(view.active_strat.mode, "PAPER");
         // Recon card: bare status + counts sub-line.
         assert_eq!(view.bar.recon_label, "CLEAN");
         assert_eq!(view.bar.recon_sub, "Positions: 0 | Orders: 0");
@@ -4313,10 +4874,16 @@ mod tests {
         assert_eq!(view.md.freshness, "0.4s");
 
         assert_eq!(view.active_strat.mode, "LIVE");
-        assert_eq!(view.active_strat.mode_tone, 1);
+        // LIVE is the risk posture, not a green light: tone 3 (neg) is what
+        // makes the mode impossible to skim past as "all good".
+        assert_eq!(view.active_strat.mode_tone, 3);
+        // Mode and status are independent: this snapshot selects LIVE while
+        // the session is stopped, and the card must say exactly that.
+        assert_eq!(view.active_strat.status, "● STOPPED");
+        assert_eq!(view.bar.exec_label, "● ENABLED");
 
         assert_eq!(view.bar.risk_label, "READY");
-        assert_eq!(view.bar.risk_sub, "4x LEV · ₹600 MAX");
+        assert_eq!(view.bar.risk_sub, "4x LEV · ₹600 MAX RISK/STOCK");
 
         assert_eq!(view.watchlist.len(), 1);
         let row = &view.watchlist[0];
@@ -4370,9 +4937,11 @@ mod tests {
         }));
 
         let view = project(&st);
-        assert_eq!(view.bar.risk_label, "NOT READY");
+        // The verdict carries its own marker and NAMES the missing fact, so
+        // "why is sizing blocked" needs no cross-reference to the inspector.
+        assert_eq!(view.bar.risk_label, "● NOT READY");
         assert_eq!(view.bar.risk_tone, 3);
-        assert_eq!(view.bar.risk_sub, "CAPITAL: NOT AVAILABLE");
+        assert_eq!(view.bar.risk_sub, "BROKER CAPITAL: NOT AVAILABLE");
 
         let row = &view.watchlist[0];
         assert_eq!(row.risk_share, "26.50"); // Price risk preserved!
@@ -4463,8 +5032,10 @@ mod tests {
 
         let view = project(&st);
 
-        // 7 filter chips verification
-        assert_eq!(view.filter_chips.len(), 7);
+        // Filter chips: the nine-bucket EXECUTION vocabulary (STEP 26). Every
+        // count is computed from the same predicate that filters the rows, so a
+        // chip's number and the rows it reveals can never disagree.
+        assert_eq!(view.filter_chips.len(), 9);
         assert_eq!(view.filter_chips[0], "ALL (3)");
         assert_eq!(view.filter_chips[1], "READY (1)");
         assert_eq!(view.filter_chips[2], "SIGNAL (2)"); // KAYNES (SELL) + INFY (BUY)
@@ -4472,6 +5043,15 @@ mod tests {
         assert_eq!(view.filter_chips[4], "IN POSITION (1)"); // KAYNES (SHORT 18)
         assert_eq!(view.filter_chips[5], "WAITING (0)");
         assert_eq!(view.filter_chips[6], "NO DATA (0)");
+        // RISK BLOCKED counts only rows the ENGINE refused: with no capital in
+        // PAPER mode's sizing basis they are the two rows that HAVE real
+        // entry/stop. INFY has no levels, so it is not a risk failure.
+        assert_eq!(view.filter_chips[7], "RISK BLOCKED (0)");
+        assert_eq!(view.filter_chips[8], "REJECTED (0)");
+        // The nine buckets are a DISJOINT partition: READY(1) + SIGNAL(2)
+        // already account for all three rows, so no row is double-counted and
+        // the chip totals cannot contradict each other.
+        assert_eq!(view.filter_chips[1], "READY (1)");
 
         // Row projection verification
         assert_eq!(view.watchlist.len(), 3);

@@ -248,3 +248,279 @@ fn live_screen_renders_structurally_at_every_viewport_tier() {
     );
     println!("live render probes written to {}", out_dir().display());
 }
+
+/// STEP 36: the twenty-state visual matrix.
+///
+/// Every combination the acceptance list names is rendered offscreen and
+/// checked for the same structural health as the idle frame. The point is not
+/// that the states differ, it is that NONE of them crashes, blanks out, or
+/// renders a frame the eye cannot read — a state that throws or paints a void
+/// is indistinguishable from a broken screen to the operator.
+#[test]
+fn live_state_matrix_renders_at_the_primary_target_viewport() {
+    let win = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
+    slint::platform::set_platform(Box::new(MiniPlatform {
+        window: win.clone(),
+    }))
+    .expect("software platform installs once per test binary");
+
+    let ui = vayren_shell::AppWindow::new().unwrap();
+    shell::apply(&ui, &shell::demo_snapshot());
+    shell::select(&ui, ShellScreen::Live);
+
+    // The 1920x1080 @150% target in LOGICAL pixels is 1280x720; both are
+    // rendered because the acceptance list names 1920x1080 as the window and
+    // 150% as the scale.
+    let (w, h) = (1920u32, 1080u32);
+
+    // The demo fixture ships an empty watchlist (it is an idle desktop shape),
+    // so the matrix seeds its OWN rows. Building the base here keeps the shared
+    // fixture untouched and makes every case differ from it in exactly one way.
+    let base = move || {
+        let mut s = shell::demo_live_state();
+        s.watchlist_rows = vec![watchlist_row("KAYNES"), watchlist_row("TATASTEEL")];
+        s.selected_symbol = "NSE:KAYNES".into();
+        s
+    };
+    let mut cases: Vec<(&str, Box<dyn Fn() -> vayren_shell::live::LiveState>)> = Vec::new();
+
+    // 1-3: mode x status independence.
+    for (label, mode, running) in [
+        ("paper_stopped", vayren_shell::live::ExecMode::Paper, false),
+        ("live_stopped", vayren_shell::live::ExecMode::Live, false),
+        ("live_running", vayren_shell::live::ExecMode::Live, true),
+    ] {
+        cases.push((
+            label,
+            Box::new(move || {
+                let mut s = base().clone();
+                s.mode = mode;
+                if running {
+                    s.session = vayren_shell::live::SessionStatus::Running;
+                }
+                s
+            }),
+        ));
+    }
+
+    // 4-7: connection and feed states.
+    for (label, ws, md) in [
+        ("ws_connected", "CONNECTED", "STREAMING"),
+        ("ws_disconnected", "DISCONNECTED", "STREAMING"),
+        ("md_streaming", "CONNECTED", "STREAMING"),
+        ("md_stale", "CONNECTED", "STALE"),
+    ] {
+        cases.push((
+            label,
+            Box::new(move || {
+                let mut s = base().clone();
+                s.websocket.status = ws.into();
+                s.market_data.status = md.into();
+                s
+            }),
+        ));
+    }
+
+    // 8-11: order states.
+    for (label, status) in [
+        ("order_none", ""),
+        ("order_working", "WORKING"),
+        ("order_filled", "FILLED"),
+        ("order_rejected", "REJECTED"),
+    ] {
+        cases.push((
+            label,
+            Box::new(move || {
+                let mut s = base().clone();
+                if status.is_empty() {
+                    s.orders.clear();
+                } else {
+                    s.orders = vec![order_row("RELIANCE", status)];
+                }
+                s
+            }),
+        ));
+    }
+
+    // 12-14: position sides.
+    for (label, side, qty) in [
+        ("position_flat", "FLAT", "0"),
+        ("position_long", "LONG", "54"),
+        ("position_short", "SHORT", "22"),
+    ] {
+        cases.push((
+            label,
+            Box::new(move || {
+                let mut s = base().clone();
+                if side == "FLAT" {
+                    s.positions.clear();
+                    s.watchlist_rows[0].position = "FLAT".into();
+                } else {
+                    s.positions = vec![position_row("RELIANCE", side, qty)];
+                    s.watchlist_rows[0].position = format!("{side} {qty}");
+                }
+                s
+            }),
+        ));
+    }
+
+    // 15-17: risk readiness.
+    for (label, with_capital) in [
+        ("risk_not_ready", false),
+        ("risk_validated", true),
+        ("risk_blocked", true),
+    ] {
+        cases.push((
+            label,
+            Box::new(move || {
+                let mut s = base().clone();
+                s.capital.broker_capital = if with_capital { Some(100_000.0) } else { None };
+                s.capital.source = "broker".into();
+                if label == "risk_blocked" {
+                    // A planned risk far above the ceiling must read blocked.
+                    s.watchlist_rows[0].planned_risk = Some(99_999.0);
+                }
+                s
+            }),
+        ));
+    }
+
+    // 18-19: reconciliation.
+    for (label, status) in [("recon_synced", "CLEAN"), ("recon_mismatch", "MISMATCH")] {
+        cases.push((
+            label,
+            Box::new(move || {
+                let mut s = base().clone();
+                s.reconciliation.status = status.into();
+                s
+            }),
+        ));
+    }
+
+    // 20: 50+ symbols (the count is runtime-driven, never hardcoded).
+    cases.push((
+        "many_symbols_50",
+        Box::new(move || {
+            let mut s = base().clone();
+            s.watchlist_rows = (0..60)
+                .map(|i| watchlist_row(&format!("SYM{i:03}")))
+                .collect();
+            s.symbols = (0..60)
+                .map(|i| vayren_shell::live::SymbolPick {
+                    symbol: format!("SYM{i:03}"),
+                    checked: true,
+                    ltp: Some(100.0 + i as f64),
+                    change_pct: Some(0.5),
+                    in_store: true,
+                })
+                .collect();
+            s.store_total = Some(60);
+            s
+        }),
+    ));
+
+    assert_eq!(cases.len(), 20, "the matrix must cover all twenty states");
+
+    for (name, build) in cases {
+        let state = build();
+        shell::apply_live(&ui, &state);
+        let buffer = render_frame(&ui, &win, name, w, h);
+        let px = (w * h) as usize;
+        let surface = count_near(&buffer, [16, 23, 32], 6);
+        let accent = count_near(&buffer, [0, 229, 200], 24);
+        let text =
+            count_near(&buffer, [230, 237, 243], 26) + count_near(&buffer, [139, 152, 167], 18);
+        // The same three health floors the idle matrix enforces: panels paint,
+        // the identity accent renders, and glyphs rasterize. A state that
+        // produced an unreadable frame would fail here.
+        assert!(surface > px / 400, "{name}: panels missing ({surface})");
+        assert!(accent > px / 6000, "{name}: accent missing ({accent})");
+        assert!(text > px / 1500, "{name}: text missing ({text})");
+        let bg = count_near(&buffer, [7, 11, 16], 3);
+        assert!(bg < px * 97 / 100, "{name}: frame is a void ({bg}/{px})");
+    }
+}
+
+/// One real order row carrying an engine-shaped transition history.
+fn order_row(symbol: &str, status: &str) -> vayren_shell::live::OrderRow {
+    let history: Vec<String> = match status {
+        "FILLED" => vec![
+            "CREATED",
+            "VALIDATED",
+            "SUBMITTED",
+            "ACKNOWLEDGED",
+            "FILLED",
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect(),
+        "REJECTED" => vec!["CREATED", "VALIDATED", "SUBMITTED", "REJECTED"]
+            .into_iter()
+            .map(String::from)
+            .collect(),
+        _ => vec!["CREATED", "VALIDATED", "SUBMITTED", "ACKNOWLEDGED"]
+            .into_iter()
+            .map(String::from)
+            .collect(),
+    };
+    vayren_shell::live::OrderRow {
+        order_id: "c1".into(),
+        strategy: "OBR".into(),
+        symbol: symbol.into(),
+        side: "SELL".into(),
+        quantity: "22".into(),
+        order_type: "SLM".into(),
+        price: "1218.50".into(),
+        status: status.into(),
+        time: "12:14:25".into(),
+        broker: "fyers".into(),
+        reason: if status == "REJECTED" {
+            "insufficient margin".into()
+        } else {
+            String::new()
+        },
+        filled_qty: if status == "FILLED" {
+            "22".into()
+        } else {
+            "0".into()
+        },
+        history,
+    }
+}
+
+fn position_row(symbol: &str, side: &str, qty: &str) -> vayren_shell::live::PositionRow {
+    vayren_shell::live::PositionRow {
+        symbol: symbol.into(),
+        side: side.into(),
+        quantity: qty.into(),
+        entry: "1218.50".into(),
+        current: "1210.20".into(),
+        pnl: "+182.60".into(),
+        status: "OPEN".into(),
+        pnl_pct: Some(0.65),
+    }
+}
+
+fn watchlist_row(symbol: &str) -> vayren_shell::live::WatchlistStockRow {
+    vayren_shell::live::WatchlistStockRow {
+        symbol: format!("NSE:{symbol}"),
+        clean_symbol: symbol.into(),
+        ltp: Some(3124.90),
+        change_pct: Some(1.1),
+        ref_high: Some(1245.0),
+        ref_low: Some(1220.0),
+        break_low: Some(1218.5),
+        entry_price: Some(1218.5),
+        stop_price: Some(1245.0),
+        risk_per_share: Some(26.5),
+        qty: Some(22),
+        planned_risk: Some(583.0),
+        risk_util: Some(97.2),
+        position: "FLAT".into(),
+        status: "WAITING".into(),
+        signal: "--".into(),
+        order: None,
+        pnl: None,
+        last_update: "12:14:25".into(),
+    }
+}

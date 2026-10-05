@@ -99,9 +99,23 @@ def _logs_to_stderr(level: str) -> None:
 
 
 def _emit(payload: dict) -> bool:
-    """Write one JSON response line. False when the pipe is gone."""
+    """Write one JSON response line. False when the pipe is gone.
+
+    UTF-8 is forced on BOTH ends so the rupee sign, the bullets and the
+    glyphs the UI draws survive the pipe as themselves instead of arriving
+    as escape soup a downstream reader has to guess about (``ensure_ascii``
+    alone would be safe, but a reconfigured stdout encoding could still
+    transcode the line to cp1252 on the way out, which is exactly how
+    ``₹`` becomes ``?`` in the footer). ``ensure_ascii=False`` keeps the
+    payload human-readable on the wire; the Rust bridge decodes UTF-8.
+    """
     try:
-        print(json.dumps(payload), flush=True)
+        line = json.dumps(payload, ensure_ascii=False)
+        reconfig = getattr(sys.stdout, "reconfigure", None)
+        if callable(reconfig):
+            with contextlib.suppress(AttributeError, OSError, ValueError):
+                reconfig(encoding="utf-8", errors="replace")
+        print(line, flush=True)
     except (OSError, ValueError, TypeError):
         return False
     return True
@@ -873,7 +887,11 @@ def _progress_emitter():
     def emit(event: dict) -> None:
         payload = {"type": "lab_progress", "data": event}
         try:
-            sys.stdout.write(json.dumps(payload, separators=(",", ":")) + "\n")
+            reconfig = getattr(sys.stdout, "reconfigure", None)
+            if callable(reconfig):
+                with contextlib.suppress(AttributeError, OSError, ValueError):
+                    reconfig(encoding="utf-8", errors="replace")
+            sys.stdout.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n")
             sys.stdout.flush()
         except (OSError, ValueError, TypeError):
             pass
