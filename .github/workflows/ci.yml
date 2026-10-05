@@ -173,7 +173,7 @@ jobs:
           shared-key: "vayren-rust"
           cache-all-crates: "true"
       - run: cargo build --release -p vayren-core --manifest-path Cargo.toml
-      - run: cargo test -p vayren-core --lib --no-run --manifest-path Cargo.toml
+      - run: cargo test -p vayren-core --lib -p vayren-shell --no-run --manifest-path Cargo.toml
       - run: python -m pytest tools/tests/test_validate_scope.py tools/tests/test_failure_intel.py -q --no-header
 
   # Shard 2/2 — isolated readers, serial within the job, isolated runner.

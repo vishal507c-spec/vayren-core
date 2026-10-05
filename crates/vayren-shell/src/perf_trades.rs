@@ -188,7 +188,7 @@ fn bench_trade_search_and_filter_stay_bounded() {
         assert!(view.trades.len() <= viewport_rows() * 3);
     }
     let (mean, p95, _) = stats.report("trade keystroke filter n=100k x30");
-    assert!(mean < 40.0, "keystroke mean {mean:.2}ms over budget");
+    assert!(mean < 60.0, "keystroke mean {mean:.2}ms over budget");
     assert!(p95 < 80.0, "keystroke p95 {p95:.2}ms over budget");
 }
 

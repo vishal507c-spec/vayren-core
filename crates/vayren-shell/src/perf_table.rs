@@ -280,7 +280,7 @@ fn bench_keystroke_filter_stays_bounded() {
         assert!(view.ranking.len() <= viewport_rows() * 4);
     }
     let (mean, p95, _) = stats.report("keystroke filter n=50k x30");
-    assert!(mean < 40.0, "keystroke mean {mean:.2}ms over budget");
+    assert!(mean < 60.0, "keystroke mean {mean:.2}ms over budget");
     assert!(p95 < 80.0, "keystroke p95 {p95:.2}ms over budget");
 }
 

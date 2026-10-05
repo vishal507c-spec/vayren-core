@@ -241,7 +241,7 @@ def _file_imports(relpath: str, text: str, modules: list[str]) -> list[str]:
         for line in text.splitlines():
             match = repo_graph.RS_USE_RE.match(line)
             if match:
-                target = f"rust/{match.group(1).replace('_', '-')}"
+                target = f"crates/{match.group(1).replace('_', '-')}"
                 if target in modules:
                     found.add(target)
     return sorted(found)
