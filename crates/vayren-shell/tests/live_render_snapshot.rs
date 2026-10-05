@@ -78,7 +78,9 @@ fn render_frame(
             renderer.render(slice, width as usize);
         });
     }
-    save_ppm(&out_dir().join(format!("{name}.ppm")), &buffer);
+    if std::env::var_os("VAYREN_SNAPSHOT_SAVE").is_some() {
+        save_ppm(&out_dir().join(format!("{name}.ppm")), &buffer);
+    }
     buffer
 }
 

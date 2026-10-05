@@ -32,7 +32,7 @@ i-slint-backend-testing = "~1.17.0"
 debug = 1
 
 [profile.test]
-debug = 1
+debug = 0
 
 [profile.release]
 opt-level = 3
