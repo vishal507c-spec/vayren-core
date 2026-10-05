@@ -5,7 +5,12 @@
 
 **Owns:** Current state, open items, verified facts, oddities. **Not owns:** Rules/architecture/events/contracts \u2192 `AGENTS.md`, `AI_ENTRY.md`, `architecture.md`, `module_contracts.md`, `event_catalog.md`.
 
-**Latest update (speed-decoupling-and-live-ui-clarity-push, 2026-10-05):** LIVE UI REDESIGN & COMPILATION SPEED DECOUPLING VERIFIED & COMMITTED.
+**Latest update (squash-merge-main-rule-locked, 2026-10-05):** SQUASH MERGE TO MAIN RULE PERMANENTLY LOCKED IN AGENTS.MD.
+- **Rule Locked:** `main` branch par development branch ke multiple intermediate commits ka direct merge ya push strictly forbidden hai.
+- **Enforcement:** Development hamesha feature branch (`no1`) par hogi. Jab CI 100% Green ho jaye aur user `main` me merge karne ka kahe, tab hamesha `git merge --squash` hoga.
+- **Objective:** `main` branch ki commit history me intermediate test failure (`✗`) noise kabhi show na ho; `main` par sirf clean consolidated **100% Green (✓)** commits hi dikhenge.
+
+**Previous update (speed-decoupling-and-live-ui-clarity-push, 2026-10-05):** LIVE UI REDESIGN & COMPILATION SPEED DECOUPLING VERIFIED & COMMITTED.
 1. **Speed Decoupling (`tools/validate_scope.py`):**
    - Mapped `crates/vayren-domain/` directly to `cargo test -p vayren-domain --lib` in `_cargo_for_file`, decoupling pure Rust domain logic from the heavy `vayren-shell` Slint compilation.
    - `test_bench_market_rust_change` test duration reduced from 647s down to 26.5s (~24x speedup).

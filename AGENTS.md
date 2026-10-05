@@ -191,6 +191,21 @@ Public API badla → README update karo, tests saath mein, `make check` pass kiy
 - Local work allowed: edit, tests, builds, validation, git status/diff, local commits (jab task appropriate ho)
 - Push karte waqt: branch check → git status → git diff review → sirf requested changes push → **force-push kabhi nahi** (jab tak user explicitly na maange), branch switch/merge push ke liye nahi
 
+## Main Branch Merge — Squash Merge Hard Rule (NON-NEGOTIABLE)
+
+**`main` branch par development branch ke multiple intermediate commits direct push/merge karna SAKHT MANA HAI. `main` hamesha 100% CLEAN aur GREEN (✓) hona chahiye.**
+
+1. **Development Isolation:** Saare intermediate commits, experiment, test fixes hamesha feature/development branch (`no1` ya dedicated branch) par honge.
+2. **Squash Merge Mandatory:** Jab feature branch par saare tests green ho jayein aur user `main` me merge karne ko kahe, tab `main` me **HAMESHA Squash Merge** (`git merge --squash <branch>`) hoga:
+   ```bash
+   git checkout main
+   git merge --squash <branch>
+   git commit -m "<type>(<scope>): <summary>"
+   git push origin main
+   ```
+3. **Zero Noise Guarantee:** Isse development ke dauran ke kisi bhi intermediate fail (`✗`) commit ka noise `main` par kabhi nahi aayega. `main` branch ki history hamesha clean, consolidated, aur **100% Green (✓)** rahegi.
+4. **Direct Fast-Forward to Main Forbidden:** `main` par multi-commit direct fast-forward merge strictly prohibited hai.
+
 ## Forbidden
 
 - `from x import *`, relative cross-module, dusre module ka internal import
@@ -198,6 +213,7 @@ Public API badla → README update karo, tests saath mein, `make check` pass kiy
 - Placeholder / mock / sample trading logic, TODO/FIXME, dead code
 - Big-bang migration, naya language/framework bina approval
 - **Bina explicit user command ke GitHub push/release/tag/PR** (upar wala Hard Rule)
+- **`main` branch par multi-commit direct fast-forward merge** (HAMESHA `git merge --squash` use karo taaki `main` branch 100% Green rahe)
 
 ## Commands
 
