@@ -232,11 +232,18 @@ def test_graph_has_no_canonical_prose() -> None:
        crossed the old cap because the restored live-execution / risk-facade /
        market-repository runtime files joined the tree (4,570 entities / 3,993
        symbols over 415 files, 26 modules) — product code, not narrative.
-       Regeneration was tried first and produced a LARGER valid artifact, so
-       the cap moved instead: two consecutive rebuilds of an unchanged tree
-       measured 2,452,206 B and 2,463,322 B (the builder is nondeterministic
-       across runs, ~11 KB variance), and 2.56MB covers the observed size plus
-       headroom for that variance.
+        Regeneration was tried first and produced a LARGER valid artifact, so
+        the cap moved instead: two consecutive rebuilds of an unchanged tree
+        measured 2,452,206 B and 2,463,322 B (the builder is nondeterministic
+        across runs, ~11 KB variance), and 2.56MB covers the observed size plus
+        headroom for that variance.
+        Justification for the 2.56MB -> 2.62MB bump (2026-10-06): the artifact
+        crossed the old cap because the FYERS live-order adapter plus
+        market/order WebSocket runtime and tests joined the tree (4,761
+        entities / 4,160 symbols over 428 files) — product code, not
+        narrative. Regeneration was tried first on the exact commit tree and
+        produced a valid artifact (2,585,920 B, second run 2,585,775 B), so
+        the cap moved instead; 2.62MB covers the observed size plus headroom.
     2. Per-entity budget + a max-string-length budget. These are what make the
        cap safe to raise: prose pasted into any field would blow the string
        budget long before it filled the entity budget, so a future dump cannot
@@ -246,7 +253,7 @@ def test_graph_has_no_canonical_prose() -> None:
     assert "INSERT OR IGNORE" not in text
     graph = json.loads(text)
     size = len(text.encode("utf-8"))
-    assert size < 2_560_000, f"graph artifact grew past the cap: {size} B"
+    assert size < 2_620_000, f"graph artifact grew past the cap: {size} B"
 
     entities = graph["entity_count"]
     assert entities > 0

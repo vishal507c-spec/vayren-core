@@ -141,6 +141,12 @@ class MockTransport:
         self.calls.append({"method": "DELETE", "url": url, "payload": payload, "headers": headers})
         return {"s": "ok", "code": 1103, "message": "Order cancelled successfully"}
 
+    def put_json(
+        self, url: str, payload: dict[str, Any], headers: dict[str, str] | None = None
+    ) -> dict[str, Any]:
+        self.calls.append({"method": "PUT", "url": url, "payload": payload, "headers": headers})
+        return {"s": "ok", "code": 1102, "message": "Order modified successfully"}
+
 
 # ── 1. MARKET DATA WEBSOCKET TESTS ──────────────────────────────────────────
 
@@ -443,7 +449,7 @@ def test_broker_disconnect_blocks_live_order() -> None:
     from execution.market_data.provider import MarketDataProvider
     from execution.models.intent import ExecutionIntent
     from execution.models.order import OrderPlan
-    from execution.modes import ExecutionMode, LiveArm
+    from execution.modes import ExecutionMode
     from execution.runtime.session import LiveSession, SessionConfig
     from risk import RiskPolicy
 
@@ -467,7 +473,7 @@ def test_broker_disconnect_blocks_live_order() -> None:
     )
     session._broker = adapter
     session._mode = ExecutionMode.LIVE
-    session.arm(LiveArm.ARMED)
+    session.arm("test arming")
 
     intent = ExecutionIntent(
         intent_id="strat:1:i1",
