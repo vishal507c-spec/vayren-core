@@ -24,6 +24,7 @@ from broker.providers.fyers.live_auth import (
     FyersAuthFlow,
     FyersSessionStore,
 )
+from broker.providers.fyers.live_market_data import FyersLiveMarketData
 from broker.providers.fyers.session_adapter import FyersSessionAdapter
 from broker.providers.fyers.spec import fyers_management_spec
 from broker.registry import BrokerRecord
@@ -57,6 +58,7 @@ __all__ = [
     "FyersAuthFlow",
     "FyersAutoAuthEngine",
     "FyersCredentials",
+    "FyersLiveMarketData",
     "FyersProvider",
     "FyersSessionAdapter",
     "FyersSessionStore",

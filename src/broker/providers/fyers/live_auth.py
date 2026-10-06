@@ -118,6 +118,14 @@ class HttpTransport(Protocol):
 
     def get_json(self, url: str, headers: dict[str, str] | None = None) -> dict[str, Any]: ...
 
+    def put_json(
+        self, url: str, payload: dict[str, Any], headers: dict[str, str] | None = None
+    ) -> dict[str, Any]: ...
+
+    def delete_json(
+        self, url: str, payload: dict[str, Any], headers: dict[str, str] | None = None
+    ) -> dict[str, Any]: ...
+
 
 class _UrllibTransport:
     """Default stdlib HTTP transport (injectable seam for tests)."""
@@ -139,6 +147,40 @@ class _UrllibTransport:
                 **(headers or {}),
             },
             method="POST",
+        )
+        return self._read_json(request)
+
+    def put_json(
+        self, url: str, payload: dict[str, Any], headers: dict[str, str] | None = None
+    ) -> dict[str, Any]:
+        body = json.dumps(payload).encode()
+        request = urllib.request.Request(
+            url,
+            data=body,
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": USER_AGENT,
+                **(headers or {}),
+            },
+            method="PUT",
+        )
+        return self._read_json(request)
+
+    def delete_json(
+        self, url: str, payload: dict[str, Any], headers: dict[str, str] | None = None
+    ) -> dict[str, Any]:
+        body = json.dumps(payload).encode()
+        request = urllib.request.Request(
+            url,
+            data=body,
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": USER_AGENT,
+                **(headers or {}),
+            },
+            method="DELETE",
         )
         return self._read_json(request)
 

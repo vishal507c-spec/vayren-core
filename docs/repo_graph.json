@@ -387,6 +387,8 @@
         "src/broker/providers/__init__.py",
         "src/broker/providers/fyers/__init__.py",
         "src/broker/providers/fyers/adapter.py",
+        "src/broker/providers/fyers/live_market_data.py",
+        "src/broker/providers/fyers/session_adapter.py",
         "src/broker/providers/fyers/spec.py",
         "src/broker/providers/skeleton/__init__.py",
         "src/broker/providers/zerodha/__init__.py",
@@ -1126,7 +1128,7 @@
       "to": "src/core/native"
     }
   ],
-  "entity_count": 4716,
+  "entity_count": 4761,
   "files": [
     {
       "domain": "CORE",
@@ -2675,6 +2677,16 @@
       "module": "src/broker/providers",
       "owner": "PROVIDER_SDK",
       "owner_source": "policy",
+      "path": "src/broker/providers/fyers/live_market_data.py",
+      "retention_state": null
+    },
+    {
+      "domain": "PROVIDER_BOUNDARY",
+      "is_test": false,
+      "language": "PYTHON",
+      "module": "src/broker/providers",
+      "owner": "PROVIDER_SDK",
+      "owner_source": "policy",
       "path": "src/broker/providers/fyers/selenium_auth.py",
       "retention_state": null
     },
@@ -2965,6 +2977,16 @@
       "module": "src/broker",
       "owner": "BROKER_CONTRACT",
       "owner_source": "policy",
+      "path": "src/broker/tests/test_fyers_live_trading.py",
+      "retention_state": null
+    },
+    {
+      "domain": "BROKER_CONTRACT",
+      "is_test": true,
+      "language": "PYTHON",
+      "module": "src/broker",
+      "owner": "BROKER_CONTRACT",
+      "owner_source": "policy",
       "path": "src/broker/tests/test_fyers_provider.py",
       "retention_state": null
     },
@@ -2986,6 +3008,16 @@
       "owner": "BROKER_CONTRACT",
       "owner_source": "policy",
       "path": "src/broker/tests/test_fyers_selenium_browser.py",
+      "retention_state": null
+    },
+    {
+      "domain": "BROKER_CONTRACT",
+      "is_test": true,
+      "language": "PYTHON",
+      "module": "src/broker",
+      "owner": "BROKER_CONTRACT",
+      "owner_source": "policy",
+      "path": "src/broker/tests/test_fyers_websocket.py",
       "retention_state": null
     },
     {
@@ -5827,9 +5859,11 @@
         "src/broker/tests/test_fyers_adapter.py",
         "src/broker/tests/test_fyers_auto_auth.py",
         "src/broker/tests/test_fyers_live_auth.py",
+        "src/broker/tests/test_fyers_live_trading.py",
         "src/broker/tests/test_fyers_provider.py",
         "src/broker/tests/test_fyers_selenium_auth.py",
         "src/broker/tests/test_fyers_selenium_browser.py",
+        "src/broker/tests/test_fyers_websocket.py",
         "src/broker/tests/test_selection_store.py",
         "src/broker/tests/test_zerodha_auth.py",
         "src/broker/tests/test_zerodha_fetch.py",
@@ -5898,6 +5932,7 @@
         "src/broker/providers/fyers/auto_auth.py",
         "src/broker/providers/fyers/credentials.py",
         "src/broker/providers/fyers/live_auth.py",
+        "src/broker/providers/fyers/live_market_data.py",
         "src/broker/providers/fyers/selenium_auth.py",
         "src/broker/providers/fyers/session_adapter.py",
         "src/broker/providers/fyers/spec.py",
@@ -6592,7 +6627,7 @@
       "required_language": "PYTHON"
     }
   ],
-  "relationship_count": 8282,
+  "relationship_count": 8484,
   "repository": {
     "name": "vayren-core",
     "root": "."
@@ -11044,6 +11079,7 @@
         "broker.interfaces.faces:StaticPlugin",
         "broker.interfaces.faces:TradingFace",
         "broker.providers.fyers.adapter:FyersProvider",
+        "broker.providers.fyers.live_market_data:FyersLiveMarketData",
         "broker.providers.skeleton:SkeletonHistorical",
         "broker.providers.skeleton:SkeletonMarketData",
         "broker.providers.skeleton:SkeletonTrading",
@@ -12545,7 +12581,7 @@
       "file": "src/broker/providers/fyers/live_auth.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 249,
+      "line": 291,
       "module": "src/broker/providers",
       "name": "AuthCodeCapture",
       "public": true,
@@ -12609,7 +12645,7 @@
       "file": "src/broker/providers/fyers/live_auth.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 331,
+      "line": 373,
       "module": "src/broker/providers",
       "name": "FyersAuthFlow",
       "public": true,
@@ -12638,7 +12674,7 @@
       "file": "src/broker/providers/fyers/live_auth.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 201,
+      "line": 243,
       "module": "src/broker/providers",
       "name": "FyersSessionStore",
       "public": true,
@@ -12683,7 +12719,7 @@
       "file": "src/broker/providers/fyers/live_auth.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 122,
+      "line": 130,
       "module": "src/broker/providers",
       "name": "_UrllibTransport",
       "public": false,
@@ -12700,7 +12736,7 @@
       "file": "src/broker/providers/fyers/live_auth.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 399,
+      "line": 441,
       "module": "src/broker/providers",
       "name": "_is_expired",
       "public": false,
@@ -12717,7 +12753,7 @@
       "file": "src/broker/providers/fyers/live_auth.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 243,
+      "line": 285,
       "module": "src/broker/providers",
       "name": "_now",
       "public": false,
@@ -12782,7 +12818,7 @@
       "file": "src/broker/providers/fyers/live_auth.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 411,
+      "line": 453,
       "module": "src/broker/providers",
       "name": "fyers_interactive_login",
       "public": true,
@@ -12826,6 +12862,32 @@
       "name": "new_state",
       "public": true,
       "qualified": "broker.providers.fyers.live_auth:new_state",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "broker.providers.fyers.spec:fyers_management_spec",
+        "broker.tests.test_fyers_websocket:test_market_ws_connection_lifecycle",
+        "broker.tests.test_fyers_websocket:test_market_ws_error_handling",
+        "broker.tests.test_fyers_websocket:test_market_ws_poll_drains_queue",
+        "broker.tests.test_fyers_websocket:test_market_ws_tick_normalization_quote_and_candle",
+        "broker.tests.test_fyers_websocket:test_market_ws_tick_normalization_trade"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "broker.capabilities:CapabilitySet",
+        "broker.vocab:BrokerError",
+        "broker.vocab:ErrorCode"
+      ],
+      "dotted": "broker.providers.fyers.live_market_data.FyersLiveMarketData",
+      "file": "src/broker/providers/fyers/live_market_data.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 44,
+      "module": "src/broker/providers",
+      "name": "FyersLiveMarketData",
+      "public": true,
+      "qualified": "broker.providers.fyers.live_market_data:FyersLiveMarketData",
       "tests": []
     },
     {
@@ -13164,7 +13226,16 @@
     },
     {
       "called_by": [
-        "broker.providers.fyers.spec:fyers_management_spec"
+        "broker.providers.fyers.spec:fyers_management_spec",
+        "broker.tests.test_fyers_live_trading:connected_adapter",
+        "broker.tests.test_fyers_live_trading:test_adapter_environment_is_live",
+        "broker.tests.test_fyers_live_trading:test_missing_credentials_fails_closed",
+        "broker.tests.test_fyers_live_trading:test_not_connected_fails_closed",
+        "broker.tests.test_fyers_websocket:test_broker_disconnect_blocks_live_order",
+        "broker.tests.test_fyers_websocket:test_order_ws_connection_and_health",
+        "broker.tests.test_fyers_websocket:test_order_ws_fallback_to_rest_when_queue_empty",
+        "broker.tests.test_fyers_websocket:test_order_ws_order_ack_and_reject",
+        "broker.tests.test_fyers_websocket:test_order_ws_partial_and_full_fill_deduplication"
       ],
       "callers_complete": true,
       "calls": [
@@ -13172,13 +13243,16 @@
         "broker.providers.fyers.live_auth:FyersAuthFlow",
         "broker.providers.fyers.live_auth:HttpTransport",
         "broker.providers.fyers.live_auth:_UrllibTransport",
-        "broker.providers.fyers.session_adapter:_safe_amount"
+        "broker.providers.fyers.session_adapter:_safe_amount",
+        "broker.vocab:BrokerError",
+        "broker.vocab:Environment",
+        "broker.vocab:ErrorCode"
       ],
       "dotted": "broker.providers.fyers.session_adapter.FyersSessionAdapter",
       "file": "src/broker/providers/fyers/session_adapter.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 29,
+      "line": 58,
       "module": "src/broker/providers",
       "name": "FyersSessionAdapter",
       "public": true,
@@ -13195,7 +13269,7 @@
       "file": "src/broker/providers/fyers/session_adapter.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 132,
+      "line": 974,
       "module": "src/broker/providers",
       "name": "_safe_amount",
       "public": false,
@@ -13212,7 +13286,7 @@
       "file": "src/broker/providers/fyers/spec.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 40,
+      "line": 41,
       "module": "src/broker/providers",
       "name": "_schema_rows",
       "public": false,
@@ -13231,6 +13305,7 @@
         "broker.providers.fyers.live_auth:FyersAuthFlow",
         "broker.providers.fyers.live_auth:FyersSessionStore",
         "broker.providers.fyers.live_auth:default_redirect_url",
+        "broker.providers.fyers.live_market_data:FyersLiveMarketData",
         "broker.providers.fyers.selenium_auth:FyersSeleniumAuthEngine",
         "broker.providers.fyers.selenium_auth:fyers_selenium_interactive_login",
         "broker.providers.fyers.session_adapter:FyersSessionAdapter",
@@ -13240,7 +13315,7 @@
       "file": "src/broker/providers/fyers/spec.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 57,
+      "line": 58,
       "module": "src/broker/providers",
       "name": "fyers_management_spec",
       "public": true,
@@ -13260,7 +13335,7 @@
       "file": "src/broker/providers/fyers/__init__.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 36,
+      "line": 37,
       "module": "src/broker/providers",
       "name": "fyers_plugin_record",
       "public": true,
@@ -16805,6 +16880,514 @@
     },
     {
       "called_by": [
+        "broker.tests.test_fyers_live_trading:test_authentication_failure",
+        "broker.tests.test_fyers_live_trading:test_buy_order_mapping",
+        "broker.tests.test_fyers_live_trading:test_fractional_quantity_rejected",
+        "broker.tests.test_fyers_live_trading:test_invalid_symbol_rejected",
+        "broker.tests.test_fyers_live_trading:test_limit_price_mapping",
+        "broker.tests.test_fyers_live_trading:test_market_order_mapping",
+        "broker.tests.test_fyers_live_trading:test_missing_credentials_fails_closed",
+        "broker.tests.test_fyers_live_trading:test_negative_limit_price_rejected",
+        "broker.tests.test_fyers_live_trading:test_no_sensitive_tokens_logged",
+        "broker.tests.test_fyers_live_trading:test_not_connected_fails_closed",
+        "broker.tests.test_fyers_live_trading:test_paper_cannot_call_live_endpoint",
+        "broker.tests.test_fyers_live_trading:test_product_type_mapping",
+        "broker.tests.test_fyers_live_trading:test_quantity_mapping",
+        "broker.tests.test_fyers_live_trading:test_rejected_order_raises_broker_error",
+        "broker.tests.test_fyers_live_trading:test_sandbox_cannot_call_live_endpoint",
+        "broker.tests.test_fyers_live_trading:test_sell_order_mapping",
+        "broker.tests.test_fyers_live_trading:test_sl_limit_mapping",
+        "broker.tests.test_fyers_live_trading:test_sl_market_mapping",
+        "broker.tests.test_fyers_live_trading:test_successful_response_and_order_id_extraction",
+        "broker.tests.test_fyers_live_trading:test_timeout_network_failure",
+        "broker.tests.test_fyers_live_trading:test_zero_quantity_rejected"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "broker.tests.test_fyers_live_trading.DummyPlan",
+      "file": "src/broker/tests/test_fyers_live_trading.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 36,
+      "module": "src/broker",
+      "name": "DummyPlan",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_live_trading:DummyPlan",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "broker.tests.test_fyers_live_trading:connected_adapter",
+        "broker.tests.test_fyers_live_trading:test_missing_credentials_fails_closed",
+        "broker.tests.test_fyers_live_trading:test_not_connected_fails_closed"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "broker.tests.test_fyers_live_trading.MockTransport",
+      "file": "src/broker/tests/test_fyers_live_trading.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 49,
+      "module": "src/broker",
+      "name": "MockTransport",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_live_trading:MockTransport",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "broker.tests.test_fyers_live_trading:test_authentication_failure",
+        "broker.tests.test_fyers_live_trading:test_buy_order_mapping",
+        "broker.tests.test_fyers_live_trading:test_fractional_quantity_rejected",
+        "broker.tests.test_fyers_live_trading:test_invalid_symbol_rejected",
+        "broker.tests.test_fyers_live_trading:test_limit_price_mapping",
+        "broker.tests.test_fyers_live_trading:test_market_order_mapping",
+        "broker.tests.test_fyers_live_trading:test_negative_limit_price_rejected",
+        "broker.tests.test_fyers_live_trading:test_no_sensitive_tokens_logged",
+        "broker.tests.test_fyers_live_trading:test_product_type_mapping",
+        "broker.tests.test_fyers_live_trading:test_quantity_mapping",
+        "broker.tests.test_fyers_live_trading:test_rejected_order_raises_broker_error",
+        "broker.tests.test_fyers_live_trading:test_sell_order_mapping",
+        "broker.tests.test_fyers_live_trading:test_sl_limit_mapping",
+        "broker.tests.test_fyers_live_trading:test_sl_market_mapping",
+        "broker.tests.test_fyers_live_trading:test_successful_response_and_order_id_extraction",
+        "broker.tests.test_fyers_live_trading:test_timeout_network_failure",
+        "broker.tests.test_fyers_live_trading:test_zero_quantity_rejected"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "broker.providers.fyers.session_adapter:FyersSessionAdapter",
+        "broker.tests.test_fyers_live_trading:MockTransport"
+      ],
+      "dotted": "broker.tests.test_fyers_live_trading.connected_adapter",
+      "file": "src/broker/tests/test_fyers_live_trading.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 100,
+      "module": "src/broker",
+      "name": "connected_adapter",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_live_trading:connected_adapter",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.providers.fyers.session_adapter:FyersSessionAdapter",
+        "broker.vocab:Environment"
+      ],
+      "dotted": "broker.tests.test_fyers_live_trading.test_adapter_environment_is_live",
+      "file": "src/broker/tests/test_fyers_live_trading.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 368,
+      "module": "src/broker",
+      "name": "test_adapter_environment_is_live",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_live_trading:test_adapter_environment_is_live",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_live_trading:DummyPlan",
+        "broker.tests.test_fyers_live_trading:connected_adapter",
+        "broker.vocab:BrokerError",
+        "broker.vocab:ErrorCode"
+      ],
+      "dotted": "broker.tests.test_fyers_live_trading.test_authentication_failure",
+      "file": "src/broker/tests/test_fyers_live_trading.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 266,
+      "module": "src/broker",
+      "name": "test_authentication_failure",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_live_trading:test_authentication_failure",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_live_trading:DummyPlan",
+        "broker.tests.test_fyers_live_trading:connected_adapter"
+      ],
+      "dotted": "broker.tests.test_fyers_live_trading.test_buy_order_mapping",
+      "file": "src/broker/tests/test_fyers_live_trading.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 111,
+      "module": "src/broker",
+      "name": "test_buy_order_mapping",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_live_trading:test_buy_order_mapping",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_live_trading:DummyPlan",
+        "broker.tests.test_fyers_live_trading:connected_adapter",
+        "broker.vocab:BrokerError",
+        "broker.vocab:ErrorCode"
+      ],
+      "dotted": "broker.tests.test_fyers_live_trading.test_fractional_quantity_rejected",
+      "file": "src/broker/tests/test_fyers_live_trading.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 148,
+      "module": "src/broker",
+      "name": "test_fractional_quantity_rejected",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_live_trading:test_fractional_quantity_rejected",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_live_trading:DummyPlan",
+        "broker.tests.test_fyers_live_trading:connected_adapter",
+        "broker.vocab:BrokerError",
+        "broker.vocab:ErrorCode"
+      ],
+      "dotted": "broker.tests.test_fyers_live_trading.test_invalid_symbol_rejected",
+      "file": "src/broker/tests/test_fyers_live_trading.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 295,
+      "module": "src/broker",
+      "name": "test_invalid_symbol_rejected",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_live_trading:test_invalid_symbol_rejected",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_live_trading:DummyPlan",
+        "broker.tests.test_fyers_live_trading:connected_adapter"
+      ],
+      "dotted": "broker.tests.test_fyers_live_trading.test_limit_price_mapping",
+      "file": "src/broker/tests/test_fyers_live_trading.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 160,
+      "module": "src/broker",
+      "name": "test_limit_price_mapping",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_live_trading:test_limit_price_mapping",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_live_trading:DummyPlan",
+        "broker.tests.test_fyers_live_trading:connected_adapter"
+      ],
+      "dotted": "broker.tests.test_fyers_live_trading.test_market_order_mapping",
+      "file": "src/broker/tests/test_fyers_live_trading.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 196,
+      "module": "src/broker",
+      "name": "test_market_order_mapping",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_live_trading:test_market_order_mapping",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.providers.fyers.session_adapter:FyersSessionAdapter",
+        "broker.tests.test_fyers_live_trading:DummyPlan",
+        "broker.tests.test_fyers_live_trading:MockTransport",
+        "broker.vocab:BrokerError",
+        "broker.vocab:ErrorCode"
+      ],
+      "dotted": "broker.tests.test_fyers_live_trading.test_missing_credentials_fails_closed",
+      "file": "src/broker/tests/test_fyers_live_trading.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 333,
+      "module": "src/broker",
+      "name": "test_missing_credentials_fails_closed",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_live_trading:test_missing_credentials_fails_closed",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_live_trading:DummyPlan",
+        "broker.tests.test_fyers_live_trading:connected_adapter",
+        "broker.vocab:BrokerError",
+        "broker.vocab:ErrorCode"
+      ],
+      "dotted": "broker.tests.test_fyers_live_trading.test_negative_limit_price_rejected",
+      "file": "src/broker/tests/test_fyers_live_trading.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 311,
+      "module": "src/broker",
+      "name": "test_negative_limit_price_rejected",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_live_trading:test_negative_limit_price_rejected",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_live_trading:DummyPlan",
+        "broker.tests.test_fyers_live_trading:connected_adapter"
+      ],
+      "dotted": "broker.tests.test_fyers_live_trading.test_no_sensitive_tokens_logged",
+      "file": "src/broker/tests/test_fyers_live_trading.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 376,
+      "module": "src/broker",
+      "name": "test_no_sensitive_tokens_logged",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_live_trading:test_no_sensitive_tokens_logged",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.providers.fyers.session_adapter:FyersSessionAdapter",
+        "broker.tests.test_fyers_live_trading:DummyPlan",
+        "broker.tests.test_fyers_live_trading:MockTransport",
+        "broker.vocab:BrokerError",
+        "broker.vocab:ErrorCode"
+      ],
+      "dotted": "broker.tests.test_fyers_live_trading.test_not_connected_fails_closed",
+      "file": "src/broker/tests/test_fyers_live_trading.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 322,
+      "module": "src/broker",
+      "name": "test_not_connected_fails_closed",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_live_trading:test_not_connected_fails_closed",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_live_trading:DummyPlan",
+        "execution.broker.paper:PaperBroker"
+      ],
+      "dotted": "broker.tests.test_fyers_live_trading.test_paper_cannot_call_live_endpoint",
+      "file": "src/broker/tests/test_fyers_live_trading.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 344,
+      "module": "src/broker",
+      "name": "test_paper_cannot_call_live_endpoint",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_live_trading:test_paper_cannot_call_live_endpoint",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_live_trading:DummyPlan",
+        "broker.tests.test_fyers_live_trading:connected_adapter"
+      ],
+      "dotted": "broker.tests.test_fyers_live_trading.test_product_type_mapping",
+      "file": "src/broker/tests/test_fyers_live_trading.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 208,
+      "module": "src/broker",
+      "name": "test_product_type_mapping",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_live_trading:test_product_type_mapping",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_live_trading:DummyPlan",
+        "broker.tests.test_fyers_live_trading:connected_adapter"
+      ],
+      "dotted": "broker.tests.test_fyers_live_trading.test_quantity_mapping",
+      "file": "src/broker/tests/test_fyers_live_trading.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 141,
+      "module": "src/broker",
+      "name": "test_quantity_mapping",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_live_trading:test_quantity_mapping",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_live_trading:DummyPlan",
+        "broker.tests.test_fyers_live_trading:connected_adapter",
+        "broker.vocab:BrokerError",
+        "broker.vocab:ErrorCode"
+      ],
+      "dotted": "broker.tests.test_fyers_live_trading.test_rejected_order_raises_broker_error",
+      "file": "src/broker/tests/test_fyers_live_trading.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 249,
+      "module": "src/broker",
+      "name": "test_rejected_order_raises_broker_error",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_live_trading:test_rejected_order_raises_broker_error",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_live_trading:DummyPlan",
+        "execution.broker.sandbox:SandboxBroker"
+      ],
+      "dotted": "broker.tests.test_fyers_live_trading.test_sandbox_cannot_call_live_endpoint",
+      "file": "src/broker/tests/test_fyers_live_trading.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 356,
+      "module": "src/broker",
+      "name": "test_sandbox_cannot_call_live_endpoint",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_live_trading:test_sandbox_cannot_call_live_endpoint",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_live_trading:DummyPlan",
+        "broker.tests.test_fyers_live_trading:connected_adapter"
+      ],
+      "dotted": "broker.tests.test_fyers_live_trading.test_sell_order_mapping",
+      "file": "src/broker/tests/test_fyers_live_trading.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 127,
+      "module": "src/broker",
+      "name": "test_sell_order_mapping",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_live_trading:test_sell_order_mapping",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_live_trading:DummyPlan",
+        "broker.tests.test_fyers_live_trading:connected_adapter"
+      ],
+      "dotted": "broker.tests.test_fyers_live_trading.test_sl_limit_mapping",
+      "file": "src/broker/tests/test_fyers_live_trading.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 183,
+      "module": "src/broker",
+      "name": "test_sl_limit_mapping",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_live_trading:test_sl_limit_mapping",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_live_trading:DummyPlan",
+        "broker.tests.test_fyers_live_trading:connected_adapter"
+      ],
+      "dotted": "broker.tests.test_fyers_live_trading.test_sl_market_mapping",
+      "file": "src/broker/tests/test_fyers_live_trading.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 173,
+      "module": "src/broker",
+      "name": "test_sl_market_mapping",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_live_trading:test_sl_market_mapping",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_live_trading:DummyPlan",
+        "broker.tests.test_fyers_live_trading:connected_adapter"
+      ],
+      "dotted": "broker.tests.test_fyers_live_trading.test_successful_response_and_order_id_extraction",
+      "file": "src/broker/tests/test_fyers_live_trading.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 227,
+      "module": "src/broker",
+      "name": "test_successful_response_and_order_id_extraction",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_live_trading:test_successful_response_and_order_id_extraction",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_live_trading:DummyPlan",
+        "broker.tests.test_fyers_live_trading:connected_adapter",
+        "broker.vocab:BrokerError",
+        "broker.vocab:ErrorCode"
+      ],
+      "dotted": "broker.tests.test_fyers_live_trading.test_timeout_network_failure",
+      "file": "src/broker/tests/test_fyers_live_trading.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 282,
+      "module": "src/broker",
+      "name": "test_timeout_network_failure",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_live_trading:test_timeout_network_failure",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_live_trading:DummyPlan",
+        "broker.tests.test_fyers_live_trading:connected_adapter",
+        "broker.vocab:BrokerError",
+        "broker.vocab:ErrorCode"
+      ],
+      "dotted": "broker.tests.test_fyers_live_trading.test_zero_quantity_rejected",
+      "file": "src/broker/tests/test_fyers_live_trading.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 303,
+      "module": "src/broker",
+      "name": "test_zero_quantity_rejected",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_live_trading:test_zero_quantity_rejected",
+      "tests": []
+    },
+    {
+      "called_by": [
         "broker.tests.test_fyers_provider:test_available_is_honest_without_network",
         "broker.tests.test_fyers_provider:test_history_calls_fail_closed_with_secret_free_reasons",
         "broker.tests.test_fyers_provider:test_reload_credentials_falls_back_to_layered_loader",
@@ -17502,6 +18085,265 @@
       "name": "test_real_chrome_completes_mock_fyers_login",
       "public": true,
       "qualified": "broker.tests.test_fyers_selenium_browser:test_real_chrome_completes_mock_fyers_login",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "broker.tests.test_fyers_websocket:test_market_ws_connection_lifecycle"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "broker.tests.test_fyers_websocket.MockDataSocket",
+      "file": "src/broker/tests/test_fyers_websocket.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 40,
+      "module": "src/broker",
+      "name": "MockDataSocket",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_websocket:MockDataSocket",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "broker.tests.test_fyers_websocket:test_order_ws_connection_and_health"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "broker.tests.test_fyers_websocket.MockOrderSocket",
+      "file": "src/broker/tests/test_fyers_websocket.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 79,
+      "module": "src/broker",
+      "name": "MockOrderSocket",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_websocket:MockOrderSocket",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "broker.tests.test_fyers_websocket:test_broker_disconnect_blocks_live_order",
+        "broker.tests.test_fyers_websocket:test_order_ws_connection_and_health",
+        "broker.tests.test_fyers_websocket:test_order_ws_fallback_to_rest_when_queue_empty",
+        "broker.tests.test_fyers_websocket:test_order_ws_order_ack_and_reject",
+        "broker.tests.test_fyers_websocket:test_order_ws_partial_and_full_fill_deduplication"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "broker.tests.test_fyers_websocket.MockTransport",
+      "file": "src/broker/tests/test_fyers_websocket.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 115,
+      "module": "src/broker",
+      "name": "MockTransport",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_websocket:MockTransport",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.providers.fyers.session_adapter:FyersSessionAdapter",
+        "broker.tests.test_fyers_websocket:MockTransport",
+        "execution.market_data.provider:MarketDataProvider",
+        "execution.models.intent:ExecutionIntent",
+        "execution.models.order:OrderPlan",
+        "execution.modes:ExecutionMode",
+        "execution.modes:LiveArm",
+        "execution.runtime.session:LiveSession",
+        "execution.runtime.session:SessionConfig"
+      ],
+      "dotted": "broker.tests.test_fyers_websocket.test_broker_disconnect_blocks_live_order",
+      "file": "src/broker/tests/test_fyers_websocket.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 439,
+      "module": "src/broker",
+      "name": "test_broker_disconnect_blocks_live_order",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_websocket:test_broker_disconnect_blocks_live_order",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.providers.fyers.live_market_data:FyersLiveMarketData",
+        "broker.tests.test_fyers_websocket:MockDataSocket"
+      ],
+      "dotted": "broker.tests.test_fyers_websocket.test_market_ws_connection_lifecycle",
+      "file": "src/broker/tests/test_fyers_websocket.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 148,
+      "module": "src/broker",
+      "name": "test_market_ws_connection_lifecycle",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_websocket:test_market_ws_connection_lifecycle",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.providers.fyers.live_market_data:FyersLiveMarketData"
+      ],
+      "dotted": "broker.tests.test_fyers_websocket.test_market_ws_error_handling",
+      "file": "src/broker/tests/test_fyers_websocket.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 270,
+      "module": "src/broker",
+      "name": "test_market_ws_error_handling",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_websocket:test_market_ws_error_handling",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.providers.fyers.live_market_data:FyersLiveMarketData"
+      ],
+      "dotted": "broker.tests.test_fyers_websocket.test_market_ws_poll_drains_queue",
+      "file": "src/broker/tests/test_fyers_websocket.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 256,
+      "module": "src/broker",
+      "name": "test_market_ws_poll_drains_queue",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_websocket:test_market_ws_poll_drains_queue",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.providers.fyers.live_market_data:FyersLiveMarketData"
+      ],
+      "dotted": "broker.tests.test_fyers_websocket.test_market_ws_tick_normalization_quote_and_candle",
+      "file": "src/broker/tests/test_fyers_websocket.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 220,
+      "module": "src/broker",
+      "name": "test_market_ws_tick_normalization_quote_and_candle",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_websocket:test_market_ws_tick_normalization_quote_and_candle",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.providers.fyers.live_market_data:FyersLiveMarketData"
+      ],
+      "dotted": "broker.tests.test_fyers_websocket.test_market_ws_tick_normalization_trade",
+      "file": "src/broker/tests/test_fyers_websocket.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 200,
+      "module": "src/broker",
+      "name": "test_market_ws_tick_normalization_trade",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_websocket:test_market_ws_tick_normalization_trade",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.providers.fyers.session_adapter:FyersSessionAdapter",
+        "broker.tests.test_fyers_websocket:MockOrderSocket",
+        "broker.tests.test_fyers_websocket:MockTransport"
+      ],
+      "dotted": "broker.tests.test_fyers_websocket.test_order_ws_connection_and_health",
+      "file": "src/broker/tests/test_fyers_websocket.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 283,
+      "module": "src/broker",
+      "name": "test_order_ws_connection_and_health",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_websocket:test_order_ws_connection_and_health",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.providers.fyers.session_adapter:FyersSessionAdapter",
+        "broker.tests.test_fyers_websocket:MockTransport"
+      ],
+      "dotted": "broker.tests.test_fyers_websocket.test_order_ws_fallback_to_rest_when_queue_empty",
+      "file": "src/broker/tests/test_fyers_websocket.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 423,
+      "module": "src/broker",
+      "name": "test_order_ws_fallback_to_rest_when_queue_empty",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_websocket:test_order_ws_fallback_to_rest_when_queue_empty",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.providers.fyers.session_adapter:FyersSessionAdapter",
+        "broker.tests.test_fyers_websocket:MockTransport"
+      ],
+      "dotted": "broker.tests.test_fyers_websocket.test_order_ws_order_ack_and_reject",
+      "file": "src/broker/tests/test_fyers_websocket.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 314,
+      "module": "src/broker",
+      "name": "test_order_ws_order_ack_and_reject",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_websocket:test_order_ws_order_ack_and_reject",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.providers.fyers.session_adapter:FyersSessionAdapter",
+        "broker.tests.test_fyers_websocket:MockTransport"
+      ],
+      "dotted": "broker.tests.test_fyers_websocket.test_order_ws_partial_and_full_fill_deduplication",
+      "file": "src/broker/tests/test_fyers_websocket.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 359,
+      "module": "src/broker",
+      "name": "test_order_ws_partial_and_full_fill_deduplication",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_websocket:test_order_ws_partial_and_full_fill_deduplication",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "execution.market_data.provider:MarketDataProvider",
+        "execution.modes:ExecutionMode",
+        "execution.runtime.session:LiveSession",
+        "execution.runtime.session:SessionConfig"
+      ],
+      "dotted": "broker.tests.test_fyers_websocket.test_paper_mode_does_not_call_live_websocket",
+      "file": "src/broker/tests/test_fyers_websocket.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 503,
+      "module": "src/broker",
+      "name": "test_paper_mode_does_not_call_live_websocket",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_websocket:test_paper_mode_does_not_call_live_websocket",
       "tests": []
     },
     {
@@ -18255,10 +19097,21 @@
     },
     {
       "called_by": [
+        "broker.providers.fyers.live_market_data:FyersLiveMarketData",
+        "broker.providers.fyers.session_adapter:FyersSessionAdapter",
         "broker.providers.skeleton:_no_transport",
         "broker.registry:DuplicateBrokerError",
         "broker.tests.test_broker_contracts:test_typed_errors_carry_normalized_codes",
         "broker.tests.test_final_phase:test_skeleton_faces_satisfy_protocols_but_refuse_work",
+        "broker.tests.test_fyers_live_trading:test_authentication_failure",
+        "broker.tests.test_fyers_live_trading:test_fractional_quantity_rejected",
+        "broker.tests.test_fyers_live_trading:test_invalid_symbol_rejected",
+        "broker.tests.test_fyers_live_trading:test_missing_credentials_fails_closed",
+        "broker.tests.test_fyers_live_trading:test_negative_limit_price_rejected",
+        "broker.tests.test_fyers_live_trading:test_not_connected_fails_closed",
+        "broker.tests.test_fyers_live_trading:test_rejected_order_raises_broker_error",
+        "broker.tests.test_fyers_live_trading:test_timeout_network_failure",
+        "broker.tests.test_fyers_live_trading:test_zero_quantity_rejected",
         "broker.vocab:BrokerNotRegisteredError",
         "broker.vocab:CredentialsNotReadyError",
         "broker.vocab:UnsupportedCapabilityError"
@@ -18354,6 +19207,7 @@
         "broker.identity:BrokerIdentity",
         "broker.identity:identity_of",
         "broker.interfaces.faces:TradingFace",
+        "broker.providers.fyers.session_adapter:FyersSessionAdapter",
         "broker.providers.skeleton:SkeletonTrading",
         "broker.providers.zerodha.live_market_data:ZerodhaMarketDataFace",
         "broker.providers.zerodha.live_trading:ZerodhaTradingAdapter",
@@ -18372,6 +19226,7 @@
         "broker.tests.test_final_phase:test_surface_status_config_awareness",
         "broker.tests.test_final_phase:test_venue_agnostic_ref_has_no_broker",
         "broker.tests.test_fyers_adapter:test_selection_resolves_and_history_surface_is_served",
+        "broker.tests.test_fyers_live_trading:test_adapter_environment_is_live",
         "broker.tests.test_selection_store:_selection",
         "broker.tests.test_selection_store:test_roundtrip"
       ],
@@ -18390,11 +19245,22 @@
     },
     {
       "called_by": [
+        "broker.providers.fyers.live_market_data:FyersLiveMarketData",
+        "broker.providers.fyers.session_adapter:FyersSessionAdapter",
         "broker.providers.skeleton:_no_transport",
         "broker.registry:DuplicateBrokerError",
         "broker.tests.test_broker_contracts:test_error_code_translation_table_covers_both_layers",
         "broker.tests.test_broker_contracts:test_typed_errors_carry_normalized_codes",
         "broker.tests.test_final_phase:test_skeleton_faces_satisfy_protocols_but_refuse_work",
+        "broker.tests.test_fyers_live_trading:test_authentication_failure",
+        "broker.tests.test_fyers_live_trading:test_fractional_quantity_rejected",
+        "broker.tests.test_fyers_live_trading:test_invalid_symbol_rejected",
+        "broker.tests.test_fyers_live_trading:test_missing_credentials_fails_closed",
+        "broker.tests.test_fyers_live_trading:test_negative_limit_price_rejected",
+        "broker.tests.test_fyers_live_trading:test_not_connected_fails_closed",
+        "broker.tests.test_fyers_live_trading:test_rejected_order_raises_broker_error",
+        "broker.tests.test_fyers_live_trading:test_timeout_network_failure",
+        "broker.tests.test_fyers_live_trading:test_zero_quantity_rejected",
         "broker.vocab:BrokerError",
         "broker.vocab:BrokerNotRegisteredError",
         "broker.vocab:CredentialsNotReadyError",
@@ -40533,7 +41399,7 @@
       "file": "crates/vayren-shell/ui/live.slint",
       "kind": "slint-component",
       "language": "RUST_SLINT",
-      "line": 477,
+      "line": 480,
       "module": "crates/vayren-shell",
       "name": "LiveGateRow",
       "public": false,
@@ -40563,7 +41429,7 @@
       "file": "crates/vayren-shell/ui/live.slint",
       "kind": "slint-component",
       "language": "RUST_SLINT",
-      "line": 445,
+      "line": 448,
       "module": "crates/vayren-shell",
       "name": "LiveKvRow",
       "public": false,
@@ -40653,7 +41519,7 @@
       "file": "crates/vayren-shell/ui/live.slint",
       "kind": "slint-component",
       "language": "RUST_SLINT",
-      "line": 531,
+      "line": 534,
       "module": "crates/vayren-shell",
       "name": "LiveScreen",
       "public": true,
@@ -40728,7 +41594,7 @@
       "file": "crates/vayren-shell/ui/live.slint",
       "kind": "slint-component",
       "language": "RUST_SLINT",
-      "line": 402,
+      "line": 405,
       "module": "crates/vayren-shell",
       "name": "LiveTabHeader",
       "public": false,
@@ -40758,7 +41624,7 @@
       "file": "crates/vayren-shell/ui/live.slint",
       "kind": "slint-global",
       "language": "RUST_SLINT",
-      "line": 301,
+      "line": 304,
       "module": "crates/vayren-shell",
       "name": "LiveTone",
       "public": true,
@@ -40773,7 +41639,7 @@
       "file": "crates/vayren-shell/ui/live.slint",
       "kind": "slint-component",
       "language": "RUST_SLINT",
-      "line": 319,
+      "line": 322,
       "module": "crates/vayren-shell",
       "name": "LiveTopCard",
       "public": false,
@@ -45107,6 +45973,7 @@
     },
     {
       "called_by": [
+        "broker.tests.test_fyers_live_trading:test_paper_cannot_call_live_endpoint",
         "execution.broker.factory:_seed_builtins",
         "execution.broker.factory:resolve_broker"
       ],
@@ -45293,6 +46160,7 @@
     },
     {
       "called_by": [
+        "broker.tests.test_fyers_live_trading:test_sandbox_cannot_call_live_endpoint",
         "execution.broker.factory:_default_sandbox"
       ],
       "callers_complete": true,
@@ -46065,6 +46933,8 @@
     },
     {
       "called_by": [
+        "broker.tests.test_fyers_websocket:test_broker_disconnect_blocks_live_order",
+        "broker.tests.test_fyers_websocket:test_paper_mode_does_not_call_live_websocket",
         "execution.market_data.broker_feed:BrokerFeedProvider",
         "execution.market_data.replay:ReplayProvider",
         "execution.market_data.sqlite_tail:SqliteTailProvider",
@@ -46292,6 +47162,7 @@
     },
     {
       "called_by": [
+        "broker.tests.test_fyers_websocket:test_broker_disconnect_blocks_live_order",
         "execution.planner:OrderPlanner",
         "execution.runtime.session:LiveSession",
         "execution.tests.test_live_pipeline:test_restart_blocks_until_reconciled",
@@ -46393,6 +47264,7 @@
     },
     {
       "called_by": [
+        "broker.tests.test_fyers_websocket:test_broker_disconnect_blocks_live_order",
         "execution.broker.adapter:BrokerAdapter",
         "execution.broker.paper:PaperBroker",
         "execution.broker.readonly:ReadOnlyBroker",
@@ -46497,6 +47369,8 @@
     },
     {
       "called_by": [
+        "broker.tests.test_fyers_websocket:test_broker_disconnect_blocks_live_order",
+        "broker.tests.test_fyers_websocket:test_paper_mode_does_not_call_live_websocket",
         "execution.broker.factory:resolve_broker",
         "execution.modes:resolve_mode",
         "execution.runtime.session:LiveSession",
@@ -46523,6 +47397,7 @@
     {
       "called_by": [
         "app.services.live_trading_service:LiveTradingService",
+        "broker.tests.test_fyers_websocket:test_broker_disconnect_blocks_live_order",
         "execution.broker.activation:evaluate_activation",
         "execution.modes:arm_transition",
         "execution.runtime.session:LiveSession",
@@ -47963,6 +48838,8 @@
     },
     {
       "called_by": [
+        "broker.tests.test_fyers_websocket:test_broker_disconnect_blocks_live_order",
+        "broker.tests.test_fyers_websocket:test_paper_mode_does_not_call_live_websocket",
         "execution.tests.test_live_pipeline:_kinds",
         "execution.tests.test_live_pipeline:_session",
         "execution.tests.test_live_sizing_gate:_session"
@@ -48062,6 +48939,8 @@
     },
     {
       "called_by": [
+        "broker.tests.test_fyers_websocket:test_broker_disconnect_blocks_live_order",
+        "broker.tests.test_fyers_websocket:test_paper_mode_does_not_call_live_websocket",
         "execution.runtime.session:LiveSession",
         "execution.tests.test_live_pipeline:_session",
         "execution.tests.test_live_sizing_gate:_session"
@@ -80254,6 +81133,12 @@
     {
       "granularity": "module",
       "module": "src/broker",
+      "path": "src/broker/tests/test_fyers_live_trading.py",
+      "targets": []
+    },
+    {
+      "granularity": "module",
+      "module": "src/broker",
       "path": "src/broker/tests/test_fyers_provider.py",
       "targets": []
     },
@@ -80267,6 +81152,12 @@
       "granularity": "module",
       "module": "src/broker",
       "path": "src/broker/tests/test_fyers_selenium_browser.py",
+      "targets": []
+    },
+    {
+      "granularity": "module",
+      "module": "src/broker",
+      "path": "src/broker/tests/test_fyers_websocket.py",
       "targets": []
     },
     {
