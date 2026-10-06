@@ -58,6 +58,24 @@ class PaperBroker:
     def connect(self) -> None:
         self._connected = True
 
+    @staticmethod
+    def _stop_triggered(plan: OrderPlan, reference_price: float) -> bool:
+        """Protective-stop trigger semantics (simulated venue honesty).
+
+        Non-stop orders always proceed. A STOP order rests WORKING until
+        the reference price touches the trigger (SELL at/below stop, BUY
+        at/above stop); an untriggered stop never fabricates a fill. A
+        stop without a positive trigger price can never fire (fail-closed).
+        """
+        if plan.order_type not in ("STOP_MARKET", "STOP_LIMIT", "SLM", "SLL"):
+            return True
+        trigger = plan.stop_price or 0.0
+        if trigger <= 0:
+            return False
+        if plan.side == "BUY":
+            return reference_price >= trigger
+        return reference_price <= trigger
+
     def disconnect(self) -> None:
         self._connected = False
 
@@ -156,11 +174,19 @@ class PaperBroker:
         if info is None or info["state"] not in ("SUBMITTED", "ACKNOWLEDGED", "PARTIALLY_FILLED"):
             return None
         plan: OrderPlan = info["plan"]
+        if not self._stop_triggered(plan, reference_price):
+            return None
         remaining = plan.quantity - info["filled_qty"]
+        # A triggered STOP_LIMIT rests on its limit economics (limit price,
+        # else the trigger itself); STOP_MARKET fills at market once fired.
+        limit_like = plan.order_type == "LIMIT" or plan.order_type in ("STOP_LIMIT", "SLL")
+        limit_value = plan.limit_price
+        if limit_value is None and plan.order_type in ("STOP_LIMIT", "SLL"):
+            limit_value = plan.stop_price
         calc = native_paper_calculate_fill(
-            plan.order_type == "LIMIT",
-            plan.limit_price is not None,
-            plan.limit_price or 0.0,
+            limit_like,
+            limit_value is not None,
+            limit_value or 0.0,
             plan.side == "BUY",
             reference_price,
             self._slippage_pct,

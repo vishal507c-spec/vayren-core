@@ -1126,7 +1126,7 @@
       "to": "src/core/native"
     }
   ],
-  "entity_count": 4630,
+  "entity_count": 4716,
   "files": [
     {
       "domain": "CORE",
@@ -2276,6 +2276,16 @@
       "owner": "route:app-composition",
       "owner_source": "route",
       "path": "src/app/tests/test_live_actions.py",
+      "retention_state": null
+    },
+    {
+      "domain": "APP_COMPOSITION",
+      "is_test": true,
+      "language": "PYTHON",
+      "module": "src/app",
+      "owner": "route:app-composition",
+      "owner_source": "route",
+      "path": "src/app/tests/test_live_risk_sizing.py",
       "retention_state": null
     },
     {
@@ -3855,6 +3865,26 @@
       "module": "src/execution",
       "owner": "RUST_EXECUTION",
       "owner_source": "policy",
+      "path": "src/execution/tests/test_live_pipeline.py",
+      "retention_state": null
+    },
+    {
+      "domain": "EXECUTION",
+      "is_test": true,
+      "language": "RUST",
+      "module": "src/execution",
+      "owner": "RUST_EXECUTION",
+      "owner_source": "policy",
+      "path": "src/execution/tests/test_live_sizing_gate.py",
+      "retention_state": null
+    },
+    {
+      "domain": "EXECUTION",
+      "is_test": true,
+      "language": "RUST",
+      "module": "src/execution",
+      "owner": "RUST_EXECUTION",
+      "owner_source": "policy",
       "path": "src/execution/tests/test_native_execution.py",
       "retention_state": null
     },
@@ -4110,6 +4140,16 @@
     },
     {
       "domain": "RISK",
+      "is_test": false,
+      "language": "RUST",
+      "module": "src/risk",
+      "owner": "RUST_RISK",
+      "owner_source": "policy",
+      "path": "src/risk/sizing.py",
+      "retention_state": "TEMPORARILY_RETAINED"
+    },
+    {
+      "domain": "RISK",
       "is_test": true,
       "language": "RUST",
       "module": "src/risk",
@@ -4146,6 +4186,16 @@
       "owner": "RUST_RISK",
       "owner_source": "policy",
       "path": "src/risk/tests/test_native_session.py",
+      "retention_state": null
+    },
+    {
+      "domain": "RISK",
+      "is_test": true,
+      "language": "RUST",
+      "module": "src/risk",
+      "owner": "RUST_RISK",
+      "owner_source": "policy",
+      "path": "src/risk/tests/test_sizing.py",
       "retention_state": null
     },
     {
@@ -5329,7 +5379,7 @@
       "retention_state": null
     }
   ],
-  "inputs_hash": "bd517cca40cd6ea2699b6ed90c1d08935468c59c83659708e32382ef3c6f3f93",
+  "inputs_hash": "7b6bc698a17ad1a86c46886d7f041813ba0454327699a64fef3c887a531aa047",
   "languages": [
     {
       "id": "RUST"
@@ -5643,6 +5693,7 @@
         "src/app/tests/test_headless_lab_coverage.py",
         "src/app/tests/test_headless_market_snapshot.py",
         "src/app/tests/test_live_actions.py",
+        "src/app/tests/test_live_risk_sizing.py",
         "src/app/tests/test_market_data_service.py",
         "src/app/tests/test_progress.py"
       ],
@@ -6097,6 +6148,8 @@
         "src/execution/runtime/session.py",
         "src/execution/runtime/strategy_runtime.py",
         "src/execution/tests/__init__.py",
+        "src/execution/tests/test_live_pipeline.py",
+        "src/execution/tests/test_live_sizing_gate.py",
         "src/execution/tests/test_native_execution.py",
         "src/execution/tests/test_native_normalizer.py",
         "src/execution/tests/test_native_order_state.py",
@@ -6201,10 +6254,12 @@
         "src/risk/native_engine.py",
         "src/risk/native_kill_switch.py",
         "src/risk/native_session.py",
+        "src/risk/sizing.py",
         "src/risk/tests/__init__.py",
         "src/risk/tests/test_native_engine.py",
         "src/risk/tests/test_native_kill_switch.py",
-        "src/risk/tests/test_native_session.py"
+        "src/risk/tests/test_native_session.py",
+        "src/risk/tests/test_sizing.py"
       ],
       "id": "src/risk",
       "language": "RUST",
@@ -6537,7 +6592,7 @@
       "required_language": "PYTHON"
     }
   ],
-  "relationship_count": 7865,
+  "relationship_count": 8282,
   "repository": {
     "name": "vayren-core",
     "root": "."
@@ -7817,7 +7872,8 @@
     },
     {
       "called_by": [
-        "app.services.live_trading_service:LiveTradingService"
+        "app.services.live_trading_service:LiveTradingService",
+        "risk.tests.test_sizing:test_engine_projection_matches_sizing_pipeline"
       ],
       "callers_complete": true,
       "calls": [],
@@ -7825,7 +7881,7 @@
       "file": "src/app/services/live_trading_service.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 136,
+      "line": 143,
       "module": "src/app/services",
       "name": "CapitalRiskEngine",
       "public": false,
@@ -7842,7 +7898,7 @@
       "file": "src/app/services/live_trading_service.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 189,
+      "line": 203,
       "module": "src/app/services",
       "name": "LiveConfigError",
       "public": true,
@@ -7859,7 +7915,7 @@
       "file": "src/app/services/live_trading_service.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 210,
+      "line": 224,
       "module": "src/app/services",
       "name": "LiveSessionStore",
       "public": true,
@@ -7876,7 +7932,7 @@
       "file": "src/app/services/live_trading_service.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 194,
+      "line": 208,
       "module": "src/app/services",
       "name": "LiveTradeConfig",
       "public": true,
@@ -7888,7 +7944,9 @@
         "app.headless:_live_service",
         "app.tests.test_live_actions:_live_venue_stubs",
         "app.tests.test_live_actions:_service",
-        "app.tests.test_live_actions:test_confirmed_start_satisfies_consent"
+        "app.tests.test_live_actions:test_confirmed_start_satisfies_consent",
+        "app.tests.test_live_risk_sizing:_service",
+        "app.tests.test_live_risk_sizing:test_live_blocker_names_missing_capital"
       ],
       "callers_complete": true,
       "calls": [
@@ -7910,6 +7968,7 @@
         "broker.vocab:Domain",
         "execution.modes:LiveArm",
         "execution.modes:gates_from_env",
+        "risk.sizing:BrokerCapital",
         "strategy.language.compiler:compile_strategy",
         "strategy.language.storage:StrategyRecord",
         "strategy.language.storage:list_strategies",
@@ -7920,7 +7979,7 @@
       "file": "src/app/services/live_trading_service.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 258,
+      "line": 272,
       "module": "src/app/services",
       "name": "LiveTradingService",
       "public": true,
@@ -7937,7 +7996,7 @@
       "file": "src/app/services/live_trading_service.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 125,
+      "line": 132,
       "module": "src/app/services",
       "name": "_as_float",
       "public": false,
@@ -7954,7 +8013,7 @@
       "file": "src/app/services/live_trading_service.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 104,
+      "line": 111,
       "module": "src/app/services",
       "name": "_category_for_event",
       "public": false,
@@ -7971,7 +8030,7 @@
       "file": "src/app/services/live_trading_service.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 95,
+      "line": 102,
       "module": "src/app/services",
       "name": "_category_for_kind",
       "public": false,
@@ -7988,7 +8047,7 @@
       "file": "src/app/services/live_trading_service.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 120,
+      "line": 127,
       "module": "src/app/services",
       "name": "_clean_symbol",
       "public": false,
@@ -8005,7 +8064,7 @@
       "file": "src/app/services/live_trading_service.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 252,
+      "line": 266,
       "module": "src/app/services",
       "name": "_utcnow_iso",
       "public": false,
@@ -9379,6 +9438,121 @@
       "name": "test_unsupported_mode_is_refused_honestly",
       "public": true,
       "qualified": "app.tests.test_live_actions:test_unsupported_mode_is_refused_honestly",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.tests.test_live_risk_sizing:test_live_blocker_names_missing_capital",
+        "app.tests.test_live_risk_sizing:test_live_feeds_broker_capital_into_engine",
+        "app.tests.test_live_risk_sizing:test_live_without_funds_is_not_ready_and_zeroed",
+        "app.tests.test_live_risk_sizing:test_paper_uses_simulated_basis"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "app.services.live_trading_service:LiveTradingService"
+      ],
+      "dotted": "app.tests.test_live_risk_sizing._service",
+      "file": "src/app/tests/test_live_risk_sizing.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 25,
+      "module": "src/app",
+      "name": "_service",
+      "public": false,
+      "qualified": "app.tests.test_live_risk_sizing:_service",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.tests.test_live_risk_sizing:test_live_blocker_names_missing_capital",
+        "app.tests.test_live_risk_sizing:test_live_feeds_broker_capital_into_engine",
+        "app.tests.test_live_risk_sizing:test_live_without_funds_is_not_ready_and_zeroed",
+        "app.tests.test_live_risk_sizing:test_paper_uses_simulated_basis"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "app.tests.test_live_risk_sizing._view",
+      "file": "src/app/tests/test_live_risk_sizing.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 29,
+      "module": "src/app",
+      "name": "_view",
+      "public": false,
+      "qualified": "app.tests.test_live_risk_sizing:_view",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.live_trading_service:LiveTradingService",
+        "app.tests.test_live_risk_sizing:_service",
+        "app.tests.test_live_risk_sizing:_view"
+      ],
+      "dotted": "app.tests.test_live_risk_sizing.test_live_blocker_names_missing_capital",
+      "file": "src/app/tests/test_live_risk_sizing.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 75,
+      "module": "src/app",
+      "name": "test_live_blocker_names_missing_capital",
+      "public": true,
+      "qualified": "app.tests.test_live_risk_sizing:test_live_blocker_names_missing_capital",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.tests.test_live_risk_sizing:_service",
+        "app.tests.test_live_risk_sizing:_view"
+      ],
+      "dotted": "app.tests.test_live_risk_sizing.test_live_feeds_broker_capital_into_engine",
+      "file": "src/app/tests/test_live_risk_sizing.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 43,
+      "module": "src/app",
+      "name": "test_live_feeds_broker_capital_into_engine",
+      "public": true,
+      "qualified": "app.tests.test_live_risk_sizing:test_live_feeds_broker_capital_into_engine",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.tests.test_live_risk_sizing:_service",
+        "app.tests.test_live_risk_sizing:_view"
+      ],
+      "dotted": "app.tests.test_live_risk_sizing.test_live_without_funds_is_not_ready_and_zeroed",
+      "file": "src/app/tests/test_live_risk_sizing.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 56,
+      "module": "src/app",
+      "name": "test_live_without_funds_is_not_ready_and_zeroed",
+      "public": true,
+      "qualified": "app.tests.test_live_risk_sizing:test_live_without_funds_is_not_ready_and_zeroed",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.tests.test_live_risk_sizing:_service",
+        "app.tests.test_live_risk_sizing:_view"
+      ],
+      "dotted": "app.tests.test_live_risk_sizing.test_paper_uses_simulated_basis",
+      "file": "src/app/tests/test_live_risk_sizing.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 66,
+      "module": "src/app",
+      "name": "test_paper_uses_simulated_basis",
+      "public": true,
+      "qualified": "app.tests.test_live_risk_sizing:test_paper_uses_simulated_basis",
       "tests": []
     },
     {
@@ -43964,7 +44138,10 @@
       "called_by": [
         "execution.broker.paper:PaperBroker",
         "execution.broker.readonly:ReadOnlyBroker",
-        "execution.broker.sandbox:SandboxBroker"
+        "execution.broker.sandbox:SandboxBroker",
+        "execution.tests.test_live_pipeline:_Venue",
+        "execution.tests.test_live_pipeline:test_deterministic_refusal_stays_rejected",
+        "execution.tests.test_live_pipeline:test_transport_timeout_marks_unknown_not_rejected"
       ],
       "callers_complete": true,
       "calls": [],
@@ -43981,7 +44158,8 @@
     },
     {
       "called_by": [
-        "execution.broker.factory:resolve_broker"
+        "execution.broker.factory:resolve_broker",
+        "execution.tests.test_live_pipeline:test_sandbox_without_adapter_is_not_configured"
       ],
       "callers_complete": true,
       "calls": [],
@@ -44163,7 +44341,9 @@
     },
     {
       "called_by": [
-        "execution.runtime.session:LiveSession"
+        "execution.runtime.session:LiveSession",
+        "execution.tests.test_live_pipeline:test_paper_resolution_never_touches_live_venue",
+        "execution.tests.test_live_pipeline:test_sandbox_without_adapter_is_not_configured"
       ],
       "callers_complete": true,
       "calls": [
@@ -45205,7 +45385,9 @@
         "execution.market_data.sqlite_tail:SqliteTailProvider",
         "execution.runtime.session:LiveSession",
         "execution.runtime.strategy_runtime:LiveStrategyDriver",
-        "execution.runtime.strategy_runtime:candle_to_bar"
+        "execution.runtime.strategy_runtime:candle_to_bar",
+        "execution.tests.test_live_pipeline:_Provider",
+        "execution.tests.test_live_pipeline:_candle"
       ],
       "callers_complete": true,
       "calls": [
@@ -46092,7 +46274,8 @@
         "execution.runtime.session:LiveSession",
         "execution.runtime.session:StrategyRegistration",
         "execution.runtime.session:check_live_readiness",
-        "execution.runtime.strategy_runtime:StrategyContext"
+        "execution.runtime.strategy_runtime:StrategyContext",
+        "execution.tests.test_live_pipeline:_session"
       ],
       "callers_complete": true,
       "calls": [],
@@ -46110,7 +46293,9 @@
     {
       "called_by": [
         "execution.planner:OrderPlanner",
-        "execution.runtime.session:LiveSession"
+        "execution.runtime.session:LiveSession",
+        "execution.tests.test_live_pipeline:test_restart_blocks_until_reconciled",
+        "execution.tests.test_live_sizing_gate:_intent"
       ],
       "callers_complete": true,
       "calls": [],
@@ -46128,7 +46313,8 @@
     {
       "called_by": [
         "execution.runtime.session:LiveSession",
-        "execution.runtime.strategy_runtime:LiveStrategyDriver"
+        "execution.runtime.strategy_runtime:LiveStrategyDriver",
+        "execution.tests.test_live_sizing_gate:_signal"
       ],
       "callers_complete": true,
       "calls": [],
@@ -46175,7 +46361,7 @@
       "file": "src/execution/models/order.py",
       "kind": "class",
       "language": "RUST",
-      "line": 42,
+      "line": 49,
       "module": "src/execution",
       "name": "BrokerOrder",
       "public": true,
@@ -46188,7 +46374,9 @@
         "execution.broker.sandbox:SandboxBroker",
         "execution.engine:ExecutionEngine",
         "execution.portfolio.ledger:PositionLedger",
-        "execution.runtime.session:LiveSession"
+        "execution.runtime.session:LiveSession",
+        "execution.tests.test_live_pipeline:_Venue",
+        "execution.tests.test_live_pipeline:test_sl_trigger_closes_position_and_marks_safe"
       ],
       "callers_complete": true,
       "calls": [],
@@ -46196,7 +46384,7 @@
       "file": "src/execution/models/order.py",
       "kind": "class",
       "language": "RUST",
-      "line": 79,
+      "line": 86,
       "module": "src/execution",
       "name": "Fill",
       "public": true,
@@ -46210,7 +46398,10 @@
         "execution.broker.readonly:ReadOnlyBroker",
         "execution.broker.sandbox:SandboxBroker",
         "execution.planner:OrderPlanner",
-        "execution.runtime.session:LiveSession"
+        "execution.runtime.session:LiveSession",
+        "execution.tests.test_live_pipeline:_Venue",
+        "execution.tests.test_live_pipeline:test_restart_blocks_until_reconciled",
+        "execution.tests.test_live_sizing_gate:_plan"
       ],
       "callers_complete": true,
       "calls": [],
@@ -46309,7 +46500,12 @@
         "execution.broker.factory:resolve_broker",
         "execution.modes:resolve_mode",
         "execution.runtime.session:LiveSession",
-        "execution.runtime.session:SessionConfig"
+        "execution.runtime.session:SessionConfig",
+        "execution.tests.test_live_pipeline:_session",
+        "execution.tests.test_live_pipeline:test_paper_resolution_never_touches_live_venue",
+        "execution.tests.test_live_pipeline:test_sandbox_without_adapter_is_not_configured",
+        "execution.tests.test_live_sizing_gate:_session",
+        "execution.tests.test_live_sizing_gate:test_paper_submit_unchanged_without_sizing_record"
       ],
       "callers_complete": true,
       "calls": [],
@@ -46329,7 +46525,9 @@
         "app.services.live_trading_service:LiveTradingService",
         "execution.broker.activation:evaluate_activation",
         "execution.modes:arm_transition",
-        "execution.runtime.session:LiveSession"
+        "execution.runtime.session:LiveSession",
+        "execution.tests.test_live_pipeline:_session",
+        "execution.tests.test_live_sizing_gate:_session"
       ],
       "callers_complete": true,
       "calls": [],
@@ -46349,7 +46547,9 @@
         "execution.broker.factory:resolve_broker",
         "execution.modes:gates_from_env",
         "execution.modes:resolve_mode",
-        "execution.runtime.session:SessionConfig"
+        "execution.runtime.session:SessionConfig",
+        "execution.tests.test_live_pipeline:test_paper_resolution_never_touches_live_venue",
+        "execution.tests.test_live_pipeline:test_sandbox_without_adapter_is_not_configured"
       ],
       "callers_complete": true,
       "calls": [
@@ -47722,7 +47922,9 @@
     {
       "called_by": [
         "execution.runtime.lifecycle:StrategyLifecycle",
-        "execution.runtime.session:LiveSession"
+        "execution.runtime.session:LiveSession",
+        "execution.tests.test_live_pipeline:_session",
+        "execution.tests.test_live_sizing_gate:_session"
       ],
       "callers_complete": true,
       "calls": [],
@@ -47760,7 +47962,11 @@
       "tests": []
     },
     {
-      "called_by": [],
+      "called_by": [
+        "execution.tests.test_live_pipeline:_kinds",
+        "execution.tests.test_live_pipeline:_session",
+        "execution.tests.test_live_sizing_gate:_session"
+      ],
       "callers_complete": true,
       "calls": [
         "execution.adaptive.attention:AttentionConfig",
@@ -47819,13 +48025,17 @@
         "execution.runtime.session:StrategyRegistration",
         "execution.runtime.session:check_live_readiness",
         "execution.runtime.strategy_runtime:LiveStrategyDriver",
-        "execution.runtime.strategy_runtime:StrategyContext"
+        "execution.runtime.strategy_runtime:StrategyContext",
+        "risk.sizing:BrokerCapital",
+        "risk.sizing:SizingVerdict",
+        "risk.sizing:size_position",
+        "risk.sizing:validate_planned_quantity"
       ],
       "dotted": "execution.runtime.session.LiveSession",
       "file": "src/execution/runtime/session.py",
       "kind": "class",
       "language": "RUST",
-      "line": 162,
+      "line": 170,
       "module": "src/execution",
       "name": "LiveSession",
       "public": true,
@@ -47843,7 +48053,7 @@
       "file": "src/execution/runtime/session.py",
       "kind": "class",
       "language": "RUST",
-      "line": 92,
+      "line": 100,
       "module": "src/execution",
       "name": "ReadinessReport",
       "public": true,
@@ -47852,7 +48062,9 @@
     },
     {
       "called_by": [
-        "execution.runtime.session:LiveSession"
+        "execution.runtime.session:LiveSession",
+        "execution.tests.test_live_pipeline:_session",
+        "execution.tests.test_live_sizing_gate:_session"
       ],
       "callers_complete": true,
       "calls": [
@@ -47863,7 +48075,7 @@
       "file": "src/execution/runtime/session.py",
       "kind": "class",
       "language": "RUST",
-      "line": 77,
+      "line": 85,
       "module": "src/execution",
       "name": "SessionConfig",
       "public": true,
@@ -47882,7 +48094,7 @@
       "file": "src/execution/runtime/session.py",
       "kind": "class",
       "language": "RUST",
-      "line": 68,
+      "line": 76,
       "module": "src/execution",
       "name": "StrategyRegistration",
       "public": true,
@@ -47903,7 +48115,7 @@
       "file": "src/execution/runtime/session.py",
       "kind": "function",
       "language": "RUST",
-      "line": 97,
+      "line": 105,
       "module": "src/execution",
       "name": "check_live_readiness",
       "public": true,
@@ -47936,7 +48148,8 @@
     {
       "called_by": [
         "execution.runtime.session:LiveSession",
-        "execution.runtime.strategy_runtime:LiveStrategyDriver"
+        "execution.runtime.strategy_runtime:LiveStrategyDriver",
+        "execution.tests.test_live_pipeline:_session"
       ],
       "callers_complete": true,
       "calls": [
@@ -47971,6 +48184,860 @@
       "name": "candle_to_bar",
       "public": true,
       "qualified": "execution.runtime.strategy_runtime:candle_to_bar",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "execution.tests.test_live_pipeline:_session",
+        "execution.tests.test_live_pipeline:test_duplicate_signal_creates_no_duplicate_order",
+        "execution.tests.test_live_pipeline:test_restart_blocks_until_reconciled"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "strategy.models.signal:Signal",
+        "strategy.models.signal:SignalKind"
+      ],
+      "dotted": "execution.tests.test_live_pipeline._Logic",
+      "file": "src/execution/tests/test_live_pipeline.py",
+      "kind": "class",
+      "language": "RUST",
+      "line": 179,
+      "module": "src/execution",
+      "name": "_Logic",
+      "public": false,
+      "qualified": "execution.tests.test_live_pipeline:_Logic",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "execution.tests.test_live_pipeline:_session",
+        "execution.tests.test_live_pipeline:test_broker_down_blocks_live_order",
+        "execution.tests.test_live_pipeline:test_deterministic_refusal_stays_rejected",
+        "execution.tests.test_live_pipeline:test_duplicate_fill_event_folds_once",
+        "execution.tests.test_live_pipeline:test_duplicate_signal_creates_no_duplicate_order",
+        "execution.tests.test_live_pipeline:test_full_entry_path_tick_to_working_order",
+        "execution.tests.test_live_pipeline:test_journal_covers_lifecycle_and_state_exposes_pipeline",
+        "execution.tests.test_live_pipeline:test_no_position_before_fill",
+        "execution.tests.test_live_pipeline:test_order_stream_down_blocks_live_order",
+        "execution.tests.test_live_pipeline:test_partial_then_full_fill_positions_filled_qty_only",
+        "execution.tests.test_live_pipeline:test_rejection_creates_no_position",
+        "execution.tests.test_live_pipeline:test_restart_blocks_until_reconciled",
+        "execution.tests.test_live_pipeline:test_risk_fail_blocks_before_adapter",
+        "execution.tests.test_live_pipeline:test_sl_armed_on_filled_qty_and_rests_until_touched",
+        "execution.tests.test_live_pipeline:test_sl_reject_marks_failed_and_attention",
+        "execution.tests.test_live_pipeline:test_sl_trigger_closes_position_and_marks_safe",
+        "execution.tests.test_live_pipeline:test_transport_timeout_marks_unknown_not_rejected"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "execution.events:CandleEvent"
+      ],
+      "dotted": "execution.tests.test_live_pipeline._Provider",
+      "file": "src/execution/tests/test_live_pipeline.py",
+      "kind": "class",
+      "language": "RUST",
+      "line": 162,
+      "module": "src/execution",
+      "name": "_Provider",
+      "public": false,
+      "qualified": "execution.tests.test_live_pipeline:_Provider",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "execution.tests.test_live_pipeline:_session",
+        "execution.tests.test_live_pipeline:test_broker_down_blocks_live_order",
+        "execution.tests.test_live_pipeline:test_deterministic_refusal_stays_rejected",
+        "execution.tests.test_live_pipeline:test_duplicate_fill_event_folds_once",
+        "execution.tests.test_live_pipeline:test_duplicate_signal_creates_no_duplicate_order",
+        "execution.tests.test_live_pipeline:test_full_entry_path_tick_to_working_order",
+        "execution.tests.test_live_pipeline:test_journal_covers_lifecycle_and_state_exposes_pipeline",
+        "execution.tests.test_live_pipeline:test_no_position_before_fill",
+        "execution.tests.test_live_pipeline:test_order_stream_down_blocks_live_order",
+        "execution.tests.test_live_pipeline:test_partial_then_full_fill_positions_filled_qty_only",
+        "execution.tests.test_live_pipeline:test_rejection_creates_no_position",
+        "execution.tests.test_live_pipeline:test_restart_blocks_until_reconciled",
+        "execution.tests.test_live_pipeline:test_risk_fail_blocks_before_adapter",
+        "execution.tests.test_live_pipeline:test_sl_armed_on_filled_qty_and_rests_until_touched",
+        "execution.tests.test_live_pipeline:test_sl_reject_marks_failed_and_attention",
+        "execution.tests.test_live_pipeline:test_sl_trigger_closes_position_and_marks_safe",
+        "execution.tests.test_live_pipeline:test_transport_timeout_marks_unknown_not_rejected"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "execution.broker.adapter:BrokerError",
+        "execution.models.order:Fill",
+        "execution.models.order:OrderPlan",
+        "execution.tests.test_live_pipeline:_now_iso"
+      ],
+      "dotted": "execution.tests.test_live_pipeline._Venue",
+      "file": "src/execution/tests/test_live_pipeline.py",
+      "kind": "class",
+      "language": "RUST",
+      "line": 52,
+      "module": "src/execution",
+      "name": "_Venue",
+      "public": false,
+      "qualified": "execution.tests.test_live_pipeline:_Venue",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "execution.tests.test_live_pipeline:test_broker_down_blocks_live_order",
+        "execution.tests.test_live_pipeline:test_deterministic_refusal_stays_rejected",
+        "execution.tests.test_live_pipeline:test_duplicate_fill_event_folds_once",
+        "execution.tests.test_live_pipeline:test_duplicate_signal_creates_no_duplicate_order",
+        "execution.tests.test_live_pipeline:test_full_entry_path_tick_to_working_order",
+        "execution.tests.test_live_pipeline:test_journal_covers_lifecycle_and_state_exposes_pipeline",
+        "execution.tests.test_live_pipeline:test_no_position_before_fill",
+        "execution.tests.test_live_pipeline:test_order_stream_down_blocks_live_order",
+        "execution.tests.test_live_pipeline:test_partial_then_full_fill_positions_filled_qty_only",
+        "execution.tests.test_live_pipeline:test_rejection_creates_no_position",
+        "execution.tests.test_live_pipeline:test_restart_blocks_until_reconciled",
+        "execution.tests.test_live_pipeline:test_risk_fail_blocks_before_adapter",
+        "execution.tests.test_live_pipeline:test_sl_armed_on_filled_qty_and_rests_until_touched",
+        "execution.tests.test_live_pipeline:test_sl_reject_marks_failed_and_attention",
+        "execution.tests.test_live_pipeline:test_sl_trigger_closes_position_and_marks_safe",
+        "execution.tests.test_live_pipeline:test_transport_timeout_marks_unknown_not_rejected"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "execution.events:CandleEvent",
+        "execution.tests.test_live_pipeline:_now_iso"
+      ],
+      "dotted": "execution.tests.test_live_pipeline._candle",
+      "file": "src/execution/tests/test_live_pipeline.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 203,
+      "module": "src/execution",
+      "name": "_candle",
+      "public": false,
+      "qualified": "execution.tests.test_live_pipeline:_candle",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "execution.tests.test_live_pipeline:test_broker_down_blocks_live_order",
+        "execution.tests.test_live_pipeline:test_duplicate_fill_event_folds_once",
+        "execution.tests.test_live_pipeline:test_full_entry_path_tick_to_working_order",
+        "execution.tests.test_live_pipeline:test_journal_covers_lifecycle_and_state_exposes_pipeline",
+        "execution.tests.test_live_pipeline:test_order_stream_down_blocks_live_order",
+        "execution.tests.test_live_pipeline:test_restart_blocks_until_reconciled",
+        "execution.tests.test_live_pipeline:test_risk_fail_blocks_before_adapter",
+        "execution.tests.test_live_pipeline:test_sl_armed_on_filled_qty_and_rests_until_touched",
+        "execution.tests.test_live_pipeline:test_sl_reject_marks_failed_and_attention",
+        "execution.tests.test_live_pipeline:test_sl_trigger_closes_position_and_marks_safe",
+        "execution.tests.test_live_pipeline:test_transport_timeout_marks_unknown_not_rejected"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "execution.runtime.session:LiveSession"
+      ],
+      "dotted": "execution.tests.test_live_pipeline._kinds",
+      "file": "src/execution/tests/test_live_pipeline.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 254,
+      "module": "src/execution",
+      "name": "_kinds",
+      "public": false,
+      "qualified": "execution.tests.test_live_pipeline:_kinds",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "execution.tests.test_live_pipeline:_Venue",
+        "execution.tests.test_live_pipeline:_candle",
+        "execution.tests.test_live_pipeline:test_restart_blocks_until_reconciled",
+        "execution.tests.test_live_pipeline:test_sl_trigger_closes_position_and_marks_safe"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "execution.tests.test_live_pipeline._now_iso",
+      "file": "src/execution/tests/test_live_pipeline.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 48,
+      "module": "src/execution",
+      "name": "_now_iso",
+      "public": false,
+      "qualified": "execution.tests.test_live_pipeline:_now_iso",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "execution.tests.test_live_pipeline:test_broker_down_blocks_live_order",
+        "execution.tests.test_live_pipeline:test_deterministic_refusal_stays_rejected",
+        "execution.tests.test_live_pipeline:test_duplicate_fill_event_folds_once",
+        "execution.tests.test_live_pipeline:test_duplicate_signal_creates_no_duplicate_order",
+        "execution.tests.test_live_pipeline:test_full_entry_path_tick_to_working_order",
+        "execution.tests.test_live_pipeline:test_journal_covers_lifecycle_and_state_exposes_pipeline",
+        "execution.tests.test_live_pipeline:test_no_position_before_fill",
+        "execution.tests.test_live_pipeline:test_order_stream_down_blocks_live_order",
+        "execution.tests.test_live_pipeline:test_partial_then_full_fill_positions_filled_qty_only",
+        "execution.tests.test_live_pipeline:test_rejection_creates_no_position",
+        "execution.tests.test_live_pipeline:test_restart_blocks_until_reconciled",
+        "execution.tests.test_live_pipeline:test_risk_fail_blocks_before_adapter",
+        "execution.tests.test_live_pipeline:test_sl_armed_on_filled_qty_and_rests_until_touched",
+        "execution.tests.test_live_pipeline:test_sl_reject_marks_failed_and_attention",
+        "execution.tests.test_live_pipeline:test_sl_trigger_closes_position_and_marks_safe",
+        "execution.tests.test_live_pipeline:test_transport_timeout_marks_unknown_not_rejected"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "execution.models.contract:StrategyRuntimeContract",
+        "execution.modes:ExecutionMode",
+        "execution.modes:LiveArm",
+        "execution.runtime.lifecycle:LifecycleState",
+        "execution.runtime.session:LiveSession",
+        "execution.runtime.session:SessionConfig",
+        "execution.runtime.strategy_runtime:StrategyContext",
+        "execution.tests.test_live_pipeline:_Logic",
+        "execution.tests.test_live_pipeline:_Provider",
+        "execution.tests.test_live_pipeline:_Venue"
+      ],
+      "dotted": "execution.tests.test_live_pipeline._session",
+      "file": "src/execution/tests/test_live_pipeline.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 219,
+      "module": "src/execution",
+      "name": "_session",
+      "public": false,
+      "qualified": "execution.tests.test_live_pipeline:_session",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "execution.tests.test_live_pipeline:_Provider",
+        "execution.tests.test_live_pipeline:_Venue",
+        "execution.tests.test_live_pipeline:_candle",
+        "execution.tests.test_live_pipeline:_kinds",
+        "execution.tests.test_live_pipeline:_session"
+      ],
+      "dotted": "execution.tests.test_live_pipeline.test_broker_down_blocks_live_order",
+      "file": "src/execution/tests/test_live_pipeline.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 488,
+      "module": "src/execution",
+      "name": "test_broker_down_blocks_live_order",
+      "public": true,
+      "qualified": "execution.tests.test_live_pipeline:test_broker_down_blocks_live_order",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "execution.broker.adapter:BrokerError",
+        "execution.tests.test_live_pipeline:_Provider",
+        "execution.tests.test_live_pipeline:_Venue",
+        "execution.tests.test_live_pipeline:_candle",
+        "execution.tests.test_live_pipeline:_session"
+      ],
+      "dotted": "execution.tests.test_live_pipeline.test_deterministic_refusal_stays_rejected",
+      "file": "src/execution/tests/test_live_pipeline.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 398,
+      "module": "src/execution",
+      "name": "test_deterministic_refusal_stays_rejected",
+      "public": true,
+      "qualified": "execution.tests.test_live_pipeline:test_deterministic_refusal_stays_rejected",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "execution.tests.test_live_pipeline:_Provider",
+        "execution.tests.test_live_pipeline:_Venue",
+        "execution.tests.test_live_pipeline:_candle",
+        "execution.tests.test_live_pipeline:_kinds",
+        "execution.tests.test_live_pipeline:_session"
+      ],
+      "dotted": "execution.tests.test_live_pipeline.test_duplicate_fill_event_folds_once",
+      "file": "src/execution/tests/test_live_pipeline.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 363,
+      "module": "src/execution",
+      "name": "test_duplicate_fill_event_folds_once",
+      "public": true,
+      "qualified": "execution.tests.test_live_pipeline:test_duplicate_fill_event_folds_once",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "execution.tests.test_live_pipeline:_Logic",
+        "execution.tests.test_live_pipeline:_Provider",
+        "execution.tests.test_live_pipeline:_Venue",
+        "execution.tests.test_live_pipeline:_candle",
+        "execution.tests.test_live_pipeline:_session"
+      ],
+      "dotted": "execution.tests.test_live_pipeline.test_duplicate_signal_creates_no_duplicate_order",
+      "file": "src/execution/tests/test_live_pipeline.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 352,
+      "module": "src/execution",
+      "name": "test_duplicate_signal_creates_no_duplicate_order",
+      "public": true,
+      "qualified": "execution.tests.test_live_pipeline:test_duplicate_signal_creates_no_duplicate_order",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "execution.tests.test_live_pipeline:_Provider",
+        "execution.tests.test_live_pipeline:_Venue",
+        "execution.tests.test_live_pipeline:_candle",
+        "execution.tests.test_live_pipeline:_kinds",
+        "execution.tests.test_live_pipeline:_session"
+      ],
+      "dotted": "execution.tests.test_live_pipeline.test_full_entry_path_tick_to_working_order",
+      "file": "src/execution/tests/test_live_pipeline.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 261,
+      "module": "src/execution",
+      "name": "test_full_entry_path_tick_to_working_order",
+      "public": true,
+      "qualified": "execution.tests.test_live_pipeline:test_full_entry_path_tick_to_working_order",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "execution.tests.test_live_pipeline:_Provider",
+        "execution.tests.test_live_pipeline:_Venue",
+        "execution.tests.test_live_pipeline:_candle",
+        "execution.tests.test_live_pipeline:_kinds",
+        "execution.tests.test_live_pipeline:_session"
+      ],
+      "dotted": "execution.tests.test_live_pipeline.test_journal_covers_lifecycle_and_state_exposes_pipeline",
+      "file": "src/execution/tests/test_live_pipeline.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 570,
+      "module": "src/execution",
+      "name": "test_journal_covers_lifecycle_and_state_exposes_pipeline",
+      "public": true,
+      "qualified": "execution.tests.test_live_pipeline:test_journal_covers_lifecycle_and_state_exposes_pipeline",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "execution.tests.test_live_pipeline:_Provider",
+        "execution.tests.test_live_pipeline:_Venue",
+        "execution.tests.test_live_pipeline:_candle",
+        "execution.tests.test_live_pipeline:_session"
+      ],
+      "dotted": "execution.tests.test_live_pipeline.test_no_position_before_fill",
+      "file": "src/execution/tests/test_live_pipeline.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 319,
+      "module": "src/execution",
+      "name": "test_no_position_before_fill",
+      "public": true,
+      "qualified": "execution.tests.test_live_pipeline:test_no_position_before_fill",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "execution.tests.test_live_pipeline:_Provider",
+        "execution.tests.test_live_pipeline:_Venue",
+        "execution.tests.test_live_pipeline:_candle",
+        "execution.tests.test_live_pipeline:_kinds",
+        "execution.tests.test_live_pipeline:_session"
+      ],
+      "dotted": "execution.tests.test_live_pipeline.test_order_stream_down_blocks_live_order",
+      "file": "src/execution/tests/test_live_pipeline.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 499,
+      "module": "src/execution",
+      "name": "test_order_stream_down_blocks_live_order",
+      "public": true,
+      "qualified": "execution.tests.test_live_pipeline:test_order_stream_down_blocks_live_order",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "execution.broker.factory:resolve_broker",
+        "execution.modes:ExecutionMode",
+        "execution.modes:ModeGates"
+      ],
+      "dotted": "execution.tests.test_live_pipeline.test_paper_resolution_never_touches_live_venue",
+      "file": "src/execution/tests/test_live_pipeline.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 549,
+      "module": "src/execution",
+      "name": "test_paper_resolution_never_touches_live_venue",
+      "public": true,
+      "qualified": "execution.tests.test_live_pipeline:test_paper_resolution_never_touches_live_venue",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "execution.tests.test_live_pipeline:_Provider",
+        "execution.tests.test_live_pipeline:_Venue",
+        "execution.tests.test_live_pipeline:_candle",
+        "execution.tests.test_live_pipeline:_session"
+      ],
+      "dotted": "execution.tests.test_live_pipeline.test_partial_then_full_fill_positions_filled_qty_only",
+      "file": "src/execution/tests/test_live_pipeline.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 296,
+      "module": "src/execution",
+      "name": "test_partial_then_full_fill_positions_filled_qty_only",
+      "public": true,
+      "qualified": "execution.tests.test_live_pipeline:test_partial_then_full_fill_positions_filled_qty_only",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "execution.tests.test_live_pipeline:_Provider",
+        "execution.tests.test_live_pipeline:_Venue",
+        "execution.tests.test_live_pipeline:_candle",
+        "execution.tests.test_live_pipeline:_session"
+      ],
+      "dotted": "execution.tests.test_live_pipeline.test_rejection_creates_no_position",
+      "file": "src/execution/tests/test_live_pipeline.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 333,
+      "module": "src/execution",
+      "name": "test_rejection_creates_no_position",
+      "public": true,
+      "qualified": "execution.tests.test_live_pipeline:test_rejection_creates_no_position",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "execution.models.intent:ExecutionIntent",
+        "execution.models.order:OrderPlan",
+        "execution.tests.test_live_pipeline:_Logic",
+        "execution.tests.test_live_pipeline:_Provider",
+        "execution.tests.test_live_pipeline:_Venue",
+        "execution.tests.test_live_pipeline:_candle",
+        "execution.tests.test_live_pipeline:_kinds",
+        "execution.tests.test_live_pipeline:_now_iso",
+        "execution.tests.test_live_pipeline:_session"
+      ],
+      "dotted": "execution.tests.test_live_pipeline.test_restart_blocks_until_reconciled",
+      "file": "src/execution/tests/test_live_pipeline.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 511,
+      "module": "src/execution",
+      "name": "test_restart_blocks_until_reconciled",
+      "public": true,
+      "qualified": "execution.tests.test_live_pipeline:test_restart_blocks_until_reconciled",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "execution.tests.test_live_pipeline:_Provider",
+        "execution.tests.test_live_pipeline:_Venue",
+        "execution.tests.test_live_pipeline:_candle",
+        "execution.tests.test_live_pipeline:_kinds",
+        "execution.tests.test_live_pipeline:_session"
+      ],
+      "dotted": "execution.tests.test_live_pipeline.test_risk_fail_blocks_before_adapter",
+      "file": "src/execution/tests/test_live_pipeline.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 282,
+      "module": "src/execution",
+      "name": "test_risk_fail_blocks_before_adapter",
+      "public": true,
+      "qualified": "execution.tests.test_live_pipeline:test_risk_fail_blocks_before_adapter",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "execution.broker.adapter:NotConfiguredError",
+        "execution.broker.factory:resolve_broker",
+        "execution.modes:ExecutionMode",
+        "execution.modes:ModeGates"
+      ],
+      "dotted": "execution.tests.test_live_pipeline.test_sandbox_without_adapter_is_not_configured",
+      "file": "src/execution/tests/test_live_pipeline.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 557,
+      "module": "src/execution",
+      "name": "test_sandbox_without_adapter_is_not_configured",
+      "public": true,
+      "qualified": "execution.tests.test_live_pipeline:test_sandbox_without_adapter_is_not_configured",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "execution.tests.test_live_pipeline:_Provider",
+        "execution.tests.test_live_pipeline:_Venue",
+        "execution.tests.test_live_pipeline:_candle",
+        "execution.tests.test_live_pipeline:_kinds",
+        "execution.tests.test_live_pipeline:_session"
+      ],
+      "dotted": "execution.tests.test_live_pipeline.test_sl_armed_on_filled_qty_and_rests_until_touched",
+      "file": "src/execution/tests/test_live_pipeline.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 411,
+      "module": "src/execution",
+      "name": "test_sl_armed_on_filled_qty_and_rests_until_touched",
+      "public": true,
+      "qualified": "execution.tests.test_live_pipeline:test_sl_armed_on_filled_qty_and_rests_until_touched",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "execution.tests.test_live_pipeline:_Provider",
+        "execution.tests.test_live_pipeline:_Venue",
+        "execution.tests.test_live_pipeline:_candle",
+        "execution.tests.test_live_pipeline:_kinds",
+        "execution.tests.test_live_pipeline:_session"
+      ],
+      "dotted": "execution.tests.test_live_pipeline.test_sl_reject_marks_failed_and_attention",
+      "file": "src/execution/tests/test_live_pipeline.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 468,
+      "module": "src/execution",
+      "name": "test_sl_reject_marks_failed_and_attention",
+      "public": true,
+      "qualified": "execution.tests.test_live_pipeline:test_sl_reject_marks_failed_and_attention",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "execution.models.order:Fill",
+        "execution.tests.test_live_pipeline:_Provider",
+        "execution.tests.test_live_pipeline:_Venue",
+        "execution.tests.test_live_pipeline:_candle",
+        "execution.tests.test_live_pipeline:_kinds",
+        "execution.tests.test_live_pipeline:_now_iso",
+        "execution.tests.test_live_pipeline:_session"
+      ],
+      "dotted": "execution.tests.test_live_pipeline.test_sl_trigger_closes_position_and_marks_safe",
+      "file": "src/execution/tests/test_live_pipeline.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 433,
+      "module": "src/execution",
+      "name": "test_sl_trigger_closes_position_and_marks_safe",
+      "public": true,
+      "qualified": "execution.tests.test_live_pipeline:test_sl_trigger_closes_position_and_marks_safe",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "execution.broker.adapter:BrokerError",
+        "execution.tests.test_live_pipeline:_Provider",
+        "execution.tests.test_live_pipeline:_Venue",
+        "execution.tests.test_live_pipeline:_candle",
+        "execution.tests.test_live_pipeline:_kinds",
+        "execution.tests.test_live_pipeline:_session"
+      ],
+      "dotted": "execution.tests.test_live_pipeline.test_transport_timeout_marks_unknown_not_rejected",
+      "file": "src/execution/tests/test_live_pipeline.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 380,
+      "module": "src/execution",
+      "name": "test_transport_timeout_marks_unknown_not_rejected",
+      "public": true,
+      "qualified": "execution.tests.test_live_pipeline:test_transport_timeout_marks_unknown_not_rejected",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "execution.tests.test_live_sizing_gate:_session",
+        "execution.tests.test_live_sizing_gate:test_final_gate_passes_sized_quantity",
+        "execution.tests.test_live_sizing_gate:test_final_gate_rejects_inflated_quantity",
+        "execution.tests.test_live_sizing_gate:test_live_buy_sized_from_broker_capital",
+        "execution.tests.test_live_sizing_gate:test_live_buy_without_broker_funds_is_blocked",
+        "execution.tests.test_live_sizing_gate:test_live_buy_without_stop_is_blocked",
+        "execution.tests.test_live_sizing_gate:test_paper_submit_unchanged_without_sizing_record"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "execution.tests.test_live_sizing_gate._Broker",
+      "file": "src/execution/tests/test_live_sizing_gate.py",
+      "kind": "class",
+      "language": "RUST",
+      "line": 36,
+      "module": "src/execution",
+      "name": "_Broker",
+      "public": false,
+      "qualified": "execution.tests.test_live_sizing_gate:_Broker",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "execution.tests.test_live_sizing_gate:_session"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "execution.tests.test_live_sizing_gate._Provider",
+      "file": "src/execution/tests/test_live_sizing_gate.py",
+      "kind": "class",
+      "language": "RUST",
+      "line": 27,
+      "module": "src/execution",
+      "name": "_Provider",
+      "public": false,
+      "qualified": "execution.tests.test_live_sizing_gate:_Provider",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "execution.tests.test_live_sizing_gate:test_final_gate_passes_sized_quantity",
+        "execution.tests.test_live_sizing_gate:test_final_gate_rejects_inflated_quantity",
+        "execution.tests.test_live_sizing_gate:test_paper_submit_unchanged_without_sizing_record"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "execution.models.intent:ExecutionIntent"
+      ],
+      "dotted": "execution.tests.test_live_sizing_gate._intent",
+      "file": "src/execution/tests/test_live_sizing_gate.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 94,
+      "module": "src/execution",
+      "name": "_intent",
+      "public": false,
+      "qualified": "execution.tests.test_live_sizing_gate:_intent",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "execution.tests.test_live_sizing_gate:test_final_gate_passes_sized_quantity",
+        "execution.tests.test_live_sizing_gate:test_final_gate_rejects_inflated_quantity",
+        "execution.tests.test_live_sizing_gate:test_paper_submit_unchanged_without_sizing_record"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "execution.models.order:OrderPlan"
+      ],
+      "dotted": "execution.tests.test_live_sizing_gate._plan",
+      "file": "src/execution/tests/test_live_sizing_gate.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 111,
+      "module": "src/execution",
+      "name": "_plan",
+      "public": false,
+      "qualified": "execution.tests.test_live_sizing_gate:_plan",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "execution.tests.test_live_sizing_gate:test_final_gate_passes_sized_quantity",
+        "execution.tests.test_live_sizing_gate:test_final_gate_rejects_inflated_quantity",
+        "execution.tests.test_live_sizing_gate:test_live_buy_sized_from_broker_capital",
+        "execution.tests.test_live_sizing_gate:test_live_buy_without_broker_funds_is_blocked",
+        "execution.tests.test_live_sizing_gate:test_live_buy_without_stop_is_blocked",
+        "execution.tests.test_live_sizing_gate:test_paper_submit_unchanged_without_sizing_record"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "execution.modes:ExecutionMode",
+        "execution.modes:LiveArm",
+        "execution.runtime.lifecycle:LifecycleState",
+        "execution.runtime.session:LiveSession",
+        "execution.runtime.session:SessionConfig",
+        "execution.tests.test_live_sizing_gate:_Broker",
+        "execution.tests.test_live_sizing_gate:_Provider"
+      ],
+      "dotted": "execution.tests.test_live_sizing_gate._session",
+      "file": "src/execution/tests/test_live_sizing_gate.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 57,
+      "module": "src/execution",
+      "name": "_session",
+      "public": false,
+      "qualified": "execution.tests.test_live_sizing_gate:_session",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "execution.tests.test_live_sizing_gate:test_live_buy_sized_from_broker_capital",
+        "execution.tests.test_live_sizing_gate:test_live_buy_without_broker_funds_is_blocked",
+        "execution.tests.test_live_sizing_gate:test_live_buy_without_stop_is_blocked"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "execution.models.intent:StrategySignal"
+      ],
+      "dotted": "execution.tests.test_live_sizing_gate._signal",
+      "file": "src/execution/tests/test_live_sizing_gate.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 80,
+      "module": "src/execution",
+      "name": "_signal",
+      "public": false,
+      "qualified": "execution.tests.test_live_sizing_gate:_signal",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "execution.tests.test_live_sizing_gate:_Broker",
+        "execution.tests.test_live_sizing_gate:_intent",
+        "execution.tests.test_live_sizing_gate:_plan",
+        "execution.tests.test_live_sizing_gate:_session",
+        "risk.sizing:SizingVerdict"
+      ],
+      "dotted": "execution.tests.test_live_sizing_gate.test_final_gate_passes_sized_quantity",
+      "file": "src/execution/tests/test_live_sizing_gate.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 169,
+      "module": "src/execution",
+      "name": "test_final_gate_passes_sized_quantity",
+      "public": true,
+      "qualified": "execution.tests.test_live_sizing_gate:test_final_gate_passes_sized_quantity",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "execution.tests.test_live_sizing_gate:_Broker",
+        "execution.tests.test_live_sizing_gate:_intent",
+        "execution.tests.test_live_sizing_gate:_plan",
+        "execution.tests.test_live_sizing_gate:_session",
+        "risk.sizing:SizingVerdict"
+      ],
+      "dotted": "execution.tests.test_live_sizing_gate.test_final_gate_rejects_inflated_quantity",
+      "file": "src/execution/tests/test_live_sizing_gate.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 147,
+      "module": "src/execution",
+      "name": "test_final_gate_rejects_inflated_quantity",
+      "public": true,
+      "qualified": "execution.tests.test_live_sizing_gate:test_final_gate_rejects_inflated_quantity",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "execution.tests.test_live_sizing_gate:_Broker",
+        "execution.tests.test_live_sizing_gate:_session",
+        "execution.tests.test_live_sizing_gate:_signal"
+      ],
+      "dotted": "execution.tests.test_live_sizing_gate.test_live_buy_sized_from_broker_capital",
+      "file": "src/execution/tests/test_live_sizing_gate.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 133,
+      "module": "src/execution",
+      "name": "test_live_buy_sized_from_broker_capital",
+      "public": true,
+      "qualified": "execution.tests.test_live_sizing_gate:test_live_buy_sized_from_broker_capital",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "execution.tests.test_live_sizing_gate:_Broker",
+        "execution.tests.test_live_sizing_gate:_session",
+        "execution.tests.test_live_sizing_gate:_signal"
+      ],
+      "dotted": "execution.tests.test_live_sizing_gate.test_live_buy_without_broker_funds_is_blocked",
+      "file": "src/execution/tests/test_live_sizing_gate.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 123,
+      "module": "src/execution",
+      "name": "test_live_buy_without_broker_funds_is_blocked",
+      "public": true,
+      "qualified": "execution.tests.test_live_sizing_gate:test_live_buy_without_broker_funds_is_blocked",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "execution.tests.test_live_sizing_gate:_Broker",
+        "execution.tests.test_live_sizing_gate:_session",
+        "execution.tests.test_live_sizing_gate:_signal"
+      ],
+      "dotted": "execution.tests.test_live_sizing_gate.test_live_buy_without_stop_is_blocked",
+      "file": "src/execution/tests/test_live_sizing_gate.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 141,
+      "module": "src/execution",
+      "name": "test_live_buy_without_stop_is_blocked",
+      "public": true,
+      "qualified": "execution.tests.test_live_sizing_gate:test_live_buy_without_stop_is_blocked",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "execution.modes:ExecutionMode",
+        "execution.tests.test_live_sizing_gate:_Broker",
+        "execution.tests.test_live_sizing_gate:_intent",
+        "execution.tests.test_live_sizing_gate:_plan",
+        "execution.tests.test_live_sizing_gate:_session"
+      ],
+      "dotted": "execution.tests.test_live_sizing_gate.test_paper_submit_unchanged_without_sizing_record",
+      "file": "src/execution/tests/test_live_sizing_gate.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 188,
+      "module": "src/execution",
+      "name": "test_paper_submit_unchanged_without_sizing_record",
+      "public": true,
+      "qualified": "execution.tests.test_live_sizing_gate:test_paper_submit_unchanged_without_sizing_record",
       "tests": []
     },
     {
@@ -49818,6 +50885,175 @@
       ]
     },
     {
+      "called_by": [
+        "app.services.live_trading_service:LiveTradingService",
+        "execution.runtime.session:LiveSession",
+        "risk.sizing:_size_position",
+        "risk.sizing:size_position",
+        "risk.tests.test_sizing:_capital",
+        "risk.tests.test_sizing:test_unknown_fetch_time_is_stale"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "risk.sizing.BrokerCapital",
+      "file": "src/risk/sizing.py",
+      "kind": "class",
+      "language": "RUST",
+      "line": 67,
+      "module": "src/risk",
+      "name": "BrokerCapital",
+      "public": true,
+      "qualified": "risk.sizing:BrokerCapital",
+      "tests": [
+        "src/risk/tests/test_sizing.py"
+      ]
+    },
+    {
+      "called_by": [
+        "execution.runtime.session:LiveSession",
+        "execution.tests.test_live_sizing_gate:test_final_gate_passes_sized_quantity",
+        "execution.tests.test_live_sizing_gate:test_final_gate_rejects_inflated_quantity",
+        "risk.sizing:_blocked",
+        "risk.sizing:_size_position",
+        "risk.sizing:size_position"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "risk.sizing.SizingVerdict",
+      "file": "src/risk/sizing.py",
+      "kind": "class",
+      "language": "RUST",
+      "line": 83,
+      "module": "src/risk",
+      "name": "SizingVerdict",
+      "public": true,
+      "qualified": "risk.sizing:SizingVerdict",
+      "tests": [
+        "src/risk/tests/test_sizing.py"
+      ]
+    },
+    {
+      "called_by": [
+        "risk.sizing:_size_position",
+        "risk.sizing:validate_planned_quantity"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "risk.sizing._as_finite",
+      "file": "src/risk/sizing.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 128,
+      "module": "src/risk",
+      "name": "_as_finite",
+      "public": false,
+      "qualified": "risk.sizing:_as_finite",
+      "tests": [
+        "src/risk/tests/test_sizing.py"
+      ]
+    },
+    {
+      "called_by": [
+        "risk.sizing:_size_position",
+        "risk.sizing:size_position"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "risk.sizing:SizingVerdict"
+      ],
+      "dotted": "risk.sizing._blocked",
+      "file": "src/risk/sizing.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 103,
+      "module": "src/risk",
+      "name": "_blocked",
+      "public": false,
+      "qualified": "risk.sizing:_blocked",
+      "tests": [
+        "src/risk/tests/test_sizing.py"
+      ]
+    },
+    {
+      "called_by": [
+        "risk.sizing:size_position"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "risk.sizing:BrokerCapital",
+        "risk.sizing:SizingVerdict",
+        "risk.sizing:_as_finite",
+        "risk.sizing:_blocked"
+      ],
+      "dotted": "risk.sizing._size_position",
+      "file": "src/risk/sizing.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 171,
+      "module": "src/risk",
+      "name": "_size_position",
+      "public": false,
+      "qualified": "risk.sizing:_size_position",
+      "tests": [
+        "src/risk/tests/test_sizing.py"
+      ]
+    },
+    {
+      "called_by": [
+        "execution.runtime.session:LiveSession",
+        "risk.tests.test_sizing:_size",
+        "risk.tests.test_sizing:test_live_rejects_non_broker_capital_source",
+        "risk.tests.test_sizing:test_missing_capital_blocks",
+        "risk.tests.test_sizing:test_paper_uses_simulated_capital",
+        "risk.tests.test_sizing:test_sandbox_uses_sandbox_capital",
+        "risk.tests.test_sizing:test_stale_capital_blocks",
+        "risk.tests.test_sizing:test_unknown_fetch_time_is_stale"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "risk.sizing:BrokerCapital",
+        "risk.sizing:SizingVerdict",
+        "risk.sizing:_blocked",
+        "risk.sizing:_size_position"
+      ],
+      "dotted": "risk.sizing.size_position",
+      "file": "src/risk/sizing.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 139,
+      "module": "src/risk",
+      "name": "size_position",
+      "public": true,
+      "qualified": "risk.sizing:size_position",
+      "tests": [
+        "src/risk/tests/test_sizing.py"
+      ]
+    },
+    {
+      "called_by": [
+        "execution.runtime.session:LiveSession",
+        "risk.tests.test_sizing:test_final_gate_passes_sized_quantity",
+        "risk.tests.test_sizing:test_final_gate_rejects_fractional_or_nonpositive_quantity",
+        "risk.tests.test_sizing:test_final_gate_rejects_inflated_quantity"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "risk.sizing:_as_finite"
+      ],
+      "dotted": "risk.sizing.validate_planned_quantity",
+      "file": "src/risk/sizing.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 263,
+      "module": "src/risk",
+      "name": "validate_planned_quantity",
+      "public": true,
+      "qualified": "risk.sizing:validate_planned_quantity",
+      "tests": [
+        "src/risk/tests/test_sizing.py"
+      ]
+    },
+    {
       "called_by": [],
       "callers_complete": true,
       "calls": [],
@@ -49890,6 +51126,497 @@
       "name": "test_within_session",
       "public": true,
       "qualified": "risk.tests.test_native_session:test_within_session",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "risk.tests.test_sizing:_size",
+        "risk.tests.test_sizing:test_live_rejects_non_broker_capital_source",
+        "risk.tests.test_sizing:test_paper_uses_simulated_capital",
+        "risk.tests.test_sizing:test_sandbox_uses_sandbox_capital",
+        "risk.tests.test_sizing:test_stale_capital_blocks"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "risk.sizing:BrokerCapital"
+      ],
+      "dotted": "risk.tests.test_sizing._capital",
+      "file": "src/risk/tests/test_sizing.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 35,
+      "module": "src/risk",
+      "name": "_capital",
+      "public": false,
+      "qualified": "risk.tests.test_sizing:_capital",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "risk.tests.test_sizing:test_budget_too_small_for_one_share_blocks",
+        "risk.tests.test_sizing:test_capital_changing_between_calculations",
+        "risk.tests.test_sizing:test_edge_matrix_planned_never_exceeds_max",
+        "risk.tests.test_sizing:test_engine_projection_matches_sizing_pipeline",
+        "risk.tests.test_sizing:test_entry_equals_stop_blocks",
+        "risk.tests.test_sizing:test_final_gate_passes_sized_quantity",
+        "risk.tests.test_sizing:test_kaynes_example_quantity_22",
+        "risk.tests.test_sizing:test_lakh_capital_gives_six_hundred_max_risk",
+        "risk.tests.test_sizing:test_nan_capital_blocks",
+        "risk.tests.test_sizing:test_negative_capital_blocks",
+        "risk.tests.test_sizing:test_negative_prices_block",
+        "risk.tests.test_sizing:test_planned_risk_never_exceeds_max",
+        "risk.tests.test_sizing:test_quantity_floors_never_ceils",
+        "risk.tests.test_sizing:test_stocks_size_independently",
+        "risk.tests.test_sizing:test_zero_capital_blocks",
+        "risk.tests.test_sizing:test_zero_entry_blocks",
+        "risk.tests.test_sizing:test_zero_stop_blocks"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "risk.sizing:size_position",
+        "risk.tests.test_sizing:_capital"
+      ],
+      "dotted": "risk.tests.test_sizing._size",
+      "file": "src/risk/tests/test_sizing.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 39,
+      "module": "src/risk",
+      "name": "_size",
+      "public": false,
+      "qualified": "risk.tests.test_sizing:_size",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "risk.tests.test_sizing:_size"
+      ],
+      "dotted": "risk.tests.test_sizing.test_budget_too_small_for_one_share_blocks",
+      "file": "src/risk/tests/test_sizing.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 128,
+      "module": "src/risk",
+      "name": "test_budget_too_small_for_one_share_blocks",
+      "public": true,
+      "qualified": "risk.tests.test_sizing:test_budget_too_small_for_one_share_blocks",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "risk.tests.test_sizing:_size"
+      ],
+      "dotted": "risk.tests.test_sizing.test_capital_changing_between_calculations",
+      "file": "src/risk/tests/test_sizing.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 232,
+      "module": "src/risk",
+      "name": "test_capital_changing_between_calculations",
+      "public": true,
+      "qualified": "risk.tests.test_sizing:test_capital_changing_between_calculations",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "risk.tests.test_sizing:_size"
+      ],
+      "dotted": "risk.tests.test_sizing.test_edge_matrix_planned_never_exceeds_max",
+      "file": "src/risk/tests/test_sizing.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 282,
+      "module": "src/risk",
+      "name": "test_edge_matrix_planned_never_exceeds_max",
+      "public": true,
+      "qualified": "risk.tests.test_sizing:test_edge_matrix_planned_never_exceeds_max",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.live_trading_service:CapitalRiskEngine",
+        "risk.tests.test_sizing:_size"
+      ],
+      "dotted": "risk.tests.test_sizing.test_engine_projection_matches_sizing_pipeline",
+      "file": "src/risk/tests/test_sizing.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 315,
+      "module": "src/risk",
+      "name": "test_engine_projection_matches_sizing_pipeline",
+      "public": true,
+      "qualified": "risk.tests.test_sizing:test_engine_projection_matches_sizing_pipeline",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "risk.tests.test_sizing:_size"
+      ],
+      "dotted": "risk.tests.test_sizing.test_entry_equals_stop_blocks",
+      "file": "src/risk/tests/test_sizing.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 101,
+      "module": "src/risk",
+      "name": "test_entry_equals_stop_blocks",
+      "public": true,
+      "qualified": "risk.tests.test_sizing:test_entry_equals_stop_blocks",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "risk.sizing:validate_planned_quantity",
+        "risk.tests.test_sizing:_size"
+      ],
+      "dotted": "risk.tests.test_sizing.test_final_gate_passes_sized_quantity",
+      "file": "src/risk/tests/test_sizing.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 243,
+      "module": "src/risk",
+      "name": "test_final_gate_passes_sized_quantity",
+      "public": true,
+      "qualified": "risk.tests.test_sizing:test_final_gate_passes_sized_quantity",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "risk.sizing:validate_planned_quantity"
+      ],
+      "dotted": "risk.tests.test_sizing.test_final_gate_rejects_fractional_or_nonpositive_quantity",
+      "file": "src/risk/tests/test_sizing.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 266,
+      "module": "src/risk",
+      "name": "test_final_gate_rejects_fractional_or_nonpositive_quantity",
+      "public": true,
+      "qualified": "risk.tests.test_sizing:test_final_gate_rejects_fractional_or_nonpositive_quantity",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "risk.sizing:validate_planned_quantity"
+      ],
+      "dotted": "risk.tests.test_sizing.test_final_gate_rejects_inflated_quantity",
+      "file": "src/risk/tests/test_sizing.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 255,
+      "module": "src/risk",
+      "name": "test_final_gate_rejects_inflated_quantity",
+      "public": true,
+      "qualified": "risk.tests.test_sizing:test_final_gate_rejects_inflated_quantity",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "risk.tests.test_sizing:_size"
+      ],
+      "dotted": "risk.tests.test_sizing.test_kaynes_example_quantity_22",
+      "file": "src/risk/tests/test_sizing.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 60,
+      "module": "src/risk",
+      "name": "test_kaynes_example_quantity_22",
+      "public": true,
+      "qualified": "risk.tests.test_sizing:test_kaynes_example_quantity_22",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "risk.tests.test_sizing:_size"
+      ],
+      "dotted": "risk.tests.test_sizing.test_lakh_capital_gives_six_hundred_max_risk",
+      "file": "src/risk/tests/test_sizing.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 49,
+      "module": "src/risk",
+      "name": "test_lakh_capital_gives_six_hundred_max_risk",
+      "public": true,
+      "qualified": "risk.tests.test_sizing:test_lakh_capital_gives_six_hundred_max_risk",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "risk.sizing:size_position",
+        "risk.tests.test_sizing:_capital"
+      ],
+      "dotted": "risk.tests.test_sizing.test_live_rejects_non_broker_capital_source",
+      "file": "src/risk/tests/test_sizing.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 169,
+      "module": "src/risk",
+      "name": "test_live_rejects_non_broker_capital_source",
+      "public": true,
+      "qualified": "risk.tests.test_sizing:test_live_rejects_non_broker_capital_source",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "risk.sizing:size_position"
+      ],
+      "dotted": "risk.tests.test_sizing.test_missing_capital_blocks",
+      "file": "src/risk/tests/test_sizing.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 77,
+      "module": "src/risk",
+      "name": "test_missing_capital_blocks",
+      "public": true,
+      "qualified": "risk.tests.test_sizing:test_missing_capital_blocks",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "risk.tests.test_sizing:_size"
+      ],
+      "dotted": "risk.tests.test_sizing.test_nan_capital_blocks",
+      "file": "src/risk/tests/test_sizing.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 92,
+      "module": "src/risk",
+      "name": "test_nan_capital_blocks",
+      "public": true,
+      "qualified": "risk.tests.test_sizing:test_nan_capital_blocks",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "risk.tests.test_sizing:_size"
+      ],
+      "dotted": "risk.tests.test_sizing.test_negative_capital_blocks",
+      "file": "src/risk/tests/test_sizing.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 86,
+      "module": "src/risk",
+      "name": "test_negative_capital_blocks",
+      "public": true,
+      "qualified": "risk.tests.test_sizing:test_negative_capital_blocks",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "risk.tests.test_sizing:_size"
+      ],
+      "dotted": "risk.tests.test_sizing.test_negative_prices_block",
+      "file": "src/risk/tests/test_sizing.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 120,
+      "module": "src/risk",
+      "name": "test_negative_prices_block",
+      "public": true,
+      "qualified": "risk.tests.test_sizing:test_negative_prices_block",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "risk.sizing:size_position",
+        "risk.tests.test_sizing:_capital"
+      ],
+      "dotted": "risk.tests.test_sizing.test_paper_uses_simulated_capital",
+      "file": "src/risk/tests/test_sizing.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 181,
+      "module": "src/risk",
+      "name": "test_paper_uses_simulated_capital",
+      "public": true,
+      "qualified": "risk.tests.test_sizing:test_paper_uses_simulated_capital",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "risk.tests.test_sizing:_size"
+      ],
+      "dotted": "risk.tests.test_sizing.test_planned_risk_never_exceeds_max",
+      "file": "src/risk/tests/test_sizing.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 147,
+      "module": "src/risk",
+      "name": "test_planned_risk_never_exceeds_max",
+      "public": true,
+      "qualified": "risk.tests.test_sizing:test_planned_risk_never_exceeds_max",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "risk.tests.test_sizing:_size"
+      ],
+      "dotted": "risk.tests.test_sizing.test_quantity_floors_never_ceils",
+      "file": "src/risk/tests/test_sizing.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 134,
+      "module": "src/risk",
+      "name": "test_quantity_floors_never_ceils",
+      "public": true,
+      "qualified": "risk.tests.test_sizing:test_quantity_floors_never_ceils",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "risk.sizing:size_position",
+        "risk.tests.test_sizing:_capital"
+      ],
+      "dotted": "risk.tests.test_sizing.test_sandbox_uses_sandbox_capital",
+      "file": "src/risk/tests/test_sizing.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 193,
+      "module": "src/risk",
+      "name": "test_sandbox_uses_sandbox_capital",
+      "public": true,
+      "qualified": "risk.tests.test_sizing:test_sandbox_uses_sandbox_capital",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "risk.sizing:size_position",
+        "risk.tests.test_sizing:_capital"
+      ],
+      "dotted": "risk.tests.test_sizing.test_stale_capital_blocks",
+      "file": "src/risk/tests/test_sizing.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 208,
+      "module": "src/risk",
+      "name": "test_stale_capital_blocks",
+      "public": true,
+      "qualified": "risk.tests.test_sizing:test_stale_capital_blocks",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "risk.tests.test_sizing:_size"
+      ],
+      "dotted": "risk.tests.test_sizing.test_stocks_size_independently",
+      "file": "src/risk/tests/test_sizing.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 157,
+      "module": "src/risk",
+      "name": "test_stocks_size_independently",
+      "public": true,
+      "qualified": "risk.tests.test_sizing:test_stocks_size_independently",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "risk.sizing:BrokerCapital",
+        "risk.sizing:size_position"
+      ],
+      "dotted": "risk.tests.test_sizing.test_unknown_fetch_time_is_stale",
+      "file": "src/risk/tests/test_sizing.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 220,
+      "module": "src/risk",
+      "name": "test_unknown_fetch_time_is_stale",
+      "public": true,
+      "qualified": "risk.tests.test_sizing:test_unknown_fetch_time_is_stale",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "risk.tests.test_sizing:_size"
+      ],
+      "dotted": "risk.tests.test_sizing.test_zero_capital_blocks",
+      "file": "src/risk/tests/test_sizing.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 70,
+      "module": "src/risk",
+      "name": "test_zero_capital_blocks",
+      "public": true,
+      "qualified": "risk.tests.test_sizing:test_zero_capital_blocks",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "risk.tests.test_sizing:_size"
+      ],
+      "dotted": "risk.tests.test_sizing.test_zero_entry_blocks",
+      "file": "src/risk/tests/test_sizing.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 108,
+      "module": "src/risk",
+      "name": "test_zero_entry_blocks",
+      "public": true,
+      "qualified": "risk.tests.test_sizing:test_zero_entry_blocks",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "risk.tests.test_sizing:_size"
+      ],
+      "dotted": "risk.tests.test_sizing.test_zero_stop_blocks",
+      "file": "src/risk/tests/test_sizing.py",
+      "kind": "function",
+      "language": "RUST",
+      "line": 114,
+      "module": "src/risk",
+      "name": "test_zero_stop_blocks",
+      "public": true,
+      "qualified": "risk.tests.test_sizing:test_zero_stop_blocks",
       "tests": []
     },
     {
@@ -50966,6 +52693,7 @@
     },
     {
       "called_by": [
+        "execution.tests.test_live_pipeline:_Logic",
         "strategy.runtime:StrategyLogic",
         "strategy.runtime:StrategyRuntime",
         "strategy.strategies.base:PythonStrategy",
@@ -50990,6 +52718,7 @@
     {
       "called_by": [
         "app.services.backtest_service:_run_symbol",
+        "execution.tests.test_live_pipeline:_Logic",
         "strategy.models.signal:Signal",
         "strategy.strategies.base:PythonStrategy",
         "strategy.tests.test_builtins:test_rsi_buys_oversold_and_exits_overbought",
@@ -78397,6 +80126,12 @@
     {
       "granularity": "module",
       "module": "src/app",
+      "path": "src/app/tests/test_live_risk_sizing.py",
+      "targets": []
+    },
+    {
+      "granularity": "module",
+      "module": "src/app",
       "path": "src/app/tests/test_market_data_service.py",
       "targets": []
     },
@@ -78617,6 +80352,18 @@
       "targets": []
     },
     {
+      "granularity": "module",
+      "module": "src/execution",
+      "path": "src/execution/tests/test_live_pipeline.py",
+      "targets": []
+    },
+    {
+      "granularity": "module",
+      "module": "src/execution",
+      "path": "src/execution/tests/test_live_sizing_gate.py",
+      "targets": []
+    },
+    {
       "granularity": "file",
       "module": "src/execution",
       "path": "src/execution/tests/test_native_execution.py",
@@ -78714,6 +80461,14 @@
       "path": "src/risk/tests/test_native_session.py",
       "targets": [
         "src/risk/native_session.py"
+      ]
+    },
+    {
+      "granularity": "file",
+      "module": "src/risk",
+      "path": "src/risk/tests/test_sizing.py",
+      "targets": [
+        "src/risk/sizing.py"
       ]
     },
     {

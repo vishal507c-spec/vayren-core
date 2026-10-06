@@ -5,7 +5,93 @@
 
 **Owns:** Current state, open items, verified facts, oddities. **Not owns:** Rules/architecture/events/contracts \u2192 `AGENTS.md`, `AI_ENTRY.md`, `architecture.md`, `module_contracts.md`, `event_catalog.md`.
 
-**Latest update (squash-merge-main-rule-locked, 2026-10-05):** SQUASH MERGE TO MAIN RULE PERMANENTLY LOCKED IN AGENTS.MD.
+**Latest update (strategy-lab-polish-pass, 2026-10-06):** STRATEGY LAB POLISH PASS - one real functional bug + honesty/affordance/layout fixes (local only, no commit/push). Files: `crates/vayren-shell/ui/lab.slint`, `crates/vayren-domain/src/lab.rs`, NEW `crates/vayren-shell/tests/lab_lens_pages.rs`, NEW `crates/vayren-shell/tests/lab_overlay_dialog.rs`. **Zero trading logic touched** (OBR C1C4, risk engine, sizing, broker routing untouched; no Python changed).
+1. **THE BUG - two of five lens tabs rendered a blank page.** `lens == 3` (Drawdown) and `lens == 4` (Analytics) were written at the very END of `lab.slint`, nested inside the `if root.lab.sym-open:` universe-dialog block. The braces BALANCED, so Slint compiled, all validators passed, and the surface looked finished - but both lenses painted their only line of content into a 460px dialog `Rectangle` that exists solely while the universe picker is open. Selecting Drawdown or Analytics switched section 04 off and rendered nothing. Both are now page sections in the same flow as lens 0/1/2, each an eyebrow + a `panel` card stating what is missing rather than an invented curve. **Lesson worth keeping: brace balance is not nesting correctness - a depth trace found what the compiler and every validator could not.**
+2. **Regression test written for it, and PROVEN to fail on the bug.** `lab_lens_pages.rs` selects each lens through the model's own `interaction_lens()` (a software-renderer harness cannot fire `TouchArea.clicked`) and compares pixels. With the bodies moved back inside the dialog: `drawdown vs analytics = 1762 px` -> both blank -> identical frames -> test FAILS. With the fix: `5299 px`, and each vs the Trades lens `~968k px` -> both paint a real body. Measured, not assumed.
+3. **A painted lie removed - the dropdown caret on controls that open nothing.** `LabCtlButton` painted its `U+25BC` caret on EVERY instance, including the trade blotter's side / result / sort controls, which CYCLE their value inline and never open a menu; and the 26px trade-detail close button, which also computed a **negative label width** (`26 - 11 - 15 - 11 = -11px`) so the caret sat on top of the glyph. New `ctl-caret` property (default true) opts out per instance; the label reserves the caret gutter only when a caret is actually painted; the close button is now a plain icon button matching the universe dialog's own close.
+4. **The first-run state said nothing at all.** The 44px "nothing to read yet" bar held only a stretch spacer plus a `+ New strategy` button gated on `name == ""` - so with a strategy selected and nothing run yet it rendered completely EMPTY. It now renders `lab.empty-reason`, the backend's own sentence ("No backtest results yet - run the backtest", "Results are outdated - run again", ...), which `lab.rs:2504` already computed and the screen never showed.
+5. **Unknown is no longer painted as bad news.** MAX DRAWDOWN carried `es-tone: 3` unconditionally, so the *unknown* placeholder rendered RED - an alarm about a number nobody measured. Red is now earned by a measured value only. Also `"--"` -> em-dash in the OUTCOME and the equity footer stats, matching the dash the rest of the file uses. `studio_source` was a hardcoded `"LOCAL"` in `lab.rs` (a fabricated provenance reading as a measured fact); it now sends empty and the meta cell shows a dash like its three neighbours.
+6. **Table clipping became truncation.** `LabTh`/`LabTd` never set `overflow`, and every metric column is `stretch: 1`, so a docked-width blotter hard-clipped dates and prices mid-glyph (`ENTRY PX`/`EXIT PX` had ~81px of text room for a ~110px string). Both now elide. The section 02 completeness strip's note width (`cfgcard.width * 60 / 100 - 415px`) went NEGATIVE below a ~692px card and silently vanished; it is clamped, then elided - the note degrades to "truncated", never to "absent".
+7. **Three real buttons never changed the cursor** (mode cells, research-object rows, `+ New strategy`) while 29 others did - hover and press painted, pointer did not. Fixed. Token discipline: `LabPalette.fs-strat-name` / `fs-strat-name-sm` (44/34px) were defined and referenced NOWHERE while the same two numbers were re-typed literally; the literals now use the tokens (identical values, zero pixel change). Dead imports (`VayrenPalette`, `VayrenDesign`, `VBadge`, `VButton`, `VBanner`, `VEmptyState`, `VCell`) and a DUPLICATE `trade-needle` field declaration removed. `Palette` from std-widgets was nearly removed too - it IS used once in `init` (`Palette.color-scheme`), which the compiler caught.
+8. **Verification (all real):** `cargo check -p vayren-shell` PASS with ZERO warnings pointing at `lab.slint` (the binding-loop warnings that remain are pre-existing, all in `live.slint` / `live_harness.slint`); `cargo test -p vayren-shell` **71/71 PASS** (53 lib + 7 `lab_config_render` + 1 `lab_lens_pages` + 1 `lab_overlay_dialog` + 1 `lab_scroll` + 1 `lab_select` + 2 `live_render_snapshot` + `render_app` + `render_matrix`); `cargo test -p vayren-domain --lib` 236/236; `cargo fmt --all -- --check` clean; `validate_structure` / `validate_language_ownership` (330 files) / `validate_authority` (201 py, 19 slint, 17 routes) / `validate_routes` / `validate_repo_graph` / `context_engine --check` PASS. **`docs/repo_graph.json` REBUILT** (4769 entities, 8504 relationships, 0 unresolved) - required, because Slint line numbers moved and that is exactly what broke the `validators` CI job before.
+9. **Not mine - PRE-EXISTING failures in this tree, from concurrent uncommitted FYERS/live work** (`live_market_data.py`, `session_adapter.py` are untracked/half-landed): `validate_imports` FAILS - `live_market_data.py:18,19` imports `execution.events` / `execution.market_data.provider` from `broker`, which `DOMAIN_DEPS` forbids; `validate_architecture_gate` FAILS - `fyers_apiv3.FyersWebsocket.data_ws` / `.order_ws` are third-party imports not declared in `pyproject.toml`; and 27 pre-existing `ruff` errors in those same FYERS files. **Left untouched on purpose** - the lab polish must not silently absorb unrelated broker work. A full `make check` stays red until those are resolved on their own branch.
+10. **Open, deliberately NOT done (features, not polish):** no search/filter on the section 01 research-object library (none at any count - a real gap at 50+ strategies); no line numbers or syntax highlighting in the section 05 editor; both grids still shrink columns indefinitely rather than scrolling at a minimum table width (elide now makes the truncation honest, but a horizontal scroll is the real fix); `LabHeader` still declares ~10 `in property` fields the screen never reads (`params`, `matrix`, `board-*`, `equity-buy/sell`, `drawdown-buy/sell`, `compare-ranking`, `filter-active`) and 13 callbacks with no call site - removing them is a Rust refactor across `lab.rs` / `shell.rs` / `vayren-strategy-lab-view`, not a polish pass.
+
+**Latest update (live-execution-pipeline-phase4, 2026-10-06):** VAYREN PHASE 4 — END-TO-END LIVE EXECUTION PIPELINE COMPLETED & VERIFIED (local only, no commit/push).
+- **Flow now closed:** tick → OBR-shaped signal (entry+stop consumed, strategy untouched) → Phase-3 sizing → consolidated `_pre_order_checks` gate → whole-share FLOOR → broker-neutral `place_order` → ack/working → partial/full fills → ledger position from fills only → protective STOP_MARKET on filled qty → SL SENT/WORKING/SAFE/FAILED → reconcile/restart safety.
+- **Files:** `execution/runtime/session.py` (pre-order gate: RUNNING/armed/health/order-stream/staleness/reconcile/symbol/sizing/duplicate; NETWORK-error → UNKNOWN+reconcile-only exit; fill-dedup via `_seen_fills`; SL lifecycle + checkpoint/recover + post-reconcile re-arm; `state()` gains order_stream/stop_protection/sl_attention), `execution/models/order.py` (`OrderPlan.stop_price`, additive), `execution/broker/paper.py` (STOP trigger semantics + STOP_LIMIT economics), `execution/broker/sandbox.py` (stop_price preserved on modify), NEW `execution/tests/test_live_pipeline.py` (18 tests, venue fakes only — no real money).
+- **Real bug found+fixed by tests:** fresh sessions run REDUCED 0.5x posture → fractional qty (10.5) hit QUANTITY_INVALID; `_submit` now floors to whole shares with QUANTITY_FLOORED journal (floor only reduces risk).
+- **Untouched:** OBR C1C4 (zero strategy files; strategy tests green), FYERS adapter + websockets (consumed via broker-neutral surface + `order_stream_health`), risk formula (4x/0.15% unchanged), UI (no .slint; additive state keys only), Rust (no .rs changed).
+- **Verification:** pytest src 469/469; cargo test -p vayren-core 403/403; vayren-domain 236/236; ruff/format/pyright clean; ownership/structure/routes/repo_graph PASS (4778 entities).
+- **Pre-existing, out of scope:** `cargo check --workspace` still fails on uncommitted `live.slint` parse errors (prior UI pass); import/arch-gate flags on Phase-1/2 FYERS files.
+- **STOP AFTER PHASE 4.** No Phase 5, no EC2, no production/LIVE-READY claim.
+
+**Previous update (live-ui-visual-polish-2, 2026-10-06):** LIVE UI VISUAL POLISH PASS 2 — screenshot-driven, Slint-only (local only, no commit/push). File: `crates/vayren-shell/ui/live.slint`. Verified on real pixels via `VAYREN_SNAPSHOT_SAVE` renders at 1920x1080.
+- Session Facts declutter: 6 fact loops hide `NOT REPORTED` rows via `visible:` binding (`visible:false` = zero layout space; Slint forbids bare `if` under `for`). 15-row grey wall gone.
+- Right-edge clipping guards: `overflow: elide` on 4 strategy-card value cells; POSITION label 54px→64px; pixel-measured rows end at panel border in all states.
+- Footer stutter fixed (`WEBSOCKET: WS:` → `WS:` etc.); SYMBOL column 75px→100px (most names now full).
+- Verification: full rebuild PASS (only pre-existing binding-loop warnings); `live_render_snapshot` 2/2 PASS. Parallel `lab.slint` edit briefly broke the build mid-session (transient, resolved itself).
+- OPEN BUG (dedicated Slint-debug cycle needed): details-card rows `Computed Qty / Planned Risk / Risk Util / Current Open Risk / risk banner / ORDER PIPELINE` (1614–1714) occupy ZERO height in every state — pixel-measured. Code unconditional, braces balanced, binary fresh, compiler clean; cause unknown.
+
+**Previous update (broker-capital-risk-engine-phase3, 2026-10-06):** VAYREN PHASE 3 — BROKER CAPITAL + 4X + 0.15% LIVE RISK PIPELINE COMPLETED & VERIFIED (local only, no commit/push).
+- **No second engine:** existing `CapitalRiskEngine` formula was already exact — reused, not duplicated. New single enforcement point `src/risk/sizing.py` (`size_position` + `validate_planned_quantity`, frozen `BrokerCapital`/`SizingVerdict`, reason codes READY/BROKER_CAPITAL_UNAVAILABLE/STALE_CAPITAL/INVALID_ENTRY_PRICE/INVALID_STOP_PRICE/ZERO_RISK_PER_SHARE/RISK_BUDGET_TOO_SMALL_FOR_ONE_SHARE/PLANNED_RISK_EXCEEDED/QUANTITY_INVALID). Retention entry added; `risk/__init__` exports it (public surface).
+- **Real capital:** LIVE session sizes ONLY from `broker.funds()["available"]` re-read per signal (no cache, no fallback); `LiveTradingService._refresh_risk_capital` feeds broker available funds into the engine every snapshot (PAPER feeds simulated basis). Invalid → engine zeroed + NOT READY, no qty computed. KAYNES check: 100000x4=400000, x0.0015=600, ABS(1218.50-1245.00)=26.50, floor=22, planned=583.
+- **Gates:** session `_handle_signal` LIVE BUY blocks on denial (RISK_DENIED journal+event); `_submit` re-validates final planned qty vs verdict ceiling (catches inflated quantities); `_live_blockers` adds "broker capital unavailable" for connected-but-fundless venues; stale (>60s/unknown age) blocks.
+- **Untouched:** OBR C1C4 (zero strategy files changed; strategy tests green), Rust kernels (no .rs changed; risk projection in live.rs already fail-closed), UI (no .slint changed; snapshot only gains additive `risk_engine.broker_capital/capital_source/sizing_status/sizing_reason` keys).
+- **Verification:** pytest src 451/451; cargo test -p vayren-core risk 15/15; cargo test -p vayren-domain 236/236; cargo check -p vayren-core/vayren-domain PASS; ruff + format + pyright clean; language_ownership/structure/routes/repo_graph PASS (graph rebuilt 4734 entities).
+- **Pre-existing, NOT Phase-3 (left alone):** `cargo check --workspace` fails on uncommitted `live.slint:1918+` parse errors (prior UI pass); import/arch-gate flags on Phase-1/2 FYERS files (`live_market_data.py` execution imports, `fyers_apiv3` undeclared) — all outside Phase-3 scope.
+- **STOP AFTER PHASE 3.** No Phase 4. No "LIVE READY" claim.
+
+**Previous update (live-ui-fast-polish, 2026-10-06):** LIVE UI FAST POLISH — Slint-only, no-feature (local only, no commit/push). File: `crates/vayren-shell/ui/live.slint` (same line count, values only).
+- Typography floor 9px→10px (9 sites: inspector section eyebrows, pipeline steps, NO ORDER, WHY START) + 8px→10px (◉ CURRENT) — no sub-10px text left in live surface.
+- Breathing: cramped 14px/15px rows→18px (section headers, pipeline steps, blocker rows), 11× inspector Kv rows 16px→18px.
+- Verification: `cargo check -p vayren-shell` PASS (only pre-existing watchlist-columns-wide binding-loop warnings); `cargo test -p vayren-shell --test live_render_snapshot` 2/2 PASS (idle matrix + 20-state matrix). Zero Rust/Python logic touched.
+
+**Previous update (fyers-websocket-integration-phase2, 2026-10-06):** VAYREN PHASE 2 — FYERS REAL-TIME MARKET + ORDER WEBSOCKET INTEGRATION COMPLETED & VERIFIED.
+- **Scope & Isolation:** Phase 2 Only. Live market data WebSocket (`FyersLiveMarketData`) and real-time order/trade WebSocket streaming (`FyersSessionAdapter`). No UI redesign, no OBR C1C4 modifications, no risk formula modifications, no EC2.
+- **FYERS Real-Time Market Data WebSocket (`FyersLiveMarketData`):**
+  - Implements `MarketDataFace` and `MarketDataProvider` in `src/broker/providers/fyers/live_market_data.py`.
+  - Connects via `FyersDataSocket`, subscribes to NSE symbols with auto-resubscription upon reconnection.
+  - Normalizes FYERS tick payloads into VAYREN's broker-neutral `MarketEvent` pipeline (`TradeEvent`, `QuoteEvent`, `CandleEvent`).
+  - Preserves symbol, LTP, volume, timestamp (ISO-8601 UTC), bid/ask with quantities, and OHLC.
+  - Exposes thread-safe queue drained non-blockingly via `poll()`.
+  - Reports discrete connection states (`DISCONNECTED`, `CONNECTING`, `CONNECTED`, `RECONNECTING`, `ERROR`) and `health()`.
+- **FYERS Real-Time Order & Trade WebSocket (`FyersSessionAdapter`):**
+  - Integrated `FyersOrderSocket` in `src/broker/providers/fyers/session_adapter.py` streaming `orders` and `trades`.
+  - Emits normalized VAYREN events (`ack`, `fill`, `reject`, `cancel`) for order lifecycle progression.
+  - Accurate partial fill handling: position ledger updates strictly on confirmed filled quantity, never requested quantity.
+  - Deduplication: Maintains `_seen_fills` preventing duplicate fills across socket retransmissions.
+  - Fallback: Gracefully drains WebSocket event queue first, falling back to REST poll if socket is idle/disconnected.
+  - Dedicated health tracking: `order_stream_health()`.
+- **Safety Gates & Isolation:**
+  - `LiveSession._submit`: Hard gate blocks live order dispatch if broker reports disconnected/unhealthy.
+  - `PAPER` and `SANDBOX` modes remain strictly isolated and never hit live WebSockets or broker endpoints.
+- **Verification:**
+  - 11/11 tests passing in `src/broker/tests/test_fyers_websocket.py`.
+  - 192/192 broker tests passing in `src/broker/tests/`.
+  - 12/12 execution tests passing in `src/execution/tests/`.
+  - `python tools/validate_language_ownership.py`: PASSED (325 files checked).
+  - `cargo check --workspace`: PASSED cleanly.
+  - Zero git push performed (local only per non-negotiable rules).
+
+**Previous update (fyers-live-execution-phase1, 2026-10-06):** VAYREN PHASE 1 — FYERS LIVE ORDER EXECUTION ADAPTER COMPLETED & VERIFIED.
+- **Scope & Isolation:** Phase 1 Only. Extended existing `FyersSessionAdapter` in `src/broker/providers/fyers/session_adapter.py`. No UI redesign, no OBR C1C4 modifications, no risk formula modifications, no WebSockets (Phase 2), no EC2.
+- **FYERS API v3 Order Execution Implemented:**
+  - `place_order(plan, client_order_id, idempotency_key=None) -> str`: POST `/api/v3/orders/sync`. Translates VAYREN order models into FYERS request format (`symbol`, `qty`, `type`, `side`, `productType`, `limitPrice`, `stopPrice`, `validity`, `disclosedQty`, `offlineOrder`, `orderTag`).
+  - `cancel_order(broker_order_id) -> bool`: DELETE `/api/v3/orders/sync`.
+  - `modify_order(broker_order_id, quantity, price) -> bool`: PUT `/api/v3/orders/sync`.
+  - `stream_events() -> tuple[dict, ...]`: Polls FYERS orderbook `/api/v3/orders` (`orderBook`), diffs order state and emits fills, rejects, cancels.
+  - Safe structured logging without logging credentials (`ORDER_REQUEST`, `ORDER_RESPONSE`, `ORDER_REJECTED`).
+- **Response & Error Handling:** Real broker order ID extracted from response `id`. Failures remain failures (never fabricated as success). Normalized error mapping for auth failure, insufficient funds, invalid symbol, market closed, network timeouts.
+- **Mode Separation & Safety:** Adapter environment pinned to `LIVE`. Fails closed if not connected or credentials missing. `PAPER` and `SANDBOX` remain isolated and cannot call the FYERS LIVE endpoint.
+- **Verification:**
+  - 22/22 unit tests in `src/broker/tests/test_fyers_live_trading.py` passed.
+  - 159/159 broker tests passed.
+  - `python tools/validate_language_ownership.py`: PASSED (323 files checked).
+  - `cargo check --workspace`: PASSED.
+  - Zero git push performed (local only per non-negotiable rules).
+
+**Previous update (squash-merge-main-rule-locked, 2026-10-05):** SQUASH MERGE TO MAIN RULE PERMANENTLY LOCKED IN AGENTS.MD.
 - **Rule Locked:** `main` branch par development branch ke multiple intermediate commits ka direct merge ya push strictly forbidden hai.
 - **Enforcement:** Development hamesha feature branch (`no1`) par hogi. Jab CI 100% Green ho jaye aur user `main` me merge karne ka kahe, tab hamesha `git merge --squash` hoga.
 - **Objective:** `main` branch ki commit history me intermediate test failure (`✗`) noise kabhi show na ho; `main` par sirf clean consolidated **100% Green (✓)** commits hi dikhenge.

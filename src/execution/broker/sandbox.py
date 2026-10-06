@@ -325,6 +325,7 @@ class SandboxBroker:
                     quantity=new_qty,
                     order_type=plan.order_type,
                     limit_price=new_price,
+                    stop_price=plan.stop_price,
                     time_in_force=plan.time_in_force,
                     bracket=plan.bracket,
                 )

@@ -26,14 +26,21 @@ __all__ = [
 
 @dataclass(frozen=True)
 class OrderPlan:
-    """Deterministic planner output: one or more executable order specs."""
+    """Deterministic planner output: one or more executable order specs.
+
+    ``stop_price`` carries a protective-stop trigger when set (read by
+    venues that support stop orders, e.g. FYERS STOP_MARKET/STOP_LIMIT;
+    ignored by venues without stop support). Additive — plans without a
+    stop behave exactly as before.
+    """
 
     intent_id: str
     symbol: str
     side: str
     quantity: float
-    order_type: str = "MARKET"  # MARKET | LIMIT
+    order_type: str = "MARKET"  # MARKET | LIMIT | STOP_MARKET | STOP_LIMIT
     limit_price: float | None = None
+    stop_price: float | None = None
     time_in_force: str = "DAY"
     bracket: tuple[dict[str, object], ...] = ()  # future: stop/TP legs as data
 

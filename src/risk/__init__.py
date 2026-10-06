@@ -16,6 +16,21 @@ from risk.kill_switch import KillSwitch, KillSwitchState
 from risk.models import RiskCheck, RiskDecision, RiskPolicy, RiskRequest
 from risk.native_kill_switch import levels
 from risk.native_session import clock_sane, within_session
+from risk.sizing import (
+    BROKER_CAPITAL_UNAVAILABLE,
+    CAPITAL_STALE_AFTER_SECONDS,
+    LEVERAGE_MULTIPLIER,
+    PER_TRADE_RISK_PCT,
+    PLANNED_RISK_EXCEEDED,
+    READY,
+    RISK_BUDGET_TOO_SMALL_FOR_ONE_SHARE,
+    STALE_CAPITAL,
+    ZERO_RISK_PER_SHARE,
+    BrokerCapital,
+    SizingVerdict,
+    size_position,
+    validate_planned_quantity,
+)
 
 __all__ = [
     "RiskPolicy",
@@ -28,4 +43,17 @@ __all__ = [
     "levels",
     "within_session",
     "clock_sane",
+    "BrokerCapital",
+    "SizingVerdict",
+    "size_position",
+    "validate_planned_quantity",
+    "LEVERAGE_MULTIPLIER",
+    "PER_TRADE_RISK_PCT",
+    "CAPITAL_STALE_AFTER_SECONDS",
+    "READY",
+    "BROKER_CAPITAL_UNAVAILABLE",
+    "STALE_CAPITAL",
+    "ZERO_RISK_PER_SHARE",
+    "RISK_BUDGET_TOO_SMALL_FOR_ONE_SHARE",
+    "PLANNED_RISK_EXCEEDED",
 ]
