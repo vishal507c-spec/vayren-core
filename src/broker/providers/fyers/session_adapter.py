@@ -183,7 +183,9 @@ class FyersSessionAdapter:
                     on_close=self._on_ws_close,
                 )
             else:
-                from fyers_apiv3.FyersWebsocket.order_ws import FyersOrderSocket
+                from fyers_apiv3.FyersWebsocket.order_ws import (  # pyright: ignore[reportMissingImports]
+                    FyersOrderSocket,
+                )
 
                 self._order_ws = FyersOrderSocket(
                     access_token=token_str,

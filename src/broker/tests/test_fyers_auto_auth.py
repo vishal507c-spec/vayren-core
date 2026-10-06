@@ -71,6 +71,30 @@ class FakeTransport:
                 return dict(outcome)
         raise AssertionError(f"unexpected GET {url}")
 
+    def put_json(
+        self, url: str, payload: dict[str, Any], headers: dict[str, str] | None = None
+    ) -> dict[str, Any]:
+        self.calls.append((url, dict(payload), dict(headers or {})))
+        for fragment, outcome in self._script.items():
+            if fragment in url:
+                if isinstance(outcome, Exception):
+                    raise outcome
+                assert isinstance(outcome, dict)
+                return dict(outcome)
+        raise AssertionError(f"unexpected PUT {url}")
+
+    def delete_json(
+        self, url: str, payload: dict[str, Any], headers: dict[str, str] | None = None
+    ) -> dict[str, Any]:
+        self.calls.append((url, dict(payload), dict(headers or {})))
+        for fragment, outcome in self._script.items():
+            if fragment in url:
+                if isinstance(outcome, Exception):
+                    raise outcome
+                assert isinstance(outcome, dict)
+                return dict(outcome)
+        raise AssertionError(f"unexpected DELETE {url}")
+
     def paths(self) -> list[str]:
         return [call[0] for call in self.calls]
 

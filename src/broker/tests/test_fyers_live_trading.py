@@ -343,10 +343,11 @@ def test_missing_credentials_fails_closed() -> None:
 
 def test_paper_cannot_call_live_endpoint() -> None:
     from execution.broker.paper import PaperBroker
+    from execution.models.order import OrderPlan
 
     paper = PaperBroker()
     paper.connect()
-    plan = DummyPlan()
+    plan = OrderPlan(intent_id="test-paper-1", symbol="SBIN", side="BUY", quantity=10.0)
     broker_id = paper.place_order(plan, "PAPER_1")
     # Paper uses simulated order ids, never network transport
     assert broker_id.startswith("PAPER-")
@@ -355,10 +356,11 @@ def test_paper_cannot_call_live_endpoint() -> None:
 
 def test_sandbox_cannot_call_live_endpoint() -> None:
     from execution.broker.sandbox import SandboxBroker
+    from execution.models.order import OrderPlan
 
     sandbox = SandboxBroker()
     sandbox.connect()
-    plan = DummyPlan()
+    plan = OrderPlan(intent_id="test-sandbox-1", symbol="SBIN", side="BUY", quantity=10.0)
     broker_id = sandbox.place_order(plan, "SANDBOX_1")
     # Sandbox uses simulated order ids, never network transport
     assert broker_id.startswith("SANDBOX-")

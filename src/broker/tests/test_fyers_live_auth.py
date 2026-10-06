@@ -63,6 +63,22 @@ class FakeTransport:
             return dict(self.profile_response)
         return {"s": "ok", "code": 200, "data": {"fy_id": "AB1234", "name": "Test"}}
 
+    def put_json(  # noqa: ARG002 (scripted double keeps the real signature)
+        self,
+        url: str,  # noqa: ARG002
+        payload: dict,  # noqa: ARG002
+        headers: dict | None = None,  # noqa: ARG002
+    ) -> dict:
+        return {"s": "ok", "code": 200}
+
+    def delete_json(  # noqa: ARG002 (scripted double keeps the real signature)
+        self,
+        url: str,  # noqa: ARG002
+        payload: dict,  # noqa: ARG002
+        headers: dict | None = None,  # noqa: ARG002
+    ) -> dict:
+        return {"s": "ok", "code": 200}
+
 
 def _flow() -> tuple[FyersAuthFlow, FakeTransport]:
     transport = FakeTransport()
