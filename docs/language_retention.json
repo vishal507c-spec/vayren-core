@@ -421,6 +421,12 @@
       "reason": "ctypes bridge for the Rust session/clock gates: encodes UTF-8 timestamps and HH:MM bounds (a -1 length is Python's None) and maps the verdict code onto a bool. No policy: window comparison, ISO parsing and skew rule stay in Rust. File role: bridge (no authority)",
       "migration_target": "crates/vayren-core/src/risk_engine.rs",
       "migration_condition": "Terminal bridge state: retained as the FFI projection (same pattern as native_checks/native_kill_switch)."
+    },
+    "src/risk/sizing.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Phase-3 LIVE sizing verdicts (broker capital x4 x0.15% -> FLOOR qty + planned-risk gate): fail-closed orchestration over plain numbers with structured denial reasons (BROKER_CAPITAL_UNAVAILABLE/STALE_CAPITAL/ZERO_RISK_PER_SHARE/...). No 18-gate checklist logic (owned by risk.native_engine/Rust) and no stop invention (entry/stop consumed from strategy/execution models only). File role: sizing orchestration (no gate authority)",
+      "migration_target": "crates/vayren-core/src/risk_engine.rs",
+      "migration_condition": "When the RISK slice containing this file is touched by feature work, migrate per AI_ENTRY.md section 1 (smallest useful slice)."
     }
   }
 }

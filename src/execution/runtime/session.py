@@ -15,7 +15,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from contextlib import suppress
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from math import floor
 from pathlib import Path
 from typing import Any
 
@@ -51,6 +52,7 @@ from execution.native_execution import (
     native_default_quantity,
     native_narrow_multiplier,
 )
+from execution.native_order_state import TERMINAL_STATES
 from execution.planner import ExecutionPreferences, OrderPlanner
 from execution.portfolio.ledger import PositionLedger
 from execution.portfolio.reconcile import ReconciliationState, reconcile_orders, reconcile_positions
@@ -61,6 +63,12 @@ from execution.runtime.lifecycle import LifecycleError, LifecycleState, Strategy
 from execution.runtime.strategy_runtime import LiveStrategyDriver, StrategyContext
 from market import Bar
 from risk import KillSwitch, RiskEngine, RiskPolicy, RiskRequest
+from risk.sizing import (
+    BrokerCapital,
+    SizingVerdict,
+    size_position,
+    validate_planned_quantity,
+)
 from strategy import StrategyDefinition, StrategyLogic, StrategyParameters, StrategyState
 
 
@@ -198,6 +206,21 @@ class LiveSession:
         self._last_order_epoch: float | None = None
         self._orders_today = 0
         self._bus: Any = None
+        # Phase-3 LIVE sizing verdicts by intent id: the final `_submit`
+        # gate re-validates the planned quantity against the verdict's
+        # ceiling, so even a planner-adjusted quantity can never exceed the
+        # 0.15% per-stock limit. One-shot entries (popped on submit).
+        self._sized_risk: dict[str, SizingVerdict] = {}
+        # Phase-4 protective-stop state (per symbol, from the strategy's own
+        # stop value — never invented): required stop price, lifecycle and
+        # the active SL order. Filled quantity alone sizes protection.
+        self._stop_levels: dict[str, float] = {}
+        self._stop_protection: dict[str, dict[str, Any]] = {}
+        self._sl_seq = 0
+        self._sl_attention: set[str] = set()
+        # Fill ids already folded (venue retransmissions must never double
+        # a position or an order's filled quantity).
+        self._seen_fills: set[tuple[str, float, float]] = set()
 
     # ── wiring ──────────────────────────────────────────────────
 
@@ -438,7 +461,20 @@ class LiveSession:
             signal.strategy_id, signal.strategy_version, signal.event_seq, context.intent_seq
         )
         if signal.side == "BUY":
-            quantity = self._default_quantity(signal)
+            if self._mode == ExecutionMode.LIVE:
+                # LIVE entries size ONLY from the risk engine: broker
+                # available capital × 4 × 0.15% against the strategy's own
+                # entry/stop. A denial blocks the order here (fail-closed).
+                sized = self._live_sized_quantity(intent_id, signal, now_epoch)
+                if sized is None:
+                    return
+                quantity = float(sized.quantity)
+            else:
+                quantity = self._default_quantity(signal)
+                # Non-live entries still anchor protective-stop placement on
+                # the strategy's own stop (consumed, never invented).
+                if signal.stop_loss is not None and signal.stop_loss > 0:
+                    self._stop_levels[signal.symbol] = signal.stop_loss
             target = ledger_qty + quantity
         else:
             quantity = abs(ledger_qty)
@@ -540,12 +576,121 @@ class LiveSession:
             snapshot.available_capital, signal.price, self._risk.policy.max_order_qty
         )
 
+    def _live_broker_capital(self, now_epoch: float) -> BrokerCapital | None:
+        """Read REAL broker available capital (LIVE sizing source of truth).
+
+        Returns ``None`` when the venue reports nothing usable — the caller
+        blocks instead of fabricating capital. Never raises, never caches:
+        every signal re-reads, so a capital change between calculations is
+        picked up and a failed read cannot launder a stale number in.
+        """
+        broker = self._broker
+        funds_fn = getattr(broker, "funds", None)
+        if not callable(funds_fn):
+            return None
+        try:
+            payload = funds_fn()
+        except Exception:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        raw_available: Any = payload.get("available")
+        try:
+            available = float(raw_available)
+        except (TypeError, ValueError):
+            return None
+        if available != available or available in (float("inf"), float("-inf")):
+            return None
+        return BrokerCapital(available=available, fetched_epoch=now_epoch, source="broker")
+
+    def _live_sized_quantity(
+        self, intent_id: str, signal: StrategySignal, now_epoch: float
+    ) -> SizingVerdict | None:
+        """Size one LIVE entry through the Phase-3 risk pipeline.
+
+        Returns the READY verdict (remembered for the final ``_submit``
+        gate) or records ``RISK_DENIED`` and returns ``None`` to block.
+        The strategy's entry/stop values are consumed unchanged — this
+        method never invents a stop level.
+        """
+        verdict = size_position(
+            broker_capital=self._live_broker_capital(now_epoch),
+            entry_price=signal.price,
+            stop_price=signal.stop_loss,
+            mode="LIVE",
+            now_epoch=now_epoch,
+        )
+        if not verdict.ready:
+            self._journal.record("RISK_DENIED", intent_id=intent_id, reasons=[verdict.reason])
+            self._emit(RiskDenied(self._request_id, intent_id, (verdict.reason,)))
+            return None
+        self._journal.record(
+            "RISK_VALIDATED",
+            intent_id=intent_id,
+            quantity=verdict.quantity,
+            planned_risk=verdict.planned_risk,
+        )
+        self._emit(RiskApproved(self._request_id, intent_id))
+        self._sized_risk[intent_id] = verdict
+        # The strategy's own stop now anchors this symbol's protective-stop
+        # requirement (placed after the entry fill, sized on filled qty).
+        if verdict.stop_price is not None and verdict.stop_price > 0:
+            self._stop_levels[signal.symbol] = verdict.stop_price
+        return verdict
+
+    def _pre_order_checks(self, intent: ExecutionIntent, plan: OrderPlan) -> tuple[str, str] | None:
+        """Final pre-order safety gate (fail-closed). Returns ``(kind,
+        reason)`` to BLOCK, or ``None`` to let the order continue.
+
+        Every check reads live facts — mode, arming, broker health, order
+        stream, market-data freshness, reconciliation, sizing verdict and
+        the engine's own open orders. Uncertain means blocked, never
+        partially executed. The two legacy journal kinds for unarmed /
+        unhealthy venues are preserved verbatim.
+        """
+        assert self._broker is not None
+        live = self._mode == ExecutionMode.LIVE
+        if self._lifecycle.state != LifecycleState.RUNNING:
+            return ("ORDER_BLOCKED", f"session not running ({self._lifecycle.state.value})")
+        if live and self._armed != LiveArm.ARMED:
+            return ("ORDER_BLOCKED_UNARMED", "live not armed")
+        if live:
+            healthy, health_reason = self._broker.health()
+            if not healthy:
+                return ("ORDER_BLOCKED_UNHEALTHY", f"broker unhealthy: {health_reason}")
+            stream_health_fn: Any = getattr(self._broker, "order_stream_health", None)
+            if callable(stream_health_fn):
+                try:
+                    stream_result: Any = stream_health_fn()
+                    stream_ok, stream_reason = bool(stream_result[0]), str(stream_result[1])
+                except Exception as exc:
+                    return ("ORDER_BLOCKED", f"order stream unreadable: {exc}")
+                if not stream_ok:
+                    return ("ORDER_BLOCKED", f"order stream unhealthy: {stream_reason}")
+            if self._normalizer.is_stale(plan.symbol):
+                return ("ORDER_BLOCKED", f"market data stale for {plan.symbol}")
+        if self._reconciliation.blocks_live:
+            return ("ORDER_BLOCKED", "reconciliation blocks live")
+        if not plan.symbol:
+            return ("ORDER_BLOCKED", "invalid symbol")
+        if live and plan.side == "BUY" and intent.intent_id not in self._sized_risk:
+            return ("ORDER_BLOCKED", "risk not validated for live order")
+        for open_order in self._engine.open_orders():
+            if open_order.intent_id.startswith("sl:"):
+                continue  # protective stops never block strategy orders
+            if open_order.symbol == plan.symbol and open_order.side == plan.side:
+                return (
+                    "ORDER_BLOCKED",
+                    f"duplicate active order for {plan.symbol} {plan.side}",
+                )
+        return None
+
     def _submit(self, intent: ExecutionIntent, plan: OrderPlan, now_epoch: float) -> None:
         assert self._broker is not None
-        if self._mode == ExecutionMode.LIVE and self._armed != LiveArm.ARMED:
-            self._journal.record(
-                "ORDER_BLOCKED_UNARMED", intent_id=intent.intent_id, reason="live not armed"
-            )
+        blocked = self._pre_order_checks(intent, plan)
+        if blocked is not None:
+            kind, reason = blocked
+            self._journal.record(kind, intent_id=intent.intent_id, reason=reason)
             return
         client_order_id = f"{intent.intent_id}:o1"
         order = BrokerOrder(
@@ -562,6 +707,42 @@ class LiveSession:
                 "ORDER_SKIPPED", intent_id=intent.intent_id, reason="zero quantity"
             )
             return
+        # NSE equity has no fractional shares: floor advisory-shrunk
+        # quantities to whole shares (FLOOR only ever reduces risk, so the
+        # sizing ceiling still holds). A floored-to-zero order is skipped,
+        # never rounded up.
+        whole_shares = floor(plan.quantity)
+        if whole_shares <= 0:
+            self._journal.record(
+                "ORDER_SKIPPED", intent_id=intent.intent_id, reason="quantity floors to zero"
+            )
+            return
+        if float(whole_shares) != plan.quantity:
+            self._journal.record(
+                "QUANTITY_FLOORED",
+                intent_id=intent.intent_id,
+                intended=plan.quantity,
+                quantity=float(whole_shares),
+            )
+            plan = replace(plan, quantity=float(whole_shares))
+        # FINAL Phase-3 gate: re-validate the planned quantity against the
+        # sizing verdict's ceiling immediately before the LIVE order path.
+        # Catches planner-adjusted or manually inflated quantities that
+        # would push planned risk past the 0.15% per-stock limit.
+        sized = self._sized_risk.pop(intent.intent_id, None)
+        if sized is not None and self._mode == ExecutionMode.LIVE:
+            allowed, gate_reason = validate_planned_quantity(
+                quantity=plan.quantity,
+                entry_price=sized.entry_price,
+                stop_price=sized.stop_price,
+                max_risk_per_stock=sized.max_risk_per_stock,
+            )
+            if not allowed:
+                self._journal.record(
+                    "RISK_DENIED", intent_id=intent.intent_id, reasons=[gate_reason]
+                )
+                self._emit(RiskDenied(self._request_id, intent.intent_id, (gate_reason,)))
+                return
         self._journal.record(
             "ORDER_PLANNED",
             intent_id=intent.intent_id,
@@ -578,6 +759,18 @@ class LiveSession:
         try:
             broker_id = self._broker.place_order(plan, tracked.client_order_id)
         except Exception as exc:
+            # Transport uncertainty (sent-but-unconfirmed) must NEVER be
+            # recorded as a rejection: the order becomes UNKNOWN and exits
+            # only via broker reconciliation. Deterministic refusals stay
+            # REJECTED with the venue's own reason.
+            if getattr(exc, "code", "") in ("NETWORK_ERROR", "NETWORK", "TIMEOUT"):
+                self._engine.transition(
+                    tracked.client_order_id, OrderState.UNKNOWN, reason=str(exc)
+                )
+                self._journal.record(
+                    "ORDER_UNKNOWN", client_order_id=client_order_id, reason=str(exc)
+                )
+                return
             self._engine.transition(tracked.client_order_id, OrderState.REJECTED, reason=str(exc))
             self._journal.record("ORDER_REJECTED", client_order_id=client_order_id, reason=str(exc))
             self._emit(OrderRejected(self._request_id, client_order_id, str(exc)))
@@ -598,6 +791,13 @@ class LiveSession:
         self._last_order_epoch = now_epoch
 
     def _apply_fill(self, tracked: BrokerOrder, fill: Fill) -> None:
+        # Venue retransmissions must never double a position: the same
+        # (order, qty, price) report folds exactly once.
+        fill_key = (fill.client_order_id, float(fill.fill_qty), float(fill.fill_price))
+        if fill_key in self._seen_fills:
+            self._journal.record("FILL_DUPLICATE_IGNORED", client_order_id=fill.client_order_id)
+            return
+        self._seen_fills.add(fill_key)
         updated = self._engine.apply_fill(tracked, fill)
         if fill.partial:
             updated = self._engine.transition(
@@ -609,12 +809,15 @@ class LiveSession:
             )
         position = self._ledger.apply_fill(fill)
         qty, side, entry = self._ledger.strategy_state_for(fill.symbol)
-        for context in self._contexts.values():
-            if context.strategy_id == self._strategy_of_intent(updated.intent_id):
-                # Live has no bar index; the ledger quantity/side/avg drive state.
-                if side is None:
-                    context.state = StrategyState()
-                else:
+        if side is None:
+            # Flat is global truth (covers protective-stop exits, whose
+            # synthetic intent maps to no strategy instance).
+            for context in self._contexts.values():
+                context.state = StrategyState()
+        else:
+            for context in self._contexts.values():
+                if context.strategy_id == self._strategy_of_intent(updated.intent_id):
+                    # Live has no bar index; the ledger quantity/side/avg drive state.
                     context.state = StrategyState.open(side, entry or 0.0, 0)
         self._working_memory.position_qty = qty
         self._journal.record(
@@ -636,6 +839,181 @@ class LiveSession:
         )
         self._emit(PositionUpdated(self._request_id, fill.symbol, qty))
         _ = position
+        if tracked.intent_id.startswith("sl:"):
+            return  # protective-stop fills only fold; state via _note_sl_event
+        if side is None:
+            self._clear_stop_protection(fill.symbol, "position flat")
+        else:
+            self._place_protective_stop(fill.symbol)
+
+    def _sl_order_open(self, client_order_id: str) -> bool:
+        """True while the tracked SL order is still live at the venue."""
+        if not client_order_id:
+            return False
+        tracked = self._engine.get(client_order_id)
+        return tracked is not None and tracked.state not in TERMINAL_STATES
+
+    def _place_protective_stop(self, symbol: str) -> None:
+        """(Re)arm the protective stop for the ACTUAL open position.
+
+        Sized strictly on confirmed filled quantity at the strategy's own
+        stop price (recorded at signal time, never invented). A stop that
+        cannot be placed, or that the venue rejects, marks the symbol as
+        needing immediate attention — protection is never claimed
+        silently. Never raises.
+        """
+        assert self._broker is not None
+        position = self._ledger.position(symbol)
+        if position.flat:
+            return
+        stop = self._stop_levels.get(symbol)
+        if stop is None or stop <= 0:
+            self._journal.record("SL_SKIPPED", symbol=symbol, reason="no strategy stop known")
+            return
+        required_qty = abs(position.quantity)
+        existing = self._stop_protection.get(symbol)
+        if (
+            existing is not None
+            and existing.get("state") in ("SENT", "ACKNOWLEDGED", "WORKING")
+            and existing.get("quantity") == required_qty
+            and self._sl_order_open(str(existing.get("client_order_id", "")))
+        ):
+            return  # correctly sized protection already working
+        if existing is not None:
+            self._cancel_stop_protection(symbol, "resize")
+        side = "SELL" if position.quantity > 0 else "BUY"
+        self._sl_seq += 1
+        intent_id = f"sl:{symbol}:{self._sl_seq}"
+        client_order_id = f"{intent_id}:o1"
+        plan = OrderPlan(
+            intent_id=intent_id,
+            symbol=symbol,
+            side=side,
+            quantity=required_qty,
+            order_type="STOP_MARKET",
+            stop_price=stop,
+        )
+        order = BrokerOrder(
+            client_order_id=client_order_id,
+            intent_id=intent_id,
+            symbol=symbol,
+            side=side,
+            quantity=required_qty,
+            order_type="STOP_MARKET",
+        )
+        try:
+            self._engine.create(order)
+            self._engine.transition(client_order_id, OrderState.VALIDATED, reason="protective stop")
+        except Exception as exc:
+            self._fail_stop_protection(symbol, stop, required_qty, client_order_id, str(exc))
+            return
+        try:
+            broker_id = self._broker.place_order(plan, client_order_id)
+        except Exception as exc:
+            with suppress(Exception):
+                self._engine.transition(client_order_id, OrderState.REJECTED, reason=str(exc))
+            self._fail_stop_protection(symbol, stop, required_qty, client_order_id, str(exc))
+            return
+        self._engine.transition(client_order_id, OrderState.SUBMITTED, reason="stop sent")
+        self._stop_protection[symbol] = {
+            "stop_price": stop,
+            "quantity": required_qty,
+            "state": "SENT",
+            "client_order_id": client_order_id,
+            "broker_order_id": broker_id,
+        }
+        self._journal.record(
+            "SL_SENT",
+            symbol=symbol,
+            client_order_id=client_order_id,
+            broker_order_id=broker_id,
+            quantity=required_qty,
+            stop_price=stop,
+        )
+
+    def _fail_stop_protection(
+        self, symbol: str, stop: float, quantity: float, client_order_id: str, reason: str
+    ) -> None:
+        """Record unprotected exposure: FAILED state + attention flag."""
+        self._stop_protection[symbol] = {
+            "stop_price": stop,
+            "quantity": quantity,
+            "state": "FAILED",
+            "client_order_id": client_order_id,
+            "broker_order_id": None,
+        }
+        self._sl_attention.add(symbol)
+        self._journal.record(
+            "SL_FAILED", symbol=symbol, client_order_id=client_order_id, reason=reason
+        )
+
+    def _cancel_stop_protection(self, symbol: str, reason: str) -> None:
+        """Best-effort venue cancel of the working stop (never raises)."""
+        prot = self._stop_protection.get(symbol)
+        if prot is None:
+            return
+        broker_id = prot.get("broker_order_id")
+        if broker_id and self._broker is not None:
+            cancel = getattr(self._broker, "cancel_order", None)
+            if callable(cancel):
+                with suppress(Exception):
+                    cancel(str(broker_id))
+        with suppress(Exception):
+            self._engine.transition(
+                str(prot.get("client_order_id", "")), OrderState.CANCELLED, reason=reason
+            )
+        self._journal.record(
+            "SL_CANCELLED",
+            symbol=symbol,
+            reason=reason,
+        )
+
+    def _clear_stop_protection(self, symbol: str, reason: str) -> None:
+        """Drop protection bookkeeping once the position is flat."""
+        if symbol not in self._stop_protection:
+            return
+        self._cancel_stop_protection(symbol, reason)
+        self._stop_protection.pop(symbol, None)
+        self._sl_attention.discard(symbol)
+        self._journal.record("SL_CLEARED", symbol=symbol, reason=reason)
+
+    def _note_sl_event(self, client_order_id: str, kind: str, event: dict) -> None:
+        """Fold venue acks/fills/rejects for protective stops (never raises).
+
+        Only broker responses advance SL state: SENT → ACKNOWLEDGED →
+        WORKING → SAFE, or FAILED (venue reject/cancel) with the symbol
+        flagged for immediate attention.
+        """
+        try:
+            for symbol, prot in self._stop_protection.items():
+                if prot.get("client_order_id") != client_order_id:
+                    continue
+                if kind == "ack":
+                    broker_id = str(event.get("broker_order_id", "") or "")
+                    if broker_id:
+                        prot["broker_order_id"] = broker_id
+                    prot["state"] = "WORKING"
+                    self._journal.record(
+                        "SL_ACKNOWLEDGED",
+                        symbol=symbol,
+                        client_order_id=client_order_id,
+                        broker_order_id=prot.get("broker_order_id"),
+                    )
+                elif kind == "fill":
+                    prot["state"] = "SAFE"
+                    self._journal.record("SL_SAFE", symbol=symbol, client_order_id=client_order_id)
+                elif kind in ("reject", "cancel"):
+                    prot["state"] = "FAILED"
+                    self._sl_attention.add(symbol)
+                    self._journal.record(
+                        "SL_FAILED",
+                        symbol=symbol,
+                        client_order_id=client_order_id,
+                        reason=str(event.get("reason", kind)),
+                    )
+                break
+        except Exception:
+            return
 
     def _strategy_of_intent(self, intent_id: str) -> str:
         return intent_id.split(":")[0]
@@ -684,6 +1062,7 @@ class LiveSession:
                     )
                 )
                 _ = updated
+                self._note_sl_event(client_order_id, kind, event)
             elif kind == "fill":
                 fill = event.get("fill")
                 if fill is None:
@@ -693,6 +1072,7 @@ class LiveSession:
                     )
                     return
                 self._apply_fill(tracked, fill)
+                self._note_sl_event(client_order_id, kind, event)
             elif kind == "reject":
                 reason = str(event.get("reason", "venue reject"))
                 self._engine.transition(client_order_id, OrderState.REJECTED, reason=reason)
@@ -700,11 +1080,13 @@ class LiveSession:
                     "ORDER_REJECTED", client_order_id=client_order_id, reason=reason
                 )
                 self._emit(OrderRejected(self._request_id, client_order_id, reason))
+                self._note_sl_event(client_order_id, kind, event)
             elif kind == "cancel":
                 self._engine.transition(
                     client_order_id, OrderState.CANCELLED, reason="venue cancel"
                 )
                 self._journal.record("ORDER_CANCELLED", client_order_id=client_order_id)
+                self._note_sl_event(client_order_id, kind, event)
             else:
                 self._journal.record("BROKER_EVENT", at=client_order_id)
         except Exception as exc:
@@ -746,6 +1128,21 @@ class LiveSession:
             "orders_today": self._orders_today,
             "last_order_epoch": self._last_order_epoch,
             "engine": self._engine.snapshot(),
+            # Protective-stop requirements survive restarts (stop price per
+            # symbol + sequence); live SL orders re-arm only AFTER broker
+            # reconciliation, never before.
+            "stop_levels": dict(self._stop_levels),
+            "sl_seq": self._sl_seq,
+            "stop_protection": {
+                symbol: {
+                    "stop_price": prot.get("stop_price"),
+                    "quantity": prot.get("quantity"),
+                    "state": prot.get("state"),
+                    "client_order_id": prot.get("client_order_id"),
+                    "broker_order_id": prot.get("broker_order_id"),
+                }
+                for symbol, prot in self._stop_protection.items()
+            },
         }
 
     def recover(self, checkpoint: dict[str, Any]) -> None:
@@ -777,6 +1174,33 @@ class LiveSession:
             LiveStrategyDriver(ctx).restore_window(bars)
         self._orders_today = int(checkpoint.get("orders_today", 0))
         self._last_order_epoch = checkpoint.get("last_order_epoch")
+        # Restored stop requirements re-arm as PENDING: live SL orders are
+        # placed only after broker reconciliation (see reconcile_now).
+        raw_levels = checkpoint.get("stop_levels", {})
+        if isinstance(raw_levels, dict):
+            for symbol, stop in raw_levels.items():
+                try:
+                    price = float(stop)
+                except (TypeError, ValueError):
+                    continue
+                if price > 0:
+                    self._stop_levels[str(symbol)] = price
+        try:
+            self._sl_seq = int(checkpoint.get("sl_seq", 0))
+        except (TypeError, ValueError):
+            self._sl_seq = 0
+        raw_prot = checkpoint.get("stop_protection", {})
+        if isinstance(raw_prot, dict):
+            for symbol, prot in raw_prot.items():
+                if not isinstance(prot, dict):
+                    continue
+                self._stop_protection[str(symbol)] = {
+                    "stop_price": prot.get("stop_price"),
+                    "quantity": prot.get("quantity"),
+                    "state": "PENDING",
+                    "client_order_id": None,
+                    "broker_order_id": prot.get("broker_order_id"),
+                }
         # Idempotency state rebuilds BEFORE any new submission (FINAL §K):
         # restored orders (incl. UNKNOWN) must reconcile before trading.
         engine_data = checkpoint.get("engine", {})
@@ -859,6 +1283,20 @@ class LiveSession:
             kinds[entry.kind] = kinds.get(entry.kind, 0) + 1
         marks = {p.symbol: p.avg_price for p in self._ledger.all_positions()}
         snapshot = self._ledger.snapshot(marks)
+        stream_health: dict[str, Any] = {"supported": False}
+        if broker is not None:
+            stream_fn: Any = getattr(broker, "order_stream_health", None)
+            if callable(stream_fn):
+                try:
+                    stream_result: Any = stream_fn()
+                    stream_ok, stream_reason = bool(stream_result[0]), str(stream_result[1])
+                    stream_health = {
+                        "supported": True,
+                        "connected": bool(stream_ok),
+                        "reason": str(stream_reason),
+                    }
+                except Exception as exc:
+                    stream_health = {"supported": True, "connected": False, "reason": str(exc)}
         return {
             "mode": self._mode.value,
             "armed": self._armed.value,
@@ -885,6 +1323,16 @@ class LiveSession:
             "pnl": snapshot.day_pnl,
             "journal": kinds,
             "reconciliation": {"blocks_live": self._reconciliation.blocks_live},
+            "order_stream": stream_health,
+            "stop_protection": {
+                symbol: {
+                    "stop_price": prot.get("stop_price"),
+                    "quantity": prot.get("quantity"),
+                    "state": prot.get("state"),
+                }
+                for symbol, prot in self._stop_protection.items()
+            },
+            "sl_attention": sorted(self._sl_attention),
             "latency": {stage: self._latency.summary(stage) for stage in self._latency.stages()},
         }
 
@@ -938,4 +1386,18 @@ class LiveSession:
             mismatches=len(positions.mismatches) + len(orders.mismatches),
             status=verdict.status.value,
         )
+        # Post-reconcile SL re-arm (restart safety §17): open positions with
+        # a known strategy stop and no working protection get re-armed ONLY
+        # once the broker truth matches. Blocked reconciliation places
+        # nothing — consistent with the pre-order gate.
+        if not self._reconciliation.blocks_live:
+            for position in self._ledger.all_positions():
+                existing = self._stop_protection.get(position.symbol)
+                if existing is not None and existing.get("state") in (
+                    "SENT",
+                    "ACKNOWLEDGED",
+                    "WORKING",
+                ):
+                    continue
+                self._place_protective_stop(position.symbol)
         return self._reconciliation

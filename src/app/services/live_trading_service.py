@@ -44,6 +44,13 @@ from execution import (
 from execution.modes import LiveArm  # pyright: ignore[reportMissingImports]
 from market import Bar, SymbolRepository  # pyright: ignore[reportAttributeAccessIssue]
 from risk import RiskPolicy  # pyright: ignore[reportAttributeAccessIssue]
+from risk.sizing import (
+    BROKER_CAPITAL_UNAVAILABLE,
+    LEVERAGE_MULTIPLIER,
+    PER_TRADE_RISK_PCT,
+    READY,
+    BrokerCapital,
+)
 from strategy import StrategyDefinition, StrategyParameters
 from strategy.language.compiler import compile_strategy
 from strategy.language.storage import (
@@ -136,18 +143,25 @@ def _as_float(value: Any) -> float | None:
 class CapitalRiskEngine:
     """Authoritative capital risk sizing engine for Live Trading.
 
-    Formula:
-    effective_capital = raw_capital * leverage
-    max_allowed_risk = effective_capital * per_trade_risk_pct
-    risk_per_share = abs(stop_price - entry_price)
-    qty = floor(max_allowed_risk / risk_per_share)
+    Formula (single implementation lives in ``risk.sizing`` — this class
+    only projects it for the UI/watchlist path, never restates it)::
+
+        effective_capital = raw_capital * leverage
+        max_allowed_risk = effective_capital * per_trade_risk_pct
+        risk_per_share = abs(stop_price - entry_price)
+        qty = floor(max_allowed_risk / risk_per_share)
+
+    ``raw_capital`` is fed from REAL broker available capital in LIVE mode
+    (see ``LiveTradingService._refresh_risk_capital``); it is NEVER left on
+    a hardcoded default for live sizing — without broker capital the
+    service reports NOT READY and sizes nothing.
     """
 
     def __init__(
         self,
         raw_capital: float = 100_000.0,
-        leverage: float = 4.0,
-        per_trade_risk_pct: float = 0.0015,
+        leverage: float = LEVERAGE_MULTIPLIER,
+        per_trade_risk_pct: float = PER_TRADE_RISK_PCT,
     ) -> None:
         self.raw_capital = float(raw_capital)
         self.leverage = float(leverage)
@@ -302,6 +316,13 @@ class LiveTradingService:
         self._last_broker_seen: tuple = ()
         self._selected_symbol: str = "NSE:KAYNES"
         self._risk_engine: CapitalRiskEngine = CapitalRiskEngine()
+        # Phase-3 LIVE capital truth: resolved fresh on every snapshot from
+        # the venue (LIVE) or the simulated source (PAPER). Sizing runs ONLY
+        # while this holds a valid reading — otherwise the service reports
+        # NOT READY and computes no quantity.
+        self._risk_capital: BrokerCapital | None = None
+        self._risk_status: str = "NOT READY"
+        self._risk_reason: str = BROKER_CAPITAL_UNAVAILABLE
         self._started_at: str = ""
         self._timer = IntervalTimer(_TICK_MS, self.tick)
         self._restore_config()
@@ -458,12 +479,19 @@ class LiveTradingService:
             self.invalidate_validation_cache()
 
     def _broker_key(self) -> tuple:
-        """Connectivity triple driving cache invalidation (cheap strings)."""
+        """Connectivity triple driving cache invalidation (cheap strings).
+
+        The broker-capital availability bit rides along: funds appearing or
+        disappearing re-evaluates START blockers within one poll, otherwise
+        the LIVE capital verdict would freeze at the pre-connect answer.
+        """
         try:
             view = self._broker_view()
-            return (view["id"], view["connected"], view["account_id"])
+            funds = view.get("funds") or {}
+            has_funds = _as_float(funds.get("available")) is not None
+            return (view["id"], view["connected"], view["account_id"], has_funds)
         except Exception:
-            return ("", False, "")
+            return ("", False, "", False)
 
     def broker_display_name(self) -> str:
         """UI-facing broker name (venue display label, never a secret)."""
@@ -712,6 +740,23 @@ class LiveTradingService:
         blockers.extend(f"live gate off: {gate}" for gate in missing)
         if not self._confirmed_live_at:
             blockers.append("live confirmation required (explicit operator consent)")
+        # Phase-3: a connected LIVE venue without usable broker capital must
+        # never start — sizing would otherwise fall back to a fabricated
+        # number. Unconnected venues already block above; only a connected
+        # venue with missing/zero funds trips this line.
+        try:
+            connected_view = self._broker_view()
+        except Exception:
+            connected_view = {}
+        if (
+            isinstance(connected_view, dict)
+            and connected_view.get("connected")
+            and self._live_available_funds(connected_view) is None
+        ):
+            blockers.append(
+                "broker capital unavailable (funds not reported) — "
+                "live sizing needs real broker available capital"
+            )
         return blockers
 
     @staticmethod
@@ -1117,6 +1162,9 @@ class LiveTradingService:
             )
         else:
             connected = connected or view["connected"]
+        # Phase-3: resolve sizing capital BEFORE quotes/risk blocks render,
+        # so every number below derives from the same venue truth.
+        self._refresh_risk_capital(view)
         universe = self.available_symbols()
         quotes = self._universe_quotes(universe)
         risk_status = "HALTED" if kill_halted else ("BLOCKED" if recon_blocks else "READY")
@@ -1201,6 +1249,13 @@ class LiveTradingService:
                 "effective_capital": self._risk_engine.effective_capital,
                 "max_allowed_risk": self._risk_engine.max_allowed_risk,
                 "status": risk_status,
+                # Phase-3 sizing truth (additive; existing keys untouched):
+                # broker available capital feeding the engine, its source,
+                # and whether sizing is READY or blocked (with reason).
+                "broker_capital": (self._risk_capital.available if self._risk_capital else None),
+                "capital_source": (self._risk_capital.source if self._risk_capital else "none"),
+                "sizing_status": self._risk_status,
+                "sizing_reason": self._risk_reason,
             },
             "selected_symbol": self._selected_symbol,
             "broker": {
@@ -1766,7 +1821,12 @@ class LiveTradingService:
             # a known entry and a known stop the same CapitalRiskEngine that
             # gates real orders produces the numbers; without them it is not
             # called at all, so no figure is ever invented here.
-            if entry_price is not None and stop_price is not None and entry_price > 0:
+            if (
+                entry_price is not None
+                and stop_price is not None
+                and entry_price > 0
+                and self._risk_capital is not None
+            ):
                 qty, risk_per_share, planned_risk, risk_util = self._risk_engine.compute_qty(
                     entry_price, stop_price
                 )
@@ -1794,6 +1854,61 @@ class LiveTradingService:
                 }
             )
         return out
+
+    def _live_available_funds(self, view: dict[str, Any] | None) -> float | None:
+        """REAL broker available capital for LIVE sizing (never a default).
+
+        Priority: a RUNNING session's reported funds, else the connected
+        SYSTEM broker's funds. Returns ``None`` when no usable reading
+        exists — callers block instead of substituting capital.
+        """
+        account = self._account_state if isinstance(self._account_state, dict) else {}
+        running = self._status == "RUNNING" and bool(account.get("ready"))
+        if running:
+            raw = account.get("funds")
+            if isinstance(raw, dict):
+                available = _as_float(raw.get("available"))
+                if available is not None and available > 0:
+                    return available
+        if view is not None and view.get("connected"):
+            venue_funds = view.get("funds")
+            if isinstance(venue_funds, dict):
+                available = _as_float(venue_funds.get("available"))
+                if available is not None and available > 0:
+                    return available
+        return None
+
+    def _refresh_risk_capital(self, view: dict[str, Any] | None) -> None:
+        """Resolve the sizing capital for the current mode (every snapshot).
+
+        LIVE feeds broker available capital into the risk engine; PAPER
+        feeds the simulated basis. Anything else leaves the engine at zero
+        with status NOT READY, so no quantity is ever sized from a stale
+        or hardcoded number.
+        """
+        now = time.time()
+        capital: BrokerCapital | None = None
+        if self._config.mode == "LIVE":
+            available = self._live_available_funds(view)
+            if available is not None:
+                capital = BrokerCapital(available=available, fetched_epoch=now, source="broker")
+        elif self._config.mode == "PAPER":
+            paper = _as_float(self._config.capital)
+            if paper is not None and paper > 0:
+                capital = BrokerCapital(available=paper, fetched_epoch=now, source="paper")
+        self._risk_capital = capital
+        if capital is not None:
+            self._risk_engine.raw_capital = capital.available or 0.0
+            self._risk_engine.leverage = LEVERAGE_MULTIPLIER
+            self._risk_engine.per_trade_risk_pct = PER_TRADE_RISK_PCT
+            self._risk_status = READY
+            self._risk_reason = READY
+        else:
+            self._risk_engine.raw_capital = 0.0
+            self._risk_status = "NOT READY"
+            self._risk_reason = (
+                BROKER_CAPITAL_UNAVAILABLE if self._config.mode == "LIVE" else "CAPITAL_UNAVAILABLE"
+            )
 
     def _capital_block(self, view: dict[str, Any] | None = None) -> dict[str, Any]:
         """Capital facts for the Account & Risk card (venue truth only).
