@@ -5,6 +5,12 @@
 
 **Owns:** Current state, open items, verified facts, oddities. **Not owns:** Rules/architecture/events/contracts \u2192 `AGENTS.md`, `AI_ENTRY.md`, `architecture.md`, `module_contracts.md`, `event_catalog.md`.
 
+**Latest update (ci-green-fix-6a50b37, 2026-10-07):** CI-GREEN FIX for `6a50b37` (4 failures to 0, no trading, no OBR/risk changes).
+1. **Root causes (CI run 37573365699):** `cargo fmt --check` FAIL (new `remote_live.rs`/`main.rs` unformatted); `context_engine --check` FAIL (`SYMBOL_DEF` had no `const`/`static` arm, so `pub const SCHEMA_VERSION` never resolved); graph cap FAIL (2,725,676 B over 2.70M; 5,016 entities at ~543 B vs 700 B budget); intel `member_count` 9 vs real 10 (new `vayren-remote-client` crate).
+2. **Fixes:** `cargo fmt --all` (format-only); `tools/context_engine.py` added `const|static` arm + third group (fixes validators + self-check + stateful scope benches at root); graph rebuilt (0 unresolved) + cap 2.70 to 2.80M with justification (budgets untouched); `test_vayren_intel.py` 9 to 10.
+3. **Verified local:** fmt check clean; context check PASS (18 routes); `test_repo_graph` 20/20; intel/context spot 22/22; structure/imports/language/arch/authority/routes/graph validators PASS. Full `make check` left to CI (2 GB box OOMs on shell crate, pre-existing limit).
+4. **Untouched:** OBR C1C4, Phase 1-4 trading/risk formulas, broker adapters/credentials, Slint logic (fmt-only), no orders, no secrets.
+
 **Latest update (exe-wss-rust-client, 2026-10-06):** RUST EXE WSS CLIENT + LIVE NEGATIVE PROBE (local only, no commit/push, no trading, read-only).
 1. **Built:** NEW `crates/vayren-remote-client` (protocol mirror, token.rs env-then-OS-keyring, client.rs wss/rustls-webpki + hello-first + seq pump + last_seq resume + explicit-request_id commands, summary.rs, `remote_ping` SAFE probe example that never sends a command) + shell `remote_source.rs` with `--remote <url>` early branch (returns before backend spawn; feeds nothing into the UI). Zero `.slint`, zero OBR/risk/execution/broker/Python changes. Route `remote-exe-client` added for scope routing.
 2. **Two real bugs found by LIVE testing, fixed:** (a) rustls 0.23 panicked with no unambiguous CryptoProvider — pinned `ring` via direct dep + `install_default` in `connect` (verification untouched); (b) headless-Linux keyring fallthrough printed store internals — `NoDefaultStore`/`NoStorageAccess` now map to clean Missing (Windows Credential Manager failures still surface).

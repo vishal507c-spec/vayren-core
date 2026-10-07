@@ -1323,13 +1323,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// with honest feedback. Other workspaces (Market/Lab/Portfolio/Research,
 /// SYSTEM broker panel) render honest-empty: the remote gateway does not
 /// serve their local stores in this phase, and nothing is invented for them.
-fn run_remote_ui(
-    argv: Vec<String>,
-    url: String,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::error::Error>> {
     use vayren_shell::remote_live::{
-        apply_remote_sections, init_remote_state, initial_connect, mark_link,
-        push_remote_event, spawn_remote_pump, RemoteUiUpdate,
+        apply_remote_sections, init_remote_state, initial_connect, mark_link, push_remote_event,
+        spawn_remote_pump, RemoteUiUpdate,
     };
 
     println!("VAYREN starting (remote graphical client)...");
@@ -1391,7 +1388,9 @@ fn run_remote_ui(
                         .ok()
                         .and_then(|v| v.get("action").and_then(|a| a.as_str()).map(str::to_string))
                         .unwrap_or_else(|| "unknown".to_string());
-                    eprintln!("remote UI: control '{name}' refused (read-only client, nothing sent)");
+                    eprintln!(
+                        "remote UI: control '{name}' refused (read-only client, nothing sent)"
+                    );
                 }
                 let mut dirty = false;
                 for update in remote_rx.try_iter() {
@@ -1411,14 +1410,13 @@ fn run_remote_ui(
                             push_remote_event(&mut live_state.borrow_mut(), &name, &payload);
                             dirty = true;
                         }
-                        RemoteUiUpdate::Link { label, detail, reconnects } => {
+                        RemoteUiUpdate::Link {
+                            label,
+                            detail,
+                            reconnects,
+                        } => {
                             eprintln!("remote UI: link {label} ({detail})");
-                            mark_link(
-                                &mut live_state.borrow_mut(),
-                                &label,
-                                &detail,
-                                reconnects,
-                            );
+                            mark_link(&mut live_state.borrow_mut(), &label, &detail, reconnects);
                             dirty = true;
                         }
                     }

@@ -57,7 +57,7 @@ def test_scan_measures_live_tree() -> None:
     assert scan["repo"]["py_files"] > 100
     assert scan["repo"]["rs_files"] > 50
     assert scan["repo"]["slint_files"] > 10
-    assert scan["rust"]["member_count"] == 9
+    assert scan["rust"]["member_count"] == 10
     assert scan["rust"]["locked_packages"] > 100
     assert scan["rust"]["profiles"]["release"]["lto"] is True
 

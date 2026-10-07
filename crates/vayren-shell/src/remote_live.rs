@@ -34,9 +34,7 @@
 use std::sync::mpsc;
 use std::time::Duration;
 use vayren_domain::live::{Gate, GateStatus, LiveEvent, LiveState, RiskStatus};
-use vayren_remote_client::{
-    Backoff, ClientError, ClientEvent, RemoteClient, resolve_remote_token,
-};
+use vayren_remote_client::{resolve_remote_token, Backoff, ClientError, ClientEvent, RemoteClient};
 
 /// Default private gateway (Tailscale). Overridable via `--remote-ui=<url>`
 /// or `VAYREN_REMOTE_URL`. No public fallback exists by design.
@@ -105,7 +103,10 @@ fn text_at(sections: &serde_json::Value, section_name: &str, key: &str) -> Strin
 }
 
 fn num_at(sections: &serde_json::Value, section_name: &str, key: &str) -> Option<f64> {
-    section(sections, section_name).get(key).and_then(|v| v.as_f64()).filter(|v| v.is_finite())
+    section(sections, section_name)
+        .get(key)
+        .and_then(|v| v.as_f64())
+        .filter(|v| v.is_finite())
 }
 
 /// Translate gateway sections into the LOCAL live-snapshot shape, then apply
@@ -115,19 +116,14 @@ fn num_at(sections: &serde_json::Value, section_name: &str, key: &str) -> Option
 /// its current value (unknown remains unknown, never zero-filled). Tables
 /// (`orders`/`positions`/`fills`) and blockers replace when present, so a
 /// `resync: true` snapshot heals a gappy stream by construction.
-pub fn apply_remote_sections(
-    state: &mut LiveState,
-    sections: &serde_json::Value,
-    resync: bool,
-) {
+pub fn apply_remote_sections(state: &mut LiveState, sections: &serde_json::Value, resync: bool) {
     let mut translated = serde_json::Map::new();
 
     let mode = text_at(sections, "strategy", "mode");
     if !mode.is_empty() {
         translated.insert("mode".to_string(), serde_json::Value::String(mode));
     }
-    let strategy_status =
-        text_at(sections, "strategy", "status").to_uppercase();
+    let strategy_status = text_at(sections, "strategy", "status").to_uppercase();
     if !strategy_status.is_empty() {
         // Gateway vocabulary (RUNNING/STOPPED/BLOCKED/ERROR) → session
         // lifecycle. BLOCKED is a stopped session with a reason, never a
@@ -149,7 +145,10 @@ pub fn apply_remote_sections(
     }
     let reason = text_at(sections, "strategy", "reason");
     if !reason.is_empty() {
-        translated.insert("status_reason".to_string(), serde_json::Value::String(reason));
+        translated.insert(
+            "status_reason".to_string(),
+            serde_json::Value::String(reason),
+        );
     }
 
     if !section(sections, "broker").is_null() {
@@ -225,13 +224,11 @@ pub fn apply_remote_sections(
     if !section(sections, "system").is_null() {
         let ws = text_at(sections, "system", "websocket");
         if !ws.is_empty() {
-            translated.insert(
-                "websocket".to_string(),
-                serde_json::json!({"status": ws}),
-            );
+            translated.insert("websocket".to_string(), serde_json::json!({"status": ws}));
         }
-        if let Some(halted) =
-            section(sections, "system").get("kill_halted").and_then(|v| v.as_bool())
+        if let Some(halted) = section(sections, "system")
+            .get("kill_halted")
+            .and_then(|v| v.as_bool())
         {
             translated.insert("kill".to_string(), serde_json::json!({"halted": halted}));
         }
@@ -249,7 +246,10 @@ pub fn apply_remote_sections(
             .filter_map(|v| v.as_str())
             .map(|s| serde_json::Value::String(s.to_string()))
             .collect();
-        translated.insert("start_blockers".to_string(), serde_json::Value::Array(honest));
+        translated.insert(
+            "start_blockers".to_string(),
+            serde_json::Value::Array(honest),
+        );
     }
 
     state.apply_snapshot(&serde_json::Value::Object(translated));
@@ -283,11 +283,17 @@ pub fn apply_remote_sections(
     if !section(sections, "stops").is_null() {
         let status = text_at(sections, "stops", "status");
         let detail = text_at(sections, "stops", "detail");
-        state.risk_lines.retain(|(name, _)| name != STOP_PROTECTION_LINE);
+        state
+            .risk_lines
+            .retain(|(name, _)| name != STOP_PROTECTION_LINE);
         if !status.is_empty() {
             state.risk_lines.push((
                 STOP_PROTECTION_LINE.to_string(),
-                if detail.is_empty() { status } else { format!("{status} — {detail}") },
+                if detail.is_empty() {
+                    status
+                } else {
+                    format!("{status} — {detail}")
+                },
             ));
         }
     }
@@ -299,13 +305,13 @@ pub fn apply_remote_sections(
 }
 
 /// Append one gateway `event` frame to the bounded tail (oldest first out).
-pub fn push_remote_event(
-    state: &mut LiveState,
-    name: &str,
-    payload: &serde_json::Value,
-) {
+pub fn push_remote_event(state: &mut LiveState, name: &str, payload: &serde_json::Value) {
     let str_field = |key: &str| {
-        payload.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string()
+        payload
+            .get(key)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
     };
     state.events.push(LiveEvent {
         timestamp: str_field("timestamp"),
@@ -313,7 +319,11 @@ pub fn push_remote_event(
         symbol: str_field("symbol"),
         event: {
             let detail = str_field("detail");
-            if detail.is_empty() { name.to_string() } else { detail }
+            if detail.is_empty() {
+                name.to_string()
+            } else {
+                detail
+            }
         },
         status: str_field("status"),
         category: name.to_string(),
@@ -379,10 +389,22 @@ pub fn mark_link(state: &mut LiveState, label: &str, detail: &str, reconnects: u
 /// One UI-thread arrival from the pump thread.
 #[derive(Debug)]
 pub enum RemoteUiUpdate {
-    Snapshot { sections: serde_json::Value, resync: bool },
-    StateUpdate { sections: serde_json::Value },
-    StreamEvent { name: String, payload: serde_json::Value },
-    Link { label: String, detail: String, reconnects: usize },
+    Snapshot {
+        sections: serde_json::Value,
+        resync: bool,
+    },
+    StateUpdate {
+        sections: serde_json::Value,
+    },
+    StreamEvent {
+        name: String,
+        payload: serde_json::Value,
+    },
+    Link {
+        label: String,
+        detail: String,
+        reconnects: usize,
+    },
 }
 
 /// Blocking initial connect: hello → welcome → snapshot → subscribe.
@@ -390,9 +412,8 @@ pub enum RemoteUiUpdate {
 /// Errors name the STAGE only, never the credential.
 pub fn initial_connect(url: &str) -> Result<(RemoteClient, String, serde_json::Value), String> {
     let token = resolve_remote_token().map_err(|err| format!("remote token: {err}"))?;
-    let (mut client, welcome, snapshot) =
-        RemoteClient::connect(url, &token, HANDSHAKE_TIMEOUT)
-            .map_err(|err| format!("remote connect failed: {err}"))?;
+    let (mut client, welcome, snapshot) = RemoteClient::connect(url, &token, HANDSHAKE_TIMEOUT)
+        .map_err(|err| format!("remote connect failed: {err}"))?;
     drop(token);
     let role = match &welcome {
         ClientEvent::Welcome { role, .. } => role.clone(),
@@ -400,7 +421,11 @@ pub fn initial_connect(url: &str) -> Result<(RemoteClient, String, serde_json::V
     };
     let sections = match &snapshot {
         ClientEvent::Snapshot { sections, .. } => sections.clone(),
-        other => return Err(format!("remote handshake: expected snapshot, got {other:?}")),
+        other => {
+            return Err(format!(
+                "remote handshake: expected snapshot, got {other:?}"
+            ))
+        }
     };
     client
         .subscribe(&[], None)
@@ -563,14 +588,22 @@ mod tests {
         // Read-only: the snapshot can never arm the commanding path.
         assert!(!state.bridge_wired);
         assert!(!state.can_start());
-        assert_eq!(state.backend_start_blockers.as_deref(), Some(&["no strategy selected".to_string()][..]));
+        assert_eq!(
+            state.backend_start_blockers.as_deref(),
+            Some(&["no strategy selected".to_string()][..])
+        );
         // Unreported capital fails closed, never assumed.
         assert!(!state.has_valid_capital());
         assert_eq!(state.risk_status, RiskStatus::NotReady);
         // Order stream + SL protection arrive as first-class facts.
-        assert!(state.gates.iter().any(|g| g.name == ORDER_STREAM_GATE
-            && g.status == GateStatus::Ready));
-        assert!(state.risk_lines.iter().any(|(name, _)| name == STOP_PROTECTION_LINE));
+        assert!(state
+            .gates
+            .iter()
+            .any(|g| g.name == ORDER_STREAM_GATE && g.status == GateStatus::Ready));
+        assert!(state
+            .risk_lines
+            .iter()
+            .any(|(name, _)| name == STOP_PROTECTION_LINE));
         // Market + feed + kill switch map through.
         assert_eq!(state.market_data.status, "STREAMING");
         assert_eq!(state.feed_kind, "live");
@@ -622,7 +655,12 @@ mod tests {
             );
         }
         assert_eq!(state.events.len(), REMOTE_EVENT_CAP);
-        assert!(state.events.first().expect("tail").event.contains("tick 40"));
+        assert!(state
+            .events
+            .first()
+            .expect("tail")
+            .event
+            .contains("tick 40"));
         assert!(state.events.iter().all(|e| e.category == "MARKET_TICK"));
     }
 
@@ -639,7 +677,10 @@ mod tests {
         let mut state = state;
         state.start();
         assert!(state.host_actions.is_empty());
-        assert_eq!(state.action_note.as_deref(), Some("No execution backend attached."));
+        assert_eq!(
+            state.action_note.as_deref(),
+            Some("No execution backend attached.")
+        );
     }
 
     #[test]

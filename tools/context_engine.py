@@ -53,7 +53,7 @@ CHAPTERS = (
 )
 
 SYMBOL_DEF = re.compile(
-    r"^\s*(?:pub\s+)?(?:async\s+)?(?:def|class|fn|struct|enum)\s+([A-Za-z_][A-Za-z0-9_]*)|^\s*([A-Za-z_][A-Za-z0-9_]*)\s*="
+    r"^\s*(?:pub\s+)?(?:async\s+)?(?:def|class|fn|struct|enum)\s+([A-Za-z_][A-Za-z0-9_]*)|^\s*(?:pub\s+)?(?:const|static)\s+([A-Za-z_][A-Za-z0-9_]*)|^\s*([A-Za-z_][A-Za-z0-9_]*)\s*="
 )
 
 # Scope -> validation level (deterministic escalation, existing commands only).
@@ -82,7 +82,7 @@ def resolve_symbol(name: str, source: str) -> int | None:
     for lineno, line in enumerate(source.splitlines(), 1):
         match = SYMBOL_DEF.match(line)
         if match:
-            sym = match.group(1) or match.group(2)
+            sym = match.group(1) or match.group(2) or match.group(3)
             if sym == name:
                 return lineno
     return None
