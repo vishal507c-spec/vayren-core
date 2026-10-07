@@ -135,22 +135,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Data dir: {}", data_dir);
     println!("Strategy dir: {}", strategy_dir);
 
-    // Remote graphical client (read-only): the Windows EXE path — the UI is
-    // fed by the private EC2 gateway instead of a local Python child. Local
-    // stdio protocol below is untouched; this branch returns early. The
-    // `--remote` smoke probe underneath stays the safe connection test.
-    if let Some(remote_url) = vayren_shell::remote_live::remote_ui_url_from_argv(&argv) {
-        return run_remote_ui(argv, remote_url);
-    }
-
-    // Remote-gateway smoke probe (read-only): proves THIS binary reaches the
-    // private EC2 endpoint (hello → welcome → snapshot → brief subscribe)
-    // without spawning a backend, opening the UI, or sending any command.
-    // The full UI binding lives in `remote_live` (`--remote-ui`); the probe
-    // stays the minimal safe connection test.
-    if let Some(remote_url) = vayren_shell::remote_source::remote_url_from_argv(&argv) {
-        return vayren_shell::remote_source::run_remote_probe(&remote_url)
-            .map_err(|err| err.into());
+    // Launch mode is owned by the remote-client launch contract (ONE decision
+    // point): explicit `--remote-ui` / `--remote` win, `--local` forces the
+    // developer loop, legacy `--data-dir` / `--strategy-dir` shortcuts keep
+    // their local backend, and otherwise the PACKAGED build (feature
+    // `packaged-remote`, set when the release EXE is built) goes remote on
+    // its own while developer builds stay local. Shortcuts carry no token
+    // and no endpoint by design — configuration lives in the OS credential
+    // store plus the built-in default, never in argv.
+    match vayren_remote_client::launch::resolve_launch_mode(
+        &argv,
+        cfg!(feature = "packaged-remote"),
+    ) {
+        vayren_remote_client::launch::LaunchMode::Remote { url } => {
+            return run_remote_ui(argv, url);
+        }
+        vayren_remote_client::launch::LaunchMode::Probe { url } => {
+            // Read-only smoke probe: hello → welcome → snapshot → brief
+            // subscribe, without spawning a backend, opening the UI, or
+            // sending any command.
+            return vayren_shell::remote_source::run_remote_probe(&url).map_err(|err| err.into());
+        }
+        vayren_remote_client::launch::LaunchMode::Local => {}
     }
 
     // Spawn Python backend. One mutex-guarded handle serves the UI thread
@@ -1307,16 +1313,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Remote graphical client (`--remote-ui [url]`, read-only).
+/// Remote graphical client (read-only; also the packaged default).
 ///
-/// Startup order (§4): connect → hello → welcome → snapshot → paint the
-/// existing UI from the snapshot → subscribe → incremental updates. The
-/// handshake is DEADLINE-BOUNDED and happens BEFORE the window opens, so an
-/// invalid token fails fast with AUTH_FAILED and never paints a frame.
-/// Afterwards a worker thread pumps the stream (RECONNECTING with
-/// `subscribe{last_seq}` on drops; `resync:true` replaces state) while the
-/// 50ms UI timer applies arrivals — the UI thread never blocks on the
-/// network, and a dead link never freezes the window.
+/// Startup order: paint CONNECTING immediately → bootstrap thread proves the
+/// token (`hello`), paints AUTHENTICATING while it does, applies the first
+/// snapshot, subscribes, and hands the live client to the pump thread
+/// (RECONNECTING with `subscribe{last_seq}` on drops; `resync:true` replaces
+/// state). The 50ms UI timer applies arrivals — the UI thread never blocks
+/// on the network, and a dead link never freezes the window.
+///
+/// A missing or rejected credential paints OFFLINE with the one-time setup
+/// note instead of exiting: the bootstrap keeps retrying (1s→30s backoff,
+/// token re-resolved per attempt), so provisioning the OS credential later
+/// connects with zero restart. No secret is ever painted or logged.
 ///
 /// Read-only by construction: no call site in this binary sends a command,
 /// and `bridge_wired` stays false so the model keeps START/STOP/HALT inert
@@ -1325,23 +1334,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// serve their local stores in this phase, and nothing is invented for them.
 fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::error::Error>> {
     use vayren_shell::remote_live::{
-        apply_remote_sections, init_remote_state, initial_connect, mark_link, push_remote_event,
-        spawn_remote_pump, RemoteUiUpdate,
+        apply_remote_sections, init_remote_state, mark_link, push_remote_event,
+        spawn_remote_bootstrap, RemoteUiUpdate,
     };
 
     println!("VAYREN starting (remote graphical client)...");
     println!("Gateway: {url}");
-    let (client, role, sections) = initial_connect(&url)?;
-    println!("Remote welcome: role {role}");
-    for line in vayren_remote_client::summarize_snapshot(&sections) {
-        println!("Remote snapshot: {line}");
-    }
 
-    let mut live_state = init_remote_state();
-    mark_link(&mut live_state, "CONNECTED", &format!("role {role}"), 0);
-    apply_remote_sections(&mut live_state, &sections, false);
-    // Refuse anything the (inert) controls queued before the first paint.
-    while live_state.take_action().is_some() {}
+    let live_state = init_remote_state();
 
     println!("Initializing Slint UI...");
     let ui = vayren_shell::AppWindow::new()?;
@@ -1370,7 +1370,9 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
     shell::apply_zoom(&ui, &zoom.borrow());
 
     let (remote_tx, remote_rx) = mpsc::channel::<RemoteUiUpdate>();
-    spawn_remote_pump(client, url, remote_tx);
+    // Bootstrap owns the first connect (with enrollment retries); on success
+    // it hands the live client to the pump and exits.
+    spawn_remote_bootstrap(url, remote_tx);
     let fetch_timer = slint::Timer::default();
     {
         let weak = ui.as_weak();

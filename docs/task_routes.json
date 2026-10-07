@@ -1210,6 +1210,73 @@
       "owner_paths": [
         "crates/vayren-remote-client"
       ]
+    },
+    {
+      "key": "remote-auto-connect",
+      "aliases": [
+        "auto connect",
+        "packaged remote",
+        "remote default",
+        "zero setup",
+        "auto reconnect",
+        "enrollment"
+      ],
+      "domain": "NATIVE_UI",
+      "owner_module": "crates/vayren-remote-client",
+      "language": "RUST",
+      "primary_files": [
+        "crates/vayren-remote-client/src/launch.rs",
+        "crates/vayren-shell/src/remote_live.rs"
+      ],
+      "secondary_files": [
+        "crates/vayren-shell/src/main.rs"
+      ],
+      "depends_on": [],
+      "depended_on_by": [
+        "crates/vayren-shell (packaged default + bootstrap consumer; read-only)"
+      ],
+      "tests": {
+        "files": [
+          "crates/vayren-remote-client/tests"
+        ],
+        "command": "cargo test -p vayren-remote-client"
+      },
+      "validation": [
+        "cargo test -p vayren-remote-client",
+        "cargo fmt -p vayren-remote-client -- --check"
+      ],
+      "forbidden": [
+        "src/strategy/*",
+        "crates/vayren-shell/ui/*"
+      ],
+      "symbols": {
+        "crates/vayren-remote-client/src/launch.rs": [
+          "LaunchMode",
+          "resolve_launch_mode",
+          "Enrollment",
+          "decide_enrollment"
+        ],
+        "crates/vayren-shell/src/remote_live.rs": [
+          "spawn_remote_bootstrap",
+          "mark_link"
+        ]
+      },
+      "contract": "docs/module_contracts.md section 5.11",
+      "change_surface": {
+        "likely_changed": [
+          "crates/vayren-remote-client/src/*.rs"
+        ],
+        "affected_interfaces": [
+          "packaged launch default (feature packaged-remote), bootstrap OFFLINE/AUTHENTICATING labels"
+        ],
+        "affected_modules": [
+          "crates/vayren-shell (mode branch + bootstrap; still read-only, no commands)"
+        ],
+        "required_tests": "cargo test -p vayren-remote-client (launch contract + fake gateway; read-only)"
+      },
+      "owner_paths": [
+        "crates/vayren-remote-client"
+      ]
     }
   ]
 }

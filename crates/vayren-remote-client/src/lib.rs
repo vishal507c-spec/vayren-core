@@ -14,6 +14,7 @@
 //! ```
 
 pub mod client;
+pub mod launch;
 pub mod protocol;
 pub mod summary;
 pub mod token;

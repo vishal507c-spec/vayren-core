@@ -34,14 +34,14 @@
 use std::sync::mpsc;
 use std::time::Duration;
 use vayren_domain::live::{Gate, GateStatus, LiveEvent, LiveState, RiskStatus};
-use vayren_remote_client::{resolve_remote_token, Backoff, ClientError, ClientEvent, RemoteClient};
+use vayren_remote_client::{
+    launch::{bootstrap_backoff, enrollment_note, Enrollment},
+    resolve_remote_token, Backoff, ClientError, ClientEvent, RemoteClient,
+};
 
-/// Default private gateway (Tailscale). Overridable via `--remote-ui=<url>`
-/// or `VAYREN_REMOTE_URL`. No public fallback exists by design.
-pub const REMOTE_DEFAULT_URL: &str = "wss://ip-172-31-12-198.taila678c5.ts.net/vayren/v1";
-
-/// Env var carrying an explicit gateway URL (the token has its own var).
-pub const REMOTE_URL_ENV_VAR: &str = "VAYREN_REMOTE_URL";
+/// Canonical gateway URL + env override live in the launch contract (one
+/// source of truth); re-exported here so existing paths keep working.
+pub use vayren_remote_client::launch::{REMOTE_DEFAULT_URL, REMOTE_URL_ENV_VAR};
 
 /// Deadline for the initial hello → welcome → snapshot handshake.
 pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
@@ -82,12 +82,10 @@ pub fn remote_ui_url_from_argv(argv: &[String]) -> Option<String> {
     None
 }
 
-/// Effective gateway URL: explicit flag value, then env, then the default.
+/// Effective gateway URL: explicit flag value, then env, then the default
+/// (canonical rule lives in the launch contract).
 fn remote_url_default() -> String {
-    std::env::var(REMOTE_URL_ENV_VAR)
-        .ok()
-        .filter(|url| !url.trim().is_empty())
-        .unwrap_or_else(|| REMOTE_DEFAULT_URL.to_string())
+    vayren_remote_client::launch::default_remote_url()
 }
 
 fn section<'a>(sections: &'a serde_json::Value, name: &str) -> &'a serde_json::Value {
@@ -364,6 +362,18 @@ pub fn init_remote_state() -> LiveState {
     state
 }
 
+/// Pre-snapshot link words: before the first server snapshot the status line
+/// truthfully IS the client link state (CONNECTING → AUTHENTICATING →
+/// CONNECTED on success; OFFLINE while the bootstrap waits on a credential
+/// or transport; RECONNECTING only after a drop).
+const PRE_SNAPSHOT: [&str; 5] = [
+    "",
+    "CONNECTING",
+    "AUTHENTICATING",
+    "OFFLINE",
+    "RECONNECTING",
+];
+
 /// Record a client-link transition. Before the first server snapshot the
 /// status line truthfully IS the client link state; afterwards the server
 /// facts own `status` and only the counters/notes move.
@@ -374,7 +384,7 @@ pub fn mark_link(state: &mut LiveState, label: &str, detail: &str, reconnects: u
     } else {
         state.websocket.last_error = detail.to_string();
     }
-    if ["", "CONNECTING", "RECONNECTING"].contains(&state.websocket.status.as_str()) {
+    if PRE_SNAPSHOT.contains(&state.websocket.status.as_str()) {
         state.websocket.status = label.to_string();
     }
     if ["", "CONNECTING", "RECONNECTING"].contains(&state.market_data.status.as_str())
@@ -431,6 +441,66 @@ pub fn initial_connect(url: &str) -> Result<(RemoteClient, String, serde_json::V
         .subscribe(&[], None)
         .map_err(|err| format!("remote subscribe failed: {err}"))?;
     Ok((client, role, sections))
+}
+
+/// Pre-connect bootstrap for the packaged client: the window opens FIRST
+/// (CONNECTING) and the credential is proven in the background.
+///
+/// Each attempt re-resolves the token (never retained, never logged) and runs
+/// the deadline-bounded [`initial_connect`]. On success the first snapshot is
+/// forwarded, the link is marked CONNECTED, and the live client is handed to
+/// [`spawn_remote_pump`] — which owns all later reconnects — before this
+/// thread exits. On failure the UI holds OFFLINE with the enrollment or
+/// transport note while the loop retries with backoff, so a credential
+/// provisioned after first launch (or a gateway restart) connects with zero
+/// restart and zero manual step. This function never sends a command.
+pub fn spawn_remote_bootstrap(
+    url: String,
+    tx: mpsc::Sender<RemoteUiUpdate>,
+) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        let mut backoff = bootstrap_backoff();
+        let mut reconnects: usize = 0;
+        loop {
+            let _ = tx.send(RemoteUiUpdate::Link {
+                label: "AUTHENTICATING".to_string(),
+                detail: "proving credential...".to_string(),
+                reconnects,
+            });
+            match initial_connect(&url) {
+                Ok((client, role, sections)) => {
+                    let _ = tx.send(RemoteUiUpdate::Link {
+                        label: "CONNECTED".to_string(),
+                        detail: format!("role {role}"),
+                        reconnects,
+                    });
+                    let _ = tx.send(RemoteUiUpdate::Snapshot {
+                        sections,
+                        resync: false,
+                    });
+                    spawn_remote_pump(client, url, tx);
+                    return;
+                }
+                Err(err) => {
+                    reconnects += 1;
+                    let wait = backoff.next_wait();
+                    let detail = if err.starts_with("remote token:") {
+                        enrollment_note(Enrollment::Missing).to_string()
+                    } else if err.contains("AUTH_FAILED") {
+                        enrollment_note(Enrollment::Rejected).to_string()
+                    } else {
+                        format!("transport down — retrying in {}s", wait.as_secs())
+                    };
+                    let _ = tx.send(RemoteUiUpdate::Link {
+                        label: "OFFLINE".to_string(),
+                        detail,
+                        reconnects,
+                    });
+                    std::thread::sleep(wait);
+                }
+            }
+        }
+    })
 }
 
 /// Own the connected client on a worker thread: pump arrivals to the UI,
@@ -695,5 +765,27 @@ mod tests {
         mark_link(&mut state, "RECONNECTING", "link lost — retrying in 4s", 4);
         assert_eq!(state.websocket.status, "CONNECTED");
         assert_eq!(state.websocket.reconnect_count, 4);
+    }
+
+    #[test]
+    fn bootstrap_labels_walk_connecting_to_offline_without_server_facts() {
+        let mut state = init_remote_state();
+        assert_eq!(state.websocket.status, "CONNECTING");
+        mark_link(&mut state, "AUTHENTICATING", "proving credential...", 0);
+        assert_eq!(state.websocket.status, "AUTHENTICATING");
+        assert!(state.websocket.last_error.contains("proving"));
+        // No credential in the store: OFFLINE carries the one-time setup note.
+        mark_link(
+            &mut state,
+            "OFFLINE",
+            enrollment_note(Enrollment::Missing),
+            1,
+        );
+        assert_eq!(state.websocket.status, "OFFLINE");
+        assert_eq!(state.websocket.reconnect_count, 1);
+        assert!(state.websocket.last_error.contains("vayren-remote"));
+        // Labels never arm controls or invent funds.
+        assert!(!state.bridge_wired);
+        assert!(!state.has_valid_capital());
     }
 }
