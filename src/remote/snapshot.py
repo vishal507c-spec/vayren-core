@@ -227,7 +227,6 @@ def build_snapshot(live: dict[str, Any]) -> dict[str, Any]:
         "blockers": [str(item) for item in (live.get("start_blockers", []) or [])],
         "quotes": scrub(live.get("quotes", [])),
         "pnl": scrub(live.get("pnl", {})),
-        "events": scrub(live.get("events", [])),
         "available_strategies": scrub(live.get("available_strategies", [])),
         "available_symbols": scrub(live.get("available_symbols", [])),
         "selected_symbols": scrub(live.get("selected_symbols", [])),
