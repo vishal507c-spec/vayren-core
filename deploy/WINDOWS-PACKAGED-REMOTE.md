@@ -11,12 +11,13 @@ built-in default endpoint (compiled in) and the OS credential store.
 cargo build --release -p vayren-shell --features packaged-remote
 ```
 
-The `packaged-remote` feature flips ONLY the no-flag default to remote
+The `packaged-remote` feature flips the default to remote
 (`crates/vayren-remote-client/src/launch.rs::resolve_launch_mode`). Explicit
 flags are untouched: `--remote-ui[=url]` and `--remote[=url]` behave as before,
 `--local` forces the developer loop, and legacy shortcuts carrying
-`--data-dir` / `--strategy-dir` keep their local backend. Rebuilding or
-replacing the EXE changes nothing about stored credentials.
+`--data-dir` / `--strategy-dir` connect to remote automatically unless `--local`
+is explicitly given. Rebuilding or replacing the EXE changes nothing about
+stored credentials.
 
 ## 2. One-time credential provisioning (per Windows device, once ever)
 

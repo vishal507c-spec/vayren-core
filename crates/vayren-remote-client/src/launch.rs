@@ -10,10 +10,10 @@
 //!
 //! Rules (mirroring the existing flag spellings exactly):
 //! - Explicit `--remote-ui[ =url]` / `--remote[ =url]` always win.
-//! - `--local` forces the developer loop (local Python backend).
-//! - Legacy local shortcuts carry `--data-dir` / `--strategy-dir`; their
-//!   presence keeps the local backend so existing shortcuts never flip.
-//! - Otherwise the packaged build defaults to remote, dev builds to local.
+//! - Explicit `--local` forces the developer loop (local Python backend) in any build.
+//! - For packaged builds (`packaged-remote`), bare launches AND launches with legacy
+//!   `--data-dir` / `--strategy-dir` arguments default to remote mode.
+//! - For developer builds, bare launches and local shortcuts stay local.
 //!
 //! Enrollment (first-run / revoked credential) is a data decision, not a
 //! second architecture: [`decide_enrollment`] maps token presence + the last
@@ -52,11 +52,6 @@ pub fn default_remote_url() -> String {
         .ok()
         .filter(|url| !url.trim().is_empty())
         .unwrap_or_else(|| REMOTE_DEFAULT_URL.to_string())
-}
-
-fn has_flag(argv: &[String], name: &str) -> bool {
-    argv.iter()
-        .any(|arg| arg == name || arg.starts_with(&format!("{name}=")))
 }
 
 /// Map argv to [`LaunchMode`]. `packaged_remote_default` is the build-time
@@ -104,24 +99,20 @@ pub fn resolve_launch_mode(argv: &[String], packaged_remote_default: bool) -> La
         }
         index += 1;
     }
-    // 3. Explicit developer opt-out.
+    // 3. Explicit developer opt-out (always wins, in any build).
     if argv.iter().any(|arg| arg == LOCAL_FLAG) {
         return LaunchMode::Local;
     }
-    // 4. Legacy local shortcuts name their data home; they keep the backend
-    // they were created for instead of silently flipping to remote.
-    if has_flag(argv, "--data-dir") || has_flag(argv, "--strategy-dir") {
-        return LaunchMode::Local;
-    }
-    // 5. No opinion expressed: the packaged build goes remote on its own,
-    // developer builds stay local.
+    // 4. Packaged remote build: always goes remote unless explicit --local was given.
+    // Legacy --data-dir / --strategy-dir arguments from older shortcuts are ignored
+    // and do NOT force local mode.
     if packaged_remote_default {
-        LaunchMode::Remote {
+        return LaunchMode::Remote {
             url: default_remote_url(),
-        }
-    } else {
-        LaunchMode::Local
+        };
     }
+    // 5. Developer builds: stay local by default, honoring any local flags.
+    LaunchMode::Local
 }
 
 /// First-run credential state for the bootstrap loop.
@@ -271,17 +262,147 @@ mod tests {
     }
 
     #[test]
-    fn legacy_data_dirs_keep_the_local_backend() {
+    fn regression_test_a_packaged_bare_launch_defaults_to_remote() {
         with_url_env(None, || {
-            // Both spellings, both dirs: a legacy shortcut never flips remote.
+            assert!(matches!(
+                resolve_launch_mode(&args(&[]), true),
+                LaunchMode::Remote { url } if url == REMOTE_DEFAULT_URL
+            ));
+        });
+    }
+
+    #[test]
+    fn regression_test_b_c_d_packaged_legacy_local_args_stay_remote() {
+        with_url_env(None, || {
+            // Test B: legacy --data-dir (both space and = forms)
             for argv in [
                 args(&["--data-dir", "D:\\data"]),
                 args(&["--data-dir=D:\\data"]),
+            ] {
+                assert!(matches!(
+                    resolve_launch_mode(&argv, true),
+                    LaunchMode::Remote { url } if url == REMOTE_DEFAULT_URL
+                ));
+            }
+
+            // Test C: legacy --strategy-dir (both space and = forms)
+            for argv in [
                 args(&["--strategy-dir", "D:\\strats"]),
                 args(&["--strategy-dir=D:\\strats"]),
             ] {
-                assert_eq!(resolve_launch_mode(&argv, true), LaunchMode::Local);
+                assert!(matches!(
+                    resolve_launch_mode(&argv, true),
+                    LaunchMode::Remote { url } if url == REMOTE_DEFAULT_URL
+                ));
             }
+
+            // Test D: both legacy args simultaneously
+            let both = args(&[
+                "--data-dir",
+                "D:\\ZerodhaTradingData",
+                "--strategy-dir",
+                "D:\\VAYREN_STRATEGIES",
+            ]);
+            assert!(matches!(
+                resolve_launch_mode(&both, true),
+                LaunchMode::Remote { url } if url == REMOTE_DEFAULT_URL
+            ));
+        });
+    }
+
+    #[test]
+    fn regression_test_e_explicit_local_forces_developer_loop() {
+        with_url_env(None, || {
+            assert_eq!(
+                resolve_launch_mode(&args(&["--local"]), true),
+                LaunchMode::Local
+            );
+            assert_eq!(
+                resolve_launch_mode(&args(&["--local", "--data-dir", "x"]), true),
+                LaunchMode::Local
+            );
+            assert_eq!(
+                resolve_launch_mode(
+                    &args(&[
+                        "--data-dir",
+                        "D:\\ZerodhaTradingData",
+                        "--strategy-dir",
+                        "D:\\VAYREN_STRATEGIES",
+                        "--local"
+                    ]),
+                    true
+                ),
+                LaunchMode::Local
+            );
+        });
+    }
+
+    #[test]
+    fn regression_test_f_explicit_remote_flag_always_routes_remote() {
+        with_url_env(None, || {
+            assert!(matches!(
+                resolve_launch_mode(&args(&["--remote-ui"]), true),
+                LaunchMode::Remote { url } if url == REMOTE_DEFAULT_URL
+            ));
+            assert!(matches!(
+                resolve_launch_mode(&args(&["--remote-ui=wss://custom/v1"]), true),
+                LaunchMode::Remote { url } if url == "wss://custom/v1"
+            ));
+            assert!(matches!(
+                resolve_launch_mode(&args(&["--remote-ui"]), false),
+                LaunchMode::Remote { url } if url == REMOTE_DEFAULT_URL
+            ));
+        });
+    }
+
+    #[test]
+    fn regression_test_g_h_shortcut_and_rebuilt_exe_invariance() {
+        with_url_env(None, || {
+            // Test G: arbitrary shortcut flags carry no configuration
+            let mode1 = resolve_launch_mode(
+                &args(&["--icon=vayren.ico", "--start-in=.", "--shortcut-flag"]),
+                true,
+            );
+            assert_eq!(
+                mode1,
+                LaunchMode::Remote {
+                    url: REMOTE_DEFAULT_URL.to_string()
+                }
+            );
+
+            // Test H: pure function stability across simulated re-executions / replaced binary
+            for _ in 0..10 {
+                let mode = resolve_launch_mode(
+                    &args(&[
+                        "--data-dir",
+                        "D:\\ZerodhaTradingData",
+                        "--strategy-dir",
+                        "D:\\VAYREN_STRATEGIES",
+                    ]),
+                    true,
+                );
+                assert_eq!(
+                    mode,
+                    LaunchMode::Remote {
+                        url: REMOTE_DEFAULT_URL.to_string()
+                    }
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn regression_test_dev_build_without_local_flag_stays_local() {
+        with_url_env(None, || {
+            assert_eq!(resolve_launch_mode(&args(&[]), false), LaunchMode::Local);
+            assert_eq!(
+                resolve_launch_mode(&args(&["--data-dir", "D:\\data"]), false),
+                LaunchMode::Local
+            );
+            assert_eq!(
+                resolve_launch_mode(&args(&["--strategy-dir", "D:\\strats"]), false),
+                LaunchMode::Local
+            );
         });
     }
 
