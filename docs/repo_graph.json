@@ -1177,7 +1177,7 @@
       "to": "src/core/native"
     }
   ],
-  "entity_count": 5016,
+  "entity_count": 5023,
   "files": [
     {
       "domain": "CORE",
@@ -6989,7 +6989,7 @@
       "required_language": "PYTHON"
     }
   ],
-  "relationship_count": 9001,
+  "relationship_count": 9021,
   "repository": {
     "name": "vayren-core",
     "root": "."
@@ -13596,6 +13596,7 @@
         "broker.tests.test_fyers_live_trading:test_adapter_environment_is_live",
         "broker.tests.test_fyers_live_trading:test_missing_credentials_fails_closed",
         "broker.tests.test_fyers_live_trading:test_not_connected_fails_closed",
+        "broker.tests.test_fyers_websocket:_vendor_adapter",
         "broker.tests.test_fyers_websocket:test_broker_disconnect_blocks_live_order",
         "broker.tests.test_fyers_websocket:test_order_ws_connection_and_health",
         "broker.tests.test_fyers_websocket:test_order_ws_fallback_to_rest_when_queue_empty",
@@ -13617,7 +13618,7 @@
       "file": "src/broker/providers/fyers/session_adapter.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 58,
+      "line": 66,
       "module": "src/broker/providers",
       "name": "FyersSessionAdapter",
       "public": true,
@@ -13634,7 +13635,7 @@
       "file": "src/broker/providers/fyers/session_adapter.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 976,
+      "line": 984,
       "module": "src/broker/providers",
       "name": "_safe_amount",
       "public": false,
@@ -18469,6 +18470,7 @@
     },
     {
       "called_by": [
+        "broker.tests.test_fyers_websocket:VendorAccurateOrderSocket",
         "broker.tests.test_fyers_websocket:test_order_ws_connection_and_health"
       ],
       "callers_complete": true,
@@ -18486,11 +18488,13 @@
     },
     {
       "called_by": [
+        "broker.tests.test_fyers_websocket:_vendor_adapter",
         "broker.tests.test_fyers_websocket:test_broker_disconnect_blocks_live_order",
         "broker.tests.test_fyers_websocket:test_order_ws_connection_and_health",
         "broker.tests.test_fyers_websocket:test_order_ws_fallback_to_rest_when_queue_empty",
         "broker.tests.test_fyers_websocket:test_order_ws_order_ack_and_reject",
-        "broker.tests.test_fyers_websocket:test_order_ws_partial_and_full_fill_deduplication"
+        "broker.tests.test_fyers_websocket:test_order_ws_partial_and_full_fill_deduplication",
+        "broker.tests.test_fyers_websocket:test_order_ws_reconnect_fallback_intact"
       ],
       "callers_complete": true,
       "calls": [],
@@ -18503,6 +18507,50 @@
       "name": "MockTransport",
       "public": true,
       "qualified": "broker.tests.test_fyers_websocket:MockTransport",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "broker.tests.test_fyers_websocket:_vendor_adapter"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_websocket:MockOrderSocket"
+      ],
+      "dotted": "broker.tests.test_fyers_websocket.VendorAccurateOrderSocket",
+      "file": "src/broker/tests/test_fyers_websocket.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 321,
+      "module": "src/broker",
+      "name": "VendorAccurateOrderSocket",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_websocket:VendorAccurateOrderSocket",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "broker.tests.test_fyers_websocket:test_order_ws_onorders_subscription_succeeds",
+        "broker.tests.test_fyers_websocket:test_order_ws_ontrades_subscription_succeeds",
+        "broker.tests.test_fyers_websocket:test_order_ws_reconnect_fallback_intact",
+        "broker.tests.test_fyers_websocket:test_order_ws_resubscribe_on_connect_uses_vendor_keys",
+        "broker.tests.test_fyers_websocket:test_order_ws_subscription_uses_vendor_keys"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "broker.providers.fyers.session_adapter:FyersSessionAdapter",
+        "broker.tests.test_fyers_websocket:MockTransport",
+        "broker.tests.test_fyers_websocket:VendorAccurateOrderSocket"
+      ],
+      "dotted": "broker.tests.test_fyers_websocket._vendor_adapter",
+      "file": "src/broker/tests/test_fyers_websocket.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 348,
+      "module": "src/broker",
+      "name": "_vendor_adapter",
+      "public": false,
+      "qualified": "broker.tests.test_fyers_websocket:_vendor_adapter",
       "tests": []
     },
     {
@@ -18522,7 +18570,7 @@
       "file": "src/broker/tests/test_fyers_websocket.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 445,
+      "line": 548,
       "module": "src/broker",
       "name": "test_broker_disconnect_blocks_live_order",
       "public": true,
@@ -18645,11 +18693,45 @@
       "file": "src/broker/tests/test_fyers_websocket.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 429,
+      "line": 532,
       "module": "src/broker",
       "name": "test_order_ws_fallback_to_rest_when_queue_empty",
       "public": true,
       "qualified": "broker.tests.test_fyers_websocket:test_order_ws_fallback_to_rest_when_queue_empty",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_websocket:_vendor_adapter"
+      ],
+      "dotted": "broker.tests.test_fyers_websocket.test_order_ws_onorders_subscription_succeeds",
+      "file": "src/broker/tests/test_fyers_websocket.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 378,
+      "module": "src/broker",
+      "name": "test_order_ws_onorders_subscription_succeeds",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_websocket:test_order_ws_onorders_subscription_succeeds",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_websocket:_vendor_adapter"
+      ],
+      "dotted": "broker.tests.test_fyers_websocket.test_order_ws_ontrades_subscription_succeeds",
+      "file": "src/broker/tests/test_fyers_websocket.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 386,
+      "module": "src/broker",
+      "name": "test_order_ws_ontrades_subscription_succeeds",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_websocket:test_order_ws_ontrades_subscription_succeeds",
       "tests": []
     },
     {
@@ -18663,7 +18745,7 @@
       "file": "src/broker/tests/test_fyers_websocket.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 320,
+      "line": 423,
       "module": "src/broker",
       "name": "test_order_ws_order_ack_and_reject",
       "public": true,
@@ -18681,11 +18763,63 @@
       "file": "src/broker/tests/test_fyers_websocket.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 365,
+      "line": 468,
       "module": "src/broker",
       "name": "test_order_ws_partial_and_full_fill_deduplication",
       "public": true,
       "qualified": "broker.tests.test_fyers_websocket:test_order_ws_partial_and_full_fill_deduplication",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_websocket:MockTransport",
+        "broker.tests.test_fyers_websocket:_vendor_adapter"
+      ],
+      "dotted": "broker.tests.test_fyers_websocket.test_order_ws_reconnect_fallback_intact",
+      "file": "src/broker/tests/test_fyers_websocket.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 405,
+      "module": "src/broker",
+      "name": "test_order_ws_reconnect_fallback_intact",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_websocket:test_order_ws_reconnect_fallback_intact",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_websocket:_vendor_adapter"
+      ],
+      "dotted": "broker.tests.test_fyers_websocket.test_order_ws_resubscribe_on_connect_uses_vendor_keys",
+      "file": "src/broker/tests/test_fyers_websocket.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 394,
+      "module": "src/broker",
+      "name": "test_order_ws_resubscribe_on_connect_uses_vendor_keys",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_websocket:test_order_ws_resubscribe_on_connect_uses_vendor_keys",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_websocket:_vendor_adapter"
+      ],
+      "dotted": "broker.tests.test_fyers_websocket.test_order_ws_subscription_uses_vendor_keys",
+      "file": "src/broker/tests/test_fyers_websocket.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 369,
+      "module": "src/broker",
+      "name": "test_order_ws_subscription_uses_vendor_keys",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_websocket:test_order_ws_subscription_uses_vendor_keys",
       "tests": []
     },
     {
@@ -18701,7 +18835,7 @@
       "file": "src/broker/tests/test_fyers_websocket.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 509,
+      "line": 612,
       "module": "src/broker",
       "name": "test_paper_mode_does_not_call_live_websocket",
       "public": true,
