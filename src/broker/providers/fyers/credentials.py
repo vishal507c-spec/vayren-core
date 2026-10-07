@@ -53,7 +53,10 @@ class FyersCredentials:
             uri = DEFAULT_REDIRECT_URL
         self._redirect_uri = uri
         self._pin = pin
-        self._client_id = client_id
+        # FYERS login IDs are canonically uppercase; the vagator login steps
+        # accept any case but the /token account binding compares strictly,
+        # so normalize once here instead of failing as "different account".
+        self._client_id = client_id.strip().upper()
         self._totp_secret = totp_secret
 
     @classmethod
