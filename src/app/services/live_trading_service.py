@@ -669,6 +669,9 @@ class LiveTradingService:
             except Exception as exc:
                 universe = set()
                 blockers.append(f"market store unreadable: {exc}")
+            # Configured strategy universe is valid even if large historical store is not mirrored
+            universe |= {s.split(":")[-1] for s in self.available_symbols()}
+            universe |= set(self.available_symbols())
             for symbol in self._config.symbols:
                 clean = symbol.split(":")[-1]
                 if clean not in universe and symbol not in universe:
@@ -678,23 +681,25 @@ class LiveTradingService:
         if self._config.quantity <= 0:
             blockers.append("quantity must be positive")
         if record is not None and self._config.symbols and self._config.timeframe:
+            has_local_store = bool(self._repository.list_symbols())
             for symbol in self._config.symbols:
                 clean = symbol.split(":")[-1]
-                try:
-                    frames = self._repository.detect_timeframes(clean)
-                except Exception:
-                    frames = ()
-                if frames and self._config.timeframe not in frames:
-                    blockers.append(
-                        f"timeframe {self._config.timeframe} not available for {symbol}"
-                    )
-                try:
-                    bars = self._repository.get_candles_timeframe(clean, self._config.timeframe, 1)
-                except Exception as exc:
-                    bars = []
-                    blockers.append(f"market data unreadable for {symbol}: {exc}")
-                if not bars:
-                    blockers.append(f"no market data for {symbol} {self._config.timeframe}")
+                if has_local_store:
+                    try:
+                        frames = self._repository.detect_timeframes(clean)
+                    except Exception:
+                        frames = ()
+                    if frames and self._config.timeframe not in frames:
+                        blockers.append(
+                            f"timeframe {self._config.timeframe} not available for {symbol}"
+                        )
+                    try:
+                        bars = self._repository.get_candles_timeframe(clean, self._config.timeframe, 1)
+                    except Exception as exc:
+                        bars = []
+                        blockers.append(f"market data unreadable for {symbol}: {exc}")
+                    if not bars:
+                        blockers.append(f"no market data for {symbol} {self._config.timeframe}")
         if self._config.mode == "LIVE":
             blockers.extend(self._live_blockers())
         return tuple(blockers)

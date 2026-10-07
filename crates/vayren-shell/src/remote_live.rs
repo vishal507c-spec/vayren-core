@@ -236,6 +236,39 @@ pub fn apply_remote_sections(state: &mut LiveState, sections: &serde_json::Value
             translated.insert(key.to_string(), serde_json::Value::Array(list.clone()));
         }
     }
+    for key in [
+        "quotes",
+        "events",
+        "available_strategies",
+        "available_symbols",
+        "selected_symbols",
+        "available_timeframes",
+    ] {
+        if let Some(list) = sections.get(key).and_then(|v| v.as_array()) {
+            translated.insert(key.to_string(), serde_json::Value::Array(list.clone()));
+        }
+    }
+    if let Some(pnl) = sections.get("pnl").filter(|v| v.is_object()) {
+        translated.insert("pnl".to_string(), pnl.clone());
+    }
+    if let Some(risk_engine) = sections.get("risk_engine").filter(|v| v.is_object()) {
+        translated.insert("risk_engine".to_string(), risk_engine.clone());
+    }
+    if let Some(stf) = sections.get("selected_timeframe").and_then(|v| v.as_str()) {
+        translated.insert(
+            "selected_timeframe".to_string(),
+            serde_json::Value::String(stf.to_string()),
+        );
+    }
+    if let Some(qty) = sections.get("quantity").and_then(|v| v.as_f64()) {
+        translated.insert("quantity".to_string(), serde_json::json!(qty));
+    }
+    if let Some(ss) = sections.get("selected_symbol").and_then(|v| v.as_str()) {
+        translated.insert(
+            "selected_symbol".to_string(),
+            serde_json::Value::String(ss.to_string()),
+        );
+    }
     if let Some(blockers) = sections.get("blockers").and_then(|v| v.as_array()) {
         // The backend's own start verdict, shown verbatim; `bridge_wired`
         // stays false so START can never enable from the remote client.
@@ -787,5 +820,44 @@ mod tests {
         // Labels never arm controls or invent funds.
         assert!(!state.bridge_wired);
         assert!(!state.has_valid_capital());
+    }
+
+    #[test]
+    fn quotes_pnl_and_symbols_translate_to_model() {
+        let mut state = init_remote_state();
+        let payload = json!({
+            "broker": {"name": "FYERS", "status": "CONNECTED"},
+            "capital": {"capital_source": "broker", "broker_capital": 500000.0, "available": 500000.0},
+            "quotes": [
+                {
+                    "symbol": "NSE:KAYNES",
+                    "ltp": 4500.0,
+                    "change_pct": 2.5,
+                    "entry_price": 4450.0,
+                    "stop_price": 4400.0,
+                    "quantity": 10.0,
+                    "planned_risk": 500.0
+                }
+            ],
+            "pnl": {
+                "realized": 1200.0,
+                "unrealized": 300.0,
+                "exposure": 45000.0,
+                "orders": 2,
+                "fills": 1,
+                "wins": 1,
+                "losses": 0
+            },
+            "available_strategies": ["OBR C1C4"],
+            "available_symbols": ["NSE:KAYNES", "NSE:DREDGECORP"]
+        });
+        apply_remote_sections(&mut state, &payload, false);
+        assert_eq!(state.watchlist_rows.len(), 1);
+        assert_eq!(state.watchlist_rows[0].symbol, "NSE:KAYNES");
+        assert_eq!(state.watchlist_rows[0].ltp, Some(4500.0));
+        assert_eq!(state.pnl.realized, Some(1200.0));
+        assert_eq!(state.pnl.unrealized, Some(300.0));
+        assert_eq!(state.strategies, vec!["OBR C1C4".to_string()]);
+        assert_eq!(state.symbols.len(), 2);
     }
 }

@@ -143,20 +143,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // its own while developer builds stay local. Shortcuts carry no token
     // and no endpoint by design — configuration lives in the OS credential
     // store plus the built-in default, never in argv.
-    match vayren_remote_client::launch::resolve_launch_mode(
+    let remote_gateway_url = match vayren_remote_client::launch::resolve_launch_mode(
         &argv,
         cfg!(feature = "packaged-remote"),
     ) {
-        vayren_remote_client::launch::LaunchMode::Remote { url } => {
-            return run_remote_ui(argv, url);
-        }
+        vayren_remote_client::launch::LaunchMode::Remote { url } => Some(url),
         vayren_remote_client::launch::LaunchMode::Probe { url } => {
             // Read-only smoke probe: hello → welcome → snapshot → brief
             // subscribe, without spawning a backend, opening the UI, or
             // sending any command.
             return vayren_shell::remote_source::run_remote_probe(&url).map_err(|err| err.into());
         }
-        vayren_remote_client::launch::LaunchMode::Local => {}
+        vayren_remote_client::launch::LaunchMode::Local => None,
+    };
+    if let Some(ref url) = remote_gateway_url {
+        println!("VAYREN starting (remote live client + local historical stores)...");
+        println!("Gateway: {url}");
     }
 
     // Spawn Python backend. One mutex-guarded handle serves the UI thread
@@ -534,30 +536,45 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // no venue adapter, PAPER default, empty execution tables.
     // Live production wiring (SLICE 4c): the idle trading service snapshot
     // feeds the native live state (same dict the legacy workspace consumed).
-    println!("Requesting live snapshot...");
-    let mut live_state = shell::demo_live_state();
-    match PythonBackend::lock_send(&backend, BackendCommand::GetLiveSnapshot)? {
-        BackendResponse::LiveSnapshot { data } => {
-            live_state.apply_snapshot(&data);
-            println!(
-                "Live ready: {} {} ({} bars, last {})",
-                live_state.market_symbol,
-                live_state.market_timeframe,
-                live_state.market_bar_count,
-                live_state
-                    .market_last_price
-                    .map(|p| p.to_string())
-                    .unwrap_or_else(|| "N/A".to_string())
-            );
-        }
-        BackendResponse::Error { data } => {
-            eprintln!("Live snapshot failed: {}", data.message);
-        }
-        _ => {
-            eprintln!("Unexpected response");
+    let is_remote = remote_gateway_url.is_some();
+    let mut live_state = if is_remote {
+        vayren_shell::remote_live::init_remote_state()
+    } else {
+        shell::demo_live_state()
+    };
+    if !is_remote {
+        println!("Requesting live snapshot...");
+        match PythonBackend::lock_send(&backend, BackendCommand::GetLiveSnapshot)? {
+            BackendResponse::LiveSnapshot { data } => {
+                live_state.apply_snapshot(&data);
+                println!(
+                    "Live ready: {} {} ({} bars, last {})",
+                    live_state.market_symbol,
+                    live_state.market_timeframe,
+                    live_state.market_bar_count,
+                    live_state
+                        .market_last_price
+                        .map(|p| p.to_string())
+                        .unwrap_or_else(|| "N/A".to_string())
+                );
+            }
+            BackendResponse::Error { data } => {
+                eprintln!("Live snapshot failed: {}", data.message);
+            }
+            _ => {
+                eprintln!("Unexpected response");
+            }
         }
     }
     let live_state = Rc::new(RefCell::new(live_state));
+    let remote_rx = if let Some(url) = remote_gateway_url {
+        let (remote_tx, remote_rx) =
+            mpsc::channel::<vayren_shell::remote_live::RemoteUiUpdate>();
+        vayren_shell::remote_live::spawn_remote_bootstrap(url, remote_tx);
+        Some(remote_rx)
+    } else {
+        None
+    };
     shell::wire(&ui);
     shell::wire_zoom(&ui, zoom.clone());
     shell::wire_lab(
@@ -667,63 +684,114 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // each on a worker thread — a blocking round-trip on the UI
                 // thread would freeze the window, and dropping them would make
                 // every LIVE control a silent no-op.
-                while let Some(raw) = live_state.borrow_mut().take_action() {
-                    let action: serde_json::Value = match serde_json::from_str(&raw) {
-                        Ok(value) => value,
-                        Err(err) => {
-                            eprintln!("Live action is not valid JSON ({err}): {raw}");
-                            continue;
-                        }
+                if let Some(ref rx) = remote_rx {
+                    use vayren_shell::remote_live::{
+                        apply_remote_sections, mark_link, push_remote_event, RemoteUiUpdate,
                     };
-                    let backend = Arc::clone(&backend);
-                    let tx = tx.clone();
-                    let id = live_seq.fetch_add(1, Ordering::SeqCst) + 1;
-                    live_busy += 1;
-                    std::thread::spawn(move || {
-                        let data = match PythonBackend::lock_send(
-                            &backend,
-                            BackendCommand::LiveAction { action },
-                        ) {
-                            Ok(BackendResponse::LiveSnapshot { data }) => Some(data),
-                            Ok(other) => {
-                                eprintln!("Live action: unexpected response ({other:?})");
-                                None
+                    while let Some(raw) = live_state.borrow_mut().take_action() {
+                        let name: String = serde_json::from_str::<serde_json::Value>(&raw)
+                            .ok()
+                            .and_then(|v| {
+                                v.get("action")
+                                    .and_then(|a| a.as_str())
+                                    .map(str::to_string)
+                            })
+                            .unwrap_or_else(|| "unknown".to_string());
+                        eprintln!(
+                            "remote UI: control '{name}' refused (read-only client, nothing sent)"
+                        );
+                    }
+                    let mut dirty = false;
+                    for update in rx.try_iter() {
+                        match update {
+                            RemoteUiUpdate::Snapshot { sections, resync } => {
+                                if resync {
+                                    println!("Remote resync: replacing state with fresh snapshot");
+                                }
+                                apply_remote_sections(&mut live_state.borrow_mut(), &sections, resync);
+                                dirty = true;
                             }
+                            RemoteUiUpdate::StateUpdate { sections } => {
+                                apply_remote_sections(&mut live_state.borrow_mut(), &sections, false);
+                                dirty = true;
+                            }
+                            RemoteUiUpdate::StreamEvent { name, payload } => {
+                                push_remote_event(&mut live_state.borrow_mut(), &name, &payload);
+                                dirty = true;
+                            }
+                            RemoteUiUpdate::Link {
+                                label,
+                                detail,
+                                reconnects,
+                            } => {
+                                eprintln!("remote UI: link {label} ({detail})");
+                                mark_link(&mut live_state.borrow_mut(), &label, &detail, reconnects);
+                                dirty = true;
+                            }
+                        }
+                    }
+                    if dirty {
+                        shell::apply_live(&ui, &live_state.borrow());
+                    }
+                } else {
+                    while let Some(raw) = live_state.borrow_mut().take_action() {
+                        let action: serde_json::Value = match serde_json::from_str(&raw) {
+                            Ok(value) => value,
                             Err(err) => {
-                                eprintln!("Live action failed: {err}");
-                                None
+                                eprintln!("Live action is not valid JSON ({err}): {raw}");
+                                continue;
                             }
                         };
-                        let _ = tx.send(FetchResult::Live(id, data));
-                    });
-                }
-                // Periodic LIVE snapshot poll (see `next_live_poll`): keeps
-                // fills, P&L, positions, events, quotes and broker edges
-                // live while a session runs — and re-reads the broker
-                // selection, so SYSTEM connects surface within one tick.
-                if live_busy == 0 && std::time::Instant::now() >= next_live_poll {
-                    let id = live_seq.fetch_add(1, Ordering::SeqCst) + 1;
-                    live_busy += 1;
-                    let backend = Arc::clone(&backend);
-                    let tx = tx.clone();
-                    std::thread::spawn(move || {
-                        let data = match PythonBackend::lock_send(
-                            &backend,
-                            BackendCommand::GetLiveSnapshot,
-                        ) {
-                            Ok(BackendResponse::LiveSnapshot { data }) => Some(data),
-                            Ok(other) => {
-                                eprintln!("Live poll: unexpected response ({other:?})");
-                                None
-                            }
-                            Err(err) => {
-                                eprintln!("Live poll failed: {err}");
-                                None
-                            }
-                        };
-                        let _ = tx.send(FetchResult::Live(id, data));
-                    });
-                    next_live_poll = std::time::Instant::now() + std::time::Duration::from_secs(1);
+                        let backend = Arc::clone(&backend);
+                        let tx = tx.clone();
+                        let id = live_seq.fetch_add(1, Ordering::SeqCst) + 1;
+                        live_busy += 1;
+                        std::thread::spawn(move || {
+                            let data = match PythonBackend::lock_send(
+                                &backend,
+                                BackendCommand::LiveAction { action },
+                            ) {
+                                Ok(BackendResponse::LiveSnapshot { data }) => Some(data),
+                                Ok(other) => {
+                                    eprintln!("Live action: unexpected response ({other:?})");
+                                    None
+                                }
+                                Err(err) => {
+                                    eprintln!("Live action failed: {err}");
+                                    None
+                                }
+                            };
+                            let _ = tx.send(FetchResult::Live(id, data));
+                        });
+                    }
+                    // Periodic LIVE snapshot poll (see `next_live_poll`): keeps
+                    // fills, P&L, positions, events, quotes and broker edges
+                    // live while a session runs — and re-reads the broker
+                    // selection, so SYSTEM connects surface within one tick.
+                    if live_busy == 0 && std::time::Instant::now() >= next_live_poll {
+                        let id = live_seq.fetch_add(1, Ordering::SeqCst) + 1;
+                        live_busy += 1;
+                        let backend = Arc::clone(&backend);
+                        let tx = tx.clone();
+                        std::thread::spawn(move || {
+                            let data = match PythonBackend::lock_send(
+                                &backend,
+                                BackendCommand::GetLiveSnapshot,
+                            ) {
+                                Ok(BackendResponse::LiveSnapshot { data }) => Some(data),
+                                Ok(other) => {
+                                    eprintln!("Live poll: unexpected response ({other:?})");
+                                    None
+                                }
+                                Err(err) => {
+                                    eprintln!("Live poll failed: {err}");
+                                    None
+                                }
+                            };
+                            let _ = tx.send(FetchResult::Live(id, data));
+                        });
+                        next_live_poll = std::time::Instant::now() + std::time::Duration::from_secs(1);
+                    }
                 }
                 let mut latest_market: Option<(u64, Option<serde_json::Value>)> = None;
                 let mut latest_lab_select: Option<(u64, Option<serde_json::Value>)> = None;
@@ -802,7 +870,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         // paint over a fresher action result).
                         FetchResult::Live(id, data) => {
                             live_busy = live_busy.saturating_sub(1);
-                            if id > last_live {
+                            if !is_remote && id > last_live {
                                 last_live = id;
                                 if let Some(data) = data {
                                     live_state.borrow_mut().apply_snapshot(&data);
@@ -1296,8 +1364,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     shell::apply_research(&ui, &research_state.borrow());
     shell::apply_live(&ui, &live_state.borrow());
     // Cross-runtime entry point: `--screen <name>` preselects that screen;
-    // default stays Lab.
-    let initial = shell::initial_screen(&argv);
+    // default stays Lab in local mode, Live in remote mode.
+    let initial = if is_remote && !argv.iter().any(|a| a.starts_with("--screen")) {
+        shell::initial_screen(&["--screen".to_string(), "live".to_string()])
+    } else {
+        shell::initial_screen(&argv)
+    };
     shell::select(&ui, initial);
     println!("VAYREN UI ready - entering event loop");
     ui.run()?;
@@ -1332,6 +1404,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// with honest feedback. Other workspaces (Market/Lab/Portfolio/Research,
 /// SYSTEM broker panel) render honest-empty: the remote gateway does not
 /// serve their local stores in this phase, and nothing is invented for them.
+#[allow(dead_code)]
 fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::error::Error>> {
     use vayren_shell::remote_live::{
         apply_remote_sections, init_remote_state, mark_link, push_remote_event,

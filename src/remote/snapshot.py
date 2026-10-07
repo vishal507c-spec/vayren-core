@@ -225,6 +225,16 @@ def build_snapshot(live: dict[str, Any]) -> dict[str, Any]:
             "source": "execution readiness + kill switch + transport",
         },
         "blockers": [str(item) for item in (live.get("start_blockers", []) or [])],
+        "quotes": scrub(live.get("quotes", [])),
+        "pnl": scrub(live.get("pnl", {})),
+        "events": scrub(live.get("events", [])),
+        "available_strategies": scrub(live.get("available_strategies", [])),
+        "available_symbols": scrub(live.get("available_symbols", [])),
+        "selected_symbols": scrub(live.get("selected_symbols", [])),
+        "available_timeframes": scrub(live.get("available_timeframes", [])),
+        "selected_timeframe": str(live.get("selected_timeframe", "") or ""),
+        "quantity": float(live.get("quantity", 0.0) or 0.0),
+        "risk_engine": scrub(risk_engine),
         "as_of": str(live.get("as_of", "") or ""),
     }
     return scrub(snapshot)
