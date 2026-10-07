@@ -47,6 +47,14 @@ _TERMINAL_STATUSES = frozenset({2, 5, 6})  # 2: Filled, 5: Cancelled, 6: Rejecte
 # 1: Cancelled, 2: Traded/Filled, 4: Transit, 5: Rejected, 6: Pending
 # We handle both numeric statuses and string representations gracefully.
 
+#: Vendor order-socket subscription keys (``FyersOrderSocket.socket_type``).
+#: The SDK splits ``data_type`` on "," and looks each token up in
+#: ``socket_type`` (``OnOrders``/``OnTrades``/``OnPositions``/``OnGeneral``),
+#: so the legacy ``"orders,trades"`` raised ``KeyError`` inside the SDK and
+#: the subscription was never sent. Orders + trades only — positions stay on
+#: the REST snapshot path.
+ORDER_WS_SUBSCRIPTION = "OnOrders,OnTrades"
+
 
 STATE_DISCONNECTED = "DISCONNECTED"
 STATE_CONNECTING = "CONNECTING"
@@ -199,7 +207,7 @@ class FyersSessionAdapter:
             if hasattr(self._order_ws, "connect"):
                 self._order_ws.connect()
             if hasattr(self._order_ws, "subscribe"):
-                self._order_ws.subscribe(data_type="orders,trades")
+                self._order_ws.subscribe(data_type=ORDER_WS_SUBSCRIPTION)
         except Exception as exc:
             self._order_ws_state = STATE_ERROR
             self._order_ws_error = str(exc)
@@ -223,7 +231,7 @@ class FyersSessionAdapter:
         logger.info("ORDER_WS_CONNECTED broker=FYERS")
         if self._order_ws is not None and hasattr(self._order_ws, "subscribe"):
             try:
-                self._order_ws.subscribe(data_type="orders,trades")
+                self._order_ws.subscribe(data_type=ORDER_WS_SUBSCRIPTION)
             except Exception as exc:
                 logger.error("ORDER_WS_SUBSCRIBE_FAILED broker=FYERS reason=%s", exc)
 
@@ -983,4 +991,4 @@ def _safe_amount(value: Any) -> float:
     return number
 
 
-__all__ = ["FyersSessionAdapter", "TRADING_CAPABILITIES"]
+__all__ = ["FyersSessionAdapter", "ORDER_WS_SUBSCRIPTION", "TRADING_CAPABILITIES"]

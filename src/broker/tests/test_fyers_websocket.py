@@ -34,7 +34,7 @@ from broker.providers.fyers.live_market_data import (
     STATE_ERROR,
     FyersLiveMarketData,
 )
-from broker.providers.fyers.session_adapter import FyersSessionAdapter
+from broker.providers.fyers.session_adapter import ORDER_WS_SUBSCRIPTION, FyersSessionAdapter
 
 
 class MockDataSocket:
@@ -310,11 +310,114 @@ def test_order_ws_connection_and_health() -> None:
     assert reason == "connected"
     assert len(created_sockets) == 1
     assert created_sockets[0].connected
-    assert created_sockets[0].subscribed_type == "orders,trades"
+    assert created_sockets[0].subscribed_type == ORDER_WS_SUBSCRIPTION
+    assert created_sockets[0].subscribed_type == "OnOrders,OnTrades"
 
     adapter.disconnect()
     assert adapter.order_ws_state == STATE_DISCONNECTED
     assert not created_sockets[0].connected
+
+
+class VendorAccurateOrderSocket(MockOrderSocket):
+    """Mirrors the real SDK lookup: ``socket_type[token]`` per comma part."""
+
+    socket_type: dict[str, Any] = {
+        "OnOrders": "orders",
+        "OnTrades": "trades",
+        "OnPositions": "positions",
+        "OnGeneral": ["edis", "pricealerts", "login"],
+    }
+
+    def subscribe(self, data_type: str) -> None:
+        parts = [part for part in str(data_type).split(",") if part]
+        assert parts, "empty subscription"
+        resolved: list[str] = []
+        for part in parts:
+            # Real SDK does ``socket_type[elem]`` — unknown keys raise KeyError
+            # and the SUB_ORD frame is never sent (logged only).
+            assert part in self.socket_type, f"invalid vendor key: {part!r}"
+            value = self.socket_type[part]
+            if isinstance(value, list):
+                resolved.extend(value)
+            else:
+                resolved.append(value)
+        self.subscribed_type = data_type
+        self.slist = resolved
+
+
+def _vendor_adapter(
+    factory: Any, transport: MockTransport | None = None
+) -> tuple[FyersSessionAdapter, list[VendorAccurateOrderSocket]]:
+    created: list[VendorAccurateOrderSocket] = []
+
+    def order_socket_factory(**kwargs: Any) -> VendorAccurateOrderSocket:
+        sock = VendorAccurateOrderSocket(**kwargs)
+        created.append(sock)
+        return sock
+
+    _ = factory  # factory placeholder keeps call sites explicit
+    adapter = FyersSessionAdapter(
+        app_id="APP123",
+        access_token="TOKEN456",
+        transport=transport or MockTransport(),
+        order_socket_factory=order_socket_factory,
+        enable_order_ws=True,
+    )
+    return adapter, created
+
+
+def test_order_ws_subscription_uses_vendor_keys() -> None:
+    adapter, created = _vendor_adapter(None)
+    adapter.connect()
+    assert adapter.order_ws_state == STATE_CONNECTED
+    assert created[0].subscribed_type == "OnOrders,OnTrades"
+    assert set(created[0].subscribed_type.split(",")) == {"OnOrders", "OnTrades"}
+    adapter.disconnect()
+
+
+def test_order_ws_onorders_subscription_succeeds() -> None:
+    adapter, created = _vendor_adapter(None)
+    adapter.connect()
+    assert "OnOrders" in created[0].subscribed_type.split(",")
+    assert "orders" in created[0].slist
+    adapter.disconnect()
+
+
+def test_order_ws_ontrades_subscription_succeeds() -> None:
+    adapter, created = _vendor_adapter(None)
+    adapter.connect()
+    assert "OnTrades" in created[0].subscribed_type.split(",")
+    assert "trades" in created[0].slist
+    adapter.disconnect()
+
+
+def test_order_ws_resubscribe_on_connect_uses_vendor_keys() -> None:
+    adapter, created = _vendor_adapter(None)
+    adapter.connect()
+    first = created[0].subscribed_type
+    # Simulate server-side reconnect callback — must resubscribe identically.
+    created[0].subscribed_type = ""
+    adapter._on_ws_connect()
+    assert created[0].subscribed_type == first == "OnOrders,OnTrades"
+    adapter.disconnect()
+
+
+def test_order_ws_reconnect_fallback_intact() -> None:
+    transport = MockTransport()
+    adapter, created = _vendor_adapter(None, transport)
+    adapter.connect()
+    assert adapter.order_ws_state == STATE_CONNECTED
+    # WS events still normalize through the unchanged interface.
+    adapter._on_ws_orders(
+        {"orders": {"id": "9", "orderTag": "t:re:o1", "status": 6, "symbol": "NSE:SBIN-EQ"}}
+    )
+    assert adapter.stream_events()[0]["type"] == "ack"
+    # Disconnect drops transport; REST polling fallback still answers.
+    adapter.disconnect()
+    assert adapter.order_ws_state == STATE_DISCONNECTED
+    adapter._connected = True
+    assert adapter.stream_events() == ()
+    assert any("orders" in c["url"] for c in transport.calls)
 
 
 def test_order_ws_order_ack_and_reject() -> None:
