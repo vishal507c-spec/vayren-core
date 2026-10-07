@@ -568,8 +568,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let live_state = Rc::new(RefCell::new(live_state));
     let remote_rx = if let Some(url) = remote_gateway_url {
-        let (remote_tx, remote_rx) =
-            mpsc::channel::<vayren_shell::remote_live::RemoteUiUpdate>();
+        let (remote_tx, remote_rx) = mpsc::channel::<vayren_shell::remote_live::RemoteUiUpdate>();
         vayren_shell::remote_live::spawn_remote_bootstrap(url, remote_tx);
         Some(remote_rx)
     } else {

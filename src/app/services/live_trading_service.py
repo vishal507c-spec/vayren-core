@@ -694,7 +694,9 @@ class LiveTradingService:
                             f"timeframe {self._config.timeframe} not available for {symbol}"
                         )
                     try:
-                        bars = self._repository.get_candles_timeframe(clean, self._config.timeframe, 1)
+                        bars = self._repository.get_candles_timeframe(
+                            clean, self._config.timeframe, 1
+                        )
                     except Exception as exc:
                         bars = []
                         blockers.append(f"market data unreadable for {symbol}: {exc}")
