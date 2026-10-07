@@ -1,0 +1,64 @@
+# VAYREN remote transport — nginx reverse-proxy snippet (EC2).
+#
+# Goal: expose ONLY https://<domain>/vayren/v1 (port 443) to EXE/APK clients.
+# Port 8765 is NEVER published: the backend stays on 127.0.0.1 and the AWS
+# Security Group opens 443/tcp only.
+#
+# Install: copy the server{...} block into /etc/nginx/sites-available/vayren,
+# replace <domain> and the cert paths (certbot/Let's Encrypt), then
+#   nginx -t && systemctl reload nginx
+#
+# Requires the nginx WebSocket proxy headers below (Upgrade/Connection) or
+# the handshake fails with 400/426 and clients cannot connect.
+
+upstream vayren_remote {
+    server 127.0.0.1:8765 max_fails=2 fail_timeout=10s;
+    keepalive 8;
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name <domain>;
+
+    # TLS: provisioned by certbot, NEVER committed to source control.
+    ssl_certificate     /etc/letsencrypt/live/<domain>/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/<domain>/privkey.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_session_timeout 10m;
+
+    # Single public endpoint for remote trading clients.
+    location = /vayren/v1 {
+        proxy_pass http://vayren_remote;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;   # above the 90 s backend idle timeout
+        proxy_send_timeout 120s;
+        proxy_connect_timeout 5s;
+        # Small control frames only; snapshots are bounded upstream (~50 orders/fills).
+        client_max_body_size 1m;
+        access_log /var/log/nginx/vayren_remote_access.log;
+        error_log  /var/log/nginx/vayren_remote_error.log;
+    }
+
+    # Everything else stays invisible.
+    location / {
+        return 404;
+    }
+}
+
+# Plain HTTP: redirect to HTTPS (ACME challenge path must stay reachable
+# for renewals — certbot manages its own snippet; do not fight it here).
+server {
+    listen 80;
+    listen [::]:80;
+    server_name <domain>;
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}

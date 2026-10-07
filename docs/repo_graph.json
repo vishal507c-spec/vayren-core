@@ -44,7 +44,8 @@
       "from": "crates/vayren-shell",
       "kind": "actual",
       "sources": [
-        "crates/vayren-shell/src/lib.rs"
+        "crates/vayren-shell/src/lib.rs",
+        "crates/vayren-shell/src/remote_live.rs"
       ],
       "to": "crates/vayren-domain"
     },
@@ -675,6 +676,30 @@
       "to": "src/core/native"
     },
     {
+      "from": "src/remote",
+      "kind": "actual",
+      "sources": [
+        "src/remote/gateway.py"
+      ],
+      "to": "src/app"
+    },
+    {
+      "from": "src/remote",
+      "kind": "actual",
+      "sources": [
+        "src/remote/gateway.py"
+      ],
+      "to": "src/app/services"
+    },
+    {
+      "from": "src/remote",
+      "kind": "actual",
+      "sources": [
+        "src/remote/gateway.py"
+      ],
+      "to": "src/broker/providers"
+    },
+    {
       "from": "src/risk",
       "kind": "declared",
       "sources": [
@@ -834,7 +859,8 @@
         "crates/vayren-portfolio-view",
         "crates/vayren-research-view",
         "crates/vayren-strategy-lab-view",
-        "crates/vayren-system-view"
+        "crates/vayren-system-view",
+        "route:remote-exe-client"
       ]
     },
     {
@@ -843,6 +869,14 @@
       "required_language": "PYTHON",
       "rule_ids": [
         "PROVIDER_SDK"
+      ]
+    },
+    {
+      "authority": "docs/ownership_policy.json",
+      "id": "REMOTE_TRANSPORT",
+      "required_language": "PYTHON",
+      "rule_ids": [
+        "REMOTE_TRANSPORT"
       ]
     },
     {
@@ -1108,6 +1142,21 @@
       "to": "src/core/native"
     },
     {
+      "from": "src/remote",
+      "kind": "actual-without-declared",
+      "to": "src/app"
+    },
+    {
+      "from": "src/remote",
+      "kind": "actual-without-declared",
+      "to": "src/app/services"
+    },
+    {
+      "from": "src/remote",
+      "kind": "actual-without-declared",
+      "to": "src/broker/providers"
+    },
+    {
       "from": "src/risk",
       "kind": "declared-without-actual",
       "to": "src/core"
@@ -1128,7 +1177,7 @@
       "to": "src/core/native"
     }
   ],
-  "entity_count": 4761,
+  "entity_count": 5016,
   "files": [
     {
       "domain": "CORE",
@@ -1733,6 +1782,76 @@
     {
       "domain": "NATIVE_UI",
       "is_test": false,
+      "language": "RUST",
+      "module": "crates/vayren-remote-client",
+      "owner": "route:remote-exe-client",
+      "owner_source": "route",
+      "path": "crates/vayren-remote-client/examples/remote_ping.rs",
+      "retention_state": null
+    },
+    {
+      "domain": "NATIVE_UI",
+      "is_test": false,
+      "language": "RUST",
+      "module": "crates/vayren-remote-client",
+      "owner": "route:remote-exe-client",
+      "owner_source": "route",
+      "path": "crates/vayren-remote-client/src/client.rs",
+      "retention_state": null
+    },
+    {
+      "domain": "NATIVE_UI",
+      "is_test": false,
+      "language": "RUST",
+      "module": "crates/vayren-remote-client",
+      "owner": "route:remote-exe-client",
+      "owner_source": "route",
+      "path": "crates/vayren-remote-client/src/lib.rs",
+      "retention_state": null
+    },
+    {
+      "domain": "NATIVE_UI",
+      "is_test": false,
+      "language": "RUST",
+      "module": "crates/vayren-remote-client",
+      "owner": "route:remote-exe-client",
+      "owner_source": "route",
+      "path": "crates/vayren-remote-client/src/protocol.rs",
+      "retention_state": null
+    },
+    {
+      "domain": "NATIVE_UI",
+      "is_test": false,
+      "language": "RUST",
+      "module": "crates/vayren-remote-client",
+      "owner": "route:remote-exe-client",
+      "owner_source": "route",
+      "path": "crates/vayren-remote-client/src/summary.rs",
+      "retention_state": null
+    },
+    {
+      "domain": "NATIVE_UI",
+      "is_test": false,
+      "language": "RUST",
+      "module": "crates/vayren-remote-client",
+      "owner": "route:remote-exe-client",
+      "owner_source": "route",
+      "path": "crates/vayren-remote-client/src/token.rs",
+      "retention_state": null
+    },
+    {
+      "domain": "NATIVE_UI",
+      "is_test": true,
+      "language": "RUST",
+      "module": "crates/vayren-remote-client",
+      "owner": "route:remote-exe-client",
+      "owner_source": "route",
+      "path": "crates/vayren-remote-client/tests/remote_e2e.rs",
+      "retention_state": null
+    },
+    {
+      "domain": "NATIVE_UI",
+      "is_test": false,
       "language": "RUST_SLINT",
       "module": "crates/vayren-research-view",
       "owner": "crates/vayren-research-view",
@@ -1838,6 +1957,26 @@
       "owner": "crates/vayren-shell",
       "owner_source": "synthetic",
       "path": "crates/vayren-shell/src/python_bridge.rs",
+      "retention_state": null
+    },
+    {
+      "domain": "NATIVE_UI",
+      "is_test": false,
+      "language": "RUST_SLINT",
+      "module": "crates/vayren-shell",
+      "owner": "crates/vayren-shell",
+      "owner_source": "synthetic",
+      "path": "crates/vayren-shell/src/remote_live.rs",
+      "retention_state": null
+    },
+    {
+      "domain": "NATIVE_UI",
+      "is_test": false,
+      "language": "RUST_SLINT",
+      "module": "crates/vayren-shell",
+      "owner": "crates/vayren-shell",
+      "owner_source": "synthetic",
+      "path": "crates/vayren-shell/src/remote_source.rs",
       "retention_state": null
     },
     {
@@ -4101,6 +4240,156 @@
       "retention_state": null
     },
     {
+      "domain": "REMOTE_TRANSPORT",
+      "is_test": false,
+      "language": "PYTHON",
+      "module": "src/remote",
+      "owner": "REMOTE_TRANSPORT",
+      "owner_source": "policy",
+      "path": "src/remote/__init__.py",
+      "retention_state": null
+    },
+    {
+      "domain": "REMOTE_TRANSPORT",
+      "is_test": false,
+      "language": "PYTHON",
+      "module": "src/remote",
+      "owner": "REMOTE_TRANSPORT",
+      "owner_source": "policy",
+      "path": "src/remote/auth.py",
+      "retention_state": null
+    },
+    {
+      "domain": "REMOTE_TRANSPORT",
+      "is_test": false,
+      "language": "PYTHON",
+      "module": "src/remote",
+      "owner": "REMOTE_TRANSPORT",
+      "owner_source": "policy",
+      "path": "src/remote/client.py",
+      "retention_state": null
+    },
+    {
+      "domain": "REMOTE_TRANSPORT",
+      "is_test": false,
+      "language": "PYTHON",
+      "module": "src/remote",
+      "owner": "REMOTE_TRANSPORT",
+      "owner_source": "policy",
+      "path": "src/remote/gateway.py",
+      "retention_state": null
+    },
+    {
+      "domain": "REMOTE_TRANSPORT",
+      "is_test": false,
+      "language": "PYTHON",
+      "module": "src/remote",
+      "owner": "REMOTE_TRANSPORT",
+      "owner_source": "policy",
+      "path": "src/remote/protocol.py",
+      "retention_state": null
+    },
+    {
+      "domain": "REMOTE_TRANSPORT",
+      "is_test": false,
+      "language": "PYTHON",
+      "module": "src/remote",
+      "owner": "REMOTE_TRANSPORT",
+      "owner_source": "policy",
+      "path": "src/remote/runner.py",
+      "retention_state": null
+    },
+    {
+      "domain": "REMOTE_TRANSPORT",
+      "is_test": false,
+      "language": "PYTHON",
+      "module": "src/remote",
+      "owner": "REMOTE_TRANSPORT",
+      "owner_source": "policy",
+      "path": "src/remote/server.py",
+      "retention_state": null
+    },
+    {
+      "domain": "REMOTE_TRANSPORT",
+      "is_test": false,
+      "language": "PYTHON",
+      "module": "src/remote",
+      "owner": "REMOTE_TRANSPORT",
+      "owner_source": "policy",
+      "path": "src/remote/snapshot.py",
+      "retention_state": null
+    },
+    {
+      "domain": "REMOTE_TRANSPORT",
+      "is_test": true,
+      "language": "PYTHON",
+      "module": "src/remote",
+      "owner": "REMOTE_TRANSPORT",
+      "owner_source": "policy",
+      "path": "src/remote/tests/__init__.py",
+      "retention_state": null
+    },
+    {
+      "domain": "REMOTE_TRANSPORT",
+      "is_test": true,
+      "language": "PYTHON",
+      "module": "src/remote",
+      "owner": "REMOTE_TRANSPORT",
+      "owner_source": "policy",
+      "path": "src/remote/tests/test_auth.py",
+      "retention_state": null
+    },
+    {
+      "domain": "REMOTE_TRANSPORT",
+      "is_test": true,
+      "language": "PYTHON",
+      "module": "src/remote",
+      "owner": "REMOTE_TRANSPORT",
+      "owner_source": "policy",
+      "path": "src/remote/tests/test_client.py",
+      "retention_state": null
+    },
+    {
+      "domain": "REMOTE_TRANSPORT",
+      "is_test": true,
+      "language": "PYTHON",
+      "module": "src/remote",
+      "owner": "REMOTE_TRANSPORT",
+      "owner_source": "policy",
+      "path": "src/remote/tests/test_gateway.py",
+      "retention_state": null
+    },
+    {
+      "domain": "REMOTE_TRANSPORT",
+      "is_test": true,
+      "language": "PYTHON",
+      "module": "src/remote",
+      "owner": "REMOTE_TRANSPORT",
+      "owner_source": "policy",
+      "path": "src/remote/tests/test_protocol.py",
+      "retention_state": null
+    },
+    {
+      "domain": "REMOTE_TRANSPORT",
+      "is_test": true,
+      "language": "PYTHON",
+      "module": "src/remote",
+      "owner": "REMOTE_TRANSPORT",
+      "owner_source": "policy",
+      "path": "src/remote/tests/test_server.py",
+      "retention_state": null
+    },
+    {
+      "domain": "REMOTE_TRANSPORT",
+      "is_test": true,
+      "language": "PYTHON",
+      "module": "src/remote",
+      "owner": "REMOTE_TRANSPORT",
+      "owner_source": "policy",
+      "path": "src/remote/tests/test_snapshot.py",
+      "retention_state": null
+    },
+    {
       "domain": "RISK",
       "is_test": false,
       "language": "RUST",
@@ -5411,7 +5700,7 @@
       "retention_state": null
     }
   ],
-  "inputs_hash": "7b6bc698a17ad1a86c46886d7f041813ba0454327699a64fef3c887a531aa047",
+  "inputs_hash": "672635a5fef535211d674dc18016cf95f67fc032d5a6547f24aeef816fb13f33",
   "languages": [
     {
       "id": "RUST"
@@ -5585,6 +5874,29 @@
     {
       "contract": "docs/module_contracts.md 5.5 Presentation",
       "depended_on_by": [],
+      "depends_on_actual": [],
+      "depends_on_declared": [],
+      "domain": "NATIVE_UI",
+      "files": [
+        "crates/vayren-remote-client/examples/remote_ping.rs",
+        "crates/vayren-remote-client/src/client.rs",
+        "crates/vayren-remote-client/src/lib.rs",
+        "crates/vayren-remote-client/src/protocol.rs",
+        "crates/vayren-remote-client/src/summary.rs",
+        "crates/vayren-remote-client/src/token.rs",
+        "crates/vayren-remote-client/tests/remote_e2e.rs"
+      ],
+      "id": "crates/vayren-remote-client",
+      "language": "RUST",
+      "owner": "route:remote-exe-client",
+      "owner_source": "route",
+      "route_keys": [
+        "remote-exe-client"
+      ]
+    },
+    {
+      "contract": "docs/module_contracts.md 5.5 Presentation",
+      "depended_on_by": [],
       "depends_on_actual": [
         "crates/vayren-domain"
       ],
@@ -5620,6 +5932,8 @@
         "crates/vayren-shell/src/perf_table.rs",
         "crates/vayren-shell/src/perf_trades.rs",
         "crates/vayren-shell/src/python_bridge.rs",
+        "crates/vayren-shell/src/remote_live.rs",
+        "crates/vayren-shell/src/remote_source.rs",
         "crates/vayren-shell/src/shell.rs",
         "crates/vayren-shell/tests/lab_config_render.rs",
         "crates/vayren-shell/tests/lab_scroll.rs",
@@ -5691,7 +6005,8 @@
     {
       "contract": "docs/module_contracts.md 5.1 Module: `src/app`",
       "depended_on_by": [
-        "src/app/services"
+        "src/app/services",
+        "src/remote"
       ],
       "depends_on_actual": [
         "src/app/services",
@@ -5738,9 +6053,10 @@
       ]
     },
     {
-      "contract": "docs/module_contracts.md 5.10 Module: `src/broker`",
+      "contract": "docs/module_contracts.md 5.11 Module: `src/remote`",
       "depended_on_by": [
-        "src/app"
+        "src/app",
+        "src/remote"
       ],
       "depends_on_actual": [
         "src/app",
@@ -5880,7 +6196,7 @@
       ]
     },
     {
-      "contract": "docs/module_contracts.md 5.10 Module: `src/broker`",
+      "contract": "docs/module_contracts.md 5.11 Module: `src/remote`",
       "depended_on_by": [
         "src/app",
         "src/app/services",
@@ -5910,11 +6226,12 @@
       ]
     },
     {
-      "contract": "docs/module_contracts.md 5.10 Module: `src/broker`",
+      "contract": "docs/module_contracts.md 5.11 Module: `src/remote`",
       "depended_on_by": [
         "src/app",
         "src/app/services",
-        "src/data/provider"
+        "src/data/provider",
+        "src/remote"
       ],
       "depends_on_actual": [
         "src/broker",
@@ -5998,7 +6315,7 @@
       ]
     },
     {
-      "contract": "docs/module_contracts.md 5.10 Module: `src/broker`",
+      "contract": "docs/module_contracts.md 5.11 Module: `src/remote`",
       "depended_on_by": [],
       "depends_on_actual": [
         "src/core"
@@ -6030,7 +6347,7 @@
       ]
     },
     {
-      "contract": "docs/module_contracts.md 5.10 Module: `src/broker`",
+      "contract": "docs/module_contracts.md 5.11 Module: `src/remote`",
       "depended_on_by": [
         "src/backtest",
         "src/data",
@@ -6091,7 +6408,7 @@
       ]
     },
     {
-      "contract": "docs/module_contracts.md 5.10 Module: `src/broker`",
+      "contract": "docs/module_contracts.md 5.11 Module: `src/remote`",
       "depended_on_by": [],
       "depends_on_actual": [
         "src/broker",
@@ -6201,7 +6518,7 @@
       ]
     },
     {
-      "contract": "docs/module_contracts.md 5.10 Module: `src/broker`",
+      "contract": "docs/module_contracts.md 5.11 Module: `src/remote`",
       "depended_on_by": [
         "src/execution"
       ],
@@ -6266,6 +6583,39 @@
       "route_keys": [
         "market-read"
       ]
+    },
+    {
+      "contract": "docs/module_contracts.md 5.11 Module: `src/remote`",
+      "depended_on_by": [],
+      "depends_on_actual": [
+        "src/app",
+        "src/app/services",
+        "src/broker/providers"
+      ],
+      "depends_on_declared": [],
+      "domain": "REMOTE_TRANSPORT",
+      "files": [
+        "src/remote/__init__.py",
+        "src/remote/auth.py",
+        "src/remote/client.py",
+        "src/remote/gateway.py",
+        "src/remote/protocol.py",
+        "src/remote/runner.py",
+        "src/remote/server.py",
+        "src/remote/snapshot.py",
+        "src/remote/tests/__init__.py",
+        "src/remote/tests/test_auth.py",
+        "src/remote/tests/test_client.py",
+        "src/remote/tests/test_gateway.py",
+        "src/remote/tests/test_protocol.py",
+        "src/remote/tests/test_server.py",
+        "src/remote/tests/test_snapshot.py"
+      ],
+      "id": "src/remote",
+      "language": "PYTHON",
+      "owner": "REMOTE_TRANSPORT",
+      "owner_source": "policy",
+      "route_keys": []
     },
     {
       "contract": "docs/module_contracts.md 5.8 Module: `src/risk`",
@@ -6520,6 +6870,12 @@
     },
     {
       "authority": "docs/ownership_policy.json",
+      "domain": "REMOTE_TRANSPORT",
+      "id": "REMOTE_TRANSPORT",
+      "required_language": "PYTHON"
+    },
+    {
+      "authority": "docs/ownership_policy.json",
       "domain": "BACKTEST",
       "id": "RUST_BACKTEST",
       "required_language": "RUST"
@@ -6621,13 +6977,19 @@
       "required_language": "PYTHON"
     },
     {
+      "authority": "docs/task_routes.json",
+      "domain": "NATIVE_UI",
+      "id": "route:remote-exe-client",
+      "required_language": "RUST"
+    },
+    {
       "authority": "docs/task_routes.json route tooling-validator",
       "domain": "TOOLING",
       "id": "tools",
       "required_language": "PYTHON"
     }
   ],
-  "relationship_count": 8482,
+  "relationship_count": 9001,
   "repository": {
     "name": "vayren-core",
     "root": "."
@@ -6909,7 +7271,8 @@
     },
     {
       "called_by": [
-        "app.headless:run_headless_backend"
+        "app.headless:run_headless_backend",
+        "remote.gateway:HeadlessGateway"
       ],
       "callers_complete": true,
       "calls": [
@@ -7243,7 +7606,8 @@
       "called_by": [
         "app.headless:_live_action",
         "app.headless:_portfolio_snapshot",
-        "app.headless:run_headless_backend"
+        "app.headless:run_headless_backend",
+        "remote.gateway:HeadlessGateway"
       ],
       "callers_complete": true,
       "calls": [
@@ -7778,7 +8142,8 @@
     {
       "called_by": [
         "app.headless:_system_snapshot",
-        "app.headless:run_headless_backend"
+        "app.headless:run_headless_backend",
+        "remote.gateway:HeadlessGateway"
       ],
       "callers_complete": true,
       "calls": [
@@ -37582,6 +37947,876 @@
       "called_by": [],
       "callers_complete": false,
       "calls": [],
+      "dotted": "crates::vayren-remote-client::examples::remote_ping::main",
+      "file": "crates/vayren-remote-client/examples/remote_ping.rs",
+      "kind": "fn",
+      "language": "RUST",
+      "line": 16,
+      "module": "crates/vayren-remote-client",
+      "name": "main",
+      "public": false,
+      "qualified": "crates::vayren-remote-client::examples::remote_ping::main",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::client::Backoff",
+      "file": "crates/vayren-remote-client/src/client.rs",
+      "kind": "struct",
+      "language": "RUST",
+      "line": 151,
+      "module": "crates/vayren-remote-client",
+      "name": "Backoff",
+      "public": true,
+      "qualified": "crates::vayren-remote-client::src::client::Backoff",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::client::ClientError",
+      "file": "crates/vayren-remote-client/src/client.rs",
+      "kind": "enum",
+      "language": "RUST",
+      "line": 40,
+      "module": "crates/vayren-remote-client",
+      "name": "ClientError",
+      "public": true,
+      "qualified": "crates::vayren-remote-client::src::client::ClientError",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::client::ClientEvent",
+      "file": "crates/vayren-remote-client/src/client.rs",
+      "kind": "enum",
+      "language": "RUST",
+      "line": 64,
+      "module": "crates/vayren-remote-client",
+      "name": "ClientEvent",
+      "public": true,
+      "qualified": "crates::vayren-remote-client::src::client::ClientEvent",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::client::ConnectionState",
+      "file": "crates/vayren-remote-client/src/client.rs",
+      "kind": "enum",
+      "language": "RUST",
+      "line": 30,
+      "module": "crates/vayren-remote-client",
+      "name": "ConnectionState",
+      "public": true,
+      "qualified": "crates::vayren-remote-client::src::client::ConnectionState",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::client::HANDSHAKE_TIMEOUT",
+      "file": "crates/vayren-remote-client/src/client.rs",
+      "kind": "const",
+      "language": "RUST",
+      "line": 24,
+      "module": "crates/vayren-remote-client",
+      "name": "HANDSHAKE_TIMEOUT",
+      "public": true,
+      "qualified": "crates::vayren-remote-client::src::client::HANDSHAKE_TIMEOUT",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::client::IDLE_TIMEOUT",
+      "file": "crates/vayren-remote-client/src/client.rs",
+      "kind": "const",
+      "language": "RUST",
+      "line": 26,
+      "module": "crates/vayren-remote-client",
+      "name": "IDLE_TIMEOUT",
+      "public": true,
+      "qualified": "crates::vayren-remote-client::src::client::IDLE_TIMEOUT",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::client::RemoteClient",
+      "file": "crates/vayren-remote-client/src/client.rs",
+      "kind": "struct",
+      "language": "RUST",
+      "line": 180,
+      "module": "crates/vayren-remote-client",
+      "name": "RemoteClient",
+      "public": true,
+      "qualified": "crates::vayren-remote-client::src::client::RemoteClient",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::client::Socket",
+      "file": "crates/vayren-remote-client/src/client.rs",
+      "kind": "type",
+      "language": "RUST",
+      "line": 100,
+      "module": "crates/vayren-remote-client",
+      "name": "Socket",
+      "public": false,
+      "qualified": "crates::vayren-remote-client::src::client::Socket",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::client::classify",
+      "file": "crates/vayren-remote-client/src/client.rs",
+      "kind": "fn",
+      "language": "RUST",
+      "line": 327,
+      "module": "crates/vayren-remote-client",
+      "name": "classify",
+      "public": false,
+      "qualified": "crates::vayren-remote-client::src::client::classify",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::client::ensure_tls_provider",
+      "file": "crates/vayren-remote-client/src/client.rs",
+      "kind": "fn",
+      "language": "RUST",
+      "line": 102,
+      "module": "crates/vayren-remote-client",
+      "name": "ensure_tls_provider",
+      "public": false,
+      "qualified": "crates::vayren-remote-client::src::client::ensure_tls_provider",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::client::read_text",
+      "file": "crates/vayren-remote-client/src/client.rs",
+      "kind": "fn",
+      "language": "RUST",
+      "line": 119,
+      "module": "crates/vayren-remote-client",
+      "name": "read_text",
+      "public": false,
+      "qualified": "crates::vayren-remote-client::src::client::read_text",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::client::set_read_timeout",
+      "file": "crates/vayren-remote-client/src/client.rs",
+      "kind": "fn",
+      "language": "RUST",
+      "line": 111,
+      "module": "crates/vayren-remote-client",
+      "name": "set_read_timeout",
+      "public": false,
+      "qualified": "crates::vayren-remote-client::src::client::set_read_timeout",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::client::tests",
+      "file": "crates/vayren-remote-client/src/client.rs",
+      "kind": "mod",
+      "language": "RUST",
+      "line": 398,
+      "module": "crates/vayren-remote-client",
+      "name": "tests",
+      "public": false,
+      "qualified": "crates::vayren-remote-client::src::client::tests",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::lib::client",
+      "file": "crates/vayren-remote-client/src/lib.rs",
+      "kind": "mod",
+      "language": "RUST",
+      "line": 16,
+      "module": "crates/vayren-remote-client",
+      "name": "client",
+      "public": true,
+      "qualified": "crates::vayren-remote-client::src::lib::client",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::lib::protocol",
+      "file": "crates/vayren-remote-client/src/lib.rs",
+      "kind": "mod",
+      "language": "RUST",
+      "line": 17,
+      "module": "crates/vayren-remote-client",
+      "name": "protocol",
+      "public": true,
+      "qualified": "crates::vayren-remote-client::src::lib::protocol",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::lib::summary",
+      "file": "crates/vayren-remote-client/src/lib.rs",
+      "kind": "mod",
+      "language": "RUST",
+      "line": 18,
+      "module": "crates/vayren-remote-client",
+      "name": "summary",
+      "public": true,
+      "qualified": "crates::vayren-remote-client::src::lib::summary",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::lib::token",
+      "file": "crates/vayren-remote-client/src/lib.rs",
+      "kind": "mod",
+      "language": "RUST",
+      "line": 19,
+      "module": "crates/vayren-remote-client",
+      "name": "token",
+      "public": true,
+      "qualified": "crates::vayren-remote-client::src::lib::token",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::protocol::CLIENT_MESSAGE_TYPES",
+      "file": "crates/vayren-remote-client/src/protocol.rs",
+      "kind": "const",
+      "language": "RUST",
+      "line": 20,
+      "module": "crates/vayren-remote-client",
+      "name": "CLIENT_MESSAGE_TYPES",
+      "public": true,
+      "qualified": "crates::vayren-remote-client::src::protocol::CLIENT_MESSAGE_TYPES",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::protocol::ClientEnvelope",
+      "file": "crates/vayren-remote-client/src/protocol.rs",
+      "kind": "struct",
+      "language": "RUST",
+      "line": 80,
+      "module": "crates/vayren-remote-client",
+      "name": "ClientEnvelope",
+      "public": true,
+      "qualified": "crates::vayren-remote-client::src::protocol::ClientEnvelope",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::protocol::ERROR_CODES",
+      "file": "crates/vayren-remote-client/src/protocol.rs",
+      "kind": "const",
+      "language": "RUST",
+      "line": 34,
+      "module": "crates/vayren-remote-client",
+      "name": "ERROR_CODES",
+      "public": true,
+      "qualified": "crates::vayren-remote-client::src::protocol::ERROR_CODES",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::protocol::MAX_MESSAGE_BYTES",
+      "file": "crates/vayren-remote-client/src/protocol.rs",
+      "kind": "const",
+      "language": "RUST",
+      "line": 17,
+      "module": "crates/vayren-remote-client",
+      "name": "MAX_MESSAGE_BYTES",
+      "public": true,
+      "qualified": "crates::vayren-remote-client::src::protocol::MAX_MESSAGE_BYTES",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::protocol::ProtocolError",
+      "file": "crates/vayren-remote-client/src/protocol.rs",
+      "kind": "struct",
+      "language": "RUST",
+      "line": 48,
+      "module": "crates/vayren-remote-client",
+      "name": "ProtocolError",
+      "public": true,
+      "qualified": "crates::vayren-remote-client::src::protocol::ProtocolError",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::protocol::SCHEMA_VERSION",
+      "file": "crates/vayren-remote-client/src/protocol.rs",
+      "kind": "const",
+      "language": "RUST",
+      "line": 14,
+      "module": "crates/vayren-remote-client",
+      "name": "SCHEMA_VERSION",
+      "public": true,
+      "qualified": "crates::vayren-remote-client::src::protocol::SCHEMA_VERSION",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::protocol::SERVER_MESSAGE_TYPES",
+      "file": "crates/vayren-remote-client/src/protocol.rs",
+      "kind": "const",
+      "language": "RUST",
+      "line": 23,
+      "module": "crates/vayren-remote-client",
+      "name": "SERVER_MESSAGE_TYPES",
+      "public": true,
+      "qualified": "crates::vayren-remote-client::src::protocol::SERVER_MESSAGE_TYPES",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::protocol::ServerMessage",
+      "file": "crates/vayren-remote-client/src/protocol.rs",
+      "kind": "struct",
+      "language": "RUST",
+      "line": 187,
+      "module": "crates/vayren-remote-client",
+      "name": "ServerMessage",
+      "public": true,
+      "qualified": "crates::vayren-remote-client::src::protocol::ServerMessage",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::protocol::chrono_stamp",
+      "file": "crates/vayren-remote-client/src/protocol.rs",
+      "kind": "fn",
+      "language": "RUST",
+      "line": 258,
+      "module": "crates/vayren-remote-client",
+      "name": "chrono_stamp",
+      "public": false,
+      "qualified": "crates::vayren-remote-client::src::protocol::chrono_stamp",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::protocol::decode_server",
+      "file": "crates/vayren-remote-client/src/protocol.rs",
+      "kind": "fn",
+      "language": "RUST",
+      "line": 199,
+      "module": "crates/vayren-remote-client",
+      "name": "decode_server",
+      "public": true,
+      "qualified": "crates::vayren-remote-client::src::protocol::decode_server",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::protocol::msg",
+      "file": "crates/vayren-remote-client/src/protocol.rs",
+      "kind": "mod",
+      "language": "RUST",
+      "line": 128,
+      "module": "crates/vayren-remote-client",
+      "name": "msg",
+      "public": true,
+      "qualified": "crates::vayren-remote-client::src::protocol::msg",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::protocol::tests",
+      "file": "crates/vayren-remote-client/src/protocol.rs",
+      "kind": "mod",
+      "language": "RUST",
+      "line": 268,
+      "module": "crates/vayren-remote-client",
+      "name": "tests",
+      "public": false,
+      "qualified": "crates::vayren-remote-client::src::protocol::tests",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::summary::summarize_snapshot",
+      "file": "crates/vayren-remote-client/src/summary.rs",
+      "kind": "fn",
+      "language": "RUST",
+      "line": 20,
+      "module": "crates/vayren-remote-client",
+      "name": "summarize_snapshot",
+      "public": true,
+      "qualified": "crates::vayren-remote-client::src::summary::summarize_snapshot",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::summary::tests",
+      "file": "crates/vayren-remote-client/src/summary.rs",
+      "kind": "mod",
+      "language": "RUST",
+      "line": 53,
+      "module": "crates/vayren-remote-client",
+      "name": "tests",
+      "public": false,
+      "qualified": "crates::vayren-remote-client::src::summary::tests",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::summary::text_at",
+      "file": "crates/vayren-remote-client/src/summary.rs",
+      "kind": "fn",
+      "language": "RUST",
+      "line": 10,
+      "module": "crates/vayren-remote-client",
+      "name": "text_at",
+      "public": false,
+      "qualified": "crates::vayren-remote-client::src::summary::text_at",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::token::EnvTokenStore",
+      "file": "crates/vayren-remote-client/src/token.rs",
+      "kind": "struct",
+      "language": "RUST",
+      "line": 63,
+      "module": "crates/vayren-remote-client",
+      "name": "EnvTokenStore",
+      "public": true,
+      "qualified": "crates::vayren-remote-client::src::token::EnvTokenStore",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::token::KEYRING_ACCOUNT",
+      "file": "crates/vayren-remote-client/src/token.rs",
+      "kind": "const",
+      "language": "RUST",
+      "line": 24,
+      "module": "crates/vayren-remote-client",
+      "name": "KEYRING_ACCOUNT",
+      "public": true,
+      "qualified": "crates::vayren-remote-client::src::token::KEYRING_ACCOUNT",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::token::KEYRING_SERVICE",
+      "file": "crates/vayren-remote-client/src/token.rs",
+      "kind": "const",
+      "language": "RUST",
+      "line": 22,
+      "module": "crates/vayren-remote-client",
+      "name": "KEYRING_SERVICE",
+      "public": true,
+      "qualified": "crates::vayren-remote-client::src::token::KEYRING_SERVICE",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::token::KeyringTokenStore",
+      "file": "crates/vayren-remote-client/src/token.rs",
+      "kind": "struct",
+      "language": "RUST",
+      "line": 88,
+      "module": "crates/vayren-remote-client",
+      "name": "KeyringTokenStore",
+      "public": true,
+      "qualified": "crates::vayren-remote-client::src::token::KeyringTokenStore",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::token::MIN_TOKEN_LENGTH",
+      "file": "crates/vayren-remote-client/src/token.rs",
+      "kind": "const",
+      "language": "RUST",
+      "line": 16,
+      "module": "crates/vayren-remote-client",
+      "name": "MIN_TOKEN_LENGTH",
+      "public": true,
+      "qualified": "crates::vayren-remote-client::src::token::MIN_TOKEN_LENGTH",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::token::TOKEN_ENV_VAR",
+      "file": "crates/vayren-remote-client/src/token.rs",
+      "kind": "const",
+      "language": "RUST",
+      "line": 19,
+      "module": "crates/vayren-remote-client",
+      "name": "TOKEN_ENV_VAR",
+      "public": true,
+      "qualified": "crates::vayren-remote-client::src::token::TOKEN_ENV_VAR",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::token::TokenError",
+      "file": "crates/vayren-remote-client/src/token.rs",
+      "kind": "enum",
+      "language": "RUST",
+      "line": 28,
+      "module": "crates/vayren-remote-client",
+      "name": "TokenError",
+      "public": true,
+      "qualified": "crates::vayren-remote-client::src::token::TokenError",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::token::TokenStore",
+      "file": "crates/vayren-remote-client/src/token.rs",
+      "kind": "trait",
+      "language": "RUST",
+      "line": 57,
+      "module": "crates/vayren-remote-client",
+      "name": "TokenStore",
+      "public": true,
+      "qualified": "crates::vayren-remote-client::src::token::TokenStore",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::token::resolve_remote_token",
+      "file": "crates/vayren-remote-client/src/token.rs",
+      "kind": "fn",
+      "language": "RUST",
+      "line": 138,
+      "module": "crates/vayren-remote-client",
+      "name": "resolve_remote_token",
+      "public": true,
+      "qualified": "crates::vayren-remote-client::src::token::resolve_remote_token",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::src::token::tests",
+      "file": "crates/vayren-remote-client/src/token.rs",
+      "kind": "mod",
+      "language": "RUST",
+      "line": 147,
+      "module": "crates/vayren-remote-client",
+      "name": "tests",
+      "public": false,
+      "qualified": "crates::vayren-remote-client::src::token::tests",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::tests::remote_e2e::Directive",
+      "file": "crates/vayren-remote-client/tests/remote_e2e.rs",
+      "kind": "enum",
+      "language": "RUST",
+      "line": 25,
+      "module": "crates/vayren-remote-client",
+      "name": "Directive",
+      "public": false,
+      "qualified": "crates::vayren-remote-client::tests::remote_e2e::Directive",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::tests::remote_e2e::STEP",
+      "file": "crates/vayren-remote-client/tests/remote_e2e.rs",
+      "kind": "const",
+      "language": "RUST",
+      "line": 22,
+      "module": "crates/vayren-remote-client",
+      "name": "STEP",
+      "public": false,
+      "qualified": "crates::vayren-remote-client::tests::remote_e2e::STEP",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::tests::remote_e2e::TOKEN",
+      "file": "crates/vayren-remote-client/tests/remote_e2e.rs",
+      "kind": "const",
+      "language": "RUST",
+      "line": 21,
+      "module": "crates/vayren-remote-client",
+      "name": "TOKEN",
+      "public": false,
+      "qualified": "crates::vayren-remote-client::tests::remote_e2e::TOKEN",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::tests::remote_e2e::bad_token_is_refused_before_snapshot",
+      "file": "crates/vayren-remote-client/tests/remote_e2e.rs",
+      "kind": "fn",
+      "language": "RUST",
+      "line": 275,
+      "module": "crates/vayren-remote-client",
+      "name": "bad_token_is_refused_before_snapshot",
+      "public": false,
+      "qualified": "crates::vayren-remote-client::tests::remote_e2e::bad_token_is_refused_before_snapshot",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::tests::remote_e2e::command_retry_reuses_request_id_without_duplicate_effect",
+      "file": "crates/vayren-remote-client/tests/remote_e2e.rs",
+      "kind": "fn",
+      "language": "RUST",
+      "line": 398,
+      "module": "crates/vayren-remote-client",
+      "name": "command_retry_reuses_request_id_without_duplicate_effect",
+      "public": false,
+      "qualified": "crates::vayren-remote-client::tests::remote_e2e::command_retry_reuses_request_id_without_duplicate_effect",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::tests::remote_e2e::envelope",
+      "file": "crates/vayren-remote-client/tests/remote_e2e.rs",
+      "kind": "fn",
+      "language": "RUST",
+      "line": 31,
+      "module": "crates/vayren-remote-client",
+      "name": "envelope",
+      "public": false,
+      "qualified": "crates::vayren-remote-client::tests::remote_e2e::envelope",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::tests::remote_e2e::gateway_error_and_malformed_frames_surface_cleanly",
+      "file": "crates/vayren-remote-client/tests/remote_e2e.rs",
+      "kind": "fn",
+      "language": "RUST",
+      "line": 433,
+      "module": "crates/vayren-remote-client",
+      "name": "gateway_error_and_malformed_frames_surface_cleanly",
+      "public": false,
+      "qualified": "crates::vayren-remote-client::tests::remote_e2e::gateway_error_and_malformed_frames_surface_cleanly",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::tests::remote_e2e::handshake_hello_welcome_snapshot",
+      "file": "crates/vayren-remote-client/tests/remote_e2e.rs",
+      "kind": "fn",
+      "language": "RUST",
+      "line": 252,
+      "module": "crates/vayren-remote-client",
+      "name": "handshake_hello_welcome_snapshot",
+      "public": false,
+      "qualified": "crates::vayren-remote-client::tests::remote_e2e::handshake_hello_welcome_snapshot",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::tests::remote_e2e::next_of",
+      "file": "crates/vayren-remote-client/tests/remote_e2e.rs",
+      "kind": "fn",
+      "language": "RUST",
+      "line": 247,
+      "module": "crates/vayren-remote-client",
+      "name": "next_of",
+      "public": false,
+      "qualified": "crates::vayren-remote-client::tests::remote_e2e::next_of",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::tests::remote_e2e::resume_replays_only_missed_events",
+      "file": "crates/vayren-remote-client/tests/remote_e2e.rs",
+      "kind": "fn",
+      "language": "RUST",
+      "line": 312,
+      "module": "crates/vayren-remote-client",
+      "name": "resume_replays_only_missed_events",
+      "public": false,
+      "qualified": "crates::vayren-remote-client::tests::remote_e2e::resume_replays_only_missed_events",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::tests::remote_e2e::run_fake",
+      "file": "crates/vayren-remote-client/tests/remote_e2e.rs",
+      "kind": "fn",
+      "language": "RUST",
+      "line": 52,
+      "module": "crates/vayren-remote-client",
+      "name": "run_fake",
+      "public": false,
+      "qualified": "crates::vayren-remote-client::tests::remote_e2e::run_fake",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::tests::remote_e2e::snapshot_sections",
+      "file": "crates/vayren-remote-client/tests/remote_e2e.rs",
+      "kind": "fn",
+      "language": "RUST",
+      "line": 42,
+      "module": "crates/vayren-remote-client",
+      "name": "snapshot_sections",
+      "public": false,
+      "qualified": "crates::vayren-remote-client::tests::remote_e2e::snapshot_sections",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::tests::remote_e2e::stale_cursor_triggers_resync_snapshot",
+      "file": "crates/vayren-remote-client/tests/remote_e2e.rs",
+      "kind": "fn",
+      "language": "RUST",
+      "line": 354,
+      "module": "crates/vayren-remote-client",
+      "name": "stale_cursor_triggers_resync_snapshot",
+      "public": false,
+      "qualified": "crates::vayren-remote-client::tests::remote_e2e::stale_cursor_triggers_resync_snapshot",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::tests::remote_e2e::start_fake",
+      "file": "crates/vayren-remote-client/tests/remote_e2e.rs",
+      "kind": "fn",
+      "language": "RUST",
+      "line": 239,
+      "module": "crates/vayren-remote-client",
+      "name": "start_fake",
+      "public": false,
+      "qualified": "crates::vayren-remote-client::tests::remote_e2e::start_fake",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-remote-client::tests::remote_e2e::streams_arrive_in_sequence_order",
+      "file": "crates/vayren-remote-client/tests/remote_e2e.rs",
+      "kind": "fn",
+      "language": "RUST",
+      "line": 285,
+      "module": "crates/vayren-remote-client",
+      "name": "streams_arrive_in_sequence_order",
+      "public": false,
+      "qualified": "crates::vayren-remote-client::tests::remote_e2e::streams_arrive_in_sequence_order",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
       "dotted": "crates::vayren-research-view::build::main",
       "file": "crates/vayren-research-view/build.rs",
       "kind": "fn",
@@ -37961,7 +39196,7 @@
       "file": "crates/vayren-shell/src/lib.rs",
       "kind": "mod",
       "language": "RUST_SLINT",
-      "line": 43,
+      "line": 45,
       "module": "crates/vayren-shell",
       "name": "live_harness_ui",
       "public": true,
@@ -38032,11 +39267,41 @@
       "called_by": [],
       "callers_complete": false,
       "calls": [],
+      "dotted": "crates::vayren-shell::src::lib::remote_live",
+      "file": "crates/vayren-shell/src/lib.rs",
+      "kind": "mod",
+      "language": "RUST_SLINT",
+      "line": 23,
+      "module": "crates/vayren-shell",
+      "name": "remote_live",
+      "public": true,
+      "qualified": "crates::vayren-shell::src::lib::remote_live",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-shell::src::lib::remote_source",
+      "file": "crates/vayren-shell/src/lib.rs",
+      "kind": "mod",
+      "language": "RUST_SLINT",
+      "line": 24,
+      "module": "crates/vayren-shell",
+      "name": "remote_source",
+      "public": true,
+      "qualified": "crates::vayren-shell::src::lib::remote_source",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
       "dotted": "crates::vayren-shell::src::lib::research_harness_ui",
       "file": "crates/vayren-shell/src/lib.rs",
       "kind": "mod",
       "language": "RUST_SLINT",
-      "line": 35,
+      "line": 37,
       "module": "crates/vayren-shell",
       "name": "research_harness_ui",
       "public": true,
@@ -38051,7 +39316,7 @@
       "file": "crates/vayren-shell/src/lib.rs",
       "kind": "mod",
       "language": "RUST_SLINT",
-      "line": 23,
+      "line": 25,
       "module": "crates/vayren-shell",
       "name": "shell",
       "public": true,
@@ -38152,11 +39417,26 @@
       "called_by": [],
       "callers_complete": false,
       "calls": [],
+      "dotted": "crates::vayren-shell::src::main::run_remote_ui",
+      "file": "crates/vayren-shell/src/main.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 1326,
+      "module": "crates/vayren-shell",
+      "name": "run_remote_ui",
+      "public": false,
+      "qualified": "crates::vayren-shell::src::main::run_remote_ui",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
       "dotted": "crates::vayren-shell::src::main::tests",
       "file": "crates/vayren-shell/src/main.rs",
       "kind": "mod",
       "language": "RUST_SLINT",
-      "line": 1293,
+      "line": 1442,
       "module": "crates/vayren-shell",
       "name": "tests",
       "public": false,
@@ -38896,6 +40176,351 @@
       "name": "tests",
       "public": false,
       "qualified": "crates::vayren-shell::src::python_bridge::tests",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-shell::src::remote_live::HANDSHAKE_TIMEOUT",
+      "file": "crates/vayren-shell/src/remote_live.rs",
+      "kind": "const",
+      "language": "RUST_SLINT",
+      "line": 49,
+      "module": "crates/vayren-shell",
+      "name": "HANDSHAKE_TIMEOUT",
+      "public": true,
+      "qualified": "crates::vayren-shell::src::remote_live::HANDSHAKE_TIMEOUT",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-shell::src::remote_live::ORDER_STREAM_GATE",
+      "file": "crates/vayren-shell/src/remote_live.rs",
+      "kind": "const",
+      "language": "RUST_SLINT",
+      "line": 58,
+      "module": "crates/vayren-shell",
+      "name": "ORDER_STREAM_GATE",
+      "public": true,
+      "qualified": "crates::vayren-shell::src::remote_live::ORDER_STREAM_GATE",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-shell::src::remote_live::PUMP_IDLE_TIMEOUT",
+      "file": "crates/vayren-shell/src/remote_live.rs",
+      "kind": "const",
+      "language": "RUST_SLINT",
+      "line": 52,
+      "module": "crates/vayren-shell",
+      "name": "PUMP_IDLE_TIMEOUT",
+      "public": true,
+      "qualified": "crates::vayren-shell::src::remote_live::PUMP_IDLE_TIMEOUT",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-shell::src::remote_live::REMOTE_DEFAULT_URL",
+      "file": "crates/vayren-shell/src/remote_live.rs",
+      "kind": "const",
+      "language": "RUST_SLINT",
+      "line": 43,
+      "module": "crates/vayren-shell",
+      "name": "REMOTE_DEFAULT_URL",
+      "public": true,
+      "qualified": "crates::vayren-shell::src::remote_live::REMOTE_DEFAULT_URL",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-shell::src::remote_live::REMOTE_EVENT_CAP",
+      "file": "crates/vayren-shell/src/remote_live.rs",
+      "kind": "const",
+      "language": "RUST_SLINT",
+      "line": 55,
+      "module": "crates/vayren-shell",
+      "name": "REMOTE_EVENT_CAP",
+      "public": true,
+      "qualified": "crates::vayren-shell::src::remote_live::REMOTE_EVENT_CAP",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-shell::src::remote_live::REMOTE_URL_ENV_VAR",
+      "file": "crates/vayren-shell/src/remote_live.rs",
+      "kind": "const",
+      "language": "RUST_SLINT",
+      "line": 46,
+      "module": "crates/vayren-shell",
+      "name": "REMOTE_URL_ENV_VAR",
+      "public": true,
+      "qualified": "crates::vayren-shell::src::remote_live::REMOTE_URL_ENV_VAR",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-shell::src::remote_live::RemoteUiUpdate",
+      "file": "crates/vayren-shell/src/remote_live.rs",
+      "kind": "enum",
+      "language": "RUST_SLINT",
+      "line": 381,
+      "module": "crates/vayren-shell",
+      "name": "RemoteUiUpdate",
+      "public": true,
+      "qualified": "crates::vayren-shell::src::remote_live::RemoteUiUpdate",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-shell::src::remote_live::STOP_PROTECTION_LINE",
+      "file": "crates/vayren-shell/src/remote_live.rs",
+      "kind": "const",
+      "language": "RUST_SLINT",
+      "line": 61,
+      "module": "crates/vayren-shell",
+      "name": "STOP_PROTECTION_LINE",
+      "public": true,
+      "qualified": "crates::vayren-shell::src::remote_live::STOP_PROTECTION_LINE",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-shell::src::remote_live::apply_remote_sections",
+      "file": "crates/vayren-shell/src/remote_live.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 118,
+      "module": "crates/vayren-shell",
+      "name": "apply_remote_sections",
+      "public": true,
+      "qualified": "crates::vayren-shell::src::remote_live::apply_remote_sections",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-shell::src::remote_live::init_remote_state",
+      "file": "crates/vayren-shell/src/remote_live.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 329,
+      "module": "crates/vayren-shell",
+      "name": "init_remote_state",
+      "public": true,
+      "qualified": "crates::vayren-shell::src::remote_live::init_remote_state",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-shell::src::remote_live::initial_connect",
+      "file": "crates/vayren-shell/src/remote_live.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 391,
+      "module": "crates/vayren-shell",
+      "name": "initial_connect",
+      "public": true,
+      "qualified": "crates::vayren-shell::src::remote_live::initial_connect",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-shell::src::remote_live::mark_link",
+      "file": "crates/vayren-shell/src/remote_live.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 360,
+      "module": "crates/vayren-shell",
+      "name": "mark_link",
+      "public": true,
+      "qualified": "crates::vayren-shell::src::remote_live::mark_link",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-shell::src::remote_live::num_at",
+      "file": "crates/vayren-shell/src/remote_live.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 107,
+      "module": "crates/vayren-shell",
+      "name": "num_at",
+      "public": false,
+      "qualified": "crates::vayren-shell::src::remote_live::num_at",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-shell::src::remote_live::push_remote_event",
+      "file": "crates/vayren-shell/src/remote_live.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 302,
+      "module": "crates/vayren-shell",
+      "name": "push_remote_event",
+      "public": true,
+      "qualified": "crates::vayren-shell::src::remote_live::push_remote_event",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-shell::src::remote_live::remote_ui_url_from_argv",
+      "file": "crates/vayren-shell/src/remote_live.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 65,
+      "module": "crates/vayren-shell",
+      "name": "remote_ui_url_from_argv",
+      "public": true,
+      "qualified": "crates::vayren-shell::src::remote_live::remote_ui_url_from_argv",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-shell::src::remote_live::remote_url_default",
+      "file": "crates/vayren-shell/src/remote_live.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 88,
+      "module": "crates/vayren-shell",
+      "name": "remote_url_default",
+      "public": false,
+      "qualified": "crates::vayren-shell::src::remote_live::remote_url_default",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-shell::src::remote_live::section",
+      "file": "crates/vayren-shell/src/remote_live.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 95,
+      "module": "crates/vayren-shell",
+      "name": "section",
+      "public": false,
+      "qualified": "crates::vayren-shell::src::remote_live::section",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-shell::src::remote_live::spawn_remote_pump",
+      "file": "crates/vayren-shell/src/remote_live.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 416,
+      "module": "crates/vayren-shell",
+      "name": "spawn_remote_pump",
+      "public": true,
+      "qualified": "crates::vayren-shell::src::remote_live::spawn_remote_pump",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-shell::src::remote_live::tests",
+      "file": "crates/vayren-shell/src/remote_live.rs",
+      "kind": "mod",
+      "language": "RUST_SLINT",
+      "line": 506,
+      "module": "crates/vayren-shell",
+      "name": "tests",
+      "public": false,
+      "qualified": "crates::vayren-shell::src::remote_live::tests",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-shell::src::remote_live::text_at",
+      "file": "crates/vayren-shell/src/remote_live.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 99,
+      "module": "crates/vayren-shell",
+      "name": "text_at",
+      "public": false,
+      "qualified": "crates::vayren-shell::src::remote_live::text_at",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-shell::src::remote_source::remote_url_from_argv",
+      "file": "crates/vayren-shell/src/remote_source.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 17,
+      "module": "crates/vayren-shell",
+      "name": "remote_url_from_argv",
+      "public": true,
+      "qualified": "crates::vayren-shell::src::remote_source::remote_url_from_argv",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-shell::src::remote_source::run_remote_probe",
+      "file": "crates/vayren-shell/src/remote_source.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 33,
+      "module": "crates/vayren-shell",
+      "name": "run_remote_probe",
+      "public": true,
+      "qualified": "crates::vayren-shell::src::remote_source::run_remote_probe",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-shell::src::remote_source::tests",
+      "file": "crates/vayren-shell/src/remote_source.rs",
+      "kind": "mod",
+      "language": "RUST_SLINT",
+      "line": 93,
+      "module": "crates/vayren-shell",
+      "name": "tests",
+      "public": false,
+      "qualified": "crates::vayren-shell::src::remote_source::tests",
       "tests": []
     },
     {
@@ -51291,6 +52916,2740 @@
       "name": "test_seconds_of_contract",
       "public": true,
       "qualified": "market.tests.test_native_timeframe:test_seconds_of_contract",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "remote.auth:load_token_map",
+        "remote.runner:main",
+        "remote.tests.test_auth:test_blank_and_whitespace_tokens_ignored",
+        "remote.tests.test_auth:test_missing_tokens_refuse_to_configure",
+        "remote.tests.test_auth:test_short_tokens_are_dropped_and_fail_closed",
+        "remote.tests.test_auth:test_token_file_bad_line_fails_closed",
+        "remote.tests.test_auth:test_token_file_missing_fails_closed"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.auth.AuthConfigError",
+      "file": "src/remote/auth.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 41,
+      "module": "src/remote",
+      "name": "AuthConfigError",
+      "public": true,
+      "qualified": "remote.auth:AuthConfigError",
+      "tests": [
+        "src/remote/tests/test_auth.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.server:_Connection",
+        "remote.tests.test_auth:test_tracker_records_role_on_success",
+        "remote.tests.test_auth:test_tracker_success_and_attempt_cap"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "remote.auth:TokenEntry"
+      ],
+      "dotted": "remote.auth.AuthTracker",
+      "file": "src/remote/auth.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 123,
+      "module": "src/remote",
+      "name": "AuthTracker",
+      "public": true,
+      "qualified": "remote.auth:AuthTracker",
+      "tests": [
+        "src/remote/tests/test_auth.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.auth:_checked_token",
+        "remote.auth:load_token_map",
+        "remote.server:RemoteServer",
+        "remote.tests.test_auth:test_load_tokens_from_env",
+        "remote.tests.test_auth:test_roles_gate_commands",
+        "remote.tests.test_auth:test_token_file_loading",
+        "remote.tests.test_auth:test_tracker_records_role_on_success"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.auth.RemoteRole",
+      "file": "src/remote/auth.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 29,
+      "module": "src/remote",
+      "name": "RemoteRole",
+      "public": true,
+      "qualified": "remote.auth:RemoteRole",
+      "tests": [
+        "src/remote/tests/test_auth.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.auth:AuthTracker",
+        "remote.auth:_checked_token",
+        "remote.auth:load_token_map",
+        "remote.auth:verify_token",
+        "remote.server:RemoteServer"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.auth.TokenEntry",
+      "file": "src/remote/auth.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 46,
+      "module": "src/remote",
+      "name": "TokenEntry",
+      "public": true,
+      "qualified": "remote.auth:TokenEntry",
+      "tests": [
+        "src/remote/tests/test_auth.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.auth:load_token_map"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "remote.auth:RemoteRole",
+        "remote.auth:TokenEntry"
+      ],
+      "dotted": "remote.auth._checked_token",
+      "file": "src/remote/auth.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 54,
+      "module": "src/remote",
+      "name": "_checked_token",
+      "public": false,
+      "qualified": "remote.auth:_checked_token",
+      "tests": [
+        "src/remote/tests/test_auth.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.runner:main",
+        "remote.tests.test_auth:test_blank_and_whitespace_tokens_ignored",
+        "remote.tests.test_auth:test_load_tokens_from_env",
+        "remote.tests.test_auth:test_missing_tokens_refuse_to_configure",
+        "remote.tests.test_auth:test_short_tokens_are_dropped_and_fail_closed",
+        "remote.tests.test_auth:test_token_file_bad_line_fails_closed",
+        "remote.tests.test_auth:test_token_file_loading",
+        "remote.tests.test_auth:test_token_file_missing_fails_closed",
+        "remote.tests.test_auth:test_tracker_records_role_on_success",
+        "remote.tests.test_auth:test_verify_token_match_miss_and_empty"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "remote.auth:AuthConfigError",
+        "remote.auth:RemoteRole",
+        "remote.auth:TokenEntry",
+        "remote.auth:_checked_token"
+      ],
+      "dotted": "remote.auth.load_token_map",
+      "file": "src/remote/auth.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 64,
+      "module": "src/remote",
+      "name": "load_token_map",
+      "public": true,
+      "qualified": "remote.auth:load_token_map",
+      "tests": [
+        "src/remote/tests/test_auth.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.server:RemoteServer",
+        "remote.tests.test_auth:test_tracker_records_role_on_success",
+        "remote.tests.test_auth:test_verify_token_match_miss_and_empty"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "remote.auth:TokenEntry"
+      ],
+      "dotted": "remote.auth.verify_token",
+      "file": "src/remote/auth.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 112,
+      "module": "src/remote",
+      "name": "verify_token",
+      "public": true,
+      "qualified": "remote.auth:verify_token",
+      "tests": [
+        "src/remote/tests/test_auth.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.client:RemoteClient",
+        "remote.tests.test_client:make_client"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.client.ClientConfig",
+      "file": "src/remote/client.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 59,
+      "module": "src/remote",
+      "name": "ClientConfig",
+      "public": true,
+      "qualified": "remote.client:ClientConfig",
+      "tests": [
+        "src/remote/tests/test_client.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.client:RemoteClient",
+        "remote.client:load_client_token",
+        "remote.tests.test_client:test_token_hygiene"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.client.ClientConfigError",
+      "file": "src/remote/client.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 54,
+      "module": "src/remote",
+      "name": "ClientConfigError",
+      "public": true,
+      "qualified": "remote.client:ClientConfigError",
+      "tests": [
+        "src/remote/tests/test_client.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.tests.test_client:make_client",
+        "remote.tests.test_client:test_token_hygiene"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "remote.client:ClientConfig",
+        "remote.client:ClientConfigError",
+        "remote.client:_client_message",
+        "remote.client:_recv_exact",
+        "remote.client:_send_frame",
+        "remote.client:new_request_id",
+        "remote.protocol:decode_message"
+      ],
+      "dotted": "remote.client.RemoteClient",
+      "file": "src/remote/client.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 129,
+      "module": "src/remote",
+      "name": "RemoteClient",
+      "public": true,
+      "qualified": "remote.client:RemoteClient",
+      "tests": [
+        "src/remote/tests/test_client.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.client:RemoteClient"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "remote.protocol:Envelope"
+      ],
+      "dotted": "remote.client._client_message",
+      "file": "src/remote/client.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 123,
+      "module": "src/remote",
+      "name": "_client_message",
+      "public": false,
+      "qualified": "remote.client:_client_message",
+      "tests": [
+        "src/remote/tests/test_client.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.client:RemoteClient"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.client._recv_exact",
+      "file": "src/remote/client.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 111,
+      "module": "src/remote",
+      "name": "_recv_exact",
+      "public": false,
+      "qualified": "remote.client:_recv_exact",
+      "tests": [
+        "src/remote/tests/test_client.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.client:RemoteClient"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.client._send_frame",
+      "file": "src/remote/client.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 100,
+      "module": "src/remote",
+      "name": "_send_frame",
+      "public": false,
+      "qualified": "remote.client:_send_frame",
+      "tests": [
+        "src/remote/tests/test_client.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.tests.test_client:test_token_hygiene"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "remote.client:ClientConfigError"
+      ],
+      "dotted": "remote.client.load_client_token",
+      "file": "src/remote/client.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 71,
+      "module": "src/remote",
+      "name": "load_client_token",
+      "public": true,
+      "qualified": "remote.client:load_client_token",
+      "tests": [
+        "src/remote/tests/test_client.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.client:RemoteClient",
+        "remote.tests.test_client:test_token_hygiene"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.client.new_request_id",
+      "file": "src/remote/client.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 95,
+      "module": "src/remote",
+      "name": "new_request_id",
+      "public": true,
+      "qualified": "remote.client:new_request_id",
+      "tests": [
+        "src/remote/tests/test_client.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.gateway:HeadlessGateway",
+        "remote.server:RemoteServer",
+        "remote.tests.test_client:FakeGateway",
+        "remote.tests.test_gateway:_FakeBackend",
+        "remote.tests.test_server:FakeGateway"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.gateway.BackendGateway",
+      "file": "src/remote/gateway.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 17,
+      "module": "src/remote",
+      "name": "BackendGateway",
+      "public": true,
+      "qualified": "remote.gateway:BackendGateway",
+      "tests": [
+        "src/remote/tests/test_gateway.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.runner:main",
+        "remote.tests.test_gateway:test_headless_gateway_close_is_safe_without_manager",
+        "remote.tests.test_gateway:test_headless_gateway_delegates_to_headless"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "app.headless:_live_action",
+        "app.headless:_trading_service_snapshot",
+        "app.services.broker_manager:BrokerManager",
+        "remote.gateway:BackendGateway"
+      ],
+      "dotted": "remote.gateway.HeadlessGateway",
+      "file": "src/remote/gateway.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 73,
+      "module": "src/remote",
+      "name": "HeadlessGateway",
+      "public": true,
+      "qualified": "remote.gateway:HeadlessGateway",
+      "tests": [
+        "src/remote/tests/test_gateway.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.gateway:new_entries",
+        "remote.server:entry_tail_signature",
+        "remote.tests.test_gateway:test_entry_signature_stable"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.gateway.entry_signature",
+      "file": "src/remote/gateway.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 32,
+      "module": "src/remote",
+      "name": "entry_signature",
+      "public": true,
+      "qualified": "remote.gateway:entry_signature",
+      "tests": [
+        "src/remote/tests/test_gateway.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.server:RemoteServer",
+        "remote.tests.test_gateway:test_new_entries_empty_previous_resyncs_bounded",
+        "remote.tests.test_gateway:test_new_entries_empty_when_nothing_new",
+        "remote.tests.test_gateway:test_new_entries_overlap_lost_resyncs",
+        "remote.tests.test_gateway:test_new_entries_returns_only_fresh_suffix"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "remote.gateway:entry_signature"
+      ],
+      "dotted": "remote.gateway.new_entries",
+      "file": "src/remote/gateway.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 44,
+      "module": "src/remote",
+      "name": "new_entries",
+      "public": true,
+      "qualified": "remote.gateway:new_entries",
+      "tests": [
+        "src/remote/tests/test_gateway.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.client:_client_message",
+        "remote.protocol:decode_message",
+        "remote.protocol:make_envelope",
+        "remote.tests.test_protocol:test_rejects_bad_payload_and_seq"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "remote.protocol:ProtocolError",
+        "remote.protocol:utcnow_iso"
+      ],
+      "dotted": "remote.protocol.Envelope",
+      "file": "src/remote/protocol.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 66,
+      "module": "src/remote",
+      "name": "Envelope",
+      "public": true,
+      "qualified": "remote.protocol:Envelope",
+      "tests": [
+        "src/remote/tests/test_protocol.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.protocol:Envelope",
+        "remote.protocol:decode_message",
+        "remote.protocol:encode_message",
+        "remote.protocol:make_envelope",
+        "remote.server:RemoteServer",
+        "remote.server:perform_handshake",
+        "remote.server:read_frame",
+        "remote.tests.test_protocol:test_make_envelope_rejects_unknown_server_type",
+        "remote.tests.test_protocol:test_rejects_bad_payload_and_seq",
+        "remote.tests.test_protocol:test_rejects_invalid_json",
+        "remote.tests.test_protocol:test_rejects_non_object",
+        "remote.tests.test_protocol:test_rejects_non_utf8",
+        "remote.tests.test_protocol:test_rejects_oversize_message",
+        "remote.tests.test_protocol:test_rejects_server_type_from_client",
+        "remote.tests.test_protocol:test_rejects_unknown_type",
+        "remote.tests.test_protocol:test_rejects_unsupported_version"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.protocol.ProtocolError",
+      "file": "src/remote/protocol.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 128,
+      "module": "src/remote",
+      "name": "ProtocolError",
+      "public": true,
+      "qualified": "remote.protocol:ProtocolError",
+      "tests": [
+        "src/remote/tests/test_protocol.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.client:RemoteClient",
+        "remote.server:RemoteServer",
+        "remote.tests.test_protocol:test_envelope_roundtrip_client_message",
+        "remote.tests.test_protocol:test_envelope_roundtrip_server_message_with_seq",
+        "remote.tests.test_protocol:test_rejects_invalid_json",
+        "remote.tests.test_protocol:test_rejects_non_object",
+        "remote.tests.test_protocol:test_rejects_non_utf8",
+        "remote.tests.test_protocol:test_rejects_oversize_message",
+        "remote.tests.test_protocol:test_rejects_server_type_from_client",
+        "remote.tests.test_protocol:test_rejects_unknown_type",
+        "remote.tests.test_protocol:test_rejects_unsupported_version"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "remote.protocol:Envelope",
+        "remote.protocol:ProtocolError"
+      ],
+      "dotted": "remote.protocol.decode_message",
+      "file": "src/remote/protocol.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 160,
+      "module": "src/remote",
+      "name": "decode_message",
+      "public": true,
+      "qualified": "remote.protocol:decode_message",
+      "tests": [
+        "src/remote/tests/test_protocol.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.server:RemoteServer",
+        "remote.tests.test_protocol:test_envelope_roundtrip_client_message",
+        "remote.tests.test_protocol:test_envelope_roundtrip_server_message_with_seq"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "remote.protocol:ProtocolError"
+      ],
+      "dotted": "remote.protocol.encode_message",
+      "file": "src/remote/protocol.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 152,
+      "module": "src/remote",
+      "name": "encode_message",
+      "public": true,
+      "qualified": "remote.protocol:encode_message",
+      "tests": [
+        "src/remote/tests/test_protocol.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.server:RemoteServer",
+        "remote.tests.test_protocol:test_error_envelope_shape_and_codes"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "remote.protocol:make_envelope"
+      ],
+      "dotted": "remote.protocol.error_envelope",
+      "file": "src/remote/protocol.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 175,
+      "module": "src/remote",
+      "name": "error_envelope",
+      "public": true,
+      "qualified": "remote.protocol:error_envelope",
+      "tests": [
+        "src/remote/tests/test_protocol.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.protocol:error_envelope",
+        "remote.server:RemoteServer",
+        "remote.tests.test_protocol:test_envelope_roundtrip_server_message_with_seq",
+        "remote.tests.test_protocol:test_make_envelope_rejects_unknown_server_type",
+        "remote.tests.test_protocol:test_wire_object_carries_metadata"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "remote.protocol:Envelope",
+        "remote.protocol:ProtocolError"
+      ],
+      "dotted": "remote.protocol.make_envelope",
+      "file": "src/remote/protocol.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 137,
+      "module": "src/remote",
+      "name": "make_envelope",
+      "public": true,
+      "qualified": "remote.protocol:make_envelope",
+      "tests": [
+        "src/remote/tests/test_protocol.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.protocol:Envelope",
+        "remote.server:RemoteServer"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.protocol.utcnow_iso",
+      "file": "src/remote/protocol.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 60,
+      "module": "src/remote",
+      "name": "utcnow_iso",
+      "public": true,
+      "qualified": "remote.protocol:utcnow_iso",
+      "tests": [
+        "src/remote/tests/test_protocol.py"
+      ]
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.runner._bootstrap_src_path",
+      "file": "src/remote/runner.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 29,
+      "module": "src/remote",
+      "name": "_bootstrap_src_path",
+      "public": false,
+      "qualified": "remote.runner:_bootstrap_src_path",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.auth:AuthConfigError",
+        "remote.auth:load_token_map",
+        "remote.gateway:HeadlessGateway",
+        "remote.runner:parse_args",
+        "remote.server:ConfigError",
+        "remote.server:RemoteServer",
+        "remote.server:config_from_env"
+      ],
+      "dotted": "remote.runner.main",
+      "file": "src/remote/runner.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 57,
+      "module": "src/remote",
+      "name": "main",
+      "public": true,
+      "qualified": "remote.runner:main",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "remote.runner:main"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.runner.parse_args",
+      "file": "src/remote/runner.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 46,
+      "module": "src/remote",
+      "name": "parse_args",
+      "public": true,
+      "qualified": "remote.runner:parse_args",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "remote.runner:main",
+        "remote.server:RemoteConfig",
+        "remote.tests.test_server:test_plaintext_non_loopback_refused"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.server.ConfigError",
+      "file": "src/remote/server.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 82,
+      "module": "src/remote",
+      "name": "ConfigError",
+      "public": true,
+      "qualified": "remote.server:ConfigError",
+      "tests": [
+        "src/remote/tests/test_server.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.server:RemoteServer",
+        "remote.server:config_from_env",
+        "remote.tests.test_client:live_server",
+        "remote.tests.test_server:start_server",
+        "remote.tests.test_server:test_plaintext_non_loopback_refused"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "remote.server:ConfigError"
+      ],
+      "dotted": "remote.server.RemoteConfig",
+      "file": "src/remote/server.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 87,
+      "module": "src/remote",
+      "name": "RemoteConfig",
+      "public": true,
+      "qualified": "remote.server:RemoteConfig",
+      "tests": [
+        "src/remote/tests/test_server.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.runner:main",
+        "remote.tests.test_client:live_server",
+        "remote.tests.test_client:make_client",
+        "remote.tests.test_server:authed_client",
+        "remote.tests.test_server:start_server",
+        "remote.tests.test_server:test_plaintext_non_loopback_refused"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "remote.auth:RemoteRole",
+        "remote.auth:TokenEntry",
+        "remote.auth:verify_token",
+        "remote.gateway:BackendGateway",
+        "remote.gateway:new_entries",
+        "remote.protocol:ProtocolError",
+        "remote.protocol:decode_message",
+        "remote.protocol:encode_message",
+        "remote.protocol:error_envelope",
+        "remote.protocol:make_envelope",
+        "remote.protocol:utcnow_iso",
+        "remote.server:RemoteConfig",
+        "remote.server:_Connection",
+        "remote.server:_IdempotentResult",
+        "remote.server:_stable_hash",
+        "remote.server:perform_handshake",
+        "remote.server:read_frame",
+        "remote.server:send_text",
+        "remote.server:write_frame",
+        "remote.snapshot:build_snapshot",
+        "remote.snapshot:project_event"
+      ],
+      "dotted": "remote.server.RemoteServer",
+      "file": "src/remote/server.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 292,
+      "module": "src/remote",
+      "name": "RemoteServer",
+      "public": true,
+      "qualified": "remote.server:RemoteServer",
+      "tests": [
+        "src/remote/tests/test_server.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.server:RemoteServer"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "remote.auth:AuthTracker"
+      ],
+      "dotted": "remote.server._Connection",
+      "file": "src/remote/server.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 268,
+      "module": "src/remote",
+      "name": "_Connection",
+      "public": false,
+      "qualified": "remote.server:_Connection",
+      "tests": [
+        "src/remote/tests/test_server.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.server:RemoteServer"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.server._IdempotentResult",
+      "file": "src/remote/server.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 287,
+      "module": "src/remote",
+      "name": "_IdempotentResult",
+      "public": false,
+      "qualified": "remote.server:_IdempotentResult",
+      "tests": [
+        "src/remote/tests/test_server.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.server:perform_handshake"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.server._accept_key",
+      "file": "src/remote/server.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 158,
+      "module": "src/remote",
+      "name": "_accept_key",
+      "public": false,
+      "qualified": "remote.server:_accept_key",
+      "tests": [
+        "src/remote/tests/test_server.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.server:read_frame"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.server._recv_exact",
+      "file": "src/remote/server.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 163,
+      "module": "src/remote",
+      "name": "_recv_exact",
+      "public": false,
+      "qualified": "remote.server:_recv_exact",
+      "tests": [
+        "src/remote/tests/test_server.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.server:RemoteServer"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.server._stable_hash",
+      "file": "src/remote/server.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 852,
+      "module": "src/remote",
+      "name": "_stable_hash",
+      "public": false,
+      "qualified": "remote.server:_stable_hash",
+      "tests": [
+        "src/remote/tests/test_server.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.runner:main"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "remote.server:RemoteConfig"
+      ],
+      "dotted": "remote.server.config_from_env",
+      "file": "src/remote/server.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 119,
+      "module": "src/remote",
+      "name": "config_from_env",
+      "public": true,
+      "qualified": "remote.server:config_from_env",
+      "tests": [
+        "src/remote/tests/test_server.py"
+      ]
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.gateway:entry_signature"
+      ],
+      "dotted": "remote.server.entry_tail_signature",
+      "file": "src/remote/server.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 860,
+      "module": "src/remote",
+      "name": "entry_tail_signature",
+      "public": true,
+      "qualified": "remote.server:entry_tail_signature",
+      "tests": [
+        "src/remote/tests/test_server.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.server:RemoteServer"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "remote.protocol:ProtocolError",
+        "remote.server:_accept_key"
+      ],
+      "dotted": "remote.server.perform_handshake",
+      "file": "src/remote/server.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 219,
+      "module": "src/remote",
+      "name": "perform_handshake",
+      "public": true,
+      "qualified": "remote.server:perform_handshake",
+      "tests": [
+        "src/remote/tests/test_server.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.server:RemoteServer"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "remote.protocol:ProtocolError",
+        "remote.server:_recv_exact"
+      ],
+      "dotted": "remote.server.read_frame",
+      "file": "src/remote/server.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 175,
+      "module": "src/remote",
+      "name": "read_frame",
+      "public": true,
+      "qualified": "remote.server:read_frame",
+      "tests": [
+        "src/remote/tests/test_server.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.server:RemoteServer"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "remote.server:write_frame"
+      ],
+      "dotted": "remote.server.send_text",
+      "file": "src/remote/server.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 215,
+      "module": "src/remote",
+      "name": "send_text",
+      "public": true,
+      "qualified": "remote.server:send_text",
+      "tests": [
+        "src/remote/tests/test_server.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.server:RemoteServer",
+        "remote.server:send_text"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.server.write_frame",
+      "file": "src/remote/server.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 202,
+      "module": "src/remote",
+      "name": "write_frame",
+      "public": true,
+      "qualified": "remote.server:write_frame",
+      "tests": [
+        "src/remote/tests/test_server.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.snapshot:scrub"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.snapshot._is_forbidden_key",
+      "file": "src/remote/snapshot.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 48,
+      "module": "src/remote",
+      "name": "_is_forbidden_key",
+      "public": false,
+      "qualified": "remote.snapshot:_is_forbidden_key",
+      "tests": [
+        "src/remote/tests/test_snapshot.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.snapshot:build_snapshot"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.snapshot._num",
+      "file": "src/remote/snapshot.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 64,
+      "module": "src/remote",
+      "name": "_num",
+      "public": false,
+      "qualified": "remote.snapshot:_num",
+      "tests": [
+        "src/remote/tests/test_snapshot.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.snapshot:build_snapshot"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.snapshot._recon_status",
+      "file": "src/remote/snapshot.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 97,
+      "module": "src/remote",
+      "name": "_recon_status",
+      "public": false,
+      "qualified": "remote.snapshot:_recon_status",
+      "tests": [
+        "src/remote/tests/test_snapshot.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.snapshot:build_snapshot"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.snapshot._stop_state",
+      "file": "src/remote/snapshot.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 110,
+      "module": "src/remote",
+      "name": "_stop_state",
+      "public": false,
+      "qualified": "remote.snapshot:_stop_state",
+      "tests": [
+        "src/remote/tests/test_snapshot.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.snapshot:build_snapshot"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.snapshot._strategy_status",
+      "file": "src/remote/snapshot.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 74,
+      "module": "src/remote",
+      "name": "_strategy_status",
+      "public": false,
+      "qualified": "remote.snapshot:_strategy_status",
+      "tests": [
+        "src/remote/tests/test_snapshot.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.server:RemoteServer",
+        "remote.tests.test_snapshot:test_kill_halted_running_maps_to_error",
+        "remote.tests.test_snapshot:test_no_vendor_or_secret_markers_on_wire",
+        "remote.tests.test_snapshot:test_non_dict_snapshot_is_honest",
+        "remote.tests.test_snapshot:test_position_without_stop_is_at_risk",
+        "remote.tests.test_snapshot:test_reconciliation_block_maps_to_required",
+        "remote.tests.test_snapshot:test_running_connected_snapshot",
+        "remote.tests.test_snapshot:test_snapshot_sections_present"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "remote.snapshot:_num",
+        "remote.snapshot:_recon_status",
+        "remote.snapshot:_stop_state",
+        "remote.snapshot:_strategy_status",
+        "remote.snapshot:scrub"
+      ],
+      "dotted": "remote.snapshot.build_snapshot",
+      "file": "src/remote/snapshot.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 144,
+      "module": "src/remote",
+      "name": "build_snapshot",
+      "public": true,
+      "qualified": "remote.snapshot:build_snapshot",
+      "tests": [
+        "src/remote/tests/test_snapshot.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.snapshot:project_event",
+        "remote.tests.test_snapshot:test_event_classification_table",
+        "remote.tests.test_snapshot:test_partial_fill_detected"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.snapshot.classify_event",
+      "file": "src/remote/snapshot.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 269,
+      "module": "src/remote",
+      "name": "classify_event",
+      "public": true,
+      "qualified": "remote.snapshot:classify_event",
+      "tests": [
+        "src/remote/tests/test_snapshot.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.server:RemoteServer",
+        "remote.tests.test_snapshot:test_project_event_shape_is_scrubbed"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "remote.snapshot:classify_event",
+        "remote.snapshot:scrub"
+      ],
+      "dotted": "remote.snapshot.project_event",
+      "file": "src/remote/snapshot.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 298,
+      "module": "src/remote",
+      "name": "project_event",
+      "public": true,
+      "qualified": "remote.snapshot:project_event",
+      "tests": [
+        "src/remote/tests/test_snapshot.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.snapshot:build_snapshot",
+        "remote.snapshot:project_event",
+        "remote.tests.test_snapshot:test_scrub_drops_credential_like_keys"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "remote.snapshot:_is_forbidden_key"
+      ],
+      "dotted": "remote.snapshot.scrub",
+      "file": "src/remote/snapshot.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 53,
+      "module": "src/remote",
+      "name": "scrub",
+      "public": true,
+      "qualified": "remote.snapshot:scrub",
+      "tests": [
+        "src/remote/tests/test_snapshot.py"
+      ]
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.auth:AuthConfigError",
+        "remote.auth:load_token_map"
+      ],
+      "dotted": "remote.tests.test_auth.test_blank_and_whitespace_tokens_ignored",
+      "file": "src/remote/tests/test_auth.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 33,
+      "module": "src/remote",
+      "name": "test_blank_and_whitespace_tokens_ignored",
+      "public": true,
+      "qualified": "remote.tests.test_auth:test_blank_and_whitespace_tokens_ignored",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.auth:RemoteRole",
+        "remote.auth:load_token_map"
+      ],
+      "dotted": "remote.tests.test_auth.test_load_tokens_from_env",
+      "file": "src/remote/tests/test_auth.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 17,
+      "module": "src/remote",
+      "name": "test_load_tokens_from_env",
+      "public": true,
+      "qualified": "remote.tests.test_auth:test_load_tokens_from_env",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.auth:AuthConfigError",
+        "remote.auth:load_token_map"
+      ],
+      "dotted": "remote.tests.test_auth.test_missing_tokens_refuse_to_configure",
+      "file": "src/remote/tests/test_auth.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 23,
+      "module": "src/remote",
+      "name": "test_missing_tokens_refuse_to_configure",
+      "public": true,
+      "qualified": "remote.tests.test_auth:test_missing_tokens_refuse_to_configure",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.auth:RemoteRole"
+      ],
+      "dotted": "remote.tests.test_auth.test_roles_gate_commands",
+      "file": "src/remote/tests/test_auth.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 68,
+      "module": "src/remote",
+      "name": "test_roles_gate_commands",
+      "public": true,
+      "qualified": "remote.tests.test_auth:test_roles_gate_commands",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.auth:AuthConfigError",
+        "remote.auth:load_token_map"
+      ],
+      "dotted": "remote.tests.test_auth.test_short_tokens_are_dropped_and_fail_closed",
+      "file": "src/remote/tests/test_auth.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 28,
+      "module": "src/remote",
+      "name": "test_short_tokens_are_dropped_and_fail_closed",
+      "public": true,
+      "qualified": "remote.tests.test_auth:test_short_tokens_are_dropped_and_fail_closed",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.auth:AuthConfigError",
+        "remote.auth:load_token_map"
+      ],
+      "dotted": "remote.tests.test_auth.test_token_file_bad_line_fails_closed",
+      "file": "src/remote/tests/test_auth.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 49,
+      "module": "src/remote",
+      "name": "test_token_file_bad_line_fails_closed",
+      "public": true,
+      "qualified": "remote.tests.test_auth:test_token_file_bad_line_fails_closed",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.auth:RemoteRole",
+        "remote.auth:load_token_map"
+      ],
+      "dotted": "remote.tests.test_auth.test_token_file_loading",
+      "file": "src/remote/tests/test_auth.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 38,
+      "module": "src/remote",
+      "name": "test_token_file_loading",
+      "public": true,
+      "qualified": "remote.tests.test_auth:test_token_file_loading",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.auth:AuthConfigError",
+        "remote.auth:load_token_map"
+      ],
+      "dotted": "remote.tests.test_auth.test_token_file_missing_fails_closed",
+      "file": "src/remote/tests/test_auth.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 56,
+      "module": "src/remote",
+      "name": "test_token_file_missing_fails_closed",
+      "public": true,
+      "qualified": "remote.tests.test_auth:test_token_file_missing_fails_closed",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.auth:AuthTracker",
+        "remote.auth:RemoteRole",
+        "remote.auth:load_token_map",
+        "remote.auth:verify_token"
+      ],
+      "dotted": "remote.tests.test_auth.test_tracker_records_role_on_success",
+      "file": "src/remote/tests/test_auth.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 83,
+      "module": "src/remote",
+      "name": "test_tracker_records_role_on_success",
+      "public": true,
+      "qualified": "remote.tests.test_auth:test_tracker_records_role_on_success",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.auth:AuthTracker"
+      ],
+      "dotted": "remote.tests.test_auth.test_tracker_success_and_attempt_cap",
+      "file": "src/remote/tests/test_auth.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 74,
+      "module": "src/remote",
+      "name": "test_tracker_success_and_attempt_cap",
+      "public": true,
+      "qualified": "remote.tests.test_auth:test_tracker_success_and_attempt_cap",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.auth:load_token_map",
+        "remote.auth:verify_token"
+      ],
+      "dotted": "remote.tests.test_auth.test_verify_token_match_miss_and_empty",
+      "file": "src/remote/tests/test_auth.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 61,
+      "module": "src/remote",
+      "name": "test_verify_token_match_miss_and_empty",
+      "public": true,
+      "qualified": "remote.tests.test_auth:test_verify_token_match_miss_and_empty",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "remote.tests.test_client:live_server"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "remote.gateway:BackendGateway",
+        "remote.tests.test_client:make_live"
+      ],
+      "dotted": "remote.tests.test_client.FakeGateway",
+      "file": "src/remote/tests/test_client.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 63,
+      "module": "src/remote",
+      "name": "FakeGateway",
+      "public": true,
+      "qualified": "remote.tests.test_client:FakeGateway",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "remote.tests.test_client:test_bad_token_rejected_without_snapshot",
+        "remote.tests.test_client:test_events_arrive_in_seq_order",
+        "remote.tests.test_client:test_hello_gets_welcome_and_snapshot",
+        "remote.tests.test_client:test_ping_pong",
+        "remote.tests.test_client:test_request_id_reuse_replays_cached_result",
+        "remote.tests.test_client:test_resubscribe_replays_from_last_seq",
+        "remote.tests.test_client:test_token_hygiene",
+        "remote.tests.test_client:test_unknown_command_rejected_without_backend_effect"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "remote.server:RemoteConfig",
+        "remote.server:RemoteServer",
+        "remote.tests.test_client:FakeGateway"
+      ],
+      "dotted": "remote.tests.test_client.live_server",
+      "file": "src/remote/tests/test_client.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 82,
+      "module": "src/remote",
+      "name": "live_server",
+      "public": true,
+      "qualified": "remote.tests.test_client:live_server",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "remote.tests.test_client:test_bad_token_rejected_without_snapshot",
+        "remote.tests.test_client:test_events_arrive_in_seq_order",
+        "remote.tests.test_client:test_hello_gets_welcome_and_snapshot",
+        "remote.tests.test_client:test_ping_pong",
+        "remote.tests.test_client:test_request_id_reuse_replays_cached_result",
+        "remote.tests.test_client:test_resubscribe_replays_from_last_seq",
+        "remote.tests.test_client:test_token_hygiene",
+        "remote.tests.test_client:test_unknown_command_rejected_without_backend_effect"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "remote.client:ClientConfig",
+        "remote.client:RemoteClient",
+        "remote.server:RemoteServer"
+      ],
+      "dotted": "remote.tests.test_client.make_client",
+      "file": "src/remote/tests/test_client.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 100,
+      "module": "src/remote",
+      "name": "make_client",
+      "public": true,
+      "qualified": "remote.tests.test_client:make_client",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "remote.tests.test_client:FakeGateway"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.tests.test_client.make_live",
+      "file": "src/remote/tests/test_client.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 32,
+      "module": "src/remote",
+      "name": "make_live",
+      "public": true,
+      "qualified": "remote.tests.test_client:make_live",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.tests.test_client:live_server",
+        "remote.tests.test_client:make_client"
+      ],
+      "dotted": "remote.tests.test_client.test_bad_token_rejected_without_snapshot",
+      "file": "src/remote/tests/test_client.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 129,
+      "module": "src/remote",
+      "name": "test_bad_token_rejected_without_snapshot",
+      "public": true,
+      "qualified": "remote.tests.test_client:test_bad_token_rejected_without_snapshot",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.tests.test_client:live_server",
+        "remote.tests.test_client:make_client"
+      ],
+      "dotted": "remote.tests.test_client.test_events_arrive_in_seq_order",
+      "file": "src/remote/tests/test_client.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 160,
+      "module": "src/remote",
+      "name": "test_events_arrive_in_seq_order",
+      "public": true,
+      "qualified": "remote.tests.test_client:test_events_arrive_in_seq_order",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.tests.test_client:live_server",
+        "remote.tests.test_client:make_client"
+      ],
+      "dotted": "remote.tests.test_client.test_hello_gets_welcome_and_snapshot",
+      "file": "src/remote/tests/test_client.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 116,
+      "module": "src/remote",
+      "name": "test_hello_gets_welcome_and_snapshot",
+      "public": true,
+      "qualified": "remote.tests.test_client:test_hello_gets_welcome_and_snapshot",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.tests.test_client:live_server",
+        "remote.tests.test_client:make_client"
+      ],
+      "dotted": "remote.tests.test_client.test_ping_pong",
+      "file": "src/remote/tests/test_client.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 144,
+      "module": "src/remote",
+      "name": "test_ping_pong",
+      "public": true,
+      "qualified": "remote.tests.test_client:test_ping_pong",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.tests.test_client:live_server",
+        "remote.tests.test_client:make_client"
+      ],
+      "dotted": "remote.tests.test_client.test_request_id_reuse_replays_cached_result",
+      "file": "src/remote/tests/test_client.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 248,
+      "module": "src/remote",
+      "name": "test_request_id_reuse_replays_cached_result",
+      "public": true,
+      "qualified": "remote.tests.test_client:test_request_id_reuse_replays_cached_result",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.tests.test_client:live_server",
+        "remote.tests.test_client:make_client"
+      ],
+      "dotted": "remote.tests.test_client.test_resubscribe_replays_from_last_seq",
+      "file": "src/remote/tests/test_client.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 193,
+      "module": "src/remote",
+      "name": "test_resubscribe_replays_from_last_seq",
+      "public": true,
+      "qualified": "remote.tests.test_client:test_resubscribe_replays_from_last_seq",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.client:ClientConfigError",
+        "remote.client:RemoteClient",
+        "remote.client:load_client_token",
+        "remote.client:new_request_id",
+        "remote.tests.test_client:live_server",
+        "remote.tests.test_client:make_client"
+      ],
+      "dotted": "remote.tests.test_client.test_token_hygiene",
+      "file": "src/remote/tests/test_client.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 266,
+      "module": "src/remote",
+      "name": "test_token_hygiene",
+      "public": true,
+      "qualified": "remote.tests.test_client:test_token_hygiene",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.tests.test_client:live_server",
+        "remote.tests.test_client:make_client"
+      ],
+      "dotted": "remote.tests.test_client.test_unknown_command_rejected_without_backend_effect",
+      "file": "src/remote/tests/test_client.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 233,
+      "module": "src/remote",
+      "name": "test_unknown_command_rejected_without_backend_effect",
+      "public": true,
+      "qualified": "remote.tests.test_client:test_unknown_command_rejected_without_backend_effect",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "remote.tests.test_gateway:test_gateway_interface_delegates"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "remote.gateway:BackendGateway"
+      ],
+      "dotted": "remote.tests.test_gateway._FakeBackend",
+      "file": "src/remote/tests/test_gateway.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 54,
+      "module": "src/remote",
+      "name": "_FakeBackend",
+      "public": false,
+      "qualified": "remote.tests.test_gateway:_FakeBackend",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "remote.tests.test_gateway:test_entry_signature_stable",
+        "remote.tests.test_gateway:test_new_entries_empty_previous_resyncs_bounded",
+        "remote.tests.test_gateway:test_new_entries_empty_when_nothing_new",
+        "remote.tests.test_gateway:test_new_entries_overlap_lost_resyncs",
+        "remote.tests.test_gateway:test_new_entries_returns_only_fresh_suffix"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.tests.test_gateway._entry",
+      "file": "src/remote/tests/test_gateway.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 8,
+      "module": "src/remote",
+      "name": "_entry",
+      "public": false,
+      "qualified": "remote.tests.test_gateway:_entry",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.gateway:entry_signature",
+        "remote.tests.test_gateway:_entry"
+      ],
+      "dotted": "remote.tests.test_gateway.test_entry_signature_stable",
+      "file": "src/remote/tests/test_gateway.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 49,
+      "module": "src/remote",
+      "name": "test_entry_signature_stable",
+      "public": true,
+      "qualified": "remote.tests.test_gateway:test_entry_signature_stable",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.tests.test_gateway:_FakeBackend"
+      ],
+      "dotted": "remote.tests.test_gateway.test_gateway_interface_delegates",
+      "file": "src/remote/tests/test_gateway.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 71,
+      "module": "src/remote",
+      "name": "test_gateway_interface_delegates",
+      "public": true,
+      "qualified": "remote.tests.test_gateway:test_gateway_interface_delegates",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.gateway:HeadlessGateway"
+      ],
+      "dotted": "remote.tests.test_gateway.test_headless_gateway_close_is_safe_without_manager",
+      "file": "src/remote/tests/test_gateway.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 104,
+      "module": "src/remote",
+      "name": "test_headless_gateway_close_is_safe_without_manager",
+      "public": true,
+      "qualified": "remote.tests.test_gateway:test_headless_gateway_close_is_safe_without_manager",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.gateway:HeadlessGateway"
+      ],
+      "dotted": "remote.tests.test_gateway.test_headless_gateway_delegates_to_headless",
+      "file": "src/remote/tests/test_gateway.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 78,
+      "module": "src/remote",
+      "name": "test_headless_gateway_delegates_to_headless",
+      "public": true,
+      "qualified": "remote.tests.test_gateway:test_headless_gateway_delegates_to_headless",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.gateway:new_entries",
+        "remote.tests.test_gateway:_entry"
+      ],
+      "dotted": "remote.tests.test_gateway.test_new_entries_empty_previous_resyncs_bounded",
+      "file": "src/remote/tests/test_gateway.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 19,
+      "module": "src/remote",
+      "name": "test_new_entries_empty_previous_resyncs_bounded",
+      "public": true,
+      "qualified": "remote.tests.test_gateway:test_new_entries_empty_previous_resyncs_bounded",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.gateway:new_entries",
+        "remote.tests.test_gateway:_entry"
+      ],
+      "dotted": "remote.tests.test_gateway.test_new_entries_empty_when_nothing_new",
+      "file": "src/remote/tests/test_gateway.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 35,
+      "module": "src/remote",
+      "name": "test_new_entries_empty_when_nothing_new",
+      "public": true,
+      "qualified": "remote.tests.test_gateway:test_new_entries_empty_when_nothing_new",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.gateway:new_entries",
+        "remote.tests.test_gateway:_entry"
+      ],
+      "dotted": "remote.tests.test_gateway.test_new_entries_overlap_lost_resyncs",
+      "file": "src/remote/tests/test_gateway.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 41,
+      "module": "src/remote",
+      "name": "test_new_entries_overlap_lost_resyncs",
+      "public": true,
+      "qualified": "remote.tests.test_gateway:test_new_entries_overlap_lost_resyncs",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.gateway:new_entries",
+        "remote.tests.test_gateway:_entry"
+      ],
+      "dotted": "remote.tests.test_gateway.test_new_entries_returns_only_fresh_suffix",
+      "file": "src/remote/tests/test_gateway.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 27,
+      "module": "src/remote",
+      "name": "test_new_entries_returns_only_fresh_suffix",
+      "public": true,
+      "qualified": "remote.tests.test_gateway:test_new_entries_returns_only_fresh_suffix",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.protocol:decode_message",
+        "remote.protocol:encode_message"
+      ],
+      "dotted": "remote.tests.test_protocol.test_envelope_roundtrip_client_message",
+      "file": "src/remote/tests/test_protocol.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 17,
+      "module": "src/remote",
+      "name": "test_envelope_roundtrip_client_message",
+      "public": true,
+      "qualified": "remote.tests.test_protocol:test_envelope_roundtrip_client_message",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.protocol:decode_message",
+        "remote.protocol:encode_message",
+        "remote.protocol:make_envelope"
+      ],
+      "dotted": "remote.tests.test_protocol.test_envelope_roundtrip_server_message_with_seq",
+      "file": "src/remote/tests/test_protocol.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 30,
+      "module": "src/remote",
+      "name": "test_envelope_roundtrip_server_message_with_seq",
+      "public": true,
+      "qualified": "remote.tests.test_protocol:test_envelope_roundtrip_server_message_with_seq",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.protocol:error_envelope"
+      ],
+      "dotted": "remote.tests.test_protocol.test_error_envelope_shape_and_codes",
+      "file": "src/remote/tests/test_protocol.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 93,
+      "module": "src/remote",
+      "name": "test_error_envelope_shape_and_codes",
+      "public": true,
+      "qualified": "remote.tests.test_protocol:test_error_envelope_shape_and_codes",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.protocol:ProtocolError",
+        "remote.protocol:make_envelope"
+      ],
+      "dotted": "remote.tests.test_protocol.test_make_envelope_rejects_unknown_server_type",
+      "file": "src/remote/tests/test_protocol.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 88,
+      "module": "src/remote",
+      "name": "test_make_envelope_rejects_unknown_server_type",
+      "public": true,
+      "qualified": "remote.tests.test_protocol:test_make_envelope_rejects_unknown_server_type",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.protocol:Envelope",
+        "remote.protocol:ProtocolError"
+      ],
+      "dotted": "remote.tests.test_protocol.test_rejects_bad_payload_and_seq",
+      "file": "src/remote/tests/test_protocol.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 81,
+      "module": "src/remote",
+      "name": "test_rejects_bad_payload_and_seq",
+      "public": true,
+      "qualified": "remote.tests.test_protocol:test_rejects_bad_payload_and_seq",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.protocol:ProtocolError",
+        "remote.protocol:decode_message"
+      ],
+      "dotted": "remote.tests.test_protocol.test_rejects_invalid_json",
+      "file": "src/remote/tests/test_protocol.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 49,
+      "module": "src/remote",
+      "name": "test_rejects_invalid_json",
+      "public": true,
+      "qualified": "remote.tests.test_protocol:test_rejects_invalid_json",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.protocol:ProtocolError",
+        "remote.protocol:decode_message"
+      ],
+      "dotted": "remote.tests.test_protocol.test_rejects_non_object",
+      "file": "src/remote/tests/test_protocol.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 44,
+      "module": "src/remote",
+      "name": "test_rejects_non_object",
+      "public": true,
+      "qualified": "remote.tests.test_protocol:test_rejects_non_object",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.protocol:ProtocolError",
+        "remote.protocol:decode_message"
+      ],
+      "dotted": "remote.tests.test_protocol.test_rejects_non_utf8",
+      "file": "src/remote/tests/test_protocol.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 55,
+      "module": "src/remote",
+      "name": "test_rejects_non_utf8",
+      "public": true,
+      "qualified": "remote.tests.test_protocol:test_rejects_non_utf8",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.protocol:ProtocolError",
+        "remote.protocol:decode_message"
+      ],
+      "dotted": "remote.tests.test_protocol.test_rejects_oversize_message",
+      "file": "src/remote/tests/test_protocol.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 76,
+      "module": "src/remote",
+      "name": "test_rejects_oversize_message",
+      "public": true,
+      "qualified": "remote.tests.test_protocol:test_rejects_oversize_message",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.protocol:ProtocolError",
+        "remote.protocol:decode_message"
+      ],
+      "dotted": "remote.tests.test_protocol.test_rejects_server_type_from_client",
+      "file": "src/remote/tests/test_protocol.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 65,
+      "module": "src/remote",
+      "name": "test_rejects_server_type_from_client",
+      "public": true,
+      "qualified": "remote.tests.test_protocol:test_rejects_server_type_from_client",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.protocol:ProtocolError",
+        "remote.protocol:decode_message"
+      ],
+      "dotted": "remote.tests.test_protocol.test_rejects_unknown_type",
+      "file": "src/remote/tests/test_protocol.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 60,
+      "module": "src/remote",
+      "name": "test_rejects_unknown_type",
+      "public": true,
+      "qualified": "remote.tests.test_protocol:test_rejects_unknown_type",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.protocol:ProtocolError",
+        "remote.protocol:decode_message"
+      ],
+      "dotted": "remote.tests.test_protocol.test_rejects_unsupported_version",
+      "file": "src/remote/tests/test_protocol.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 70,
+      "module": "src/remote",
+      "name": "test_rejects_unsupported_version",
+      "public": true,
+      "qualified": "remote.tests.test_protocol:test_rejects_unsupported_version",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.protocol:make_envelope"
+      ],
+      "dotted": "remote.tests.test_protocol.test_wire_object_carries_metadata",
+      "file": "src/remote/tests/test_protocol.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 36,
+      "module": "src/remote",
+      "name": "test_wire_object_carries_metadata",
+      "public": true,
+      "qualified": "remote.tests.test_protocol:test_wire_object_carries_metadata",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "remote.tests.test_server:live_server",
+        "remote.tests.test_server:start_server",
+        "remote.tests.test_server:test_auth_timeout_closes_quiet_client",
+        "remote.tests.test_server:test_event_streaming_then_resubscribe_replays",
+        "remote.tests.test_server:test_idle_timeout_closes_silent_client",
+        "remote.tests.test_server:test_plaintext_non_loopback_refused",
+        "remote.tests.test_server:test_unknown_endpoint_rejected"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "remote.gateway:BackendGateway",
+        "remote.tests.test_server:make_live"
+      ],
+      "dotted": "remote.tests.test_server.FakeGateway",
+      "file": "src/remote/tests/test_server.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 76,
+      "module": "src/remote",
+      "name": "FakeGateway",
+      "public": true,
+      "qualified": "remote.tests.test_server:FakeGateway",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "remote.tests.test_server:authed_client",
+        "remote.tests.test_server:test_auth_timeout_closes_quiet_client",
+        "remote.tests.test_server:test_bad_token_attempts_then_close",
+        "remote.tests.test_server:test_event_streaming_then_resubscribe_replays",
+        "remote.tests.test_server:test_unauthenticated_command_rejected",
+        "remote.tests.test_server:test_unknown_endpoint_rejected",
+        "remote.tests.test_server:test_unsupported_schema_version_rejected"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.tests.test_server.WsClient",
+      "file": "src/remote/tests/test_server.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 101,
+      "module": "src/remote",
+      "name": "WsClient",
+      "public": true,
+      "qualified": "remote.tests.test_server:WsClient",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "remote.tests.test_server:test_command_passthrough_and_duplicate_cached",
+        "remote.tests.test_server:test_event_streaming_then_resubscribe_replays",
+        "remote.tests.test_server:test_gate_blockers_preserved_in_result",
+        "remote.tests.test_server:test_hello_gets_welcome_and_snapshot",
+        "remote.tests.test_server:test_idle_timeout_closes_silent_client",
+        "remote.tests.test_server:test_malformed_message_does_not_kill_connection",
+        "remote.tests.test_server:test_no_broker_secrets_on_wire",
+        "remote.tests.test_server:test_ping_gets_pong",
+        "remote.tests.test_server:test_read_token_cannot_send_commands",
+        "remote.tests.test_server:test_start_requires_explicit_confirmation",
+        "remote.tests.test_server:test_unknown_action_rejected"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "remote.server:RemoteServer",
+        "remote.tests.test_server:WsClient"
+      ],
+      "dotted": "remote.tests.test_server.authed_client",
+      "file": "src/remote/tests/test_server.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 225,
+      "module": "src/remote",
+      "name": "authed_client",
+      "public": true,
+      "qualified": "remote.tests.test_server:authed_client",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "remote.tests.test_server:test_no_broker_secrets_on_wire"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.tests.test_server.collect_wire_texts",
+      "file": "src/remote/tests/test_server.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 491,
+      "module": "src/remote",
+      "name": "collect_wire_texts",
+      "public": true,
+      "qualified": "remote.tests.test_server:collect_wire_texts",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "remote.tests.test_server:test_bad_token_attempts_then_close",
+        "remote.tests.test_server:test_command_passthrough_and_duplicate_cached",
+        "remote.tests.test_server:test_gate_blockers_preserved_in_result",
+        "remote.tests.test_server:test_hello_gets_welcome_and_snapshot",
+        "remote.tests.test_server:test_malformed_message_does_not_kill_connection",
+        "remote.tests.test_server:test_no_broker_secrets_on_wire",
+        "remote.tests.test_server:test_ping_gets_pong",
+        "remote.tests.test_server:test_read_token_cannot_send_commands",
+        "remote.tests.test_server:test_start_requires_explicit_confirmation",
+        "remote.tests.test_server:test_unauthenticated_command_rejected",
+        "remote.tests.test_server:test_unknown_action_rejected",
+        "remote.tests.test_server:test_unsupported_schema_version_rejected"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "remote.tests.test_server:FakeGateway",
+        "remote.tests.test_server:start_server"
+      ],
+      "dotted": "remote.tests.test_server.live_server",
+      "file": "src/remote/tests/test_server.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 218,
+      "module": "src/remote",
+      "name": "live_server",
+      "public": true,
+      "qualified": "remote.tests.test_server:live_server",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "remote.tests.test_server:FakeGateway"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.tests.test_server.make_live",
+      "file": "src/remote/tests/test_server.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 39,
+      "module": "src/remote",
+      "name": "make_live",
+      "public": true,
+      "qualified": "remote.tests.test_server:make_live",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "remote.tests.test_server:live_server",
+        "remote.tests.test_server:test_auth_timeout_closes_quiet_client",
+        "remote.tests.test_server:test_event_streaming_then_resubscribe_replays",
+        "remote.tests.test_server:test_idle_timeout_closes_silent_client",
+        "remote.tests.test_server:test_unknown_endpoint_rejected"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "remote.server:RemoteConfig",
+        "remote.server:RemoteServer",
+        "remote.tests.test_server:FakeGateway"
+      ],
+      "dotted": "remote.tests.test_server.start_server",
+      "file": "src/remote/tests/test_server.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 195,
+      "module": "src/remote",
+      "name": "start_server",
+      "public": true,
+      "qualified": "remote.tests.test_server:start_server",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.tests.test_server:FakeGateway",
+        "remote.tests.test_server:WsClient",
+        "remote.tests.test_server:start_server"
+      ],
+      "dotted": "remote.tests.test_server.test_auth_timeout_closes_quiet_client",
+      "file": "src/remote/tests/test_server.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 547,
+      "module": "src/remote",
+      "name": "test_auth_timeout_closes_quiet_client",
+      "public": true,
+      "qualified": "remote.tests.test_server:test_auth_timeout_closes_quiet_client",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.tests.test_server:WsClient",
+        "remote.tests.test_server:live_server"
+      ],
+      "dotted": "remote.tests.test_server.test_bad_token_attempts_then_close",
+      "file": "src/remote/tests/test_server.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 278,
+      "module": "src/remote",
+      "name": "test_bad_token_attempts_then_close",
+      "public": true,
+      "qualified": "remote.tests.test_server:test_bad_token_attempts_then_close",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.tests.test_server:authed_client",
+        "remote.tests.test_server:live_server"
+      ],
+      "dotted": "remote.tests.test_server.test_command_passthrough_and_duplicate_cached",
+      "file": "src/remote/tests/test_server.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 292,
+      "module": "src/remote",
+      "name": "test_command_passthrough_and_duplicate_cached",
+      "public": true,
+      "qualified": "remote.tests.test_server:test_command_passthrough_and_duplicate_cached",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.tests.test_server:FakeGateway",
+        "remote.tests.test_server:WsClient",
+        "remote.tests.test_server:authed_client",
+        "remote.tests.test_server:start_server"
+      ],
+      "dotted": "remote.tests.test_server.test_event_streaming_then_resubscribe_replays",
+      "file": "src/remote/tests/test_server.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 432,
+      "module": "src/remote",
+      "name": "test_event_streaming_then_resubscribe_replays",
+      "public": true,
+      "qualified": "remote.tests.test_server:test_event_streaming_then_resubscribe_replays",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.tests.test_server:authed_client",
+        "remote.tests.test_server:live_server"
+      ],
+      "dotted": "remote.tests.test_server.test_gate_blockers_preserved_in_result",
+      "file": "src/remote/tests/test_server.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 379,
+      "module": "src/remote",
+      "name": "test_gate_blockers_preserved_in_result",
+      "public": true,
+      "qualified": "remote.tests.test_server:test_gate_blockers_preserved_in_result",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.tests.test_server:authed_client",
+        "remote.tests.test_server:live_server"
+      ],
+      "dotted": "remote.tests.test_server.test_hello_gets_welcome_and_snapshot",
+      "file": "src/remote/tests/test_server.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 237,
+      "module": "src/remote",
+      "name": "test_hello_gets_welcome_and_snapshot",
+      "public": true,
+      "qualified": "remote.tests.test_server:test_hello_gets_welcome_and_snapshot",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.tests.test_server:FakeGateway",
+        "remote.tests.test_server:authed_client",
+        "remote.tests.test_server:start_server"
+      ],
+      "dotted": "remote.tests.test_server.test_idle_timeout_closes_silent_client",
+      "file": "src/remote/tests/test_server.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 572,
+      "module": "src/remote",
+      "name": "test_idle_timeout_closes_silent_client",
+      "public": true,
+      "qualified": "remote.tests.test_server:test_idle_timeout_closes_silent_client",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.tests.test_server:authed_client",
+        "remote.tests.test_server:live_server"
+      ],
+      "dotted": "remote.tests.test_server.test_malformed_message_does_not_kill_connection",
+      "file": "src/remote/tests/test_server.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 394,
+      "module": "src/remote",
+      "name": "test_malformed_message_does_not_kill_connection",
+      "public": true,
+      "qualified": "remote.tests.test_server:test_malformed_message_does_not_kill_connection",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.tests.test_server:authed_client",
+        "remote.tests.test_server:collect_wire_texts",
+        "remote.tests.test_server:live_server"
+      ],
+      "dotted": "remote.tests.test_server.test_no_broker_secrets_on_wire",
+      "file": "src/remote/tests/test_server.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 495,
+      "module": "src/remote",
+      "name": "test_no_broker_secrets_on_wire",
+      "public": true,
+      "qualified": "remote.tests.test_server:test_no_broker_secrets_on_wire",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.tests.test_server:authed_client",
+        "remote.tests.test_server:live_server"
+      ],
+      "dotted": "remote.tests.test_server.test_ping_gets_pong",
+      "file": "src/remote/tests/test_server.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 421,
+      "module": "src/remote",
+      "name": "test_ping_gets_pong",
+      "public": true,
+      "qualified": "remote.tests.test_server:test_ping_gets_pong",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.server:ConfigError",
+        "remote.server:RemoteConfig",
+        "remote.server:RemoteServer",
+        "remote.tests.test_server:FakeGateway"
+      ],
+      "dotted": "remote.tests.test_server.test_plaintext_non_loopback_refused",
+      "file": "src/remote/tests/test_server.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 541,
+      "module": "src/remote",
+      "name": "test_plaintext_non_loopback_refused",
+      "public": true,
+      "qualified": "remote.tests.test_server:test_plaintext_non_loopback_refused",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.tests.test_server:authed_client",
+        "remote.tests.test_server:live_server"
+      ],
+      "dotted": "remote.tests.test_server.test_read_token_cannot_send_commands",
+      "file": "src/remote/tests/test_server.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 312,
+      "module": "src/remote",
+      "name": "test_read_token_cannot_send_commands",
+      "public": true,
+      "qualified": "remote.tests.test_server:test_read_token_cannot_send_commands",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.tests.test_server:authed_client",
+        "remote.tests.test_server:live_server"
+      ],
+      "dotted": "remote.tests.test_server.test_start_requires_explicit_confirmation",
+      "file": "src/remote/tests/test_server.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 328,
+      "module": "src/remote",
+      "name": "test_start_requires_explicit_confirmation",
+      "public": true,
+      "qualified": "remote.tests.test_server:test_start_requires_explicit_confirmation",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.tests.test_server:WsClient",
+        "remote.tests.test_server:live_server"
+      ],
+      "dotted": "remote.tests.test_server.test_unauthenticated_command_rejected",
+      "file": "src/remote/tests/test_server.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 263,
+      "module": "src/remote",
+      "name": "test_unauthenticated_command_rejected",
+      "public": true,
+      "qualified": "remote.tests.test_server:test_unauthenticated_command_rejected",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.tests.test_server:authed_client",
+        "remote.tests.test_server:live_server"
+      ],
+      "dotted": "remote.tests.test_server.test_unknown_action_rejected",
+      "file": "src/remote/tests/test_server.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 360,
+      "module": "src/remote",
+      "name": "test_unknown_action_rejected",
+      "public": true,
+      "qualified": "remote.tests.test_server:test_unknown_action_rejected",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.tests.test_server:FakeGateway",
+        "remote.tests.test_server:WsClient",
+        "remote.tests.test_server:start_server"
+      ],
+      "dotted": "remote.tests.test_server.test_unknown_endpoint_rejected",
+      "file": "src/remote/tests/test_server.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 531,
+      "module": "src/remote",
+      "name": "test_unknown_endpoint_rejected",
+      "public": true,
+      "qualified": "remote.tests.test_server:test_unknown_endpoint_rejected",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.tests.test_server:WsClient",
+        "remote.tests.test_server:live_server"
+      ],
+      "dotted": "remote.tests.test_server.test_unsupported_schema_version_rejected",
+      "file": "src/remote/tests/test_server.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 409,
+      "module": "src/remote",
+      "name": "test_unsupported_schema_version_rejected",
+      "public": true,
+      "qualified": "remote.tests.test_server:test_unsupported_schema_version_rejected",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "remote.tests.test_snapshot:test_kill_halted_running_maps_to_error",
+        "remote.tests.test_snapshot:test_no_vendor_or_secret_markers_on_wire",
+        "remote.tests.test_snapshot:test_position_without_stop_is_at_risk",
+        "remote.tests.test_snapshot:test_reconciliation_block_maps_to_required",
+        "remote.tests.test_snapshot:test_running_connected_snapshot",
+        "remote.tests.test_snapshot:test_snapshot_sections_present"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.tests.test_snapshot.make_live",
+      "file": "src/remote/tests/test_snapshot.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 15,
+      "module": "src/remote",
+      "name": "make_live",
+      "public": true,
+      "qualified": "remote.tests.test_snapshot:make_live",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.snapshot:classify_event"
+      ],
+      "dotted": "remote.tests.test_snapshot.test_event_classification_table",
+      "file": "src/remote/tests/test_snapshot.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 185,
+      "module": "src/remote",
+      "name": "test_event_classification_table",
+      "public": true,
+      "qualified": "remote.tests.test_snapshot:test_event_classification_table",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.snapshot:build_snapshot",
+        "remote.tests.test_snapshot:make_live"
+      ],
+      "dotted": "remote.tests.test_snapshot.test_kill_halted_running_maps_to_error",
+      "file": "src/remote/tests/test_snapshot.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 141,
+      "module": "src/remote",
+      "name": "test_kill_halted_running_maps_to_error",
+      "public": true,
+      "qualified": "remote.tests.test_snapshot:test_kill_halted_running_maps_to_error",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.snapshot:build_snapshot",
+        "remote.tests.test_snapshot:make_live"
+      ],
+      "dotted": "remote.tests.test_snapshot.test_no_vendor_or_secret_markers_on_wire",
+      "file": "src/remote/tests/test_snapshot.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 172,
+      "module": "src/remote",
+      "name": "test_no_vendor_or_secret_markers_on_wire",
+      "public": true,
+      "qualified": "remote.tests.test_snapshot:test_no_vendor_or_secret_markers_on_wire",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.snapshot:build_snapshot"
+      ],
+      "dotted": "remote.tests.test_snapshot.test_non_dict_snapshot_is_honest",
+      "file": "src/remote/tests/test_snapshot.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 181,
+      "module": "src/remote",
+      "name": "test_non_dict_snapshot_is_honest",
+      "public": true,
+      "qualified": "remote.tests.test_snapshot:test_non_dict_snapshot_is_honest",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.snapshot:classify_event"
+      ],
+      "dotted": "remote.tests.test_snapshot.test_partial_fill_detected",
+      "file": "src/remote/tests/test_snapshot.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 203,
+      "module": "src/remote",
+      "name": "test_partial_fill_detected",
+      "public": true,
+      "qualified": "remote.tests.test_snapshot:test_partial_fill_detected",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.snapshot:build_snapshot",
+        "remote.tests.test_snapshot:make_live"
+      ],
+      "dotted": "remote.tests.test_snapshot.test_position_without_stop_is_at_risk",
+      "file": "src/remote/tests/test_snapshot.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 151,
+      "module": "src/remote",
+      "name": "test_position_without_stop_is_at_risk",
+      "public": true,
+      "qualified": "remote.tests.test_snapshot:test_position_without_stop_is_at_risk",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.snapshot:project_event"
+      ],
+      "dotted": "remote.tests.test_snapshot.test_project_event_shape_is_scrubbed",
+      "file": "src/remote/tests/test_snapshot.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 209,
+      "module": "src/remote",
+      "name": "test_project_event_shape_is_scrubbed",
+      "public": true,
+      "qualified": "remote.tests.test_snapshot:test_project_event_shape_is_scrubbed",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.snapshot:build_snapshot",
+        "remote.tests.test_snapshot:make_live"
+      ],
+      "dotted": "remote.tests.test_snapshot.test_reconciliation_block_maps_to_required",
+      "file": "src/remote/tests/test_snapshot.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 146,
+      "module": "src/remote",
+      "name": "test_reconciliation_block_maps_to_required",
+      "public": true,
+      "qualified": "remote.tests.test_snapshot:test_reconciliation_block_maps_to_required",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.snapshot:build_snapshot",
+        "remote.tests.test_snapshot:make_live"
+      ],
+      "dotted": "remote.tests.test_snapshot.test_running_connected_snapshot",
+      "file": "src/remote/tests/test_snapshot.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 78,
+      "module": "src/remote",
+      "name": "test_running_connected_snapshot",
+      "public": true,
+      "qualified": "remote.tests.test_snapshot:test_running_connected_snapshot",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.snapshot:scrub"
+      ],
+      "dotted": "remote.tests.test_snapshot.test_scrub_drops_credential_like_keys",
+      "file": "src/remote/tests/test_snapshot.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 161,
+      "module": "src/remote",
+      "name": "test_scrub_drops_credential_like_keys",
+      "public": true,
+      "qualified": "remote.tests.test_snapshot:test_scrub_drops_credential_like_keys",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.snapshot:build_snapshot",
+        "remote.tests.test_snapshot:make_live"
+      ],
+      "dotted": "remote.tests.test_snapshot.test_snapshot_sections_present",
+      "file": "src/remote/tests/test_snapshot.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 53,
+      "module": "src/remote",
+      "name": "test_snapshot_sections_present",
+      "public": true,
+      "qualified": "remote.tests.test_snapshot:test_snapshot_sections_present",
       "tests": []
     },
     {
@@ -67058,7 +71417,7 @@
       "file": "tools/run_tests.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 50,
+      "line": 51,
       "module": "tools",
       "name": "_expected_artifacts",
       "public": false,
@@ -67079,7 +71438,7 @@
       "file": "tools/run_tests.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 101,
+      "line": 102,
       "module": "tools",
       "name": "ensure_native",
       "public": true,
@@ -67098,7 +71457,7 @@
       "file": "tools/run_tests.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 131,
+      "line": 132,
       "module": "tools",
       "name": "main",
       "public": true,
@@ -67119,7 +71478,7 @@
       "file": "tools/run_tests.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 77,
+      "line": 78,
       "module": "tools",
       "name": "native_fresh",
       "public": true,
@@ -78080,7 +82439,7 @@
       "file": "tools/validate_architecture_gate.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 84,
+      "line": 85,
       "module": "tools",
       "name": "GateReport",
       "public": true,
@@ -78099,7 +82458,7 @@
       "file": "tools/validate_architecture_gate.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 77,
+      "line": 78,
       "module": "tools",
       "name": "Violation",
       "public": true,
@@ -78116,7 +82475,7 @@
       "file": "tools/validate_architecture_gate.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 248,
+      "line": 249,
       "module": "tools",
       "name": "_declared_distributions",
       "public": false,
@@ -78133,7 +82492,7 @@
       "file": "tools/validate_architecture_gate.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 185,
+      "line": 186,
       "module": "tools",
       "name": "_git_available",
       "public": false,
@@ -78150,7 +82509,7 @@
       "file": "tools/validate_architecture_gate.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 200,
+      "line": 201,
       "module": "tools",
       "name": "_git_changed",
       "public": false,
@@ -78167,7 +82526,7 @@
       "file": "tools/validate_architecture_gate.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 220,
+      "line": 221,
       "module": "tools",
       "name": "_git_changed_all",
       "public": false,
@@ -78184,7 +82543,7 @@
       "file": "tools/validate_architecture_gate.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 292,
+      "line": 293,
       "module": "tools",
       "name": "_is_first_party_root",
       "public": false,
@@ -78201,7 +82560,7 @@
       "file": "tools/validate_architecture_gate.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 268,
+      "line": 269,
       "module": "tools",
       "name": "_load_policy",
       "public": false,
@@ -78218,7 +82577,7 @@
       "file": "tools/validate_architecture_gate.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 276,
+      "line": 277,
       "module": "tools",
       "name": "_required_language",
       "public": false,
@@ -78235,7 +82594,7 @@
       "file": "tools/validate_architecture_gate.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 235,
+      "line": 236,
       "module": "tools",
       "name": "_working_tree",
       "public": false,
@@ -78264,7 +82623,7 @@
       "file": "tools/validate_architecture_gate.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 306,
+      "line": 307,
       "module": "tools",
       "name": "check_changes",
       "public": true,
@@ -78283,7 +82642,7 @@
       "file": "tools/validate_architecture_gate.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 165,
+      "line": 166,
       "module": "tools",
       "name": "check_new_file_extension",
       "public": true,
@@ -78300,7 +82659,7 @@
       "file": "tools/validate_architecture_gate.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 428,
+      "line": 429,
       "module": "tools",
       "name": "main",
       "public": true,
@@ -80924,6 +85283,12 @@
     },
     {
       "granularity": "module",
+      "module": "crates/vayren-remote-client",
+      "path": "crates/vayren-remote-client/tests/remote_e2e.rs",
+      "targets": []
+    },
+    {
+      "granularity": "module",
       "module": "crates/vayren-shell",
       "path": "crates/vayren-shell/tests/lab_config_render.rs",
       "targets": []
@@ -81320,6 +85685,60 @@
       "path": "src/market/tests/test_native_timeframe.py",
       "targets": [
         "src/market/native_timeframe.py"
+      ]
+    },
+    {
+      "granularity": "module",
+      "module": "src/remote",
+      "path": "src/remote/tests/__init__.py",
+      "targets": []
+    },
+    {
+      "granularity": "file",
+      "module": "src/remote",
+      "path": "src/remote/tests/test_auth.py",
+      "targets": [
+        "src/remote/auth.py"
+      ]
+    },
+    {
+      "granularity": "file",
+      "module": "src/remote",
+      "path": "src/remote/tests/test_client.py",
+      "targets": [
+        "src/remote/client.py"
+      ]
+    },
+    {
+      "granularity": "file",
+      "module": "src/remote",
+      "path": "src/remote/tests/test_gateway.py",
+      "targets": [
+        "src/remote/gateway.py"
+      ]
+    },
+    {
+      "granularity": "file",
+      "module": "src/remote",
+      "path": "src/remote/tests/test_protocol.py",
+      "targets": [
+        "src/remote/protocol.py"
+      ]
+    },
+    {
+      "granularity": "file",
+      "module": "src/remote",
+      "path": "src/remote/tests/test_server.py",
+      "targets": [
+        "src/remote/server.py"
+      ]
+    },
+    {
+      "granularity": "file",
+      "module": "src/remote",
+      "path": "src/remote/tests/test_snapshot.py",
+      "targets": [
+        "src/remote/snapshot.py"
       ]
     },
     {

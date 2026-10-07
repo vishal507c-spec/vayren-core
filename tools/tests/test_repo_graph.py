@@ -244,6 +244,12 @@ def test_graph_has_no_canonical_prose() -> None:
         narrative. Regeneration was tried first on the exact commit tree and
         produced a valid artifact (2,585,920 B, second run 2,585,775 B), so
         the cap moved instead; 2.62MB covers the observed size plus headroom.
+    Justification for the 2.62MB -> 2.70MB bump (2026-10-06): the artifact
+    crossed the old cap because the broker-neutral remote transport module
+    (`src/remote`: protocol/auth/snapshot/gateway/server/runner + 60 tests)
+    joined the tree (4,897 entities over the new files) — product code, not
+    narrative. Per-entity cost stays ~545 B (budget: 700 B), so the cap moved
+    instead; 2.70MB covers the observed size plus headroom.
     2. Per-entity budget + a max-string-length budget. These are what make the
        cap safe to raise: prose pasted into any field would blow the string
        budget long before it filled the entity budget, so a future dump cannot
@@ -253,7 +259,7 @@ def test_graph_has_no_canonical_prose() -> None:
     assert "INSERT OR IGNORE" not in text
     graph = json.loads(text)
     size = len(text.encode("utf-8"))
-    assert size < 2_620_000, f"graph artifact grew past the cap: {size} B"
+    assert size < 2_700_000, f"graph artifact grew past the cap: {size} B"
 
     entities = graph["entity_count"]
     assert entities > 0

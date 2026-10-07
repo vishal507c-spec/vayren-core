@@ -1143,6 +1143,73 @@
         "docs",
         "tools"
       ]
+    },
+    {
+      "key": "remote-exe-client",
+      "aliases": [
+        "remote client",
+        "exe wss",
+        "wss client",
+        "gateway client",
+        "remote probe"
+      ],
+      "domain": "NATIVE_UI",
+      "owner_module": "crates/vayren-remote-client",
+      "language": "RUST",
+      "primary_files": [
+        "crates/vayren-remote-client/src/client.rs",
+        "crates/vayren-remote-client/src/protocol.rs"
+      ],
+      "secondary_files": [
+        "crates/vayren-remote-client/src/token.rs",
+        "crates/vayren-remote-client/src/summary.rs",
+        "crates/vayren-shell/src/remote_source.rs"
+      ],
+      "depends_on": [],
+      "depended_on_by": [
+        "crates/vayren-shell (read-only --remote probe)"
+      ],
+      "tests": {
+        "files": [
+          "crates/vayren-remote-client/tests"
+        ],
+        "command": "cargo test -p vayren-remote-client"
+      },
+      "validation": [
+        "cargo test -p vayren-remote-client",
+        "cargo fmt -p vayren-remote-client -- --check"
+      ],
+      "forbidden": [
+        "src/strategy/*",
+        "crates/vayren-shell/ui/*"
+      ],
+      "symbols": {
+        "crates/vayren-remote-client/src/client.rs": [
+          "RemoteClient",
+          "ClientEvent",
+          "ConnectionState"
+        ],
+        "crates/vayren-remote-client/src/protocol.rs": [
+          "SCHEMA_VERSION",
+          "ServerMessage"
+        ]
+      },
+      "contract": "docs/module_contracts.md section 5.11",
+      "change_surface": {
+        "likely_changed": [
+          "crates/vayren-remote-client/src/*.rs"
+        ],
+        "affected_interfaces": [
+          "schema-v1 handshake (hello/welcome/snapshot), resume (last_seq/resync)"
+        ],
+        "affected_modules": [
+          "crates/vayren-shell (probe consumer; no UI binding)"
+        ],
+        "required_tests": "cargo test -p vayren-remote-client (fake gateway; read-only)"
+      },
+      "owner_paths": [
+        "crates/vayren-remote-client"
+      ]
     }
   ]
 }

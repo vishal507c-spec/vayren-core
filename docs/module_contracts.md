@@ -96,6 +96,14 @@ Allowed graph (machine truth: `DOMAIN_DEPS` in `tools/validate_imports.py`). Qua
 **Invariants:** One registry, one selection, one capability/error vocabulary (AST-enforced); unsupported capability fails closed before transport; credentials are key-references only (never in logs/events/UI); health is connection-only (never implies LIVE readiness); `UNKNOWN`/`unsupported` funds ≠ `0.0`; network boundary Core → UBL → Adapter → Network; Zerodha history-only; no `if broker == ...` outside adapters. New venue = one adapter package + `BrokerRegistry.register(...)` + generic harness.
 **Validation:** `src/broker/tests` + `validate_imports.py` (SDK/network) + `validate_structure.py`.
 
+### 5.11 Module: `src/remote` — Remote Transport Adapter (EC2 ↔ EXE/APK)
+**Responsibility:** ONE broker-neutral WebSocket endpoint exposing the existing backend to remote graphical clients. Adapter only: stdlib socket server, versioned message contract, token auth, snapshot/event projection, idempotent command delegation. No strategy, risk, execution, broker, or trading logic — commands map 1:1 onto the headless action path with all existing gates intact; the stdin/stdout protocol is untouched.
+**Public API:** `RemoteConfig`/`config_from_env`, `RemoteServer`, `BackendGateway`/`HeadlessGateway`, `build_snapshot`/`classify_event`/`project_event`, `make_envelope`/`decode_message`/`encode_message`/`Envelope` (`SCHEMA_VERSION = 1`), `load_token_map`/`verify_token`/`RemoteRole`, `new_entries`. Entry: `python -m remote.runner --data-dir … --strategy-dir …` (env: `VAYREN_REMOTE_{HOST,PORT,TOKEN,READ_TOKEN,TOKEN_FILE,TLS_CERT,TLS_KEY}`).
+**Consumes:** `app.headless` snapshots/actions (read-only delegation). **Produces:** versioned remote messages (`hello/welcome/heartbeat/snapshot/state_update/event/command/command_result/error`).
+**Forbidden:** Broker SDKs, FYERS payloads/credentials on the wire, anonymous or plaintext non-loopback binds, auto-starting trading, unbounded buffers.
+**Invariants:** Auth mandatory (server exits without credentials); `trade` vs `read` scopes; state-changing commands require `request_id` with bounded replay; reconnect resubscribes with `last_seq` or resyncs; secrets scrubbed from every outbound key/value.
+**Validation:** `src/remote/tests` (fake transport/gateway, no real orders) + existing gate suite.
+
 ## 6. Cross-Module Interfaces
 | Interface | Owner | Consumer | Data |
 |---|---|---|---|

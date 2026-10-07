@@ -42,6 +42,7 @@ PARTS = (
     "src/risk/tests",
     "src/execution/tests",
     "src/broker/tests",
+    "src/remote/tests",
     "tools/forensics/tests",
     "tools/tests",
 )

@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/vayren-core",
     "crates/vayren-domain",
+    "crates/vayren-remote-client",
     "crates/vayren-shell",
     "crates/vayren-live-view",
     "crates/vayren-market-view",
@@ -25,6 +26,10 @@ slint = { version = "~1.17.0", default-features = false }
 slint-build = { version = "~1.17.0" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+vayren-remote-client = { path = "crates/vayren-remote-client" }
+tungstenite = { version = "0.30", features = ["url", "rustls-tls-webpki-roots"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+keyring = "4"
 clipboard-win = "5"
 i-slint-backend-testing = "~1.17.0"
 

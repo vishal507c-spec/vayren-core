@@ -84,6 +84,7 @@ include = [
     "src/risk",
     "src/execution",
     "src/broker",
+    "src/remote",
     "tools",
 ]
 # src/ root so `import core / market / broker / strategy / risk /
@@ -109,6 +110,7 @@ testpaths = [
     "src/risk/tests",
     "src/execution/tests",
     "src/broker/tests",
+    "src/remote/tests",
     "tools/forensics/tests",
     "tools/tests",
 ]
@@ -126,6 +128,7 @@ source = [
     "src/risk",
     "src/execution",
     "src/broker",
+    "src/remote",
 ]
 
 [tool.coverage.report]
@@ -146,6 +149,7 @@ packages = [
     "src/risk",
     "src/execution",
     "src/broker",
+    "src/remote",
 ]
 
 [build-system]

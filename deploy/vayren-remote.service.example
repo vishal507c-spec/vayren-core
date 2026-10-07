@@ -1,0 +1,37 @@
+# VAYREN remote transport — systemd unit template (EC2).
+#
+# Install: copy to /etc/systemd/system/vayren-remote.service, then
+#   systemctl daemon-reload && systemctl enable --now vayren-remote
+#
+# This unit serves the TRANSPORT ONLY. It never starts trading: the runner
+# opens the authenticated WebSocket and answers snapshots/commands through
+# the existing gates. Sessions/orders start solely via an authenticated
+# client command passing every safety gate (or not at all).
+#
+# Secrets come from /etc/vayren/remote.env (mode 0600, vayren-owned).
+# Broker credentials stay in the broker manager's own store — never here.
+
+[Unit]
+Description=VAYREN remote transport (EC2 loopback WebSocket for EXE/APK)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=vayren
+Group=vayren
+WorkingDirectory=/opt/vayren-core
+# Adjust to the deployed interpreter / entry point:
+ExecStart=/opt/vayren-core/.venv/bin/python -m remote.runner --data-dir /var/lib/vayren/data --strategy-dir /var/lib/vayren/strategies
+EnvironmentFile=/etc/vayren/remote.env
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/vayren
+# No trading auto-start: the process idles until a client connects.
+
+[Install]
+WantedBy=multi-user.target

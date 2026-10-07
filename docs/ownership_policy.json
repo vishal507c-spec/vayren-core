@@ -157,6 +157,16 @@
       "description": "UBL vocabulary, capabilities, registry, selection. Contract layer stays Python.",
       "allow_python_glue": true,
       "python_glue_scope": "ALL — contract/vocabulary layer"
+    },
+    {
+      "id": "REMOTE_TRANSPORT",
+      "domain": "REMOTE_TRANSPORT",
+      "required_language": "PYTHON",
+      "directory_prefixes": ["src/remote/"],
+      "excluded_subpaths": ["src/remote/tests/"],
+      "description": "Broker-neutral remote transport adapter (EC2 WebSocket endpoint for EXE/APK clients). Composition-side glue over the existing headless backend: versioned message contract, token auth, snapshot projection, stdlib socket server. No strategy/risk/execution/broker logic.",
+      "allow_python_glue": true,
+      "python_glue_scope": "ALL - transport adapter over the existing backend; Python by composition (no numeric core)"
     }
   ],
   "test_files": {

@@ -135,6 +135,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Data dir: {}", data_dir);
     println!("Strategy dir: {}", strategy_dir);
 
+    // Remote graphical client (read-only): the Windows EXE path — the UI is
+    // fed by the private EC2 gateway instead of a local Python child. Local
+    // stdio protocol below is untouched; this branch returns early. The
+    // `--remote` smoke probe underneath stays the safe connection test.
+    if let Some(remote_url) = vayren_shell::remote_live::remote_ui_url_from_argv(&argv) {
+        return run_remote_ui(argv, remote_url);
+    }
+
+    // Remote-gateway smoke probe (read-only): proves THIS binary reaches the
+    // private EC2 endpoint (hello → welcome → snapshot → brief subscribe)
+    // without spawning a backend, opening the UI, or sending any command.
+    // The full UI binding lives in `remote_live` (`--remote-ui`); the probe
+    // stays the minimal safe connection test.
+    if let Some(remote_url) = vayren_shell::remote_source::remote_url_from_argv(&argv) {
+        return vayren_shell::remote_source::run_remote_probe(&remote_url)
+            .map_err(|err| err.into());
+    }
+
     // Spawn Python backend. One mutex-guarded handle serves the UI thread
     // (startup/shutdown snapshots) and worker threads (interaction fetches).
     // The mutex serializes whole command round-trips: the bridge locks
@@ -1286,6 +1304,137 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .shutdown()?;
     println!("VAYREN shutdown complete");
 
+    Ok(())
+}
+
+/// Remote graphical client (`--remote-ui [url]`, read-only).
+///
+/// Startup order (§4): connect → hello → welcome → snapshot → paint the
+/// existing UI from the snapshot → subscribe → incremental updates. The
+/// handshake is DEADLINE-BOUNDED and happens BEFORE the window opens, so an
+/// invalid token fails fast with AUTH_FAILED and never paints a frame.
+/// Afterwards a worker thread pumps the stream (RECONNECTING with
+/// `subscribe{last_seq}` on drops; `resync:true` replaces state) while the
+/// 50ms UI timer applies arrivals — the UI thread never blocks on the
+/// network, and a dead link never freezes the window.
+///
+/// Read-only by construction: no call site in this binary sends a command,
+/// and `bridge_wired` stays false so the model keeps START/STOP/HALT inert
+/// with honest feedback. Other workspaces (Market/Lab/Portfolio/Research,
+/// SYSTEM broker panel) render honest-empty: the remote gateway does not
+/// serve their local stores in this phase, and nothing is invented for them.
+fn run_remote_ui(
+    argv: Vec<String>,
+    url: String,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use vayren_shell::remote_live::{
+        apply_remote_sections, init_remote_state, initial_connect, mark_link,
+        push_remote_event, spawn_remote_pump, RemoteUiUpdate,
+    };
+
+    println!("VAYREN starting (remote graphical client)...");
+    println!("Gateway: {url}");
+    let (client, role, sections) = initial_connect(&url)?;
+    println!("Remote welcome: role {role}");
+    for line in vayren_remote_client::summarize_snapshot(&sections) {
+        println!("Remote snapshot: {line}");
+    }
+
+    let mut live_state = init_remote_state();
+    mark_link(&mut live_state, "CONNECTED", &format!("role {role}"), 0);
+    apply_remote_sections(&mut live_state, &sections, false);
+    // Refuse anything the (inert) controls queued before the first paint.
+    while live_state.take_action().is_some() {}
+
+    println!("Initializing Slint UI...");
+    let ui = vayren_shell::AppWindow::new()?;
+    let zoom = Rc::new(RefCell::new(
+        vayren_shell::viewport::ChartViewportZoom::default(),
+    ));
+    let live_state = Rc::new(RefCell::new(live_state));
+    shell::wire(&ui);
+    shell::wire_zoom(&ui, zoom.clone());
+    shell::wire_live(&ui, live_state.clone());
+    shell::wire_portfolio(
+        &ui,
+        Rc::new(RefCell::new(portfolio::PortfolioState::default())),
+    );
+    shell::wire_research(
+        &ui,
+        Rc::new(RefCell::new(research_state::demo_research_state())),
+    );
+    shell::apply(&ui, &shell::demo_snapshot());
+    shell::apply_connection(&ui, &BrokerWorkspace::empty());
+    shell::apply_market(&ui, &market::MarketState::default());
+    shell::apply_lab(&ui, &shell::demo_lab_state());
+    shell::apply_portfolio(&ui, &portfolio::PortfolioState::default());
+    shell::apply_research(&ui, &research_state::demo_research_state());
+    shell::apply_live(&ui, &live_state.borrow());
+    shell::apply_zoom(&ui, &zoom.borrow());
+
+    let (remote_tx, remote_rx) = mpsc::channel::<RemoteUiUpdate>();
+    spawn_remote_pump(client, url, remote_tx);
+    let fetch_timer = slint::Timer::default();
+    {
+        let weak = ui.as_weak();
+        let live_state = live_state.clone();
+        fetch_timer.start(
+            slint::TimerMode::Repeated,
+            std::time::Duration::from_millis(50),
+            move || {
+                let Some(ui) = weak.upgrade() else { return };
+                // Inert controls stay inert: the model refuses to queue when
+                // unwired, so anything here is drained and dropped with a
+                // log line — never forwarded, never sent.
+                while let Some(raw) = live_state.borrow_mut().take_action() {
+                    let name: String = serde_json::from_str::<serde_json::Value>(&raw)
+                        .ok()
+                        .and_then(|v| v.get("action").and_then(|a| a.as_str()).map(str::to_string))
+                        .unwrap_or_else(|| "unknown".to_string());
+                    eprintln!("remote UI: control '{name}' refused (read-only client, nothing sent)");
+                }
+                let mut dirty = false;
+                for update in remote_rx.try_iter() {
+                    match update {
+                        RemoteUiUpdate::Snapshot { sections, resync } => {
+                            if resync {
+                                println!("Remote resync: replacing state with fresh snapshot");
+                            }
+                            apply_remote_sections(&mut live_state.borrow_mut(), &sections, resync);
+                            dirty = true;
+                        }
+                        RemoteUiUpdate::StateUpdate { sections } => {
+                            apply_remote_sections(&mut live_state.borrow_mut(), &sections, false);
+                            dirty = true;
+                        }
+                        RemoteUiUpdate::StreamEvent { name, payload } => {
+                            push_remote_event(&mut live_state.borrow_mut(), &name, &payload);
+                            dirty = true;
+                        }
+                        RemoteUiUpdate::Link { label, detail, reconnects } => {
+                            eprintln!("remote UI: link {label} ({detail})");
+                            mark_link(
+                                &mut live_state.borrow_mut(),
+                                &label,
+                                &detail,
+                                reconnects,
+                            );
+                            dirty = true;
+                        }
+                    }
+                }
+                if dirty {
+                    shell::apply_live(&ui, &live_state.borrow());
+                }
+            },
+        );
+    }
+    let initial = shell::initial_screen(&argv);
+    shell::select(&ui, initial);
+    println!("VAYREN UI ready (remote) - entering event loop");
+    ui.run()?;
+
+    println!("VAYREN shutdown complete");
     Ok(())
 }
 

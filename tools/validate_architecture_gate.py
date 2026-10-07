@@ -39,6 +39,7 @@ FIRST_PARTY_ROOTS = frozenset(
         "risk",
         "execution",
         "broker",
+        "remote",
         "tools",
         "conftest",
     }

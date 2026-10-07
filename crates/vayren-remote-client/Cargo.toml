@@ -1,0 +1,20 @@
+[package]
+name = "vayren-remote-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "VAYREN remote gateway client (schema v1): WSS transport, token resolution, reconnect — no trading logic, no UI"
+
+[dependencies]
+tungstenite = { workspace = true }
+rustls = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+keyring = { workspace = true }
+
+[dev-dependencies]
+tungstenite = { workspace = true }
+
+[[example]]
+name = "remote_ping"
+path = "examples/remote_ping.rs"
