@@ -222,6 +222,7 @@ component RailButton inherits Rectangle {
     background: root.active ? VayrenPalette.selected
         : ta.has-hover ? VayrenPalette.hover : transparent;
     ta := TouchArea {
+        mouse-cursor: pointer;
         clicked => { root.picked(); }
     }
     Text {
@@ -292,6 +293,7 @@ component SmallButton inherits Rectangle {
         : root.enabled ? VayrenPalette.muted : VayrenPalette.faint;
     ta := TouchArea {
         enabled: root.enabled;
+        mouse-cursor: pointer;
         clicked => { if root.enabled { root.picked(); } }
     }
     HorizontalLayout {
@@ -381,6 +383,7 @@ component MenuRow inherits Rectangle {
     background: ta.has-hover && root.enabled ? VayrenPalette.selected : transparent;
     ta := TouchArea {
         enabled: root.enabled;
+        mouse-cursor: pointer;
         clicked => { if root.enabled { root.picked(); } }
     }
     Text {
@@ -463,6 +466,7 @@ component IndicatorIconBtn inherits Rectangle {
     background: ta.pressed ? VayrenPalette.pressed
         : ta.has-hover ? VayrenPalette.hover : transparent;
     ta := TouchArea {
+        mouse-cursor: pointer;
         clicked => { root.picked(); }
     }
     IndicatorIcon {
@@ -492,6 +496,7 @@ component IndicatorBarRow inherits Rectangle {
             font-size: VayrenDesign.fs-small;
             font-weight: 600;
             vertical-alignment: center;
+            overflow: elide;
         }
         // The ONLY three actions: eye · settings · delete.
         IndicatorIconBtn {
@@ -693,10 +698,11 @@ component MarkerGlyph inherits Rectangle {
         Text {
             text: label;
             color: pill-solid ? VayrenPalette.text : ink;
-            font-size: 10px;
+            font-size: VayrenDesign.fs-label;
             font-weight: 700;
             horizontal-alignment: center;
             vertical-alignment: center;
+            overflow: elide;
         }
     }
 }
@@ -760,6 +766,7 @@ component PopupItem inherits Rectangle {
     }
     if pr.kind == "item": Rectangle {
         ta := TouchArea {
+            mouse-cursor: pointer;
             clicked => { root.picked(root.pr.name); }
         }
         Text {
@@ -921,6 +928,7 @@ component DlField inherits Rectangle {
                     color: VayrenPalette.text;
                     font-size: VayrenDesign.fs-small;
                     vertical-alignment: center;
+                    overflow: elide;
                 }
                 Rectangle { horizontal-stretch: 1; background: transparent; }
                 Text {
@@ -938,7 +946,7 @@ component DlKVRow inherits Rectangle {
     in property <string> value;
     in property <bool> strong: false;
     in property <bool> wrap: false;
-    height: root.wrap ? Math.max(18px, 34px) : 18px;
+    height: root.wrap ? Math.max(22px, 34px) : 22px;
     HorizontalLayout {
         spacing: 8px;
         Text {
@@ -969,6 +977,7 @@ component DlCheckRow inherits Rectangle {
     background: ta.has-hover && root.enabled ? VayrenPalette.hover : transparent;
     ta := TouchArea {
         enabled: root.enabled;
+        mouse-cursor: pointer;
         clicked => { if root.enabled { root.picked(); } }
     }
     HorizontalLayout {
@@ -1008,6 +1017,7 @@ component DlChip inherits Rectangle {
     border-color: VayrenPalette.hairline;
     background: ta.has-hover ? VayrenPalette.hover : VayrenPalette.bg;
     ta := TouchArea {
+        mouse-cursor: pointer;
         clicked => { root.removed(); }
     }
     HorizontalLayout {
@@ -1032,6 +1042,7 @@ component CalDay inherits Rectangle {
     background: day > 0 && ta.has-hover ? VayrenPalette.hover : transparent;
     ta := TouchArea {
         enabled: root.day > 0;
+        mouse-cursor: pointer;
         clicked => { if root.day > 0 { root.picked(root.day); } }
     }
     Text {
@@ -1980,6 +1991,7 @@ export component MarketScreen inherits Rectangle {
                                 background: row.selected ? VayrenPalette.selected
                                     : wta.has-hover ? VayrenPalette.hover : transparent;
                                 wta := TouchArea {
+                                    mouse-cursor: pointer;
                                     clicked => { root.symbol-selected(row.symbol); }
                                 }
                                 VerticalLayout {
@@ -2004,6 +2016,7 @@ export component MarketScreen inherits Rectangle {
                                             font-weight: 600;
                                             horizontal-alignment: right;
                                             vertical-alignment: center;
+                                            overflow: elide;
                                         }
                                     }
                                     Text {
@@ -2012,6 +2025,7 @@ export component MarketScreen inherits Rectangle {
                                         font-size: VayrenDesign.fs-label;
                                         horizontal-alignment: right;
                                         vertical-alignment: center;
+                                        overflow: elide;
                                     }
                                 }
                             }

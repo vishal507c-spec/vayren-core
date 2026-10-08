@@ -5,7 +5,16 @@
 
 **Owns:** Current state, open items, verified facts, oddities. **Not owns:** Rules/architecture/events/contracts \u2192 `AGENTS.md`, `AI_ENTRY.md`, `architecture.md`, `module_contracts.md`, `event_catalog.md`.
 
-**Latest update (live-render-snapshot-speed, 2026-10-08):** LIVE_RENDER_SNAPSHOT 2.7x FASTER — same viewports, same thresholds (local only, no commit/push).
+**Latest update (fast-market-ui-polish-1, 2026-10-08):** FAST MARKET UI POLISH 1 — Slint values-only, no logic (local only, no commit/push).
+1. File: `crates/vayren-shell/ui/market.slint` only. Zero Rust/Python changed.
+2. Typography floor: last sub-11px `10px` (MarkerGlyph label pill) → `VayrenDesign.fs-label` + `overflow: elide` (0 sub-11px left, grep-verified).
+3. Truncation honesty: `overflow: elide` added to IndicatorBarRow name, watchlist price/change, DlField value (long names/prices truncate, never mid-glyph clip).
+4. Pointer affordance: `mouse-cursor: pointer` on all clickable TouchAreas (RailButton, SmallButton, MenuRow, IndicatorIconBtn, watch-row, PopupItem item, DlCheckRow, DlChip, CalDay).
+5. Breathing: cramped `DlKVRow 18px` → `22px` (= row-height token value).
+6. Verified: `cargo check -p vayren-shell` PASS (2m43s); sub-11px grep clean. `cargo fmt --check` diff is pre-existing Rust formatting, untouched.
+7. Open: MTimeButton centered labels still un-elided (fixed-width tab row, low risk); full `make check` left to task end / CI.
+
+**Previous update (live-render-snapshot-speed, 2026-10-08):** LIVE_RENDER_SNAPSHOT 2.7x FASTER — same viewports, same thresholds (local only, no commit/push).
 1. Root cause: har frame par 5-6 full-buffer `count_near` scans (UHD 3840x2160 = 8.3M px x 6 = ~50M checks) + STRUCT test me ~15 bade renders.
 2. Fix (`crates/vayren-shell/tests/live_render_snapshot.rs` only, test code — no product logic): single-pass `probe_frame` — 1 loop me surface/accent/neg/green/text/bg (+ collapse `surface_alt`), centers/tolerances identical, buckets independent. Saare viewports + saare asserts unchanged. Plus `live.slint` fast polish: sub-10px → 10px floor, cramped 14/15/16px rows → 18px.
 3. Verified: 4/4 PASS, `cargo fmt --check` clean. Debug: 53.7s → ~20-26s (~2.7x).
