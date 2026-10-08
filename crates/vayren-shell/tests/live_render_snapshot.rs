@@ -50,16 +50,62 @@ fn save_ppm(path: &std::path::Path, buffer: &SharedPixelBuffer<Rgb8Pixel>) {
     std::fs::write(path, raw).unwrap();
 }
 
-fn count_near(buffer: &SharedPixelBuffer<Rgb8Pixel>, rgb: [u8; 3], tol: u8) -> usize {
-    buffer
-        .as_slice()
-        .iter()
-        .filter(|p| {
-            p.r.abs_diff(rgb[0]) <= tol
-                && p.g.abs_diff(rgb[1]) <= tol
-                && p.b.abs_diff(rgb[2]) <= tol
-        })
-        .count()
+/// Single-pass frame probe: classifies every pixel once into the same
+/// buckets the old per-color `count_near` scans produced (identical centers
+/// and tolerances, buckets are independent so overlap behaviour matches).
+/// One pass instead of 5-6 over multi-megapixel buffers — same thresholds,
+/// ~5x less pixel traffic. Thresholds below must stay in sync with the
+/// asserts; change a color in exactly one place (here).
+struct FrameProbe {
+    surface: usize,
+    surface_alt: usize,
+    accent: usize,
+    neg: usize,
+    green: usize,
+    text: usize,
+    bg: usize,
+}
+
+fn probe_frame(buffer: &SharedPixelBuffer<Rgb8Pixel>) -> FrameProbe {
+    let mut p = FrameProbe {
+        surface: 0,
+        surface_alt: 0,
+        accent: 0,
+        neg: 0,
+        green: 0,
+        text: 0,
+        bg: 0,
+    };
+    for px in buffer.as_slice() {
+        let (r, g, b) = (px.r, px.g, px.b);
+        if r.abs_diff(16) <= 6 && g.abs_diff(23) <= 6 && b.abs_diff(32) <= 6 {
+            p.surface += 1;
+        }
+        // Collapse/expand recomposition probe (1280x720 pair only).
+        if r.abs_diff(12) <= 6 && g.abs_diff(18) <= 6 && b.abs_diff(27) <= 6 {
+            p.surface_alt += 1;
+        }
+        if r.abs_diff(0) <= 24 && g.abs_diff(229) <= 24 && b.abs_diff(200) <= 24 {
+            p.accent += 1;
+        }
+        if r.abs_diff(240) <= 24 && g.abs_diff(90) <= 24 && b.abs_diff(103) <= 24 {
+            p.neg += 1;
+        }
+        if r.abs_diff(33) <= 24 && g.abs_diff(197) <= 24 && b.abs_diff(139) <= 24 {
+            p.green += 1;
+        }
+        // Bright and dim text bands are disjoint (r >= 204 vs r <= 157), so a
+        // single counter equals the old bright+dim sum exactly.
+        if (r.abs_diff(230) <= 26 && g.abs_diff(237) <= 26 && b.abs_diff(243) <= 26)
+            || (r.abs_diff(139) <= 18 && g.abs_diff(152) <= 18 && b.abs_diff(167) <= 18)
+        {
+            p.text += 1;
+        }
+        if r.abs_diff(7) <= 3 && g.abs_diff(11) <= 3 && b.abs_diff(16) <= 3 {
+            p.bg += 1;
+        }
+    }
+    p
 }
 
 fn render_frame(
@@ -160,11 +206,8 @@ fn live_screen_renders_structurally_at_every_viewport_tier() {
     for (name, w, h) in cases {
         let buffer = render_frame(&ui, &win, name, w, h);
         let px = (w * h) as usize;
-        let surface = count_near(&buffer, [16, 23, 32], 6);
-        let accent = count_near(&buffer, [0, 229, 200], 24);
-        let neg = count_near(&buffer, [240, 90, 103], 24);
-        let text =
-            count_near(&buffer, [230, 237, 243], 26) + count_near(&buffer, [139, 152, 167], 18);
+        let probe = probe_frame(&buffer);
+        let (surface, accent, neg, text) = (probe.surface, probe.accent, probe.neg, probe.text);
         // Panels paint (rail + command bar + section surfaces), the teal
         // identity/nav renders, the danger spine (NOT READY verdicts, HALT
         // control) renders, and real glyphs rasterize in every frame.
@@ -179,7 +222,7 @@ fn live_screen_renders_structurally_at_every_viewport_tier() {
             assert!(neg > px / 12000, "{name}: danger tone missing ({neg})");
         }
         // No giant flat void: at least 3% of every frame is non-background.
-        let bg = count_near(&buffer, [7, 11, 16], 3);
+        let bg = probe.bg;
         assert!(bg < px * 97 / 100, "{name}: frame is a void ({bg}/{px})");
     }
 
@@ -187,8 +230,9 @@ fn live_screen_renders_structurally_at_every_viewport_tier() {
     shell::apply_live(&ui, &shell::demo_live_state_running());
     let running = render_frame(&ui, &win, "running_1920x1080", 1920, 1080);
     let px = (1920 * 1080) as usize;
-    let green = count_near(&running, [33, 197, 139], 24); // POS: +P&L / ENABLED
-    let neg = count_near(&running, [240, 90, 103], 24); // NEG: halt spine
+    let run_probe = probe_frame(&running);
+    let green = run_probe.green; // POS: +P&L / ENABLED
+    let neg = run_probe.neg; // NEG: halt spine
     assert!(green > px / 15000, "running: POS tone missing ({green})");
     assert!(neg > px / 12000, "running: halt control missing ({neg})");
 
@@ -246,8 +290,8 @@ fn live_screen_renders_structurally_at_every_viewport_tier() {
     open.inspector_open = true;
     shell::apply_live(&ui, &open);
     let o = render_frame(&ui, &win, "expanded_1280x720", 1280, 720);
-    let surf_c = count_near(&c, [12, 18, 27], 6) as i64;
-    let surf_o = count_near(&o, [12, 18, 27], 6) as i64;
+    let surf_c = probe_frame(&c).surface_alt as i64;
+    let surf_o = probe_frame(&o).surface_alt as i64;
     assert!(
         (surf_c - surf_o).abs() > 2000,
         "collapse/expand must recompose the frame, not just hide pixels"
@@ -366,9 +410,7 @@ fn narrow_viewports_render_the_compact_chrome_not_the_clipped_wide_form() {
 
     // Text-pixel budget as a proxy for "how much is drawn": a clipped wide
     // form draws strictly less than a form that actually fits.
-    let text_pixels = |buffer: &SharedPixelBuffer<Rgb8Pixel>| {
-        count_near(buffer, [230, 237, 243], 26) + count_near(buffer, [139, 152, 167], 18)
-    };
+    // Single pass per frame (same bands the old double `count_near` summed).
 
     // 1024x640 is the smallest supported shell window: chips on their strip,
     // compact tabs. Every chip and every tab must still be drawn.
@@ -377,22 +419,18 @@ fn narrow_viewports_render_the_compact_chrome_not_the_clipped_wide_form() {
     // the wide frame must carry at least as much text as the compact one —
     // proof that nothing is lost by recomposing down.
     let large = render_frame(&ui, &win, "wide_1920x1080", 1920, 1080);
+    let small_probe = probe_frame(&small);
+    let large_probe = probe_frame(&large);
     assert!(
-        text_pixels(&large) > text_pixels(&small),
+        large_probe.text > small_probe.text,
         "the wide form must draw more text than the compact one ({})",
-        text_pixels(&large)
+        large_probe.text
     );
     // Structural health at the floor: panels, accent and glyphs all present.
     let px = (1024 * 640) as usize;
-    assert!(
-        count_near(&small, [16, 23, 32], 6) > px / 400,
-        "compact: panels"
-    );
-    assert!(
-        count_near(&small, [0, 229, 200], 24) > px / 6000,
-        "compact: accent"
-    );
-    assert!(text_pixels(&small) > px / 1500, "compact: glyphs");
+    assert!(small_probe.surface > px / 400, "compact: panels");
+    assert!(small_probe.accent > px / 6000, "compact: accent");
+    assert!(small_probe.text > px / 1500, "compact: glyphs");
 }
 
 #[test]
@@ -565,17 +603,15 @@ fn live_state_matrix_renders_at_the_primary_target_viewport() {
         shell::apply_live(&ui, &state);
         let buffer = render_frame(&ui, &win, name, w, h);
         let px = (w * h) as usize;
-        let surface = count_near(&buffer, [16, 23, 32], 6);
-        let accent = count_near(&buffer, [0, 229, 200], 24);
-        let text =
-            count_near(&buffer, [230, 237, 243], 26) + count_near(&buffer, [139, 152, 167], 18);
+        let probe = probe_frame(&buffer);
+        let (surface, accent, text) = (probe.surface, probe.accent, probe.text);
         // The same three health floors the idle matrix enforces: panels paint,
         // the identity accent renders, and glyphs rasterize. A state that
         // produced an unreadable frame would fail here.
         assert!(surface > px / 400, "{name}: panels missing ({surface})");
         assert!(accent > px / 6000, "{name}: accent missing ({accent})");
         assert!(text > px / 1500, "{name}: text missing ({text})");
-        let bg = count_near(&buffer, [7, 11, 16], 3);
+        let bg = probe.bg;
         assert!(bg < px * 97 / 100, "{name}: frame is a void ({bg}/{px})");
     }
 }
