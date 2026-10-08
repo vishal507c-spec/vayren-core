@@ -29,7 +29,8 @@ def main() -> int:
 
     image = Image.open(args.png).convert("RGB")
     crop = image.crop((args.x, args.y, args.x + args.w, args.y + args.h))
-    crop = crop.resize((crop.width * args.scale, crop.height * args.scale), Image.NEAREST)
+    resample_nearest: int = int(getattr(Image, "NEAREST", 0))
+    crop = crop.resize((crop.width * args.scale, crop.height * args.scale), resample_nearest)
     out = args.out or args.png.with_name(f"{args.png.stem}_crop{args.x}x{args.y}.png")
     crop.save(out)
     print(f"{args.png.name} [{args.x},{args.y} {args.w}x{args.h}] x{args.scale} -> {out}")

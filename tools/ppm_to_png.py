@@ -57,13 +57,14 @@ def main() -> int:
     if not sources:
         sys.exit(f"no .ppm files under {args.ppm_dir}")
 
+    resample_lanczos: int = int(getattr(Image, "LANCZOS", 1))
     written: list[Path] = []
     for path in sources:
         image = read_ppm(path)
         if args.scale != 1.0:
             image = image.resize(
                 (max(1, int(image.width * args.scale)), max(1, int(image.height * args.scale))),
-                Image.LANCZOS,
+                resample_lanczos,
             )
         out = path.with_suffix(".png")
         image.save(out)
@@ -77,7 +78,7 @@ def main() -> int:
         for path in sorted(written, key=lambda p: p.stat().st_size):
             tile = Image.open(path)
             if tile.width > 1400:
-                tile = tile.resize((1400, int(tile.height * 1400 / tile.width)), Image.LANCZOS)
+                tile = tile.resize((1400, int(tile.height * 1400 / tile.width)), resample_lanczos)
             tiles.append((path.stem, tile))
         if not tiles:
             sys.exit("nothing to stack")
