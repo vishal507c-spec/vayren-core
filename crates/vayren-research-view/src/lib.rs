@@ -19,6 +19,15 @@
 //! `-4` bad JSON · `-5` bad arg · `-6` wrong thread · `-7` platform ·
 //! `-9` panic (destroy the view after one).
 
+// The C ABI below dereferences its `*mut` arguments. These entry points
+// are `pub extern "C" fn` on purpose: the safety contract is carried by
+// the C signature and by the documented per-function error codes (null and
+// length checks before every dereference, thread affinity checked on
+// entry), not by an `unsafe` obligation on the caller. Marking them
+// `unsafe fn` would push that obligation onto every caller — including
+// this crate's own tests — without making the boundary any safer.
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
+
 slint::include_modules!();
 
 use std::cell::{Cell, RefCell};
