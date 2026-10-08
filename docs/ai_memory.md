@@ -5,7 +5,12 @@
 
 **Owns:** Current state, open items, verified facts, oddities. **Not owns:** Rules/architecture/events/contracts \u2192 `AGENTS.md`, `AI_ENTRY.md`, `architecture.md`, `module_contracts.md`, `event_catalog.md`.
 
-**Latest update (permanent-remote-first-desktop-launch, 2026-10-08):** PERMANENT REMOTE-FIRST PRODUCTION DESKTOP LAUNCH + OFFICIAL PACKAGE PIPELINE + LIVE CONNECTION VERIFIED.
+**Latest update (live-render-snapshot-speed, 2026-10-08):** LIVE_RENDER_SNAPSHOT 2.7x FASTER — same viewports, same thresholds (local only, no commit/push).
+1. Root cause: har frame par 5-6 full-buffer `count_near` scans (UHD 3840x2160 = 8.3M px x 6 = ~50M checks) + STRUCT test me ~15 bade renders.
+2. Fix (`crates/vayren-shell/tests/live_render_snapshot.rs` only, test code — no product logic): single-pass `probe_frame` — 1 loop me surface/accent/neg/green/text/bg (+ collapse `surface_alt`), centers/tolerances identical, buckets independent. Saare viewports + saare asserts unchanged. Plus `live.slint` fast polish: sub-10px → 10px floor, cramped 14/15/16px rows → 18px.
+3. Verified: 4/4 PASS, `cargo fmt --check` clean. Debug: 53.7s → ~20-26s (~2.7x).
+
+**Previous update (permanent-remote-first-desktop-launch, 2026-10-08):** PERMANENT REMOTE-FIRST PRODUCTION DESKTOP LAUNCH + OFFICIAL PACKAGE PIPELINE + LIVE CONNECTION VERIFIED.
 1. **Production Remote-First Default & Fail-Closed Guard:**
    - Launch contract (`crates/vayren-remote-client/src/launch.rs`): Packaged build (`packaged-remote`) defaults to `LaunchMode::Remote` (`wss://ip-172-31-12-198.taila678c5.ts.net/vayren/v1`). Explicit `--local` forces development mode; unrelated CLI flags (e.g. `--data-dir`, `--strategy-dir`) never switch off remote mode. Regression test suite covers contracts A-E.
    - Shell startup guard (`crates/vayren-shell/src/main.rs`): Added compile-time `assert!(remote_gateway_url.is_some())` for packaged builds when `--local` is absent, permanently preventing silent fallback to local execution.
