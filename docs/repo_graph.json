@@ -1243,7 +1243,7 @@
       "to": "src/core/native"
     }
   ],
-  "entity_count": 5342,
+  "entity_count": 5335,
   "files": [
     {
       "domain": "CORE",
@@ -2463,16 +2463,6 @@
       "owner": "route:app-composition",
       "owner_source": "route",
       "path": "src/app/tests/__init__.py",
-      "retention_state": null
-    },
-    {
-      "domain": "APP_COMPOSITION",
-      "is_test": true,
-      "language": "PYTHON",
-      "module": "src/app",
-      "owner": "route:app-composition",
-      "owner_source": "route",
-      "path": "src/app/tests/conftest.py",
       "retention_state": null
     },
     {
@@ -6293,7 +6283,6 @@
         "src/app/observable.py",
         "src/app/progress.py",
         "src/app/tests/__init__.py",
-        "src/app/tests/conftest.py",
         "src/app/tests/test_backtest_progress.py",
         "src/app/tests/test_backtest_service.py",
         "src/app/tests/test_headless_lab_coverage.py",
@@ -7291,7 +7280,7 @@
       "required_language": "PYTHON"
     }
   ],
-  "relationship_count": 11007,
+  "relationship_count": 11031,
   "repository": {
     "name": "vayren-core",
     "root": "."
@@ -9509,104 +9498,6 @@
     },
     {
       "called_by": [
-        "app.tests.conftest:qt_app"
-      ],
-      "callers_complete": true,
-      "calls": [],
-      "dotted": "app.tests.conftest._load_real_font",
-      "file": "src/app/tests/conftest.py",
-      "kind": "function",
-      "language": "PYTHON",
-      "line": 168,
-      "module": "src/app",
-      "name": "_load_real_font",
-      "public": false,
-      "qualified": "app.tests.conftest:_load_real_font",
-      "tests": []
-    },
-    {
-      "called_by": [],
-      "callers_complete": true,
-      "calls": [],
-      "dotted": "app.tests.conftest._shutdown_qt_workers",
-      "file": "src/app/tests/conftest.py",
-      "kind": "function",
-      "language": "PYTHON",
-      "line": 128,
-      "module": "src/app",
-      "name": "_shutdown_qt_workers",
-      "public": false,
-      "qualified": "app.tests.conftest:_shutdown_qt_workers",
-      "tests": []
-    },
-    {
-      "called_by": [],
-      "callers_complete": true,
-      "calls": [
-        "app.tests.conftest:_load_real_font"
-      ],
-      "dotted": "app.tests.conftest.qt_app",
-      "file": "src/app/tests/conftest.py",
-      "kind": "function",
-      "language": "PYTHON",
-      "line": 114,
-      "module": "src/app",
-      "name": "qt_app",
-      "public": true,
-      "qualified": "app.tests.conftest:qt_app",
-      "tests": []
-    },
-    {
-      "called_by": [],
-      "callers_complete": true,
-      "calls": [],
-      "dotted": "app.tests.conftest.seed_database",
-      "file": "src/app/tests/conftest.py",
-      "kind": "function",
-      "language": "PYTHON",
-      "line": 47,
-      "module": "src/app",
-      "name": "seed_database",
-      "public": true,
-      "qualified": "app.tests.conftest:seed_database",
-      "tests": []
-    },
-    {
-      "called_by": [
-        "app.tests.conftest:seed_symbol_directory"
-      ],
-      "callers_complete": true,
-      "calls": [],
-      "dotted": "app.tests.conftest.seed_ohlcv_database",
-      "file": "src/app/tests/conftest.py",
-      "kind": "function",
-      "language": "PYTHON",
-      "line": 75,
-      "module": "src/app",
-      "name": "seed_ohlcv_database",
-      "public": true,
-      "qualified": "app.tests.conftest:seed_ohlcv_database",
-      "tests": []
-    },
-    {
-      "called_by": [],
-      "callers_complete": true,
-      "calls": [
-        "app.tests.conftest:seed_ohlcv_database"
-      ],
-      "dotted": "app.tests.conftest.seed_symbol_directory",
-      "file": "src/app/tests/conftest.py",
-      "kind": "function",
-      "language": "PYTHON",
-      "line": 105,
-      "module": "src/app",
-      "name": "seed_symbol_directory",
-      "public": true,
-      "qualified": "app.tests.conftest:seed_symbol_directory",
-      "tests": []
-    },
-    {
-      "called_by": [
         "app.tests.test_backtest_progress:test_cancelling_stops_early_and_is_not_a_complete_run",
         "app.tests.test_backtest_progress:test_events_only_ever_claim_finished_work",
         "app.tests.test_backtest_progress:test_progress_reporting_changes_no_result"
@@ -10921,6 +10812,36 @@
     },
     {
       "called_by": [
+        "app.tests.test_phase4_dashboard:test_bridge_command_dispatches",
+        "app.tests.test_phase4_dashboard:test_bridge_event_ingest_and_deduplication",
+        "app.tests.test_phase4_dashboard:test_bridge_snapshot_and_signals",
+        "app.tests.test_phase4_dashboard:test_bridge_staleness_detection",
+        "app.tests.test_phase4_dashboard:test_dashboard_embeds_all_6_workspaces",
+        "app.tests.test_phase4_dashboard:test_dashboard_tab_switching",
+        "app.tests.test_phase4_dashboard:test_global_stale_banner_toggle",
+        "app.tests.test_phase4_dashboard:test_live_workspace_updates",
+        "app.tests.test_phase4_dashboard:test_market_workspace_stale_alert",
+        "app.tests.test_phase4_dashboard:test_portfolio_workspace_consolidation",
+        "app.tests.test_phase4_dashboard:test_research_workspace_local_data_scan",
+        "app.tests.test_phase4_dashboard:test_risk_panel_9_metrics_grid",
+        "app.tests.test_phase4_dashboard:test_strategy_lab_inspector_and_deploy",
+        "app.tests.test_phase4_dashboard:test_system_workspace_health_and_gates"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "app.tests.test_phase4_dashboard.qt_app",
+      "file": "src/app/tests/test_phase4_dashboard.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 87,
+      "module": "src/app",
+      "name": "qt_app",
+      "public": true,
+      "qualified": "app.tests.test_phase4_dashboard:qt_app",
+      "tests": []
+    },
+    {
+      "called_by": [
         "app.tests.test_phase4_dashboard:test_bridge_snapshot_and_signals",
         "app.tests.test_phase4_dashboard:test_bridge_staleness_detection",
         "app.tests.test_phase4_dashboard:test_live_workspace_updates",
@@ -10935,7 +10856,7 @@
       "file": "src/app/tests/test_phase4_dashboard.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 58,
+      "line": 98,
       "module": "src/app",
       "name": "sample_snapshot",
       "public": true,
@@ -10947,6 +10868,7 @@
       "callers_complete": true,
       "calls": [
         "app.services.control_plane_bridge:ControlPlaneBridge",
+        "app.tests.test_phase4_dashboard:qt_app",
         "execution.control_plane:CommandResponse",
         "execution.control_plane:CommandStatus",
         "execution.control_plane:ControlCommand"
@@ -10955,7 +10877,7 @@
       "file": "src/app/tests/test_phase4_dashboard.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 182,
+      "line": 222,
       "module": "src/app",
       "name": "test_bridge_command_dispatches",
       "public": true,
@@ -10966,13 +10888,14 @@
       "called_by": [],
       "callers_complete": true,
       "calls": [
-        "app.services.control_plane_bridge:ControlPlaneBridge"
+        "app.services.control_plane_bridge:ControlPlaneBridge",
+        "app.tests.test_phase4_dashboard:qt_app"
       ],
       "dotted": "app.tests.test_phase4_dashboard.test_bridge_event_ingest_and_deduplication",
       "file": "src/app/tests/test_phase4_dashboard.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 164,
+      "line": 204,
       "module": "src/app",
       "name": "test_bridge_event_ingest_and_deduplication",
       "public": true,
@@ -10984,13 +10907,14 @@
       "callers_complete": true,
       "calls": [
         "app.services.control_plane_bridge:ControlPlaneBridge",
+        "app.tests.test_phase4_dashboard:qt_app",
         "app.tests.test_phase4_dashboard:sample_snapshot"
       ],
       "dotted": "app.tests.test_phase4_dashboard.test_bridge_snapshot_and_signals",
       "file": "src/app/tests/test_phase4_dashboard.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 127,
+      "line": 167,
       "module": "src/app",
       "name": "test_bridge_snapshot_and_signals",
       "public": true,
@@ -11002,13 +10926,14 @@
       "callers_complete": true,
       "calls": [
         "app.services.control_plane_bridge:ControlPlaneBridge",
+        "app.tests.test_phase4_dashboard:qt_app",
         "app.tests.test_phase4_dashboard:sample_snapshot"
       ],
       "dotted": "app.tests.test_phase4_dashboard.test_bridge_staleness_detection",
       "file": "src/app/tests/test_phase4_dashboard.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 139,
+      "line": 179,
       "module": "src/app",
       "name": "test_bridge_staleness_detection",
       "public": true,
@@ -11026,13 +10951,14 @@
         "app.services.trading_dashboard:ResearchWorkspaceView",
         "app.services.trading_dashboard:StrategyLabWorkspaceView",
         "app.services.trading_dashboard:SystemWorkspaceView",
-        "app.services.trading_dashboard:TradingDashboardWidget"
+        "app.services.trading_dashboard:TradingDashboardWidget",
+        "app.tests.test_phase4_dashboard:qt_app"
       ],
       "dotted": "app.tests.test_phase4_dashboard.test_dashboard_embeds_all_6_workspaces",
       "file": "src/app/tests/test_phase4_dashboard.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 230,
+      "line": 270,
       "module": "src/app",
       "name": "test_dashboard_embeds_all_6_workspaces",
       "public": true,
@@ -11044,13 +10970,14 @@
       "callers_complete": true,
       "calls": [
         "app.services.control_plane_bridge:ControlPlaneBridge",
-        "app.services.trading_dashboard:TradingDashboardWidget"
+        "app.services.trading_dashboard:TradingDashboardWidget",
+        "app.tests.test_phase4_dashboard:qt_app"
       ],
       "dotted": "app.tests.test_phase4_dashboard.test_dashboard_tab_switching",
       "file": "src/app/tests/test_phase4_dashboard.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 244,
+      "line": 284,
       "module": "src/app",
       "name": "test_dashboard_tab_switching",
       "public": true,
@@ -11062,13 +10989,14 @@
       "callers_complete": true,
       "calls": [
         "app.services.control_plane_bridge:ControlPlaneBridge",
-        "app.services.trading_dashboard:TradingDashboardWidget"
+        "app.services.trading_dashboard:TradingDashboardWidget",
+        "app.tests.test_phase4_dashboard:qt_app"
       ],
       "dotted": "app.tests.test_phase4_dashboard.test_global_stale_banner_toggle",
       "file": "src/app/tests/test_phase4_dashboard.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 383,
+      "line": 417,
       "module": "src/app",
       "name": "test_global_stale_banner_toggle",
       "public": true,
@@ -11081,13 +11009,14 @@
       "calls": [
         "app.services.control_plane_bridge:ControlPlaneBridge",
         "app.services.trading_dashboard:LiveWorkspaceView",
+        "app.tests.test_phase4_dashboard:qt_app",
         "app.tests.test_phase4_dashboard:sample_snapshot"
       ],
       "dotted": "app.tests.test_phase4_dashboard.test_live_workspace_updates",
       "file": "src/app/tests/test_phase4_dashboard.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 268,
+      "line": 308,
       "module": "src/app",
       "name": "test_live_workspace_updates",
       "public": true,
@@ -11100,13 +11029,14 @@
       "calls": [
         "app.services.control_plane_bridge:ControlPlaneBridge",
         "app.services.trading_dashboard:MarketWorkspaceView",
+        "app.tests.test_phase4_dashboard:qt_app",
         "app.tests.test_phase4_dashboard:sample_snapshot"
       ],
       "dotted": "app.tests.test_phase4_dashboard.test_market_workspace_stale_alert",
       "file": "src/app/tests/test_phase4_dashboard.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 304,
+      "line": 344,
       "module": "src/app",
       "name": "test_market_workspace_stale_alert",
       "public": true,
@@ -11119,13 +11049,14 @@
       "calls": [
         "app.services.control_plane_bridge:ControlPlaneBridge",
         "app.services.trading_dashboard:PortfolioWorkspaceView",
+        "app.tests.test_phase4_dashboard:qt_app",
         "app.tests.test_phase4_dashboard:sample_snapshot"
       ],
       "dotted": "app.tests.test_phase4_dashboard.test_portfolio_workspace_consolidation",
       "file": "src/app/tests/test_phase4_dashboard.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 349,
+      "line": 387,
       "module": "src/app",
       "name": "test_portfolio_workspace_consolidation",
       "public": true,
@@ -11137,13 +11068,14 @@
       "callers_complete": true,
       "calls": [
         "app.services.control_plane_bridge:ControlPlaneBridge",
-        "app.services.trading_dashboard:ResearchWorkspaceView"
+        "app.services.trading_dashboard:ResearchWorkspaceView",
+        "app.tests.test_phase4_dashboard:qt_app"
       ],
       "dotted": "app.tests.test_phase4_dashboard.test_research_workspace_local_data_scan",
       "file": "src/app/tests/test_phase4_dashboard.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 338,
+      "line": 376,
       "module": "src/app",
       "name": "test_research_workspace_local_data_scan",
       "public": true,
@@ -11156,13 +11088,14 @@
       "calls": [
         "app.services.control_plane_bridge:ControlPlaneBridge",
         "app.services.trading_dashboard:RiskPanelWidget",
+        "app.tests.test_phase4_dashboard:qt_app",
         "app.tests.test_phase4_dashboard:sample_snapshot"
       ],
       "dotted": "app.tests.test_phase4_dashboard.test_risk_panel_9_metrics_grid",
       "file": "src/app/tests/test_phase4_dashboard.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 287,
+      "line": 327,
       "module": "src/app",
       "name": "test_risk_panel_9_metrics_grid",
       "public": true,
@@ -11174,13 +11107,14 @@
       "callers_complete": true,
       "calls": [
         "app.services.control_plane_bridge:ControlPlaneBridge",
-        "app.services.trading_dashboard:StrategyLabWorkspaceView"
+        "app.services.trading_dashboard:StrategyLabWorkspaceView",
+        "app.tests.test_phase4_dashboard:qt_app"
       ],
       "dotted": "app.tests.test_phase4_dashboard.test_strategy_lab_inspector_and_deploy",
       "file": "src/app/tests/test_phase4_dashboard.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 323,
+      "line": 361,
       "module": "src/app",
       "name": "test_strategy_lab_inspector_and_deploy",
       "public": true,
@@ -11193,13 +11127,14 @@
       "calls": [
         "app.services.control_plane_bridge:ControlPlaneBridge",
         "app.services.trading_dashboard:SystemWorkspaceView",
+        "app.tests.test_phase4_dashboard:qt_app",
         "app.tests.test_phase4_dashboard:sample_snapshot"
       ],
       "dotted": "app.tests.test_phase4_dashboard.test_system_workspace_health_and_gates",
       "file": "src/app/tests/test_phase4_dashboard.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 363,
+      "line": 399,
       "module": "src/app",
       "name": "test_system_workspace_health_and_gates",
       "public": true,
@@ -92448,12 +92383,6 @@
       "granularity": "module",
       "module": "src/app",
       "path": "src/app/tests/__init__.py",
-      "targets": []
-    },
-    {
-      "granularity": "module",
-      "module": "src/app",
-      "path": "src/app/tests/conftest.py",
       "targets": []
     },
     {

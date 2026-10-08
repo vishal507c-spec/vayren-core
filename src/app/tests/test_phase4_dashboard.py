@@ -18,40 +18,80 @@ Verifies:
 
 from __future__ import annotations
 
-from typing import Any
+import os
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
 import pytest
 
-try:
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from app.services.control_plane_bridge import ControlPlaneBridge
+
+if TYPE_CHECKING:
     from PySide6.QtWidgets import QApplication
 
+    from app.services.trading_dashboard import (
+        LiveWorkspaceView,
+        MarketWorkspaceView,
+        PortfolioWorkspaceView,
+        ResearchWorkspaceView,
+        RiskPanelWidget,
+        StrategyLabWorkspaceView,
+        SystemWorkspaceView,
+        TradingDashboardWidget,
+    )
+
     _QT_AVAILABLE = True
-except (ImportError, OSError):
-    _QT_AVAILABLE = False
-    QApplication = None  # type: ignore[assignment, misc]
+else:
+    try:
+        from PySide6.QtWidgets import QApplication
+
+        from app.services.trading_dashboard import (
+            LiveWorkspaceView,
+            MarketWorkspaceView,
+            PortfolioWorkspaceView,
+            ResearchWorkspaceView,
+            RiskPanelWidget,
+            StrategyLabWorkspaceView,
+            SystemWorkspaceView,
+            TradingDashboardWidget,
+        )
+
+        _QT_AVAILABLE = True
+    except (ImportError, OSError):
+        _QT_AVAILABLE = False
+        QApplication = None
+        LiveWorkspaceView = None
+        MarketWorkspaceView = None
+        PortfolioWorkspaceView = None
+        ResearchWorkspaceView = None
+        RiskPanelWidget = None
+        StrategyLabWorkspaceView = None
+        SystemWorkspaceView = None
+        TradingDashboardWidget = None
 
 if not _QT_AVAILABLE:
     pytestmark = pytest.mark.skip(
         reason="PySide6 / GUI system libraries not available in headless environment"
     )
 
-from app.services.control_plane_bridge import ControlPlaneBridge
-from app.services.trading_dashboard import (
-    LiveWorkspaceView,
-    MarketWorkspaceView,
-    PortfolioWorkspaceView,
-    ResearchWorkspaceView,
-    RiskPanelWidget,
-    StrategyLabWorkspaceView,
-    SystemWorkspaceView,
-    TradingDashboardWidget,
-)
 from execution.control_plane import (
     CommandResponse,
     CommandStatus,
     ControlCommand,
 )
+
+
+@pytest.fixture
+def qt_app() -> Any:
+    """Return the process-wide QApplication, creating it if needed."""
+    if not _QT_AVAILABLE:
+        pytest.skip("PySide6 / GUI system libraries not available")
+    instance = QApplication.instance()
+    if isinstance(instance, QApplication):
+        return instance
+    return QApplication([])
 
 
 @pytest.fixture
@@ -124,7 +164,7 @@ def sample_snapshot() -> dict[str, Any]:
 # ── Bridge Tests ─────────────────────────────────────────────────────────────
 
 
-def test_bridge_snapshot_and_signals(qt_app: QApplication, sample_snapshot: dict[str, Any]) -> None:
+def test_bridge_snapshot_and_signals(qt_app: Any, sample_snapshot: dict[str, Any]) -> None:
     assert qt_app is not None
     bridge = ControlPlaneBridge()
     snapshots_received: list[dict] = []
@@ -136,7 +176,7 @@ def test_bridge_snapshot_and_signals(qt_app: QApplication, sample_snapshot: dict
     assert bridge.is_stale is False
 
 
-def test_bridge_staleness_detection(qt_app: QApplication, sample_snapshot: dict[str, Any]) -> None:
+def test_bridge_staleness_detection(qt_app: Any, sample_snapshot: dict[str, Any]) -> None:
     assert qt_app is not None
     bridge = ControlPlaneBridge()
     stale_states: list[bool] = []
@@ -161,7 +201,7 @@ def test_bridge_staleness_detection(qt_app: QApplication, sample_snapshot: dict[
     assert stale_states == [True, False]
 
 
-def test_bridge_event_ingest_and_deduplication(qt_app: QApplication) -> None:
+def test_bridge_event_ingest_and_deduplication(qt_app: Any) -> None:
     assert qt_app is not None
     bridge = ControlPlaneBridge()
     received_events: list[dict] = []
@@ -179,7 +219,7 @@ def test_bridge_event_ingest_and_deduplication(qt_app: QApplication) -> None:
     assert len(bridge.recent_events) == 2
 
 
-def test_bridge_command_dispatches(qt_app: QApplication) -> None:
+def test_bridge_command_dispatches(qt_app: Any) -> None:
     assert qt_app is not None
     bridge = ControlPlaneBridge()
     # Mock _dispatch to inspect calls
@@ -227,7 +267,7 @@ def test_bridge_command_dispatches(qt_app: QApplication) -> None:
 # ── Dashboard & Workspaces UI Tests ──────────────────────────────────────────
 
 
-def test_dashboard_embeds_all_6_workspaces(qt_app: QApplication) -> None:
+def test_dashboard_embeds_all_6_workspaces(qt_app: Any) -> None:
     assert qt_app is not None
     bridge = ControlPlaneBridge()
     dashboard = TradingDashboardWidget(bridge)
@@ -241,7 +281,7 @@ def test_dashboard_embeds_all_6_workspaces(qt_app: QApplication) -> None:
     assert isinstance(dashboard.system_view, SystemWorkspaceView)
 
 
-def test_dashboard_tab_switching(qt_app: QApplication) -> None:
+def test_dashboard_tab_switching(qt_app: Any) -> None:
     assert qt_app is not None
     bridge = ControlPlaneBridge()
     dashboard = TradingDashboardWidget(bridge)
@@ -265,7 +305,7 @@ def test_dashboard_tab_switching(qt_app: QApplication) -> None:
     assert dashboard.stack.currentIndex() == 5
 
 
-def test_live_workspace_updates(qt_app: QApplication, sample_snapshot: dict[str, Any]) -> None:
+def test_live_workspace_updates(qt_app: Any, sample_snapshot: dict[str, Any]) -> None:
     assert qt_app is not None
     bridge = ControlPlaneBridge()
     live = LiveWorkspaceView(bridge)
@@ -284,7 +324,7 @@ def test_live_workspace_updates(qt_app: QApplication, sample_snapshot: dict[str,
     assert item_ord is not None and item_ord.text() == "NSE:RELIANCE-EQ"
 
 
-def test_risk_panel_9_metrics_grid(qt_app: QApplication, sample_snapshot: dict[str, Any]) -> None:
+def test_risk_panel_9_metrics_grid(qt_app: Any, sample_snapshot: dict[str, Any]) -> None:
     assert qt_app is not None
     bridge = ControlPlaneBridge()
     panel = RiskPanelWidget(bridge)
@@ -301,9 +341,7 @@ def test_risk_panel_9_metrics_grid(qt_app: QApplication, sample_snapshot: dict[s
     assert panel._labels["Risk Status"].text() == "HEALTHY"
 
 
-def test_market_workspace_stale_alert(
-    qt_app: QApplication, sample_snapshot: dict[str, Any]
-) -> None:
+def test_market_workspace_stale_alert(qt_app: Any, sample_snapshot: dict[str, Any]) -> None:
     assert qt_app is not None
     bridge = ControlPlaneBridge()
     market = MarketWorkspaceView(bridge)
@@ -320,7 +358,7 @@ def test_market_workspace_stale_alert(
     assert "ORDERS BLOCKED" in market.lbl_stale_alert.text()
 
 
-def test_strategy_lab_inspector_and_deploy(qt_app: QApplication) -> None:
+def test_strategy_lab_inspector_and_deploy(qt_app: Any) -> None:
     assert qt_app is not None
     bridge = ControlPlaneBridge()
     bridge.send_select_strategy = MagicMock()  # type: ignore[method-assign]
@@ -335,7 +373,7 @@ def test_strategy_lab_inspector_and_deploy(qt_app: QApplication) -> None:
     )
 
 
-def test_research_workspace_local_data_scan(qt_app: QApplication) -> None:
+def test_research_workspace_local_data_scan(qt_app: Any) -> None:
     assert qt_app is not None
     bridge = ControlPlaneBridge()
     res = ResearchWorkspaceView(bridge)
@@ -346,9 +384,7 @@ def test_research_workspace_local_data_scan(qt_app: QApplication) -> None:
     assert item_res is not None and item_res.text() != ""
 
 
-def test_portfolio_workspace_consolidation(
-    qt_app: QApplication, sample_snapshot: dict[str, Any]
-) -> None:
+def test_portfolio_workspace_consolidation(qt_app: Any, sample_snapshot: dict[str, Any]) -> None:
     assert qt_app is not None
     bridge = ControlPlaneBridge()
     portfolio = PortfolioWorkspaceView(bridge)
@@ -360,9 +396,7 @@ def test_portfolio_workspace_consolidation(
     assert "1,500.00" in portfolio.lbl_unrealized.text()
 
 
-def test_system_workspace_health_and_gates(
-    qt_app: QApplication, sample_snapshot: dict[str, Any]
-) -> None:
+def test_system_workspace_health_and_gates(qt_app: Any, sample_snapshot: dict[str, Any]) -> None:
     assert qt_app is not None
     bridge = ControlPlaneBridge()
     sys_view = SystemWorkspaceView(bridge)
@@ -380,7 +414,7 @@ def test_system_workspace_health_and_gates(
     assert item_jour is not None and item_jour.text() == "RECONCILIATION_COMPLETED"
 
 
-def test_global_stale_banner_toggle(qt_app: QApplication) -> None:
+def test_global_stale_banner_toggle(qt_app: Any) -> None:
     assert qt_app is not None
     bridge = ControlPlaneBridge()
     dash = TradingDashboardWidget(bridge)
