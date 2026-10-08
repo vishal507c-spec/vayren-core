@@ -17,6 +17,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -123,6 +124,11 @@ def _run(argv: list[str]) -> int:
     return proc.returncode
 
 
+def _phase(name: str) -> None:
+    """Timestamp a build phase (CI wall-clock attribution, stdout only)."""
+    print(f"[{time.strftime('%H:%M:%S')}] PHASE {name}", flush=True)
+
+
 def _build_shell_debug() -> int:
     """Build the debug shell binary (desktop runtime + dev test target)."""
     rc = _run(["cargo", "build", "-p", "vayren-shell", "--manifest-path", "Cargo.toml"])
@@ -227,6 +233,7 @@ def main(argv: list[str] | None = None) -> int:
         print("native handshake OK")
         return 0
 
+    _phase("release core cdylib")
     rc = _run(["cargo", "build", "--release", "-p", "vayren-core", "--manifest-path", "Cargo.toml"])
     if rc != 0:
         return rc
@@ -241,11 +248,14 @@ def main(argv: list[str] | None = None) -> int:
         # kernel (vayren_core release) + the debug shell + workspace tests.
         # The six view release DLLs have no in-repo consumer on this path,
         # so the batched view invocation below is skipped entirely.
+        _phase("debug shell binary")
         rc = _build_shell_debug()
         if rc != 0:
             return rc
+        _phase("workspace tests")
         return _run_workspace_tests()
 
+    _phase("view release DLLs (batched)")
     rc = _run(
         [
             "cargo",
