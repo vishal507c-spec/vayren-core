@@ -3772,7 +3772,6 @@ pub fn wire_live(ui: &AppWindow, state: Rc<RefCell<LiveState>>) {
     wire_int!(on_live_symbol_toggled, |s: &mut LiveState, i: i32| {
         s.toggle_symbol(i.max(0) as usize);
     });
-    wire_unit!(on_live_universe_save, LiveState::save_universe);
     wire_text!(on_live_timeframe_picked, LiveState::select_timeframe_value);
     wire_text!(on_live_event_type_picked, LiveState::apply_event_category);
     wire_text!(on_live_symbol_filter_changed, LiveState::set_symbol_filter);
@@ -3826,11 +3825,10 @@ pub fn wire_live(ui: &AppWindow, state: Rc<RefCell<LiveState>>) {
 /// Representative LIVE state for the standalone shell binary — the exact
 /// static readiness of this workstation (`--check-live` facts): no live
 /// venue adapter, PAPER default, empty execution tables. Nothing is
-/// fabricated: the watchlist starts EMPTY (each strategy's universe arrives
-/// with the first backend snapshot — a stale built-in list would pose as
-/// the strategy's universe), no strategy is pre-selected (Phase 1
-/// strategy-first flow: the backend confirms the selection, never a
-/// default), while the strategy option names the registry-known candidate.
+/// fabricated: the watchlist starts EMPTY (the universe is registry-owned
+/// and arrives with the first backend snapshot — a stale built-in list
+/// would pose as the strategy's universe), while the strategy option names
+/// the registry-canonical default the backend will confirm or replace.
 pub fn demo_live_state() -> LiveState {
     let gate = |name: &str, reason: &str| Gate {
         name: name.into(),
