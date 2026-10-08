@@ -213,8 +213,11 @@ jobs:
           cache-all-crates: "true"
       - run: cargo build --release -p vayren-core --manifest-path Cargo.toml
         if: github.ref == 'refs/heads/main' || steps.native.outputs.changed == 'true'
-      - run: cargo test -p vayren-core --lib -p vayren-shell --no-run --manifest-path Cargo.toml
-        if: github.ref == 'refs/heads/main' || steps.native.outputs.changed == 'true'
+      # Core-only warmup: the shell test binaries are compiled + run in
+      # test-shard-rust-shell (same coverage, no duplication); the shard's
+      # pytest files drive any cargo invocation they need through the
+      # shared cache themselves. Saves ~3min of duplicate Slint codegen.
+      - run: cargo test -p vayren-core --lib --no-run --manifest-path Cargo.toml
       - run: python -m pytest tools/tests/test_validate_scope.py tools/tests/test_failure_intel.py -q --no-header
 
   # Shard 2/2 — isolated readers, serial within the job, isolated runner.
