@@ -211,6 +211,12 @@ def main(argv: list[str] | None = None) -> int:
         "packaging still uses the full path)",
     )
     parser.add_argument(
+        "--lean-build",
+        action="store_true",
+        help="lean build only: core release + shell debug, no tests (CI "
+        "runs the workspace tests in parallel jobs instead)",
+    )
+    parser.add_argument(
         "--package",
         action="store_true",
         help="build official production remote-first desktop package "
@@ -242,6 +248,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: expected cdylib missing after build: {lib}")
         return 1
     print(f"built {lib} ({lib.stat().st_size} bytes)")
+
+    if args.lean_build:
+        # Lean build only (CI splits the test phase across parallel jobs):
+        # shipped kernel + debug shell, no workspace tests here.
+        _phase("debug shell binary")
+        return _build_shell_debug()
 
     if args.lean_test:
         # Lean test path (verified Day-4): the test gate needs the shipped
