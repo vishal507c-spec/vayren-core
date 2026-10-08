@@ -5,18 +5,20 @@
 
 **Owns:** Current state, open items, verified facts, oddities. **Not owns:** Rules/architecture/events/contracts \u2192 `AGENTS.md`, `AI_ENTRY.md`, `architecture.md`, `module_contracts.md`, `event_catalog.md`.
 
-**Latest update (live-ec2-gateway-and-repo-graph, 2026-10-08):** DEDICATED EC2 / REMOTE GATEWAY STATUS CARD ADDED TO LIVE UI + REPO GRAPH SYNC & CI GATES VERIFIED.
-1. **EC2 / Remote Gateway Status Card in LIVE UI:**
-   - Crate domain (`crates/vayren-domain/src/live.rs`): Added `GatewayFacts` struct to `LiveState` tracking honest remote link status, latency/RTT, heartbeat timestamp, reconnects, and error notes. Mapped to `GatewayView` in `live::project` with honest fallbacks (`DISCONNECTED`, `NOT AVAILABLE`, `LOCAL MODE`).
-   - Slint presentation (`crates/vayren-shell/ui/live.slint`, `app.slint`): Added dedicated top status card for `EC2 / REMOTE GATEWAY` alongside broker card; dynamic connection status (🟢 `CONNECTED`, 🔴 `DISCONNECTED`, 🟡 `CONNECTING`/`STALE`) with real RTT / heartbeat / detail info.
-   - Shell & Remote Live (`crates/vayren-shell/src/remote_live.rs`, `shell.rs`, `main.rs`): Wired `RemoteUiUpdate::Heartbeat` on ping/pong and snapshots with real RTT; formatted IST timestamps via zero-dependency helper; wired view to UI properties.
-2. **Repo Graph & Governance Gates:**
-   - Synchronized `docs/repo_graph.json` via `python tools/repo_graph.py --build` (5,347 entities, 11,033 relationships, 0 unresolved).
-   - `python tools/validate_repo_graph.py`: PASS.
-   - `cargo fmt --manifest-path Cargo.toml --all -- --check`: PASS.
-   - `python -m pytest tools/tests/test_desktop.py`: PASS (6/6 passed).
-   - Domain unit tests: 236/236 passed. Shell unit tests: 48/48 passed.
-   - Pre-commit validators: structure, imports, language ownership, architecture, authority, routes, context engine all PASS.
+**Latest update (permanent-remote-first-desktop-launch, 2026-10-08):** PERMANENT REMOTE-FIRST PRODUCTION DESKTOP LAUNCH + OFFICIAL PACKAGE PIPELINE + LIVE CONNECTION VERIFIED.
+1. **Production Remote-First Default & Fail-Closed Guard:**
+   - Launch contract (`crates/vayren-remote-client/src/launch.rs`): Packaged build (`packaged-remote`) defaults to `LaunchMode::Remote` (`wss://ip-172-31-12-198.taila678c5.ts.net/vayren/v1`). Explicit `--local` forces development mode; unrelated CLI flags (e.g. `--data-dir`, `--strategy-dir`) never switch off remote mode. Regression test suite covers contracts A-E.
+   - Shell startup guard (`crates/vayren-shell/src/main.rs`): Added compile-time `assert!(remote_gateway_url.is_some())` for packaged builds when `--local` is absent, permanently preventing silent fallback to local execution.
+   - Fail-closed behavior (`crates/vayren-shell/src/remote_live.rs`): If credentials are missing or network is down, the client remains held OFFLINE with retry timetable, never silently executing locally.
+2. **Official Production Build & Desktop Shortcut:**
+   - Build driver (`tools/build_rust.py`): Added `--package` flag (`make exe`) compiling `--release -p vayren-shell --features packaged-remote` and automatically syncing the Windows desktop shortcut `C:\Users\visha\Desktop\VAYREN.lnk` to point to `target/release/vayren-shell.exe` without `--local`.
+   - CI & Build Guards (`tools/tests/test_desktop.py`, `test_build_rust.py`): Added tests asserting Cargo.toml feature definition, `build_rust.py` package mode, Makefile `exe:` target, and shortcut args containing NO `--local`.
+3. **Live EC2 Gateway Connection Verified:**
+   - Real connection to EC2 (`wss://ip-172-31-12-198.taila678c5.ts.net/vayren/v1`) verified: hello -> welcome (`connection c20 role trade`) -> snapshot -> heartbeat/resync active.
+   - All tests pass: 27/27 `vayren-remote-client`, 7/7 `remote_e2e`, 49/49 `vayren-shell`, 18/18 desktop & build python tests.
+   - Repo graph synced (5,352 entities, 11,047 relationships, 0 unresolved).
+
+**Previous update (live-ec2-gateway-and-repo-graph, 2026-10-08):** DEDICATED EC2 / REMOTE GATEWAY STATUS CARD ADDED TO LIVE UI + REPO GRAPH SYNC & CI GATES VERIFIED.
 
 **Previous update (build-test-speed-ci-green, 2026-10-08):** 100% GREEN CI GATE ON GITHUB ACTIONS (`37779678240`), BUILD/TEST CACHING & GIT PERFORMANCE OPTIMIZATIONS.
 1. **GitHub CI Green Verification (run `37779678240`):**

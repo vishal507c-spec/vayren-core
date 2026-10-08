@@ -106,6 +106,9 @@ VERSION ?= $(error VERSION is required — run: make release VERSION=1.28.0)
 release:
 	python tools/release.py --version $(VERSION)
 
+exe:
+	python tools/build_rust.py --package
+
 # ── Clean ──────────────────────────────────────────────────────
 # Cross-platform on purpose: one Python one-liner instead of
 # powershell + rmdir (Windows-only) or rm (POSIX-only).

@@ -143,22 +143,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // its own while developer builds stay local. Shortcuts carry no token
     // and no endpoint by design — configuration lives in the OS credential
     // store plus the built-in default, never in argv.
-    let remote_gateway_url = match vayren_remote_client::launch::resolve_launch_mode(
-        &argv,
-        cfg!(feature = "packaged-remote"),
-    ) {
-        vayren_remote_client::launch::LaunchMode::Remote { url } => Some(url),
-        vayren_remote_client::launch::LaunchMode::Probe { url } => {
-            // Read-only smoke probe: hello → welcome → snapshot → brief
-            // subscribe, without spawning a backend, opening the UI, or
-            // sending any command.
-            return vayren_shell::remote_source::run_remote_probe(&url).map_err(|err| err.into());
-        }
-        vayren_remote_client::launch::LaunchMode::Local => None,
-    };
+    let is_packaged_remote = cfg!(feature = "packaged-remote");
+    let remote_gateway_url =
+        match vayren_remote_client::launch::resolve_launch_mode(&argv, is_packaged_remote) {
+            vayren_remote_client::launch::LaunchMode::Remote { url } => Some(url),
+            vayren_remote_client::launch::LaunchMode::Probe { url } => {
+                // Read-only smoke probe: hello → welcome → snapshot → brief
+                // subscribe, without spawning a backend, opening the UI, or
+                // sending any command.
+                return vayren_shell::remote_source::run_remote_probe(&url)
+                    .map_err(|err| err.into());
+            }
+            vayren_remote_client::launch::LaunchMode::Local => None,
+        };
+
+    // Production Startup Assertion: In a packaged remote build, if --local was NOT
+    // explicitly provided, remote_gateway_url MUST be Some(url). Silent fallback
+    // to Local mode is strictly prohibited.
+    #[cfg(feature = "packaged-remote")]
+    if !argv
+        .iter()
+        .any(|arg| arg == vayren_remote_client::launch::LOCAL_FLAG)
+    {
+        assert!(
+            remote_gateway_url.is_some(),
+            "PRODUCTION STARTUP ASSERTION FAILED: Packaged build must default to LaunchMode::Remote when --local is absent"
+        );
+    }
+
     if let Some(ref url) = remote_gateway_url {
-        println!("VAYREN starting (remote live client + local historical stores)...");
+        println!("VAYREN starting (PRODUCTION REMOTE DESKTOP CLIENT)...");
         println!("Gateway: {url}");
+    } else {
+        println!("VAYREN starting in DEVELOPMENT / LOCAL MODE (local Python backend)...");
+        println!("[DEV MODE NOTICE] Operating in local mode. Official production desktop runs remote by default.");
     }
 
     // Spawn Python backend. One mutex-guarded handle serves the UI thread

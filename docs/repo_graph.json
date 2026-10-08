@@ -1243,7 +1243,7 @@
       "to": "src/core/native"
     }
   ],
-  "entity_count": 5347,
+  "entity_count": 5352,
   "files": [
     {
       "domain": "CORE",
@@ -7302,7 +7302,7 @@
       "required_language": "PYTHON"
     }
   ],
-  "relationship_count": 11031,
+  "relationship_count": 11047,
   "repository": {
     "name": "vayren-core",
     "root": "."
@@ -40858,7 +40858,7 @@
       "file": "crates/vayren-shell/src/main.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1439,
+      "line": 1457,
       "module": "crates/vayren-shell",
       "name": "run_remote_ui",
       "public": false,
@@ -40873,7 +40873,7 @@
       "file": "crates/vayren-shell/src/main.rs",
       "kind": "mod",
       "language": "RUST_SLINT",
-      "line": 1555,
+      "line": 1573,
       "module": "crates/vayren-shell",
       "name": "tests",
       "public": false,
@@ -70819,7 +70819,9 @@
     },
     {
       "called_by": [
-        "tools.build_rust:_build_shell_debug"
+        "tools.build_rust:_build_shell_debug",
+        "tools.build_rust:_build_shell_package",
+        "tools.build_rust:main"
       ],
       "callers_complete": true,
       "calls": [],
@@ -70854,6 +70856,28 @@
       "name": "_build_shell_debug",
       "public": false,
       "qualified": "tools.build_rust:_build_shell_debug",
+      "tests": [
+        "tools/tests/test_build_rust.py"
+      ]
+    },
+    {
+      "called_by": [
+        "tools.build_rust:main"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "tools.build_rust:_bin_name",
+        "tools.build_rust:_run"
+      ],
+      "dotted": "tools.build_rust._build_shell_package",
+      "file": "tools/build_rust.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 139,
+      "module": "tools",
+      "name": "_build_shell_package",
+      "public": false,
+      "qualified": "tools.build_rust:_build_shell_package",
       "tests": [
         "tools/tests/test_build_rust.py"
       ]
@@ -70975,6 +70999,7 @@
     {
       "called_by": [
         "tools.build_rust:_build_shell_debug",
+        "tools.build_rust:_build_shell_package",
         "tools.build_rust:_run_workspace_tests",
         "tools.build_rust:main"
       ],
@@ -71007,11 +71032,30 @@
       "file": "tools/build_rust.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 139,
+      "line": 192,
       "module": "tools",
       "name": "_run_workspace_tests",
       "public": false,
       "qualified": "tools.build_rust:_run_workspace_tests",
+      "tests": [
+        "tools/tests/test_build_rust.py"
+      ]
+    },
+    {
+      "called_by": [
+        "tools.build_rust:main"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "tools.build_rust._sync_desktop_shortcut",
+      "file": "tools/build_rust.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 164,
+      "module": "tools",
+      "name": "_sync_desktop_shortcut",
+      "public": false,
+      "qualified": "tools.build_rust:_sync_desktop_shortcut",
       "tests": [
         "tools/tests/test_build_rust.py"
       ]
@@ -71059,7 +71103,9 @@
       "callers_complete": true,
       "calls": [
         "core.native.loader:load_vayren_core",
+        "tools.build_rust:_bin_name",
         "tools.build_rust:_build_shell_debug",
+        "tools.build_rust:_build_shell_package",
         "tools.build_rust:_lab_lib_name",
         "tools.build_rust:_lib_name",
         "tools.build_rust:_live_lib_name",
@@ -71067,6 +71113,7 @@
         "tools.build_rust:_research_lib_name",
         "tools.build_rust:_run",
         "tools.build_rust:_run_workspace_tests",
+        "tools.build_rust:_sync_desktop_shortcut",
         "tools.build_rust:_system_lib_name",
         "tools.build_rust:_view_lib_name"
       ],
@@ -71074,7 +71121,7 @@
       "file": "tools/build_rust.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 144,
+      "line": 197,
       "module": "tools",
       "name": "main",
       "public": true,
@@ -81243,7 +81290,8 @@
     {
       "called_by": [
         "tools.tests.test_build_rust:test_full_test_keeps_batched_views",
-        "tools.tests.test_build_rust:test_lean_test_skips_view_invocation"
+        "tools.tests.test_build_rust:test_lean_test_skips_view_invocation",
+        "tools.tests.test_build_rust:test_package_mode_builds_remote_default_binary"
       ],
       "callers_complete": true,
       "calls": [],
@@ -81251,7 +81299,7 @@
       "file": "tools/tests/test_build_rust.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 130,
+      "line": 143,
       "module": "tools",
       "name": "_fake_tree",
       "public": false,
@@ -81282,6 +81330,7 @@
         "tools.tests.test_build_rust:test_full_workspace_test_safety_net_intact",
         "tools.tests.test_build_rust:test_kernel_release_stays_separate",
         "tools.tests.test_build_rust:test_no_new_process_shapes",
+        "tools.tests.test_build_rust:test_shell_package_build_specifies_packaged_remote_feature",
         "tools.tests.test_build_rust:test_single_batched_view_release_invocation"
       ],
       "callers_complete": true,
@@ -81320,7 +81369,7 @@
       "file": "tools/tests/test_build_rust.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 113,
+      "line": 126,
       "module": "tools",
       "name": "test_failure_summary_surfaces_culprits",
       "public": true,
@@ -81338,7 +81387,7 @@
       "file": "tools/tests/test_build_rust.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 166,
+      "line": 179,
       "module": "tools",
       "name": "test_full_test_keeps_batched_views",
       "public": true,
@@ -81390,7 +81439,7 @@
       "file": "tools/tests/test_build_rust.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 149,
+      "line": 162,
       "module": "tools",
       "name": "test_lean_test_skips_view_invocation",
       "public": true,
@@ -81412,6 +81461,40 @@
       "name": "test_no_new_process_shapes",
       "public": true,
       "qualified": "tools.tests.test_build_rust:test_no_new_process_shapes",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "tools.tests.test_build_rust:_fake_tree"
+      ],
+      "dotted": "tools.tests.test_build_rust.test_package_mode_builds_remote_default_binary",
+      "file": "tools/tests/test_build_rust.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 194,
+      "module": "tools",
+      "name": "test_package_mode_builds_remote_default_binary",
+      "public": true,
+      "qualified": "tools.tests.test_build_rust:test_package_mode_builds_remote_default_binary",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "tools.tests.test_build_rust:_run_calls"
+      ],
+      "dotted": "tools.tests.test_build_rust.test_shell_package_build_specifies_packaged_remote_feature",
+      "file": "tools/tests/test_build_rust.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 115,
+      "module": "tools",
+      "name": "test_shell_package_build_specifies_packaged_remote_feature",
+      "public": true,
+      "qualified": "tools.tests.test_build_rust:test_shell_package_build_specifies_packaged_remote_feature",
       "tests": []
     },
     {
@@ -82549,7 +82632,7 @@
       "file": "tools/tests/test_desktop.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 103,
+      "line": 105,
       "module": "tools",
       "name": "test_desktop_shortcut_launches_rust_directly",
       "public": true,
@@ -82564,7 +82647,7 @@
       "file": "tools/tests/test_desktop.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 115,
+      "line": 145,
       "module": "tools",
       "name": "test_no_stale_deleted_refs_in_active_docs",
       "public": true,
@@ -82575,11 +82658,26 @@
       "called_by": [],
       "callers_complete": true,
       "calls": [],
+      "dotted": "tools.tests.test_desktop.test_production_build_remote_first_guard",
+      "file": "tools/tests/test_desktop.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 118,
+      "module": "tools",
+      "name": "test_production_build_remote_first_guard",
+      "public": true,
+      "qualified": "tools.tests.test_desktop:test_production_build_remote_first_guard",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
       "dotted": "tools.tests.test_desktop.test_retention_ledger_healthy",
       "file": "tools/tests/test_desktop.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 128,
+      "line": 158,
       "module": "tools",
       "name": "test_retention_ledger_healthy",
       "public": true,
@@ -82594,7 +82692,7 @@
       "file": "tools/tests/test_desktop.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 88,
+      "line": 90,
       "module": "tools",
       "name": "test_shell_accepts_data_dirs",
       "public": true,
@@ -82624,7 +82722,7 @@
       "file": "tools/tests/test_desktop.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 93,
+      "line": 95,
       "module": "tools",
       "name": "test_shell_spawns_backend_itself",
       "public": true,

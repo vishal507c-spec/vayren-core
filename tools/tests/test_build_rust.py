@@ -67,7 +67,7 @@ def test_single_batched_view_release_invocation() -> None:
         for argv in release_builds
         if _p_flags(argv)
         and not set(VIEWS) <= set(_p_flags(argv))
-        and "vayren-core" not in _p_flags(argv)
+        and not any(p in _p_flags(argv) for p in ("vayren-core", "vayren-shell"))
     ]
     assert solo_views == [], "no single-view release invocation may remain"
 
@@ -107,7 +107,20 @@ def test_no_new_process_shapes() -> None:
     calls = _run_calls()
     for argv in calls:
         assert argv[0] == "cargo", f"unexpected process shape: {argv[:2]}"
-    assert len(calls) == 4, "expected: core release + batched views + shell debug + workspace test"
+    assert len(calls) == 5, (
+        "expected: core release + batched views + shell debug + shell package + workspace test"
+    )
+
+
+def test_shell_package_build_specifies_packaged_remote_feature() -> None:
+    calls = _run_calls()
+    pkg_calls = [
+        argv
+        for argv in calls
+        if "vayren-shell" in argv and "--features" in argv and "--release" in argv
+    ]
+    assert len(pkg_calls) == 1, "must have exactly one packaged shell release build"
+    assert "packaged-remote" in pkg_calls[0]
 
 
 def test_failure_summary_surfaces_culprits() -> None:
@@ -176,3 +189,18 @@ def test_full_test_keeps_batched_views(
     for view in VIEWS:
         assert view in batched[0]
     capsys.readouterr()
+
+
+def test_package_mode_builds_remote_default_binary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(build_rust, "ROOT", tmp_path)
+    _fake_tree(tmp_path)
+    (tmp_path / "target" / "release" / build_rust._bin_name()).write_text("x", encoding="utf-8")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(build_rust, "_run", lambda argv: calls.append(argv) or 0)
+    monkeypatch.setattr(build_rust, "_sync_desktop_shortcut", lambda _bin: None)
+    assert build_rust.main(["--package"]) == 0
+    assert any("vayren-shell" in argv and "packaged-remote" in argv for argv in calls)
+    capsys.readouterr()
+

@@ -949,4 +949,48 @@ mod tests {
         assert_eq!(state.gateway.reconnect_count, 1);
         assert_eq!(state.gateway.last_error, "link lost — retrying in 2s");
     }
+
+    #[test]
+    fn remote_mode_fails_closed_without_silent_local_fallback() {
+        let mut state = init_remote_state();
+
+        // 1. Missing credential: held OFFLINE with enrollment guidance, never falling back to local
+        mark_link(
+            &mut state,
+            "OFFLINE",
+            enrollment_note(Enrollment::Missing),
+            1,
+        );
+        assert_eq!(state.gateway.status, "OFFLINE");
+        assert!(!state.gateway.connected);
+        assert!(
+            !state.bridge_wired,
+            "Remote mode must never wire commanding bridge on missing token"
+        );
+        assert!(
+            !state.can_start(),
+            "START must remain blocked in remote mode"
+        );
+
+        // 2. Transport down / gateway failure: held OFFLINE with retry timetable
+        mark_link(&mut state, "OFFLINE", "transport down — retrying in 4s", 2);
+        assert_eq!(state.gateway.status, "OFFLINE");
+        assert_eq!(state.gateway.reconnect_count, 2);
+        assert!(!state.gateway.connected);
+        assert!(
+            !state.bridge_wired,
+            "Remote mode must never wire commanding bridge on transport failure"
+        );
+
+        // 3. User attempts start while offline: rejected with honest notice, never executes locally
+        state.start();
+        assert!(
+            state.host_actions.is_empty(),
+            "No host actions queued while offline"
+        );
+        assert_eq!(
+            state.action_note.as_deref(),
+            Some("No execution backend attached.")
+        );
+    }
 }
