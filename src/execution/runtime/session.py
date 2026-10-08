@@ -56,11 +56,13 @@ from execution.native_order_state import TERMINAL_STATES
 from execution.planner import ExecutionPreferences, OrderPlanner
 from execution.portfolio.ledger import PositionLedger
 from execution.portfolio.reconcile import ReconciliationState, reconcile_orders, reconcile_positions
+from execution.recovery import RecoveryCoordinator
 from execution.regime import StatisticalRegimeDetector
 from execution.replay import LiveEventRecorder
 from execution.runtime.inspector import inspect_strategy
 from execution.runtime.lifecycle import LifecycleError, LifecycleState, StrategyLifecycle
 from execution.runtime.strategy_runtime import LiveStrategyDriver, StrategyContext
+from execution.safety import SafetySnapshot, SlProtectionTracker, build_safety_snapshot
 from market import Bar
 from risk import KillSwitch, RiskEngine, RiskPolicy, RiskRequest
 from risk.sizing import (
@@ -174,9 +176,11 @@ class LiveSession:
         self,
         config: SessionConfig,
         provider: MarketDataProvider,
-        risk_policy: RiskPolicy,
+        risk_policy: RiskPolicy | None = None,
         request_id: str = "live-1",
     ) -> None:
+        if risk_policy is None:
+            risk_policy = RiskPolicy()
         self._config = config
         self._provider = provider
         self._request_id = request_id
@@ -206,6 +210,10 @@ class LiveSession:
         self._last_order_epoch: float | None = None
         self._orders_today = 0
         self._bus: Any = None
+        self._sl_tracker = SlProtectionTracker()
+        self._last_block_reason = ""
+        self._last_risk_denial_reason = ""
+        self._recovery = RecoveryCoordinator(journal=self._journal)
         # Phase-3 LIVE sizing verdicts by intent id: the final `_submit`
         # gate re-validates the planned quantity against the verdict's
         # ceiling, so even a planner-adjusted quantity can never exceed the
@@ -808,6 +816,13 @@ class LiveSession:
                 updated.client_order_id, OrderState.FILLED, reason="fill"
             )
         position = self._ledger.apply_fill(fill)
+        self._sl_tracker.on_fill(
+            intent_id=tracked.intent_id,
+            symbol=fill.symbol,
+            side=tracked.side,
+            fill_price=fill.fill_price,
+            stop_price=None,
+        )
         qty, side, entry = self._ledger.strategy_state_for(fill.symbol)
         if side is None:
             # Flat is global truth (covers protective-stop exits, whose
@@ -1333,8 +1348,68 @@ class LiveSession:
                 for symbol, prot in self._stop_protection.items()
             },
             "sl_attention": sorted(self._sl_attention),
+            "safety": self.safety_snapshot().to_dict(),
             "latency": {stage: self._latency.summary(stage) for stage in self._latency.stages()},
         }
+
+    def safety_snapshot(self) -> SafetySnapshot:
+        """Full point-in-time trading safety snapshot per Phase 1 spec."""
+        broker = self._broker
+        broker_connected = False
+        broker_name = broker.name if broker else ""
+        broker_env = self._mode.value.lower()
+        broker_health_reason = ""
+        if broker is not None:
+            healthy, reason = broker.health()
+            broker_connected = healthy
+            broker_health_reason = reason
+        gates = self._config.gates
+        rec = self._reconciliation
+        verdict = rec.verdict()
+        marks = {p.symbol: p.avg_price for p in self._ledger.all_positions()}
+        snapshot = self._ledger.snapshot(marks)
+        capital_valid = snapshot.available_capital > 0 and snapshot.equity > 0
+        base = build_safety_snapshot(
+            kill_switch_engaged=self._kill_switch.is_halted(),
+            kill_switch_reason=self._kill_switch.state().reason,
+            kill_switch_level=self._kill_switch.state().level,
+            gates_live_trading_enabled=gates.live_trading_enabled,
+            gates_broker_live_enabled=gates.broker_live_enabled,
+            gates_account_confirmed=gates.account_confirmed,
+            gates_risk_limits_valid=gates.risk_limits_valid,
+            gates_kill_switch_off=gates.kill_switch_off,
+            broker_connected=broker_connected,
+            broker_name=broker_name,
+            broker_environment=broker_env,
+            broker_health_reason=broker_health_reason,
+            reconciliation_healthy=not rec.blocks_live,
+            reconciliation_status=verdict.status.value,
+            reconciliation_reasons=verdict.reasons,
+            risk_ready=not self._kill_switch.is_halted() and broker_connected,
+            capital_valid=capital_valid,
+            last_risk_denial_reason=self._last_risk_denial_reason,
+            sl_tracker=self._sl_tracker,
+            armed=self._armed.value,
+            session_lifecycle=self._lifecycle.state.value,
+            last_block_reason=self._last_block_reason,
+        )
+        return self._recovery.build_snapshot(base)
+
+    @property
+    def recovery(self) -> RecoveryCoordinator:
+        return self._recovery
+
+    @property
+    def sl_tracker(self) -> SlProtectionTracker:
+        return self._sl_tracker
+
+    @property
+    def kill_switch(self) -> KillSwitch:
+        return self._kill_switch
+
+    @property
+    def risk_policy(self) -> RiskPolicy:
+        return self._risk.policy
 
     @property
     def mode(self) -> ExecutionMode:

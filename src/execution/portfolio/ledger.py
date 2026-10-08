@@ -55,6 +55,24 @@ class PositionLedger:
     def all_positions(self) -> tuple[Position, ...]:
         return tuple(self._positions.values())
 
+    def adopt_position(self, pos: Position) -> None:
+        """Adopt authoritative position from broker truth (self-healing)."""
+        if pos.flat:
+            self._positions.pop(pos.symbol, None)
+        else:
+            self._positions[pos.symbol] = pos
+
+    def adopt_positions(self, positions: list[Position] | tuple[Position, ...]) -> None:
+        """Reset and replace all positions with authoritative broker positions."""
+        self._positions.clear()
+        for p in positions:
+            if not p.flat:
+                self._positions[p.symbol] = p
+
+    def clear_positions(self) -> None:
+        """Clear all active positions."""
+        self._positions.clear()
+
     def snapshot(self, marks: dict[str, float] | None = None) -> AccountSnapshot:
         """Account view: starting capital + realized + unrealized at marks."""
         marks = marks or {}

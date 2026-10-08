@@ -2,6 +2,24 @@
   "_note": "Per-file language retention (ACTIVE MACHINE INPUT). Every Python file in a Rust-owned domain MUST have an entry here with state + reason + migration_target + migration_condition, or validate_language_ownership.py HARD FAILS. States: MIGRATED (file must be absent) / MIGRATION_REQUIRED (touch-to-migrate) / TEMPORARILY_RETAINED (justified bridge/facade) / EXEMPT_WITH_JUSTIFICATION (permanent, proven).",
   "version": 2,
   "files": {
+    "src/app/ui/__init__.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Phase 4 professional desktop UI package re-export surface.",
+      "migration_target": "crates/vayren-shell/src/ui/",
+      "migration_condition": "When UI slice is migrated to Slint"
+    },
+    "src/app/ui/lab_theme.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Phase 4 institutional desktop UI theme: dark low-glare palette, typography, and QSS fragments.",
+      "migration_target": "crates/vayren-shell/src/ui/",
+      "migration_condition": "When UI slice is migrated to Slint"
+    },
+    "src/app/ui/top_nav_bar.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Phase 4 institutional command-center top navigation bar widget.",
+      "migration_target": "crates/vayren-shell/src/ui/",
+      "migration_condition": "When UI slice is migrated to Slint"
+    },
     "src/backtest/__init__.py": {
       "state": "TEMPORARILY_RETAINED",
       "reason": "Runner/optimizer/worker orchestration driving Python strategies (strategies must stay Python). Metrics kernels already migrated. File role: package re-export surface (no logic)",
@@ -152,6 +170,18 @@
       "migration_target": "crates/vayren-core/src/execution_engine.rs",
       "migration_condition": "Rust session runtime (session lifecycle, journal, ledger, reconcile, arming) exists and is proven by the restored parity/safety suite; until then this file is the only live path."
     },
+    "src/execution/control_plane.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Phase 3 APK/EXE bidirectional WSS control plane: secure commands, auth, idempotency, event stream replay, and remote client synchronization.",
+      "migration_target": "crates/vayren-core/src/control_plane.rs",
+      "migration_condition": "When LiveSession ported to Rust"
+    },
+    "src/execution/disaster_recovery.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Phase 6 production hardening + disaster recovery: primary/backup failover, split-brain fencing tokens, state checkpointing with SHA-256 integrity, deployment locking, resource monitoring, and bounded disaster recovery.",
+      "migration_target": "crates/vayren-core/src/disaster_recovery.rs",
+      "migration_condition": "When LiveSession ported to Rust"
+    },
     "src/execution/engine.py": {
       "state": "TEMPORARILY_RETAINED",
       "reason": "Restored 2026-10-02 from d0cc3f9^ (the v1.21.0 'ownership purity' release deleted the live execution subsystem, which left the LIVE page importing a module that no longer existed). Session/engine/venue/ledger/journal orchestration is Python again; every numeric decision still crosses into Rust (risk gates via risk.native_engine, order lifecycle via execution.native_order_state, fill/position math via execution.native_positions, metrics via backtest.native_metrics). Tracked debt, not an exemption: migrate the orchestration layer to Rust and delete this file.",
@@ -290,6 +320,18 @@
       "migration_target": "crates/vayren-core/src/execution_engine.rs",
       "migration_condition": "Rust session runtime (session lifecycle, journal, ledger, reconcile, arming) exists and is proven by the restored parity/safety suite; until then this file is the only live path."
     },
+    "src/execution/reconciliation.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Phase 5 institutional reconciliation + self-healing engine: broker truth authoritative comparison, fail-closed mismatch detection, bounded self-healing, stop-loss protection verification, and periodic reconciliation.",
+      "migration_target": "crates/vayren-core/src/reconciliation.rs",
+      "migration_condition": "When LiveSession ported to Rust"
+    },
+    "src/execution/recovery.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Phase 2 self-managing EC2 execution engine: broker auto-recovery, WS resilience, state machine, watchdog, and crash safety. Session orchestration glue.",
+      "migration_target": "crates/vayren-core/src/recovery.rs",
+      "migration_condition": "When LiveSession ported to Rust"
+    },
     "src/execution/replay.py": {
       "state": "TEMPORARILY_RETAINED",
       "reason": "Restored 2026-10-02 from d0cc3f9^ with the execution subsystem. Event recording and the replay comparison harness are Python; compared metrics are Rust (backtest.native_metrics).",
@@ -325,6 +367,12 @@
       "reason": "Restored 2026-10-02 from d0cc3f9^ with the execution subsystem. LiveSession/SessionConfig/lifecycle/driver own the per-symbol session loop and warmup feed; sizing, risk, fills and order state stay in Rust. Tracked debt.",
       "migration_target": "crates/vayren-core/src/execution_engine.rs",
       "migration_condition": "Rust session runtime (session lifecycle, journal, ledger, reconcile, arming) exists and is proven by the restored parity/safety suite; until then this file is the only live path."
+    },
+    "src/execution/safety.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "Phase 1 institutional safety foundation: frozen state snapshots, stop protection tracking, zero secret exposure. Session orchestration glue.",
+      "migration_target": "crates/vayren-core/src/safety.rs",
+      "migration_condition": "When LiveSession ported to Rust"
     },
     "src/market/__init__.py": {
       "state": "TEMPORARILY_RETAINED",

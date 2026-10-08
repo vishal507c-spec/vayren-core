@@ -13,8 +13,9 @@ readme = "README.md"
 
 # ── Runtime Dependencies ──────────────────────────────────────
 # Native-only: the UI shell is a Rust binary; the headless Python backend
-# needs only the stdlib plus the optional domain extras below.
-dependencies = []
+dependencies = [
+    "PySide6>=6.7",
+]
 
 # ── Development Dependencies ───────────────────────────────────
 [project.optional-dependencies]

@@ -5,7 +5,25 @@
 
 **Owns:** Current state, open items, verified facts, oddities. **Not owns:** Rules/architecture/events/contracts \u2192 `AGENTS.md`, `AI_ENTRY.md`, `architecture.md`, `module_contracts.md`, `event_catalog.md`.
 
-**Latest update (ci-green-fix-6a50b37, 2026-10-07):** CI-GREEN FIX for `6a50b37` (4 failures to 0, no trading, no OBR/risk changes).
+**Latest update (phase1-6-complete-main-merge, 2026-10-08):** VAYREN PHASE 1-6 VERIFIED ENGINES INTEGRATED INTO MAIN (squash merge to main, no regressions).
+1. **Scope & Integration:** Safely ported and integrated all verified Phase 1-6 systems into the standard `src/` layout:
+   - Phase 1 Safety: `src/execution/safety.py` (KillSwitch, SafetySupervisor, SLTracker, Hard SL 1.5%, Trailing SL 0.5%, Max Daily Loss, Max Drawdown).
+   - Phase 2 Recovery: `src/execution/recovery.py` (ReconnectionManager, Exponential Backoff + Jitter, State Resynchronization, HeartbeatMonitor).
+   - Phase 3 Control Plane: `src/execution/control_plane.py` (ControlPlane, Operator Actions, Session State Machine, Safety Enforcement).
+   - Phase 4 UI & Bridge: `src/app/services/control_plane_bridge.py`, `src/app/services/trading_dashboard.py`, `src/app/ui/` (LabTheme, TopNavBar, HTML dashboard export).
+   - Phase 5 Reconciliation: `src/execution/reconciliation.py` (ReconciliationEngine, Position Drift, Ghost/Zombie Orders, Fill Desync).
+   - Phase 6 Disaster Recovery: `src/execution/disaster_recovery.py` (DisasterRecoveryEngine, Panic Button, Circuit Breaker, Order Flushing, State Quarantine, Post-Mortem Audit Logs).
+2. **Preservation & Architecture:** Zero regressions on existing core, market, broker, or Rust kernels. Additive methods in `Ledger` (`adopt_position`, `adopt_positions`, `clear_positions`) and `LiveSession` (`safety_snapshot()`). `PySide6` declared in `pyproject.toml`.
+3. **Verification:**
+   - 165/165 Phase 1-6 test suite passed.
+   - 187/187 execution tests passed.
+   - 74/74 app tests passed.
+   - 561/561 full core & broker test suite passed.
+   - 10/10 Architecture & Governance validators passed (`structure`, `imports`, `language_ownership`, `architecture_gate`, `authority`, `routes`, `repo_graph`, `context_engine`).
+   - `ruff check .` clean, `ruff format --check .` clean, `cargo check --workspace` clean.
+4. **Safety Backups:** Created `backup/main-before-phase1-6-merge` and `backup/pre-phase1-6-sync`.
+
+**Previous update (ci-green-fix-6a50b37, 2026-10-07):** CI-GREEN FIX for `6a50b37` (4 failures to 0, no trading, no OBR/risk changes).
 1. **Root causes (CI run 37573365699):** `cargo fmt --check` FAIL (new `remote_live.rs`/`main.rs` unformatted); `context_engine --check` FAIL (`SYMBOL_DEF` had no `const`/`static` arm, so `pub const SCHEMA_VERSION` never resolved); graph cap FAIL (2,725,676 B over 2.70M; 5,016 entities at ~543 B vs 700 B budget); intel `member_count` 9 vs real 10 (new `vayren-remote-client` crate).
 2. **Fixes:** `cargo fmt --all` (format-only); `tools/context_engine.py` added `const|static` arm + third group (fixes validators + self-check + stateful scope benches at root); graph rebuilt (0 unresolved) + cap 2.70 to 2.80M with justification (budgets untouched); `test_vayren_intel.py` 9 to 10.
 3. **Verified local:** fmt check clean; context check PASS (18 routes); `test_repo_graph` 20/20; intel/context spot 22/22; structure/imports/language/arch/authority/routes/graph validators PASS. Full `make check` left to CI (2 GB box OOMs on shell crate, pre-existing limit).
