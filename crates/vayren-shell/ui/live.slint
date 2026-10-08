@@ -159,6 +159,15 @@ export struct LiveMarketData {
     freshness: string,
 }
 
+export struct LiveRemoteGateway {
+    status: string,
+    tone: int,
+    conn-state: string,
+    rtt: string,
+    last-heartbeat: string,
+    detail: string,
+}
+
 export struct LiveActiveStrategy {
     name: string,
     status: string,
@@ -260,27 +269,14 @@ export struct LiveFooter {
 // ── recomposition tiers ──────────────────────────────────────────────────
 
 export global LiveTiers {
+    // ── the two hard content floors of the workstation ──
     public pure function workspace-min-width() -> length {
         return 440px;
     }
     public pure function inspector-min-width() -> length {
         return 440px;
     }
-    public pure function dock-inspector(w: length) -> bool {
-        return w >= VayrenDesign.live-dock-inspector;
-    }
-    public pure function bar-core(w: length) -> bool {
-        return w >= VayrenDesign.live-bar-core;
-    }
-    public pure function bar-secondary(w: length) -> bool {
-        return w >= VayrenDesign.live-bar-secondary;
-    }
-    public pure function bar-extended(w: length) -> bool {
-        return w >= VayrenDesign.live-bar-extended;
-    }
-    public pure function blotters-side-by-side(w: length) -> bool {
-        return w >= VayrenDesign.live-blotter-side-by-side;
-    }
+
     // STEP 24: the inspector clips (`clip: true` below), so its width must be
     // the CONTENT minimum, never a tighter visual preference. At 1920x1080
     // @150% the logical viewport is 1280 wide; a 400px cap squeezed the two
@@ -288,7 +284,69 @@ export global LiveTiers {
     // VALUES off-frame, which is exactly the reported clipping. The floor is
     // now sized from the widest row this panel actually lays out.
     public pure function inspector-width(w: length) -> length {
-        return Math.max(440px, Math.min(520px, w * 0.34));
+        return Math.max(440px, Math.min(520px, w * 0.32));
+    }
+
+    // ── the width the workspace column actually receives ──
+    // Every workspace-region tier below is measured against THIS, not the
+    // window: with the inspector docked the workspace gets `w` minus the
+    // inspector, its gutter and the layout padding, so a threshold applied
+    // straight to the window width is wrong by ~550px exactly where the
+    // clipping is worst. Deriving it here keeps one decision source.
+    public pure function workspace-width(w: length) -> length {
+        // padding 10 left + 10 right + 10 gutter between the two columns.
+        return w - (dock-inspector(w) ? inspector-width(w) + 20px : 0px) - 20px;
+    }
+
+    // ── command bar: computed from the widgets, never guessed ──
+    // Width each command-bar region needs to render un-elided: one status
+    // card, the PAPER|SANDBOX|LIVE selector and the START/STOP/HALT group.
+    public pure function bar-card-width() -> length { return 150px; }
+    public pure function bar-mode-width() -> length { return 168px; }
+    public pure function bar-transport-width() -> length { return 264px; }
+    // 12px padding each side + the one 8px gap before the first card.
+    public pure function bar-chrome() -> length { return 32px; }
+    public pure function bar-gap() -> length { return 8px; }
+
+    // BROKER + RISK ENGINE only: the two facts that decide whether the
+    // workstation is safe to touch at all.
+    public pure function bar-core(w: length) -> bool {
+        return w >= bar-chrome() + bar-mode-width() + bar-transport-width()
+            + 2 * bar-card-width() + 5 * bar-gap();
+    }
+    // + MARKET DATA / ORDER WS / STRATEGY: the session's own inputs.
+    public pure function bar-secondary(w: length) -> bool {
+        return w >= bar-chrome() + bar-mode-width() + bar-transport-width()
+            + 5 * bar-card-width() + 9 * bar-gap();
+    }
+    // + RECONCILIATION / EXECUTOR: only while all seven stay readable.
+    public pure function bar-extended(w: length) -> bool {
+        return w >= bar-chrome() + bar-mode-width() + bar-transport-width()
+            + 7 * bar-card-width() + 11 * bar-gap();
+    }
+
+    // The inspector docks only when the workspace floor STILL fits beside it.
+    // The old fixed 800px threshold docked a 440px inspector into an 800px
+    // window, leaving the workspace 330px — narrower than the screen's own
+    // declared `workspace-min-width()` — so the watchlist chips and the
+    // search box were clipped with no way to reach them.
+    public pure function dock-inspector(w: length) -> bool {
+        return w >= VayrenDesign.live-dock-inspector
+            && w >= workspace-min-width() + inspector-width(w) + 30px;
+    }
+
+    // The watchlist header holds title + count + nine chips + search on one
+    // row only when the workspace is wide enough for all of it; below that
+    // the chips move to their own scrollable strip (never clipped).
+    public pure function watchlist-header-inline(w: length) -> bool {
+        return workspace-width(w) >= VayrenDesign.live-watchlist-header-inline;
+    }
+
+    // The blotter tab bar holds its five full labels plus Clear only when the
+    // panel can afford them; below that the labels shorten and Clear becomes
+    // icon-sized (previously "Clear" was sliced mid-word at 1024x640).
+    public pure function blotters-side-by-side(w: length) -> bool {
+        return workspace-width(w) >= VayrenDesign.live-blotter-tabs-wide;
     }
 }
 
@@ -328,29 +386,27 @@ component LiveTopCard inherits Rectangle {
     in property <string> sub-text;
     in property <int> sub-tone: 0;
     in property <bool> show-icon: true;
+    in property <string> source-text: "";
 
     background: VayrenPalette.live-panel;
     border-radius: 6px;
     border-width: 1px;
     border-color: VayrenPalette.live-line-mist;
-    min-width: 96px;
-    // Capped so five cards + mode selector + three run controls always fit
-    // the bar: an overflowing bar with `alignment: center` pushed the FIRST
-    // card off-frame entirely (the broker fact vanished).
-    max-width: 236px;
+    min-width: 90px;
+    max-width: 175px;
     height: 52px;
     clip: true;
 
     HorizontalLayout {
-        padding-left: 10px;
-        padding-right: 12px;
-        spacing: 10px;
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 7px;
         alignment: center;
 
         if root.show-icon: Rectangle {
-            width: 32px;
-            height: 32px;
-            border-radius: 16px;
+            width: 28px;
+            height: 28px;
+            border-radius: 14px;
             background: LiveTone.chip(root.tone);
             border-width: 1px;
             border-color: LiveTone.ink(root.tone);
@@ -365,9 +421,7 @@ component LiveTopCard inherits Rectangle {
             }
         }
 
-        // Text stack: label / value / sub on their own lines (terminal
-        // reference anatomy). Stacked rows fill the card width, so long
-        // facts elide with … instead of breaking mid-word.
+        // Text stack: label / value / sub / source on their own lines
         VerticalLayout {
             alignment: center;
             spacing: 1px;
@@ -375,15 +429,15 @@ component LiveTopCard inherits Rectangle {
             if root.label != "": Text {
                 text: root.label;
                 color: VayrenPalette.live-ink-faint;
-                font-size: 10px;
-                font-weight: 600;
+                font-size: 9px;
+                font-weight: 700;
                 overflow: elide;
             }
 
             Text {
                 text: root.value-text;
                 color: LiveTone.ink(root.tone);
-                font-size: 12px;
+                font-size: 11px;
                 font-weight: 700;
                 overflow: elide;
             }
@@ -391,8 +445,16 @@ component LiveTopCard inherits Rectangle {
             if root.sub-text != "": Text {
                 text: root.sub-text;
                 color: LiveTone.ink(root.sub-tone);
-                font-size: 11px;
+                font-size: 10px;
                 font-weight: 500;
+                overflow: elide;
+            }
+
+            if root.source-text != "": Text {
+                text: "SRC: " + root.source-text;
+                color: VayrenPalette.live-ink-dim;
+                font-size: 8px;
+                font-weight: 600;
                 overflow: elide;
             }
         }
@@ -449,6 +511,7 @@ component LiveKvRow inherits HorizontalLayout {
 
     height: 18px;
     spacing: 6px;
+    alignment: center;
 
     Text {
         width: 112px;
@@ -461,6 +524,7 @@ component LiveKvRow inherits HorizontalLayout {
     }
     Text {
         horizontal-stretch: 1;
+        min-width: 0px;
         text: root.value;
         color: LiveTone.ink(root.tone);
         font-size: 11px;
@@ -474,55 +538,68 @@ component LiveKvRow inherits HorizontalLayout {
 // own reason. There is no `is-ready` input - readiness is never assumed, only
 // reported. A NOT READY / BLOCKED gate carries the semantic left edge and the
 // NOT READY verdict, so it can never be mistaken for a satisfied one.
-component LiveGateRow inherits VerticalLayout {
+component LiveGateRow inherits Rectangle {
     in property <string> name;
     in property <string> status;
     in property <int> tone: 0;
     in property <string> reason;
-    // The reason line only fits while the inspector is tall; below that the
-    // name + verdict stay and the reason moves to the arm summary.
     in property <bool> show-reason: true;
 
-    spacing: 1px;
-    alignment: start;
-    padding-left: 6px;
-    padding-right: 2px;
+    background: VayrenPalette.live-panel-deep;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: root.tone == 3 ? VayrenPalette.neg : (root.tone == 1 ? VayrenPalette.live-line-soft : VayrenPalette.live-line-faint);
 
-    Rectangle {
-        width: 2px;
-        background: LiveTone.ink(root.tone);
-    }
+    VerticalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        padding-top: 4px;
+        padding-bottom: 4px;
+        spacing: 2px;
 
-    HorizontalLayout {
-        height: 18px;
-        spacing: 6px;
-        alignment: start;
+        HorizontalLayout {
+            height: 18px;
+            spacing: 6px;
+            alignment: center;
 
-        Text {
-            text: root.name;
-            color: VayrenPalette.live-ink;
-            font-size: 11px;
-            font-weight: 700;
-            vertical-alignment: center;
+            Text {
+                text: root.tone == 1 ? "✓" : (root.tone == 3 ? "✕" : (root.tone == 2 ? "!" : "○"));
+                color: LiveTone.ink(root.tone);
+                font-size: 11px;
+                font-weight: 800;
+                vertical-alignment: center;
+            }
+
+            Text {
+                horizontal-stretch: 1;
+                min-width: 0px;
+                text: root.name;
+                color: VayrenPalette.live-ink;
+                font-size: 11px;
+                font-weight: 700;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+
+            Rectangle { width: 4px; background: transparent; }
+
+            VBadge {
+                text: root.status;
+                tone: root.tone;
+                vertical-alignment: center;
+            }
         }
 
-        VBadge {
-            text: root.status;
-            tone: root.tone;
+        if root.reason != "" && root.show-reason: Text {
+            min-width: 0px;
+            width: 100%;
+            text: root.reason;
+            color: root.tone == 3 ? VayrenPalette.neg : VayrenPalette.muted;
+            font-size: 10px;
+            font-weight: root.tone == 3 ? 600 : 500;
             vertical-alignment: center;
+            wrap: word-wrap;
         }
-
-        Rectangle { horizontal-stretch: 1; background: transparent; }
-    }
-
-    if root.reason != "" && root.show-reason: Text {
-        text: root.reason;
-        color: VayrenPalette.muted;
-        font-size: 10px;
-        font-weight: 500;
-        height: 14px;
-        vertical-alignment: center;
-        overflow: elide;
     }
 }
 
@@ -557,6 +634,7 @@ export component LiveScreen inherits Rectangle {
     in property <string> event-filter: "";
     in property <LiveWebSocket> ws;
     in property <LiveMarketData> md;
+    in property <LiveRemoteGateway> gateway;
     in property <LiveActiveStrategy> active-strat;
     in property <[LiveWatchlistRow]> watchlist;
     in property <LiveSelectedStock> selected-stock;
@@ -574,6 +652,7 @@ export component LiveScreen inherits Rectangle {
     in property <bool> bar-secondary: true;
     in property <bool> bar-extended: true;
     in property <bool> blotters-side-by-side: true;
+    in property <bool> watchlist-header-inline: true;
     in property <bool> tall-inspector: true;
     in property <length> inspector-w: LiveTiers.inspector-width(root.width);
     in property <bool> inspector-open: true;
@@ -584,11 +663,12 @@ export component LiveScreen inherits Rectangle {
     out property <bool> show-inspector: root.inspector-open;
     out property <bool> drawer-open: !root.dock-inspector && root.inspector-open;
     out property <bool> inspector-docked: root.dock-inspector && root.inspector-open;
-    out property <bool> workspace-fits: !root.market.has-data || root.tall-inspector;
-    // Compact blotter height tier (the chart this once sized is gone; the
-    // blotter keeps the tier so the workspace still breathes on short
-    // viewports).
-    out property <length> chart-h: root.market.has-data ? (root.tall-inspector ? 340px : 220px) : 132px;
+    // Blotter tab bar runs in its compact form (short labels + icon-only
+    // Clear) whenever the panel cannot hold the full row un-elided.
+    out property <bool> blotters-compact: !root.blotters-side-by-side;
+    // The watchlist header keeps title + chips + search on one row only while
+    // all of it fits; otherwise the chips take their own scrollable strip.
+    out property <bool> chips-inline: root.watchlist-header-inline;
 
     // Callbacks
     callback mode-picked(int);
@@ -636,17 +716,20 @@ export component LiveScreen inherits Rectangle {
     // Never optimistic: nothing here is set by a click.
     property <string> start-verdict: root.setup.can-stop ? "● RUNNING" : (root.blockers.length > 0 ? "✕ START BLOCKED" : "✓ READY TO START");
 
-    // STEP 25: the reference-candle detail tier. Derived from the watchlist's
-    // OWN width, not the window, so the table measures the space it actually
-    // has and collapses the secondary columns before it can overflow.
-    property <bool> watchlist-columns-wide: root.width >= 1120px;
+    // Watchlist columns always preserved. Internal horizontal scrolling handles narrow viewports.
+    property <bool> watchlist-columns-wide: true;
 
     init => { root.qty-text = root.setup.quantity; }
     changed setup => { if (!root.qty-dirty) { root.qty-text = root.setup.quantity; } }
+    min-width: 0px;
+    width: 100%;
+    clip: true;
     background: VayrenPalette.bg;
 
     VerticalLayout {
         spacing: 0;
+        min-width: 0px;
+        width: 100%;
 
         // ══ 0. HALT BANNER (Placed right at top of LiveScreen for y:50..76 in AppWindow, strictly satisfying 36 < y < 70) ══
         if root.bar.halted: Rectangle {
@@ -668,6 +751,8 @@ export component LiveScreen inherits Rectangle {
         // ══ 1. TOP STATUS & CONTROL BAR ══════════════════════════════════════
         Rectangle {
             height: 60px;
+            min-width: 0px;
+            width: 100%;
             background: VayrenPalette.live-topbar;
             border-width: 1px;
             border-color: VayrenPalette.live-line-deep;
@@ -683,49 +768,68 @@ export component LiveScreen inherits Rectangle {
                 spacing: 8px;
                 alignment: start;
 
-                // Card 1: Broker + connection + safe account.
+                // Card 1: Broker + connection + safe account
                 LiveTopCard {
                     icon-char: "B";
                     show-icon: root.bar-extended;
                     label: "BROKER";
-                    value-text: root.bar.broker-label;
+                    value-text: root.bar.broker-label != "" ? root.bar.broker-label : "NOT CONFIGURED";
                     tone: root.bar.broker-tone;
-                    sub-text: root.bar.conn-label;
+                    sub-text: root.bar.conn-label != "" ? root.bar.conn-label : "DISCONNECTED";
                     sub-tone: root.bar.conn-tone;
+                    source-text: "FYERS API";
                 }
 
-                // Card 2: WebSocket first-class live status + latency
+                // Dedicated Card: EC2 / Remote Gateway connection + heartbeat + latency
+                LiveTopCard {
+                    icon-char: "EC2";
+                    show-icon: root.bar-extended;
+                    label: "EC2 / REMOTE GATEWAY";
+                    value-text: root.gateway.status != "" ? root.gateway.status : "DISCONNECTED";
+                    tone: root.gateway.tone != 0 ? root.gateway.tone : 3;
+                    sub-text: (root.gateway.last-heartbeat != "" ? ("HB: " + root.gateway.last-heartbeat) : "HB: NOT AVAILABLE")
+                        + " · " + (root.gateway.rtt != "" ? ("RTT: " + root.gateway.rtt) : "RTT: NOT AVAILABLE");
+                    sub-tone: root.gateway.tone != 0 ? root.gateway.tone : 3;
+                    source-text: root.gateway.conn-state != "" ? ("EC2 WSS (" + root.gateway.conn-state + ")") : (root.gateway.detail != "" ? root.gateway.detail : "EC2 WSS");
+                }
+
+                // Card 2: Market data state + freshness
+                if root.bar-secondary: LiveTopCard {
+                    icon-char: "M";
+                    show-icon: root.bar-extended;
+                    label: "MARKET DATA";
+                    value-text: root.md.status != "" ? root.md.status : (root.market.state-label != "" ? root.market.state-label : "NO DATA");
+                    tone: root.md.tone != 0 ? root.md.tone : root.market.tone;
+                    sub-text: (root.md.freshness != "" ? root.md.freshness : "—") + " · " + (root.md.sub != "" ? root.md.sub : "FEED");
+                    sub-tone: root.md.tone;
+                    source-text: "MARKET WSS";
+                }
+
+                // Card 3: Order WebSocket live status + latency
                 if root.bar-secondary: LiveTopCard {
                     icon-char: "W";
                     show-icon: root.bar-extended;
-                    label: "WEBSOCKET";
-                    value-text: root.ws.status != "" ? root.ws.status : "CONNECTED";
+                    label: "ORDER WS";
+                    value-text: root.ws.status != "" ? root.ws.status : "DISCONNECTED";
                     tone: root.ws.tone;
-                    sub-text: (root.ws.latency != "" ? root.ws.latency : "42 ms") + " · " + (root.ws.sub != "" ? root.ws.sub : "52 sub");
-                    sub-tone: 0;
+                    sub-text: (root.ws.latency != "" ? root.ws.latency : "—") + " · " + (root.ws.sub != "" ? root.ws.sub : "ORDERS");
+                    sub-tone: root.ws.tone;
+                    source-text: "ORDER WSS";
                 }
 
-                // Card 3: Market data state + freshness
-                if root.bar-secondary: LiveTopCard {
-                    icon-char: "M";
-                    label: "MARKET DATA";
-                    value-text: root.md.status != "" ? root.md.status : (root.market.state-label != "" ? root.market.state-label : "STREAMING");
-                    tone: root.md.tone != 0 ? root.md.tone : root.market.tone;
-                    sub-text: (root.md.freshness != "" ? root.md.freshness : "0.4s") + " · " + (root.md.sub != "" ? root.md.sub : "52 symbols");
-                    sub-tone: root.md.tone;
-                }
-
-                // Card 4: Strategy fact (real id + running status).
+                // Card 4: Strategy fact (real id + running status)
                 if root.bar-secondary: LiveTopCard {
                     icon-char: "S";
+                    show-icon: root.bar-extended;
                     label: "STRATEGY";
                     value-text: root.active-strat.name != "" ? root.active-strat.name : (root.bar.strategy-label != "" ? root.bar.strategy-label : "OBR C1C4");
                     tone: root.active-strat.status-tone != 0 ? root.active-strat.status-tone : root.bar.strategy-tone;
-                    sub-text: root.active-strat.status != "" ? root.active-strat.status : (root.bar.strategy-sub != "" ? root.bar.strategy-sub : "RUNNING");
+                    sub-text: root.active-strat.status != "" ? root.active-strat.status : (root.bar.strategy-sub != "" ? root.bar.strategy-sub : "STOPPED");
                     sub-tone: root.active-strat.status-tone;
+                    source-text: "STRATEGY RT";
                 }
 
-                // Card 5: Risk engine verdict + leverage/limits.
+                // Card 5: Risk engine verdict + leverage/limits
                 LiveTopCard {
                     icon-char: "R";
                     show-icon: root.bar-extended;
@@ -734,16 +838,31 @@ export component LiveScreen inherits Rectangle {
                     tone: root.bar.risk-tone;
                     sub-text: root.bar.risk-sub != "" ? root.bar.risk-sub : "CAPITAL: NOT AVAILABLE";
                     sub-tone: root.bar.risk-tone == 3 ? 3 : 0;
+                    source-text: "RISK ENGINE";
                 }
 
-                // Card 6: Reconciliation verdict + venue counts.
+                // Card 6: Reconciliation verdict + venue counts
                 if root.bar-extended: LiveTopCard {
                     icon-char: "RC";
+                    show-icon: root.bar-extended;
                     label: "RECONCILIATION";
-                    value-text: root.bar.recon-label;
+                    value-text: root.bar.recon-label != "" ? root.bar.recon-label : "NOT CONFIGURED";
                     tone: root.bar.recon-tone;
                     sub-text: root.bar.recon-sub != "" ? root.bar.recon-sub : "0 MISMATCHES";
-                    sub-tone: 0;
+                    sub-tone: root.bar.recon-tone;
+                    source-text: "RECON ENGINE";
+                }
+
+                // Card 7: Executor / recovery state
+                if root.bar-extended: LiveTopCard {
+                    icon-char: "EX";
+                    show-icon: root.bar-extended;
+                    label: "EXECUTOR";
+                    value-text: root.bar.exec-label != "" ? root.bar.exec-label : "STANDBY";
+                    tone: root.bar.exec-tone;
+                    sub-text: root.setup.session-label != "" ? root.setup.session-label : "PHASE 6 RT";
+                    sub-tone: root.bar.exec-tone;
+                    source-text: "PHASE 6 RT";
                 }
 
                 Rectangle { horizontal-stretch: 1; background: transparent; }
@@ -848,9 +967,14 @@ export component LiveScreen inherits Rectangle {
         // ══ 2. MAIN 3-COLUMN WORKSPACE ══════════════════════════════════════
         Rectangle {
             vertical-stretch: 1;
+            min-width: 0px;
+            width: 100%;
+            clip: true;
             background: VayrenPalette.bg;
 
             HorizontalLayout {
+                min-width: 0px;
+                width: 100%;
                 padding: 10px;
                 // The inspector only reserves workspace width while it is
                 // actually docked; an overlay floats above the workspace
@@ -861,12 +985,16 @@ export component LiveScreen inherits Rectangle {
                 // ── COLUMN 1: WORKSTATION WORKSPACE (LEFT ~70%) ──
                 VerticalLayout {
                     horizontal-stretch: 70;
+                    min-width: 0px;
                     spacing: 10px;
 
                     // 1.1 STRATEGY WATCHLIST PANEL
                     Rectangle {
                         vertical-stretch: 3;
                         min-height: 220px;
+                        min-width: 0px;
+                        width: 100%;
+                        clip: true;
                         background: VayrenPalette.live-panel;
                         border-radius: 6px;
                         border-width: 1px;
@@ -877,6 +1005,14 @@ export component LiveScreen inherits Rectangle {
                             spacing: 6px;
 
                             // Watchlist Header: Title, Filter Chips, Search
+                            //
+                            // Adaptive, never clipped. The full row (title +
+                            // count + NINE chips + a 150px search box) needs
+                            // ~1340px of workspace; below that the chips move
+                            // onto their own horizontally scrollable strip, so
+                            // every chip stays reachable instead of being cut
+                            // at the panel edge — which is exactly what
+                            // happened at 1024x640, 1366x768 and 1600x900.
                             HorizontalLayout {
                                 height: 28px;
                                 spacing: 8px;
@@ -898,34 +1034,41 @@ export component LiveScreen inherits Rectangle {
 
                                 Rectangle { width: 8px; background: transparent; }
 
-                                // Filter chips
-                                for chip[c-idx] in root.filter-chips: Rectangle {
-                                    height: 22px;
-                                    border-radius: 11px;
-                                    background: root.filter-chip-selected == c-idx ? VayrenPalette.live-teal-deep : VayrenPalette.live-panel-deep;
-                                    border-width: 1px;
-                                    border-color: root.filter-chip-selected == c-idx ? VayrenPalette.live-teal : VayrenPalette.live-line-soft;
-                                    TouchArea { clicked => { root.filter-chip-picked(c-idx); } }
-                                    HorizontalLayout {
-                                        padding-left: 8px;
-                                        padding-right: 8px;
-                                        alignment: center;
-                                        Text {
-                                            text: chip;
-                                            color: root.filter-chip-selected == c-idx ? VayrenPalette.live-teal : VayrenPalette.live-ink-mute;
-                                            font-size: 10px;
-                                            font-weight: root.filter-chip-selected == c-idx ? 700 : 600;
-                                            vertical-alignment: center;
+                                // Filter chips — inline only while the whole row fits.
+                                if root.chips-inline: HorizontalLayout {
+                                    vertical-stretch: 1;
+                                    spacing: 6px;
+                                    for chip[c-idx] in root.filter-chips: Rectangle {
+                                        height: 22px;
+                                        border-radius: 11px;
+                                        background: root.filter-chip-selected == c-idx ? VayrenPalette.live-teal-deep : VayrenPalette.live-panel-deep;
+                                        border-width: 1px;
+                                        border-color: root.filter-chip-selected == c-idx ? VayrenPalette.live-teal : VayrenPalette.live-line-soft;
+                                        TouchArea { clicked => { root.filter-chip-picked(c-idx); } }
+                                        HorizontalLayout {
+                                            padding-left: 8px;
+                                            padding-right: 8px;
+                                            alignment: center;
+                                            Text {
+                                                text: chip;
+                                                color: root.filter-chip-selected == c-idx ? VayrenPalette.live-teal : VayrenPalette.live-ink-mute;
+                                                font-size: 10px;
+                                                font-weight: root.filter-chip-selected == c-idx ? 700 : 600;
+                                                vertical-alignment: center;
+                                            }
                                         }
                                     }
                                 }
 
                                 Rectangle { horizontal-stretch: 1; background: transparent; }
 
+                                // Search shrinks before it is ever cut: full width when there is room,
+                                // and a shorter placeholder with it, so the
+                                // label is never elided to "Search symbo".
                                 LineEdit {
-                                    width: 150px;
+                                    width: root.chips-inline ? 150px : (root.blotters-compact ? 110px : 130px);
                                     height: 26px;
-                                    placeholder-text: "Search symbol...";
+                                    placeholder-text: root.chips-inline ? "Search symbol..." : "Search";
                                     text: root.filter-text;
                                     edited(t) => {
                                         root.filter-text = t;
@@ -935,53 +1078,80 @@ export component LiveScreen inherits Rectangle {
                                 }
                             }
 
-                            // Watchlist Table Header
-                            // STEP 25: only the OPERATIONAL columns are fixed —
-                            // SYMBOL, LTP, SIGNAL, ORDER, POSITION, QTY, RISK,
-                            // STATUS. The reference-candle detail (C1/C4, trigger,
-                            // stop, max risk) rides the wide tier and collapses on
-                            // narrower viewports, so the row never overflows its
-                            // panel and the primary read survives at 150% scale.
-                            Rectangle {
-                                height: 22px;
-                                background: VayrenPalette.bg1;
+                            // Filter chips on their own strip (narrow workspaces):
+                            // a horizontal ScrollView keeps every chip reachable,
+                            // so no filter is ever silently unreachable.
+                            if !root.chips-inline: chip-scroll := ScrollView {
+                                width: 100%;
+                                height: 26px;
+                                viewport-width: self.width;
+
                                 HorizontalLayout {
-                                    padding-left: 6px;
-                                    padding-right: 6px;
-                                    spacing: 4px;
-                                    Text { width: 20px; text: "#"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
-                                    Text { width: 75px; text: "SYMBOL"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
-                                    Text { width: 62px; text: "LTP"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
-                                    Text { width: 48px; text: "CHG %"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
-                                    if root.watchlist-columns-wide: Text { width: 64px; text: "BREAK C1"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
-                                    if root.watchlist-columns-wide: Text { width: 64px; text: "BREAK C4"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
-                                    if root.watchlist-columns-wide: Text { width: 64px; text: "TRIGGER"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
-                                    if root.watchlist-columns-wide: Text { width: 64px; text: "STOP LOSS"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
-                                    Text { width: 55px; text: "RISK/SH"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
-                                    Text { width: 38px; text: "QTY"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
-                                    // STEP 9: MAX RISK / PLANNED RISK / UTIL are per-stock
-                                    // facts (never one global number); they ride the
-                                    // wide tier and collapse below it.
-                                    if root.watchlist-columns-wide: Text { width: 65px; text: "MAX RISK"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
-                                    Text { width: 70px; text: "PLANNED"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
-                                    if root.watchlist-columns-wide: Text { width: 52px; text: "UTIL %"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
-                                    Text { width: 75px; text: "STATUS"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
-                                    Text { width: 52px; text: "SIGNAL"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
-                                    Text { width: 70px; text: "ORDER"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
-                                    Text { width: 65px; text: "POSITION"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
-                                    if root.watchlist-columns-wide: Text { width: 65px; text: "P&L"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
-                                    Text { horizontal-stretch: 1; text: ""; color: VayrenPalette.live-ink-dim; font-size: 10px; vertical-alignment: center; }
+                                    width: Math.max(chip-scroll.visible-width, 200px);
+                                    height: 26px;
+                                    spacing: 6px;
+                                    for chip[c-idx] in root.filter-chips: Rectangle {
+                                        height: 22px;
+                                        border-radius: 11px;
+                                        background: root.filter-chip-selected == c-idx ? VayrenPalette.live-teal-deep : VayrenPalette.live-panel-deep;
+                                        border-width: 1px;
+                                        border-color: root.filter-chip-selected == c-idx ? VayrenPalette.live-teal : VayrenPalette.live-line-soft;
+                                        TouchArea { clicked => { root.filter-chip-picked(c-idx); } }
+                                        HorizontalLayout {
+                                            padding-left: 8px;
+                                            padding-right: 8px;
+                                            alignment: center;
+                                            Text {
+                                                text: chip;
+                                                color: root.filter-chip-selected == c-idx ? VayrenPalette.live-teal : VayrenPalette.live-ink-mute;
+                                                font-size: 10px;
+                                                font-weight: root.filter-chip-selected == c-idx ? 700 : 600;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                    }
                                 }
                             }
 
-                            // Watchlist Table Body
+                            // Watchlist Table with Synchronized Header & Scrollable Body
                             wl-scroll := ScrollView {
                                 width: 100%;
+                                min-width: 0px;
                                 vertical-stretch: 1;
 
                                 VerticalLayout {
-                                    width: wl-scroll.visible-width;
+                                    width: Math.max(wl-scroll.visible-width, 1180px);
                                     spacing: 1px;
+
+                                    // Table Header (Synchronously scrolled with rows)
+                                    Rectangle {
+                                        height: 22px;
+                                        background: VayrenPalette.bg1;
+                                        HorizontalLayout {
+                                            padding-left: 6px;
+                                            padding-right: 6px;
+                                            spacing: 4px;
+                                            Text { width: 22px; text: "#"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
+                                            Text { width: 80px; text: "SYMBOL"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
+                                            Text { width: 65px; text: "LTP"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
+                                            Text { width: 52px; text: "CHG %"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
+                                            Text { width: 65px; text: "BREAK C1"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
+                                            Text { width: 65px; text: "BREAK C4"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
+                                            Text { width: 65px; text: "TRIGGER"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
+                                            Text { width: 65px; text: "STOP LOSS"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
+                                            Text { width: 58px; text: "RISK/SH"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
+                                            Text { width: 44px; text: "QTY"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
+                                            Text { width: 68px; text: "MAX RISK"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
+                                            Text { width: 72px; text: "PLANNED"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
+                                            Text { width: 54px; text: "UTIL %"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
+                                            Text { width: 76px; text: "STATUS"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+                                            Text { width: 56px; text: "SIGNAL"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+                                            Text { width: 70px; text: "ORDER"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+                                            Text { width: 70px; text: "POSITION"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
+                                            Text { width: 66px; text: "P&L"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
+                                            Rectangle { horizontal-stretch: 1; }
+                                        }
+                                    }
 
                                     if root.watchlist.length > 0: VerticalLayout {
                                         spacing: 1px;
@@ -1000,25 +1170,25 @@ export component LiveScreen inherits Rectangle {
                                                 spacing: 4px;
                                                 alignment: center;
 
-                                                Text { width: 20px; text: idx + 1; color: VayrenPalette.live-ink-dim; font-size: 10px; vertical-alignment: center; }
-                                                Text { width: 75px; text: row.symbol; color: row.selected ? VayrenPalette.text-bright : VayrenPalette.live-ink; font-size: 11px; font-weight: row.selected ? 700 : 600; vertical-alignment: center; overflow: elide; }
-                                                Text { width: 62px; text: row.ltp; color: VayrenPalette.text; font-size: 11px; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                                Text { width: 48px; text: row.change; color: LiveTone.ink(row.change-tone); font-size: 10px; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                                if root.watchlist-columns-wide: Text { width: 64px; text: row.ref-high; color: VayrenPalette.muted; font-size: 10px; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                                if root.watchlist-columns-wide: Text { width: 64px; text: row.ref-low; color: VayrenPalette.muted; font-size: 10px; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                                if root.watchlist-columns-wide: Text { width: 64px; text: row.entry; color: VayrenPalette.text; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                                if root.watchlist-columns-wide: Text { width: 64px; text: row.stop; color: VayrenPalette.neg; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                                Text { width: 55px; text: row.risk-share; color: VayrenPalette.text; font-size: 10px; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                                Text { width: 38px; text: row.qty; color: VayrenPalette.text; font-size: 10px; font-weight: 700; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                                if root.watchlist-columns-wide: Text { width: 65px; text: row.max-allowed-risk; color: VayrenPalette.live-ink; font-size: 10px; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                                Text { width: 70px; text: row.planned-risk; color: VayrenPalette.live-ink; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                                if root.watchlist-columns-wide: Text { width: 52px; text: row.risk-util; color: row.risk-util-tone == 3 ? VayrenPalette.neg : VayrenPalette.text; font-size: 10px; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                                Text { width: 75px; text: row.status; color: LiveTone.ink(row.status-tone); font-size: 10px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
-                                                Text { width: 52px; text: row.signal; color: LiveTone.ink(row.signal-tone); font-size: 10px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
+                                                Text { width: 22px; text: idx + 1; color: VayrenPalette.live-ink-dim; font-size: 10px; vertical-alignment: center; }
+                                                Text { width: 80px; text: row.symbol; color: row.selected ? VayrenPalette.text-bright : VayrenPalette.live-ink; font-size: 11px; font-weight: row.selected ? 700 : 600; vertical-alignment: center; overflow: elide; }
+                                                Text { width: 65px; text: row.ltp; color: VayrenPalette.text; font-size: 11px; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+                                                Text { width: 52px; text: row.change; color: LiveTone.ink(row.change-tone); font-size: 10px; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+                                                Text { width: 65px; text: row.ref-high; color: VayrenPalette.muted; font-size: 10px; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+                                                Text { width: 65px; text: row.ref-low; color: VayrenPalette.muted; font-size: 10px; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+                                                Text { width: 65px; text: row.entry; color: VayrenPalette.text; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+                                                Text { width: 65px; text: row.stop; color: VayrenPalette.neg; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+                                                Text { width: 58px; text: row.risk-share; color: VayrenPalette.text; font-size: 10px; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+                                                Text { width: 44px; text: row.qty; color: VayrenPalette.text; font-size: 10px; font-weight: 700; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+                                                Text { width: 68px; text: row.max-allowed-risk; color: VayrenPalette.live-ink; font-size: 10px; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+                                                Text { width: 72px; text: row.planned-risk; color: VayrenPalette.live-ink; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+                                                Text { width: 54px; text: row.risk-util; color: row.risk-util-tone == 3 ? VayrenPalette.neg : VayrenPalette.text; font-size: 10px; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+                                                Text { width: 76px; text: row.status; color: LiveTone.ink(row.status-tone); font-size: 10px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
+                                                Text { width: 56px; text: row.signal; color: LiveTone.ink(row.signal-tone); font-size: 10px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
                                                 Text { width: 70px; text: row.order; color: LiveTone.ink(row.order-tone); font-size: 10px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
-                                                Text { width: 65px; text: row.position; color: VayrenPalette.text; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
-                                                if root.watchlist-columns-wide: Text { width: 65px; text: row.pnl; color: LiveTone.ink(row.pnl-tone); font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                                Text { horizontal-stretch: 1; text: ""; font-size: 10px; }
+                                                Text { width: 70px; text: row.position; color: VayrenPalette.text; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
+                                                Text { width: 66px; text: row.pnl; color: LiveTone.ink(row.pnl-tone); font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+                                                Rectangle { horizontal-stretch: 1; }
                                             }
                                         }
                                     }
@@ -1063,6 +1233,9 @@ export component LiveScreen inherits Rectangle {
                     Rectangle {
                         vertical-stretch: 2;
                         min-height: 180px;
+                        min-width: 0px;
+                        width: 100%;
+                        clip: true;
                         background: VayrenPalette.live-panel;
                         border-radius: 6px;
                         border-width: 1px;
@@ -1075,8 +1248,43 @@ export component LiveScreen inherits Rectangle {
                             padding-bottom: 6px;
                             spacing: 4px;
 
-                            // Tab Bar
-                            HorizontalLayout {
+                            // Tab Bar — adaptive (LiveTiers.blotters-side-by-side). The full row needs
+                            // ~780px of panel; below that the labels shorten and
+                            // Clear becomes icon-sized, instead of every tab
+                            // being elided mid-word and Clear sliced in half.
+                            if root.blotters-compact: HorizontalLayout {
+                                height: 32px;
+                                spacing: 10px;
+                                LiveTabHeader { label: "Events (" + root.events.length + ")"; active: root.active-blotter-tab == 0; clicked => { root.active-blotter-tab = 0; } }
+                                LiveTabHeader { label: "Pos (" + root.positions.length + ")"; active: root.active-blotter-tab == 1; clicked => { root.active-blotter-tab = 1; } }
+                                LiveTabHeader { label: "Ord (" + root.orders.length + ")"; active: root.active-blotter-tab == 2; clicked => { root.active-blotter-tab = 2; } }
+                                LiveTabHeader { label: "Fill (" + root.fills.length + ")"; active: root.active-blotter-tab == 3; clicked => { root.active-blotter-tab = 3; } }
+                                LiveTabHeader { label: "P&L"; active: root.active-blotter-tab == 4; clicked => { root.active-blotter-tab = 4; } }
+                                Rectangle { horizontal-stretch: 1; background: transparent; }
+
+                                if root.active-blotter-tab == 0: Rectangle {
+                                    width: 30px;
+                                    height: 24px;
+                                    border-radius: 4px;
+                                    background: VayrenPalette.live-panel-deep;
+                                    border-width: 1px;
+                                    border-color: VayrenPalette.live-line-faint;
+                                    TouchArea { clicked => { root.clear-events(); } }
+                                    Text {
+                                        // U+00D7 multiplication sign, not a dingbat:
+                                        // the U+2715 glyph renders as an EMPTY BOX at
+                                        // this size in the default font, which is how a
+                                        // compact Clear control shipped blank.
+                                        text: "×";
+                                        color: VayrenPalette.live-ink-faint;
+                                        font-size: 14px;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+
+                            if !root.blotters-compact: HorizontalLayout {
                                 height: 32px;
                                 spacing: 16px;
                                 LiveTabHeader { label: "Live Events Stream (" + root.events.length + ")"; active: root.active-blotter-tab == 0; clicked => { root.active-blotter-tab = 0; } }
@@ -1144,7 +1352,7 @@ export component LiveScreen inherits Rectangle {
                                         Text { width: 44px; text: "Level"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
                                         Text { horizontal-stretch: 1; text: "Event"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
                                         Text { width: 80px; text: "Symbol"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { width: 70px; text: "Category"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
+                                        Text { width: 70px; text: "Source"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
                                         Text { width: 70px; text: "Strategy"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
                                     }
                                 }
@@ -1159,7 +1367,7 @@ export component LiveScreen inherits Rectangle {
                                         if root.events.length == 0: Rectangle {
                                             height: 48px;
                                             Text {
-                                                text: "No live events recorded";
+                                                text: "NO EVENTS · No live events recorded";
                                                 color: VayrenPalette.live-ink-dim;
                                                 font-size: 11px;
                                                 horizontal-alignment: center;
@@ -1203,7 +1411,7 @@ export component LiveScreen inherits Rectangle {
                                 if root.positions.length == 0: Rectangle {
                                     height: 56px;
                                     Text {
-                                        text: "No open positions";
+                                        text: "No open positions (SOURCE: BROKER / RECONCILIATION)";
                                         color: VayrenPalette.live-ink-dim;
                                         font-size: 11px;
                                         horizontal-alignment: center;
@@ -1252,7 +1460,7 @@ export component LiveScreen inherits Rectangle {
                                 if root.orders.length == 0: Rectangle {
                                     height: 56px;
                                     Text {
-                                        text: "No active orders";
+                                        text: "No active orders (SOURCE: ORDER / TRADE WS)";
                                         color: VayrenPalette.live-ink-dim;
                                         font-size: 11px;
                                         horizontal-alignment: center;
@@ -1299,7 +1507,7 @@ export component LiveScreen inherits Rectangle {
                                 if root.fills.length == 0: Rectangle {
                                     height: 56px;
                                     Text {
-                                        text: "No order fills";
+                                        text: "No order fills (SOURCE: ORDER / TRADE WS)";
                                         color: VayrenPalette.live-ink-dim;
                                         font-size: 11px;
                                         horizontal-alignment: center;
@@ -1358,11 +1566,13 @@ export component LiveScreen inherits Rectangle {
                 inspector-scroll := ScrollView {
                     width: 100%;
                     height: 100%;
+                    viewport-width: self.width;
 
                     VerticalLayout {
-                        width: inspector-scroll.visible-width;
+                        width: 100%;
                         padding: 10px;
-                        padding-left: 0px;
+                        padding-left: 4px;
+                        padding-right: 8px;
                         spacing: 8px;
 
                         // 3.1 ACTIVE STRATEGY CARD
@@ -1424,10 +1634,10 @@ export component LiveScreen inherits Rectangle {
                                 HorizontalLayout {
                                     height: 18px;
                                     spacing: 4px;
-                                    Text { width: 90px; text: "STRATEGY"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
-                                    Text { horizontal-stretch: 1; text: root.active-strat.name != "" ? root.active-strat.name : "—"; color: VayrenPalette.live-teal; font-size: 11px; font-weight: 800; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 80px; text: "STRATEGY"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
+                                    Text { horizontal-stretch: 1; min-width: 0px; text: root.active-strat.name != "" ? root.active-strat.name : "—"; color: VayrenPalette.live-teal; font-size: 11px; font-weight: 800; vertical-alignment: center; overflow: elide; }
                                     Text { width: 50px; text: "STATUS"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
-                                    Text { width: 70px; text: root.active-strat.status != "" ? root.active-strat.status : "—"; color: LiveTone.ink(root.active-strat.status-tone != 0 ? root.active-strat.status-tone : root.bar.exec-tone); font-size: 11px; font-weight: 700; horizontal-alignment: right; vertical-alignment: center; }
+                                    Text { width: 65px; text: root.active-strat.status != "" ? root.active-strat.status : "—"; color: LiveTone.ink(root.active-strat.status-tone != 0 ? root.active-strat.status-tone : root.bar.exec-tone); font-size: 11px; font-weight: 700; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
                                 }
 
                                 // MODE is independent of STATUS: a LIVE selection
@@ -1435,28 +1645,28 @@ export component LiveScreen inherits Rectangle {
                                 HorizontalLayout {
                                     height: 16px;
                                     spacing: 4px;
-                                    Text { width: 90px; text: "MODE"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
-                                    Text { horizontal-stretch: 1; text: root.active-strat.mode != "" ? root.active-strat.mode : (root.bar.mode == 2 ? "LIVE" : root.bar.mode == 1 ? "SANDBOX" : "PAPER"); color: LiveTone.ink(root.active-strat.mode-tone != 0 ? root.active-strat.mode-tone : (root.bar.mode == 2 ? 3 : 0)); font-size: 10px; font-weight: 700; vertical-alignment: center; }
+                                    Text { width: 80px; text: "MODE"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
+                                    Text { horizontal-stretch: 1; min-width: 0px; text: root.active-strat.mode != "" ? root.active-strat.mode : (root.bar.mode == 2 ? "LIVE" : root.bar.mode == 1 ? "SANDBOX" : "PAPER"); color: LiveTone.ink(root.active-strat.mode-tone != 0 ? root.active-strat.mode-tone : (root.bar.mode == 2 ? 3 : 0)); font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
                                     Text { width: 50px; text: "SYMBOLS"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
-                                    Text { width: 70px; text: root.active-strat.symbols-count != "" ? root.active-strat.symbols-count : "—"; color: VayrenPalette.text; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
+                                    Text { width: 65px; text: root.active-strat.symbols-count != "" ? root.active-strat.symbols-count : "—"; color: VayrenPalette.text; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
                                 }
 
                                 HorizontalLayout {
                                     height: 16px;
                                     spacing: 4px;
-                                    Text { width: 90px; text: "SIGNALS TODAY"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
-                                    Text { horizontal-stretch: 1; text: root.active-strat.today-signals != "" ? root.active-strat.today-signals : "—"; color: VayrenPalette.text; font-size: 10px; font-weight: 700; vertical-alignment: center; }
+                                    Text { width: 80px; text: "SIGNALS TODAY"; color: VayrenPalette.live-ink-dim; font-size: 9.5px; font-weight: 600; vertical-alignment: center; overflow: elide; }
+                                    Text { horizontal-stretch: 1; min-width: 0px; text: root.active-strat.today-signals != "" ? root.active-strat.today-signals : "—"; color: VayrenPalette.text; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
                                     Text { width: 50px; text: "ORDERS"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
-                                    Text { width: 70px; text: root.active-strat.orders-today != "" ? root.active-strat.orders-today : "—"; color: VayrenPalette.text; font-size: 10px; font-weight: 700; horizontal-alignment: right; vertical-alignment: center; }
+                                    Text { width: 65px; text: root.active-strat.orders-today != "" ? root.active-strat.orders-today : "—"; color: VayrenPalette.text; font-size: 10px; font-weight: 700; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
                                 }
 
                                 HorizontalLayout {
                                     height: 16px;
                                     spacing: 4px;
-                                    Text { width: 90px; text: "POSITIONS"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
-                                    Text { horizontal-stretch: 1; text: root.active-strat.current-position != "" ? root.active-strat.current-position : "—"; color: VayrenPalette.pos; font-size: 10px; font-weight: 700; vertical-alignment: center; }
+                                    Text { width: 80px; text: "POSITIONS"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
+                                    Text { horizontal-stretch: 1; min-width: 0px; text: root.active-strat.current-position != "" ? root.active-strat.current-position : "—"; color: VayrenPalette.pos; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
                                     Text { width: 50px; text: "STARTED"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
-                                    Text { width: 70px; text: root.active-strat.started-at != "" ? root.active-strat.started-at : "—"; color: VayrenPalette.muted; font-size: 10px; horizontal-alignment: right; vertical-alignment: center; }
+                                    Text { width: 65px; text: root.active-strat.started-at != "" ? root.active-strat.started-at : "—"; color: VayrenPalette.muted; font-size: 10px; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
                                 }
                             }
                         }
@@ -1479,11 +1689,13 @@ export component LiveScreen inherits Rectangle {
                                     alignment: center;
 
                                     Text {
+                                        min-width: 0px;
                                         text: (root.selected-stock.symbol != "" ? root.selected-stock.symbol : "NO STOCK SELECTED") + " — DETAILS";
                                         color: VayrenPalette.text-bright;
                                         font-size: 11px;
                                         font-weight: 700;
                                         vertical-alignment: center;
+                                        overflow: elide;
                                     }
 
                                     VBadge {
@@ -1495,11 +1707,13 @@ export component LiveScreen inherits Rectangle {
                                     Rectangle { horizontal-stretch: 1; background: transparent; }
 
                                     Text {
+                                        min-width: 0px;
                                         text: root.selected-stock.ltp != "" ? ("LTP " + root.selected-stock.ltp) : "LTP —";
                                         color: VayrenPalette.live-teal;
                                         font-size: 11px;
                                         font-weight: 700;
                                         vertical-alignment: center;
+                                        overflow: elide;
                                     }
                                 }
 
@@ -1512,21 +1726,23 @@ export component LiveScreen inherits Rectangle {
                                 HorizontalLayout {
                                     height: 17px;
                                     spacing: 4px;
-                                    Text { width: 78px; text: "SIGNAL"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
+                                    Text { width: 50px; text: "SIGNAL"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
                                     Text {
+                                        min-width: 0px;
                                         text: root.selected-stock.signal;
                                         color: root.selected-stock.signal == "NONE" ? VayrenPalette.muted : (root.selected-stock.signal == "SELL" || root.selected-stock.signal == "SHORT" ? VayrenPalette.neg : VayrenPalette.pos);
-                                        font-size: 11px;
+                                        font-size: 10px;
                                         font-weight: 800;
                                         vertical-alignment: center;
                                         overflow: elide;
                                     }
-                                    Rectangle { width: 6px; background: transparent; }
-                                    Text { width: 46px; text: "ORDER"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
+                                    Rectangle { width: 4px; background: transparent; }
+                                    Text { width: 44px; text: "ORDER"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
                                     Text {
+                                        min-width: 0px;
                                         text: root.selected-stock.order;
                                         color: root.selected-stock.order == "NONE" ? VayrenPalette.muted : (root.selected-stock.order == "FILLED" ? VayrenPalette.pos : (root.selected-stock.order == "REJECTED" ? VayrenPalette.neg : VayrenPalette.amber));
-                                        font-size: 11px;
+                                        font-size: 10px;
                                         font-weight: 800;
                                         vertical-alignment: center;
                                         overflow: elide;
@@ -1534,9 +1750,10 @@ export component LiveScreen inherits Rectangle {
                                     Rectangle { horizontal-stretch: 1; background: transparent; }
                                     Text { width: 54px; text: "POSITION"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
                                     Text {
+                                        min-width: 0px;
                                         text: root.selected-stock.current-position;
                                         color: root.selected-stock.current-position == "FLAT" || root.selected-stock.current-position == "FLAT (0 shares)" ? VayrenPalette.muted : VayrenPalette.pos;
-                                        font-size: 11px;
+                                        font-size: 10px;
                                         font-weight: 800;
                                         horizontal-alignment: right;
                                         vertical-alignment: center;
@@ -1546,105 +1763,114 @@ export component LiveScreen inherits Rectangle {
 
                                 Rectangle { height: 1px; background: VayrenPalette.live-line; }
 
-                                // 1. Capital & Risk Limits
+                                // 1. Risk & Position Sizing Flow
                                 HorizontalLayout {
-                                    height: 14px;
-                                    Text { text: "CAPITAL & RISK LIMITS"; color: VayrenPalette.live-ink-dim; font-size: 9px; font-weight: 700; vertical-alignment: center; }
-                                    Rectangle { horizontal-stretch: 1; background: transparent; }
+                                    height: 16px;
+                                    spacing: 4px;
                                     Text {
-                                        text: root.selected-stock.capital-source != "" ? root.selected-stock.capital-source : "CAPITAL SOURCE: BROKER";
-                                        color: VayrenPalette.live-teal;
-                                        font-size: 9px;
+                                        horizontal-stretch: 1;
+                                        min-width: 0px;
+                                        text: "RISK & POSITION SIZING FLOW";
+                                        color: VayrenPalette.text-bright;
+                                        font-size: 9.5px;
                                         font-weight: 700;
                                         vertical-alignment: center;
+                                        overflow: elide;
+                                    }
+                                    Text {
+                                        min-width: 0px;
+                                        text: root.selected-stock.capital-source != "" ? root.selected-stock.capital-source : "SOURCE: RISK ENGINE";
+                                        color: VayrenPalette.live-teal;
+                                        font-size: 8px;
+                                        font-weight: 700;
+                                        vertical-alignment: center;
+                                        overflow: elide;
                                     }
                                 }
 
                                 HorizontalLayout {
                                     height: 16px;
                                     spacing: 4px;
-                                    Text { width: 90px; text: "Broker Capital"; color: VayrenPalette.live-ink-dim; font-size: 10px; vertical-alignment: center; }
-                                    Text { horizontal-stretch: 1; text: root.selected-stock.broker-capital != "" ? root.selected-stock.broker-capital : "NOT AVAILABLE"; color: VayrenPalette.text; font-size: 10px; font-weight: 600; vertical-alignment: center; }
-                                    Text { width: 85px; text: "Max Risk / Trade"; color: VayrenPalette.live-ink-dim; font-size: 10px; vertical-alignment: center; }
-                                    Text { width: 65px; text: root.selected-stock.max-allowed-risk != "" ? root.selected-stock.max-allowed-risk : "—"; color: VayrenPalette.text; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
+                                    Text { width: 125px; text: "BROKER AVAILABLE CAPITAL"; color: VayrenPalette.live-ink-dim; font-size: 8.5px; font-weight: 600; vertical-alignment: center; overflow: elide; }
+                                    Text { horizontal-stretch: 1; min-width: 0px; text: root.selected-stock.broker-capital != "" && root.selected-stock.broker-capital != "—" ? root.selected-stock.broker-capital : "NOT AVAILABLE"; color: VayrenPalette.text; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 75px; text: "SRC: FYERS"; color: VayrenPalette.live-ink-faint; font-size: 7.5px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
                                 }
 
                                 HorizontalLayout {
                                     height: 16px;
                                     spacing: 4px;
-                                    Text { width: 90px; text: "Effective Capital"; color: VayrenPalette.live-ink-dim; font-size: 10px; vertical-alignment: center; }
-                                    Text { horizontal-stretch: 1; text: root.selected-stock.effective-capital != "" ? root.selected-stock.effective-capital : "—"; color: VayrenPalette.text; font-size: 10px; font-weight: 600; vertical-alignment: center; }
-                                }
-
-                                Rectangle { height: 1px; background: VayrenPalette.live-line; }
-
-                                // 2. Reference Levels & Price Risk (C1-C4)
-                                Text { text: "REFERENCE LEVELS & PRICE RISK (C1-C4)"; color: VayrenPalette.live-ink-dim; font-size: 9px; font-weight: 700; }
-
-                                HorizontalLayout {
-                                    height: 16px;
-                                    spacing: 4px;
-                                    Text { width: 90px; text: "Ref High (C1-C4)"; color: VayrenPalette.live-ink-dim; font-size: 10px; vertical-alignment: center; }
-                                    Text { horizontal-stretch: 1; text: root.selected-stock.ref-high != "" ? root.selected-stock.ref-high : "—"; color: VayrenPalette.text; font-size: 10px; font-weight: 600; vertical-alignment: center; }
-                                    Text { width: 85px; text: "Ref Low (C1-C4)"; color: VayrenPalette.live-ink-dim; font-size: 10px; vertical-alignment: center; }
-                                    Text { width: 65px; text: root.selected-stock.ref-low != "" ? root.selected-stock.ref-low : "—"; color: VayrenPalette.text; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
+                                    Text { width: 125px; text: "  ↓ EFFECTIVE CAPITAL"; color: VayrenPalette.live-ink-dim; font-size: 8.5px; font-weight: 600; vertical-alignment: center; overflow: elide; }
+                                    Text { horizontal-stretch: 1; min-width: 0px; text: root.selected-stock.effective-capital != "" && root.selected-stock.effective-capital != "—" ? root.selected-stock.effective-capital : "NOT AVAILABLE"; color: VayrenPalette.text; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 75px; text: "SRC: BROKER"; color: VayrenPalette.live-ink-faint; font-size: 7.5px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
                                 }
 
                                 HorizontalLayout {
                                     height: 16px;
                                     spacing: 4px;
-                                    Text { width: 90px; text: "Trigger (Break Low)"; color: VayrenPalette.live-ink-dim; font-size: 10px; vertical-alignment: center; }
-                                    Text { horizontal-stretch: 1; text: root.selected-stock.entry-price != "" ? root.selected-stock.entry-price : "—"; color: VayrenPalette.text; font-size: 10px; font-weight: 700; vertical-alignment: center; }
-                                    Text { width: 85px; text: "Stop Loss"; color: VayrenPalette.live-ink-dim; font-size: 10px; vertical-alignment: center; }
-                                    Text { width: 65px; text: root.selected-stock.stop-price != "" ? root.selected-stock.stop-price : "—"; color: VayrenPalette.neg; font-size: 10px; font-weight: 700; horizontal-alignment: right; vertical-alignment: center; }
+                                    Text { width: 125px; text: "  ↓ MAX RISK / TRADE"; color: VayrenPalette.live-ink-dim; font-size: 8.5px; font-weight: 600; vertical-alignment: center; overflow: elide; }
+                                    Text { horizontal-stretch: 1; min-width: 0px; text: root.selected-stock.max-allowed-risk != "" && root.selected-stock.max-allowed-risk != "—" ? root.selected-stock.max-allowed-risk : "NOT AVAILABLE"; color: VayrenPalette.live-ink; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 75px; text: "SRC: LIMITS"; color: VayrenPalette.live-ink-faint; font-size: 7.5px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
                                 }
 
                                 HorizontalLayout {
                                     height: 16px;
                                     spacing: 4px;
-                                    Text { width: 90px; text: "Risk / Share"; color: VayrenPalette.live-ink-dim; font-size: 10px; vertical-alignment: center; }
-                                    Text { horizontal-stretch: 1; text: root.selected-stock.risk-share != "" ? root.selected-stock.risk-share : "—"; color: VayrenPalette.live-teal; font-size: 10px; font-weight: 700; vertical-alignment: center; }
-                                }
-
-                                Rectangle { height: 1px; background: VayrenPalette.live-line; }
-
-                                // 3. Position & Risk Sizing
-                                Text { text: "POSITION & RISK SIZING"; color: VayrenPalette.live-ink-dim; font-size: 9px; font-weight: 700; }
-
-                                HorizontalLayout {
-                                    height: 16px;
-                                    spacing: 4px;
-                                    Text { width: 90px; text: "Computed Qty"; color: VayrenPalette.live-ink-dim; font-size: 10px; vertical-alignment: center; }
-                                    Text { width: 65px; text: root.selected-stock.calculated-qty != "" ? root.selected-stock.calculated-qty : "—"; color: VayrenPalette.live-teal; font-size: 10px; font-weight: 800; vertical-alignment: center; }
-                                    Text { width: 85px; text: "Planned Risk"; color: VayrenPalette.live-ink-dim; font-size: 10px; vertical-alignment: center; }
-                                    Text { horizontal-stretch: 1; text: root.selected-stock.planned-risk != "" ? root.selected-stock.planned-risk : "—"; color: VayrenPalette.text; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
+                                    Text { width: 125px; text: "  ↓ ENTRY (BREAK LOW)"; color: VayrenPalette.live-ink-dim; font-size: 8.5px; font-weight: 600; vertical-alignment: center; overflow: elide; }
+                                    Text { horizontal-stretch: 1; min-width: 0px; text: root.selected-stock.entry-price != "" && root.selected-stock.entry-price != "—" ? root.selected-stock.entry-price : "NOT READY"; color: VayrenPalette.text; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 75px; text: "SRC: STRATEGY"; color: VayrenPalette.live-ink-faint; font-size: 7.5px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
                                 }
 
                                 HorizontalLayout {
                                     height: 16px;
                                     spacing: 4px;
-                                    Text { width: 90px; text: "Risk Util"; color: VayrenPalette.live-ink-dim; font-size: 10px; vertical-alignment: center; }
-                                    Text { horizontal-stretch: 1; text: root.selected-stock.risk-util != "" ? root.selected-stock.risk-util : "—"; color: VayrenPalette.text; font-size: 10px; font-weight: 600; vertical-alignment: center; }
+                                    Text { width: 125px; text: "  ↓ STOP LOSS (C1-C4)"; color: VayrenPalette.live-ink-dim; font-size: 8.5px; font-weight: 600; vertical-alignment: center; overflow: elide; }
+                                    Text { horizontal-stretch: 1; min-width: 0px; text: root.selected-stock.stop-price != "" && root.selected-stock.stop-price != "—" ? root.selected-stock.stop-price : "NOT READY"; color: VayrenPalette.neg; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 75px; text: "SRC: STRATEGY"; color: VayrenPalette.live-ink-faint; font-size: 7.5px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
                                 }
 
-                                // STEP 29: PLANNED risk is the pre-trade ceiling;
-                                // CURRENT OPEN risk is what the live position
-                                // stands to lose right now. They are different
-                                // numbers for different moments, so they get
-                                // separate rows. "—" means the backend does not
-                                // expose a live stop distance yet — never a
-                                // figure invented from LTP.
                                 HorizontalLayout {
                                     height: 16px;
                                     spacing: 4px;
-                                    Text { width: 90px; text: "Current Open Risk"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
-                                    Text { horizontal-stretch: 1; text: root.selected-stock.current-open-risk != "" ? root.selected-stock.current-open-risk : "—"; color: root.selected-stock.current-open-risk == "" || root.selected-stock.current-open-risk == "—" ? VayrenPalette.muted : VayrenPalette.text; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 125px; text: "  ↓ RISK / SHARE"; color: VayrenPalette.live-ink-dim; font-size: 8.5px; font-weight: 600; vertical-alignment: center; overflow: elide; }
+                                    Text { horizontal-stretch: 1; min-width: 0px; text: root.selected-stock.risk-share != "" && root.selected-stock.risk-share != "—" ? root.selected-stock.risk-share : "NOT READY"; color: VayrenPalette.live-teal; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 75px; text: "SRC: RISK ENG"; color: VayrenPalette.live-ink-faint; font-size: 7.5px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
                                 }
 
-                                // Risk validation banner
+                                HorizontalLayout {
+                                    height: 16px;
+                                    spacing: 4px;
+                                    Text { width: 125px; text: "  ↓ QUANTITY"; color: VayrenPalette.live-ink-dim; font-size: 8.5px; font-weight: 600; vertical-alignment: center; overflow: elide; }
+                                    Text { horizontal-stretch: 1; min-width: 0px; text: root.selected-stock.calculated-qty != "" && root.selected-stock.calculated-qty != "—" ? root.selected-stock.calculated-qty : "NOT READY"; color: VayrenPalette.live-teal; font-size: 10px; font-weight: 800; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 75px; text: "SRC: RISK ENG"; color: VayrenPalette.live-ink-faint; font-size: 7.5px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+                                }
+
+                                HorizontalLayout {
+                                    height: 16px;
+                                    spacing: 4px;
+                                    Text { width: 125px; text: "  ↓ PLANNED RISK"; color: VayrenPalette.live-ink-dim; font-size: 8.5px; font-weight: 600; vertical-alignment: center; overflow: elide; }
+                                    Text { horizontal-stretch: 1; min-width: 0px; text: root.selected-stock.planned-risk != "" && root.selected-stock.planned-risk != "—" ? root.selected-stock.planned-risk : "NOT READY"; color: VayrenPalette.live-ink; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 75px; text: "SRC: RISK ENG"; color: VayrenPalette.live-ink-faint; font-size: 7.5px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+                                }
+
+                                HorizontalLayout {
+                                    height: 16px;
+                                    spacing: 4px;
+                                    Text { width: 125px; text: "    CURRENT OPEN RISK"; color: VayrenPalette.live-ink-dim; font-size: 8.5px; font-weight: 600; vertical-alignment: center; overflow: elide; }
+                                    Text { horizontal-stretch: 1; min-width: 0px; text: root.selected-stock.current-open-risk != "" && root.selected-stock.current-open-risk != "—" ? root.selected-stock.current-open-risk : "NOT AVAILABLE"; color: root.selected-stock.current-open-risk == "" || root.selected-stock.current-open-risk == "—" ? VayrenPalette.muted : VayrenPalette.text; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 75px; text: "SRC: POSITION"; color: VayrenPalette.live-ink-faint; font-size: 7.5px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+                                }
+
+                                HorizontalLayout {
+                                    height: 16px;
+                                    spacing: 4px;
+                                    Text { width: 125px; text: "    RISK UTILIZATION"; color: VayrenPalette.live-ink-dim; font-size: 8.5px; font-weight: 600; vertical-alignment: center; overflow: elide; }
+                                    Text { horizontal-stretch: 1; min-width: 0px; text: root.selected-stock.risk-util != "" && root.selected-stock.risk-util != "—" ? root.selected-stock.risk-util : "—"; color: VayrenPalette.text; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 75px; text: "SRC: RISK ENG"; color: VayrenPalette.live-ink-faint; font-size: 7.5px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+                                }
+
                                 VBanner {
                                     height: 20px;
-                                    message: root.selected-stock.risk-banner-text != "" ? root.selected-stock.risk-banner-text : (root.selected-stock.risk-validated ? "[✓] RISK VALIDATED (Under limit)" : "[✕] RISK STATUS: NOT READY · Capital not available");
+                                    message: root.selected-stock.risk-banner-text != "" ? root.selected-stock.risk-banner-text : (root.selected-stock.risk-validated ? "[✓] RISK VALIDATED · Within risk limits" : "[✕] RISK NOT READY · Capital or limits unavailable");
                                     tone: root.selected-stock.risk-validated ? 1 : 3;
                                 }
 
@@ -1741,6 +1967,14 @@ export component LiveScreen inherits Rectangle {
                                     }
 
                                     Rectangle { horizontal-stretch: 1; background: transparent; }
+
+                                    Text {
+                                        text: "EC2 LINK: " + (root.gateway.status != "" ? root.gateway.status : "DISCONNECTED");
+                                        color: root.gateway.tone == 1 ? VayrenPalette.pos : (root.gateway.tone == 2 ? VayrenPalette.amber : VayrenPalette.neg);
+                                        font-size: 9px;
+                                        font-weight: 700;
+                                        vertical-alignment: center;
+                                    }
                                 }
 
                                 // STEP 4/5: ONE consolidated verdict block. This is
@@ -1760,11 +1994,13 @@ export component LiveScreen inherits Rectangle {
                                         spacing: 6px;
                                         alignment: center;
                                         Text {
+                                            min-width: 0px;
                                             text: root.start-verdict;
                                             color: LiveTone.ink(root.setup.can-stop ? 1 : (root.blockers.length > 0 ? 3 : 2));
-                                            font-size: 14px;
+                                            font-size: 13px;
                                             font-weight: 800;
                                             vertical-alignment: center;
+                                            overflow: elide;
                                         }
                                         Rectangle { horizontal-stretch: 1; background: transparent; }
                                         // Mode + session side by side, so "LIVE but
@@ -1783,11 +2019,13 @@ export component LiveScreen inherits Rectangle {
                                             vertical-alignment: center;
                                         }
                                         Text {
+                                            min-width: 0px;
                                             text: root.setup.session-label;
                                             color: LiveTone.ink(root.setup.session-tone);
                                             font-size: 10px;
                                             font-weight: 700;
                                             vertical-alignment: center;
+                                            overflow: elide;
                                         }
                                     }
                                 }
@@ -1796,7 +2034,7 @@ export component LiveScreen inherits Rectangle {
                                 // below carry per-gate detail, not a second copy of
                                 // this list (STEP 5: no blocker repeated 3-4 times).
                                 if root.blockers.length > 0: Text {
-                                    text: "WHY START IS DISABLED";
+                                    text: "WHY START IS BLOCKED (EXACT REASONS):";
                                     color: VayrenPalette.live-ink-faint;
                                     font-size: 9px;
                                     font-weight: 700;
@@ -1805,13 +2043,13 @@ export component LiveScreen inherits Rectangle {
                                 }
 
                                 for b in root.blockers: Text {
+                                    min-width: 0px;
+                                    width: 100%;
                                     text: "• " + b;
                                     color: VayrenPalette.neg;
                                     font-size: 10px;
-                                    font-weight: 500;
-                                    height: 14px;
-                                    vertical-alignment: center;
-                                    overflow: elide;
+                                    font-weight: 600;
+                                    wrap: word-wrap;
                                 }
 
                                 if root.blockers.length == 0: Text {
@@ -1864,6 +2102,8 @@ export component LiveScreen inherits Rectangle {
                                 }
 
                                 if root.arm-note != "": Text {
+                                    min-width: 0px;
+                                    width: 100%;
                                     text: root.arm-note;
                                     color: root.setup.can-arm ? VayrenPalette.pos : VayrenPalette.amber;
                                     font-size: 10px;
@@ -1872,6 +2112,8 @@ export component LiveScreen inherits Rectangle {
                                 }
 
                                 if root.bar.note != "": Text {
+                                    min-width: 0px;
+                                    width: 100%;
                                     text: root.bar.note;
                                     color: LiveTone.ink(root.bar.note-tone);
                                     font-size: 11px;
@@ -1936,6 +2178,14 @@ export component LiveScreen inherits Rectangle {
                                 Rectangle { height: 1px; background: VayrenPalette.live-line; }
                                 Text { text: "RECONCILIATION"; color: VayrenPalette.live-ink-soft; font-size: 10px; font-weight: 700; }
                                 for r in root.recon-rows: LiveKvRow { key: r.key; value: r.value; tone: r.tone; }
+
+                                Rectangle { height: 1px; background: VayrenPalette.live-line; }
+                                Text { text: "TELEMETRY & ACTIVITY"; color: VayrenPalette.live-ink-soft; font-size: 10px; font-weight: 700; }
+                                LiveKvRow { key: "LAST MARKET TICK"; value: root.md.last-tick != "" ? root.md.last-tick : "NOT AVAILABLE"; tone: root.md.tone; }
+                                LiveKvRow { key: "MARKET FRESHNESS"; value: root.md.freshness != "" ? root.md.freshness : "NOT AVAILABLE"; tone: root.md.tone; }
+                                LiveKvRow { key: "LAST ORDER WS"; value: root.ws.last-tick != "" ? root.ws.last-tick : "NOT AVAILABLE"; tone: root.ws.tone; }
+                                LiveKvRow { key: "ORDER WS LATENCY"; value: root.ws.latency != "" ? root.ws.latency : "NOT AVAILABLE"; tone: root.ws.tone; }
+                                LiveKvRow { key: "RECON STATUS"; value: root.bar.recon-label != "" ? root.bar.recon-label : "NOT AVAILABLE"; tone: root.bar.recon-tone; }
 
                                 Rectangle { height: 1px; background: VayrenPalette.live-line; }
                                 Text { text: "ORDER"; color: VayrenPalette.live-ink-soft; font-size: 10px; font-weight: 700; }
@@ -2010,6 +2260,9 @@ export component LiveScreen inherits Rectangle {
         // ══ 3. FOOTER STATUS STRIP (Height 24px) ════════════════════════════
         Rectangle {
             height: 24px;
+            min-width: 0px;
+            width: 100%;
+            clip: true;
             background: VayrenPalette.live-topbar;
             border-width: 1px;
             border-color: VayrenPalette.live-line-deep;
@@ -2065,15 +2318,18 @@ export component LiveScreen inherits Rectangle {
                 // Strategy Status — MODE and STATUS are separate words, and the
                 // fallback carries neither a hardcoded name nor a fake RUNNING.
                 HorizontalLayout {
+                    min-width: 0px;
                     spacing: 4px;
                     alignment: center;
                     VStatusDot { tone: root.active-strat.status-tone; }
                     Text {
+                        min-width: 0px;
                         text: "STRATEGY: " + (root.active-strat.name != "" ? root.active-strat.name : "—") + " · " + (root.bar.mode == 2 ? "LIVE" : root.bar.mode == 1 ? "SANDBOX" : "PAPER") + " · " + (root.active-strat.status != "" ? root.active-strat.status : "—");
                         color: LiveTone.ink(root.active-strat.status-tone);
                         font-size: 10px;
                         font-weight: 700;
                         vertical-alignment: center;
+                        overflow: elide;
                     }
                 }
 

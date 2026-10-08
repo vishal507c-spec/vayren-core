@@ -502,4 +502,76 @@ mod tests {
         backoff.reset();
         assert_eq!(backoff.next_wait(), Duration::from_secs(1));
     }
+
+    #[test]
+    fn regression_production_launch_remote_first_contract_a_to_e() {
+        with_url_env(None, || {
+            // A. production/default launch -> REMOTE
+            let mode_default = resolve_launch_mode(&args(&[]), true);
+            assert!(
+                matches!(mode_default, LaunchMode::Remote { ref url } if url == REMOTE_DEFAULT_URL),
+                "Production default launch must resolve to Remote mode"
+            );
+
+            // B. --local -> LOCAL (explicit developer override only)
+            let mode_local = resolve_launch_mode(&args(&["--local"]), true);
+            assert_eq!(mode_local, LaunchMode::Local);
+
+            let mode_local_with_dirs = resolve_launch_mode(
+                &args(&[
+                    "--local",
+                    "--data-dir",
+                    "D:\\data",
+                    "--strategy-dir",
+                    "D:\\strats",
+                ]),
+                true,
+            );
+            assert_eq!(mode_local_with_dirs, LaunchMode::Local);
+
+            // C. missing / empty token does NOT alter launch mode (remains Remote, enrollment is Missing)
+            let enrollment_missing = decide_enrollment(false, false);
+            assert_eq!(enrollment_missing, Enrollment::Missing);
+            assert!(matches!(
+                resolve_launch_mode(&args(&[]), true),
+                LaunchMode::Remote { .. }
+            ));
+
+            // E. NO silent Local fallback under ANY production arguments without explicit --local
+            let production_arg_permutations = [
+                args(&[]),
+                args(&["--data-dir", "D:\\ZerodhaTradingData"]),
+                args(&["--strategy-dir", "D:\\VAYREN_STRATEGIES"]),
+                args(&[
+                    "--data-dir",
+                    "D:\\ZerodhaTradingData",
+                    "--strategy-dir",
+                    "D:\\VAYREN_STRATEGIES",
+                ]),
+                args(&["--symbol", "RELIANCE"]),
+                args(&["--timeframe", "5m"]),
+                args(&["--limit", "100"]),
+                args(&["--random-flag"]),
+            ];
+            for argv in production_arg_permutations {
+                let mode = resolve_launch_mode(&argv, true);
+                assert!(
+                    matches!(mode, LaunchMode::Remote { .. }),
+                    "Production build MUST NOT fall back to Local for argv: {:?}",
+                    argv
+                );
+            }
+        });
+
+        // D. custom / bad remote endpoint in env remains Remote and points to that endpoint (distinct lock scope)
+        with_url_env(Some("wss://bad-gateway-test:9999/vayren/v1"), || {
+            let mode_bad_url = resolve_launch_mode(&args(&[]), true);
+            assert_eq!(
+                mode_bad_url,
+                LaunchMode::Remote {
+                    url: "wss://bad-gateway-test:9999/vayren/v1".to_string()
+                }
+            );
+        });
+    }
 }

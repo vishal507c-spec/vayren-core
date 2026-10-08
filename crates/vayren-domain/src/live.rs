@@ -409,6 +409,32 @@ pub struct MarketDataFacts {
     pub freshness_age_s: Option<f64>,
 }
 
+/// Remote gateway (EC2 / Gateway WSS) connection facts.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GatewayFacts {
+    pub connected: bool,
+    pub status: String,
+    pub url: String,
+    pub latency_ms: Option<f64>,
+    pub last_heartbeat: String,
+    pub reconnect_count: usize,
+    pub last_error: String,
+}
+
+impl Default for GatewayFacts {
+    fn default() -> Self {
+        Self {
+            connected: false,
+            status: "DISCONNECTED".to_string(),
+            url: String::new(),
+            latency_ms: None,
+            last_heartbeat: String::new(),
+            reconnect_count: 0,
+            last_error: String::new(),
+        }
+    }
+}
+
 /// Authoritative CapitalRiskEngine for position sizing and limit checks.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CapitalRiskEngine {
@@ -526,9 +552,10 @@ pub struct LiveState {
     pub reconciliation: ReconciliationFacts,
     pub kill_halted: bool,
 
-    // WebSocket + Market Data first-class status.
+    // WebSocket + Market Data + Remote Gateway first-class status.
     pub websocket: WebSocketFacts,
     pub market_data: MarketDataFacts,
+    pub gateway: GatewayFacts,
     pub risk_engine: CapitalRiskEngine,
     pub watchlist_rows: Vec<WatchlistStockRow>,
     pub selected_symbol: String,
@@ -645,6 +672,7 @@ impl Default for LiveState {
                 last_tick_time: "12:14:25".into(),
                 freshness_age_s: Some(0.4),
             },
+            gateway: GatewayFacts::default(),
             risk_engine: CapitalRiskEngine::default(),
             watchlist_rows: Vec::new(),
             selected_symbol: "NSE:KAYNES".into(),
@@ -995,6 +1023,17 @@ impl LiveState {
     /// Drain the next host action intent (JSON), if one was accepted.
     pub fn take_action(&mut self) -> Option<String> {
         self.host_actions.pop_front()
+    }
+
+    /// Drain EVERY queued host action in the order the operator produced it.
+    ///
+    /// Hosts must dispatch a batch through one ordered worker, never one
+    /// concurrent thread per action: threads race for the backend lock, the
+    /// service then applies intents in an arbitrary order, and a
+    /// latest-wins sequence guard then paints a snapshot the backend does not
+    /// actually hold. One queue, one order, one truth.
+    pub fn drain_actions(&mut self) -> Vec<String> {
+        self.host_actions.drain(..).collect()
     }
 
     /// Re-queue an action at the front (host buffer was too small).
@@ -2160,6 +2199,16 @@ pub struct MarketDataView {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct GatewayView {
+    pub status: String,
+    pub tone: i32,
+    pub conn_state: String,
+    pub rtt: String,
+    pub last_heartbeat: String,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct ActiveStrategyView {
     pub name: String,
     pub status: String,
@@ -2301,6 +2350,7 @@ pub struct LiveView {
     pub event_filter: String,
     pub ws: WebSocketView,
     pub md: MarketDataView,
+    pub gateway: GatewayView,
     pub active_strat: ActiveStrategyView,
     pub watchlist: Vec<WatchlistRowView>,
     pub selected_stock: StockDetailView,
@@ -3760,6 +3810,67 @@ pub fn project(state: &LiveState) -> LiveView {
         clock: "09:47:12 IST".into(),
     };
 
+    // ── GatewayView ──
+    let gw_status_upper = state.gateway.status.trim().to_uppercase();
+    let (gw_status, gw_tone) = match gw_status_upper.as_str() {
+        "CONNECTED" => ("CONNECTED".to_string(), 1),
+        "CONNECTING" | "AUTHENTICATING" | "RECONNECTING" => (
+            if gw_status_upper.is_empty() {
+                "CONNECTING".to_string()
+            } else {
+                gw_status_upper.clone()
+            },
+            2,
+        ),
+        "STALE" => ("STALE".to_string(), 2),
+        "OFFLINE" => ("OFFLINE".to_string(), 3),
+        "ERROR" => ("ERROR".to_string(), 3),
+        _ => {
+            if state.gateway.connected {
+                ("CONNECTED".to_string(), 1)
+            } else {
+                ("DISCONNECTED".to_string(), 3)
+            }
+        }
+    };
+    let gw_rtt = match state.gateway.latency_ms {
+        Some(ms) if ms.is_finite() && ms >= 0.0 => format!("{:.0}ms", ms),
+        _ => "NOT AVAILABLE".to_string(),
+    };
+    let gw_heartbeat = if !state.gateway.last_heartbeat.trim().is_empty() {
+        state.gateway.last_heartbeat.trim().to_string()
+    } else {
+        "NOT AVAILABLE".to_string()
+    };
+    let gw_conn_state = if !state.gateway.last_error.trim().is_empty() {
+        state.gateway.last_error.trim().to_string()
+    } else if state.gateway.connected {
+        "CONNECTED".to_string()
+    } else if !gw_status_upper.is_empty() {
+        gw_status_upper
+    } else {
+        "DISCONNECTED".to_string()
+    };
+    let gw_detail = if !state.gateway.url.trim().is_empty() {
+        if state.gateway.url.starts_with("wss://") || state.gateway.url.starts_with("ws://") {
+            "EC2 WSS".to_string()
+        } else {
+            state.gateway.url.clone()
+        }
+    } else if state.gateway.connected {
+        "EC2 WSS".to_string()
+    } else {
+        "LOCAL MODE".to_string()
+    };
+    let gateway = GatewayView {
+        status: gw_status,
+        tone: gw_tone,
+        conn_state: gw_conn_state,
+        rtt: gw_rtt,
+        last_heartbeat: gw_heartbeat,
+        detail: gw_detail,
+    };
+
     LiveView {
         bar,
         setup,
@@ -3791,6 +3902,7 @@ pub fn project(state: &LiveState) -> LiveView {
         event_filter: state.event_filter.clone(),
         ws,
         md,
+        gateway,
         active_strat,
         watchlist: watchlist_views,
         selected_stock,
@@ -5091,5 +5203,61 @@ mod tests {
         let filtered_pos = project(&st);
         assert_eq!(filtered_pos.watchlist.len(), 1);
         assert_eq!(filtered_pos.watchlist[0].symbol, "KAYNES");
+    }
+
+    #[test]
+    fn gateway_projection_renders_honest_facts_and_tones() {
+        // 1. Default / local workstation mode: disconnected, not available
+        let local_st = LiveState::default();
+        let local_view = project(&local_st);
+        assert_eq!(local_view.gateway.status, "DISCONNECTED");
+        assert_eq!(local_view.gateway.tone, 3);
+        assert_eq!(local_view.gateway.rtt, "NOT AVAILABLE");
+        assert_eq!(local_view.gateway.last_heartbeat, "NOT AVAILABLE");
+        assert_eq!(local_view.gateway.conn_state, "DISCONNECTED");
+        assert_eq!(local_view.gateway.detail, "LOCAL MODE");
+
+        // 2. Connecting / Handshake mode
+        let mut connecting_st = LiveState::default();
+        connecting_st.gateway.status = "CONNECTING".to_string();
+        connecting_st.gateway.url = "wss://gateway.vayren.internal/v1".to_string();
+        let conn_view = project(&connecting_st);
+        assert_eq!(conn_view.gateway.status, "CONNECTING");
+        assert_eq!(conn_view.gateway.tone, 2);
+        assert_eq!(conn_view.gateway.detail, "EC2 WSS");
+        assert_eq!(conn_view.gateway.rtt, "NOT AVAILABLE");
+
+        // 3. Authenticating mode
+        let mut auth_st = LiveState::default();
+        auth_st.gateway.status = "AUTHENTICATING".to_string();
+        let auth_view = project(&auth_st);
+        assert_eq!(auth_view.gateway.status, "AUTHENTICATING");
+        assert_eq!(auth_view.gateway.tone, 2);
+
+        // 4. Fully connected remote gateway with heartbeat and measured RTT
+        let mut live_st = LiveState::default();
+        live_st.gateway.connected = true;
+        live_st.gateway.status = "CONNECTED".to_string();
+        live_st.gateway.url = "wss://ec2-gateway.aws.internal/vayren/v1".to_string();
+        live_st.gateway.latency_ms = Some(42.0);
+        live_st.gateway.last_heartbeat = "12:14:25".to_string();
+        let live_view = project(&live_st);
+        assert_eq!(live_view.gateway.status, "CONNECTED");
+        assert_eq!(live_view.gateway.tone, 1);
+        assert_eq!(live_view.gateway.rtt, "42ms");
+        assert_eq!(live_view.gateway.last_heartbeat, "12:14:25");
+        assert_eq!(live_view.gateway.conn_state, "CONNECTED");
+        assert_eq!(live_view.gateway.detail, "EC2 WSS");
+
+        // 5. Link drop / Reconnecting with backoff detail
+        let mut drop_st = LiveState::default();
+        drop_st.gateway.status = "RECONNECTING".to_string();
+        drop_st.gateway.last_error = "link lost — retrying in 2s".to_string();
+        drop_st.gateway.last_heartbeat = "12:14:25".to_string();
+        let drop_view = project(&drop_st);
+        assert_eq!(drop_view.gateway.status, "RECONNECTING");
+        assert_eq!(drop_view.gateway.tone, 2);
+        assert_eq!(drop_view.gateway.conn_state, "link lost — retrying in 2s");
+        assert_eq!(drop_view.gateway.last_heartbeat, "12:14:25");
     }
 }

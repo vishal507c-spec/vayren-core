@@ -136,6 +136,59 @@ def _build_shell_debug() -> int:
     return 0
 
 
+def _build_shell_package() -> int:
+    """Build the official production remote-first desktop shell binary."""
+    rc = _run(
+        [
+            "cargo",
+            "build",
+            "--release",
+            "-p",
+            "vayren-shell",
+            "--features",
+            "packaged-remote",
+            "--manifest-path",
+            "Cargo.toml",
+        ]
+    )
+    if rc != 0:
+        return rc
+    shell_bin = ROOT / "target" / "release" / _bin_name()
+    if not shell_bin.is_file():
+        print(f"ERROR: expected packaged release binary missing after build: {shell_bin}")
+        return 1
+    print(f"built packaged remote shell {shell_bin} ({shell_bin.stat().st_size} bytes)")
+    return 0
+
+
+def _sync_desktop_shortcut(release_bin: Path) -> None:
+    """Ensure desktop shortcut points to the production binary with no --local flag."""
+    if sys.platform != "win32":
+        return
+    lnk = Path("C:/Users/visha/Desktop/VAYREN.lnk")
+    if not lnk.parent.is_dir():
+        return
+    icon = ROOT / "tools" / "assets" / "vayren_desktop.ico"
+    script = (
+        f"$sh = New-Object -ComObject WScript.Shell; "
+        f"$lnk = $sh.CreateShortcut('{lnk}'); "
+        f"$args = $lnk.Arguments; "
+        f"if ($args) {{ $args = $args -replace '--local', '' }}; "
+        f"$lnk.TargetPath = '{release_bin}'; "
+        f"$lnk.WorkingDirectory = '{ROOT}'; "
+        f"if ($args) {{ $lnk.Arguments = $args.Trim() }}; "
+        f"if (Test-Path '{icon}') {{ $lnk.IconLocation = '{icon},0' }}; "
+        f"$lnk.Save()"
+    )
+    proc = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", script],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode == 0:
+        print(f"desktop shortcut synced -> {release_bin}")
+
+
 def _run_workspace_tests() -> int:
     """Run the full workspace test suite (never narrowed, never skipped)."""
     return _run(["cargo", "test", "--workspace", "--manifest-path", "Cargo.toml"])
@@ -150,6 +203,12 @@ def main(argv: list[str] | None = None) -> int:
         help="lean test path: core release + shell debug + workspace tests, "
         "skipping the six consumer-less view release DLLs (test gate only; "
         "packaging still uses the full path)",
+    )
+    parser.add_argument(
+        "--package",
+        action="store_true",
+        help="build official production remote-first desktop package "
+        "(core + views + packaged shell)",
     )
     parser.add_argument(
         "--check-only", action="store_true", help="verify the cdylib exists + handshake"
@@ -224,6 +283,18 @@ def main(argv: list[str] | None = None) -> int:
             print(f"ERROR: expected {label} cdylib missing after build: {lib}")
             return 1
     print(f"built {lib} ({lib.stat().st_size} bytes)")
+
+    if args.package:
+        rc = _build_shell_package()
+        if rc != 0:
+            return rc
+        _sync_desktop_shortcut(ROOT / "target" / "release" / _bin_name())
+        if args.test:
+            rc = _run_workspace_tests()
+            if rc != 0:
+                return rc
+        print("Official production desktop package ready (remote-default).")
+        return 0
 
     rc = _build_shell_debug()
     if rc != 0:

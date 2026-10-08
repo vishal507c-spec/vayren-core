@@ -392,6 +392,11 @@ pub fn init_remote_state() -> LiveState {
     state.market_data.last_tick_time = String::new();
     state.market_data.freshness_age_s = None;
     state.broker.connected = None;
+    state.gateway.connected = false;
+    state.gateway.status = "CONNECTING".to_string();
+    state.gateway.last_error = "dialling private gateway…".to_string();
+    state.gateway.latency_ms = None;
+    state.gateway.last_heartbeat = String::new();
     state
 }
 
@@ -427,6 +432,16 @@ pub fn mark_link(state: &mut LiveState, label: &str, detail: &str, reconnects: u
         // first snapshot overwrites both cards with EC2-side truth.
         state.market_data.status = label.to_string();
     }
+
+    state.gateway.reconnect_count = reconnects;
+    state.gateway.status = label.to_string();
+    if label == "CONNECTED" {
+        state.gateway.connected = true;
+        state.gateway.last_error.clear();
+    } else {
+        state.gateway.connected = false;
+        state.gateway.last_error = detail.to_string();
+    }
 }
 
 /// One UI-thread arrival from the pump thread.
@@ -447,6 +462,10 @@ pub enum RemoteUiUpdate {
         label: String,
         detail: String,
         reconnects: usize,
+    },
+    Heartbeat {
+        rtt_ms: Option<f64>,
+        timestamp: String,
     },
 }
 
@@ -487,6 +506,19 @@ pub fn initial_connect(url: &str) -> Result<(RemoteClient, String, serde_json::V
 /// transport note while the loop retries with backoff, so a credential
 /// provisioned after first launch (or a gateway restart) connects with zero
 /// restart and zero manual step. This function never sends a command.
+fn current_time_str() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let day_secs = (secs + 19800) % 86400; // IST: UTC + 5:30
+    let h = day_secs / 3600;
+    let m = (day_secs % 3600) / 60;
+    let s = day_secs % 60;
+    format!("{:02}:{:02}:{:02}", h, m, s)
+}
+
 pub fn spawn_remote_bootstrap(
     url: String,
     tx: mpsc::Sender<RemoteUiUpdate>,
@@ -506,6 +538,10 @@ pub fn spawn_remote_bootstrap(
                         label: "CONNECTED".to_string(),
                         detail: format!("role {role}"),
                         reconnects,
+                    });
+                    let _ = tx.send(RemoteUiUpdate::Heartbeat {
+                        rtt_ms: None,
+                        timestamp: current_time_str(),
                     });
                     let _ = tx.send(RemoteUiUpdate::Snapshot {
                         sections,
@@ -550,18 +586,35 @@ pub fn spawn_remote_pump(
         let mut backoff = Backoff::new(Duration::from_secs(1), Duration::from_secs(30));
         let mut reconnects: usize = 0;
         let pump = |client: &mut RemoteClient, tx: &mpsc::Sender<RemoteUiUpdate>| {
+            let mut last_ping: Option<std::time::Instant> = None;
             loop {
                 match client.next(PUMP_IDLE_TIMEOUT) {
                     Ok(ClientEvent::Snapshot { sections, resync }) => {
                         let _ = tx.send(RemoteUiUpdate::Snapshot { sections, resync });
+                        let _ = tx.send(RemoteUiUpdate::Heartbeat {
+                            rtt_ms: None,
+                            timestamp: current_time_str(),
+                        });
                     }
                     Ok(ClientEvent::StateUpdate { sections, .. }) => {
                         let _ = tx.send(RemoteUiUpdate::StateUpdate { sections });
+                        let _ = tx.send(RemoteUiUpdate::Heartbeat {
+                            rtt_ms: None,
+                            timestamp: current_time_str(),
+                        });
                     }
                     Ok(ClientEvent::StreamEvent { name, payload, .. }) => {
                         let _ = tx.send(RemoteUiUpdate::StreamEvent { name, payload });
                     }
-                    Ok(ClientEvent::Pong) => {}
+                    Ok(ClientEvent::Pong) => {
+                        let rtt = last_ping
+                            .take()
+                            .map(|t0| t0.elapsed().as_secs_f64() * 1000.0);
+                        let _ = tx.send(RemoteUiUpdate::Heartbeat {
+                            rtt_ms: rtt,
+                            timestamp: current_time_str(),
+                        });
+                    }
                     Ok(ClientEvent::CommandResult { .. }) => {
                         // The shell never sends commands; a result here
                         // would mean a protocol violation — log, don't act.
@@ -573,6 +626,7 @@ pub fn spawn_remote_pump(
                     Ok(ClientEvent::Closed) => break,
                     Ok(ClientEvent::Welcome { .. }) => {}
                     Err(ClientError::Timeout) => {
+                        last_ping = Some(std::time::Instant::now());
                         if client.ping().is_err() {
                             break;
                         }
@@ -618,6 +672,10 @@ pub fn spawn_remote_pump(
                         label: "CONNECTED".to_string(),
                         detail: "resumed".to_string(),
                         reconnects,
+                    });
+                    let _ = tx.send(RemoteUiUpdate::Heartbeat {
+                        rtt_ms: None,
+                        timestamp: current_time_str(),
                     });
                     pump(&mut client, &tx);
                 }
@@ -859,5 +917,80 @@ mod tests {
         assert_eq!(state.pnl.unrealized, Some(300.0));
         assert_eq!(state.strategies, vec!["OBR C1C4".to_string()]);
         assert_eq!(state.symbols.len(), 2);
+    }
+
+    #[test]
+    fn gateway_facts_track_remote_connection_lifecycle() {
+        let mut state = init_remote_state();
+        assert_eq!(state.gateway.status, "CONNECTING");
+        assert!(!state.gateway.connected);
+        assert_eq!(state.gateway.last_error, "dialling private gateway…");
+
+        // Authenticating
+        mark_link(&mut state, "AUTHENTICATING", "proving credential...", 0);
+        assert_eq!(state.gateway.status, "AUTHENTICATING");
+        assert!(!state.gateway.connected);
+
+        // Connected
+        mark_link(&mut state, "CONNECTED", "role client", 0);
+        assert_eq!(state.gateway.status, "CONNECTED");
+        assert!(state.gateway.connected);
+        assert!(state.gateway.last_error.is_empty());
+
+        // Snapshot arrives
+        apply_remote_sections(&mut state, &sections(), false);
+        assert_eq!(state.gateway.status, "CONNECTED");
+        assert!(state.gateway.connected);
+
+        // Reconnecting
+        mark_link(&mut state, "RECONNECTING", "link lost — retrying in 2s", 1);
+        assert_eq!(state.gateway.status, "RECONNECTING");
+        assert!(!state.gateway.connected);
+        assert_eq!(state.gateway.reconnect_count, 1);
+        assert_eq!(state.gateway.last_error, "link lost — retrying in 2s");
+    }
+
+    #[test]
+    fn remote_mode_fails_closed_without_silent_local_fallback() {
+        let mut state = init_remote_state();
+
+        // 1. Missing credential: held OFFLINE with enrollment guidance, never falling back to local
+        mark_link(
+            &mut state,
+            "OFFLINE",
+            enrollment_note(Enrollment::Missing),
+            1,
+        );
+        assert_eq!(state.gateway.status, "OFFLINE");
+        assert!(!state.gateway.connected);
+        assert!(
+            !state.bridge_wired,
+            "Remote mode must never wire commanding bridge on missing token"
+        );
+        assert!(
+            !state.can_start(),
+            "START must remain blocked in remote mode"
+        );
+
+        // 2. Transport down / gateway failure: held OFFLINE with retry timetable
+        mark_link(&mut state, "OFFLINE", "transport down — retrying in 4s", 2);
+        assert_eq!(state.gateway.status, "OFFLINE");
+        assert_eq!(state.gateway.reconnect_count, 2);
+        assert!(!state.gateway.connected);
+        assert!(
+            !state.bridge_wired,
+            "Remote mode must never wire commanding bridge on transport failure"
+        );
+
+        // 3. User attempts start while offline: rejected with honest notice, never executes locally
+        state.start();
+        assert!(
+            state.host_actions.is_empty(),
+            "No host actions queued while offline"
+        );
+        assert_eq!(
+            state.action_note.as_deref(),
+            Some("No execution backend attached.")
+        );
     }
 }

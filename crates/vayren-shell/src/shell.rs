@@ -21,9 +21,9 @@ use crate::{
     DlCredField, DlPlan, DlStatus, DlStock, LabBoardCell, LabCheckData, LabDetailMetric, LabHeader,
     LabKpi, LabLibraryRow, LabMatrixRow, LabParam, LabPoint, LabPreset, LabRankRow, LabTradeMetric,
     LabTradeRow, LiveActiveStrategy, LiveBar, LiveEventRow, LiveFill, LiveFooter, LiveGate, LiveKv,
-    LiveMarket, LiveMarketData, LiveOrder, LivePipelineStep, LivePosition, LiveSelectedStock,
-    LiveSetup, LiveStat, LiveSymbolRow, LiveWatchlistRow, LiveWebSocket, MarketCandle,
-    MarketIndicator, MarketMarker, MarketPlotSeg, MarketPopupRow, MarketRayLevel,
+    LiveMarket, LiveMarketData, LiveOrder, LivePipelineStep, LivePosition, LiveRemoteGateway,
+    LiveSelectedStock, LiveSetup, LiveStat, LiveSymbolRow, LiveWatchlistRow, LiveWebSocket,
+    MarketCandle, MarketIndicator, MarketMarker, MarketPlotSeg, MarketPopupRow, MarketRayLevel,
     MarketSettingsRow, MarketStatusRow, MarketTick, MarketTimeframe, MarketTradeContext,
     MarketWatchRow, PortfolioAlloc, PortfolioFill, PortfolioGate, PortfolioKpi, PortfolioOrder,
     PortfolioPosition, PortfolioRisk, ProgressStepView, RankWindow, ResearchCompareRow,
@@ -3549,6 +3549,14 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
         last_tick: view.md.last_tick.into(),
         freshness: view.md.freshness.into(),
     });
+    ui.set_live_gateway(LiveRemoteGateway {
+        status: view.gateway.status.into(),
+        tone: view.gateway.tone,
+        conn_state: view.gateway.conn_state.into(),
+        rtt: view.gateway.rtt.into(),
+        last_heartbeat: view.gateway.last_heartbeat.into(),
+        detail: view.gateway.detail.into(),
+    });
     ui.set_live_active_strat(LiveActiveStrategy {
         name: view.active_strat.name.into(),
         status: view.active_strat.status.into(),
@@ -4572,16 +4580,37 @@ mod tests {
         // preference — at 1920x1080 @150% a 400 px cap cut the right-hand
         // VALUE column off-frame.
         assert!((ui.get_live_inspector_w() - 520.0).abs() < 1.0); // capped
+                                                                  // 1176 fits the CORE cards only. The old thresholds (1120/1040) let
+                                                                  // five then seven cards render here, and every one of them elided
+                                                                  // ("NOT CONF…", "MARKET D…", "CONNECT…") because the bar cannot hold
+                                                                  // seven 150px cards plus the mode selector, the transport group and
+                                                                  // the chrome in 1176px. The thresholds are now computed from those
+                                                                  // widths in LiveTiers, so the honest answer here is core-only.
+                                                                  //
+                                                                  // The size is also read back: the testing backend applies `set_size`
+                                                                  // lazily, so a binding can still be evaluating against the PREVIOUS
+                                                                  // width unless something forces the resize to settle. Reading it here
+                                                                  // is what makes every tier assertion below deterministic instead of
+                                                                  // order-dependent — without it these assertions pass or fail based on
+                                                                  // which size was set first.
         ui.window().set_size(slint::PhysicalSize::new(1176, 720));
-        assert!(ui.get_live_dock_inspector()); // 1176 content ≥ 800 floor
-        assert!(ui.get_live_bar_extended());
-        assert!(!ui.get_live_blotter_side()); // 1176 < 1240
+        assert_eq!(ui.window().size().width, 1176);
+        assert!(ui.get_live_dock_inspector()); // 1176 ≥ 440 + 440 + 30
+        assert!(ui.get_live_bar_core());
+        assert!(!ui.get_live_bar_secondary()); // needs 1286
+        assert!(!ui.get_live_bar_extended()); // needs 1602
+        assert!(!ui.get_live_blotter_side()); // workspace 696 < 780
         assert!(!ui.get_live_tall_inspector()); // 720 − 50 − 24 < 720
         ui.window().set_size(slint::PhysicalSize::new(1024, 640));
-        assert!(ui.get_live_dock_inspector()); // 920 ≥ 800
-        assert!(!ui.get_live_bar_secondary()); // 920 < 1040 — pills fold away
+        assert_eq!(ui.window().size().width, 1024);
+        assert!(ui.get_live_dock_inspector()); // 1024 ≥ 440 + 440 + 30
+        assert!(!ui.get_live_bar_secondary()); // 1024 < 1286 — cards fold away
         assert!(!ui.get_live_bar_extended());
         assert!(ui.get_live_bar_core()); // HALT spine + mode stay
+                                         // The watchlist header cannot hold nine chips plus the search box in
+                                         // the 564px workspace a docked 440px inspector leaves at 1024, so the
+                                         // chips must take their own scrollable strip — never a clipped row.
+        assert!(!ui.get_live_chips_inline());
         assert!(
             (ui.get_live_inspector_w() - 440.0).abs() < 1.0,
             "inspector holds its usable floor"
@@ -4726,28 +4755,35 @@ mod tests {
         });
         harness.set_inspector_open(true);
 
-        // (width, height, docked?, blotters-side-by-side?, extended bar?)
-        // The harness hosts the screen WITHOUT the shell rail, so these
-        // widths are raw screen widths; in production the 104 px rail
-        // subtracts from the window width before the same decisions apply.
-        let matrix: [(u32, u32, bool, bool, bool); 15] = [
-            (1920, 1080, true, true, true),
-            (1600, 900, true, true, true),
-            (1440, 900, true, true, true),
-            (1366, 768, true, true, true),
-            (1280, 720, true, true, true),
-            (1280, 1024, true, true, true),
-            (1150, 800, true, false, true),
-            (1024, 700, true, false, false),
-            (980, 680, true, false, false),
-            (900, 680, true, false, false),
-            (800, 640, true, false, false),
-            (799, 640, false, false, false),
-            (600, 700, false, false, false),
-            (480, 640, false, false, false),
-            (360, 640, false, false, false),
+        // The desktop size ladder, smallest shell window through 4K, ASCENDING so
+        // the monotonicity assertion below means what it says. NO tier is
+        // written here: each row is DRIVEN with the tiers the harness
+        // derives from LiveTiers itself (`derived-*`), so the test can never
+        // disagree with production the way the old hardcoded 760/1040/1120/
+        // 1240 table did.
+        let matrix: [(u32, u32); 19] = [
+            (360, 640),
+            (480, 640),
+            (640, 700),
+            (800, 640),
+            (860, 640),
+            (900, 680),
+            (960, 640),
+            (980, 680),
+            (1024, 640),
+            (1024, 700),
+            (1150, 800),
+            (1280, 720),
+            (1280, 1024),
+            (1366, 768),
+            (1440, 900),
+            (1600, 900),
+            (1920, 1080),
+            (2560, 1440),
+            (3840, 2160),
         ];
-        for (width, height, docked, side_by_side, extended) in matrix {
+        let mut previous_workspace: Option<f64> = None;
+        for (width, height) in matrix {
             harness
                 .window()
                 .set_size(slint::PhysicalSize::new(width, height));
@@ -4757,39 +4793,66 @@ mod tests {
             if applied.width < width {
                 continue;
             }
-            let avail = applied.width as f64;
-            // The row's expected tiers must agree with the production
-            // thresholds (content minima — pinned here as the decision
-            // table itself).
-            assert_eq!(docked, avail >= 800.0, "{width}x{height} dock floor");
-            assert_eq!(side_by_side, avail >= 1240.0, "{width}x{height} blotters");
-            assert_eq!(extended, avail >= 1120.0, "{width}x{height} extended bar");
-            // Drive the tiers exactly as app.slint's LiveTiers computes them.
-            let inspector_w = (avail * 0.32).clamp(340.0, 400.0);
+            // Production's decisions for this exact width, read from LiveTiers.
+            let docked = harness.get_derived_dock();
+            let inspector_w = harness.get_derived_inspector_w() as f64;
+            let workspace_w = harness.get_derived_workspace_w() as f64;
             harness.set_tier_dock(docked);
-            harness.set_tier_core(avail >= 760.0);
-            harness.set_tier_secondary(avail >= 1040.0);
-            harness.set_tier_extended(extended);
-            harness.set_tier_blotter(side_by_side);
+            harness.set_tier_core(harness.get_derived_core());
+            harness.set_tier_secondary(harness.get_derived_secondary());
+            harness.set_tier_extended(harness.get_derived_extended());
+            harness.set_tier_blotter(harness.get_derived_blotter());
+            harness.set_tier_chips_inline(harness.get_derived_chips_inline());
             harness.set_tier_tall(applied.height as f64 >= 720.0);
             harness.set_tier_inspector_w(inspector_w as f32);
-            // THE invariant: whenever the inspector is shown docked, the
-            // workspace keeps its 440 px floor (padding-left math at real
-            // applied size) — clipping is structurally impossible.
+
+            // THE invariant, at every single size: whenever the inspector is
+            // shown docked, the workspace still receives its declared 440px
+            // floor. This is the assertion that makes clipping structurally
+            // impossible instead of a visual accident.
             assert!(harness.get_show_inspector(), "{width}x{height}");
             assert_eq!(harness.get_drawer_open(), !docked, "{width}x{height}");
-            assert!(harness.get_workspace_fits(), "{width}x{height}");
             if docked {
                 assert!(
-                    avail - inspector_w - 1.0 >= 440.0,
-                    "{width}x{height} docked workspace floor"
+                    workspace_w >= 440.0,
+                    "{width}x{height}: docked workspace {workspace_w} below its 440px floor"
+                );
+                // Monotonic in width: a wider viewport never starves the
+                // workspace, so growing the window can only reveal more.
+                if let Some(previous) = previous_workspace {
+                    assert!(
+                        workspace_w >= previous,
+                        "{width}x{height}: workspace shrank as the viewport grew"
+                    );
+                }
+                previous_workspace = Some(workspace_w);
+            }
+            // The two adaptive workspace regions must agree with the tier they
+            // were driven with (a stale binding is how the chips and the tab
+            // bar stayed in their clipped wide form).
+            assert_eq!(
+                harness.get_blotters_compact(),
+                !harness.get_derived_blotter(),
+                "{width}x{height}: blotter compaction must follow its tier"
+            );
+            assert_eq!(
+                harness.get_chips_inline(),
+                harness.get_derived_chips_inline(),
+                "{width}x{height}: chip row must follow its tier"
+            );
+            // Every bar tier is monotone in width: a wider viewport can add a
+            // card group but must never remove one.
+            if width > 1024 {
+                assert!(harness.get_derived_core(), "{width}x{height}: core bar");
+                assert!(
+                    harness.get_derived_secondary() <= harness.get_derived_core(),
+                    "{width}x{height}: secondary must imply core"
+                );
+                assert!(
+                    harness.get_derived_extended() <= harness.get_derived_secondary(),
+                    "{width}x{height}: extended must imply secondary"
                 );
             }
-            // No-data recomposition: the chart region stays COMPACT.
-            assert!(
-                harness.get_chart_h() <= 160.0,
-                "{width}x{height} chart must not void"
-            );
         }
 
         // Collapse, never squeeze: closing the inspector returns the full
@@ -4797,7 +4860,6 @@ mod tests {
         harness.set_inspector_open(false);
         assert!(!harness.get_show_inspector());
         assert!(!harness.get_drawer_open());
-        assert!(harness.get_workspace_fits());
         harness.set_inspector_open(true);
         assert!(harness.get_show_inspector());
 
@@ -4817,22 +4879,34 @@ mod tests {
             feed_tone: 2,
             updated_label: "13:00:05".into(),
         });
-        harness
-            .window()
-            .set_size(slint::PhysicalSize::new(1600, 900));
-        harness.set_tier_tall(harness.window().size().height as f64 >= 720.0);
-        assert!(
-            harness.get_chart_h() > 300.0,
-            "chart owns remaining height with data"
-        );
-        harness
-            .window()
-            .set_size(slint::PhysicalSize::new(1600, 620));
-        harness.set_tier_tall(harness.window().size().height as f64 >= 720.0);
-        assert!(
-            harness.get_chart_h() >= 220.0,
-            "chart keeps its usable floor; page scrolls"
-        );
+        // The LIVE chart is gone, so there is no `chart-h` to assert any
+        // more — that out-property was dead. What must still hold at BOTH a
+        // tall and a short viewport is the structural one: the workspace keeps
+        // its floor and the adaptive regions follow their tier, so no region
+        // can void or clip because the page got shorter.
+        for (w, h) in [(1600u32, 900u32), (1600, 620), (1280, 560)] {
+            harness.window().set_size(slint::PhysicalSize::new(w, h));
+            harness.set_tier_dock(harness.get_derived_dock());
+            harness.set_tier_core(harness.get_derived_core());
+            harness.set_tier_secondary(harness.get_derived_secondary());
+            harness.set_tier_extended(harness.get_derived_extended());
+            harness.set_tier_blotter(harness.get_derived_blotter());
+            harness.set_tier_chips_inline(harness.get_derived_chips_inline());
+            harness.set_tier_tall(harness.window().size().height as f64 >= 720.0);
+            harness.set_tier_inspector_w(harness.get_derived_inspector_w() as f32);
+            assert!(harness.get_show_inspector(), "{w}x{h}");
+            if harness.get_derived_dock() {
+                assert!(
+                    harness.get_derived_workspace_w() >= 440.0,
+                    "{w}x{h}: workspace floor must hold with market data present"
+                );
+            }
+            assert_eq!(
+                harness.get_chips_inline(),
+                harness.get_derived_chips_inline(),
+                "{w}x{h}: chip tier must track the size with data present"
+            );
+        }
 
         select(&ui, ShellScreen::Broker);
         assert!(!ui.get_screen_pending());

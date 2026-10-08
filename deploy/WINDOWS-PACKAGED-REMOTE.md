@@ -7,6 +7,16 @@ built-in default endpoint (compiled in) and the OS credential store.
 
 ## 1. Build the packaged EXE (on the Windows host)
 
+Official production command (builds core release, all views release, packaged remote shell, and syncs shortcut):
+
+```bat
+make exe
+:: or:
+python tools/build_rust.py --package
+```
+
+Direct cargo form:
+
 ```bat
 cargo build --release -p vayren-shell --features packaged-remote
 ```

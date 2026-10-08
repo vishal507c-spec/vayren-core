@@ -143,22 +143,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // its own while developer builds stay local. Shortcuts carry no token
     // and no endpoint by design — configuration lives in the OS credential
     // store plus the built-in default, never in argv.
-    let remote_gateway_url = match vayren_remote_client::launch::resolve_launch_mode(
-        &argv,
-        cfg!(feature = "packaged-remote"),
-    ) {
-        vayren_remote_client::launch::LaunchMode::Remote { url } => Some(url),
-        vayren_remote_client::launch::LaunchMode::Probe { url } => {
-            // Read-only smoke probe: hello → welcome → snapshot → brief
-            // subscribe, without spawning a backend, opening the UI, or
-            // sending any command.
-            return vayren_shell::remote_source::run_remote_probe(&url).map_err(|err| err.into());
-        }
-        vayren_remote_client::launch::LaunchMode::Local => None,
-    };
+    let is_packaged_remote = cfg!(feature = "packaged-remote");
+    let remote_gateway_url =
+        match vayren_remote_client::launch::resolve_launch_mode(&argv, is_packaged_remote) {
+            vayren_remote_client::launch::LaunchMode::Remote { url } => Some(url),
+            vayren_remote_client::launch::LaunchMode::Probe { url } => {
+                // Read-only smoke probe: hello → welcome → snapshot → brief
+                // subscribe, without spawning a backend, opening the UI, or
+                // sending any command.
+                return vayren_shell::remote_source::run_remote_probe(&url)
+                    .map_err(|err| err.into());
+            }
+            vayren_remote_client::launch::LaunchMode::Local => None,
+        };
+
+    // Production Startup Assertion: In a packaged remote build, if --local was NOT
+    // explicitly provided, remote_gateway_url MUST be Some(url). Silent fallback
+    // to Local mode is strictly prohibited.
+    #[cfg(feature = "packaged-remote")]
+    if !argv
+        .iter()
+        .any(|arg| arg == vayren_remote_client::launch::LOCAL_FLAG)
+    {
+        assert!(
+            remote_gateway_url.is_some(),
+            "PRODUCTION STARTUP ASSERTION FAILED: Packaged build must default to LaunchMode::Remote when --local is absent"
+        );
+    }
+
     if let Some(ref url) = remote_gateway_url {
-        println!("VAYREN starting (remote live client + local historical stores)...");
+        println!("VAYREN starting (PRODUCTION REMOTE DESKTOP CLIENT)...");
         println!("Gateway: {url}");
+    } else {
+        println!("VAYREN starting in DEVELOPMENT / LOCAL MODE (local Python backend)...");
+        println!("[DEV MODE NOTICE] Operating in local mode. Official production desktop runs remote by default.");
     }
 
     // Spawn Python backend. One mutex-guarded handle serves the UI thread
@@ -568,6 +586,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let live_state = Rc::new(RefCell::new(live_state));
     let remote_rx = if let Some(url) = remote_gateway_url {
+        live_state.borrow_mut().gateway.url = url.clone();
+        live_state.borrow_mut().gateway.status = "CONNECTING".to_string();
         let (remote_tx, remote_rx) = mpsc::channel::<vayren_shell::remote_live::RemoteUiUpdate>();
         vayren_shell::remote_live::spawn_remote_bootstrap(url, remote_tx);
         Some(remote_rx)
@@ -727,41 +747,71 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 mark_link(&mut live_state.borrow_mut(), &label, &detail, reconnects);
                                 dirty = true;
                             }
+                            RemoteUiUpdate::Heartbeat { rtt_ms, timestamp } => {
+                                if let Some(ms) = rtt_ms {
+                                    live_state.borrow_mut().gateway.latency_ms = Some(ms);
+                                }
+                                live_state.borrow_mut().gateway.last_heartbeat = timestamp;
+                                dirty = true;
+                            }
                         }
                     }
                     if dirty {
                         shell::apply_live(&ui, &live_state.borrow());
                     }
                 } else {
-                    while let Some(raw) = live_state.borrow_mut().take_action() {
-                        let action: serde_json::Value = match serde_json::from_str(&raw) {
-                            Ok(value) => value,
-                            Err(err) => {
-                                eprintln!("Live action is not valid JSON ({err}): {raw}");
-                                continue;
-                            }
-                        };
-                        let backend = Arc::clone(&backend);
-                        let tx = tx.clone();
-                        let id = live_seq.fetch_add(1, Ordering::SeqCst) + 1;
-                        live_busy += 1;
-                        std::thread::spawn(move || {
-                            let data = match PythonBackend::lock_send(
-                                &backend,
-                                BackendCommand::LiveAction { action },
-                            ) {
-                                Ok(BackendResponse::LiveSnapshot { data }) => Some(data),
-                                Ok(other) => {
-                                    eprintln!("Live action: unexpected response ({other:?})");
-                                    None
-                                }
+                    // Ordered dispatch. The drain used to spawn ONE THREAD PER
+                    // action, each contending for the same backend mutex — so
+                    // `service.configure()` could apply intents in an order
+                    // different from the operator's. It then became visible
+                    // WRONG, not merely slow: the seq-guard keeps only the
+                    // highest id, so if action 2 won the mutex the screen
+                    // painted action 2's snapshot while the backend's real
+                    // state was action 1's, until the next poll corrected it.
+                    // One worker, the queue in order: the last intent the
+                    // operator made is the last intent the service applies.
+                    if live_busy == 0 {
+                        let batch: Vec<serde_json::Value> = live_state
+                            .borrow_mut()
+                            .drain_actions()
+                            .into_iter()
+                            .filter_map(|raw| match serde_json::from_str(&raw) {
+                                Ok(value) => Some(value),
                                 Err(err) => {
-                                    eprintln!("Live action failed: {err}");
+                                    eprintln!("Live action is not valid JSON ({err}): {raw}");
                                     None
                                 }
-                            };
-                            let _ = tx.send(FetchResult::Live(id, data));
-                        });
+                            })
+                            .collect();
+                        if !batch.is_empty() {
+                            live_busy = batch.len() as u32;
+                            let backend = Arc::clone(&backend);
+                            let tx = tx.clone();
+                            let base = live_seq.fetch_add(batch.len() as u64, Ordering::SeqCst);
+                            std::thread::spawn(move || {
+                                for (offset, action) in batch.into_iter().enumerate() {
+                                    // Ids stay ascending WITH dispatch order, so
+                                    // the pump's latest-wins guard can no longer
+                                    // drop the genuinely newest snapshot.
+                                    let id = base + offset as u64 + 1;
+                                    let data = match PythonBackend::lock_send(
+                                        &backend,
+                                        BackendCommand::LiveAction { action },
+                                    ) {
+                                        Ok(BackendResponse::LiveSnapshot { data }) => Some(data),
+                                        Ok(other) => {
+                                            eprintln!("Live action: unexpected response ({other:?})");
+                                            None
+                                        }
+                                        Err(err) => {
+                                            eprintln!("Live action failed: {err}");
+                                            None
+                                        }
+                                    };
+                                    let _ = tx.send(FetchResult::Live(id, data));
+                                }
+                            });
+                        }
                     }
                     // Periodic LIVE snapshot poll (see `next_live_poll`): keeps
                     // fills, P&L, positions, events, quotes and broker edges
@@ -1441,6 +1491,8 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
     shell::apply_live(&ui, &live_state.borrow());
     shell::apply_zoom(&ui, &zoom.borrow());
 
+    live_state.borrow_mut().gateway.url = url.clone();
+    live_state.borrow_mut().gateway.status = "CONNECTING".to_string();
     let (remote_tx, remote_rx) = mpsc::channel::<RemoteUiUpdate>();
     // Bootstrap owns the first connect (with enrollment retries); on success
     // it hands the live client to the pump and exits.
@@ -1491,6 +1543,13 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                         } => {
                             eprintln!("remote UI: link {label} ({detail})");
                             mark_link(&mut live_state.borrow_mut(), &label, &detail, reconnects);
+                            dirty = true;
+                        }
+                        RemoteUiUpdate::Heartbeat { rtt_ms, timestamp } => {
+                            if let Some(ms) = rtt_ms {
+                                live_state.borrow_mut().gateway.latency_ms = Some(ms);
+                            }
+                            live_state.borrow_mut().gateway.last_heartbeat = timestamp;
                             dirty = true;
                         }
                     }

@@ -34,6 +34,15 @@
 //! `-4` invalid JSON · `-5` bad argument (size/buffer/button) ·
 //! `-6` wrong thread · `-7` platform setup failed · `-9` internal panic.
 
+// The C ABI below dereferences its `*mut` arguments. These entry points
+// are `pub extern "C" fn` on purpose: the safety contract is carried by
+// the C signature and by the documented per-function error codes (null and
+// length checks before every dereference, thread affinity checked on
+// entry), not by an `unsafe` obligation on the caller. Marking them
+// `unsafe fn` would push that obligation onto every caller — including
+// this crate's own tests — without making the boundary any safer.
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
+
 slint::include_modules!();
 
 use std::cell::{Cell, RefCell};
@@ -53,6 +62,22 @@ use vayren_domain::live::{self, ExecMode, LiveState};
 pub const ABI_VERSION: u32 = 1;
 const MIN_SCALE: f32 = 0.25;
 const MAX_SCALE: f32 = 8.0;
+
+/// Clamp a host-supplied scale factor, rejecting non-finite input.
+///
+/// `f32::clamp` returns `self` for NaN, so a garbage scale flowed straight
+/// into `ScaleFactorChanged` and the logical view size. Every downstream tier
+/// comparison against NaN is false, so the whole layout collapsed — and
+/// `draw_if_needed` panicked inside the renderer, which `guard` reports as
+/// `-9`, POISONING the view per this crate's own contract. One bad float from
+/// the host permanently bricked the Live screen with no diagnostic. Fail closed
+/// like every other bad argument here.
+fn sanitize_scale(scale_factor: f32) -> Result<f32, i32> {
+    if !scale_factor.is_finite() {
+        return Err(-5);
+    }
+    Ok(scale_factor.clamp(MIN_SCALE, MAX_SCALE))
+}
 
 // Window handed to each view at creation. `LiveHostWindow::new()` pulls it
 // through `EmbedPlatform::create_window_adapter` synchronously on the
@@ -291,6 +316,49 @@ fn apply_view(ui: &LiveHostWindow, state: &LiveState) {
     ui.set_event_types(strings(view.event_types));
     ui.set_event_type_index(view.event_type_index);
     ui.set_event_filter(view.event_filter.into());
+    // Watchlist + execution filter chips. `live::project` already computes
+    // both (real rows, real per-bucket counts); binding them here is what
+    // makes the table and the nine chips mean anything. Without these four
+    // setters the screen rendered an empty table with all chips pinned at
+    // "(0)" — the projection was right and the host threw it away.
+    ui.set_watchlist(model(
+        view.watchlist
+            .into_iter()
+            .map(|w| LiveWatchlistRow {
+                index: w.index,
+                symbol: w.symbol.into(),
+                full_symbol: w.full_symbol.into(),
+                ltp: w.ltp.into(),
+                change: w.change.into(),
+                change_tone: w.change_tone,
+                ref_high: w.ref_high.into(),
+                ref_low: w.ref_low.into(),
+                break_low: w.break_low.into(),
+                entry: w.entry.into(),
+                stop: w.stop.into(),
+                risk_share: w.risk_share.into(),
+                qty: w.qty.into(),
+                max_allowed_risk: w.max_allowed_risk.into(),
+                planned_risk: w.planned_risk.into(),
+                risk_util: w.risk_util.into(),
+                risk_util_tone: w.risk_util_tone,
+                position: w.position.into(),
+                status: w.status.into(),
+                status_tone: w.status_tone,
+                signal: w.signal.into(),
+                signal_tone: w.signal_tone,
+                order: w.order.into(),
+                order_tone: w.order_tone,
+                pnl: w.pnl.into(),
+                pnl_tone: w.pnl_tone,
+                last_update: w.last_update.into(),
+                selected: w.selected,
+            })
+            .collect::<Vec<_>>(),
+    ));
+    ui.set_filter_chip_selected(view.filter_chip_selected);
+    ui.set_filter_chip_counts(view.filter_chip_counts.into());
+    ui.set_filter_chips(strings(view.filter_chips));
 }
 
 fn wire_view(ui: &LiveHostWindow, state: Rc<RefCell<LiveState>>, refresh: Rc<Cell<bool>>) {
@@ -352,6 +420,11 @@ fn wire_view(ui: &LiveHostWindow, state: Rc<RefCell<LiveState>>, refresh: Rc<Cel
     wire_text!(on_symbol_filter_changed, LiveState::set_symbol_filter);
     wire_text!(on_event_filter_changed, LiveState::set_event_filter);
     wire_text!(on_quantity_edited, LiveState::set_quantity);
+    wire_text!(on_watchlist_selected, LiveState::select_watchlist_symbol);
+    wire_int!(on_filter_chip_picked, |s: &mut LiveState, i: i32| {
+        s.set_filter_chip(i.max(0) as usize);
+    });
+    wire_text!(on_watchlist_search_changed, LiveState::set_watchlist_search);
     wire_unit!(on_start_requested, LiveState::start);
     wire_unit!(on_stop_requested, LiveState::stop);
     wire_unit!(on_arm_requested, LiveState::arm);
@@ -370,14 +443,25 @@ fn wire_view(ui: &LiveHostWindow, state: Rc<RefCell<LiveState>>, refresh: Rc<Cel
             }
         });
     }
-    // CONFIGURE BROKER is navigation intent — the legacy host routes it to the
-    // BROKERS workspace; no broker logic lives in this surface.
+    // CONFIGURE BROKER is navigation intent — the host routes it to the BROKERS
+    // workspace; no broker logic lives in this surface.
+    //
+    // It carries a distinct `navigate` action, NOT a trading action. The old
+    // `{"action":"configure_broker"}` had no branch in
+    // `headless.py::_live_action`, so it fell through to `_live_unavailable`,
+    // whose blank degraded snapshot wiped every panel on the Live screen on a
+    // single click. The native shell never queued it at all (it switches
+    // screens directly); an embed host intercepts `navigate` the same way, and
+    // if one ever forwards it blindly the backend now answers with the live
+    // snapshot instead of a blank page.
     {
         let strong = state.clone();
+        let refresh_flag = refresh.clone();
         ui.on_configure_broker(move || {
             strong
                 .borrow_mut()
-                .push_host_action(serde_json::json!({"action": "configure_broker"}));
+                .push_host_action(serde_json::json!({"action": "navigate", "target": "brokers"}));
+            refresh_flag.set(true);
         });
     }
 }
@@ -388,7 +472,7 @@ impl LiveView {
             return Err(-5);
         }
         ensure_platform()?;
-        let scale = scale_factor.clamp(MIN_SCALE, MAX_SCALE);
+        let scale = sanitize_scale(scale_factor)?;
         let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
         PENDING_WINDOW.with(|slot| slot.borrow_mut().replace(window.clone()));
         let ui = LiveHostWindow::new().map_err(|_| -7)?;
@@ -545,7 +629,7 @@ pub extern "C" fn vayren_live_view_resize(
         }
         view.width_px = width_px;
         view.height_px = height_px;
-        view.scale_factor = scale_factor.clamp(MIN_SCALE, MAX_SCALE);
+        view.scale_factor = sanitize_scale(scale_factor)?;
         view.apply_geometry();
         Ok(0)
     })

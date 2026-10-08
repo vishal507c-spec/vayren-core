@@ -82,7 +82,9 @@ def _shortcut_target() -> tuple[str, str] | None:
 
 
 def test_shell_binary_exists() -> None:
-    assert EXPECTED_BINARY.is_file(), "debug shell binary must exist (shortcut target)"
+    assert EXPECTED_BINARY.is_file() or (ROOT / "target" / "release" / _BIN_NAME).is_file(), (
+        "shell binary must exist in target/debug or target/release"
+    )
 
 
 def test_shell_accepts_data_dirs() -> None:
@@ -110,6 +112,34 @@ def test_desktop_shortcut_launches_rust_directly() -> None:
     assert "python" not in target.lower(), "no Python launcher in the desktop path"
     assert "launch_native" not in args, "shortcut must bypass scripts/launch_native.py"
     assert "--data-dir" in args and "--strategy-dir" in args
+    assert "--local" not in args, "shortcut must not contain --local override"
+
+
+def test_production_build_remote_first_guard() -> None:
+    """Build & CI guard: production desktop binary must configure packaged-remote."""
+    # 1. Feature definition in vayren-shell Cargo.toml
+    shell_cargo = (ROOT / "crates" / "vayren-shell" / "Cargo.toml").read_text(encoding="utf-8")
+    assert "packaged-remote = []" in shell_cargo, (
+        "vayren-shell must declare packaged-remote feature"
+    )
+
+    # 2. Build driver build_rust.py builds with --features packaged-remote
+    build_driver = (ROOT / "tools" / "build_rust.py").read_text(encoding="utf-8")
+    assert "--features" in build_driver and "packaged-remote" in build_driver, (
+        "build_rust.py package mode must build with packaged-remote feature"
+    )
+
+    # 3. Makefile defines `make exe` invoking python tools/build_rust.py --package
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    assert "exe:" in makefile and "build_rust.py --package" in makefile, (
+        "Makefile must wire `exe:` target to build_rust.py --package"
+    )
+
+    # 4. Fail-closed assertion in vayren-shell main.rs
+    shell_main = (ROOT / "crates" / "vayren-shell" / "src" / "main.rs").read_text(encoding="utf-8")
+    assert "PRODUCTION STARTUP ASSERTION FAILED" in shell_main, (
+        "vayren-shell main.rs must guard packaged-remote against silent local fallback"
+    )
 
 
 def test_no_stale_deleted_refs_in_active_docs() -> None:

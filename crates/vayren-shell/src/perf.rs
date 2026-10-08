@@ -59,6 +59,7 @@ impl Stats {
 }
 
 #[test]
+#[ignore = "perf benchmark: run with `cargo test -- --ignored` or `make bench`"]
 fn bench_set_bars_scales_linearly() {
     for n in [1_000usize, 5_000, 20_000, 60_000] {
         let bars = bench_bars(n);
@@ -72,6 +73,7 @@ fn bench_set_bars_scales_linearly() {
 }
 
 #[test]
+#[ignore = "perf benchmark: run with `cargo test -- --ignored` or `make bench`"]
 fn bench_project_visible_window_only() {
     let st = loaded_state(60_000);
     // Proof of culling: projection covers the visible window, never 60k.
@@ -89,6 +91,7 @@ fn bench_project_visible_window_only() {
 }
 
 #[test]
+#[ignore = "perf benchmark: run with `cargo test -- --ignored` or `make bench`"]
 fn bench_hover_full_path_cost() {
     // BEFORE reference: every hover runs apply + full project + full Slint
     // model rebuild. This measures the Rust side (project); the Slint model
@@ -109,6 +112,7 @@ fn bench_hover_full_path_cost() {
 }
 
 #[test]
+#[ignore = "perf benchmark: run with `cargo test -- --ignored` or `make bench`"]
 fn bench_pan_and_zoom_ops() {
     let mut st = loaded_state(20_000);
     let bars_before = st.bars.len();
@@ -140,6 +144,7 @@ fn bench_pan_and_zoom_ops() {
 }
 
 #[test]
+#[ignore = "perf benchmark: run with `cargo test -- --ignored` or `make bench`"]
 fn bench_apply_tiers_single_window() {
     // Slint's testing backend owns process-global event-loop state: all
     // window-instantiation measurements run in this ONE test, sequentially

@@ -204,6 +204,7 @@ fn viewport_rows() -> usize {
 }
 
 #[test]
+#[ignore = "perf benchmark: run with `cargo test -- --ignored` or `make bench`"]
 fn bench_snapshot_ingest_keeps_every_row() {
     // Pipeline stage 1: the bridge snapshot. Cells are formatted once, here, on
     // arrival — the frame path must never redo that work (`spec §7`).
@@ -224,6 +225,7 @@ fn bench_snapshot_ingest_keeps_every_row() {
 }
 
 #[test]
+#[ignore = "perf benchmark: run with `cargo test -- --ignored` or `make bench`"]
 fn bench_project_cost_is_independent_of_dataset_size() {
     // The core budget: a projection must not scale with the dataset. Only the
     // virtual window may be cloned per frame.
@@ -267,6 +269,7 @@ fn bench_project_cost_is_independent_of_dataset_size() {
 }
 
 #[test]
+#[ignore = "perf benchmark: run with `cargo test -- --ignored` or `make bench`"]
 fn bench_keystroke_filter_stays_bounded() {
     // Typing (`spec §15`): the sort criterion is unchanged, so a keystroke only
     // filters the EXISTING order — no re-sort. This is the per-keystroke path.
@@ -285,6 +288,7 @@ fn bench_keystroke_filter_stays_bounded() {
 }
 
 #[test]
+#[ignore = "perf benchmark: run with `cargo test -- --ignored` or `make bench`"]
 fn bench_sort_change_reorders_within_budget() {
     // Changing the criterion (`spec §16`) is the ONE O(N log N) operation in the
     // table, and it is user-initiated (a dropdown click), not per-frame. Budget
@@ -305,6 +309,7 @@ fn bench_sort_change_reorders_within_budget() {
 }
 
 #[test]
+#[ignore = "perf benchmark: run with `cargo test -- --ignored` or `make bench`"]
 fn bench_scroll_path_stays_inside_the_frame_budget() {
     // Scroll is the critical path (`spec §8/§14`): a long flick across a
     // 50k-row dataset, worst case at the far end.
@@ -328,6 +333,7 @@ fn bench_scroll_path_stays_inside_the_frame_budget() {
 }
 
 #[test]
+#[ignore = "perf benchmark: run with `cargo test -- --ignored` or `make bench`"]
 fn bench_fast_flick_grows_overscan_and_idle_shrinks_it_back() {
     // Adaptive quality (`spec §2/§9`): a fast scroll pre-renders more rows
     // than an idle table, and the band shrinks back once scrolling stops.
@@ -349,6 +355,7 @@ fn bench_fast_flick_grows_overscan_and_idle_shrinks_it_back() {
 }
 
 #[test]
+#[ignore = "perf benchmark: run with `cargo test -- --ignored` or `make bench`"]
 fn bench_top_bottom_top_returns_the_same_window() {
     // Scroll-position integrity (`spec §11`): no blank rows, no jumping, no
     // wrong order — and no leaked state (the window must be identical to the

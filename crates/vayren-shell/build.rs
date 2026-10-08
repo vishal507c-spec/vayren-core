@@ -20,13 +20,34 @@ fn is_stale(inputs: &[PathBuf], output: &Path) -> bool {
 }
 
 fn main() {
-    slint_build::compile("ui/app.slint").unwrap();
+    let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
+    let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
+    let build_script = manifest.join("build.rs");
+    let app_out = out_dir.join("app.rs");
+
+    // Gather all ui/*.slint files and emit rerun-if-changed
+    let mut slint_files = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(manifest.join("ui")) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) == Some("slint") {
+                if let Ok(rel) = path.strip_prefix(&manifest) {
+                    println!("cargo:rerun-if-changed={}", rel.display());
+                }
+                slint_files.push(path);
+            }
+        }
+    }
+    slint_files.push(build_script.clone());
+
+    if is_stale(&slint_files, &app_out) {
+        slint_build::compile("ui/app.slint").unwrap();
+    }
+
     // Headless responsive harness (tests only): a separate compilation unit
     // so the harness Window gets Rust bindings without touching the app
     // entry. Included from lib.rs under cfg(test) only.
-    let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
-    let build_script = manifest.join("build.rs");
-    let out = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("research_harness.rs");
+    let out = out_dir.join("research_harness.rs");
     println!("cargo:rerun-if-changed=ui/research_harness.slint");
     println!("cargo:rerun-if-changed=ui/research.slint");
     println!("cargo:rerun-if-changed=ui/components.slint");

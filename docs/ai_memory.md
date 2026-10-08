@@ -5,7 +5,39 @@
 
 **Owns:** Current state, open items, verified facts, oddities. **Not owns:** Rules/architecture/events/contracts \u2192 `AGENTS.md`, `AI_ENTRY.md`, `architecture.md`, `module_contracts.md`, `event_catalog.md`.
 
-**Latest update (ci-green-fix-phase1-6, 2026-10-08):** CI 100% GREEN FIX FOR PHASE 1-6 MAIN MERGE.
+**Latest update (permanent-remote-first-desktop-launch, 2026-10-08):** PERMANENT REMOTE-FIRST PRODUCTION DESKTOP LAUNCH + OFFICIAL PACKAGE PIPELINE + LIVE CONNECTION VERIFIED.
+1. **Production Remote-First Default & Fail-Closed Guard:**
+   - Launch contract (`crates/vayren-remote-client/src/launch.rs`): Packaged build (`packaged-remote`) defaults to `LaunchMode::Remote` (`wss://ip-172-31-12-198.taila678c5.ts.net/vayren/v1`). Explicit `--local` forces development mode; unrelated CLI flags (e.g. `--data-dir`, `--strategy-dir`) never switch off remote mode. Regression test suite covers contracts A-E.
+   - Shell startup guard (`crates/vayren-shell/src/main.rs`): Added compile-time `assert!(remote_gateway_url.is_some())` for packaged builds when `--local` is absent, permanently preventing silent fallback to local execution.
+   - Fail-closed behavior (`crates/vayren-shell/src/remote_live.rs`): If credentials are missing or network is down, the client remains held OFFLINE with retry timetable, never silently executing locally.
+2. **Official Production Build & Desktop Shortcut:**
+   - Build driver (`tools/build_rust.py`): Added `--package` flag (`make exe`) compiling `--release -p vayren-shell --features packaged-remote` and automatically syncing the Windows desktop shortcut `C:\Users\visha\Desktop\VAYREN.lnk` to point to `target/release/vayren-shell.exe` without `--local`.
+   - CI & Build Guards (`tools/tests/test_desktop.py`, `test_build_rust.py`): Added tests asserting Cargo.toml feature definition, `build_rust.py` package mode, Makefile `exe:` target, and shortcut args containing NO `--local`.
+3. **Live EC2 Gateway Connection Verified:**
+   - Real connection to EC2 (`wss://ip-172-31-12-198.taila678c5.ts.net/vayren/v1`) verified: hello -> welcome (`connection c20 role trade`) -> snapshot -> heartbeat/resync active.
+   - All tests pass: 27/27 `vayren-remote-client`, 7/7 `remote_e2e`, 49/49 `vayren-shell`, 18/18 desktop & build python tests.
+   - Repo graph synced (5,352 entities, 11,047 relationships, 0 unresolved).
+
+**Previous update (live-ec2-gateway-and-repo-graph, 2026-10-08):** DEDICATED EC2 / REMOTE GATEWAY STATUS CARD ADDED TO LIVE UI + REPO GRAPH SYNC & CI GATES VERIFIED.
+
+**Previous update (build-test-speed-ci-green, 2026-10-08):** 100% GREEN CI GATE ON GITHUB ACTIONS (`37779678240`), BUILD/TEST CACHING & GIT PERFORMANCE OPTIMIZATIONS.
+1. **GitHub CI Green Verification (run `37779678240`):**
+   - `quality` (42s): PASSED (`ruff check`, `ruff format --check`, `pyright` 0 errors).
+   - `validators` (51s): PASSED (all 9 domain gates, structure, imports, language ownership, architecture, authority, routes, repo graph, context engine).
+   - `test-shard-pure` (1m42s): PASSED.
+   - `test-shard-stateful` (7m15s): PASSED.
+   - `build-test` (9m38s): PASSED.
+   - `CI gate` (4s): ALL REQUIRED CHECKS PASSED.
+2. **Build & Test Speed Optimizations:**
+   - Slint UI codegen caching: `crates/vayren-shell/build.rs` wrapped `ui/app.slint` with `is_stale(...)` dependency tracking; warm test compilation dropped to 0.55s–0.92s!
+   - Linker: configured `rust-lld.exe` for MSVC target in `.cargo/config.toml`.
+   - Functional test suite: 1.01s (vs 2.64s baseline, 61.7% faster).
+   - Authoritative full test suite: 35.65s (vs 41.47s baseline), 64/64 tests passed (47 functional + 17 benchmarks).
+3. **Git Performance Optimization:**
+   - Local and global config: `core.fscache`, `core.preloadindex`, `core.untrackedCache`, `core.fsmonitor`, `core.autocrlf=false`, `http.postBuffer=524288000`, `pack.threads=0`, `pack.compression=1`, `http.version=HTTP/2`.
+   - Sub-second status (~120ms) and high-speed network streaming.
+
+**Previous update (ci-green-fix-phase1-6, 2026-10-08):** CI 100% GREEN FIX FOR PHASE 1-6 MAIN MERGE.
 1. **Root causes identified from CI run 37733103279:**
    - `quality` (pyright 11 errors): `ControlPlaneBridge.disconnect` QObject override mismatch, optional `.text()` in dashboard tests, `BrokerPositionTruth` duck-type vs `Position` in `disaster_recovery` / `ledger.adopt_position`, `local_positions` union typing in `reconciliation.py`, optional `stop_loss` comparison in `test_phase1_safety.py`.
    - `build-test` / `test-shard-stateful`: `src/app/services/__init__.py` eager import of `trading_dashboard` triggered `PySide6` -> `libEGL.so.1` missing in headless Linux CI; `src/app/tests/conftest.py` imported `PySide6` at module level crashing test collection in headless Linux; `test_phase3_control_plane.py` used `@pytest.mark.asyncio` without `pytest-asyncio` plugin.

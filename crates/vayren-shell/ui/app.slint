@@ -10,13 +10,13 @@ import { StrategyLabScreen, LabHeader, LabLibraryRow, LabKpi, LabRankRow, LabTra
 import { MarketScreen, MarketWatchRow, MarketCandle, MarketTick, MarketRayLevel, MarketTimeframe, MarketIndicator, MarketStatusRow, MarketSettingsRow, MarketPopupRow, MarketPlotSeg, MarketMarker, MarketTradeContext, DlPlan, DlStatus, DlCalDay, DlCredField, DlStock } from "market.slint";
 import { ResearchScreen, ResearchMetric, ResearchSignalRow, ResearchTradeRow, ResearchRobustRow, ResearchKv, ResearchCompareRow, ResearchStrategyRow, ResearchExperimentRow, ResearchField, ResearchConfigGroup, ResearchEvidenceDim, ResearchEvidenceWhy, ResearchKvGroup } from "research.slint";
 import { PortfolioScreen, PortfolioKpi, PortfolioGate, PortfolioPosition, PortfolioAlloc, PortfolioOrder, PortfolioFill, PortfolioRisk } from "portfolio.slint";
-import { LiveScreen, LiveBar, LiveSetup, LiveMarket, LiveSymbolRow, LiveGate, LiveKv, LiveStat, LivePosition, LiveOrder, LiveFill, LiveEventRow, LiveTiers, LiveWebSocket, LiveMarketData, LiveActiveStrategy, LiveWatchlistRow, LiveSelectedStock, LiveFooter } from "live.slint";
+import { LiveScreen, LiveBar, LiveSetup, LiveMarket, LiveSymbolRow, LiveGate, LiveKv, LiveStat, LivePosition, LiveOrder, LiveFill, LiveEventRow, LiveTiers, LiveWebSocket, LiveMarketData, LiveActiveStrategy, LiveWatchlistRow, LiveSelectedStock, LiveFooter, LiveRemoteGateway } from "live.slint";
 import { BrokerPanel, BrokerCheckRow } from "broker.slint";
 import { BrokerConnectionWorkspace, BrokerRowView, CredentialFieldView, ProgressStepView } from "broker_connection.slint";
 
 import { ShellScreen, VGlobalHeader, VGlobalNavItem } from "global_header.slint";
 export { ShellScreen }
-export { LiveWebSocket, LiveMarketData, LiveActiveStrategy, LiveWatchlistRow, LiveSelectedStock, LiveFooter }
+export { LiveWebSocket, LiveMarketData, LiveActiveStrategy, LiveWatchlistRow, LiveSelectedStock, LiveFooter, LiveRemoteGateway }
 
 export struct CapabilityRowView {
     id: string,
@@ -601,6 +601,7 @@ export component AppWindow inherits Window {
     in-out property <string> live-event-filter;
     in-out property <LiveWebSocket> live-ws;
     in-out property <LiveMarketData> live-md;
+    in-out property <LiveRemoteGateway> live-gateway;
     in-out property <LiveActiveStrategy> live-active-strat;
     in-out property <[LiveWatchlistRow]> live-watchlist;
     in-out property <LiveSelectedStock> live-selected-stock;
@@ -621,6 +622,7 @@ export component AppWindow inherits Window {
     in-out property <bool> live-bar-secondary: LiveTiers.bar-secondary(root.live-screen-width);
     in-out property <bool> live-bar-extended: LiveTiers.bar-extended(root.live-screen-width);
     in-out property <bool> live-blotter-side: LiveTiers.blotters-side-by-side(root.live-screen-width);
+    in-out property <bool> live-chips-inline: LiveTiers.watchlist-header-inline(root.live-screen-width);
     in-out property <bool> live-tall-inspector: (root.height - VayrenDesign.h-nav-header - VayrenDesign.status-height) >= 720px;
     in-out property <length> live-inspector-w: LiveTiers.inspector-width(root.live-screen-width);
 
@@ -1098,6 +1100,7 @@ export component AppWindow inherits Window {
                     bar-secondary: root.live-bar-secondary;
                     bar-extended: root.live-bar-extended;
                     blotters-side-by-side: root.live-blotter-side;
+                    watchlist-header-inline: root.live-chips-inline;
                     tall-inspector: root.live-tall-inspector;
                     inspector-w: root.live-inspector-w;
                     setup: root.live-setup;
@@ -1127,6 +1130,7 @@ export component AppWindow inherits Window {
                     event-filter: root.live-event-filter;
                     ws: root.live-ws;
                     md: root.live-md;
+                    gateway: root.live-gateway;
                     active-strat: root.live-active-strat;
                     watchlist: root.live-watchlist;
                     selected-stock: root.live-selected-stock;

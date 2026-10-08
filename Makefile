@@ -1,4 +1,4 @@
-.PHONY: setup dev fast check-fast test test-coverage lint format typecheck check validate-structure validate-imports validate-language validate-architecture validate-routes validate-authority validate-repo-graph validate-scope context-check rust release exe clean
+.PHONY: setup dev fast check-fast test test-coverage bench lint format typecheck check validate-structure validate-imports validate-language validate-architecture validate-routes validate-authority validate-repo-graph validate-scope context-check rust release exe clean
 
 # ═══════════════════════════════════════════════════════════════
 # VAYREN — MAKEFILE
@@ -34,6 +34,13 @@ check-fast:
 
 test:
 	pytest
+
+# Performance benchmarks (frame budgets, million-row projections, scroll and
+# projection cost). They are `#[ignore]`d so the default gate asks only "is it
+# correct?" — measured 76.2s -> 1.6s for the Rust lib suite. Run them here when
+# the algorithms changed and the numbers need re-proving.
+bench:
+	cargo test --workspace -- --ignored
 
 test-coverage:
 	pytest --cov=app --cov=core --cov=market --cov=data --cov=strategy --cov=backtest --cov=risk --cov=execution --cov-report=term --cov-report=html
@@ -99,6 +106,9 @@ VERSION ?= $(error VERSION is required — run: make release VERSION=1.28.0)
 release:
 	python tools/release.py --version $(VERSION)
 
+exe:
+	python tools/build_rust.py --package
+
 # ── Clean ──────────────────────────────────────────────────────
 # Cross-platform on purpose: one Python one-liner instead of
 # powershell + rmdir (Windows-only) or rm (POSIX-only).
@@ -116,6 +126,7 @@ clean:
 #   make fast        → Fast inner loop: test & lint only changed files (<2s)
 #   make check-fast  → Fast lint, cargo check & governance without full gate
 #   make check       → Before commit: verify everything
+#   make bench       → Perf benchmarks only (frame budgets, large datasets)
 #   make format      → Auto-fix formatting issues
 #   make test        → Run the test suite
 #
