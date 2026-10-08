@@ -2556,7 +2556,12 @@ overflow: elide;
                                 // viewport, not the dataset.
                                 for rrow[rindex] in root.ranking: Rectangle {
                                     height: root.lab-rank-window.row-h;
-                                    y: 50px + rindex * root.lab-rank-window.row-h - root.lab-rank-window.scroll-px;
+                                    // Window origin: `rindex` is band-relative
+                                    // but `scroll-px` is dataset-absolute, so
+                                    // the band's `first` dataset index anchors
+                                    // the row — without it every scrolled row
+                                    // sits `first * row-h` too high.
+                                    y: 50px + (root.lab-rank-window.first + rindex) * root.lab-rank-window.row-h - root.lab-rank-window.scroll-px;
                                     width: parent.width - (root.lab-rank-window.scrollable ? 10px : 0px);
                                     background: root.lab.detail-symbol == rrow.symbol ? LabPalette.teal-06 : rrta.has-hover ? LabPalette.white-02 : transparent;
                                     rrta := TouchArea {
@@ -2940,7 +2945,10 @@ overflow: elide;
                             // count tracks the viewport, never the trade count.
                             for trow[tindex] in root.trades: Rectangle {
                                 height: root.lab-trade-window.row-h;
-                                y: 46px + tindex * root.lab-trade-window.row-h - root.lab-trade-window.scroll-px;
+                                // Same window-origin contract as the ranking
+                                // grid above: `tindex` is band-relative,
+                                // `scroll-px` dataset-absolute.
+                                y: 46px + (root.lab-trade-window.first + tindex) * root.lab-trade-window.row-h - root.lab-trade-window.scroll-px;
                                 width: parent.width - (root.lab-trade-window.scrollable ? 10px : 0px);
                                 background: trow.selected ? LabPalette.teal-06 : tta.has-hover ? LabPalette.white-02 : transparent;
                                 tta := TouchArea {

@@ -23,6 +23,7 @@ import logging
 import math
 import os
 import sqlite3
+import sys
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -32,6 +33,12 @@ logger = logging.getLogger(__name__)
 _LEGACY_DATA_DIR = r"D:\ZerodhaTradingData"
 _SESSION_ANCHOR = "09:15"
 _STAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
+# Final-Bar cache bounds: an identical re-RUN (tweak → RUN → tweak → RUN)
+# must not re-read SQLite. Entries are whole experiment windows; rows are
+# shared Bar tuples (immutable), so a hit costs one dict lookup. LRU by
+# re-insertion, oldest evicted first — both caps bind, entries first.
+_BARS_CACHE_MAX_ENTRIES = 1024
+_BARS_CACHE_MAX_ROWS = 1_000_000
 
 
 class MarketDataError(Exception):
@@ -167,6 +174,8 @@ class MarketDataService:
         self._row_cache: dict[str, tuple[float, _CachedRows]] = {}
         self._quote_cache: dict[str, tuple[float, Quote]] = {}
         self._base_seconds_cache: dict[str, int] = {}
+        self._bars_cache: dict[tuple, tuple] = {}
+        self._bars_cache_rows = 0
         report = self.discovery_report()
         logger.info(
             "Market data ready: data_dir=%s discovered=%d valid=%d skipped=%d",
@@ -321,6 +330,12 @@ class MarketDataService:
                 ) from exc
         finally:
             con.close()
+        # Insertion-ordered: every query above returns one direction (ASC, or
+        # DESC for the limit-only tail), and stamps are unique after the
+        # keep-first dedup below — so insertion order IS ascending order and
+        # the old `sorted()` re-sort (O(n log n) string compares per symbol
+        # per run) is redundant. The DESC tail is reversed once at the end.
+        descending = limit is not None and start is None and end is None
         by_stamp: dict[str, tuple[str, float, float, float, float, int]] = {}
         invalid = 0
         duplicates = 0
@@ -372,7 +387,9 @@ class MarketDataService:
                 duplicates,
                 duplicates,
             )
-        rows = [by_stamp[key] for key in sorted(by_stamp)]
+        rows = list(by_stamp.values())
+        if descending:
+            rows.reverse()
         if start is None and end is None and limit is None:
             try:
                 mtime = path.stat().st_mtime
@@ -384,6 +401,26 @@ class MarketDataService:
                 if oldest != symbol:
                     del self._row_cache[oldest]
         return list(rows)
+
+    def _store_bars_cache(self, key: tuple | None, bars: tuple) -> None:
+        """Remember one experiment window (LRU, bounded by entries + rows).
+
+        ``None`` keys (unstatable DB) are never stored; a window bigger than
+        the whole row budget is never stored either — one giant experiment
+        must not evict hundreds of small reusable ones.
+        """
+        if key is None or len(bars) > _BARS_CACHE_MAX_ROWS:
+            return
+        if key in self._bars_cache:
+            self._bars_cache_rows -= len(self._bars_cache.pop(key))
+        self._bars_cache[key] = bars
+        self._bars_cache_rows += len(bars)
+        while len(self._bars_cache) > 1 and (
+            len(self._bars_cache) > _BARS_CACHE_MAX_ENTRIES
+            or self._bars_cache_rows > _BARS_CACHE_MAX_ROWS
+        ):
+            old_key = next(iter(self._bars_cache))
+            self._bars_cache_rows -= len(self._bars_cache.pop(old_key))
 
     def _base_seconds(self, symbol: str) -> int:
         """Detected base bar duration via the kernel mode of timestamp deltas."""
@@ -498,6 +535,32 @@ class MarketDataService:
         base = self._base_seconds(symbol)
         base_label = native_timeframe.name_of(base) or f"{base}s"
         wanted = (timeframe or "").strip() or base_label
+        # Identical re-RUN fast path: the Lab re-runs the same window while
+        # tweaking strategy/params, and Bars are immutable — so a byte-stable
+        # mtime lets us return the exact same tuple with one dict lookup
+        # instead of re-reading SQLite. A changed DB (new mtime) misses and
+        # re-reads, exactly like a cold run.
+        sym = sys.intern(symbol.upper())
+        cache_key: tuple | None = None
+        try:
+            cache_key = (
+                sym,
+                wanted,
+                limit,
+                start,
+                end,
+                self._db_path(symbol).stat().st_mtime,
+            )
+        except OSError:
+            cache_key = None
+        if cache_key is not None:
+            hit = self._bars_cache.get(cache_key)
+            if hit is not None:
+                # LRU refresh: a repeated universe scan must not evict the
+                # rows it is about to ask for again.
+                del self._bars_cache[cache_key]
+                self._bars_cache[cache_key] = hit
+                return hit
         try:
             seconds = native_timeframe.seconds_of(wanted)
         except Exception as exc:
@@ -512,9 +575,9 @@ class MarketDataService:
             rows = self._read_rows(symbol, start, end, limit)
             if limit is not None:
                 rows = rows[-limit:]
-            return tuple(
+            bars = tuple(
                 Bar(
-                    symbol=symbol.upper(),
+                    symbol=sym,
                     open=o,
                     high=h,
                     low=lo,
@@ -526,6 +589,8 @@ class MarketDataService:
                 )
                 for stamp, o, h, lo, c, v in rows
             )
+            self._store_bars_cache(cache_key, bars)
+            return bars
         if start is not None or end is not None:
             rows = self._read_rows(symbol, start, end)
         else:
@@ -561,7 +626,7 @@ class MarketDataService:
             plan.seconds,
             anchor,
         )
-        bars = [self._bucket_bar(symbol, wanted, plan.seconds, anchor, b) for b in buckets]
+        bars = [self._bucket_bar(sym, wanted, plan.seconds, anchor, b) for b in buckets]
         bars.sort(key=lambda bar: bar.timestamp)
         if plan.keep_last is not None and start is None and end is None:
             bars = bars[-plan.keep_last :]
@@ -569,7 +634,9 @@ class MarketDataService:
             bars = bars[-limit:]
         if not bars:
             raise MarketDataError(f"No candle data for {symbol} on {wanted} timeframe")
-        return tuple(bars)
+        out = tuple(bars)
+        self._store_bars_cache(cache_key, out)
+        return out
 
     def _bucket_bar(self, symbol: str, label: str, tf: int, anchor: int, bucket: tuple):
         """Format one kernel bucket (domain IO; grouping math stays in Rust)."""

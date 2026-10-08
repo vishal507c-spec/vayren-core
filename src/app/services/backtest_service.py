@@ -256,9 +256,12 @@ def run_backtest(
             continue
         run.symbol_progress("trades", 60.0)
         all_trades.extend(trades)
-        realised_total += sum(t["pnl"] for t in trades)
+        # One pass: the same total feeds the equity chain and the progress
+        # event (the old code summed the identical list twice per symbol).
+        symbol_pnl = sum(t["pnl"] for t in trades)
+        realised_total += symbol_pnl
         ranking.append(_rank_row(symbol, trades, capital))
-        run.symbol_done(trades, len(bars), sum(t["pnl"] for t in trades))
+        run.symbol_done(trades, len(bars), symbol_pnl)
 
     if not ranking:
         run.set_stage("failed", 0.0)
@@ -582,8 +585,10 @@ def _rank_row(symbol: str, trades: list[dict], capital: float) -> dict:
     """Per-symbol ranking row (metrics recomputed on the symbol's trades)."""
     from backtest import native_metrics
 
-    pnls = [t["pnl"] for t in trades if t["symbol"] == symbol]
-    held = [float(t["bars"]) for t in trades if t["symbol"] == symbol]
+    # No symbol filter: `_run_symbol` appends only its own symbol (see
+    # `_trade`), so every entry here already belongs to it.
+    pnls = [t["pnl"] for t in trades]
+    held = [float(t["bars"]) for t in trades]
     equities = _running_equities(capital, pnls)
     report = native_metrics.report(pnls, held, equities, capital)
     wins = sum(1 for p in pnls if p > 0)

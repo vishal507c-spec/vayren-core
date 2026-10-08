@@ -75,7 +75,17 @@ fn main() {
     // between runs on identical content.
     slint_files.sort();
 
-    if !up_to_date(&app_out, &slint_files) {
+    if up_to_date(&app_out, &slint_files) {
+        // Skipped compile must be OBSERVABLE-identical to a fresh one:
+        // `slint_build::compile` emits this rustc-env pointing at the
+        // generated module (`slint::include_modules!()` reads it at compile
+        // time), so skipping the codegen without emitting it breaks the
+        // crate build — the exact symptom this line prevents.
+        println!(
+            "cargo:rustc-env=SLINT_INCLUDE_GENERATED={}",
+            app_out.display()
+        );
+    } else {
         slint_build::compile("ui/app.slint").unwrap();
         record(&app_out, &slint_files);
     }
