@@ -124,15 +124,25 @@ export global VayrenDesign {
     out property <length> research-log-compact: 46px;
     out property <length> research-log-expanded: 132px;
     out property <length> research-inspector-drawer: 240px;
-    // Live recomposition breakpoints (§29) — derived from CONTENT MINIMA
-    // (logical px, DPI-independent): dock the inspector only when the
-    // 440 px workspace floor + 340 px inspector floor + gutters fit; show
-    // bar groups only while their labels stay readable side by side.
+    // Live recomposition breakpoints (§29) — all of these are FLOORS derived
+    // from what the governed region must actually show (logical px,
+    // DPI-independent). The command-bar thresholds are computed from those
+    // floors in `live.slint::LiveTiers` (card + mode + transport widths),
+    // not guessed here: the old fixed 760/1040/1120 numbers switched the full
+    // seven-card bar on far below the width it needs, so every card label
+    // rendered elided ("NOT CONF…", "MARKET D…") on ordinary 1366x768
+    // laptops. `live-dock-inspector` is a hard floor only — whether the
+    // inspector actually docks is decided in LiveTiers against the live
+    // inspector width, so the 440px workspace floor can never be squeezed.
     out property <length> live-dock-inspector: 800px;
-    out property <length> live-bar-core: 760px;
-    out property <length> live-bar-secondary: 1040px;
-    out property <length> live-bar-extended: 1120px;
-    out property <length> live-blotter-side-by-side: 1240px;
+    // Workspace width at which the watchlist header can hold its title, the
+    // symbol count, all nine filter chips and the search box on ONE row.
+    // Measured from the header itself (chips ~1180 + search 150 + gaps);
+    // below it the chips drop to their own scrollable strip.
+    out property <length> live-watchlist-header-inline: 1340px;
+    // Workspace width at which the blotter tab bar holds its five full labels
+    // plus the Clear control without eliding any of them.
+    out property <length> live-blotter-tabs-wide: 780px;
     // Market recomposition breakpoints (§5): full workstation (rail +
     // watchlist + chart + inspector) ≥ wide; inspector becomes a drawer
     // below wide; watchlist compacts to a symbol strip below medium.

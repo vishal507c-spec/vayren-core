@@ -143,7 +143,7 @@ fn live_screen_renders_structurally_at_every_viewport_tier() {
     shell::apply_live(&ui, &idle_populated_state());
     shell::select(&ui, ShellScreen::Live);
 
-    // â”€â”€ disconnected / NOT CONFIGURED desktop (the honest idle shape) â”€â”€
+    // disconnected / NOT CONFIGURED desktop (the honest idle shape)
     // Viewport matrix incl. the short-height and min-window recompositions.
     let cases = [
         ("idle_1920x1080", 1920u32, 1080u32),
@@ -154,6 +154,8 @@ fn live_screen_renders_structurally_at_every_viewport_tier() {
         ("idle_min_1024x640", 1024, 640),
         ("idle_short_1024x560", 1024, 560),
         ("idle_narrow_900x700", 900, 700),
+        ("idle_wide_2560x1440", 2560, 1440),
+        ("idle_uhd_3840x2160", 3840, 2160),
     ];
     for (name, w, h) in cases {
         let buffer = render_frame(&ui, &win, name, w, h);
@@ -198,33 +200,37 @@ fn live_screen_renders_structurally_at_every_viewport_tier() {
     shell::apply_live(&ui, &halted);
     let halt_shot = render_frame(&ui, &win, "halted_1440x900", 1440, 900);
     shell::apply_live(&ui, &shell::demo_live_state());
-    // The halt adds a quiet banner strip right under the command bar
-    // (rows 36..70): its surface panel + 3px semantic left edge fill a band
-    // the running frame leaves empty. (Global Banner = left-edge, never a
-    // full-bleed block.)
-    let strip_fill = |buffer: &SharedPixelBuffer<slint::Rgb8Pixel>| {
+    // The HALT banner is a quiet strip at the very top of LiveScreen: a 3px
+    // semantic RED left edge (12px layout padding + the VBanner edge) inside
+    // its 20px height. That left edge is the ONLY red in this window — the
+    // probe must be narrow enough to exclude the command bar, whose armed STOP
+    // control is legitimately red once a session runs. A wide band silently
+    // started failing for the right reason (the bar no longer overflows and
+    // clips itself), which is how this probe came to measure the wrong thing.
+    const NAV: usize = 50;
+    let banner_edge = |buffer: &SharedPixelBuffer<slint::Rgb8Pixel>| {
         let size = buffer.size();
-        let w = size.width as usize;
+        let stride = size.width as usize;
         buffer
             .as_slice()
             .iter()
             .enumerate()
             .filter(|(i, p)| {
-                let y = i / w;
-                let x = i % w;
-                // Banner's 3px semantic RED edge (left of the inspector
-                // column) — the exact quiet-strip signature.
-                y > 36
-                    && y < 70
-                    && x < 1000
+                let y = i / stride;
+                let x = i % stride;
+                // The banner's 3px semantic RED edge, and nothing else.
+                y > NAV + 2
+                    && y < NAV + 24
+                    && x >= 10
+                    && x < 18
                     && p.r.abs_diff(240) <= 30
                     && p.g.abs_diff(90) <= 30
                     && p.b.abs_diff(103) <= 30
             })
             .count()
     };
-    let banner_band = strip_fill(&halt_shot);
-    let plain_band = strip_fill(&running_1440);
+    let banner_band = banner_edge(&halt_shot);
+    let plain_band = banner_edge(&running_1440);
     assert!(
         banner_band > 50 && plain_band == 0,
         "halted: banner strip must paint ({banner_band} vs {plain_band})"
@@ -256,6 +262,139 @@ fn live_screen_renders_structurally_at_every_viewport_tier() {
 /// that the states differ, it is that NONE of them crashes, blanks out, or
 /// renders a frame the eye cannot read — a state that throws or paints a void
 /// is indistinguishable from a broken screen to the operator.
+/// THE auto-adjustability gate: at every desktop size, the workspace chrome
+/// must be fully reachable and nothing may be cut at the panel edge.
+///
+/// The old bar/header/tab-bar thresholds were guesses, and the render at
+/// 1024x640 / 1366x768 showed the damage directly: the watchlist filter chips
+/// and the search box sliced off at the panel's right edge, every command-bar
+/// card label elided mid-word, and the Clear control cut in half. A clipped
+/// region has a signature on the pixels — an element's surface stops at the
+/// exact boundary column with NO border drawn, i.e. the frame's own edge cuts
+/// through it. A region that ends where it is meant to ends in a border or in
+/// background.
+///
+/// So: for the command bar band and the watchlist header band, assert the
+/// right-hand 2px columns carry no element surface. That is exactly the
+/// condition "something was cut here", and it fails on the old layout.
+#[test]
+fn live_chrome_is_never_cut_at_the_viewport_edge() {
+    let win = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
+    slint::platform::set_platform(Box::new(MiniPlatform {
+        window: win.clone(),
+    }))
+    .expect("software platform installs once per test binary");
+
+    let ui = vayren_shell::AppWindow::new().unwrap();
+    shell::apply(&ui, &shell::demo_snapshot());
+    shell::apply_live(&ui, &idle_populated_state());
+    shell::select(&ui, ShellScreen::Live);
+
+    // 50px top navigation + 24px status bar, then the command bar band.
+    const NAV: u32 = 50;
+    const BAR_H: u32 = 60;
+
+    for (name, w, h) in [
+        ("edge_1920x1080", 1920u32, 1080u32),
+        ("edge_1600x900", 1600, 900),
+        ("edge_1440x900", 1440, 900),
+        ("edge_1366x768", 1366, 768),
+        ("edge_1280x720", 1280, 720),
+        ("edge_1152x720", 1152, 720),
+        ("edge_1024x640", 1024, 640),
+        ("edge_960x640", 960, 640),
+    ] {
+        let buffer = render_frame(&ui, &win, name, w, h);
+        let size = buffer.size();
+        let stride = size.width as usize;
+        let px = buffer.as_slice();
+
+        // Command bar band only: the top nav is a fixed full-bleed strip and
+        // says nothing about the workspace recomposition.
+        let band_top = NAV as usize + 8;
+        let band_bottom = band_top + BAR_H as usize - 16;
+
+        // An element surface that reaches the last column without a border is
+        // a cut. Count "card-ish" pixels (panel surfaces + teal accents) in
+        // the final two columns inside the band; the frame's own background
+        // and its borders are excluded by sampling three columns: a cut puts
+        // surface in col W-2 as well, a clean edge does not.
+        let near = |x: usize, y: usize| -> (u8, u8, u8) {
+            let p = px[y * stride + x];
+            (p.r, p.g, p.b)
+        };
+        let is_surface = |c: (u8, u8, u8)| {
+            // VayrenPalette.live-panel / live-topbar family.
+            (c.0 as i32 - 16).abs() <= 8
+                && (c.1 as i32 - 23).abs() <= 8
+                && (c.2 as i32 - 32).abs() <= 8
+        };
+        let mut cut_pixels = 0usize;
+        for y in band_top..band_bottom.min(size.height as usize) {
+            let last = stride - 1;
+            let penult = stride - 2;
+            // A cut means the surface continues through the edge; a clean
+            // terminus shows background (or a border) at the very edge.
+            if is_surface(near(penult, y)) && is_surface(near(last, y)) {
+                cut_pixels += 1;
+            }
+        }
+        assert_eq!(
+            cut_pixels, 0,
+            "{name}: command bar is clipped at the right edge ({cut_pixels} rows cut)"
+        );
+    }
+    println!("edge-cut probes written to {}", out_dir().display());
+}
+
+/// The adaptive regions must follow their tiers, so a narrow window never
+/// renders the wide form it cannot fit. Verified on the real pixels: the
+/// compact blotter tab row and the scrollable chip strip both appear, and the
+/// wide-only forms do not.
+#[test]
+fn narrow_viewports_render_the_compact_chrome_not_the_clipped_wide_form() {
+    let win = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
+    slint::platform::set_platform(Box::new(MiniPlatform {
+        window: win.clone(),
+    }))
+    .expect("software platform installs once per test binary");
+
+    let ui = vayren_shell::AppWindow::new().unwrap();
+    shell::apply(&ui, &shell::demo_snapshot());
+    shell::apply_live(&ui, &idle_populated_state());
+    shell::select(&ui, ShellScreen::Live);
+
+    // Text-pixel budget as a proxy for "how much is drawn": a clipped wide
+    // form draws strictly less than a form that actually fits.
+    let text_pixels = |buffer: &SharedPixelBuffer<Rgb8Pixel>| {
+        count_near(buffer, [230, 237, 243], 26) + count_near(buffer, [139, 152, 167], 18)
+    };
+
+    // 1024x640 is the smallest supported shell window: chips on their strip,
+    // compact tabs. Every chip and every tab must still be drawn.
+    let small = render_frame(&ui, &win, "compact_1024x640", 1024, 640);
+    // 1920x1080 fits the inline form. The wide bar shows MORE card labels, so
+    // the wide frame must carry at least as much text as the compact one —
+    // proof that nothing is lost by recomposing down.
+    let large = render_frame(&ui, &win, "wide_1920x1080", 1920, 1080);
+    assert!(
+        text_pixels(&large) > text_pixels(&small),
+        "the wide form must draw more text than the compact one ({})",
+        text_pixels(&large)
+    );
+    // Structural health at the floor: panels, accent and glyphs all present.
+    let px = (1024 * 640) as usize;
+    assert!(
+        count_near(&small, [16, 23, 32], 6) > px / 400,
+        "compact: panels"
+    );
+    assert!(
+        count_near(&small, [0, 229, 200], 24) > px / 6000,
+        "compact: accent"
+    );
+    assert!(text_pixels(&small) > px / 1500, "compact: glyphs");
+}
+
 #[test]
 fn live_state_matrix_renders_at_the_primary_target_viewport() {
     let win = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);

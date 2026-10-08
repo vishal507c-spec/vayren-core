@@ -7,7 +7,7 @@
 // cfg(test). Layout decisions are read back from LiveScreen's own
 // out-properties — one decision source for screen and tests.
 
-import { LiveScreen, LiveBar, LiveSetup, LiveMarket, LiveSymbolRow, LiveGate, LiveKv, LiveStat, LivePosition, LiveOrder, LiveFill, LiveEventRow } from "live.slint";
+import { LiveScreen, LiveBar, LiveSetup, LiveMarket, LiveSymbolRow, LiveGate, LiveKv, LiveStat, LivePosition, LiveOrder, LiveFill, LiveEventRow, LiveWatchlistRow, LiveTiers } from "live.slint";
 import { VayrenPalette } from "palette.slint";
 
 export component LiveHarness inherits Window {
@@ -47,6 +47,12 @@ export component LiveHarness inherits Window {
     in property <[string]> event-types;
     in property <int> event-type-index: 0;
     in property <string> event-filter: "";
+    // Watchlist + filter chips: the header recomposition is only meaningful
+    // with the real nine-chip list and real rows behind it.
+    in property <[LiveWatchlistRow]> watchlist;
+    in property <int> filter-chip-selected: 0;
+    in property <string> filter-chip-counts: "";
+    in property <[string]> filter-chips: ["ALL (0)", "READY (0)", "SIGNAL (0)", "ORDER (0)", "IN POSITION (0)", "WAITING (0)", "NO DATA (0)", "RISK BLOCKED (0)", "REJECTED (0)"];
 
     // Recomposition tiers are TEST INPUTS (set from the matrix in
     // shell.rs — exactly the way the Research harness drives its tiers);
@@ -58,14 +64,29 @@ export component LiveHarness inherits Window {
     in-out property <bool> tier-secondary: false;
     in-out property <bool> tier-extended: false;
     in-out property <bool> tier-blotter: false;
+    in-out property <bool> tier-chips-inline: false;
     in-out property <bool> tier-tall: false;
     in-out property <length> tier-inspector-w: 340px;
 
     out property <bool> show-inspector: screen.show-inspector;
     out property <bool> drawer-open: screen.drawer-open;
-    out property <bool> workspace-fits: screen.workspace-fits;
-    out property <length> chart-h: screen.chart-h;
-    out property <bool> chart-compact: !screen.market.has-data;
+    out property <bool> blotters-compact: screen.blotters-compact;
+    out property <bool> chips-inline: screen.chips-inline;
+
+    // The tiers PRODUCTION computes for this harness's own width, read back
+    // from LiveTiers itself. The Rust matrix used to restate the breakpoints
+    // as literals (760/1040/1120/1240) and silently drifted out of LiveTiers
+    // — which is how an ordinary 1366x768 laptop ended up rendering seven
+    // status cards whose labels were all elided. Asserting against these
+    // keeps exactly one decision source.
+    out property <bool> derived-dock: LiveTiers.dock-inspector(root.width);
+    out property <bool> derived-core: LiveTiers.bar-core(root.width);
+    out property <bool> derived-secondary: LiveTiers.bar-secondary(root.width);
+    out property <bool> derived-extended: LiveTiers.bar-extended(root.width);
+    out property <bool> derived-blotter: LiveTiers.blotters-side-by-side(root.width);
+    out property <bool> derived-chips-inline: LiveTiers.watchlist-header-inline(root.width);
+    out property <length> derived-inspector-w: LiveTiers.inspector-width(root.width);
+    out property <length> derived-workspace-w: LiveTiers.workspace-width(root.width);
 
     callback mode-picked(int);
     callback strategy-picked(string);
@@ -93,6 +114,7 @@ export component LiveHarness inherits Window {
         bar-secondary: root.tier-secondary;
         bar-extended: root.tier-extended;
         blotters-side-by-side: root.tier-blotter;
+        watchlist-header-inline: root.tier-chips-inline;
         tall-inspector: root.tier-tall;
         inspector-w: root.tier-inspector-w;
         setup: root.setup;
@@ -116,6 +138,10 @@ export component LiveHarness inherits Window {
         fills: root.fills;
         stats: root.stats;
         events: root.events;
+        watchlist: root.watchlist;
+        filter-chip-selected: root.filter-chip-selected;
+        filter-chip-counts: root.filter-chip-counts;
+        filter-chips: root.filter-chips;
         event-types: root.event-types;
         event-type-index: root.event-type-index;
         event-filter: root.event-filter;

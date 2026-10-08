@@ -621,6 +621,7 @@ export component AppWindow inherits Window {
     in-out property <bool> live-bar-secondary: LiveTiers.bar-secondary(root.live-screen-width);
     in-out property <bool> live-bar-extended: LiveTiers.bar-extended(root.live-screen-width);
     in-out property <bool> live-blotter-side: LiveTiers.blotters-side-by-side(root.live-screen-width);
+    in-out property <bool> live-chips-inline: LiveTiers.watchlist-header-inline(root.live-screen-width);
     in-out property <bool> live-tall-inspector: (root.height - VayrenDesign.h-nav-header - VayrenDesign.status-height) >= 720px;
     in-out property <length> live-inspector-w: LiveTiers.inspector-width(root.live-screen-width);
 
@@ -1098,6 +1099,7 @@ export component AppWindow inherits Window {
                     bar-secondary: root.live-bar-secondary;
                     bar-extended: root.live-bar-extended;
                     blotters-side-by-side: root.live-blotter-side;
+                    watchlist-header-inline: root.live-chips-inline;
                     tall-inspector: root.live-tall-inspector;
                     inspector-w: root.live-inspector-w;
                     setup: root.live-setup;

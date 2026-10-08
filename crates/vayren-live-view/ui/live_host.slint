@@ -9,7 +9,7 @@
 // the HOST WINDOW size (platform-owned input — never the screen's own
 // width, which would feed layout implicit sizes) using the same LiveTiers
 // functions production uses.
-import { LiveScreen, LiveTiers, LiveBar, LiveSetup, LiveMarket, LiveSymbolRow, LiveGate, LiveKv, LiveStat, LivePosition, LiveOrder, LiveFill, LiveEventRow } from "../../vayren-shell/ui/live.slint";
+import { LiveScreen, LiveTiers, LiveBar, LiveSetup, LiveMarket, LiveSymbolRow, LiveGate, LiveKv, LiveStat, LivePosition, LiveOrder, LiveFill, LiveEventRow, LiveWatchlistRow } from "../../vayren-shell/ui/live.slint";
 
 export component LiveHostWindow inherits Window {
     title: "VAYREN — Live";
@@ -50,6 +50,14 @@ export component LiveHostWindow inherits Window {
     in-out property <[string]> event-types;
     in-out property <int> event-type-index: 0;
     in-out property <string> event-filter: "";
+    // Watchlist + execution filter chips. These are NOT optional decoration:
+    // the watchlist table and the nine filter buckets are how the operator
+    // picks symbols and scopes execution, so dropping them (as this host
+    // once did) empties the table and pins every chip to "(0)".
+    in-out property <[LiveWatchlistRow]> watchlist;
+    in-out property <int> filter-chip-selected: 0;
+    in-out property <string> filter-chip-counts: "";
+    in-out property <[string]> filter-chips: ["ALL (0)", "READY (0)", "SIGNAL (0)", "ORDER (0)", "IN POSITION (0)", "WAITING (0)", "NO DATA (0)", "RISK BLOCKED (0)", "REJECTED (0)"];
     in-out property <bool> inspector-open: true;
 
     callback mode-picked(int);
@@ -68,6 +76,9 @@ export component LiveHostWindow inherits Window {
     callback clear-events();
     callback inspector-toggled();
     callback configure-broker();
+    callback watchlist-selected(string);
+    callback filter-chip-picked(int);
+    callback watchlist-search-changed(string);
 
     LiveScreen {
         width: 100%;
@@ -95,6 +106,10 @@ export component LiveHostWindow inherits Window {
         fills: root.fills;
         stats: root.stats;
         events: root.events;
+        watchlist: root.watchlist;
+        filter-chip-selected: root.filter-chip-selected;
+        filter-chip-counts: root.filter-chip-counts;
+        filter-chips: root.filter-chips;
         event-types: root.event-types;
         event-type-index: root.event-type-index;
         event-filter: root.event-filter;
@@ -104,6 +119,7 @@ export component LiveHostWindow inherits Window {
         bar-secondary: LiveTiers.bar-secondary(root.view-width);
         bar-extended: LiveTiers.bar-extended(root.view-width);
         blotters-side-by-side: LiveTiers.blotters-side-by-side(root.view-width);
+        watchlist-header-inline: LiveTiers.watchlist-header-inline(root.view-width);
         tall-inspector: root.view-height >= 720px;
         inspector-w: LiveTiers.inspector-width(root.view-width);
         mode-picked(k) => { root.mode-picked(k); }
@@ -122,5 +138,8 @@ export component LiveHostWindow inherits Window {
         clear-events() => { root.clear-events(); }
         inspector-toggled() => { root.inspector-toggled(); }
         configure-broker() => { root.configure-broker(); }
+        watchlist-selected(s) => { root.watchlist-selected(s); }
+        filter-chip-picked(i) => { root.filter-chip-picked(i); }
+        watchlist-search-changed(t) => { root.watchlist-search-changed(t); }
     }
 }

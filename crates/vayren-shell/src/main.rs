@@ -733,35 +733,58 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         shell::apply_live(&ui, &live_state.borrow());
                     }
                 } else {
-                    while let Some(raw) = live_state.borrow_mut().take_action() {
-                        let action: serde_json::Value = match serde_json::from_str(&raw) {
-                            Ok(value) => value,
-                            Err(err) => {
-                                eprintln!("Live action is not valid JSON ({err}): {raw}");
-                                continue;
-                            }
-                        };
-                        let backend = Arc::clone(&backend);
-                        let tx = tx.clone();
-                        let id = live_seq.fetch_add(1, Ordering::SeqCst) + 1;
-                        live_busy += 1;
-                        std::thread::spawn(move || {
-                            let data = match PythonBackend::lock_send(
-                                &backend,
-                                BackendCommand::LiveAction { action },
-                            ) {
-                                Ok(BackendResponse::LiveSnapshot { data }) => Some(data),
-                                Ok(other) => {
-                                    eprintln!("Live action: unexpected response ({other:?})");
-                                    None
-                                }
+                    // Ordered dispatch. The drain used to spawn ONE THREAD PER
+                    // action, each contending for the same backend mutex — so
+                    // `service.configure()` could apply intents in an order
+                    // different from the operator's. It then became visible
+                    // WRONG, not merely slow: the seq-guard keeps only the
+                    // highest id, so if action 2 won the mutex the screen
+                    // painted action 2's snapshot while the backend's real
+                    // state was action 1's, until the next poll corrected it.
+                    // One worker, the queue in order: the last intent the
+                    // operator made is the last intent the service applies.
+                    if live_busy == 0 {
+                        let batch: Vec<serde_json::Value> = live_state
+                            .borrow_mut()
+                            .drain_actions()
+                            .into_iter()
+                            .filter_map(|raw| match serde_json::from_str(&raw) {
+                                Ok(value) => Some(value),
                                 Err(err) => {
-                                    eprintln!("Live action failed: {err}");
+                                    eprintln!("Live action is not valid JSON ({err}): {raw}");
                                     None
                                 }
-                            };
-                            let _ = tx.send(FetchResult::Live(id, data));
-                        });
+                            })
+                            .collect();
+                        if !batch.is_empty() {
+                            live_busy = batch.len() as u32;
+                            let backend = Arc::clone(&backend);
+                            let tx = tx.clone();
+                            let base = live_seq.fetch_add(batch.len() as u64, Ordering::SeqCst);
+                            std::thread::spawn(move || {
+                                for (offset, action) in batch.into_iter().enumerate() {
+                                    // Ids stay ascending WITH dispatch order, so
+                                    // the pump's latest-wins guard can no longer
+                                    // drop the genuinely newest snapshot.
+                                    let id = base + offset as u64 + 1;
+                                    let data = match PythonBackend::lock_send(
+                                        &backend,
+                                        BackendCommand::LiveAction { action },
+                                    ) {
+                                        Ok(BackendResponse::LiveSnapshot { data }) => Some(data),
+                                        Ok(other) => {
+                                            eprintln!("Live action: unexpected response ({other:?})");
+                                            None
+                                        }
+                                        Err(err) => {
+                                            eprintln!("Live action failed: {err}");
+                                            None
+                                        }
+                                    };
+                                    let _ = tx.send(FetchResult::Live(id, data));
+                                }
+                            });
+                        }
                     }
                     // Periodic LIVE snapshot poll (see `next_live_poll`): keeps
                     // fills, P&L, positions, events, quotes and broker edges

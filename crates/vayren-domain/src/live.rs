@@ -997,6 +997,17 @@ impl LiveState {
         self.host_actions.pop_front()
     }
 
+    /// Drain EVERY queued host action in the order the operator produced it.
+    ///
+    /// Hosts must dispatch a batch through one ordered worker, never one
+    /// concurrent thread per action: threads race for the backend lock, the
+    /// service then applies intents in an arbitrary order, and a
+    /// latest-wins sequence guard then paints a snapshot the backend does not
+    /// actually hold. One queue, one order, one truth.
+    pub fn drain_actions(&mut self) -> Vec<String> {
+        self.host_actions.drain(..).collect()
+    }
+
     /// Re-queue an action at the front (host buffer was too small).
     pub fn push_front_action(&mut self, action: String) {
         self.host_actions.push_front(action);

@@ -3642,6 +3642,7 @@ mod tests {
     /// viewport projection. Prints timings under `--nocapture`; asserts only
     /// generous ceilings so CI machines never flake.
     #[test]
+    #[ignore = "perf benchmark: run with `cargo test -- --ignored` or `make bench`"]
     fn bench_viewport_interactions() {
         let mut st = MarketState::default();
         st.set_bars("S", "15m", "", bars(62_800));

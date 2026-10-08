@@ -120,6 +120,7 @@ fn viewport_rows() -> usize {
 }
 
 #[test]
+#[ignore = "perf benchmark: run with `cargo test -- --ignored` or `make bench`"]
 fn bench_trade_projection_is_independent_of_dataset_size() {
     // The core budget: projecting the Lab (which now carries a trade blotter)
     // must not scale with the trade count. Only the window may be cloned.
@@ -154,6 +155,7 @@ fn bench_trade_projection_is_independent_of_dataset_size() {
 }
 
 #[test]
+#[ignore = "perf benchmark: run with `cargo test -- --ignored` or `make bench`"]
 fn bench_trade_scroll_stays_inside_the_frame_budget() {
     // Scroll is the critical path (spec §19): a long flick across 100k trades.
     let mut st = loaded_state(100_000);
@@ -175,6 +177,7 @@ fn bench_trade_scroll_stays_inside_the_frame_budget() {
 }
 
 #[test]
+#[ignore = "perf benchmark: run with `cargo test -- --ignored` or `make bench`"]
 fn bench_trade_search_and_filter_stay_bounded() {
     // Per-keystroke path: the criterion is unchanged, so a keystroke only
     // filters the existing index (no re-sort) (spec §15).
@@ -193,6 +196,7 @@ fn bench_trade_search_and_filter_stay_bounded() {
 }
 
 #[test]
+#[ignore = "perf benchmark: run with `cargo test -- --ignored` or `make bench`"]
 fn bench_trade_sort_reorders_within_budget() {
     // Changing the sort column is the ONE O(N log N) blotter operation, and it
     // is user-initiated (a dropdown click), not per frame.
@@ -211,6 +215,7 @@ fn bench_trade_sort_reorders_within_budget() {
 }
 
 #[test]
+#[ignore = "perf benchmark: run with `cargo test -- --ignored` or `make bench`"]
 fn bench_million_trade_dataset_stays_functional() {
     // Spec §33 stress: 1M synthetic trades through the real parse → index →
     // project path. This is a STRESS construction, not a claim about the

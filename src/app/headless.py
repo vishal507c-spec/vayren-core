@@ -496,6 +496,13 @@ def _live_action(
                 service.select_symbol(sym)
         elif name == "tick":
             service.tick()
+        elif name == "navigate":
+            # Host-owned navigation intent (CONFIGURE BROKER -> BROKERS). It
+            # changes no trading state, so the honest answer is the CURRENT
+            # live snapshot. Falling through to `unknown live action` returned
+            # `_live_unavailable(...)`, whose blank degraded snapshot wiped
+            # every panel on the Live screen on one click.
+            return _trading_service_snapshot(data_dir, strategy_dir, broker_manager)
         else:
             return _live_unavailable(f"unknown live action {name!r}")
     except Exception as exc:  # noqa: BLE001
