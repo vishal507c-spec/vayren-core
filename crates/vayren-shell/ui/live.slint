@@ -159,6 +159,15 @@ export struct LiveMarketData {
     freshness: string,
 }
 
+export struct LiveRemoteGateway {
+    status: string,
+    tone: int,
+    conn-state: string,
+    rtt: string,
+    last-heartbeat: string,
+    detail: string,
+}
+
 export struct LiveActiveStrategy {
     name: string,
     status: string,
@@ -625,6 +634,7 @@ export component LiveScreen inherits Rectangle {
     in property <string> event-filter: "";
     in property <LiveWebSocket> ws;
     in property <LiveMarketData> md;
+    in property <LiveRemoteGateway> gateway;
     in property <LiveActiveStrategy> active-strat;
     in property <[LiveWatchlistRow]> watchlist;
     in property <LiveSelectedStock> selected-stock;
@@ -768,6 +778,19 @@ export component LiveScreen inherits Rectangle {
                     sub-text: root.bar.conn-label != "" ? root.bar.conn-label : "DISCONNECTED";
                     sub-tone: root.bar.conn-tone;
                     source-text: "FYERS API";
+                }
+
+                // Dedicated Card: EC2 / Remote Gateway connection + heartbeat + latency
+                LiveTopCard {
+                    icon-char: "EC2";
+                    show-icon: root.bar-extended;
+                    label: "EC2 / REMOTE GATEWAY";
+                    value-text: root.gateway.status != "" ? root.gateway.status : "DISCONNECTED";
+                    tone: root.gateway.tone != 0 ? root.gateway.tone : 3;
+                    sub-text: (root.gateway.last-heartbeat != "" ? ("HB: " + root.gateway.last-heartbeat) : "HB: NOT AVAILABLE")
+                        + " · " + (root.gateway.rtt != "" ? ("RTT: " + root.gateway.rtt) : "RTT: NOT AVAILABLE");
+                    sub-tone: root.gateway.tone != 0 ? root.gateway.tone : 3;
+                    source-text: root.gateway.conn-state != "" ? ("EC2 WSS (" + root.gateway.conn-state + ")") : (root.gateway.detail != "" ? root.gateway.detail : "EC2 WSS");
                 }
 
                 // Card 2: Market data state + freshness
@@ -1946,8 +1969,8 @@ export component LiveScreen inherits Rectangle {
                                     Rectangle { horizontal-stretch: 1; background: transparent; }
 
                                     Text {
-                                        text: "TARGET: EC2 / RUNTIME";
-                                        color: VayrenPalette.live-teal;
+                                        text: "EC2 LINK: " + (root.gateway.status != "" ? root.gateway.status : "DISCONNECTED");
+                                        color: root.gateway.tone == 1 ? VayrenPalette.pos : (root.gateway.tone == 2 ? VayrenPalette.amber : VayrenPalette.neg);
                                         font-size: 9px;
                                         font-weight: 700;
                                         vertical-alignment: center;

@@ -21,9 +21,9 @@ use crate::{
     DlCredField, DlPlan, DlStatus, DlStock, LabBoardCell, LabCheckData, LabDetailMetric, LabHeader,
     LabKpi, LabLibraryRow, LabMatrixRow, LabParam, LabPoint, LabPreset, LabRankRow, LabTradeMetric,
     LabTradeRow, LiveActiveStrategy, LiveBar, LiveEventRow, LiveFill, LiveFooter, LiveGate, LiveKv,
-    LiveMarket, LiveMarketData, LiveOrder, LivePipelineStep, LivePosition, LiveSelectedStock,
-    LiveSetup, LiveStat, LiveSymbolRow, LiveWatchlistRow, LiveWebSocket, MarketCandle,
-    MarketIndicator, MarketMarker, MarketPlotSeg, MarketPopupRow, MarketRayLevel,
+    LiveMarket, LiveMarketData, LiveOrder, LivePipelineStep, LivePosition, LiveRemoteGateway,
+    LiveSelectedStock, LiveSetup, LiveStat, LiveSymbolRow, LiveWatchlistRow, LiveWebSocket,
+    MarketCandle, MarketIndicator, MarketMarker, MarketPlotSeg, MarketPopupRow, MarketRayLevel,
     MarketSettingsRow, MarketStatusRow, MarketTick, MarketTimeframe, MarketTradeContext,
     MarketWatchRow, PortfolioAlloc, PortfolioFill, PortfolioGate, PortfolioKpi, PortfolioOrder,
     PortfolioPosition, PortfolioRisk, ProgressStepView, RankWindow, ResearchCompareRow,
@@ -3548,6 +3548,14 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
         sub: view.md.sub.into(),
         last_tick: view.md.last_tick.into(),
         freshness: view.md.freshness.into(),
+    });
+    ui.set_live_gateway(LiveRemoteGateway {
+        status: view.gateway.status.into(),
+        tone: view.gateway.tone,
+        conn_state: view.gateway.conn_state.into(),
+        rtt: view.gateway.rtt.into(),
+        last_heartbeat: view.gateway.last_heartbeat.into(),
+        detail: view.gateway.detail.into(),
     });
     ui.set_live_active_strat(LiveActiveStrategy {
         name: view.active_strat.name.into(),

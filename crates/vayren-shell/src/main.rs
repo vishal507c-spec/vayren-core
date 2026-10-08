@@ -568,6 +568,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let live_state = Rc::new(RefCell::new(live_state));
     let remote_rx = if let Some(url) = remote_gateway_url {
+        live_state.borrow_mut().gateway.url = url.clone();
+        live_state.borrow_mut().gateway.status = "CONNECTING".to_string();
         let (remote_tx, remote_rx) = mpsc::channel::<vayren_shell::remote_live::RemoteUiUpdate>();
         vayren_shell::remote_live::spawn_remote_bootstrap(url, remote_tx);
         Some(remote_rx)
@@ -725,6 +727,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             } => {
                                 eprintln!("remote UI: link {label} ({detail})");
                                 mark_link(&mut live_state.borrow_mut(), &label, &detail, reconnects);
+                                dirty = true;
+                            }
+                            RemoteUiUpdate::Heartbeat { rtt_ms, timestamp } => {
+                                if let Some(ms) = rtt_ms {
+                                    live_state.borrow_mut().gateway.latency_ms = Some(ms);
+                                }
+                                live_state.borrow_mut().gateway.last_heartbeat = timestamp;
                                 dirty = true;
                             }
                         }
@@ -1464,6 +1473,8 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
     shell::apply_live(&ui, &live_state.borrow());
     shell::apply_zoom(&ui, &zoom.borrow());
 
+    live_state.borrow_mut().gateway.url = url.clone();
+    live_state.borrow_mut().gateway.status = "CONNECTING".to_string();
     let (remote_tx, remote_rx) = mpsc::channel::<RemoteUiUpdate>();
     // Bootstrap owns the first connect (with enrollment retries); on success
     // it hands the live client to the pump and exits.
@@ -1514,6 +1525,13 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                         } => {
                             eprintln!("remote UI: link {label} ({detail})");
                             mark_link(&mut live_state.borrow_mut(), &label, &detail, reconnects);
+                            dirty = true;
+                        }
+                        RemoteUiUpdate::Heartbeat { rtt_ms, timestamp } => {
+                            if let Some(ms) = rtt_ms {
+                                live_state.borrow_mut().gateway.latency_ms = Some(ms);
+                            }
+                            live_state.borrow_mut().gateway.last_heartbeat = timestamp;
                             dirty = true;
                         }
                     }

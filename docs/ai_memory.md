@@ -5,7 +5,20 @@
 
 **Owns:** Current state, open items, verified facts, oddities. **Not owns:** Rules/architecture/events/contracts \u2192 `AGENTS.md`, `AI_ENTRY.md`, `architecture.md`, `module_contracts.md`, `event_catalog.md`.
 
-**Latest update (build-test-speed-ci-green, 2026-10-08):** 100% GREEN CI GATE ON GITHUB ACTIONS (`37779678240`), BUILD/TEST CACHING & GIT PERFORMANCE OPTIMIZATIONS.
+**Latest update (live-ec2-gateway-and-repo-graph, 2026-10-08):** DEDICATED EC2 / REMOTE GATEWAY STATUS CARD ADDED TO LIVE UI + REPO GRAPH SYNC & CI GATES VERIFIED.
+1. **EC2 / Remote Gateway Status Card in LIVE UI:**
+   - Crate domain (`crates/vayren-domain/src/live.rs`): Added `GatewayFacts` struct to `LiveState` tracking honest remote link status, latency/RTT, heartbeat timestamp, reconnects, and error notes. Mapped to `GatewayView` in `live::project` with honest fallbacks (`DISCONNECTED`, `NOT AVAILABLE`, `LOCAL MODE`).
+   - Slint presentation (`crates/vayren-shell/ui/live.slint`, `app.slint`): Added dedicated top status card for `EC2 / REMOTE GATEWAY` alongside broker card; dynamic connection status (🟢 `CONNECTED`, 🔴 `DISCONNECTED`, 🟡 `CONNECTING`/`STALE`) with real RTT / heartbeat / detail info.
+   - Shell & Remote Live (`crates/vayren-shell/src/remote_live.rs`, `shell.rs`, `main.rs`): Wired `RemoteUiUpdate::Heartbeat` on ping/pong and snapshots with real RTT; formatted IST timestamps via zero-dependency helper; wired view to UI properties.
+2. **Repo Graph & Governance Gates:**
+   - Synchronized `docs/repo_graph.json` via `python tools/repo_graph.py --build` (5,347 entities, 11,033 relationships, 0 unresolved).
+   - `python tools/validate_repo_graph.py`: PASS.
+   - `cargo fmt --manifest-path Cargo.toml --all -- --check`: PASS.
+   - `python -m pytest tools/tests/test_desktop.py`: PASS (6/6 passed).
+   - Domain unit tests: 236/236 passed. Shell unit tests: 48/48 passed.
+   - Pre-commit validators: structure, imports, language ownership, architecture, authority, routes, context engine all PASS.
+
+**Previous update (build-test-speed-ci-green, 2026-10-08):** 100% GREEN CI GATE ON GITHUB ACTIONS (`37779678240`), BUILD/TEST CACHING & GIT PERFORMANCE OPTIMIZATIONS.
 1. **GitHub CI Green Verification (run `37779678240`):**
    - `quality` (42s): PASSED (`ruff check`, `ruff format --check`, `pyright` 0 errors).
    - `validators` (51s): PASSED (all 9 domain gates, structure, imports, language ownership, architecture, authority, routes, repo graph, context engine).
