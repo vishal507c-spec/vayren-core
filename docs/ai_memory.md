@@ -5,7 +5,13 @@
 
 **Owns:** Current state, open items, verified facts, oddities. **Not owns:** Rules/architecture/events/contracts \u2192 `AGENTS.md`, `AI_ENTRY.md`, `architecture.md`, `module_contracts.md`, `event_catalog.md`.
 
-**Latest update (fast-market-ui-polish-1, 2026-10-08):** FAST MARKET UI POLISH 1 — Slint values-only, no logic (local only, no commit/push).
+**Latest update (fast-shell-check-1, 2026-10-08):** CARGO CHECK FAST LOOP — measured + scoped (local only, no commit/push).
+1. Measured (12 CPU / 16 GB / SSD, cargo 1.98.1): warm `cargo check -p vayren-shell` = ~1s (3 runs, all-Fresh, app.rs hash unchanged) — Slint `is_stale` cache in `crates/vayren-shell/build.rs` works; minutes-long runs happen ONLY right after real `.slint`/`.rs` edits (Slint compiler + 31 MB generated `app.rs` recheck — inherent, not deletable without restructuring UI compilation).
+2. Fix: `Makefile check-fast` no longer runs full `cargo check --workspace` (which also rechecks the 1584-line shell BIN). Now `cargo check --workspace --exclude vayren-shell` + `cargo check -p vayren-shell --lib` (warm 1.2s + 1.1s). Full gate untouched — `make check → rust → build_rust.py --lean-test` still covers the shell bin.
+3. One-time 76s seen on first workspace-wide check (cross-crate fingerprint unification); repeats are ~1s. No Rust/Slint logic changed (Makefile recipe only).
+4. Open (needs ADMIN powershell, not done — this shell is non-admin): Defender exclusion is the biggest remaining cold-build lever on Windows: `Add-MpPreference -ExclusionPath "C:\Users\visha\Desktop\vayren-core-main\target", "$env:USERPROFILE\.cargo\registry"`. NOT done: shell `slint` dep sets `default-features = true` (full backend stack, cold cost) — changing it risks the shipped EXE, needs its own tested task; thin-main refactor (1584-line `main.rs` → lib) same.
+
+**Previous update (fast-market-ui-polish-1, 2026-10-08):** FAST MARKET UI POLISH 1 — Slint values-only, no logic (local only, no commit/push).
 1. File: `crates/vayren-shell/ui/market.slint` only. Zero Rust/Python changed.
 2. Typography floor: last sub-11px `10px` (MarkerGlyph label pill) → `VayrenDesign.fs-label` + `overflow: elide` (0 sub-11px left, grep-verified).
 3. Truncation honesty: `overflow: elide` added to IndicatorBarRow name, watchlist price/change, DlField value (long names/prices truncate, never mid-glyph clip).
