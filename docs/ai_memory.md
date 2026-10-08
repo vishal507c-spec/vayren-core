@@ -5,7 +5,24 @@
 
 **Owns:** Current state, open items, verified facts, oddities. **Not owns:** Rules/architecture/events/contracts \u2192 `AGENTS.md`, `AI_ENTRY.md`, `architecture.md`, `module_contracts.md`, `event_catalog.md`.
 
-**Latest update (ci-green-fix-phase1-6, 2026-10-08):** CI 100% GREEN FIX FOR PHASE 1-6 MAIN MERGE.
+**Latest update (build-test-speed-ci-green, 2026-10-08):** 100% GREEN CI GATE ON GITHUB ACTIONS (`37779678240`), BUILD/TEST CACHING & GIT PERFORMANCE OPTIMIZATIONS.
+1. **GitHub CI Green Verification (run `37779678240`):**
+   - `quality` (42s): PASSED (`ruff check`, `ruff format --check`, `pyright` 0 errors).
+   - `validators` (51s): PASSED (all 9 domain gates, structure, imports, language ownership, architecture, authority, routes, repo graph, context engine).
+   - `test-shard-pure` (1m42s): PASSED.
+   - `test-shard-stateful` (7m15s): PASSED.
+   - `build-test` (9m38s): PASSED.
+   - `CI gate` (4s): ALL REQUIRED CHECKS PASSED.
+2. **Build & Test Speed Optimizations:**
+   - Slint UI codegen caching: `crates/vayren-shell/build.rs` wrapped `ui/app.slint` with `is_stale(...)` dependency tracking; warm test compilation dropped to 0.55s–0.92s!
+   - Linker: configured `rust-lld.exe` for MSVC target in `.cargo/config.toml`.
+   - Functional test suite: 1.01s (vs 2.64s baseline, 61.7% faster).
+   - Authoritative full test suite: 35.65s (vs 41.47s baseline), 64/64 tests passed (47 functional + 17 benchmarks).
+3. **Git Performance Optimization:**
+   - Local and global config: `core.fscache`, `core.preloadindex`, `core.untrackedCache`, `core.fsmonitor`, `core.autocrlf=false`, `http.postBuffer=524288000`, `pack.threads=0`, `pack.compression=1`, `http.version=HTTP/2`.
+   - Sub-second status (~120ms) and high-speed network streaming.
+
+**Previous update (ci-green-fix-phase1-6, 2026-10-08):** CI 100% GREEN FIX FOR PHASE 1-6 MAIN MERGE.
 1. **Root causes identified from CI run 37733103279:**
    - `quality` (pyright 11 errors): `ControlPlaneBridge.disconnect` QObject override mismatch, optional `.text()` in dashboard tests, `BrokerPositionTruth` duck-type vs `Position` in `disaster_recovery` / `ledger.adopt_position`, `local_positions` union typing in `reconciliation.py`, optional `stop_loss` comparison in `test_phase1_safety.py`.
    - `build-test` / `test-shard-stateful`: `src/app/services/__init__.py` eager import of `trading_dashboard` triggered `PySide6` -> `libEGL.so.1` missing in headless Linux CI; `src/app/tests/conftest.py` imported `PySide6` at module level crashing test collection in headless Linux; `test_phase3_control_plane.py` used `@pytest.mark.asyncio` without `pytest-asyncio` plugin.
