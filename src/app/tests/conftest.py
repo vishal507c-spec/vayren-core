@@ -8,8 +8,16 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-from PySide6.QtGui import QFont
-from PySide6.QtWidgets import QApplication
+
+try:
+    from PySide6.QtGui import QFont
+    from PySide6.QtWidgets import QApplication
+
+    _QT_AVAILABLE = True
+except (ImportError, OSError):
+    _QT_AVAILABLE = False
+    QFont = None  # type: ignore[assignment, misc]
+    QApplication = None  # type: ignore[assignment, misc]
 
 SCHEMA = """
 CREATE TABLE candles (
@@ -105,6 +113,8 @@ def seed_symbol_directory(directory: Path, symbols: dict[str, int]) -> Path:
 @pytest.fixture
 def qt_app() -> QApplication:
     """Return the process-wide QApplication, creating it if needed."""
+    if not _QT_AVAILABLE or QApplication is None or QFont is None:
+        pytest.skip("PySide6 / GUI system libraries not available")
     instance = QApplication.instance()
     if isinstance(instance, QApplication):
         return instance
@@ -132,6 +142,8 @@ def _shutdown_qt_workers():
     already joined is what made the run hang).
     """
     yield
+    if not _QT_AVAILABLE:
+        return
     import contextlib
     import gc
 
@@ -154,15 +166,15 @@ def _shutdown_qt_workers():
 
 
 def _load_real_font() -> None:
-    """Load a real Windows TTF so offscreen metrics match production fonts.
-
-    The offscreen platform has an empty font database; every family name
-    falls back to the same wide substitute, which doubles text widths and
-    breaks pixel/layout tests. Loading Segoe UI gives realistic metrics.
-    """
+    """Load a real Windows TTF so offscreen metrics match production fonts."""
+    if not _QT_AVAILABLE:
+        return
     from pathlib import Path
 
-    from PySide6.QtGui import QFontDatabase
+    try:
+        from PySide6.QtGui import QFontDatabase
+    except (ImportError, OSError):
+        return
 
     for path in (
         "C:/Windows/Fonts/segoeui.ttf",

@@ -74,7 +74,8 @@ class _LiveSma:
         from dataclasses import replace
 
         sig = self._inner.on_bar(view)
-        if sig is not None and (getattr(sig, "stop_loss", None) is None or sig.stop_loss <= 0):
+        sl = getattr(sig, "stop_loss", None) if sig is not None else None
+        if sig is not None and (sl is None or sl <= 0):
             price = getattr(sig, "price", 100.0)
             side = getattr(sig, "side", "BUY")
             stop = price * 0.95 if side == "BUY" else price * 1.05

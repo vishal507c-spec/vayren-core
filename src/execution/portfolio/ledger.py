@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from execution.models.order import Fill
 from execution.models.position import AccountSnapshot, Position
 from execution.native_execution import (
@@ -55,8 +57,14 @@ class PositionLedger:
     def all_positions(self) -> tuple[Position, ...]:
         return tuple(self._positions.values())
 
-    def adopt_position(self, pos: Position) -> None:
+    def adopt_position(self, pos: Position | Any) -> None:
         """Adopt authoritative position from broker truth (self-healing)."""
+        if not isinstance(pos, Position):
+            pos = Position(
+                symbol=str(getattr(pos, "symbol", "")),
+                quantity=float(getattr(pos, "quantity", 0.0)),
+                avg_price=float(getattr(pos, "avg_price", 0.0)),
+            )
         if pos.flat:
             self._positions.pop(pos.symbol, None)
         else:

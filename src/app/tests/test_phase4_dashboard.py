@@ -22,7 +22,19 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from PySide6.QtWidgets import QApplication
+
+try:
+    from PySide6.QtWidgets import QApplication
+
+    _QT_AVAILABLE = True
+except (ImportError, OSError):
+    _QT_AVAILABLE = False
+    QApplication = None  # type: ignore[assignment, misc]
+
+if not _QT_AVAILABLE:
+    pytestmark = pytest.mark.skip(
+        reason="PySide6 / GUI system libraries not available in headless environment"
+    )
 
 from app.services.control_plane_bridge import ControlPlaneBridge
 from app.services.trading_dashboard import (
@@ -265,9 +277,11 @@ def test_live_workspace_updates(qt_app: QApplication, sample_snapshot: dict[str,
 
     # Positions and orders tables populated
     assert live.pos_table.rowCount() == 1
-    assert live.pos_table.item(0, 0).text() == "NSE:RELIANCE-EQ"
+    item_pos = live.pos_table.item(0, 0)
+    assert item_pos is not None and item_pos.text() == "NSE:RELIANCE-EQ"
     assert live.ord_table.rowCount() == 1
-    assert live.ord_table.item(0, 1).text() == "NSE:RELIANCE-EQ"
+    item_ord = live.ord_table.item(0, 1)
+    assert item_ord is not None and item_ord.text() == "NSE:RELIANCE-EQ"
 
 
 def test_risk_panel_9_metrics_grid(qt_app: QApplication, sample_snapshot: dict[str, Any]) -> None:
@@ -328,8 +342,8 @@ def test_research_workspace_local_data_scan(qt_app: QApplication) -> None:
 
     # Table contains real local rows or honest "NO LOCAL DATA FOUND" (zero fake data)
     assert res.table.rowCount() >= 1
-    row0_col0 = res.table.item(0, 0).text()
-    assert row0_col0 != ""
+    item_res = res.table.item(0, 0)
+    assert item_res is not None and item_res.text() != ""
 
 
 def test_portfolio_workspace_consolidation(
@@ -362,7 +376,8 @@ def test_system_workspace_health_and_gates(
         {"seq": 1, "event_type": "RECONCILIATION_COMPLETED", "payload": {"matched": True}}
     )
     assert sys_view.table_journal.rowCount() == 1
-    assert sys_view.table_journal.item(0, 1).text() == "RECONCILIATION_COMPLETED"
+    item_jour = sys_view.table_journal.item(0, 1)
+    assert item_jour is not None and item_jour.text() == "RECONCILIATION_COMPLETED"
 
 
 def test_global_stale_banner_toggle(qt_app: QApplication) -> None:

@@ -93,11 +93,15 @@ class ControlPlaneBridge(QObject):
         self.connection_changed.emit(True)
         self.refresh_snapshot()
 
-    def disconnect(self) -> None:
+    def disconnect_controller(self) -> None:
         self._connected = False
         if self._controller is not None:
             self._controller.client_tracker.on_client_disconnect()
         self.connection_changed.emit(False)
+
+    def disconnect(self, *_args: Any, **_kwargs: Any) -> bool:  # pyright: ignore[reportIncompatibleMethodOverride]
+        self.disconnect_controller()
+        return True
 
     def reconnect(self) -> None:
         if self._controller is not None:

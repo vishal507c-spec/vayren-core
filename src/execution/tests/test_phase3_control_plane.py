@@ -880,66 +880,69 @@ def test_websocket_handshake_generation() -> None:
 # ── 12. End-to-End Async Socket Loopback Test ────────────────────────────────
 
 
-@pytest.mark.asyncio
-async def test_async_socket_control_plane_loopback(test_auth: ControlPlaneAuth) -> None:
+def test_async_socket_control_plane_loopback(test_auth: ControlPlaneAuth) -> None:
     """Full async socket loopback: handshake, initial snapshot, command exchange, close."""
-    session = MockLiveSession(execution_state=ExecutionState.READY)
-    controller = ControlPlaneController(session=session, auth=test_auth)
 
-    server = await start_control_plane_server(controller, host="127.0.0.1", port=0)
-    sockets = server.sockets
-    assert sockets is not None and len(sockets) > 0
-    port = sockets[0].getsockname()[1]
+    async def _run() -> None:
+        session = MockLiveSession(execution_state=ExecutionState.READY)
+        controller = ControlPlaneController(session=session, auth=test_auth)
 
-    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        server = await start_control_plane_server(controller, host="127.0.0.1", port=0)
+        sockets = server.sockets
+        assert sockets is not None and len(sockets) > 0
+        port = sockets[0].getsockname()[1]
 
-    try:
-        # 1. Send WebSocket handshake
-        key = "AQIDBAUGBwgJCgsMDQ4PEA=="
-        handshake_req = (
-            "GET /ws HTTP/1.1\r\n"
-            f"Host: 127.0.0.1:{port}\r\n"
-            "Upgrade: websocket\r\n"
-            "Connection: Upgrade\r\n"
-            f"Sec-WebSocket-Key: {key}\r\n\r\n"
-        )
-        writer.write(handshake_req.encode("utf-8"))
-        await writer.drain()
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
 
-        # 2. Read 101 response up to header delimiter
-        handshake_resp = await reader.readuntil(b"\r\n\r\n")
-        assert b"101 Switching Protocols" in handshake_resp
+        try:
+            # 1. Send WebSocket handshake
+            key = "AQIDBAUGBwgJCgsMDQ4PEA=="
+            handshake_req = (
+                "GET /ws HTTP/1.1\r\n"
+                f"Host: 127.0.0.1:{port}\r\n"
+                "Upgrade: websocket\r\n"
+                "Connection: Upgrade\r\n"
+                f"Sec-WebSocket-Key: {key}\r\n\r\n"
+            )
+            writer.write(handshake_req.encode("utf-8"))
+            await writer.drain()
 
-        # 3. Read initial RuntimeSnapshot pushed on connection
-        snap_raw = await reader.read(4096)
-        decoded = WebSocketFrame.decode(snap_raw)
-        assert decoded is not None
-        opcode, snap_payload, _ = decoded
-        assert opcode == WebSocketFrame.OP_TEXT
-        snapshot_dict = json.loads(snap_payload.decode("utf-8"))
-        assert snapshot_dict["execution_state"] == "READY"
+            # 2. Read 101 response up to header delimiter
+            handshake_resp = await reader.readuntil(b"\r\n\r\n")
+            assert b"101 Switching Protocols" in handshake_resp
 
-        # 4. Send START command
-        cmd = {
-            "command": "START",
-            "request_id": "req-socket-start",
-            "auth_token": "secret_token_123",
-        }
-        writer.write(WebSocketFrame.encode(json.dumps(cmd), mask=True))
-        await writer.drain()
+            # 3. Read initial RuntimeSnapshot pushed on connection
+            snap_raw = await reader.read(4096)
+            decoded = WebSocketFrame.decode(snap_raw)
+            assert decoded is not None
+            opcode, snap_payload, _ = decoded
+            assert opcode == WebSocketFrame.OP_TEXT
+            snapshot_dict = json.loads(snap_payload.decode("utf-8"))
+            assert snapshot_dict["execution_state"] == "READY"
 
-        # 5. Receive CommandResponse
-        resp_raw = await reader.read(4096)
-        decoded_resp = WebSocketFrame.decode(resp_raw)
-        assert decoded_resp is not None
-        _, resp_payload, _ = decoded_resp
-        cmd_resp = json.loads(resp_payload.decode("utf-8"))
-        assert cmd_resp["status"] == "SUCCESS"
-        assert cmd_resp["data"]["state"] == "RUNNING"
-        assert session.recovery.state_machine.state == ExecutionState.RUNNING
+            # 4. Send START command
+            cmd = {
+                "command": "START",
+                "request_id": "req-socket-start",
+                "auth_token": "secret_token_123",
+            }
+            writer.write(WebSocketFrame.encode(json.dumps(cmd), mask=True))
+            await writer.drain()
 
-    finally:
-        writer.close()
-        await writer.wait_closed()
-        server.close()
-        await server.wait_closed()
+            # 5. Receive CommandResponse
+            resp_raw = await reader.read(4096)
+            decoded_resp = WebSocketFrame.decode(resp_raw)
+            assert decoded_resp is not None
+            _, resp_payload, _ = decoded_resp
+            cmd_resp = json.loads(resp_payload.decode("utf-8"))
+            assert cmd_resp["status"] == "SUCCESS"
+            assert cmd_resp["data"]["state"] == "RUNNING"
+            assert session.recovery.state_machine.state == ExecutionState.RUNNING
+
+        finally:
+            writer.close()
+            await writer.wait_closed()
+            server.close()
+            await server.wait_closed()
+
+    asyncio.run(_run())

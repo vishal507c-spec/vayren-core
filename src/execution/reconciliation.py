@@ -238,12 +238,15 @@ def compare_broker_truth(
 
     # 1. Normalize local positions
     loc_pos_map: dict[str, float] = {}
-    if local_positions and isinstance(local_positions[0], dict):
-        for p in local_positions:
-            loc_pos_map[str(p.get("symbol", ""))] = float(p.get("quantity", 0.0))
-    else:
-        for pos in local_positions:  # type: ignore[union-attr]
-            loc_pos_map[pos.symbol] = pos.quantity
+    for item in local_positions:
+        if isinstance(item, dict):
+            sym = str(item.get("symbol", ""))
+            qty = float(item.get("quantity", 0.0))
+        else:
+            sym = str(getattr(item, "symbol", ""))
+            qty = float(getattr(item, "quantity", 0.0))
+        if sym:
+            loc_pos_map[sym] = qty
 
     brk_pos_map: dict[str, float] = {
         bp.symbol: bp.quantity for bp in broker_truth.positions if not bp.flat
