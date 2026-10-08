@@ -203,4 +203,3 @@ def test_package_mode_builds_remote_default_binary(
     assert build_rust.main(["--package"]) == 0
     assert any("vayren-shell" in argv and "packaged-remote" in argv for argv in calls)
     capsys.readouterr()
-
