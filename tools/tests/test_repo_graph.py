@@ -256,6 +256,18 @@ def test_graph_has_no_canonical_prose() -> None:
     and Phase 1-6 safety/recovery/UI systems joined the tree (5,342 entities, 3,028,389 B) —
     product code, not narrative. Per-entity cost stays ~566 B (budget: 700 B),
     so the cap moved instead; 3.20MB covers the observed size plus headroom.
+    Justification for the 3.20MB -> 3.30MB bump (2026-10-09): the artifact
+    crossed the old cap because the Phase 2-5 strategy platform joined the
+    tree (canonical instruments + universes + provider mappings + market-data
+    router + execution router and their tests: 5,622 entities, 3,213,838 B) —
+    product code, not narrative. Per-entity cost stays ~572 B (budget: 700 B),
+    so the cap moved instead; 3.30MB covers the observed size plus headroom.
+    Justification for the 3.30MB -> 3.31MB bump (2026-10-09): the artifact
+    crossed the old cap by 939 B because the Phase 6-7 eligibility layer
+    joined the tree (eligibility models + engine + lifecycle wiring + tests:
+    5,733 entities, 3,300,939 B) — product code, not narrative. Per-entity
+    cost stays ~576 B (budget: 700 B), so the cap moved instead; 3.31MB
+    covers the observed size plus headroom.
     2. Per-entity budget + a max-string-length budget. These are what make the
        cap safe to raise: prose pasted into any field would blow the string
        budget long before it filled the entity budget, so a future dump cannot
@@ -265,7 +277,7 @@ def test_graph_has_no_canonical_prose() -> None:
     assert "INSERT OR IGNORE" not in text
     graph = json.loads(text)
     size = len(text.encode("utf-8"))
-    assert size < 3_200_000, f"graph artifact grew past the cap: {size} B"
+    assert size < 3_310_000, f"graph artifact grew past the cap: {size} B"
 
     entities = graph["entity_count"]
     assert entities > 0

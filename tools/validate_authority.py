@@ -31,6 +31,10 @@ REGISTRIES = {
     "BrokerRegistry": "src/broker/registry.py",
     "StrategyRegistry": "src/strategy/registry.py",
     "AiProviderRegistry": "src/core/ai/providers.py",
+    # Phase 2 canonical instrument identity lives in its own registry file
+    # (one owner per responsibility — it is not folded into the strategy
+    # registry, which owns strategy definitions, not instrument identity).
+    "CanonicalInstrumentRegistry": "src/strategy/instrument_registry.py",
 }
 
 # Canonical single authorities: symbol -> defining file (exactly one site).
@@ -59,6 +63,9 @@ REGISTER_WRITERS = {
     "src/broker/providers/zerodha/live_activation.py",
     "src/broker/registry.py",
     "src/execution/broker/factory.py",
+    # The instrument registry seeds its deterministic NSE-equity built-ins
+    # in its own constructor — the same canonical act as factory.py above.
+    "src/strategy/instrument_registry.py",
 }
 
 # Canonical selection writers: files allowed to construct BrokerSelection.
@@ -93,6 +100,8 @@ REGISTRY_MAP_PATTERN = re.compile(r"(REGISTRY|_PROVIDERS|_ADAPTERS|_PLUGINS|_VEN
 REGISTRY_MAP_OWNERS = {
     "src/broker/registry.py",
     "src/strategy/registry.py",
+    # Canonical instrument identity map (one owner per responsibility).
+    "src/strategy/instrument_registry.py",
 }
 
 # Authority tables that live in RUST. A module-level store of one of these
