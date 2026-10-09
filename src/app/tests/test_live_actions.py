@@ -97,8 +97,11 @@ def _live_venue_stubs(service: LiveTradingService):
 
 def test_confirmed_start_satisfies_consent(dirs: tuple[str, str]) -> None:
     service = _service(dirs)
+    # Phase 1 strategy-first flow: select the strategy first (loads its
+    # saved universe), then configure its symbols — one combined call
+    # would carry the previous screen's rows and is ignored by design.
+    service.configure(strategy_name="OBR")
     service.configure(
-        strategy_name="OBR",
         symbols=("NSE:RELIANCE",),
         timeframe="30m",
         quantity=10.0,
@@ -136,8 +139,8 @@ def test_unconfirmed_start_lists_consent_exactly_once(
     dirs: tuple[str, str],
 ) -> None:
     service = _service(dirs)
+    service.configure(strategy_name="OBR")
     service.configure(
-        strategy_name="OBR",
         symbols=("NSE:RELIANCE",),
         timeframe="30m",
         quantity=10.0,
