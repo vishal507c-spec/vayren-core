@@ -3,13 +3,75 @@
 Depends on: core, market.
 """
 
+from strategy.eligibility_engine import GATE_ORDER, EligibilityEngine, EligibilityEngineError
 from strategy.events.lab_reset import LabReset
 from strategy.events.paper_trade_requested import PaperTradeRequested
 from strategy.events.strategies_listed import StrategiesListed
 from strategy.events.strategy_selected import StrategySelected
+from strategy.execution_router import (
+    BrokerExecutionAdapter,
+    ExecutionRouter,
+    ExecutionRouterError,
+)
+from strategy.instrument_registry import (
+    NSE_EQUITY_SEED,
+    CanonicalInstrumentRegistry,
+    RegistryError,
+    get_instrument_registry,
+    reset_instrument_registry,
+    resolve_instrument,
+)
 from strategy.manifest import strategy_manifest
+from strategy.market_data_router import MarketDataFeed, MarketDataRouter, RouterError
 from strategy.models.definition import StrategyDefinition
+from strategy.models.eligibility import (
+    BLOCKED,
+    BLOCKING,
+    DEGRADED,
+    DIAGNOSTIC,
+    DISABLED,
+    ERROR,
+    FAIL_FAST,
+    READY,
+    STALE,
+    UNAVAILABLE,
+    WAITING,
+    WARNING,
+    EligibilityCheck,
+    EligibilityVerdict,
+)
+from strategy.models.execution import (
+    ATTENTION_REQUIRED,
+    BROKER_MAPPING_CONFLICT,
+    BROKER_MAPPING_DISABLED,
+    BROKER_MAPPING_MISSING,
+    BROKER_NOT_READY,
+    BROKER_UNAVAILABLE,
+    INVALID_INTENT,
+    NO_READY_BROKER,
+    REJECTED_SAFE,
+    RISK_APPROVAL_MISSING,
+    ROUTED_PRIMARY,
+    ROUTED_SECONDARY,
+    UNKNOWN_CLIENT_ORDER,
+    NormalizedOrderResult,
+    OrderIntent,
+    RouterExecutionConfig,
+)
 from strategy.models.form import BacktestForm
+from strategy.models.instrument import (
+    INACTIVE,
+    INVALID_FORMAT,
+    NOT_FOUND,
+    RESOLVED,
+    UNSUPPORTED_EXCHANGE,
+    UNSUPPORTED_SEGMENT,
+    CanonicalInstrument,
+    ResolutionResult,
+    canonical_id,
+    parse_reference,
+)
+from strategy.models.market_data import NormalizedMarketData, RouterConfig
 from strategy.models.parameters import (
     ParameterError,
     ParameterSpec,
@@ -25,8 +87,29 @@ from strategy.models.plot_event import (
     default_layer,
     make_event_id,
 )
+from strategy.models.provider_instrument import (
+    AMBIGUOUS,
+    CONFLICT,
+    FOUND,
+    MAPPED,
+    PROVIDER_FYERS,
+    PROVIDER_ZERODHA,
+    RECORD_ACTIVE,
+    RECORD_DISABLED,
+    UNMAPPED,
+    ProviderInstrument,
+)
 from strategy.models.signal import Signal, SignalKind
 from strategy.models.state import StrategyState
+from strategy.models.universe import StrategyUniverse, normalize_symbol, validate_symbols
+from strategy.provider_adapters import ProviderParseError
+from strategy.provider_mapping import (
+    ImportReport,
+    MappingError,
+    MappingLookup,
+    ProviderMappingRegistry,
+    ProviderResolution,
+)
 from strategy.registry import (
     OBR_C1C4_METADATA,
     OBR_C1C4_SYMBOLS,
@@ -38,6 +121,11 @@ from strategy.registry import (
 )
 from strategy.research.dataset import ResearchDataset
 from strategy.runtime import BarView, StrategyLogic, StrategyRuntime
+from strategy.universe_store import (
+    StrategyUniverseStore,
+    UniverseStoreError,
+    universe_strategy_id,
+)
 
 __all__ = [
     "StrategyRegistry",
@@ -55,6 +143,86 @@ __all__ = [
     "Signal",
     "SignalKind",
     "StrategyState",
+    "StrategyUniverse",
+    "StrategyUniverseStore",
+    "UniverseStoreError",
+    "normalize_symbol",
+    "universe_strategy_id",
+    "validate_symbols",
+    "CanonicalInstrument",
+    "CanonicalInstrumentRegistry",
+    "RegistryError",
+    "ResolutionResult",
+    "canonical_id",
+    "parse_reference",
+    "get_instrument_registry",
+    "reset_instrument_registry",
+    "resolve_instrument",
+    "NSE_EQUITY_SEED",
+    "RESOLVED",
+    "NOT_FOUND",
+    "INVALID_FORMAT",
+    "UNSUPPORTED_EXCHANGE",
+    "UNSUPPORTED_SEGMENT",
+    "INACTIVE",
+    "ProviderInstrument",
+    "PROVIDER_FYERS",
+    "PROVIDER_ZERODHA",
+    "RECORD_ACTIVE",
+    "RECORD_DISABLED",
+    "MAPPED",
+    "UNMAPPED",
+    "AMBIGUOUS",
+    "CONFLICT",
+    "DISABLED",
+    "FOUND",
+    "ProviderMappingRegistry",
+    "ProviderResolution",
+    "MappingLookup",
+    "ImportReport",
+    "MappingError",
+    "ProviderParseError",
+    "ExecutionRouter",
+    "BrokerExecutionAdapter",
+    "ExecutionRouterError",
+    "EligibilityEngine",
+    "EligibilityEngineError",
+    "GATE_ORDER",
+    "EligibilityCheck",
+    "EligibilityVerdict",
+    "BLOCKING",
+    "BLOCKED",
+    "DEGRADED",
+    "DIAGNOSTIC",
+    "DISABLED",
+    "ERROR",
+    "FAIL_FAST",
+    "READY",
+    "STALE",
+    "UNAVAILABLE",
+    "WAITING",
+    "WARNING",
+    "OrderIntent",
+    "NormalizedOrderResult",
+    "RouterExecutionConfig",
+    "ROUTED_PRIMARY",
+    "ROUTED_SECONDARY",
+    "REJECTED_SAFE",
+    "ATTENTION_REQUIRED",
+    "RISK_APPROVAL_MISSING",
+    "BROKER_MAPPING_MISSING",
+    "BROKER_MAPPING_DISABLED",
+    "BROKER_MAPPING_CONFLICT",
+    "BROKER_NOT_READY",
+    "BROKER_UNAVAILABLE",
+    "NO_READY_BROKER",
+    "UNKNOWN_CLIENT_ORDER",
+    "INVALID_INTENT",
+    "MarketDataRouter",
+    "MarketDataFeed",
+    "RouterError",
+    "RouterConfig",
+    "NormalizedMarketData",
     "PlotEvent",
     "PlotType",
     "MarkerType",
