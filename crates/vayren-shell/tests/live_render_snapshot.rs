@@ -16,7 +16,7 @@ use slint::platform::software_renderer::{
     MinimalSoftwareWindow, RepaintBufferType, SoftwareRenderer,
 };
 use slint::platform::{Platform, PlatformError, WindowAdapter};
-use slint::{ComponentHandle, PhysicalSize, Rgb8Pixel, SharedPixelBuffer};
+use slint::{ComponentHandle, Model, PhysicalSize, Rgb8Pixel, SharedPixelBuffer};
 use std::rc::Rc;
 use std::time::Duration;
 use vayren_shell::{live, shell, ShellScreen};
@@ -698,4 +698,105 @@ fn watchlist_row(symbol: &str) -> vayren_shell::live::WatchlistStockRow {
         pnl: None,
         last_update: "12:14:25".into(),
     }
+}
+
+/// Property round-trip probe: the reported verdict must reach the Slint
+/// property the card binds (distinguishes "data never arrived" from a
+/// paint/layout mystery when debugging the panel).
+#[test]
+fn eligibility_property_round_trip() {
+    let win = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
+    slint::platform::set_platform(Box::new(MiniPlatform {
+        window: win.clone(),
+    }))
+    .expect("software platform installs once per test binary");
+
+    let ui = vayren_shell::AppWindow::new().unwrap();
+    let mut state = idle_populated_state();
+    state.eligibility = live::EligibilityFacts {
+        reported: true,
+        final_label: "TRADING_BLOCKED".into(),
+        final_tone: 3,
+        reason: "RISK_NOT_READY".into(),
+        market: "READY".into(),
+        execution: "DEGRADED".into(),
+        risk: "NOT READY".into(),
+        strategy_line: "1 ready · 1 blocked · 2 total".into(),
+        enforcement: true,
+        rows: vec![],
+    };
+    shell::apply_live(&ui, &state);
+    let elig = ui.get_live_eligibility();
+    assert!(elig.reported, "eligibility.reported must arrive");
+    assert_eq!(elig.final_label.as_str(), "TRADING_BLOCKED");
+    assert_eq!(elig.final_tone, 3);
+    assert_eq!(elig.market.as_str(), "READY");
+    let rows = ui.get_live_eligibility_rows();
+    assert_eq!(rows.iter().count(), 0);
+}
+
+/// Eligibility panel: unreported backends render "NOT REPORTED" without
+/// breaking the frame, and a reported 60-row verdict set (mixed levels)
+/// paints the panel + watchlist ELIG cells while keeping every
+/// structural floor. Thresholds identical to the idle matrix — a state
+/// that crashes or renders a void fails here, not in production.
+#[test]
+fn eligibility_panel_renders_reported_and_unreported() {
+    let win = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
+    slint::platform::set_platform(Box::new(MiniPlatform {
+        window: win.clone(),
+    }))
+    .expect("software platform installs once per test binary");
+
+    let ui = vayren_shell::AppWindow::new().unwrap();
+    shell::apply(&ui, &shell::demo_snapshot());
+    shell::select(&ui, ShellScreen::Live);
+
+    // Unreported backend: the idle shape must still hold every floor.
+    shell::apply_live(&ui, &idle_populated_state());
+    let buffer = render_frame(&ui, &win, "eligibility_unreported_1920x1080", 1920, 1080);
+    let px = (1920 * 1080) as usize;
+    let probe = probe_frame(&buffer);
+    assert!(probe.surface > px / 400, "unreported: panels missing");
+    assert!(probe.text > px / 1500, "unreported: text missing");
+    assert!(probe.bg < px * 97 / 100, "unreported: frame is a void");
+
+    // Reported backend: 60 mixed verdicts + two quoted rows joined.
+    let mut state = idle_populated_state();
+    state.watchlist_rows = vec![watchlist_row("KAYNES"), watchlist_row("TATASTEEL")];
+    state.eligibility = live::EligibilityFacts {
+        reported: true,
+        final_label: "TRADING_BLOCKED".into(),
+        final_tone: 3,
+        reason: "RISK_NOT_READY".into(),
+        market: "READY".into(),
+        execution: "DEGRADED".into(),
+        risk: "NOT READY".into(),
+        strategy_line: "30 ready · 30 blocked · 60 total".into(),
+        enforcement: true,
+        rows: (0..60)
+            .map(|i| live::EligibilityRow {
+                symbol: format!("NSE:SYM{i:03}"),
+                level: if i % 2 == 0 {
+                    "READY".into()
+                } else {
+                    "BLOCKED".into()
+                },
+                allowed: i % 2 == 0,
+                reasons: if i % 2 == 0 {
+                    String::new()
+                } else {
+                    "BROKER_NOT_READY".into()
+                },
+            })
+            .collect(),
+    };
+    shell::apply_live(&ui, &state);
+    let buffer = render_frame(&ui, &win, "eligibility_reported_1920x1080", 1920, 1080);
+    let probe = probe_frame(&buffer);
+    assert!(probe.surface > px / 400, "reported: panels missing");
+    assert!(probe.accent > px / 6000, "reported: accent missing");
+    assert!(probe.text > px / 1500, "reported: text missing");
+    assert!(probe.neg > px / 12000, "reported: danger tone missing");
+    assert!(probe.bg < px * 97 / 100, "reported: frame is a void");
 }

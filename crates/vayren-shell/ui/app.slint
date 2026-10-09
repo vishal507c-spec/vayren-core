@@ -10,7 +10,7 @@ import { StrategyLabScreen, LabHeader, LabLibraryRow, LabKpi, LabRankRow, LabTra
 import { MarketScreen, MarketWatchRow, MarketCandle, MarketTick, MarketRayLevel, MarketTimeframe, MarketIndicator, MarketStatusRow, MarketSettingsRow, MarketPopupRow, MarketPlotSeg, MarketMarker, MarketTradeContext, DlPlan, DlStatus, DlCalDay, DlCredField, DlStock } from "market.slint";
 import { ResearchScreen, ResearchMetric, ResearchSignalRow, ResearchTradeRow, ResearchRobustRow, ResearchKv, ResearchCompareRow, ResearchStrategyRow, ResearchExperimentRow, ResearchField, ResearchConfigGroup, ResearchEvidenceDim, ResearchEvidenceWhy, ResearchKvGroup } from "research.slint";
 import { PortfolioScreen, PortfolioKpi, PortfolioGate, PortfolioPosition, PortfolioAlloc, PortfolioOrder, PortfolioFill, PortfolioRisk } from "portfolio.slint";
-import { LiveScreen, LiveBar, LiveSetup, LiveMarket, LiveSymbolRow, LiveGate, LiveKv, LiveStat, LivePosition, LiveOrder, LiveFill, LiveEventRow, LiveTiers, LiveWebSocket, LiveMarketData, LiveActiveStrategy, LiveWatchlistRow, LiveSelectedStock, LiveFooter, LiveRemoteGateway } from "live.slint";
+import { LiveScreen, LiveBar, LiveSetup, LiveMarket, LiveSymbolRow, LiveGate, LiveKv, LiveStat, LivePosition, LiveOrder, LiveFill, LiveEventRow, LiveTiers, LiveWebSocket, LiveMarketData, LiveActiveStrategy, LiveWatchlistRow, LiveEligibility, LiveEligibilityRow, LiveSelectedStock, LiveFooter, LiveRemoteGateway } from "live.slint";
 import { BrokerPanel, BrokerCheckRow } from "broker.slint";
 import { BrokerConnectionWorkspace, BrokerRowView, CredentialFieldView, ProgressStepView } from "broker_connection.slint";
 
@@ -172,6 +172,7 @@ export component AppWindow inherits Window {
     callback live-mode-picked(int);
     callback live-strategy-picked(string);
     callback live-symbol-toggled(int);
+    callback live-universe-save();
     callback live-symbol-filter-changed(string);
     callback live-timeframe-picked(string);
     callback live-quantity-edited(string);
@@ -604,6 +605,8 @@ export component AppWindow inherits Window {
     in-out property <LiveRemoteGateway> live-gateway;
     in-out property <LiveActiveStrategy> live-active-strat;
     in-out property <[LiveWatchlistRow]> live-watchlist;
+    in-out property <LiveEligibility> live-eligibility;
+    in-out property <[LiveEligibilityRow]> live-eligibility-rows;
     in-out property <LiveSelectedStock> live-selected-stock;
     in-out property <LiveFooter> live-footer;
     in-out property <int> live-filter-chip-selected: 0;
@@ -1133,6 +1136,8 @@ export component AppWindow inherits Window {
                     gateway: root.live-gateway;
                     active-strat: root.live-active-strat;
                     watchlist: root.live-watchlist;
+                    eligibility: root.live-eligibility;
+                    eligibility-rows: root.live-eligibility-rows;
                     selected-stock: root.live-selected-stock;
                     footer: root.live-footer;
                     filter-chip-selected: root.live-filter-chip-selected;
@@ -1144,6 +1149,7 @@ export component AppWindow inherits Window {
                     mode-picked(k) => { root.live-mode-picked(k); }
                     strategy-picked(i) => { root.live-strategy-picked(i); }
                     symbol-toggled(i) => { root.live-symbol-toggled(i); }
+                    universe-save() => { root.live-universe-save(); }
                     symbol-filter-changed(t) => { root.live-symbol-filter-changed(t); }
                     timeframe-picked(i) => { root.live-timeframe-picked(i); }
                     quantity-edited(t) => { root.live-quantity-edited(t); }

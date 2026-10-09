@@ -20,16 +20,17 @@ use crate::{
     AppWindow, BrokerCheckRow, BrokerRowView, CapabilityRowView, CredentialFieldView, DlCalDay,
     DlCredField, DlPlan, DlStatus, DlStock, LabBoardCell, LabCheckData, LabDetailMetric, LabHeader,
     LabKpi, LabLibraryRow, LabMatrixRow, LabParam, LabPoint, LabPreset, LabRankRow, LabTradeMetric,
-    LabTradeRow, LiveActiveStrategy, LiveBar, LiveEventRow, LiveFill, LiveFooter, LiveGate, LiveKv,
-    LiveMarket, LiveMarketData, LiveOrder, LivePipelineStep, LivePosition, LiveRemoteGateway,
-    LiveSelectedStock, LiveSetup, LiveStat, LiveSymbolRow, LiveWatchlistRow, LiveWebSocket,
-    MarketCandle, MarketIndicator, MarketMarker, MarketPlotSeg, MarketPopupRow, MarketRayLevel,
-    MarketSettingsRow, MarketStatusRow, MarketTick, MarketTimeframe, MarketTradeContext,
-    MarketWatchRow, PortfolioAlloc, PortfolioFill, PortfolioGate, PortfolioKpi, PortfolioOrder,
-    PortfolioPosition, PortfolioRisk, ProgressStepView, RankWindow, ResearchCompareRow,
-    ResearchConfigGroup, ResearchEvidenceDim, ResearchEvidenceWhy, ResearchExperimentRow,
-    ResearchField, ResearchKv, ResearchKvGroup, ResearchMetric, ResearchRobustRow,
-    ResearchSignalRow, ResearchStrategyRow, ResearchTradeRow, ShellScreen,
+    LabTradeRow, LiveActiveStrategy, LiveBar, LiveEligibility, LiveEligibilityRow, LiveEventRow,
+    LiveFill, LiveFooter, LiveGate, LiveKv, LiveMarket, LiveMarketData, LiveOrder,
+    LivePipelineStep, LivePosition, LiveRemoteGateway, LiveSelectedStock, LiveSetup, LiveStat,
+    LiveSymbolRow, LiveWatchlistRow, LiveWebSocket, MarketCandle, MarketIndicator, MarketMarker,
+    MarketPlotSeg, MarketPopupRow, MarketRayLevel, MarketSettingsRow, MarketStatusRow, MarketTick,
+    MarketTimeframe, MarketTradeContext, MarketWatchRow, PortfolioAlloc, PortfolioFill,
+    PortfolioGate, PortfolioKpi, PortfolioOrder, PortfolioPosition, PortfolioRisk,
+    ProgressStepView, RankWindow, ResearchCompareRow, ResearchConfigGroup, ResearchEvidenceDim,
+    ResearchEvidenceWhy, ResearchExperimentRow, ResearchField, ResearchKv, ResearchKvGroup,
+    ResearchMetric, ResearchRobustRow, ResearchSignalRow, ResearchStrategyRow, ResearchTradeRow,
+    ShellScreen,
 };
 use slint::ComponentHandle;
 #[cfg(test)]
@@ -3642,6 +3643,35 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
                     pnl_tone: r.pnl_tone,
                     last_update: r.last_update.into(),
                     selected: r.selected,
+                    eligibility: r.eligibility.into(),
+                    eligibility_tone: r.eligibility_tone,
+                })
+                .collect::<Vec<_>>(),
+        ))
+        .into(),
+    );
+    ui.set_live_eligibility(LiveEligibility {
+        reported: view.eligibility.reported,
+        final_label: view.eligibility.final_label.into(),
+        final_tone: view.eligibility.final_tone,
+        reason: view.eligibility.reason.into(),
+        market: view.eligibility.market.into(),
+        execution: view.eligibility.execution.into(),
+        risk: view.eligibility.risk.into(),
+        strategy_counts: view.eligibility.strategy_counts.into(),
+        enforcement: view.eligibility.enforcement,
+    });
+    ui.set_live_eligibility_rows(
+        Rc::new(slint::VecModel::from(
+            view.eligibility
+                .rows
+                .into_iter()
+                .map(|r| LiveEligibilityRow {
+                    symbol: r.symbol.into(),
+                    level: r.level.into(),
+                    level_tone: r.level_tone,
+                    allowed: r.allowed,
+                    reasons: r.reasons.into(),
                 })
                 .collect::<Vec<_>>(),
         ))
@@ -3772,6 +3802,7 @@ pub fn wire_live(ui: &AppWindow, state: Rc<RefCell<LiveState>>) {
     wire_int!(on_live_symbol_toggled, |s: &mut LiveState, i: i32| {
         s.toggle_symbol(i.max(0) as usize);
     });
+    wire_unit!(on_live_universe_save, LiveState::save_universe);
     wire_text!(on_live_timeframe_picked, LiveState::select_timeframe_value);
     wire_text!(on_live_event_type_picked, LiveState::apply_event_category);
     wire_text!(on_live_symbol_filter_changed, LiveState::set_symbol_filter);
@@ -3825,10 +3856,11 @@ pub fn wire_live(ui: &AppWindow, state: Rc<RefCell<LiveState>>) {
 /// Representative LIVE state for the standalone shell binary — the exact
 /// static readiness of this workstation (`--check-live` facts): no live
 /// venue adapter, PAPER default, empty execution tables. Nothing is
-/// fabricated: the watchlist starts EMPTY (the universe is registry-owned
-/// and arrives with the first backend snapshot — a stale built-in list
-/// would pose as the strategy's universe), while the strategy option names
-/// the registry-canonical default the backend will confirm or replace.
+/// fabricated: the watchlist starts EMPTY (each strategy's universe arrives
+/// with the first backend snapshot — a stale built-in list would pose as
+/// the strategy's universe), no strategy is pre-selected (Phase 1
+/// strategy-first flow: the backend confirms the selection, never a
+/// default), while the strategy option names the registry-known candidate.
 pub fn demo_live_state() -> LiveState {
     let gate = |name: &str, reason: &str| Gate {
         name: name.into(),

@@ -211,6 +211,31 @@ export struct LiveWatchlistRow {
     pnl-tone: int,
     last-update: string,
     selected: bool,
+    eligibility: string,
+    eligibility-tone: int,
+}
+
+// Unified eligibility verdict (Phase-6/7 backend section, verbatim).
+// Unreported backends leave every field at its fallback — the screen
+// prints "NOT REPORTED", never an invented verdict.
+export struct LiveEligibility {
+    reported: bool,
+    final-label: string,
+    final-tone: int,
+    reason: string,
+    market: string,
+    execution: string,
+    risk: string,
+    strategy-counts: string,
+    enforcement: bool,
+}
+
+export struct LiveEligibilityRow {
+    symbol: string,
+    level: string,
+    level-tone: int,
+    allowed: bool,
+    reasons: string,
 }
 
 // One engine order-state step. Every flag is a backend verdict: `reached`
@@ -637,6 +662,8 @@ export component LiveScreen inherits Rectangle {
     in property <LiveRemoteGateway> gateway;
     in property <LiveActiveStrategy> active-strat;
     in property <[LiveWatchlistRow]> watchlist;
+    in property <LiveEligibility> eligibility;
+    in property <[LiveEligibilityRow]> eligibility-rows;
     in property <LiveSelectedStock> selected-stock;
     in property <LiveFooter> footer;
     in property <int> filter-chip-selected: 0;
@@ -674,6 +701,7 @@ export component LiveScreen inherits Rectangle {
     callback mode-picked(int);
     callback strategy-picked(string);
     callback symbol-toggled(int);
+    callback universe-save();
     callback symbol-filter-changed(string);
     callback timeframe-picked(string);
     callback quantity-edited(string);
@@ -1145,6 +1173,7 @@ export component LiveScreen inherits Rectangle {
                                             Text { width: 72px; text: "PLANNED"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
                                             Text { width: 54px; text: "UTIL %"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
                                             Text { width: 76px; text: "STATUS"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+                                            Text { width: 84px; text: "ELIG"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
                                             Text { width: 56px; text: "SIGNAL"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
                                             Text { width: 70px; text: "ORDER"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
                                             Text { width: 70px; text: "POSITION"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
@@ -1184,6 +1213,7 @@ export component LiveScreen inherits Rectangle {
                                                 Text { width: 72px; text: row.planned-risk; color: VayrenPalette.live-ink; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
                                                 Text { width: 54px; text: row.risk-util; color: row.risk-util-tone == 3 ? VayrenPalette.neg : VayrenPalette.text; font-size: 10px; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
                                                 Text { width: 76px; text: row.status; color: LiveTone.ink(row.status-tone); font-size: 10px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
+                                                Text { width: 84px; text: row.eligibility; color: LiveTone.ink(row.eligibility-tone); font-size: 10px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
                                                 Text { width: 56px; text: row.signal; color: LiveTone.ink(row.signal-tone); font-size: 10px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
                                                 Text { width: 70px; text: row.order; color: LiveTone.ink(row.order-tone); font-size: 10px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
                                                 Text { width: 70px; text: row.position; color: VayrenPalette.text; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
@@ -1196,10 +1226,29 @@ export component LiveScreen inherits Rectangle {
                                     // Fallback for idle state without populated quotes
                                     if root.watchlist.length == 0: VerticalLayout {
                                         spacing: 1px;
+                                        // Phase 1 strategy-first universe header: the
+                                        // checked list below IS this strategy's
+                                        // configuration surface (toggles persist
+                                        // via setup actions; SAVE UNIVERSE
+                                        // re-confirms with backend verdict).
+                                        HorizontalLayout {
+                                            height: 28px;
+                                            spacing: 8px;
+                                            alignment: center;
+                                            Text { text: "UNIVERSE"; color: VayrenPalette.live-ink-faint; font-size: 10px; font-weight: 700; vertical-alignment: center; }
+                                            Text { horizontal-stretch: 1; min-width: 0px; text: root.setup.symbol-total; color: VayrenPalette.live-ink; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
+                                            VButton {
+                                                width: 118px;
+                                                label: "SAVE UNIVERSE";
+                                                variant: 1;
+                                                enabled: root.strategy-selected >= 0;
+                                                clicked => { root.universe-save(); }
+                                            }
+                                        }
                                         if root.symbols.length == 0: Rectangle {
                                             height: 50px;
                                             Text {
-                                                text: root.filter-text != "" ? "No symbol matches the filter" : "No symbols in universe";
+                                                text: root.strategy-selected < 0 ? "Select a strategy to configure symbols." : (root.filter-text != "" ? "No symbol matches the filter" : "No symbols configured for this strategy.");
                                                 color: VayrenPalette.live-ink-dim;
                                                 font-size: 11px;
                                                 horizontal-alignment: center;
@@ -1207,10 +1256,12 @@ export component LiveScreen inherits Rectangle {
                                             }
                                         }
                                         for sym[idx] in root.symbols: Rectangle {
-                                            height: 26px;
+                                            height: 18px;
                                             border-radius: 3px;
                                             background: sym.checked ? VayrenPalette.live-row-checked : (Math.mod(idx, 2) == 1 ? VayrenPalette.live-panel-deep : transparent);
-                                            TouchArea { clicked => { root.symbol-toggled(sym.real-index); } }
+                                            // Universe configuration is disabled
+                                            // until a strategy is selected.
+                                            TouchArea { enabled: root.strategy-selected >= 0; clicked => { root.symbol-toggled(sym.real-index); } }
                                             HorizontalLayout {
                                                 padding-left: 6px;
                                                 padding-right: 6px;
@@ -2123,6 +2174,109 @@ export component LiveScreen inherits Rectangle {
                             }
                         }
 
+                        // 3.3b UNIFIED ELIGIBILITY (Phase-6/7 backend section,
+                        // verbatim). Its own card so the verdict block can
+                        // never disturb the readiness gates above. Unreported
+                        // backends show "NOT REPORTED" — the card never
+                        // invents a verdict, and per-instrument rows come
+                        // only from reported backend rows.
+                        Rectangle {
+                            background: VayrenPalette.live-panel;
+                            border-radius: 6px;
+                            border-width: 1px;
+                            border-color: VayrenPalette.live-line;
+
+                            VerticalLayout {
+                                padding: 12px;
+                                spacing: 5px;
+
+                                Text {
+                                    text: "ELIGIBILITY";
+                                    color: VayrenPalette.text-bright;
+                                    font-size: 12px;
+                                    font-weight: 700;
+                                    height: 24px;
+                                    vertical-alignment: center;
+                                }
+                                Rectangle {
+                                    height: 30px;
+                                    border-radius: 4px;
+                                    background: LiveTone.chip(root.eligibility.final-tone);
+                                    border-width: 1px;
+                                    border-color: LiveTone.ink(root.eligibility.final-tone);
+                                    HorizontalLayout {
+                                        padding-left: 10px;
+                                        padding-right: 10px;
+                                        spacing: 6px;
+                                        alignment: center;
+                                        Text {
+                                            min-width: 0px;
+                                            text: root.eligibility.reported ? root.eligibility.final-label : "NOT REPORTED";
+                                            color: LiveTone.ink(root.eligibility.final-tone);
+                                            font-size: 13px;
+                                            font-weight: 800;
+                                            vertical-alignment: center;
+                                            overflow: elide;
+                                        }
+                                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                                        Text {
+                                            text: root.eligibility.enforcement ? "ENFORCING" : "ADVISORY";
+                                            color: VayrenPalette.muted;
+                                            font-size: 10px;
+                                            font-weight: 700;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+                                if root.eligibility.reported && root.eligibility.reason != "": Text {
+                                    min-width: 0px;
+                                    width: 100%;
+                                    text: root.eligibility.reason;
+                                    color: VayrenPalette.live-ink-dim;
+                                    font-size: 10px;
+                                    font-weight: 600;
+                                    wrap: word-wrap;
+                                }
+                                LiveGateRow {
+                                    name: "MARKET DATA";
+                                    status: root.eligibility.reported ? root.eligibility.market : "—";
+                                    tone: 0;
+                                    reason: "";
+                                    show-reason: false;
+                                }
+                                LiveGateRow {
+                                    name: "EXECUTION";
+                                    status: root.eligibility.reported ? root.eligibility.execution : "—";
+                                    tone: 0;
+                                    reason: "";
+                                    show-reason: false;
+                                }
+                                LiveGateRow {
+                                    name: "RISK";
+                                    status: root.eligibility.reported ? root.eligibility.risk : "—";
+                                    tone: 0;
+                                    reason: "";
+                                    show-reason: false;
+                                }
+                                Text {
+                                    min-width: 0px;
+                                    width: 100%;
+                                    text: root.eligibility.reported ? root.eligibility.strategy-counts : "No strategy verdicts reported.";
+                                    color: VayrenPalette.live-ink-dim;
+                                    font-size: 10px;
+                                    font-weight: 600;
+                                    wrap: word-wrap;
+                                }
+                                for erow in root.eligibility-rows: HorizontalLayout {
+                                    height: 18px;
+                                    spacing: 6px;
+                                    Text { width: 80px; text: erow.symbol; color: VayrenPalette.text; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 110px; text: erow.level; color: LiveTone.ink(erow.level-tone); font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
+                                    Text { horizontal-stretch: 1; min-width: 0px; text: erow.reasons; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
+                                }
+                            }
+                        }
+
                         // 3.4 SESSION FACTS
                         Rectangle {
                             min-height: 120px;
@@ -2229,7 +2383,7 @@ export component LiveScreen inherits Rectangle {
                                                 root.strategy-picked(root.strategy-names[Math.mod(root.strategy-selected + 1, root.strategy-names.length)]);
                                             }
                                         }
-                                        Text { text: root.selected-strategy + "  ▾"; color: root.setup.can-stop ? VayrenPalette.faint : VayrenPalette.text; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
+                                        Text { text: (root.strategy-selected >= 0 ? root.selected-strategy : "Select Strategy") + "  ▾"; color: root.setup.can-stop ? VayrenPalette.faint : VayrenPalette.text; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
                                     }
                                 }
                             }
