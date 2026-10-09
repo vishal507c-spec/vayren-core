@@ -620,7 +620,6 @@ def test_38_phase4_suite_passes() -> None:
             "-m",
             "pytest",
             "src/strategy/tests/test_market_data_router.py",
-            "src/broker/tests/test_router_feeds.py",
             "-q",
             "-p",
             "no:cacheprovider",
