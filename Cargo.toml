@@ -43,5 +43,9 @@ debug = 0
 opt-level = 3
 lto = false
 codegen-units = 16
+# Incremental release builds: only changed units recompile on rebuilds.
+# Zero effect on the shipped binary (same opt/LTO/codegen) — it purely
+# reuses prior codegen. First build after this pays full price once.
+incremental = true
 
 

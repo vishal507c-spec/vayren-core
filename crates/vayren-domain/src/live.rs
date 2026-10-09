@@ -638,6 +638,9 @@ pub struct LiveState {
     pub inspector_open: bool,
     /// Last action feedback note (arm/halt/mode refusals); never fabricated.
     pub action_note: Option<String>,
+    /// Unified eligibility facts (Phase-6/7 backend section). Unreported
+    /// until a snapshot carries it — the UI prints "NOT REPORTED".
+    pub eligibility: EligibilityFacts,
 }
 
 impl Default for LiveState {
@@ -722,6 +725,7 @@ impl Default for LiveState {
             // viewport cannot fit it beside the workspace.
             inspector_open: true,
             action_note: None,
+            eligibility: EligibilityFacts::default(),
         }
     }
 }
@@ -1134,6 +1138,13 @@ impl LiveState {
     pub fn select_strategy(&mut self, index: usize) {
         if index < self.strategies.len() {
             self.strategy_index = Some(index);
+            // Immediate visible switch: the newly selected strategy's rows
+            // arrive with the next backend snapshot, so the previous
+            // strategy's checks are cleared now rather than displayed as the
+            // new strategy's universe for a frame.
+            for pick in self.symbols.iter_mut() {
+                pick.checked = false;
+            }
             self.action_note = None;
             self.push_setup_action();
         }
@@ -1148,11 +1159,29 @@ impl LiveState {
     }
 
     pub fn toggle_symbol(&mut self, index: usize) {
+        // Universe configuration is disabled until a strategy is selected:
+        // a check with no owning strategy could never be saved anywhere
+        // honest, so it is refused here as well as in the backend.
+        if self.selected_strategy().is_none() {
+            return;
+        }
         if let Some(pick) = self.symbols.get_mut(index) {
             pick.checked = !pick.checked;
             self.action_note = None;
             self.push_setup_action();
         }
+    }
+
+    /// Explicit universe save: re-sends the current selection as a setup
+    /// action so the backend validates + persists it and the next snapshot
+    /// confirms. Toggles already auto-save; this is the operator's
+    /// deliberate "persist now" gesture with backend confirmation.
+    pub fn save_universe(&mut self) {
+        if self.selected_strategy().is_none() {
+            return;
+        }
+        self.action_note = None;
+        self.push_setup_action();
     }
 
     pub fn set_symbol_filter(&mut self, filter: &str) {
@@ -1406,6 +1435,93 @@ impl LiveState {
             self.lifecycle = value_to_text(list);
         }
 
+        // ── unified eligibility (Phase-6/7 backend section) ──
+        // The whole section is optional: older backends and degraded
+        // snapshots carry no eligibility, and the UI must print
+        // "NOT REPORTED" rather than invent a verdict. Every field below
+        // is backend text passed through verbatim.
+        if let Some(e) = v.get("eligibility").and_then(|e| e.as_object()) {
+            let mut facts = EligibilityFacts {
+                reported: true,
+                enforcement: e
+                    .get("enforcement")
+                    .and_then(|b| b.as_bool())
+                    .unwrap_or(false),
+                ..EligibilityFacts::default()
+            };
+            if let Some(system) = e.get("system").and_then(|s| s.as_object()) {
+                let final_label = map_str(system, "final");
+                facts.final_label = if final_label.is_empty() {
+                    "NOT REPORTED".into()
+                } else {
+                    final_label
+                };
+                facts.final_tone = match facts.final_label.as_str() {
+                    "TRADING_ALLOWED" => 1,
+                    "TRADING_BLOCKED" => 3,
+                    _ => 0,
+                };
+                facts.reason = map_str(system, "reason");
+                facts.market = map_str(system, "market_data");
+                if facts.market.is_empty() {
+                    facts.market = "—".into();
+                }
+                facts.execution = map_str(system, "execution");
+                if facts.execution.is_empty() {
+                    facts.execution = "—".into();
+                }
+                facts.risk = map_str(system, "risk");
+                if facts.risk.is_empty() {
+                    facts.risk = "—".into();
+                }
+            }
+            if let Some(strategy) = e.get("strategy").and_then(|s| s.as_object()) {
+                let total = strategy.get("TOTAL").and_then(|n| n.as_u64()).unwrap_or(0);
+                let ready = strategy.get("READY").and_then(|n| n.as_u64()).unwrap_or(0);
+                let blocked: u64 = ["BLOCKED", "RISK_BLOCKED", "EXECUTION_BLOCKED"]
+                    .iter()
+                    .map(|k| strategy.get(*k).and_then(|n| n.as_u64()).unwrap_or(0))
+                    .sum();
+                facts.strategy_line = format!("{ready} ready · {blocked} blocked · {total} total");
+            }
+            if let Some(instruments) = e.get("instruments").and_then(|i| i.as_object()) {
+                let mut rows: Vec<EligibilityRow> = instruments
+                    .iter()
+                    .map(|(symbol, entry)| {
+                        let level = str_of(entry, "level");
+                        let allowed = entry
+                            .get("allowed")
+                            .and_then(|a| a.as_bool())
+                            .unwrap_or(false);
+                        let reasons = entry
+                            .get("blocking_reasons")
+                            .and_then(|r| r.as_array())
+                            .map(|list| {
+                                list.iter()
+                                    .map(value_to_text)
+                                    .filter(|s| !s.is_empty())
+                                    .collect::<Vec<_>>()
+                                    .join("; ")
+                            })
+                            .unwrap_or_default();
+                        EligibilityRow {
+                            symbol: symbol.clone(),
+                            level: if level.is_empty() {
+                                "UNKNOWN".into()
+                            } else {
+                                level
+                            },
+                            allowed,
+                            reasons,
+                        }
+                    })
+                    .collect();
+                rows.sort_by(|a, b| a.symbol.cmp(&b.symbol));
+                facts.rows = rows;
+            }
+            self.eligibility = facts;
+        }
+
         // ── session setup (selection = service config, the single source) ──
         if let Some(list) = v.get("available_strategies").and_then(|a| a.as_array()) {
             let options: Vec<String> = list.iter().map(value_to_text).collect();
@@ -1418,10 +1534,19 @@ impl LiveState {
             .and_then(|s| s.get("id"))
             .and_then(|i| i.as_str())
             .map(str::to_string);
-        self.strategy_index = active_strategy
-            .as_deref()
-            .and_then(|name| self.strategies.iter().position(|s| s == name))
-            .or_else(|| self.strategy_index.filter(|i| *i < self.strategies.len()));
+        self.strategy_index = match active_strategy.as_deref() {
+            // A named strategy resolves against the option list; an unknown
+            // name keeps the previous in-range selection (list races the
+            // snapshot), while an EMPTY id is the backend's explicit "none
+            // selected" — a stale local selection is cleared, never retained.
+            Some(name) if !name.is_empty() => self
+                .strategies
+                .iter()
+                .position(|s| s == name)
+                .or_else(|| self.strategy_index.filter(|i| *i < self.strategies.len())),
+            Some(_) => None,
+            None => self.strategy_index.filter(|i| *i < self.strategies.len()),
+        };
         if let Some(list) = v.get("available_symbols").and_then(|a| a.as_array()) {
             let selected: Vec<String> = v
                 .get("selected_symbols")
@@ -1939,6 +2064,15 @@ fn str_vec_of(v: &serde_json::Value, key: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// `str_of` for an already-unwrapped JSON object (bridge sub-sections).
+fn map_str(map: &serde_json::Map<String, serde_json::Value>, key: &str) -> String {
+    match map.get(key) {
+        Some(serde_json::Value::String(s)) => s.clone(),
+        Some(serde_json::Value::Number(n)) => n.to_string(),
+        _ => String::new(),
+    }
+}
+
 /// Honest scalar rendering for bridge values (mirrors ui_kit.text).
 fn value_to_text(v: &serde_json::Value) -> String {
     match v {
@@ -2056,6 +2190,63 @@ pub struct GateRow {
     pub status: String,
     pub tone: i32,
     pub reason: String,
+}
+
+/// One instrument's eligibility verdict, exactly as the backend reported
+/// it (Phase-6 `eligibility_snapshot` "instruments" entries). Levels are
+/// backend words (`READY`, `STALE`, `BLOCKED`, …) — the projection only
+/// maps them to tones, it never re-derives or softens them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EligibilityRow {
+    pub symbol: String,
+    pub level: String,
+    pub allowed: bool,
+    pub reasons: String,
+}
+
+/// Unified eligibility facts (Phase-6/7 backend truth). `reported` is
+/// false until a snapshot actually carries the section — the UI then
+/// prints "NOT REPORTED", never a fabricated READY.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EligibilityFacts {
+    pub reported: bool,
+    pub final_label: String,
+    pub final_tone: i32,
+    pub reason: String,
+    pub market: String,
+    pub execution: String,
+    pub risk: String,
+    pub strategy_line: String,
+    pub enforcement: bool,
+    pub rows: Vec<EligibilityRow>,
+}
+
+impl Default for EligibilityFacts {
+    fn default() -> Self {
+        Self {
+            reported: false,
+            final_label: "NOT REPORTED".into(),
+            final_tone: 0,
+            reason: String::new(),
+            market: "—".into(),
+            execution: "—".into(),
+            risk: "—".into(),
+            strategy_line: "—".into(),
+            enforcement: false,
+            rows: Vec::new(),
+        }
+    }
+}
+
+/// Eligibility level → badge tone. Unknown words stay neutral (0) —
+/// an unread verdict is never painted as good or bad news.
+pub fn eligibility_tone(level: &str) -> i32 {
+    match level {
+        "READY" => 1,
+        "WAITING" | "STALE" | "DEGRADED" => 2,
+        "BLOCKED" | "UNAVAILABLE" | "RISK_BLOCKED" | "EXECUTION_BLOCKED" | "ERROR" => 3,
+        _ => 0,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -2257,6 +2448,10 @@ pub struct WatchlistRowView {
     pub pnl_tone: i32,
     pub last_update: String,
     pub selected: bool,
+    /// Backend eligibility verdict for this symbol, joined by display
+    /// symbol (`—` when the backend reported no verdict for the row).
+    pub eligibility: String,
+    pub eligibility_tone: i32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -2321,6 +2516,33 @@ pub struct FooterView {
     pub clock: String,
 }
 
+/// Unified eligibility panel (Phase-6/7 backend section, projected
+/// verbatim). When `reported` is false the screen prints the
+/// "NOT REPORTED" fallbacks — the projection invents no verdict.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EligibilityView {
+    pub reported: bool,
+    pub final_label: String,
+    pub final_tone: i32,
+    pub reason: String,
+    pub market: String,
+    pub execution: String,
+    pub risk: String,
+    pub strategy_counts: String,
+    pub enforcement: bool,
+    pub rows: Vec<EligibilityRowView>,
+}
+
+/// One instrument verdict row for the eligibility panel.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EligibilityRowView {
+    pub symbol: String,
+    pub level: String,
+    pub level_tone: i32,
+    pub allowed: bool,
+    pub reasons: String,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct LiveView {
     pub bar: BarView,
@@ -2354,6 +2576,7 @@ pub struct LiveView {
     pub active_strat: ActiveStrategyView,
     pub watchlist: Vec<WatchlistRowView>,
     pub selected_stock: StockDetailView,
+    pub eligibility: EligibilityView,
     pub footer: FooterView,
     pub filter_chip_selected: i32,
     pub filter_chip_counts: String,
@@ -2726,6 +2949,43 @@ fn account_rows(state: &LiveState) -> Vec<KvRow> {
     ]
 }
 
+/// Unified eligibility panel (Phase-6/7 backend section, verbatim).
+/// Unreported backends project the "NOT REPORTED" fallbacks — never a
+/// verdict the backend did not publish.
+fn eligibility_view(state: &LiveState) -> EligibilityView {
+    let facts = &state.eligibility;
+    EligibilityView {
+        reported: facts.reported,
+        final_label: if facts.reported {
+            facts.final_label.clone()
+        } else {
+            "NOT REPORTED".into()
+        },
+        final_tone: if facts.reported { facts.final_tone } else { 0 },
+        reason: facts.reason.clone(),
+        market: facts.market.clone(),
+        execution: facts.execution.clone(),
+        risk: facts.risk.clone(),
+        strategy_counts: facts.strategy_line.clone(),
+        enforcement: facts.enforcement,
+        rows: facts
+            .rows
+            .iter()
+            .map(|r| EligibilityRowView {
+                symbol: r.symbol.clone(),
+                level: r.level.clone(),
+                level_tone: eligibility_tone(&r.level),
+                allowed: r.allowed,
+                reasons: if r.reasons.is_empty() {
+                    "—".into()
+                } else {
+                    r.reasons.clone()
+                },
+            })
+            .collect(),
+    }
+}
+
 pub fn project(state: &LiveState) -> LiveView {
     // ── command bar ──
     // Card anatomy matches the terminal reference: small label (in Slint),
@@ -2937,18 +3197,16 @@ pub fn project(state: &LiveState) -> LiveView {
             lines
         },
         symbol_total: {
-            let strategy = state
-                .strategy_facts
-                .as_ref()
-                .map(|f| f.id.clone())
-                .filter(|id| !id.trim().is_empty())
-                .or_else(|| state.selected_strategy().map(str::to_string))
-                .unwrap_or_else(|| "—".into());
-            format!(
-                "{} symbols ({})",
-                state.store_total.unwrap_or(state.symbols.len()),
-                strategy
-            )
+            // Phase 1 strategy-first status: no selection names the required
+            // next step instead of a misleading generic count; a selection
+            // reports exactly how many symbols that strategy has configured.
+            match state.selected_strategy() {
+                None => "Select a strategy to configure symbols.".into(),
+                Some(_) => format!(
+                    "{} symbols configured",
+                    state.store_total.unwrap_or(state.symbols.len()),
+                ),
+            }
         },
         strategy_names: state.strategies.clone(),
         strategy_selected: state.strategy_index.map_or(-1, |i| i as i32),
@@ -3452,6 +3710,16 @@ pub fn project(state: &LiveState) -> LiveView {
         } else {
             "—".into()
         };
+        // ── eligibility join (backend verdict by display symbol) ──
+        // The backend keys verdicts by display symbol (`NSE:RELIANCE`);
+        // a row with no verdict renders "—", never an invented level.
+        let (elig_label, elig_tone) = state
+            .eligibility
+            .rows
+            .iter()
+            .find(|e| e.symbol == row.symbol || e.symbol == sym_disp)
+            .map(|e| (e.level.clone(), eligibility_tone(&e.level)))
+            .unwrap_or_else(|| ("—".into(), 0));
         let order_tone = match order_str.as_str() {
             "WORKING" | "SUBMITTING" => 2,
             "FILLED" => 1,
@@ -3542,6 +3810,8 @@ pub fn project(state: &LiveState) -> LiveView {
                 row.last_update.clone()
             },
             selected: is_selected,
+            eligibility: elig_label,
+            eligibility_tone: elig_tone,
         });
 
         row_idx += 1;
@@ -3906,6 +4176,7 @@ pub fn project(state: &LiveState) -> LiveView {
         active_strat,
         watchlist: watchlist_views,
         selected_stock,
+        eligibility: eligibility_view(state),
         footer,
         filter_chip_selected,
         filter_chip_counts,
@@ -4239,6 +4510,8 @@ mod tests {
     #[test]
     fn symbol_filter_and_toggle_use_real_indices() {
         let mut st = LiveState::default();
+        st.strategies = vec!["OBR".into()];
+        st.strategy_index = Some(0);
         st.symbols = "AAA,ABA,BB,REL,REL-JR"
             .split(',')
             .map(|s| SymbolPick {
@@ -4466,6 +4739,191 @@ mod tests {
         assert_eq!(st.orders[0].filled_qty, "—");
     }
 
+    fn eligibility_snapshot_fixture() -> serde_json::Value {
+        serde_json::json!({
+            "eligibility": {
+                "system": {
+                    "final": "TRADING_BLOCKED",
+                    "reason": "RISK_NOT_READY",
+                    "market_data": "READY",
+                    "execution": "DEGRADED",
+                    "risk": "NOT READY",
+                },
+                "strategy": {"TOTAL": 3, "READY": 1, "BLOCKED": 1, "RISK_BLOCKED": 1},
+                "instruments": {
+                    "NSE:RELIANCE": {"level": "READY", "allowed": true, "blocking_reasons": []},
+                    "NSE:TCS": {"level": "STALE", "allowed": false, "blocking_reasons": ["MARKET_DATA_STALE"]},
+                },
+                "enforcement": true,
+            },
+        })
+    }
+
+    #[test]
+    fn eligibility_snapshot_ingests_backend_verdict_verbatim() {
+        let mut st = configured(LiveState::default());
+        st.apply_snapshot(&eligibility_snapshot_fixture());
+        let facts = &st.eligibility;
+        assert!(facts.reported);
+        assert_eq!(facts.final_label, "TRADING_BLOCKED");
+        assert_eq!(facts.final_tone, 3);
+        assert_eq!(facts.reason, "RISK_NOT_READY");
+        assert_eq!(facts.market, "READY");
+        assert_eq!(facts.execution, "DEGRADED");
+        assert_eq!(facts.risk, "NOT READY");
+        assert_eq!(facts.strategy_line, "1 ready · 2 blocked · 3 total");
+        assert!(facts.enforcement);
+        assert_eq!(facts.rows.len(), 2);
+        // Rows sort by symbol for a stable panel order.
+        assert_eq!(facts.rows[0].symbol, "NSE:RELIANCE");
+        assert_eq!(facts.rows[0].level, "READY");
+        assert!(facts.rows[0].allowed);
+        assert_eq!(facts.rows[1].symbol, "NSE:TCS");
+        assert!(!facts.rows[1].allowed);
+        assert_eq!(facts.rows[1].reasons, "MARKET_DATA_STALE");
+    }
+
+    #[test]
+    fn eligibility_missing_section_never_fakes_ready() {
+        // No section at all: unreported, neutral tone, dash fallbacks.
+        let mut st = configured(LiveState::default());
+        st.apply_snapshot(&serde_json::json!({"mode": "PAPER"}));
+        assert!(!st.eligibility.reported);
+        let view = project(&st);
+        assert!(!view.eligibility.reported);
+        assert_eq!(view.eligibility.final_label, "NOT REPORTED");
+        assert_eq!(view.eligibility.final_tone, 0);
+        // A section without the system block still reports (partial truth),
+        // with missing fields as dashes — never invented verdicts.
+        st.apply_snapshot(&serde_json::json!({"eligibility": {"enforcement": false}}));
+        assert!(st.eligibility.reported);
+        assert_eq!(st.eligibility.final_label, "NOT REPORTED");
+        assert_eq!(st.eligibility.market, "—");
+        assert_eq!(st.eligibility.rows.len(), 0);
+    }
+
+    #[test]
+    fn eligibility_unknown_levels_stay_neutral() {
+        assert_eq!(eligibility_tone("READY"), 1);
+        assert_eq!(eligibility_tone("WAITING"), 2);
+        assert_eq!(eligibility_tone("STALE"), 2);
+        assert_eq!(eligibility_tone("BLOCKED"), 3);
+        assert_eq!(eligibility_tone("UNAVAILABLE"), 3);
+        assert_eq!(eligibility_tone("RISK_BLOCKED"), 3);
+        assert_eq!(eligibility_tone("EXECUTION_BLOCKED"), 3);
+        assert_eq!(eligibility_tone("SOMETHING_NEW"), 0);
+        assert_eq!(eligibility_tone(""), 0);
+    }
+
+    #[test]
+    fn eligibility_allowed_verdict_projects_trading_allowed() {
+        let mut st = configured(LiveState::default());
+        st.apply_snapshot(&serde_json::json!({
+            "eligibility": {
+                "system": {"final": "TRADING_ALLOWED", "reason": "all subsystems ready",
+                           "market_data": "READY", "execution": "READY", "risk": "READY"},
+                "strategy": {"TOTAL": 1, "READY": 1},
+                "instruments": {
+                    "NSE:RELIANCE": {"level": "READY", "allowed": true, "blocking_reasons": []},
+                },
+                "enforcement": false,
+            },
+        }));
+        let view = project(&st);
+        assert_eq!(view.eligibility.final_label, "TRADING_ALLOWED");
+        assert_eq!(view.eligibility.final_tone, 1);
+        assert_eq!(view.eligibility.rows.len(), 1);
+        assert_eq!(view.eligibility.rows[0].level_tone, 1);
+        assert!(view.eligibility.rows[0].allowed);
+        assert_eq!(view.eligibility.rows[0].reasons, "—");
+    }
+
+    fn watchlist_row_fixture(symbol: &str) -> WatchlistStockRow {
+        WatchlistStockRow {
+            symbol: symbol.into(),
+            clean_symbol: symbol.replace("NSE:", ""),
+            ltp: Some(2500.0),
+            change_pct: Some(1.0),
+            ref_high: None,
+            ref_low: None,
+            break_low: None,
+            entry_price: None,
+            stop_price: None,
+            risk_per_share: None,
+            qty: None,
+            planned_risk: None,
+            risk_util: None,
+            position: String::new(),
+            status: "AVAILABLE".into(),
+            signal: String::new(),
+            order: None,
+            pnl: None,
+            last_update: String::new(),
+        }
+    }
+
+    #[test]
+    fn eligibility_joins_watchlist_rows_by_symbol() {
+        let mut st = configured(LiveState::default());
+        st.watchlist_rows = vec![
+            watchlist_row_fixture("NSE:RELIANCE"),
+            watchlist_row_fixture("NSE:INFY"),
+        ];
+        st.apply_snapshot(&eligibility_snapshot_fixture());
+        let view = project(&st);
+        let reliance = view
+            .watchlist
+            .iter()
+            .find(|r| r.symbol == "RELIANCE")
+            .unwrap();
+        assert_eq!(reliance.eligibility, "READY");
+        assert_eq!(reliance.eligibility_tone, 1);
+        let tcs = view.watchlist.iter().find(|r| r.symbol == "TCS");
+        // TCS has a verdict but no quote row; INFY has a quote row but no
+        // verdict — the join covers exactly what the backend reported.
+        assert!(tcs.is_none());
+        let infy = view.watchlist.iter().find(|r| r.symbol == "INFY").unwrap();
+        assert_eq!(infy.eligibility, "—");
+        assert_eq!(infy.eligibility_tone, 0);
+    }
+
+    #[test]
+    fn eligibility_scales_past_fifty_instruments() {
+        let mut instruments = serde_json::Map::new();
+        for i in 0..60 {
+            instruments.insert(
+                format!("NSE:SYM{i:03}"),
+                serde_json::json!({
+                    "level": if i % 2 == 0 { "READY" } else { "BLOCKED" },
+                    "allowed": i % 2 == 0,
+                    "blocking_reasons": if i % 2 == 0 {
+                        Vec::<&str>::new()
+                    } else {
+                        vec!["BROKER_NOT_READY"]
+                    },
+                }),
+            );
+        }
+        let mut st = configured(LiveState::default());
+        st.apply_snapshot(&serde_json::json!({
+            "eligibility": {
+                "system": {"final": "TRADING_BLOCKED", "reason": "BROKER_NOT_READY",
+                           "market_data": "READY", "execution": "DEGRADED", "risk": "READY"},
+                "strategy": {"TOTAL": 60, "READY": 30, "BLOCKED": 30},
+                "instruments": instruments,
+                "enforcement": true,
+            },
+        }));
+        assert_eq!(st.eligibility.rows.len(), 60);
+        let view = project(&st);
+        assert_eq!(view.eligibility.rows.len(), 60);
+        assert_eq!(view.eligibility.rows[0].symbol, "NSE:SYM000");
+        assert_eq!(
+            view.eligibility.strategy_counts,
+            "30 ready · 30 blocked · 60 total"
+        );
+    }
+
     #[test]
     fn money_and_text_renderings_match_the_terminal_conventions() {
         assert_eq!(money(123.456), "+123.46");
@@ -4576,6 +5034,90 @@ mod tests {
         let action: serde_json::Value = serde_json::from_str(&st.take_action().unwrap()).unwrap();
         assert_eq!(action["mode"], "LIVE");
         assert_eq!(action["action"], "mode");
+    }
+
+    #[test]
+    fn toggle_without_strategy_is_disabled() {
+        // Phase 1: no selection means no universe configuration — the
+        // toggle is refused locally (no flipped check, no host action) and
+        // the explicit save is a matching no-op.
+        let mut st = LiveState::default();
+        st.host_mode = true;
+        st.symbols = vec![SymbolPick {
+            symbol: "NSE:RELIANCE".into(),
+            checked: false,
+            ltp: None,
+            change_pct: None,
+            in_store: true,
+        }];
+        st.toggle_symbol(0);
+        assert!(!st.symbols[0].checked);
+        assert!(st.take_action().is_none());
+        st.save_universe();
+        assert!(st.take_action().is_none());
+    }
+
+    #[test]
+    fn select_strategy_clears_stale_checks_and_forwards() {
+        // Switching strategies must never display — or forward — the
+        // previous strategy's checks as the new strategy's universe.
+        let mut st = LiveState::default();
+        st.host_mode = true;
+        st.strategies = vec!["Strategy A".into(), "Strategy B".into()];
+        st.strategy_index = Some(0);
+        st.symbols = vec![
+            SymbolPick {
+                symbol: "NSE:RELIANCE".into(),
+                checked: true,
+                ltp: None,
+                change_pct: None,
+                in_store: true,
+            },
+            SymbolPick {
+                symbol: "NSE:TCS".into(),
+                checked: false,
+                ltp: None,
+                change_pct: None,
+                in_store: true,
+            },
+        ];
+        st.select_strategy(1);
+        assert_eq!(st.selected_strategy(), Some("Strategy B"));
+        assert!(st.symbols.iter().all(|s| !s.checked));
+        let action: serde_json::Value = serde_json::from_str(&st.take_action().unwrap()).unwrap();
+        assert_eq!(action["action"], "setup");
+        assert_eq!(action["strategy_name"], "Strategy B");
+        assert_eq!(action["symbols"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn save_universe_reconfirms_current_selection() {
+        let mut st = configured(LiveState::default());
+        st.host_mode = true;
+        st.save_universe();
+        let action: serde_json::Value = serde_json::from_str(&st.take_action().unwrap()).unwrap();
+        assert_eq!(action["action"], "setup");
+        assert_eq!(action["strategy_name"], "OBR");
+        assert_eq!(action["symbols"], serde_json::json!(["RELIANCE"]));
+    }
+
+    #[test]
+    fn empty_strategy_id_clears_stale_selection() {
+        // The backend's "" is an explicit "none selected": a stale local
+        // selection is cleared and the status names the required next step.
+        let mut st = configured(LiveState::default());
+        st.apply_snapshot(&serde_json::json!({
+            "strategy": {"id": ""},
+            "available_strategies": ["OBR"],
+            "available_symbols": [],
+            "selected_symbols": [],
+        }));
+        assert!(st.selected_strategy().is_none());
+        let view = project(&st);
+        assert_eq!(
+            view.setup.symbol_total,
+            "Select a strategy to configure symbols."
+        );
     }
 
     #[test]
@@ -4693,7 +5235,10 @@ mod tests {
             .find(|r| r.key == "CAPITAL SOURCE")
             .unwrap();
         assert_eq!(source.value, "BROKER (VENUE)");
-        assert_eq!(view.setup.symbol_total, "2 symbols (—)");
+        assert_eq!(
+            view.setup.symbol_total,
+            "Select a strategy to configure symbols."
+        );
         assert_eq!(view.events.len(), 1);
     }
 
@@ -4893,8 +5438,8 @@ mod tests {
         assert_eq!(view.positions[0].pnl_pct, "+0.44%");
         // Market card carries the backend poll clock.
         assert_eq!(view.market.updated_label, "10:28:42");
-        // Watchlist header names the universe strategy.
-        assert_eq!(view.setup.symbol_total, "1 symbols (OBR C1C4)");
+        // Watchlist header names the configured count for the strategy.
+        assert_eq!(view.setup.symbol_total, "1 symbols configured");
     }
 
     #[test]

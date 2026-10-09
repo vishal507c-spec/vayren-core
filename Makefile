@@ -25,7 +25,8 @@ fast:
 
 check-fast:
 	ruff check .
-	cargo check --workspace
+	cargo check --workspace --exclude vayren-shell
+	cargo check -p vayren-shell --lib
 	python tools/validate_imports.py
 	python tools/validate_structure.py
 	python tools/validate_language_ownership.py

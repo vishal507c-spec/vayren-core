@@ -178,6 +178,7 @@ class LiveSession:
         provider: MarketDataProvider,
         risk_policy: RiskPolicy | None = None,
         request_id: str = "live-1",
+        order_gate: Callable[[Any, Any], str | None] | None = None,
     ) -> None:
         if risk_policy is None:
             risk_policy = RiskPolicy()
@@ -202,6 +203,11 @@ class LiveSession:
         self._contexts: dict[str, StrategyContext] = {}
         self._registrations: dict[str, StrategyRegistration] = {}
         self._broker: BrokerAdapter | None = None
+        # Phase-7 eligibility gate (optional, app-wired): called with
+        # (intent, plan) after every existing gate and before ORDER_PLANNED.
+        # Returns None to allow or a refusal reason to block. A raising gate
+        # fails closed at the call site — the tick loop never sees it.
+        self._order_gate = order_gate
         self._mode = ExecutionMode.PAPER
         self._armed = LiveArm.DISARMED
         self._broker_calls = 0
@@ -750,6 +756,22 @@ class LiveSession:
                     "RISK_DENIED", intent_id=intent.intent_id, reasons=[gate_reason]
                 )
                 self._emit(RiskDenied(self._request_id, intent.intent_id, (gate_reason,)))
+                return
+        if self._order_gate is not None:
+            # Phase-7 unified eligibility: the verdict aggregates subsystem
+            # truth (strategy/universe/market-data/risk/execution/safety).
+            # A refusal (or a gate fault — fail-closed) blocks here, after
+            # every existing gate and before anything is planned or sent.
+            # Protective stops bypass this hook (separate path, always).
+            try:
+                gate_reason = self._order_gate(intent, plan)
+            except Exception as exc:  # noqa: BLE001
+                gate_reason = f"eligibility evaluation failed: {exc}"
+            if gate_reason:
+                self._journal.record(
+                    "ORDER_REJECTED", intent_id=intent.intent_id, reason=gate_reason
+                )
+                self._emit(OrderRejected(self._request_id, client_order_id, gate_reason))
                 return
         self._journal.record(
             "ORDER_PLANNED",

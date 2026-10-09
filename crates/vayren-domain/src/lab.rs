@@ -4403,6 +4403,74 @@ mod tests {
     }
 
     #[test]
+    fn rank_window_first_anchors_every_visible_row() {
+        // The Slint row band positions each row at
+        // `header + (first + rindex) * row_h - scroll_px`: `rindex` is
+        // band-relative while `scroll_px` is dataset-absolute, so the band's
+        // `first` dataset index MUST anchor the row — without it every
+        // scrolled row sits `first * row_h` too high and a deep scroll
+        // renders a blank table. This test pins the data side of that
+        // contract at EVERY scroll offset: rendered row `rindex` always
+        // carries dataset index `first + rindex`, and the first rendered
+        // row always sits at or just above the header.
+        let mut st = state_with_obr();
+        st.select(0);
+        st.engine_wired = true;
+        st.rank_desc = true;
+        st.rankby_labels = vec!["Net P&L".into()];
+        st.apply_result(LabResults {
+            ranking: (0..200)
+                .map(|i| RankRow {
+                    rank: (i + 1).to_string(),
+                    symbol: format!("SYM{i:03}"),
+                    pnl: format!("₹{}", i),
+                    ret: "+1.00%".into(),
+                    trades: "1".into(),
+                    win: "50.0%".into(),
+                    pf: "1.00".into(),
+                    dd: "-1.00%".into(),
+                    sharpe: "0.00".into(),
+                    pnl_tone: Tone::Positive,
+                    pf_tone: Tone::Neutral,
+                    unranked: false,
+                    sort: [i as f64, 1.0, 1.0, 50.0, 1.0, 1.0, 0.0],
+                })
+                .collect(),
+            ..LabResults::default()
+        });
+        // Descending net P&L over ascending keys: SYM199 first, SYM000 last.
+        let header = 50.0;
+        let max = st.rank.max_scroll();
+        assert!(max > 0.0, "fixture must be scrollable");
+        let mut px = 0.0;
+        while px <= max {
+            st.interaction_rank_scroll_to(px);
+            let view = project(&st);
+            let w = &view.rank_window;
+            assert_eq!(
+                view.ranking.len(),
+                w.count as usize,
+                "scroll {px}: model length must equal the window count"
+            );
+            assert!(!view.ranking.is_empty(), "scroll {px}: band must have rows");
+            for (rindex, row) in view.ranking.iter().enumerate() {
+                let dataset = (w.first as usize) + rindex;
+                assert_eq!(
+                    row.symbol,
+                    format!("SYM{:03}", 199 - dataset),
+                    "scroll {px}: rendered row {rindex} must carry dataset index {dataset}"
+                );
+            }
+            let first_y = header + (w.first as f32) * w.row_h - w.scroll_px;
+            assert!(
+                first_y <= header + 0.001,
+                "scroll {px}: first rendered row at {first_y} floats below the {header} header"
+            );
+            px += 7.0;
+        }
+    }
+
+    #[test]
     fn rank_pick_opens_the_inspector_from_the_row_itself() {
         let mut st = state_with_obr();
         st.select(0);

@@ -20,16 +20,17 @@ use crate::{
     AppWindow, BrokerCheckRow, BrokerRowView, CapabilityRowView, CredentialFieldView, DlCalDay,
     DlCredField, DlPlan, DlStatus, DlStock, LabBoardCell, LabCheckData, LabDetailMetric, LabHeader,
     LabKpi, LabLibraryRow, LabMatrixRow, LabParam, LabPoint, LabPreset, LabRankRow, LabTradeMetric,
-    LabTradeRow, LiveActiveStrategy, LiveBar, LiveEventRow, LiveFill, LiveFooter, LiveGate, LiveKv,
-    LiveMarket, LiveMarketData, LiveOrder, LivePipelineStep, LivePosition, LiveRemoteGateway,
-    LiveSelectedStock, LiveSetup, LiveStat, LiveSymbolRow, LiveWatchlistRow, LiveWebSocket,
-    MarketCandle, MarketIndicator, MarketMarker, MarketPlotSeg, MarketPopupRow, MarketRayLevel,
-    MarketSettingsRow, MarketStatusRow, MarketTick, MarketTimeframe, MarketTradeContext,
-    MarketWatchRow, PortfolioAlloc, PortfolioFill, PortfolioGate, PortfolioKpi, PortfolioOrder,
-    PortfolioPosition, PortfolioRisk, ProgressStepView, RankWindow, ResearchCompareRow,
-    ResearchConfigGroup, ResearchEvidenceDim, ResearchEvidenceWhy, ResearchExperimentRow,
-    ResearchField, ResearchKv, ResearchKvGroup, ResearchMetric, ResearchRobustRow,
-    ResearchSignalRow, ResearchStrategyRow, ResearchTradeRow, ShellScreen,
+    LabTradeRow, LiveActiveStrategy, LiveBar, LiveEligibility, LiveEligibilityRow, LiveEventRow,
+    LiveFill, LiveFooter, LiveGate, LiveKv, LiveMarket, LiveMarketData, LiveOrder,
+    LivePipelineStep, LivePosition, LiveRemoteGateway, LiveSelectedStock, LiveSetup, LiveStat,
+    LiveSymbolRow, LiveWatchlistRow, LiveWebSocket, MarketCandle, MarketIndicator, MarketMarker,
+    MarketPlotSeg, MarketPopupRow, MarketRayLevel, MarketSettingsRow, MarketStatusRow, MarketTick,
+    MarketTimeframe, MarketTradeContext, MarketWatchRow, PortfolioAlloc, PortfolioFill,
+    PortfolioGate, PortfolioKpi, PortfolioOrder, PortfolioPosition, PortfolioRisk,
+    ProgressStepView, RankWindow, ResearchCompareRow, ResearchConfigGroup, ResearchEvidenceDim,
+    ResearchEvidenceWhy, ResearchExperimentRow, ResearchField, ResearchKv, ResearchKvGroup,
+    ResearchMetric, ResearchRobustRow, ResearchSignalRow, ResearchStrategyRow, ResearchTradeRow,
+    ShellScreen,
 };
 use slint::ComponentHandle;
 #[cfg(test)]
@@ -1341,8 +1342,147 @@ pub fn wire_zoom(ui: &AppWindow, zoom: Rc<RefCell<ChartViewportZoom>>) {
 /// value comes from `LabState` (selection, mode, results) — the screen never
 /// infers state, so a selected strategy can never coexist with a
 /// "no strategy" workspace.
+/// Ranking-band-only sync for the scroll path (`spec §8`).
+///
+/// A scroll notch moves the virtual window and nothing else: the library,
+/// KPIs, presets, equity curve and inspector cannot change under a scroll,
+/// so pushing their models per notch is pure Slint churn (re-instantiated
+/// rows + full relayout on every wheel tick — the ranking lag). The window
+/// prop refreshes every notch by design (scroll-px/thumb move); the row
+/// model keeps the signature guard, so a within-band scroll repaints
+/// without rebuilding a single row element.
+///
+/// Clone-based (`&LabView`): a full band is ~40 rows x 9 cells, i.e.
+/// microseconds next to a frame — and one implementation serves both the
+/// full sync below and the scroll fast path, so they cannot drift apart.
+fn push_lab_rank_band(ui: &AppWindow, view: &lab::LabView) {
+    // Signature of the band the UI currently shows — captured BEFORE the window
+    // prop is overwritten, so the model-push guard below compares against what
+    // is really on screen. Both halves are compared: hi alone collides.
+    let rendered = {
+        let w = ui.get_lab_rank_window();
+        (w.signature_hi, w.signature_lo)
+    };
+    ui.set_lab_rank_window(RankWindow {
+        total: view.rank_window.total,
+        first: view.rank_window.first,
+        count: view.rank_window.count,
+        row_h: view.rank_window.row_h as f32,
+        viewport_h: view.rank_window.viewport_h as f32,
+        scroll_px: view.rank_window.scroll_px as f32,
+        max_scroll_px: view.rank_window.max_scroll_px as f32,
+        thumb_h: view.rank_window.thumb_h as f32,
+        thumb_y: view.rank_window.thumb_y as f32,
+        scrollable: view.rank_window.scrollable,
+        signature_hi: view.rank_window.signature.0,
+        signature_lo: view.rank_window.signature.1,
+        overscan: view.rank_window.overscan,
+    });
+    // Zero full-table re-render (`spec §3`): the ranking band is a virtual
+    // window, and an unrelated state change (a KPI, a code edit, a hover) must
+    // not rebuild its model. The Rust side signs the band; an equal signature
+    // means the rows on screen are already correct.
+    if rendered != view.rank_window.signature {
+        ui.set_lab_ranking(
+            Rc::new(slint::VecModel::from(
+                view.ranking
+                    .iter()
+                    .map(|r| LabRankRow {
+                        rank: r.rank.clone().into(),
+                        symbol: r.symbol.clone().into(),
+                        pnl: r.pnl.clone().into(),
+                        ret: r.ret.clone().into(),
+                        trades: r.trades.clone().into(),
+                        win: r.win.clone().into(),
+                        pf: r.pf.clone().into(),
+                        dd: r.dd.clone().into(),
+                        sharpe: r.sharpe.clone().into(),
+                        pnl_tone: r.pnl_tone.cell(),
+                        pf_tone: r.pf_tone.cell(),
+                        unranked: r.unranked,
+                    })
+                    .collect::<Vec<_>>(),
+            ))
+            .into(),
+        );
+    }
+}
+
+/// Trade-band-only sync for the blotter scroll path (same contract as the
+/// ranking band above: window prop always, row model only on signature
+/// change).
+fn push_lab_trade_band(ui: &AppWindow, view: &lab::LabView) {
+    // Signature of the trade band the UI currently shows — captured BEFORE the
+    // window prop is overwritten, so the guard below compares against the truth.
+    let rendered = {
+        let w = ui.get_lab_trade_window();
+        (w.signature_hi, w.signature_lo)
+    };
+    ui.set_lab_trade_window(RankWindow {
+        total: view.trade_window.total,
+        first: view.trade_window.first,
+        count: view.trade_window.count,
+        row_h: view.trade_window.row_h as f32,
+        viewport_h: view.trade_window.viewport_h as f32,
+        scroll_px: view.trade_window.scroll_px as f32,
+        max_scroll_px: view.trade_window.max_scroll_px as f32,
+        thumb_h: view.trade_window.thumb_h as f32,
+        thumb_y: view.trade_window.thumb_y as f32,
+        scrollable: view.trade_window.scrollable,
+        signature_hi: view.trade_window.signature.0,
+        signature_lo: view.trade_window.signature.1,
+        overscan: view.trade_window.overscan,
+    });
+    // Zero full-table re-render for the blotter (`spec §3`): same signature
+    // guard as the ranking grid, so a KPI change or a code edit never rebuilds
+    // the trade model.
+    if rendered != view.trade_window.signature {
+        ui.set_lab_trades(
+            Rc::new(slint::VecModel::from(
+                view.trades
+                    .iter()
+                    .map(|t| LabTradeRow {
+                        no: t.no.clone().into(),
+                        abs_index: t.abs_index,
+                        symbol: t.symbol.clone().into(),
+                        side: t.side.clone().into(),
+                        entry: t.entry.clone().into(),
+                        entry_px: t.entry_px.clone().into(),
+                        exit: t.exit.clone().into(),
+                        exit_px: t.exit_px.clone().into(),
+                        pnl: t.pnl.clone().into(),
+                        r: t.r.clone().into(),
+                        bars: t.bars.clone().into(),
+                        reason: t.reason.clone().into(),
+                        pnl_tone: t.pnl_tone.cell(),
+                        selected: t.selected,
+                    })
+                    .collect::<Vec<_>>(),
+            ))
+            .into(),
+        );
+    }
+}
+
+/// Scroll-only entry points: project (sub-millisecond) plus the one band
+/// that moved. Everything else on screen is untouched by construction.
+pub fn apply_lab_rank_scroll(ui: &AppWindow, state: &LabState) {
+    let view = lab::project(state);
+    push_lab_rank_band(ui, &view);
+}
+
+pub fn apply_lab_trade_scroll(ui: &AppWindow, state: &LabState) {
+    let view = lab::project(state);
+    push_lab_trade_band(ui, &view);
+}
+
 pub fn apply_lab(ui: &AppWindow, state: &LabState) {
     let view = lab::project(state);
+    // Bands first: the helpers borrow `view`, and the header below moves
+    // most of its fields — a borrow after any move would not compile.
+    // Slint applies every set in the same frame, so order is invisible.
+    push_lab_rank_band(ui, &view);
+    push_lab_trade_band(ui, &view);
     ui.set_lab(LabHeader {
         has_strategy: view.has_strategy,
         name: view.name.into(),
@@ -1521,49 +1661,6 @@ pub fn apply_lab(ui: &AppWindow, state: &LabState) {
         prog_long: view.prog_long,
         prog_watchdog: view.prog_watchdog.into(),
     });
-    // Signature of the band the UI currently shows — captured BEFORE the window
-    // prop is overwritten, so the model-push guard below compares against what
-    // is really on screen. Both halves are compared: hi alone collides.
-    let rendered_rank_signature = {
-        let w = ui.get_lab_rank_window();
-        (w.signature_hi, w.signature_lo)
-    };
-    ui.set_lab_rank_window(RankWindow {
-        total: view.rank_window.total,
-        first: view.rank_window.first,
-        count: view.rank_window.count,
-        row_h: view.rank_window.row_h as f32,
-        viewport_h: view.rank_window.viewport_h as f32,
-        scroll_px: view.rank_window.scroll_px as f32,
-        max_scroll_px: view.rank_window.max_scroll_px as f32,
-        thumb_h: view.rank_window.thumb_h as f32,
-        thumb_y: view.rank_window.thumb_y as f32,
-        scrollable: view.rank_window.scrollable,
-        signature_hi: view.rank_window.signature.0,
-        signature_lo: view.rank_window.signature.1,
-        overscan: view.rank_window.overscan,
-    });
-    // Signature of the trade band the UI currently shows — captured BEFORE the
-    // window prop is overwritten, so the guard below compares against the truth.
-    let rendered_trade_signature = {
-        let w = ui.get_lab_trade_window();
-        (w.signature_hi, w.signature_lo)
-    };
-    ui.set_lab_trade_window(RankWindow {
-        total: view.trade_window.total,
-        first: view.trade_window.first,
-        count: view.trade_window.count,
-        row_h: view.trade_window.row_h as f32,
-        viewport_h: view.trade_window.viewport_h as f32,
-        scroll_px: view.trade_window.scroll_px as f32,
-        max_scroll_px: view.trade_window.max_scroll_px as f32,
-        thumb_h: view.trade_window.thumb_h as f32,
-        thumb_y: view.trade_window.thumb_y as f32,
-        scrollable: view.trade_window.scrollable,
-        signature_hi: view.trade_window.signature.0,
-        signature_lo: view.trade_window.signature.1,
-        overscan: view.trade_window.overscan,
-    });
     ui.set_lab_date_presets(
         Rc::new(slint::VecModel::from(
             view.date_presets
@@ -1619,63 +1716,6 @@ pub fn apply_lab(ui: &AppWindow, state: &LabState) {
         ))
         .into(),
     );
-    // Zero full-table re-render (`spec §3`): the ranking band is a virtual
-    // window, and an unrelated state change (a KPI, a code edit, a hover) must
-    // not rebuild its model. The Rust side signs the band; an equal signature
-    // means the rows on screen are already correct.
-    if rendered_rank_signature != view.rank_window.signature {
-        ui.set_lab_ranking(
-            Rc::new(slint::VecModel::from(
-                view.ranking
-                    .into_iter()
-                    .map(|r| LabRankRow {
-                        rank: r.rank.into(),
-                        symbol: r.symbol.into(),
-                        pnl: r.pnl.into(),
-                        ret: r.ret.into(),
-                        trades: r.trades.into(),
-                        win: r.win.into(),
-                        pf: r.pf.into(),
-                        dd: r.dd.into(),
-                        sharpe: r.sharpe.into(),
-                        pnl_tone: r.pnl_tone.cell(),
-                        pf_tone: r.pf_tone.cell(),
-                        unranked: r.unranked,
-                    })
-                    .collect::<Vec<_>>(),
-            ))
-            .into(),
-        );
-    }
-    // Zero full-table re-render for the blotter (`spec §3`): same signature
-    // guard as the ranking grid, so a KPI change or a code edit never rebuilds
-    // the trade model.
-    if rendered_trade_signature != view.trade_window.signature {
-        ui.set_lab_trades(
-            Rc::new(slint::VecModel::from(
-                view.trades
-                    .into_iter()
-                    .map(|t| LabTradeRow {
-                        no: t.no.into(),
-                        abs_index: t.abs_index,
-                        symbol: t.symbol.into(),
-                        side: t.side.into(),
-                        entry: t.entry.into(),
-                        entry_px: t.entry_px.into(),
-                        exit: t.exit.into(),
-                        exit_px: t.exit_px.into(),
-                        pnl: t.pnl.into(),
-                        r: t.r.into(),
-                        bars: t.bars.into(),
-                        reason: t.reason.into(),
-                        pnl_tone: t.pnl_tone.cell(),
-                        selected: t.selected,
-                    })
-                    .collect::<Vec<_>>(),
-            ))
-            .into(),
-        );
-    }
     // view coordinates scaled to the fixed 1000x300 chart box (presentation
     // transform only — the engine data itself is untouched).
     let to_points = |series: &Vec<(f32, f32)>| -> Vec<LabPoint> {
@@ -2213,7 +2253,7 @@ pub fn wire_lab(
         s.interaction_trade_pick(i);
     }));
     // Trade blotter surface. The scroll binding is the hot path, so it stays a
-    // bare borrow + `apply_lab` — no allocation, no formatting (`spec §19`).
+    // bare borrow + band-only sync — no allocation, no formatting (`spec §19`).
     {
         let strong = state.clone();
         let handle = ui.as_weak();
@@ -2223,7 +2263,7 @@ pub fn wire_lab(
                 guard.interaction_trade_scroll(px);
             }
             if let Some(ui) = handle.upgrade() {
-                apply_lab(&ui, &strong.borrow());
+                apply_lab_trade_scroll(&ui, &strong.borrow());
             }
         });
     }
@@ -2236,7 +2276,7 @@ pub fn wire_lab(
                 guard.interaction_trade_viewport(height);
             }
             if let Some(ui) = handle.upgrade() {
-                apply_lab(&ui, &strong.borrow());
+                apply_lab_trade_scroll(&ui, &strong.borrow());
             }
         });
     }
@@ -2359,7 +2399,7 @@ pub fn wire_lab(
                 guard.interaction_rank_scroll(px);
             }
             if let Some(ui) = handle.upgrade() {
-                apply_lab(&ui, &strong.borrow());
+                apply_lab_rank_scroll(&ui, &strong.borrow());
             }
         });
     }
@@ -2372,7 +2412,7 @@ pub fn wire_lab(
                 guard.interaction_rank_scroll_to(px);
             }
             if let Some(ui) = handle.upgrade() {
-                apply_lab(&ui, &strong.borrow());
+                apply_lab_rank_scroll(&ui, &strong.borrow());
             }
         });
     }
@@ -2385,7 +2425,7 @@ pub fn wire_lab(
                 guard.interaction_rank_viewport(height);
             }
             if let Some(ui) = handle.upgrade() {
-                apply_lab(&ui, &strong.borrow());
+                apply_lab_rank_scroll(&ui, &strong.borrow());
             }
         });
     }
@@ -3603,6 +3643,35 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
                     pnl_tone: r.pnl_tone,
                     last_update: r.last_update.into(),
                     selected: r.selected,
+                    eligibility: r.eligibility.into(),
+                    eligibility_tone: r.eligibility_tone,
+                })
+                .collect::<Vec<_>>(),
+        ))
+        .into(),
+    );
+    ui.set_live_eligibility(LiveEligibility {
+        reported: view.eligibility.reported,
+        final_label: view.eligibility.final_label.into(),
+        final_tone: view.eligibility.final_tone,
+        reason: view.eligibility.reason.into(),
+        market: view.eligibility.market.into(),
+        execution: view.eligibility.execution.into(),
+        risk: view.eligibility.risk.into(),
+        strategy_counts: view.eligibility.strategy_counts.into(),
+        enforcement: view.eligibility.enforcement,
+    });
+    ui.set_live_eligibility_rows(
+        Rc::new(slint::VecModel::from(
+            view.eligibility
+                .rows
+                .into_iter()
+                .map(|r| LiveEligibilityRow {
+                    symbol: r.symbol.into(),
+                    level: r.level.into(),
+                    level_tone: r.level_tone,
+                    allowed: r.allowed,
+                    reasons: r.reasons.into(),
                 })
                 .collect::<Vec<_>>(),
         ))
@@ -3733,6 +3802,7 @@ pub fn wire_live(ui: &AppWindow, state: Rc<RefCell<LiveState>>) {
     wire_int!(on_live_symbol_toggled, |s: &mut LiveState, i: i32| {
         s.toggle_symbol(i.max(0) as usize);
     });
+    wire_unit!(on_live_universe_save, LiveState::save_universe);
     wire_text!(on_live_timeframe_picked, LiveState::select_timeframe_value);
     wire_text!(on_live_event_type_picked, LiveState::apply_event_category);
     wire_text!(on_live_symbol_filter_changed, LiveState::set_symbol_filter);
@@ -3786,10 +3856,11 @@ pub fn wire_live(ui: &AppWindow, state: Rc<RefCell<LiveState>>) {
 /// Representative LIVE state for the standalone shell binary — the exact
 /// static readiness of this workstation (`--check-live` facts): no live
 /// venue adapter, PAPER default, empty execution tables. Nothing is
-/// fabricated: the watchlist starts EMPTY (the universe is registry-owned
-/// and arrives with the first backend snapshot — a stale built-in list
-/// would pose as the strategy's universe), while the strategy option names
-/// the registry-canonical default the backend will confirm or replace.
+/// fabricated: the watchlist starts EMPTY (each strategy's universe arrives
+/// with the first backend snapshot — a stale built-in list would pose as
+/// the strategy's universe), no strategy is pre-selected (Phase 1
+/// strategy-first flow: the backend confirms the selection, never a
+/// default), while the strategy option names the registry-known candidate.
 pub fn demo_live_state() -> LiveState {
     let gate = |name: &str, reason: &str| Gate {
         name: name.into(),
@@ -4653,6 +4724,8 @@ mod tests {
         // watchlist fills when the first backend snapshot lands.
         assert_eq!(ui.get_live_symbols().row_count(), 0);
         live_state.borrow_mut().apply_snapshot(&serde_json::json!({
+            "strategy": {"id": "OBR C1C4"},
+            "available_strategies": ["OBR C1C4"],
             "available_symbols": ["NSE:KAYNES", "NSE:TCS"],
             "selected_symbols": [],
             "quotes": [

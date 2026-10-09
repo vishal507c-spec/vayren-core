@@ -441,25 +441,38 @@ def _live_action(
             return snapshot
         note = ""
         if name == "setup":
+            from app.services.live_trading_service import LiveConfigError
+
             symbols = action.get("symbols")
             # Rust sends `strategy_name` (live.rs::push_setup_action); accept
             # the legacy `strategy` key too — reading only one silently
             # dropped every strategy pick while symbols/timeframe applied.
-            service.configure(
-                strategy_name=_opt_str(action.get("strategy_name", action.get("strategy"))),
-                symbols=tuple(str(s) for s in symbols) if isinstance(symbols, list) else None,
-                timeframe=_opt_str(action.get("timeframe")),
-                mode=_opt_str(action.get("mode")),
-                quantity=_opt_float(action.get("quantity")),
-            )
+            try:
+                service.configure(
+                    strategy_name=_opt_str(action.get("strategy_name", action.get("strategy"))),
+                    symbols=tuple(str(s) for s in symbols) if isinstance(symbols, list) else None,
+                    timeframe=_opt_str(action.get("timeframe")),
+                    mode=_opt_str(action.get("mode")),
+                    quantity=_opt_float(action.get("quantity")),
+                    eligibility_enabled=_opt_bool(action.get("eligibility_enabled")),
+                )
+            except LiveConfigError as exc:
+                # A refused setup (no owning strategy, non-NSE symbol,
+                # unknown/inactive instrument) keeps the current snapshot and
+                # says why — it never degrades the page into a blank book.
+                snapshot = _trading_service_snapshot(data_dir, strategy_dir, broker_manager)
+                snapshot["action_note"] = f"setup refused: {exc}"
+                return snapshot
             note = "setup updated — readiness re-evaluated"
             # Consent binds to the reviewed setup: any setup edit voids it.
             _ARMED[0] = False
+            service.note_armed(False)
         elif name == "mode":
             requested = _opt_str(action.get("mode"))
             service.configure(mode=requested)
             # A mode switch voids any earlier consent (fresh ARM per setup).
             _ARMED[0] = False
+            service.note_armed(False)
             if requested is not None and requested not in ("PAPER", "LIVE"):
                 # configure() only accepts PAPER/LIVE; saying "mode set to
                 # PAPER" here posed as an accepted SANDBOX switch.
@@ -479,6 +492,7 @@ def _live_action(
             _LIVE_ACTION_ERRORS.pop("start", None)
             # A finished run voids consent: the next START needs a fresh ARM.
             _ARMED[0] = False
+            service.note_armed(False)
         elif name == "halt":
             # HALT is the emergency stop: same teardown as STOP, but the reason
             # is recorded so the journal and the UI say a halt happened rather
@@ -486,16 +500,24 @@ def _live_action(
             service.stop(reason="operator halt")
             _LIVE_ACTION_ERRORS.pop("start", None)
             _ARMED[0] = False
+            service.note_armed(False)
         elif name == "arm":
             # Arming is the operator's LIVE consent; it is carried on the next
             # START rather than being a session of its own.
             _ARMED[0] = True
+            service.note_armed(True)
         elif name == "select_symbol":
             sym = str(action.get("symbol") or "")
             if hasattr(service, "select_symbol"):
                 service.select_symbol(sym)
         elif name == "tick":
             service.tick()
+        elif name == "eligibility":
+            # Read-only readiness diagnostics (Phase-6 truth, same shape the
+            # snapshot carries) — never starts, stops, or submits anything.
+            snapshot = _trading_service_snapshot(data_dir, strategy_dir, broker_manager)
+            snapshot["action_note"] = "eligibility evaluated — see eligibility section"
+            return snapshot
         elif name == "navigate":
             # Host-owned navigation intent (CONFIGURE BROKER -> BROKERS). It
             # changes no trading state, so the honest answer is the CURRENT
@@ -550,6 +572,14 @@ def _opt_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _opt_bool(value: Any) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in ("1", "true", "yes")
 
 
 def _live_service(data_dir: str, strategy_dir: str, broker_manager: Any = None) -> Any:

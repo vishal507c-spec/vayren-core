@@ -353,6 +353,8 @@ fn apply_view(ui: &LiveHostWindow, state: &LiveState) {
                 pnl_tone: w.pnl_tone,
                 last_update: w.last_update.into(),
                 selected: w.selected,
+                eligibility: w.eligibility.into(),
+                eligibility_tone: w.eligibility_tone,
             })
             .collect::<Vec<_>>(),
     ));

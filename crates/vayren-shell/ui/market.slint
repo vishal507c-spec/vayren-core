@@ -222,6 +222,7 @@ component RailButton inherits Rectangle {
     background: root.active ? VayrenPalette.selected
         : ta.has-hover ? VayrenPalette.hover : transparent;
     ta := TouchArea {
+        mouse-cursor: pointer;
         clicked => { root.picked(); }
     }
     Text {
@@ -246,6 +247,7 @@ component MTimeButton inherits Rectangle {
 
     height: VayrenDesign.h-tabs;
     ta := TouchArea {
+        mouse-cursor: pointer;
         clicked => { root.picked(); }
     }
     VerticalLayout {
@@ -261,6 +263,7 @@ component MTimeButton inherits Rectangle {
                 font-weight: 700;
                 horizontal-alignment: center;
                 vertical-alignment: center;
+                overflow: elide;
             }
         }
         Rectangle {
@@ -292,6 +295,7 @@ component SmallButton inherits Rectangle {
         : root.enabled ? VayrenPalette.muted : VayrenPalette.faint;
     ta := TouchArea {
         enabled: root.enabled;
+        mouse-cursor: pointer;
         clicked => { if root.enabled { root.picked(); } }
     }
     HorizontalLayout {
@@ -308,6 +312,7 @@ component SmallButton inherits Rectangle {
             font-size: VayrenDesign.fs-label;
             font-weight: 700;
             vertical-alignment: center;
+            overflow: elide;
         }
         // drop chevron (text buttons)
         if root.icon == "chevron": VerticalLayout {
@@ -381,6 +386,7 @@ component MenuRow inherits Rectangle {
     background: ta.has-hover && root.enabled ? VayrenPalette.selected : transparent;
     ta := TouchArea {
         enabled: root.enabled;
+        mouse-cursor: pointer;
         clicked => { if root.enabled { root.picked(); } }
     }
     Text {
@@ -463,6 +469,7 @@ component IndicatorIconBtn inherits Rectangle {
     background: ta.pressed ? VayrenPalette.pressed
         : ta.has-hover ? VayrenPalette.hover : transparent;
     ta := TouchArea {
+        mouse-cursor: pointer;
         clicked => { root.picked(); }
     }
     IndicatorIcon {
@@ -492,6 +499,7 @@ component IndicatorBarRow inherits Rectangle {
             font-size: VayrenDesign.fs-small;
             font-weight: 600;
             vertical-alignment: center;
+            overflow: elide;
         }
         // The ONLY three actions: eye · settings · delete.
         IndicatorIconBtn {
@@ -693,10 +701,11 @@ component MarkerGlyph inherits Rectangle {
         Text {
             text: label;
             color: pill-solid ? VayrenPalette.text : ink;
-            font-size: 10px;
+            font-size: VayrenDesign.fs-label;
             font-weight: 700;
             horizontal-alignment: center;
             vertical-alignment: center;
+            overflow: elide;
         }
     }
 }
@@ -752,14 +761,17 @@ component PopupItem inherits Rectangle {
     height: 28px;
     if pr.kind == "section": Text {
         x: 8px;
+        width: parent.width - 16px;
         text: pr.label;
         color: VayrenPalette.faint;
         font-size: VayrenDesign.fs-label;
         font-weight: 700;
         vertical-alignment: center;
+        overflow: elide;
     }
     if pr.kind == "item": Rectangle {
         ta := TouchArea {
+            mouse-cursor: pointer;
             clicked => { root.picked(root.pr.name); }
         }
         Text {
@@ -774,10 +786,12 @@ component PopupItem inherits Rectangle {
     }
     if pr.kind == "empty": Text {
         x: 8px;
+        width: parent.width - 16px;
         text: pr.label;
         color: VayrenPalette.faint;
         font-size: VayrenDesign.fs-table;
         vertical-alignment: center;
+        overflow: elide;
     }
 }
 
@@ -798,6 +812,7 @@ component SettingsField inherits Rectangle {
             color: VayrenPalette.muted;
             font-size: VayrenDesign.fs-small;
             vertical-alignment: center;
+            overflow: elide;
         }
         Rectangle { horizontal-stretch: 1; background: transparent; }
         SpinBox {
@@ -911,6 +926,7 @@ component DlField inherits Rectangle {
             background: root.enabled && ta.has-hover ? VayrenPalette.hover : VayrenPalette.bg;
             ta := TouchArea {
                 enabled: root.enabled;
+                mouse-cursor: pointer;
                 clicked => { root.open(); }
             }
             HorizontalLayout {
@@ -921,6 +937,7 @@ component DlField inherits Rectangle {
                     color: VayrenPalette.text;
                     font-size: VayrenDesign.fs-small;
                     vertical-alignment: center;
+                    overflow: elide;
                 }
                 Rectangle { horizontal-stretch: 1; background: transparent; }
                 Text {
@@ -938,7 +955,7 @@ component DlKVRow inherits Rectangle {
     in property <string> value;
     in property <bool> strong: false;
     in property <bool> wrap: false;
-    height: root.wrap ? Math.max(18px, 34px) : 18px;
+    height: root.wrap ? Math.max(22px, 34px) : 22px;
     HorizontalLayout {
         spacing: 8px;
         Text {
@@ -954,6 +971,7 @@ component DlKVRow inherits Rectangle {
             font-size: VayrenDesign.fs-label;
             font-weight: 600;
             wrap: root.wrap ? TextWrap.word-wrap : TextWrap.no-wrap;
+            overflow: root.wrap ? TextOverflow.clip : TextOverflow.elide;
             horizontal-alignment: right;
             vertical-alignment: center;
         }
@@ -969,6 +987,7 @@ component DlCheckRow inherits Rectangle {
     background: ta.has-hover && root.enabled ? VayrenPalette.hover : transparent;
     ta := TouchArea {
         enabled: root.enabled;
+        mouse-cursor: pointer;
         clicked => { if root.enabled { root.picked(); } }
     }
     HorizontalLayout {
@@ -1008,6 +1027,7 @@ component DlChip inherits Rectangle {
     border-color: VayrenPalette.hairline;
     background: ta.has-hover ? VayrenPalette.hover : VayrenPalette.bg;
     ta := TouchArea {
+        mouse-cursor: pointer;
         clicked => { root.removed(); }
     }
     HorizontalLayout {
@@ -1032,6 +1052,7 @@ component CalDay inherits Rectangle {
     background: day > 0 && ta.has-hover ? VayrenPalette.hover : transparent;
     ta := TouchArea {
         enabled: root.day > 0;
+        mouse-cursor: pointer;
         clicked => { if root.day > 0 { root.picked(root.day); } }
     }
     Text {
@@ -1110,6 +1131,7 @@ component CredFieldRow inherits Rectangle {
             text: root.field.label;
             color: VayrenPalette.faint;
             font-size: VayrenDesign.fs-label;
+            overflow: elide;
         }
         HorizontalLayout {
             spacing: 4px;
@@ -1669,6 +1691,70 @@ component DownloadDock inherits Rectangle {
     }
 }
 
+// ── Market-status strip (legacy `MarketStatusPanel` parity) ────────────────
+// The rail's "MS" button toggles the strip; Rust owns every fact and
+// projects them as `market-status-regime` + `market-status-data`. A value
+// of "--" renders muted — the honest-unknown rule (never zero-filled, never
+// invented).
+
+// One fact cell: caption above the value. Both elide — the strip is a fixed
+// row of eight cells, so a long value must truncate, never clip mid-glyph.
+component StatusFact inherits Rectangle {
+    in property <string> caption;
+    in property <string> value;
+    in property <bool> muted: false;
+
+    horizontal-stretch: 1;
+    min-width: 0px;
+    VerticalLayout {
+        spacing: VayrenDesign.sp-xs;
+        Text {
+            text: root.caption;
+            color: VayrenPalette.faint;
+            font-size: VayrenDesign.fs-label;
+            font-weight: 600;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        Text {
+            text: root.value;
+            color: root.muted ? VayrenPalette.faint : VayrenPalette.text;
+            font-size: VayrenDesign.fs-small;
+            font-weight: 600;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+}
+
+// One titled fact group (legacy grid split: MARKET REGIME + DATA STATUS).
+component StatusGroup inherits Rectangle {
+    in property <string> title;
+    in property <[MarketStatusRow]> rows;
+
+    horizontal-stretch: 1;
+    min-width: 0px;
+    VerticalLayout {
+        spacing: VayrenDesign.sp-md;
+        Text {
+            text: root.title;
+            color: VayrenPalette.faint;
+            font-size: VayrenDesign.fs-label;
+            font-weight: 700;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        HorizontalLayout {
+            spacing: VayrenDesign.sp-lg;
+            for r in root.rows: StatusFact {
+                caption: r.key;
+                value: r.value;
+                muted: r.muted;
+            }
+        }
+    }
+}
+
 export component MarketScreen inherits Rectangle {
     // ── bound view state (Rust -> screen) ──
     in property <bool> panel-visible: true;
@@ -1885,6 +1971,11 @@ export component MarketScreen inherits Rectangle {
                         active: root.dl-open;
                         picked => { root.dl-toggle(); }
                     }
+                    RailButton {
+                        code: "MS";
+                        active: root.market-status-open;
+                        picked => { root.status-toggle(); }
+                    }
                     Rectangle { vertical-stretch: 1; background: transparent; }
                 }
             }
@@ -1980,6 +2071,7 @@ export component MarketScreen inherits Rectangle {
                                 background: row.selected ? VayrenPalette.selected
                                     : wta.has-hover ? VayrenPalette.hover : transparent;
                                 wta := TouchArea {
+                                    mouse-cursor: pointer;
                                     clicked => { root.symbol-selected(row.symbol); }
                                 }
                                 VerticalLayout {
@@ -2004,6 +2096,7 @@ export component MarketScreen inherits Rectangle {
                                             font-weight: 600;
                                             horizontal-alignment: right;
                                             vertical-alignment: center;
+                                            overflow: elide;
                                         }
                                     }
                                     Text {
@@ -2012,7 +2105,24 @@ export component MarketScreen inherits Rectangle {
                                         font-size: VayrenDesign.fs-label;
                                         horizontal-alignment: right;
                                         vertical-alignment: center;
+                                        overflow: elide;
                                     }
+                                }
+                            }
+                            // Honest empty list: an unfiltered watchlist and a
+                            // filter that matched nothing are different facts,
+                            // so the panel says which one happened instead of
+                            // rendering an unexplained void.
+                            if root.watch-rows.length == 0: Rectangle {
+                                height: VayrenDesign.h-strip;
+                                Text {
+                                    text: root.filter != ""
+                                        ? "No symbols match the filter."
+                                        : "No symbols in this list.";
+                                    color: VayrenPalette.faint;
+                                    font-size: VayrenDesign.fs-label;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
                                 }
                             }
                         }
@@ -2082,6 +2192,8 @@ export component MarketScreen inherits Rectangle {
                                 font-size: VayrenDesign.fs-label;
                                 font-weight: 700;
                                 vertical-alignment: center;
+                                min-width: 0px;
+                                overflow: elide;
                             }
                             Text {
                                 text: root.trade-context.symbol-side;
@@ -2089,12 +2201,16 @@ export component MarketScreen inherits Rectangle {
                                 font-size: VayrenDesign.fs-label;
                                 font-weight: 600;
                                 vertical-alignment: center;
+                                min-width: 0px;
+                                overflow: elide;
                             }
                             Text {
                                 text: root.trade-context.time;
                                 color: VayrenPalette.muted;
                                 font-size: VayrenDesign.fs-label;
                                 vertical-alignment: center;
+                                min-width: 0px;
+                                overflow: elide;
                             }
                             Text {
                                 text: root.trade-context.pnl;
@@ -2102,12 +2218,16 @@ export component MarketScreen inherits Rectangle {
                                 font-size: VayrenDesign.fs-label;
                                 font-weight: 700;
                                 vertical-alignment: center;
+                                min-width: 0px;
+                                overflow: elide;
                             }
                             Text {
                                 text: root.trade-context.r;
                                 color: VayrenPalette.muted;
                                 font-size: VayrenDesign.fs-label;
                                 vertical-alignment: center;
+                                min-width: 0px;
+                                overflow: elide;
                             }
                             Rectangle { horizontal-stretch: 1; background: transparent; }
                             SmallButton { label: "← PREV"; picked => { root.trade-prev(); } }
@@ -2283,6 +2403,7 @@ export component MarketScreen inherits Rectangle {
                                 y: 0;
                                 width: plot.width;
                                 height: plot.height;
+                                mouse-cursor: crosshair;
                                 pointer-event(ev) => {
                                     if ev.kind == PointerEventKind.move {
                                         let fx = self.mouse-x / plot.width;
@@ -2572,6 +2693,7 @@ export component MarketScreen inherits Rectangle {
                                 y: 0;
                                 width: parent.width;
                                 height: parent.height;
+                                mouse-cursor: crosshair;
                                 pointer-event(ev) => {
                                     if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
                                         root.price-dragging = true;
@@ -2630,6 +2752,7 @@ export component MarketScreen inherits Rectangle {
                             y: 0;
                             width: parent.width - root.price-strip;
                             height: parent.height;
+                            mouse-cursor: crosshair;
                             pointer-event(ev) => {
                                 if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
                                     root.dragging = true;
@@ -2679,6 +2802,37 @@ export component MarketScreen inherits Rectangle {
                                 font-weight: 600;
                                 horizontal-alignment: center;
                                 vertical-alignment: center;
+                            }
+                        }
+                    }
+
+                    // Market-status strip (legacy `MarketStatusPanel`).
+                    // Collapsed by default; the rail "MS" button toggles it.
+                    // Sizes by content, so it never steals chart space while
+                    // closed and the chart keeps priority while open.
+                    if root.market-status-open
+                        && (root.market-status-regime.length + root.market-status-data.length) > 0: Rectangle {
+                        background: VayrenPalette.surface;
+                        Rectangle {
+                            y: 0;
+                            height: 1px;
+                            width: parent.width;
+                            background: VayrenPalette.hairline;
+                        }
+                        HorizontalLayout {
+                            padding: VayrenDesign.sp-md;
+                            spacing: VayrenDesign.sp-lg;
+                            StatusGroup {
+                                title: "MARKET REGIME";
+                                rows: root.market-status-regime;
+                            }
+                            Rectangle {
+                                width: 1px;
+                                background: VayrenPalette.hairline-soft;
+                            }
+                            StatusGroup {
+                                title: "DATA STATUS";
+                                rows: root.market-status-data;
                             }
                         }
                     }

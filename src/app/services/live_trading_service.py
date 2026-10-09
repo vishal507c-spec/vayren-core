@@ -61,6 +61,7 @@ from strategy.language.storage import (
 from strategy.language.storage import (
     strategy_dir as resolve_strategy_dir,
 )
+from strategy.universe_store import StrategyUniverseStore, UniverseStoreError
 
 # Backward-compatible default: the shared resolver picks env var → data_dir →
 # per-user folder. Kept as a module constant because callers and the public
@@ -287,6 +288,10 @@ class LiveTradingService:
         self._broker_manager = broker_manager
         self._repository = SymbolRepository(self._data_dir)
         self._store = LiveSessionStore(self._data_dir / "live" / "live_session.json")
+        # Phase 1 strategy-scoped universes: strategy_id -> saved NSE symbols.
+        # The store is the universe authority; the registry declaration and
+        # the market-store discovery are never consulted as fallbacks here.
+        self._universes = StrategyUniverseStore(self._data_dir / "live" / "strategy_universes.json")
         self._config = LiveTradeConfig()
         self._sessions: dict[str, LiveSession] = {}
         self._session_dirs: dict[str, Path] = {}
@@ -316,6 +321,13 @@ class LiveTradingService:
         self._last_broker_seen: tuple = ()
         self._selected_symbol: str = "NSE:KAYNES"
         self._risk_engine: CapitalRiskEngine = CapitalRiskEngine()
+        # Phase-7 unified eligibility: operator ARM mirror (headless sets it
+        # alongside its own flag) + enforcement posture (default off — strict
+        # evaluation needs configured mappings; diagnostics always available).
+        self.armed: bool = False
+        self._eligibility_enforcement: bool = False
+        self._eligibility_mappings: Any = None
+        self._eligibility_mappings_mtime: float | None = None
         # Phase-3 LIVE capital truth: resolved fresh on every snapshot from
         # the venue (LIVE) or the simulated source (PAPER). Sizing runs ONLY
         # while this holds a valid reading — otherwise the service reports
@@ -332,6 +344,10 @@ class LiveTradingService:
         if symbol:
             self._selected_symbol = str(symbol).strip()
             self.state_changed.emit()
+
+    def note_armed(self, armed: bool) -> None:
+        """Mirror the operator ARM ceremony (set by headless per action)."""
+        self.armed = bool(armed)
 
     # ── catalog (Strategy Lab store + watchlist universe, never copied) ──
 
@@ -351,19 +367,19 @@ class LiveTradingService:
             return ()
 
     def available_symbols(self, strategy_name: str | None = None) -> tuple[str, ...]:
-        try:
-            from strategy.registry import get_strategy_registry
+        """Saved universe for one strategy — and nothing else (Phase 1).
 
-            reg = get_strategy_registry()
-            strat = strategy_name or self._config.strategy_name or "OBR C1C4"
-            if reg.contains(strat):
-                defn = reg.get(strat)
-                if defn.symbols:
-                    return defn.symbols
-        except Exception:
-            pass
+        Precedence is flat: the strategy's saved universe, or empty. There
+        is deliberately no registry-declaration fallback and no market-store
+        discovery fallback here: an unsaved strategy shows the empty state,
+        never a global list. Callers needing discovery use the repository
+        directly (market-data concern, not strategy configuration).
+        """
+        strat = strategy_name or self._config.strategy_name
+        if not strat:
+            return ()
         try:
-            return tuple(self._repository.list_symbols())
+            return self._universes.symbols_for(strat)
         except Exception:
             return ()
 
@@ -391,6 +407,7 @@ class LiveTradingService:
         timeframe: str | None = None,
         mode: str | None = None,
         quantity: float | None = None,
+        eligibility_enabled: bool | None = None,
     ) -> None:
         if self._status == "RUNNING":
             raise LiveConfigError("setup is frozen while a session runs")
@@ -398,8 +415,11 @@ class LiveTradingService:
 
         reg = get_strategy_registry()
         strat_def = None
+        strategy_changed = False
         if strategy_name is not None:
-            self._config.strategy_name = str(strategy_name)
+            cleaned = str(strategy_name)
+            strategy_changed = cleaned != self._config.strategy_name
+            self._config.strategy_name = cleaned
             if reg.contains(strategy_name):
                 strat_def = reg.get(strategy_name)
                 if strat_def.timeframe and not timeframe:
@@ -407,19 +427,24 @@ class LiveTradingService:
         elif self._config.strategy_name and reg.contains(self._config.strategy_name):
             strat_def = reg.get(self._config.strategy_name)
 
-        if symbols is not None:
-            if strat_def and strat_def.symbols:
-                strat_syms_clean = {s.split(":")[-1] for s in strat_def.symbols}
-                allowed = tuple(
-                    s
-                    for s in symbols
-                    if s in strat_def.symbols or s.split(":")[-1] in strat_syms_clean
-                )
-                self._config.symbols = allowed if allowed else strat_def.symbols
+        if strategy_changed:
+            # Selection change wins: the newly selected strategy's saved
+            # universe loads immediately. Symbols riding along in the same
+            # action are the previous screen's rows (the UI re-sends the real
+            # list once the snapshot lands) — applying them here would leak
+            # one strategy's symbols into another, so they are ignored.
+            self._config.symbols = self._universes.symbols_for(self._config.strategy_name)
+        elif symbols is not None:
+            if not self._config.strategy_name:
+                if tuple(symbols):
+                    raise LiveConfigError("select a strategy before configuring its universe")
+                self._config.symbols = ()
             else:
-                self._config.symbols = tuple(symbols)
-        elif strat_def and strat_def.symbols and not self._config.symbols:
-            self._config.symbols = strat_def.symbols
+                try:
+                    saved = self._universes.save(self._config.strategy_name, tuple(symbols))
+                except UniverseStoreError as exc:
+                    raise LiveConfigError(str(exc)) from exc
+                self._config.symbols = saved.symbols
 
         if timeframe is not None:
             self._config.timeframe = str(timeframe)
@@ -442,11 +467,73 @@ class LiveTradingService:
             if qty != qty or qty in (float("inf"), float("-inf")) or qty <= 0:
                 raise LiveConfigError(f"quantity must be a positive finite number ({quantity!r})")
             self._config.quantity = qty
+        if eligibility_enabled is not None:
+            # Phase-7 enforcement posture (default off): strict per-order
+            # eligibility needs configured provider mappings; diagnostics
+            # stay available either way.
+            self._eligibility_enforcement = bool(eligibility_enabled)
         self.invalidate_validation_cache()
         self._chart_cache_key = None
         self._chart_cache = None
         self._persist_config()
         self.state_changed.emit()
+
+    # ── Phase-7 unified eligibility (opt-in enforcement + diagnostics) ──
+
+    def _session_order_gate(self) -> Any:
+        """Order-gate closure for sessions, or None when not enforcing."""
+        if not self._eligibility_enforcement:
+            return None
+        from app.services.eligibility import order_gate_for
+
+        return order_gate_for(self)
+
+    def eligibility_snapshot(
+        self,
+        quotes: list[dict[str, Any]] | None = None,
+        recon_blocks: bool | None = None,
+        recon_reason: str = "",
+    ) -> dict[str, Any]:
+        """Readiness diagnostics (system + strategy + instruments).
+
+        Read-only: never starts, stops, or submits anything. ``quotes`` /
+        ``recon_blocks`` let the hot snapshot pass precomputed facts (no
+        double market reads, no snapshot recursion); otherwise the views
+        read the service directly.
+        """
+        from app.services.eligibility import build_eligibility_engine, canonical_id_for
+
+        try:
+            engine = build_eligibility_engine(
+                self, quotes=quotes, recon_blocks=recon_blocks, recon_reason=recon_reason
+            )
+            strategy = self._config.strategy_name
+            mode = str(self._config.mode or "PAPER").strip().upper() or "PAPER"
+            instruments: dict[str, Any] = {}
+            for symbol in self._config.symbols:
+                canonical_id = canonical_id_for(symbol)
+                if not canonical_id:
+                    instruments[symbol] = {
+                        "level": "BLOCKED",
+                        "allowed": False,
+                        "blocking_reasons": ["INSTRUMENT_NOT_FOUND"],
+                    }
+                    continue
+                verdict = engine.evaluate(canonical_id, strategy, trading_mode=mode)
+                instruments[symbol] = {
+                    "level": verdict.level,
+                    "allowed": verdict.allowed,
+                    "blocking_reasons": list(verdict.blocking_reasons),
+                }
+            return {
+                "system": engine.system_readiness(),
+                "strategy": engine.strategy_readiness(strategy),
+                "instruments": instruments,
+                "enforcement": self._eligibility_enforcement,
+            }
+        except Exception as exc:  # noqa: BLE001
+            logging.getLogger(__name__).warning("eligibility snapshot failed: %s", exc)
+            return {"error": str(exc), "enforcement": self._eligibility_enforcement}
 
     def broker_name(self) -> str:
         """User-selected broker (display only; venue resolves inside sessions)."""
@@ -654,16 +741,16 @@ class LiveTradingService:
         if not self._config.symbols:
             blockers.append("no symbols selected (pick from Market Watchlist)")
         else:
-            if strat_def and strat_def.symbols:
-                strat_syms_clean = {s.split(":")[-1] for s in strat_def.symbols}
-                for symbol in self._config.symbols:
-                    if (
-                        symbol not in strat_def.symbols
-                        and symbol.split(":")[-1] not in strat_syms_clean
-                    ):
-                        blockers.append(
-                            f"symbol {symbol} not in {strat_def.name} configured universe"
-                        )
+            # Configured rows must belong to THIS strategy's saved universe —
+            # the registry declaration is not the authority (Phase 1), so a
+            # row from another strategy's list is refused here even if every
+            # other check would pass.
+            saved_universe = set(self._universes.symbols_for(self._config.strategy_name))
+            for symbol in self._config.symbols:
+                if symbol not in saved_universe:
+                    blockers.append(
+                        f"symbol {symbol} not in {self._config.strategy_name} saved universe"
+                    )
             try:
                 universe = set(self._repository.list_symbols())
             except Exception as exc:
@@ -1110,18 +1197,20 @@ class LiveTradingService:
             }
             self._track_open_since()
         if strategy_state is None:
-            strat_name = self._config.strategy_name or "OBR C1C4"
-            strat_tf = self._config.timeframe or "30m"
+            # No hidden/default strategy (Phase 1): an unselected strategy
+            # renders empty — id "", no symbols, NOT READY downstream — never
+            # as OBR C1C4 or any other global fallback.
+            strat_name = self._config.strategy_name or ""
+            strat_tf = self._config.timeframe or ""
             strat_syms = self._config.symbols
-            strat_status = "ACTIVE"
+            strat_status = "NOT READY" if not strat_name else "ACTIVE"
             try:
                 from strategy.registry import get_strategy_registry
 
                 reg = get_strategy_registry()
-                if reg.contains(strat_name):
+                if strat_name and reg.contains(strat_name):
                     defn = reg.get(strat_name)
                     strat_tf = strat_tf or defn.timeframe
-                    strat_syms = strat_syms or defn.symbols
                     strat_status = defn.status or "ACTIVE"
             except Exception:
                 pass
@@ -1187,7 +1276,7 @@ class LiveTradingService:
         now_iso = _utcnow_iso()
         now_time = now_iso.split("T")[1][:8] if "T" in now_iso else ""
         if isinstance(strategy_state, dict):
-            strat_name_str = str(strategy_state.get("id") or "OBR C1C4")
+            strat_name_str = str(strategy_state.get("id") or "")
             strategy_state["started_at"] = self._started_at or (
                 "2026-10-04 12:10:23" if running else "—"
             )
@@ -1236,7 +1325,8 @@ class LiveTradingService:
                 "latency_ms": 42.0 if (running or view.get("connected")) else None,
                 "channel": "NSE Live",
                 "timeframe": self._config.timeframe or "15s",
-                "subscribed_symbols": len(universe) if universe else 1312,
+                # Empty universe subscribes to nothing (never a fake count).
+                "subscribed_symbols": len(universe),
                 "last_tick_time": now_time,
                 "reconnect_count": 0,
                 "last_error": "",
@@ -1245,7 +1335,7 @@ class LiveTradingService:
                 "status": md_status,
                 "exchange": "NSE Cash",
                 "timeframe": self._config.timeframe or "15s",
-                "subscribed_symbols": len(universe) if universe else 1312,
+                "subscribed_symbols": len(universe),
                 "last_tick_time": now_time,
                 "freshness_age_s": 0.4 if running else None,
             },
@@ -1328,6 +1418,13 @@ class LiveTradingService:
         # Readiness rows always exist (idle included): the checklist renders
         # backend verdicts, never an empty panel.
         snap["gates"] = self._readiness_gates(snap, view, quotes)
+        # Phase-7 unified eligibility diagnostics (read-only, bounded):
+        # system + strategy summaries plus per-symbol verdicts, reusing the
+        # snapshot's own quotes and reconciliation facts (no double reads,
+        # no recursion — the engine never calls snapshot() from here).
+        snap["eligibility"] = self.eligibility_snapshot(
+            quotes=quotes, recon_blocks=recon_blocks, recon_reason=recon_status
+        )
         return snap
 
     def _arm_eligible_blockers(self) -> list[str]:
@@ -1432,6 +1529,7 @@ class LiveTradingService:
                     provider,
                     policy,
                     request_id=f"live-{symbol}",
+                    order_gate=self._session_order_gate(),
                 )
                 contract = session.register_strategy(
                     record.id, record.version, _factory, params, definition
@@ -2236,24 +2334,28 @@ class LiveTradingService:
             self._config = LiveTradeConfig()
         if self._config.mode not in ("PAPER", "LIVE"):
             self._config.mode = "PAPER"
+        if isinstance(config, dict):
+            self._eligibility_enforcement = bool(config.get("eligibility_enabled", False))
 
-        # Strategy Registry authority default: if not configured, default to OBR C1C4
+        # Phase 1 strategy-first flow: no pre-selected strategy, ever. The
+        # saved per-strategy universe is the only symbol authority — a legacy
+        # global symbol list restored from an old session file is dropped
+        # (one-time migration to empty state, never to a fallback), and the
+        # registry declaration no longer fills symbols in.
         try:
             from strategy.registry import get_strategy_registry
 
             reg = get_strategy_registry()
-            if (
-                not self._config.strategy_name or not reg.contains(self._config.strategy_name)
-            ) and reg.contains("OBR C1C4"):
-                self._config.strategy_name = "OBR C1C4"
             if self._config.strategy_name and reg.contains(self._config.strategy_name):
                 defn = reg.get(self._config.strategy_name)
-                if not self._config.symbols and defn.symbols:
-                    self._config.symbols = defn.symbols
                 if not self._config.timeframe and defn.timeframe:
                     self._config.timeframe = defn.timeframe
         except Exception:
             pass
+        if self._config.strategy_name:
+            self._config.symbols = self._universes.symbols_for(self._config.strategy_name)
+        else:
+            self._config.symbols = ()
 
         # Restored config NEVER auto-starts (real-money safety + paper hygiene).
         self._status = "STOPPED"
@@ -2267,6 +2369,7 @@ class LiveTradingService:
             "mode": self._config.mode,
             "quantity": self._config.quantity,
             "capital": self._config.capital,
+            "eligibility_enabled": self._eligibility_enforcement,
         }
         try:
             self._store.save(data)
@@ -2291,6 +2394,7 @@ class LiveTradingService:
             "mode": self._config.mode,
             "quantity": self._config.quantity,
             "capital": self._config.capital,
+            "eligibility_enabled": self._eligibility_enforcement,
         }
         checkpoints: dict[str, Any] = {}
         for symbol, session in self._sessions.items():

@@ -13,7 +13,11 @@ concurrency:
 #   build-test = cargo fmt + lean Rust build/test + pytest     (~13 min)
 #   test-shard-stateful = live-mutator suites, serial          (~9 min)
 #   test-shard-pure     = isolated/reader suites, serial       (~8 min)
+#   test-shard-rust-shell = shell `cargo test` (parallel shell suites)
 #   gate       = aggregate "ALL REQUIRED CHECKS PASSED" signal
+# Native fast path: Rust/Slint steps self-skip on Python-only branch pushes
+# (main always full) — Python-only pipeline ~2-3min, native-change pipeline
+# unchanged (Slint compilation is the floor on 4-vCPU runners).
 # quality/validators run parallel to build-test: cheap failures surface in
 # ~1 minute and every domain reports independently. build-test stays ONE job
 # on purpose: the pytest suites need the just-built workspace (same target/
@@ -82,6 +86,20 @@ jobs:
       actions: write
     steps:
       - uses: actions/checkout@v4
+      # Native fast path: Rust/Slint compilation is ~8min of the ~10min
+      # pipeline. Python-only branch pushes skip it — `main` always runs
+      # full, and run_tests.py --skip-build self-heals via its freshness
+      # gate if the cache ever misses, so coverage can never silently gap.
+      - uses: dorny/paths-filter@v3
+        id: native
+        with:
+          filters: |
+            changed:
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - '.cargo/**'
+              - 'crates/**'
+              - 'tools/build_rust.py'
       # The Slint workspace emits multi-GB release+debug+test artifacts and
       # exhausts the runner disk (linker SIGBUS / ENOSPC archives). Reclaim
       # space from preinstalled toolchains this build never uses.
@@ -126,7 +144,16 @@ jobs:
       # (otherwise it rebuilds) — hence one job, no duplicate full chain.
       # tools/tests runs in the shard jobs below (--exclude here);
       # test_desktop.py stays here beside its shell binary.
-      - run: time python tools/build_rust.py --lean-test
+      # Skipped on Python-only branch pushes (see filter above); the pytest
+      # steps below still run and rebuild via the freshness gate when stale.
+      # Workspace tests run split: everything except the shell here, shell
+      # tests in test-shard-rust-shell (same coverage, parallel wall-clock).
+      - name: Build Rust workspace (lean, no tests)
+        if: github.ref == 'refs/heads/main' || steps.native.outputs.changed == 'true'
+        run: time python tools/build_rust.py --lean-build
+      - name: Test workspace except shell
+        if: github.ref == 'refs/heads/main' || steps.native.outputs.changed == 'true'
+        run: time cargo test --workspace --exclude vayren-shell --manifest-path Cargo.toml
       - run: time python tools/run_tests.py --skip-build --lean --exclude tools/tests
       - run: python -m pytest tools/tests/test_desktop.py -q --no-header
       - name: Report disk usage
@@ -154,6 +181,18 @@ jobs:
       actions: write
     steps:
       - uses: actions/checkout@v4
+      # Native fast path (same contract as build-test): Python-only branch
+      # pushes skip the cargo steps below; `main` always runs full.
+      - uses: dorny/paths-filter@v3
+        id: native
+        with:
+          filters: |
+            changed:
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - '.cargo/**'
+              - 'crates/**'
+              - 'tools/build_rust.py'
       # Same native prerequisites as build-test: the Slint font stack
       # links fontconfig/freetype at final link time (linker fails
       # without the dev packages — Day-6 CI proof).
@@ -173,7 +212,12 @@ jobs:
           shared-key: "vayren-rust"
           cache-all-crates: "true"
       - run: cargo build --release -p vayren-core --manifest-path Cargo.toml
-      - run: cargo test -p vayren-core --lib -p vayren-shell --no-run --manifest-path Cargo.toml
+        if: github.ref == 'refs/heads/main' || steps.native.outputs.changed == 'true'
+      # Core-only warmup: the shell test binaries are compiled + run in
+      # test-shard-rust-shell (same coverage, no duplication); the shard's
+      # pytest files drive any cargo invocation they need through the
+      # shared cache themselves. Saves ~3min of duplicate Slint codegen.
+      - run: cargo test -p vayren-core --lib --no-run --manifest-path Cargo.toml
       - run: python -m pytest tools/tests/test_validate_scope.py tools/tests/test_failure_intel.py -q --no-header
 
   # Shard 2/2 — isolated readers, serial within the job, isolated runner.
@@ -204,7 +248,20 @@ jobs:
           workspaces: ". -> target"
           shared-key: "vayren-rust"
           cache-all-crates: "true"
+      # Native fast path (same contract as build-test): Python-only branch
+      # pushes skip the cargo build below; `main` always runs full.
+      - uses: dorny/paths-filter@v3
+        id: native
+        with:
+          filters: |
+            changed:
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - '.cargo/**'
+              - 'crates/**'
+              - 'tools/build_rust.py'
       - run: cargo build --release -p vayren-core --manifest-path Cargo.toml
+        if: github.ref == 'refs/heads/main' || steps.native.outputs.changed == 'true'
       - run: >-
           python -m pytest tools/tests/test_authority.py
           tools/tests/test_build_rust.py tools/tests/test_context.py
@@ -216,9 +273,54 @@ jobs:
           tools/tests/test_shard_contract.py tools/tests/test_speed_loop.py
           tools/tests/test_speed_metrics.py tools/tests/test_vayren_intel.py -q --no-header
 
+  # Shard 3/3 — shell Rust tests, isolated runner. The shell test binaries
+  # (Slint software-renderer suites) are the single most expensive compile
+  # unit; running them here in parallel with build-test cuts wall-clock
+  # while the union of this job + build-test's --exclude run keeps the exact
+  # `cargo test --workspace` coverage. Pure Rust: no Python/pip needed.
+  test-shard-rust-shell:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RUSTFLAGS: "-C link-arg=-fuse-ld=lld"
+      CARGO_BUILD_JOBS: "4"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+      # Native fast path (same contract as build-test): Python-only branch
+      # pushes skip the cargo run below; `main` always runs full.
+      - uses: dorny/paths-filter@v3
+        id: native
+        with:
+          filters: |
+            changed:
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - '.cargo/**'
+              - 'crates/**'
+              - 'tools/build_rust.py'
+      # Same native prerequisites as build-test: the Slint font stack
+      # links fontconfig/freetype at final link time (linker fails
+      # without the dev packages — Day-6 CI proof).
+      - name: Install Linux build dependencies
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libfontconfig1-dev lld
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: "vayren-rust"
+          cache-all-crates: "true"
+      - name: Test shell crate
+        if: github.ref == 'refs/heads/main' || steps.native.outputs.changed == 'true'
+        run: time cargo test -p vayren-shell --manifest-path Cargo.toml
+
   gate:
     name: CI gate
-    needs: [quality, validators, build-test, test-shard-stateful, test-shard-pure]
+    needs: [quality, validators, build-test, test-shard-stateful, test-shard-pure, test-shard-rust-shell]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

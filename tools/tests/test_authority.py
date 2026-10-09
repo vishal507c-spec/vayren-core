@@ -27,6 +27,7 @@ from validate_authority import (  # noqa: E402
 
 BROKER_REG = "src/broker/registry.py"
 STRAT_REG = "src/strategy/registry.py"
+INSTRUMENT_REG = "src/strategy/instrument_registry.py"
 FACTORY = "src/data/provider/factory.py"
 
 
@@ -35,6 +36,7 @@ def _full_registries(extra: dict[str, str] | None = None) -> dict[str, str]:
         BROKER_REG: "class BrokerRegistry:\n    pass\n_default_registry = None\n",
         STRAT_REG: "class StrategyRegistry:\n    pass\n",
         "src/core/ai/providers.py": "class AiProviderRegistry:\n    pass\n",
+        INSTRUMENT_REG: "class CanonicalInstrumentRegistry:\n    pass\n_REGISTRY = None\n",
     }
     if extra:
         files.update(extra)
@@ -110,6 +112,25 @@ def test_strategy_registry_holder_passes() -> None:
     # One holder per domain: venues in broker/registry.py, strategies here.
     files = _full_registries({STRAT_REG: "_GLOBAL_REGISTRY = None\n"})
     assert "shadow-registry-map" not in _rule_ids(check_registries(files))
+
+
+def test_instrument_registry_holder_passes() -> None:
+    # Canonical instrument identity owns its own registry file (not folded
+    # into the strategy registry, which owns strategy definitions).
+    files = _full_registries({INSTRUMENT_REG: "_INSTRUMENT_REGISTRY = None\n"})
+    assert "shadow-registry-map" not in _rule_ids(check_registries(files))
+
+
+def test_instrument_builtin_seeding_passes() -> None:
+    # Deterministic NSE-equity seeding is canonical seeding, not a hijack.
+    files = _full_registries(
+        {
+            INSTRUMENT_REG: (
+                "class CanonicalInstrumentRegistry:\n    pass\nregistry.register(record)\n"
+            )
+        }
+    )
+    assert "unauthorized-registry-writer" not in _rule_ids(check_registries(files))
 
 
 def test_registry_constructed_outside_holder_fails() -> None:

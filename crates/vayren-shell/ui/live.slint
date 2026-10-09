@@ -211,6 +211,31 @@ export struct LiveWatchlistRow {
     pnl-tone: int,
     last-update: string,
     selected: bool,
+    eligibility: string,
+    eligibility-tone: int,
+}
+
+// Unified eligibility verdict (Phase-6/7 backend section, verbatim).
+// Unreported backends leave every field at its fallback — the screen
+// prints "NOT REPORTED", never an invented verdict.
+export struct LiveEligibility {
+    reported: bool,
+    final-label: string,
+    final-tone: int,
+    reason: string,
+    market: string,
+    execution: string,
+    risk: string,
+    strategy-counts: string,
+    enforcement: bool,
+}
+
+export struct LiveEligibilityRow {
+    symbol: string,
+    level: string,
+    level-tone: int,
+    allowed: bool,
+    reasons: string,
 }
 
 // One engine order-state step. Every flag is a backend verdict: `reached`
@@ -429,7 +454,7 @@ component LiveTopCard inherits Rectangle {
             if root.label != "": Text {
                 text: root.label;
                 color: VayrenPalette.live-ink-faint;
-                font-size: 9px;
+                font-size: 10px;
                 font-weight: 700;
                 overflow: elide;
             }
@@ -453,7 +478,7 @@ component LiveTopCard inherits Rectangle {
             if root.source-text != "": Text {
                 text: "SRC: " + root.source-text;
                 color: VayrenPalette.live-ink-dim;
-                font-size: 8px;
+                font-size: 10px;
                 font-weight: 600;
                 overflow: elide;
             }
@@ -637,6 +662,8 @@ export component LiveScreen inherits Rectangle {
     in property <LiveRemoteGateway> gateway;
     in property <LiveActiveStrategy> active-strat;
     in property <[LiveWatchlistRow]> watchlist;
+    in property <LiveEligibility> eligibility;
+    in property <[LiveEligibilityRow]> eligibility-rows;
     in property <LiveSelectedStock> selected-stock;
     in property <LiveFooter> footer;
     in property <int> filter-chip-selected: 0;
@@ -674,6 +701,7 @@ export component LiveScreen inherits Rectangle {
     callback mode-picked(int);
     callback strategy-picked(string);
     callback symbol-toggled(int);
+    callback universe-save();
     callback symbol-filter-changed(string);
     callback timeframe-picked(string);
     callback quantity-edited(string);
@@ -1145,6 +1173,7 @@ export component LiveScreen inherits Rectangle {
                                             Text { width: 72px; text: "PLANNED"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
                                             Text { width: 54px; text: "UTIL %"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
                                             Text { width: 76px; text: "STATUS"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+                                            Text { width: 84px; text: "ELIG"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
                                             Text { width: 56px; text: "SIGNAL"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
                                             Text { width: 70px; text: "ORDER"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
                                             Text { width: 70px; text: "POSITION"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
@@ -1184,6 +1213,7 @@ export component LiveScreen inherits Rectangle {
                                                 Text { width: 72px; text: row.planned-risk; color: VayrenPalette.live-ink; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
                                                 Text { width: 54px; text: row.risk-util; color: row.risk-util-tone == 3 ? VayrenPalette.neg : VayrenPalette.text; font-size: 10px; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
                                                 Text { width: 76px; text: row.status; color: LiveTone.ink(row.status-tone); font-size: 10px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
+                                                Text { width: 84px; text: row.eligibility; color: LiveTone.ink(row.eligibility-tone); font-size: 10px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
                                                 Text { width: 56px; text: row.signal; color: LiveTone.ink(row.signal-tone); font-size: 10px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
                                                 Text { width: 70px; text: row.order; color: LiveTone.ink(row.order-tone); font-size: 10px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
                                                 Text { width: 70px; text: row.position; color: VayrenPalette.text; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
@@ -1196,10 +1226,29 @@ export component LiveScreen inherits Rectangle {
                                     // Fallback for idle state without populated quotes
                                     if root.watchlist.length == 0: VerticalLayout {
                                         spacing: 1px;
+                                        // Phase 1 strategy-first universe header: the
+                                        // checked list below IS this strategy's
+                                        // configuration surface (toggles persist
+                                        // via setup actions; SAVE UNIVERSE
+                                        // re-confirms with backend verdict).
+                                        HorizontalLayout {
+                                            height: 28px;
+                                            spacing: 8px;
+                                            alignment: center;
+                                            Text { text: "UNIVERSE"; color: VayrenPalette.live-ink-faint; font-size: 10px; font-weight: 700; vertical-alignment: center; }
+                                            Text { horizontal-stretch: 1; min-width: 0px; text: root.setup.symbol-total; color: VayrenPalette.live-ink; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
+                                            VButton {
+                                                width: 118px;
+                                                label: "SAVE UNIVERSE";
+                                                variant: 1;
+                                                enabled: root.strategy-selected >= 0;
+                                                clicked => { root.universe-save(); }
+                                            }
+                                        }
                                         if root.symbols.length == 0: Rectangle {
                                             height: 50px;
                                             Text {
-                                                text: root.filter-text != "" ? "No symbol matches the filter" : "No symbols in universe";
+                                                text: root.strategy-selected < 0 ? "Select a strategy to configure symbols." : (root.filter-text != "" ? "No symbol matches the filter" : "No symbols configured for this strategy.");
                                                 color: VayrenPalette.live-ink-dim;
                                                 font-size: 11px;
                                                 horizontal-alignment: center;
@@ -1207,10 +1256,12 @@ export component LiveScreen inherits Rectangle {
                                             }
                                         }
                                         for sym[idx] in root.symbols: Rectangle {
-                                            height: 26px;
+                                            height: 18px;
                                             border-radius: 3px;
                                             background: sym.checked ? VayrenPalette.live-row-checked : (Math.mod(idx, 2) == 1 ? VayrenPalette.live-panel-deep : transparent);
-                                            TouchArea { clicked => { root.symbol-toggled(sym.real-index); } }
+                                            // Universe configuration is disabled
+                                            // until a strategy is selected.
+                                            TouchArea { enabled: root.strategy-selected >= 0; clicked => { root.symbol-toggled(sym.real-index); } }
                                             HorizontalLayout {
                                                 padding-left: 6px;
                                                 padding-right: 6px;
@@ -1643,7 +1694,7 @@ export component LiveScreen inherits Rectangle {
                                 // MODE is independent of STATUS: a LIVE selection
                                 // with a stopped session must read exactly so.
                                 HorizontalLayout {
-                                    height: 16px;
+                                    height: 18px;
                                     spacing: 4px;
                                     Text { width: 80px; text: "MODE"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
                                     Text { horizontal-stretch: 1; min-width: 0px; text: root.active-strat.mode != "" ? root.active-strat.mode : (root.bar.mode == 2 ? "LIVE" : root.bar.mode == 1 ? "SANDBOX" : "PAPER"); color: LiveTone.ink(root.active-strat.mode-tone != 0 ? root.active-strat.mode-tone : (root.bar.mode == 2 ? 3 : 0)); font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
@@ -1652,16 +1703,16 @@ export component LiveScreen inherits Rectangle {
                                 }
 
                                 HorizontalLayout {
-                                    height: 16px;
+                                    height: 18px;
                                     spacing: 4px;
-                                    Text { width: 80px; text: "SIGNALS TODAY"; color: VayrenPalette.live-ink-dim; font-size: 9.5px; font-weight: 600; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 80px; text: "SIGNALS TODAY"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
                                     Text { horizontal-stretch: 1; min-width: 0px; text: root.active-strat.today-signals != "" ? root.active-strat.today-signals : "—"; color: VayrenPalette.text; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
                                     Text { width: 50px; text: "ORDERS"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
                                     Text { width: 65px; text: root.active-strat.orders-today != "" ? root.active-strat.orders-today : "—"; color: VayrenPalette.text; font-size: 10px; font-weight: 700; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
                                 }
 
                                 HorizontalLayout {
-                                    height: 16px;
+                                    height: 18px;
                                     spacing: 4px;
                                     Text { width: 80px; text: "POSITIONS"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
                                     Text { horizontal-stretch: 1; min-width: 0px; text: root.active-strat.current-position != "" ? root.active-strat.current-position : "—"; color: VayrenPalette.pos; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
@@ -1765,14 +1816,14 @@ export component LiveScreen inherits Rectangle {
 
                                 // 1. Risk & Position Sizing Flow
                                 HorizontalLayout {
-                                    height: 16px;
+                                    height: 18px;
                                     spacing: 4px;
                                     Text {
                                         horizontal-stretch: 1;
                                         min-width: 0px;
                                         text: "RISK & POSITION SIZING FLOW";
                                         color: VayrenPalette.text-bright;
-                                        font-size: 9.5px;
+                                        font-size: 10px;
                                         font-weight: 700;
                                         vertical-alignment: center;
                                         overflow: elide;
@@ -1781,7 +1832,7 @@ export component LiveScreen inherits Rectangle {
                                         min-width: 0px;
                                         text: root.selected-stock.capital-source != "" ? root.selected-stock.capital-source : "SOURCE: RISK ENGINE";
                                         color: VayrenPalette.live-teal;
-                                        font-size: 8px;
+                                        font-size: 10px;
                                         font-weight: 700;
                                         vertical-alignment: center;
                                         overflow: elide;
@@ -1789,83 +1840,83 @@ export component LiveScreen inherits Rectangle {
                                 }
 
                                 HorizontalLayout {
-                                    height: 16px;
+                                    height: 18px;
                                     spacing: 4px;
-                                    Text { width: 125px; text: "BROKER AVAILABLE CAPITAL"; color: VayrenPalette.live-ink-dim; font-size: 8.5px; font-weight: 600; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 125px; text: "BROKER AVAILABLE CAPITAL"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
                                     Text { horizontal-stretch: 1; min-width: 0px; text: root.selected-stock.broker-capital != "" && root.selected-stock.broker-capital != "—" ? root.selected-stock.broker-capital : "NOT AVAILABLE"; color: VayrenPalette.text; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
-                                    Text { width: 75px; text: "SRC: FYERS"; color: VayrenPalette.live-ink-faint; font-size: 7.5px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 75px; text: "SRC: FYERS"; color: VayrenPalette.live-ink-faint; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
                                 }
 
                                 HorizontalLayout {
-                                    height: 16px;
+                                    height: 18px;
                                     spacing: 4px;
-                                    Text { width: 125px; text: "  ↓ EFFECTIVE CAPITAL"; color: VayrenPalette.live-ink-dim; font-size: 8.5px; font-weight: 600; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 125px; text: "  ↓ EFFECTIVE CAPITAL"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
                                     Text { horizontal-stretch: 1; min-width: 0px; text: root.selected-stock.effective-capital != "" && root.selected-stock.effective-capital != "—" ? root.selected-stock.effective-capital : "NOT AVAILABLE"; color: VayrenPalette.text; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
-                                    Text { width: 75px; text: "SRC: BROKER"; color: VayrenPalette.live-ink-faint; font-size: 7.5px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 75px; text: "SRC: BROKER"; color: VayrenPalette.live-ink-faint; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
                                 }
 
                                 HorizontalLayout {
-                                    height: 16px;
+                                    height: 18px;
                                     spacing: 4px;
-                                    Text { width: 125px; text: "  ↓ MAX RISK / TRADE"; color: VayrenPalette.live-ink-dim; font-size: 8.5px; font-weight: 600; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 125px; text: "  ↓ MAX RISK / TRADE"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
                                     Text { horizontal-stretch: 1; min-width: 0px; text: root.selected-stock.max-allowed-risk != "" && root.selected-stock.max-allowed-risk != "—" ? root.selected-stock.max-allowed-risk : "NOT AVAILABLE"; color: VayrenPalette.live-ink; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
-                                    Text { width: 75px; text: "SRC: LIMITS"; color: VayrenPalette.live-ink-faint; font-size: 7.5px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 75px; text: "SRC: LIMITS"; color: VayrenPalette.live-ink-faint; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
                                 }
 
                                 HorizontalLayout {
-                                    height: 16px;
+                                    height: 18px;
                                     spacing: 4px;
-                                    Text { width: 125px; text: "  ↓ ENTRY (BREAK LOW)"; color: VayrenPalette.live-ink-dim; font-size: 8.5px; font-weight: 600; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 125px; text: "  ↓ ENTRY (BREAK LOW)"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
                                     Text { horizontal-stretch: 1; min-width: 0px; text: root.selected-stock.entry-price != "" && root.selected-stock.entry-price != "—" ? root.selected-stock.entry-price : "NOT READY"; color: VayrenPalette.text; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
-                                    Text { width: 75px; text: "SRC: STRATEGY"; color: VayrenPalette.live-ink-faint; font-size: 7.5px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 75px; text: "SRC: STRATEGY"; color: VayrenPalette.live-ink-faint; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
                                 }
 
                                 HorizontalLayout {
-                                    height: 16px;
+                                    height: 18px;
                                     spacing: 4px;
-                                    Text { width: 125px; text: "  ↓ STOP LOSS (C1-C4)"; color: VayrenPalette.live-ink-dim; font-size: 8.5px; font-weight: 600; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 125px; text: "  ↓ STOP LOSS (C1-C4)"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
                                     Text { horizontal-stretch: 1; min-width: 0px; text: root.selected-stock.stop-price != "" && root.selected-stock.stop-price != "—" ? root.selected-stock.stop-price : "NOT READY"; color: VayrenPalette.neg; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
-                                    Text { width: 75px; text: "SRC: STRATEGY"; color: VayrenPalette.live-ink-faint; font-size: 7.5px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 75px; text: "SRC: STRATEGY"; color: VayrenPalette.live-ink-faint; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
                                 }
 
                                 HorizontalLayout {
-                                    height: 16px;
+                                    height: 18px;
                                     spacing: 4px;
-                                    Text { width: 125px; text: "  ↓ RISK / SHARE"; color: VayrenPalette.live-ink-dim; font-size: 8.5px; font-weight: 600; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 125px; text: "  ↓ RISK / SHARE"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
                                     Text { horizontal-stretch: 1; min-width: 0px; text: root.selected-stock.risk-share != "" && root.selected-stock.risk-share != "—" ? root.selected-stock.risk-share : "NOT READY"; color: VayrenPalette.live-teal; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
-                                    Text { width: 75px; text: "SRC: RISK ENG"; color: VayrenPalette.live-ink-faint; font-size: 7.5px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 75px; text: "SRC: RISK ENG"; color: VayrenPalette.live-ink-faint; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
                                 }
 
                                 HorizontalLayout {
-                                    height: 16px;
+                                    height: 18px;
                                     spacing: 4px;
-                                    Text { width: 125px; text: "  ↓ QUANTITY"; color: VayrenPalette.live-ink-dim; font-size: 8.5px; font-weight: 600; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 125px; text: "  ↓ QUANTITY"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
                                     Text { horizontal-stretch: 1; min-width: 0px; text: root.selected-stock.calculated-qty != "" && root.selected-stock.calculated-qty != "—" ? root.selected-stock.calculated-qty : "NOT READY"; color: VayrenPalette.live-teal; font-size: 10px; font-weight: 800; vertical-alignment: center; overflow: elide; }
-                                    Text { width: 75px; text: "SRC: RISK ENG"; color: VayrenPalette.live-ink-faint; font-size: 7.5px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 75px; text: "SRC: RISK ENG"; color: VayrenPalette.live-ink-faint; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
                                 }
 
                                 HorizontalLayout {
-                                    height: 16px;
+                                    height: 18px;
                                     spacing: 4px;
-                                    Text { width: 125px; text: "  ↓ PLANNED RISK"; color: VayrenPalette.live-ink-dim; font-size: 8.5px; font-weight: 600; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 125px; text: "  ↓ PLANNED RISK"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
                                     Text { horizontal-stretch: 1; min-width: 0px; text: root.selected-stock.planned-risk != "" && root.selected-stock.planned-risk != "—" ? root.selected-stock.planned-risk : "NOT READY"; color: VayrenPalette.live-ink; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
-                                    Text { width: 75px; text: "SRC: RISK ENG"; color: VayrenPalette.live-ink-faint; font-size: 7.5px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 75px; text: "SRC: RISK ENG"; color: VayrenPalette.live-ink-faint; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
                                 }
 
                                 HorizontalLayout {
-                                    height: 16px;
+                                    height: 18px;
                                     spacing: 4px;
-                                    Text { width: 125px; text: "    CURRENT OPEN RISK"; color: VayrenPalette.live-ink-dim; font-size: 8.5px; font-weight: 600; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 125px; text: "    CURRENT OPEN RISK"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
                                     Text { horizontal-stretch: 1; min-width: 0px; text: root.selected-stock.current-open-risk != "" && root.selected-stock.current-open-risk != "—" ? root.selected-stock.current-open-risk : "NOT AVAILABLE"; color: root.selected-stock.current-open-risk == "" || root.selected-stock.current-open-risk == "—" ? VayrenPalette.muted : VayrenPalette.text; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
-                                    Text { width: 75px; text: "SRC: POSITION"; color: VayrenPalette.live-ink-faint; font-size: 7.5px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 75px; text: "SRC: POSITION"; color: VayrenPalette.live-ink-faint; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
                                 }
 
                                 HorizontalLayout {
-                                    height: 16px;
+                                    height: 18px;
                                     spacing: 4px;
-                                    Text { width: 125px; text: "    RISK UTILIZATION"; color: VayrenPalette.live-ink-dim; font-size: 8.5px; font-weight: 600; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 125px; text: "    RISK UTILIZATION"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
                                     Text { horizontal-stretch: 1; min-width: 0px; text: root.selected-stock.risk-util != "" && root.selected-stock.risk-util != "—" ? root.selected-stock.risk-util : "—"; color: VayrenPalette.text; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
-                                    Text { width: 75px; text: "SRC: RISK ENG"; color: VayrenPalette.live-ink-faint; font-size: 7.5px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 75px; text: "SRC: RISK ENG"; color: VayrenPalette.live-ink-faint; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
                                 }
 
                                 VBanner {
@@ -1884,19 +1935,19 @@ export component LiveScreen inherits Rectangle {
                                 // step's reached/failed/current flags come from
                                 // `OrderSnapshot::history`. No order in the
                                 // backend means NO pipeline is drawn at all.
-                                Text { text: "ORDER PIPELINE"; color: VayrenPalette.live-ink-dim; font-size: 9px; font-weight: 700; }
+                                Text { text: "ORDER PIPELINE"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 700; }
 
                                 if root.selected-stock.pipeline.length == 0: Text {
                                     text: "NO ORDER — backend has not created one for this symbol";
                                     color: VayrenPalette.muted;
-                                    font-size: 9px;
+                                    font-size: 10px;
                                     font-weight: 600;
-                                    height: 14px;
+                                    height: 18px;
                                     vertical-alignment: center;
                                 }
 
                                 for step[s-idx] in root.selected-stock.pipeline: HorizontalLayout {
-                                    height: 15px;
+                                    height: 18px;
                                     spacing: 6px;
                                     alignment: center;
 
@@ -1907,7 +1958,7 @@ export component LiveScreen inherits Rectangle {
                                     Text {
                                         text: step.failed ? "✕" : (step.reached ? "✓" : "○");
                                         color: step.failed ? VayrenPalette.neg : (step.reached ? VayrenPalette.pos : VayrenPalette.muted);
-                                        font-size: 9px;
+                                        font-size: 10px;
                                         font-weight: 800;
                                         width: 10px;
                                         vertical-alignment: center;
@@ -1915,7 +1966,7 @@ export component LiveScreen inherits Rectangle {
                                     Text {
                                         text: step.label;
                                         color: step.current ? VayrenPalette.live-teal : (step.reached ? VayrenPalette.text : VayrenPalette.muted);
-                                        font-size: 9px;
+                                        font-size: 10px;
                                         font-weight: step.current ? 800 : 600;
                                         vertical-alignment: center;
                                         overflow: elide;
@@ -1924,7 +1975,7 @@ export component LiveScreen inherits Rectangle {
                                     if step.current: Text {
                                         text: "◉ CURRENT";
                                         color: VayrenPalette.live-teal;
-                                        font-size: 8px;
+                                        font-size: 10px;
                                         font-weight: 800;
                                         vertical-alignment: center;
                                     }
@@ -1971,7 +2022,7 @@ export component LiveScreen inherits Rectangle {
                                     Text {
                                         text: "EC2 LINK: " + (root.gateway.status != "" ? root.gateway.status : "DISCONNECTED");
                                         color: root.gateway.tone == 1 ? VayrenPalette.pos : (root.gateway.tone == 2 ? VayrenPalette.amber : VayrenPalette.neg);
-                                        font-size: 9px;
+                                        font-size: 10px;
                                         font-weight: 700;
                                         vertical-alignment: center;
                                     }
@@ -2036,9 +2087,9 @@ export component LiveScreen inherits Rectangle {
                                 if root.blockers.length > 0: Text {
                                     text: "WHY START IS BLOCKED (EXACT REASONS):";
                                     color: VayrenPalette.live-ink-faint;
-                                    font-size: 9px;
+                                    font-size: 10px;
                                     font-weight: 700;
-                                    height: 14px;
+                                    height: 18px;
                                     vertical-alignment: center;
                                 }
 
@@ -2057,7 +2108,7 @@ export component LiveScreen inherits Rectangle {
                                     color: VayrenPalette.muted;
                                     font-size: 10px;
                                     font-weight: 500;
-                                    height: 14px;
+                                    height: 18px;
                                     vertical-alignment: center;
                                 }
 
@@ -2119,6 +2170,109 @@ export component LiveScreen inherits Rectangle {
                                     font-size: 11px;
                                     font-weight: 600;
                                     wrap: word-wrap;
+                                }
+                            }
+                        }
+
+                        // 3.3b UNIFIED ELIGIBILITY (Phase-6/7 backend section,
+                        // verbatim). Its own card so the verdict block can
+                        // never disturb the readiness gates above. Unreported
+                        // backends show "NOT REPORTED" — the card never
+                        // invents a verdict, and per-instrument rows come
+                        // only from reported backend rows.
+                        Rectangle {
+                            background: VayrenPalette.live-panel;
+                            border-radius: 6px;
+                            border-width: 1px;
+                            border-color: VayrenPalette.live-line;
+
+                            VerticalLayout {
+                                padding: 12px;
+                                spacing: 5px;
+
+                                Text {
+                                    text: "ELIGIBILITY";
+                                    color: VayrenPalette.text-bright;
+                                    font-size: 12px;
+                                    font-weight: 700;
+                                    height: 24px;
+                                    vertical-alignment: center;
+                                }
+                                Rectangle {
+                                    height: 30px;
+                                    border-radius: 4px;
+                                    background: LiveTone.chip(root.eligibility.final-tone);
+                                    border-width: 1px;
+                                    border-color: LiveTone.ink(root.eligibility.final-tone);
+                                    HorizontalLayout {
+                                        padding-left: 10px;
+                                        padding-right: 10px;
+                                        spacing: 6px;
+                                        alignment: center;
+                                        Text {
+                                            min-width: 0px;
+                                            text: root.eligibility.reported ? root.eligibility.final-label : "NOT REPORTED";
+                                            color: LiveTone.ink(root.eligibility.final-tone);
+                                            font-size: 13px;
+                                            font-weight: 800;
+                                            vertical-alignment: center;
+                                            overflow: elide;
+                                        }
+                                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                                        Text {
+                                            text: root.eligibility.enforcement ? "ENFORCING" : "ADVISORY";
+                                            color: VayrenPalette.muted;
+                                            font-size: 10px;
+                                            font-weight: 700;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+                                if root.eligibility.reported && root.eligibility.reason != "": Text {
+                                    min-width: 0px;
+                                    width: 100%;
+                                    text: root.eligibility.reason;
+                                    color: VayrenPalette.live-ink-dim;
+                                    font-size: 10px;
+                                    font-weight: 600;
+                                    wrap: word-wrap;
+                                }
+                                LiveGateRow {
+                                    name: "MARKET DATA";
+                                    status: root.eligibility.reported ? root.eligibility.market : "—";
+                                    tone: 0;
+                                    reason: "";
+                                    show-reason: false;
+                                }
+                                LiveGateRow {
+                                    name: "EXECUTION";
+                                    status: root.eligibility.reported ? root.eligibility.execution : "—";
+                                    tone: 0;
+                                    reason: "";
+                                    show-reason: false;
+                                }
+                                LiveGateRow {
+                                    name: "RISK";
+                                    status: root.eligibility.reported ? root.eligibility.risk : "—";
+                                    tone: 0;
+                                    reason: "";
+                                    show-reason: false;
+                                }
+                                Text {
+                                    min-width: 0px;
+                                    width: 100%;
+                                    text: root.eligibility.reported ? root.eligibility.strategy-counts : "No strategy verdicts reported.";
+                                    color: VayrenPalette.live-ink-dim;
+                                    font-size: 10px;
+                                    font-weight: 600;
+                                    wrap: word-wrap;
+                                }
+                                for erow in root.eligibility-rows: HorizontalLayout {
+                                    height: 18px;
+                                    spacing: 6px;
+                                    Text { width: 80px; text: erow.symbol; color: VayrenPalette.text; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 110px; text: erow.level; color: LiveTone.ink(erow.level-tone); font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
+                                    Text { horizontal-stretch: 1; min-width: 0px; text: erow.reasons; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
                                 }
                             }
                         }
@@ -2229,7 +2383,7 @@ export component LiveScreen inherits Rectangle {
                                                 root.strategy-picked(root.strategy-names[Math.mod(root.strategy-selected + 1, root.strategy-names.length)]);
                                             }
                                         }
-                                        Text { text: root.selected-strategy + "  ▾"; color: root.setup.can-stop ? VayrenPalette.faint : VayrenPalette.text; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
+                                        Text { text: (root.strategy-selected >= 0 ? root.selected-strategy : "Select Strategy") + "  ▾"; color: root.setup.can-stop ? VayrenPalette.faint : VayrenPalette.text; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
                                     }
                                 }
                             }
