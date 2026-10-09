@@ -1244,7 +1244,7 @@
       "to": "src/core/native"
     }
   ],
-  "entity_count": 5744,
+  "entity_count": 5732,
   "files": [
     {
       "domain": "CORE",
@@ -3023,16 +3023,6 @@
       "module": "src/broker/providers",
       "owner": "PROVIDER_SDK",
       "owner_source": "policy",
-      "path": "src/broker/providers/fyers/router_feed.py",
-      "retention_state": null
-    },
-    {
-      "domain": "PROVIDER_BOUNDARY",
-      "is_test": false,
-      "language": "PYTHON",
-      "module": "src/broker/providers",
-      "owner": "PROVIDER_SDK",
-      "owner_source": "policy",
       "path": "src/broker/providers/fyers/selenium_auth.py",
       "retention_state": null
     },
@@ -3164,16 +3154,6 @@
       "owner": "PROVIDER_SDK",
       "owner_source": "policy",
       "path": "src/broker/providers/zerodha/live_trading.py",
-      "retention_state": null
-    },
-    {
-      "domain": "PROVIDER_BOUNDARY",
-      "is_test": false,
-      "language": "PYTHON",
-      "module": "src/broker/providers",
-      "owner": "PROVIDER_SDK",
-      "owner_source": "policy",
-      "path": "src/broker/providers/zerodha/router_feed.py",
       "retention_state": null
     },
     {
@@ -3374,16 +3354,6 @@
       "owner": "BROKER_CONTRACT",
       "owner_source": "policy",
       "path": "src/broker/tests/test_fyers_websocket.py",
-      "retention_state": null
-    },
-    {
-      "domain": "BROKER_CONTRACT",
-      "is_test": true,
-      "language": "PYTHON",
-      "module": "src/broker",
-      "owner": "BROKER_CONTRACT",
-      "owner_source": "policy",
-      "path": "src/broker/tests/test_router_feeds.py",
       "retention_state": null
     },
     {
@@ -6247,7 +6217,7 @@
       "retention_state": null
     }
   ],
-  "inputs_hash": "10f1fac29aac6d5710ec7e199463e0f47526e7cae3808f87ae493f3fe74a9c4f",
+  "inputs_hash": "ef76c49cfd6bb8fff538ac3d6371ee9b25a558c30c13d60ca9b75f17ed1cabc0",
   "languages": [
     {
       "id": "RUST"
@@ -6764,7 +6734,6 @@
         "src/broker/tests/test_fyers_selenium_auth.py",
         "src/broker/tests/test_fyers_selenium_browser.py",
         "src/broker/tests/test_fyers_websocket.py",
-        "src/broker/tests/test_router_feeds.py",
         "src/broker/tests/test_selection_store.py",
         "src/broker/tests/test_zerodha_auth.py",
         "src/broker/tests/test_zerodha_fetch.py",
@@ -6835,7 +6804,6 @@
         "src/broker/providers/fyers/credentials.py",
         "src/broker/providers/fyers/live_auth.py",
         "src/broker/providers/fyers/live_market_data.py",
-        "src/broker/providers/fyers/router_feed.py",
         "src/broker/providers/fyers/selenium_auth.py",
         "src/broker/providers/fyers/session_adapter.py",
         "src/broker/providers/fyers/spec.py",
@@ -6850,7 +6818,6 @@
         "src/broker/providers/zerodha/live_auth.py",
         "src/broker/providers/zerodha/live_market_data.py",
         "src/broker/providers/zerodha/live_trading.py",
-        "src/broker/providers/zerodha/router_feed.py",
         "src/broker/providers/zerodha/spec.py"
       ],
       "id": "src/broker/providers",
@@ -7611,7 +7578,7 @@
       "required_language": "PYTHON"
     }
   ],
-  "relationship_count": 12206,
+  "relationship_count": 12197,
   "repository": {
     "name": "vayren-core",
     "root": "."
@@ -16060,24 +16027,6 @@
     },
     {
       "called_by": [
-        "broker.tests.test_router_feeds:test_fyers_feed_health_failure_is_honest",
-        "broker.tests.test_router_feeds:test_fyers_feed_passes_ids_through_and_tags_rows"
-      ],
-      "callers_complete": true,
-      "calls": [],
-      "dotted": "broker.providers.fyers.router_feed.FyersRouterFeed",
-      "file": "src/broker/providers/fyers/router_feed.py",
-      "kind": "class",
-      "language": "PYTHON",
-      "line": 18,
-      "module": "src/broker/providers",
-      "name": "FyersRouterFeed",
-      "public": true,
-      "qualified": "broker.providers.fyers.router_feed:FyersRouterFeed",
-      "tests": []
-    },
-    {
-      "called_by": [
         "broker.providers.fyers.selenium_auth:fyers_selenium_interactive_login",
         "broker.providers.fyers.spec:fyers_management_spec",
         "broker.tests.test_fyers_selenium_auth:_engine",
@@ -17278,23 +17227,6 @@
     },
     {
       "called_by": [
-        "broker.tests.test_router_feeds:test_zerodha_feed_translates_tokens_and_tags_rows"
-      ],
-      "callers_complete": true,
-      "calls": [],
-      "dotted": "broker.providers.zerodha.router_feed.ZerodhaRouterFeed",
-      "file": "src/broker/providers/zerodha/router_feed.py",
-      "kind": "class",
-      "language": "PYTHON",
-      "line": 23,
-      "module": "src/broker/providers",
-      "name": "ZerodhaRouterFeed",
-      "public": true,
-      "qualified": "broker.providers.zerodha.router_feed:ZerodhaRouterFeed",
-      "tests": []
-    },
-    {
-      "called_by": [
         "broker.providers.zerodha.spec:zerodha_management_spec"
       ],
       "callers_complete": true,
@@ -17477,21 +17409,6 @@
       "tests": []
     },
     {
-      "called_by": [],
-      "callers_complete": true,
-      "calls": [],
-      "dotted": "broker.registry._phase6_probe",
-      "file": "src/broker/registry.py",
-      "kind": "function",
-      "language": "PYTHON",
-      "line": 159,
-      "module": "src/broker",
-      "name": "_phase6_probe",
-      "public": false,
-      "qualified": "broker.registry:_phase6_probe",
-      "tests": []
-    },
-    {
       "called_by": [
         "app.services.broker_selection_service:BrokerSelectionService",
         "app.services.live_trading_service:LiveTradingService",
@@ -17523,21 +17440,6 @@
       "name": "default_registry",
       "public": true,
       "qualified": "broker.registry:default_registry",
-      "tests": []
-    },
-    {
-      "called_by": [],
-      "callers_complete": true,
-      "calls": [],
-      "dotted": "broker.registry.phase6_probe_api",
-      "file": "src/broker/registry.py",
-      "kind": "function",
-      "language": "PYTHON",
-      "line": 155,
-      "module": "src/broker",
-      "name": "phase6_probe_api",
-      "public": true,
-      "qualified": "broker.registry:phase6_probe_api",
       "tests": []
     },
     {
@@ -21710,94 +21612,6 @@
       "name": "test_paper_mode_does_not_call_live_websocket",
       "public": true,
       "qualified": "broker.tests.test_fyers_websocket:test_paper_mode_does_not_call_live_websocket",
-      "tests": []
-    },
-    {
-      "called_by": [
-        "broker.tests.test_router_feeds:test_fyers_feed_health_failure_is_honest",
-        "broker.tests.test_router_feeds:test_fyers_feed_passes_ids_through_and_tags_rows",
-        "broker.tests.test_router_feeds:test_zerodha_feed_translates_tokens_and_tags_rows"
-      ],
-      "callers_complete": true,
-      "calls": [],
-      "dotted": "broker.tests.test_router_feeds.StubFace",
-      "file": "src/broker/tests/test_router_feeds.py",
-      "kind": "class",
-      "language": "PYTHON",
-      "line": 23,
-      "module": "src/broker",
-      "name": "StubFace",
-      "public": true,
-      "qualified": "broker.tests.test_router_feeds:StubFace",
-      "tests": []
-    },
-    {
-      "called_by": [],
-      "callers_complete": true,
-      "calls": [
-        "broker.providers.fyers.router_feed:FyersRouterFeed",
-        "broker.tests.test_router_feeds:StubFace"
-      ],
-      "dotted": "broker.tests.test_router_feeds.test_fyers_feed_health_failure_is_honest",
-      "file": "src/broker/tests/test_router_feeds.py",
-      "kind": "function",
-      "language": "PYTHON",
-      "line": 80,
-      "module": "src/broker",
-      "name": "test_fyers_feed_health_failure_is_honest",
-      "public": true,
-      "qualified": "broker.tests.test_router_feeds:test_fyers_feed_health_failure_is_honest",
-      "tests": []
-    },
-    {
-      "called_by": [],
-      "callers_complete": true,
-      "calls": [
-        "broker.providers.fyers.router_feed:FyersRouterFeed",
-        "broker.tests.test_router_feeds:StubFace"
-      ],
-      "dotted": "broker.tests.test_router_feeds.test_fyers_feed_passes_ids_through_and_tags_rows",
-      "file": "src/broker/tests/test_router_feeds.py",
-      "kind": "function",
-      "language": "PYTHON",
-      "line": 56,
-      "module": "src/broker",
-      "name": "test_fyers_feed_passes_ids_through_and_tags_rows",
-      "public": true,
-      "qualified": "broker.tests.test_router_feeds:test_fyers_feed_passes_ids_through_and_tags_rows",
-      "tests": []
-    },
-    {
-      "called_by": [],
-      "callers_complete": true,
-      "calls": [],
-      "dotted": "broker.tests.test_router_feeds.test_zerodha_feed_never_imports_strategy",
-      "file": "src/broker/tests/test_router_feeds.py",
-      "kind": "function",
-      "language": "PYTHON",
-      "line": 108,
-      "module": "src/broker",
-      "name": "test_zerodha_feed_never_imports_strategy",
-      "public": true,
-      "qualified": "broker.tests.test_router_feeds:test_zerodha_feed_never_imports_strategy",
-      "tests": []
-    },
-    {
-      "called_by": [],
-      "callers_complete": true,
-      "calls": [
-        "broker.providers.zerodha.router_feed:ZerodhaRouterFeed",
-        "broker.tests.test_router_feeds:StubFace"
-      ],
-      "dotted": "broker.tests.test_router_feeds.test_zerodha_feed_translates_tokens_and_tags_rows",
-      "file": "src/broker/tests/test_router_feeds.py",
-      "kind": "function",
-      "language": "PYTHON",
-      "line": 88,
-      "module": "src/broker",
-      "name": "test_zerodha_feed_translates_tokens_and_tags_rows",
-      "public": true,
-      "qualified": "broker.tests.test_router_feeds:test_zerodha_feed_translates_tokens_and_tags_rows",
       "tests": []
     },
     {
@@ -40173,7 +39987,7 @@
       "file": "crates/vayren-live-view/src/lib.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 558,
+      "line": 560,
       "module": "crates/vayren-live-view",
       "name": "cstr",
       "public": false,
@@ -40203,7 +40017,7 @@
       "file": "crates/vayren-live-view/src/lib.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 573,
+      "line": 575,
       "module": "crates/vayren-live-view",
       "name": "guard",
       "public": false,
@@ -40233,7 +40047,7 @@
       "file": "crates/vayren-live-view/src/lib.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 756,
+      "line": 758,
       "module": "crates/vayren-live-view",
       "name": "pointer_button",
       "public": false,
@@ -40248,7 +40062,7 @@
       "file": "crates/vayren-live-view/src/lib.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 724,
+      "line": 726,
       "module": "crates/vayren-live-view",
       "name": "pointer_event",
       "public": false,
@@ -40293,7 +40107,7 @@
       "file": "crates/vayren-live-view/src/lib.rs",
       "kind": "mod",
       "language": "RUST_SLINT",
-      "line": 886,
+      "line": 888,
       "module": "crates/vayren-live-view",
       "name": "tests",
       "public": false,
@@ -40308,7 +40122,7 @@
       "file": "crates/vayren-live-view/src/lib.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 549,
+      "line": 551,
       "module": "crates/vayren-live-view",
       "name": "view_of",
       "public": false,
@@ -40323,7 +40137,7 @@
       "file": "crates/vayren-live-view/src/lib.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 364,
+      "line": 366,
       "module": "crates/vayren-live-view",
       "name": "wire_view",
       "public": false,
@@ -77918,7 +77732,7 @@
       "file": "tools/build_rust.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 88,
+      "line": 89,
       "module": "tools",
       "name": "_bin_name",
       "public": false,
@@ -77940,7 +77754,7 @@
       "file": "tools/build_rust.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 126,
+      "line": 132,
       "module": "tools",
       "name": "_build_shell_debug",
       "public": false,
@@ -77962,7 +77776,7 @@
       "file": "tools/build_rust.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 139,
+      "line": 145,
       "module": "tools",
       "name": "_build_shell_package",
       "public": false,
@@ -77981,7 +77795,7 @@
       "file": "tools/build_rust.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 103,
+      "line": 104,
       "module": "tools",
       "name": "_failure_summary",
       "public": false,
@@ -78000,7 +77814,7 @@
       "file": "tools/build_rust.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 52,
+      "line": 53,
       "module": "tools",
       "name": "_lab_lib_name",
       "public": false,
@@ -78019,7 +77833,7 @@
       "file": "tools/build_rust.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 25,
+      "line": 26,
       "module": "tools",
       "name": "_lib_name",
       "public": false,
@@ -78038,7 +77852,7 @@
       "file": "tools/build_rust.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 43,
+      "line": 44,
       "module": "tools",
       "name": "_live_lib_name",
       "public": false,
@@ -78057,7 +77871,7 @@
       "file": "tools/build_rust.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 79,
+      "line": 80,
       "module": "tools",
       "name": "_market_lib_name",
       "public": false,
@@ -78072,11 +77886,30 @@
       ],
       "callers_complete": true,
       "calls": [],
+      "dotted": "tools.build_rust._phase",
+      "file": "tools/build_rust.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 127,
+      "module": "tools",
+      "name": "_phase",
+      "public": false,
+      "qualified": "tools.build_rust:_phase",
+      "tests": [
+        "tools/tests/test_build_rust.py"
+      ]
+    },
+    {
+      "called_by": [
+        "tools.build_rust:main"
+      ],
+      "callers_complete": true,
+      "calls": [],
       "dotted": "tools.build_rust._research_lib_name",
       "file": "tools/build_rust.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 70,
+      "line": 71,
       "module": "tools",
       "name": "_research_lib_name",
       "public": false,
@@ -78100,7 +77933,7 @@
       "file": "tools/build_rust.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 115,
+      "line": 116,
       "module": "tools",
       "name": "_run",
       "public": false,
@@ -78121,7 +77954,7 @@
       "file": "tools/build_rust.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 192,
+      "line": 198,
       "module": "tools",
       "name": "_run_workspace_tests",
       "public": false,
@@ -78140,7 +77973,7 @@
       "file": "tools/build_rust.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 164,
+      "line": 170,
       "module": "tools",
       "name": "_sync_desktop_shortcut",
       "public": false,
@@ -78159,7 +77992,7 @@
       "file": "tools/build_rust.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 61,
+      "line": 62,
       "module": "tools",
       "name": "_system_lib_name",
       "public": false,
@@ -78178,7 +78011,7 @@
       "file": "tools/build_rust.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 34,
+      "line": 35,
       "module": "tools",
       "name": "_view_lib_name",
       "public": false,
@@ -78199,6 +78032,7 @@
         "tools.build_rust:_lib_name",
         "tools.build_rust:_live_lib_name",
         "tools.build_rust:_market_lib_name",
+        "tools.build_rust:_phase",
         "tools.build_rust:_research_lib_name",
         "tools.build_rust:_run",
         "tools.build_rust:_run_workspace_tests",
@@ -78210,7 +78044,7 @@
       "file": "tools/build_rust.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 197,
+      "line": 203,
       "module": "tools",
       "name": "main",
       "public": true,
@@ -100007,12 +99841,6 @@
       "granularity": "module",
       "module": "src/broker",
       "path": "src/broker/tests/test_fyers_websocket.py",
-      "targets": []
-    },
-    {
-      "granularity": "module",
-      "module": "src/broker",
-      "path": "src/broker/tests/test_router_feeds.py",
       "targets": []
     },
     {
