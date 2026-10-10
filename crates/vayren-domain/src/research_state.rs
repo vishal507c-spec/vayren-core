@@ -2659,11 +2659,6 @@ pub fn demo_research_state() -> ResearchState {
                 description: "Opening Breakout Strategy".into(),
                 version: "1.0".into(),
             },
-            ResearchStrategy {
-                name: "SMA".into(),
-                description: "SMA crossover".into(),
-                version: "1.0".into(),
-            },
         ],
         ..ResearchState::default()
     };
@@ -2723,7 +2718,7 @@ mod tests {
         let st = obr_selected();
         let view = project(&st);
         assert!(view.create_visible);
-        assert_eq!(view.strategies.len(), 2);
+        assert_eq!(view.strategies.len(), 1);
         assert!(view.strategies[0].selected);
         // 5 grouped sections, 11 inputs total (8 text + 3 selects).
         assert_eq!(view.config_groups.len(), 5);

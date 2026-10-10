@@ -1945,11 +1945,10 @@ fn date_presets_for(today: i64) -> Vec<LabPresetData> {
 
 /// §02 date-range presets, anchored on the REAL store bounds.
 ///
-/// Five entries, every one ending at the last available bar, so switching
-/// presets never moves the END of the experiment behind the user's back:
-/// `1Y 3Y 5Y 10Y MAX`. A preset whose nominal span reaches before the first
-/// available bar is CLAMPED to it, and its label states the span the data
-/// actually has (`"3.2 YRS"`) instead of a year count the store cannot back.
+/// Every entry ends at the last available bar, so switching presets never
+/// moves the END of the experiment behind the user's back: `1Y 3Y 5Y 10Y MAX`.
+/// A year preset whose span reaches before the first available bar is
+/// dropped, so it never duplicates `MAX` under a different label.
 ///
 /// `first_avail`/`last_avail` are day anchors from the backend's real
 /// `date_range()`; unknown bounds (`<= 0`) yield no presets at all, because a
@@ -1961,18 +1960,16 @@ pub fn range_presets_for(first_avail: i64, last_avail: i64) -> Vec<LabRangePrese
     let end = last_avail;
     let mut presets: Vec<LabRangePresetData> = [(1i64, "1Y"), (3, "3Y"), (5, "5Y"), (10, "10Y")]
         .iter()
-        .map(|(years, label)| {
+        .filter_map(|(years, label)| {
             let want = sub_months(end, years * 12);
-            let (start, label) = if want < first_avail {
-                (first_avail, span_label(first_avail, end))
-            } else {
-                (want, (*label).to_string())
-            };
-            LabRangePresetData {
-                label,
-                start_days: start as i32,
-                end_days: end as i32,
+            if want < first_avail {
+                return None;
             }
+            Some(LabRangePresetData {
+                label: (*label).to_string(),
+                start_days: want as i32,
+                end_days: end as i32,
+            })
         })
         .collect();
     presets.push(LabRangePresetData {
@@ -1981,19 +1978,6 @@ pub fn range_presets_for(first_avail: i64, last_avail: i64) -> Vec<LabRangePrese
         end_days: end as i32,
     });
     presets
-}
-
-/// Honest label for a clamped span: years with one decimal while the span is
-/// under ten years, whole years beyond that. A 3.2-year store says "3.2 YRS",
-/// never "5Y".
-fn span_label(start: i64, end: i64) -> String {
-    let days = (end - start).max(0) as f64;
-    let years = days / 365.25;
-    if years >= 10.0 {
-        format!("{:.0} YRS", years)
-    } else {
-        format!("{years:.1} YRS")
-    }
 }
 
 /// `seconds` → `MM:SS` (or `HH:MM:SS`). A dash for an unknown duration —
@@ -5006,25 +4990,21 @@ mod tests {
     }
 
     #[test]
-    fn range_presets_are_five_and_all_end_at_the_last_available_bar() {
+    fn range_presets_are_all_year_presets_plus_max_ending_at_the_last_bar() {
         let presets = range_presets_for(LONG_FIRST, LONG_LAST);
-        assert_eq!(presets.len(), 5);
         for p in &presets {
             assert_eq!(p.end_days as i64, LONG_LAST);
             assert!(p.start_days <= p.end_days);
         }
-        // A 6.9-year store cannot offer a 10Y range, so that cell states the
-        // span the data actually has. The honest label replaces the claim.
+        // A 6.9-year store cannot offer a 10Y range, so it is dropped rather
+        // than shown under a clamped label that duplicates MAX.
         assert_eq!(
             presets.iter().map(|p| p.label.as_str()).collect::<Vec<_>>(),
-            vec!["1Y", "3Y", "5Y", "6.9 YRS", "MAX"]
+            vec!["1Y", "3Y", "5Y", "MAX"]
         );
         // A store long enough for the label keeps it.
         let deep = range_presets_for(14_000, LONG_LAST);
         assert_eq!(deep[3].label, "10Y");
-        // The row WIDENS left to right, so starts only ever move earlier. A
-        // clamped cell may EQUAL the one beside it (both mean "everything the
-        // store has"), but the row must never narrow as it goes right.
         for pair in presets.windows(2) {
             assert!(pair[1].start_days <= pair[0].start_days, "{pair:?}");
         }
@@ -5033,30 +5013,24 @@ mod tests {
     #[test]
     fn max_preset_is_exactly_the_reported_store_bounds() {
         let presets = range_presets_for(LONG_FIRST, LONG_LAST);
-        let max = presets.last().expect("five presets");
+        let max = presets.last().expect("max preset");
         assert_eq!(max.label, "MAX");
         assert_eq!(max.start_days as i64, LONG_FIRST);
         assert_eq!(max.end_days as i64, LONG_LAST);
     }
 
     #[test]
-    fn a_short_history_store_clamps_the_label_instead_of_lying() {
-        // Only 3.2 years of history: 5Y and 10Y cannot exist, so they collapse
-        // onto the real first bar and SAY SO rather than claiming five years.
+    fn a_short_history_store_drops_the_year_presets_it_cannot_back() {
+        // Only 3.2 years of history: 5Y and 10Y cannot exist, so they are
+        // dropped instead of being shown as a clamped duplicate of MAX.
         let first = LONG_LAST - 1_168; // ≈3.2 years
         let presets = range_presets_for(first, LONG_LAST);
-        assert_eq!(presets.len(), 5);
-        let five = &presets[2];
-        assert_eq!(five.start_days as i64, first);
-        assert!(!five.label.contains('5'), "label claims 5Y: {}", five.label);
-        assert!(
-            five.label.ends_with("YRS"),
-            "label is not a span: {}",
-            five.label
+        assert_eq!(
+            presets.iter().map(|p| p.label.as_str()).collect::<Vec<_>>(),
+            vec!["1Y", "3Y", "MAX"]
         );
-        // MAX is still the full store, and still the widest cell.
-        assert_eq!(presets[4].start_days as i64, first);
-        assert_eq!(presets[4].end_days as i64, LONG_LAST);
+        assert_eq!(presets[2].start_days as i64, first);
+        assert_eq!(presets[2].end_days as i64, LONG_LAST);
     }
 
     #[test]

@@ -1,5 +1,5 @@
-// VAYREN LIVE — Native Slint execution workstation (no chart: this surface
-// is a terminal blotter, not a charting page — freed space goes to the
+﻿// VAYREN LIVE â€” Native Slint execution workstation (no chart: this surface
+// is a terminal blotter, not a charting page â€” freed space goes to the
 // blotter, events, watchlist and readiness panels).
 //
 // Single integrated workspace layout:
@@ -13,7 +13,7 @@ import { VayrenPalette, VayrenDesign } from "palette.slint";
 import { VBadge, VButton, VBanner, VEmptyState, VCell, VStatusDot } from "components.slint";
 import { LineEdit, ScrollView, ComboBox } from "std-widgets.slint";
 
-// ── projected shapes (mirror domain live.rs) ──────────────────────────────────
+// â”€â”€ projected shapes (mirror domain live.rs) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export struct LiveBar {
     mode: int, // 0 PAPER, 1 SANDBOX, 2 LIVE
@@ -216,7 +216,7 @@ export struct LiveWatchlistRow {
 }
 
 // Unified eligibility verdict (Phase-6/7 backend section, verbatim).
-// Unreported backends leave every field at its fallback — the screen
+// Unreported backends leave every field at its fallback â€” the screen
 // prints "NOT REPORTED", never an invented verdict.
 export struct LiveEligibility {
     reported: bool,
@@ -291,10 +291,10 @@ export struct LiveFooter {
     clock: string,
 }
 
-// ── recomposition tiers ──────────────────────────────────────────────────
+// â”€â”€ recomposition tiers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export global LiveTiers {
-    // ── the two hard content floors of the workstation ──
+    // â”€â”€ the two hard content floors of the workstation â”€â”€
     public pure function workspace-min-width() -> length {
         return 440px;
     }
@@ -312,7 +312,7 @@ export global LiveTiers {
         return Math.max(440px, Math.min(520px, w * 0.32));
     }
 
-    // ── the width the workspace column actually receives ──
+    // â”€â”€ the width the workspace column actually receives â”€â”€
     // Every workspace-region tier below is measured against THIS, not the
     // window: with the inspector docked the workspace gets `w` minus the
     // inspector, its gutter and the layout padding, so a threshold applied
@@ -323,7 +323,7 @@ export global LiveTiers {
         return w - (dock-inspector(w) ? inspector-width(w) + 20px : 0px) - 20px;
     }
 
-    // ── command bar: computed from the widgets, never guessed ──
+    // â”€â”€ command bar: computed from the widgets, never guessed â”€â”€
     // Width each command-bar region needs to render un-elided: one status
     // card, the PAPER|SANDBOX|LIVE selector and the START/STOP/HALT group.
     public pure function bar-card-width() -> length { return 150px; }
@@ -354,8 +354,8 @@ export global LiveTiers {
 
     // The inspector docks only when the workspace floor STILL fits beside it.
     // The old fixed 800px threshold docked a 440px inspector into an 800px
-    // window, leaving the workspace 330px — narrower than the screen's own
-    // declared `workspace-min-width()` — so the watchlist chips and the
+    // window, leaving the workspace 330px â€” narrower than the screen's own
+    // declared `workspace-min-width()` â€” so the watchlist chips and the
     // search box were clipped with no way to reach them.
     public pure function dock-inspector(w: length) -> bool {
         return w >= VayrenDesign.live-dock-inspector
@@ -377,9 +377,9 @@ export global LiveTiers {
     }
 }
 
-// ── safety tone authority ────────────────────────────────────────────────
+// â”€â”€ safety tone authority â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // The single place a backend badge tone becomes a colour. Tone convention is
-// the shared one (components.slint §tone): 0 muted/unknown, 1 pos/ready,
+// the shared one (components.slint Â§tone): 0 muted/unknown, 1 pos/ready,
 // 2 warn, 3 neg/NOT READY, 4 accent/info. A surface NEVER invents a tone: it
 // passes the domain badge through, so an unconfigured fact can never paint
 // itself healthy.
@@ -399,7 +399,7 @@ export global LiveTone {
     }
 }
 
-// ── UI Helper Components ─────────────────────────────────────────────────
+// â”€â”€ UI Helper Components â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 component LiveTopCard inherits Rectangle {
     // A status card carries ONE backend fact: the domain label string plus its
@@ -488,149 +488,12 @@ component LiveTopCard inherits Rectangle {
     }
 }
 
-component LiveTabHeader inherits Rectangle {
-    in property <string> label;
-    in property <bool> active: false;
-    callback clicked();
-
-    background: transparent;
-    height: 32px;
-
-    TouchArea {
-        clicked => { root.clicked(); }
-    }
-
-    VerticalLayout {
-        alignment: center;
-        spacing: 0;
-
-        Rectangle {
-            vertical-stretch: 1;
-            background: transparent;
-        }
-
-        Text {
-            text: root.label;
-            color: root.active ? VayrenPalette.live-teal : VayrenPalette.live-ink-mute;
-            font-size: 12px;
-            font-weight: root.active ? 700 : 500;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-        }
-
-        Rectangle {
-            vertical-stretch: 1;
-            background: transparent;
-        }
-
-        // Cyan underline indicator
-        Rectangle {
-            height: 2px;
-            background: root.active ? VayrenPalette.live-teal : transparent;
-        }
-    }
-}
-
-component LiveKvRow inherits HorizontalLayout {
-    in property <string> key;
-    in property <string> value;
-    in property <int> tone: 0;
-
-    height: 18px;
-    spacing: 6px;
-    alignment: center;
-
-    Text {
-        width: 112px;
-        text: root.key;
-        color: VayrenPalette.live-ink-faint;
-        font-size: 10px;
-        font-weight: 600;
-        vertical-alignment: center;
-        overflow: elide;
-    }
-    Text {
-        horizontal-stretch: 1;
-        min-width: 0px;
-        text: root.value;
-        color: LiveTone.ink(root.tone);
-        font-size: 11px;
-        font-weight: 700;
-        vertical-alignment: center;
-        overflow: elide;
-    }
-}
 
 // One real readiness gate: name + the domain's own verdict + the backend's
 // own reason. There is no `is-ready` input - readiness is never assumed, only
 // reported. A NOT READY / BLOCKED gate carries the semantic left edge and the
 // NOT READY verdict, so it can never be mistaken for a satisfied one.
-component LiveGateRow inherits Rectangle {
-    in property <string> name;
-    in property <string> status;
-    in property <int> tone: 0;
-    in property <string> reason;
-    in property <bool> show-reason: true;
-
-    background: VayrenPalette.live-panel-deep;
-    border-radius: 4px;
-    border-width: 1px;
-    border-color: root.tone == 3 ? VayrenPalette.neg : (root.tone == 1 ? VayrenPalette.live-line-soft : VayrenPalette.live-line-faint);
-
-    VerticalLayout {
-        padding-left: 8px;
-        padding-right: 8px;
-        padding-top: 4px;
-        padding-bottom: 4px;
-        spacing: 2px;
-
-        HorizontalLayout {
-            height: 18px;
-            spacing: 6px;
-            alignment: center;
-
-            Text {
-                text: root.tone == 1 ? "✓" : (root.tone == 3 ? "✕" : (root.tone == 2 ? "!" : "○"));
-                color: LiveTone.ink(root.tone);
-                font-size: 11px;
-                font-weight: 800;
-                vertical-alignment: center;
-            }
-
-            Text {
-                horizontal-stretch: 1;
-                min-width: 0px;
-                text: root.name;
-                color: VayrenPalette.live-ink;
-                font-size: 11px;
-                font-weight: 700;
-                vertical-alignment: center;
-                overflow: elide;
-            }
-
-            Rectangle { width: 4px; background: transparent; }
-
-            VBadge {
-                text: root.status;
-                tone: root.tone;
-                vertical-alignment: center;
-            }
-        }
-
-        if root.reason != "" && root.show-reason: Text {
-            min-width: 0px;
-            width: 100%;
-            text: root.reason;
-            color: root.tone == 3 ? VayrenPalette.neg : VayrenPalette.muted;
-            font-size: 10px;
-            font-weight: root.tone == 3 ? 600 : 500;
-            vertical-alignment: center;
-            wrap: word-wrap;
-        }
-    }
-}
-
-// ── The Complete LiveScreen UI ───────────────────────────────────────────
+// â”€â”€ The Complete LiveScreen UI â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export component LiveScreen inherits Rectangle {
     in property <LiveBar> bar;
@@ -688,7 +551,7 @@ export component LiveScreen inherits Rectangle {
 
     // Out properties strictly satisfying test suites. They read the RECOMPOSITION
     // TIERS (decided from the window size one level up), never this screen's own
-    // height — a height-derived size would close a layout binding loop.
+    // height â€” a height-derived size would close a layout binding loop.
     out property <bool> show-inspector: root.inspector-open;
     out property <bool> drawer-open: !root.dock-inspector && root.inspector-open;
     out property <bool> inspector-docked: root.dock-inspector && root.inspector-open;
@@ -723,8 +586,8 @@ export component LiveScreen inherits Rectangle {
 
     // The selected timeframe is the BACKEND's selection (index into
     // timeframe-names), never a locally shadowed string.
-    property <string> selected-timeframe: root.timeframe-selected >= 0 && root.timeframe-selected < root.timeframe-names.length ? root.timeframe-names[root.timeframe-selected] : "—";
-    property <string> selected-strategy: root.strategy-selected >= 0 && root.strategy-selected < root.strategy-names.length ? root.strategy-names[root.strategy-selected] : "—";
+    property <string> selected-timeframe: root.timeframe-selected >= 0 && root.timeframe-selected < root.timeframe-names.length ? root.timeframe-names[root.timeframe-selected] : "â€”";
+    property <string> selected-strategy: root.strategy-selected >= 0 && root.strategy-selected < root.strategy-names.length ? root.strategy-names[root.strategy-selected] : "â€”";
 
     // Internal state
     property <int> active-blotter-tab: 0; // 0 Positions, 1 Orders, 2 Fills, 3 Daily P&L
@@ -733,18 +596,18 @@ export component LiveScreen inherits Rectangle {
     // field to the model would fight the caret on every keystroke.
     property <string> filter-text: "";
     // The quantity field owns its text like the search box above: the
-    // backend normalises every commit ("25" → "2.00"), so a live model
+    // backend normalises every commit ("25" â†’ "2.00"), so a live model
     // binding rewrites the field mid-keystroke and eats digits. Commits
     // go out on Enter only; backend updates sync back only while the
     // operator holds no uncommitted edit.
     property <string> qty-text: "";
     property <bool> qty-dirty: false;
 
-    // STEP 4: the ONE start verdict. Derived from backend facts only — a
+    // STEP 4: the ONE start verdict. Derived from backend facts only â€” a
     // running session reads RUNNING, a session with reported blockers reads
     // START BLOCKED, and an unblocked stopped session reads READY TO START.
     // Never optimistic: nothing here is set by a click.
-    property <string> start-verdict: root.setup.can-stop ? "● RUNNING" : (root.blockers.length > 0 ? "✕ START BLOCKED" : "✓ READY TO START");
+    property <string> start-verdict: root.setup.can-stop ? "â— RUNNING" : (root.blockers.length > 0 ? "âœ• START BLOCKED" : "âœ“ READY TO START");
 
     // Watchlist columns always preserved. Internal horizontal scrolling handles narrow viewports.
     property <bool> watchlist-columns-wide: true;
@@ -761,7 +624,7 @@ export component LiveScreen inherits Rectangle {
         min-width: 0px;
         width: 100%;
 
-        // ══ 0. HALT BANNER (Placed right at top of LiveScreen for y:50..76 in AppWindow, strictly satisfying 36 < y < 70) ══
+        // â•â• 0. HALT BANNER (Placed right at top of LiveScreen for y:50..76 in AppWindow, strictly satisfying 36 < y < 70) â•â•
         if root.bar.halted: Rectangle {
             height: 24px;
             background: VayrenPalette.bg;
@@ -772,13 +635,13 @@ export component LiveScreen inherits Rectangle {
                 VBanner {
                     height: 20px;
                     width: 100%;
-                    message: "EXECUTION HALTED — kill switch engaged. Reconcile before restarting.";
+                    message: "EXECUTION HALTED â€” kill switch engaged. Reconcile before restarting.";
                     tone: 3;
                 }
             }
         }
 
-        // ══ 1. TOP STATUS & CONTROL BAR ══════════════════════════════════════
+        // â•â• 1. TOP STATUS & CONTROL BAR â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
         Rectangle {
             height: 60px;
             min-width: 0px;
@@ -818,7 +681,7 @@ export component LiveScreen inherits Rectangle {
                     value-text: root.gateway.status != "" ? root.gateway.status : "DISCONNECTED";
                     tone: root.gateway.tone != 0 ? root.gateway.tone : 3;
                     sub-text: (root.gateway.last-heartbeat != "" ? ("HB: " + root.gateway.last-heartbeat) : "HB: NOT AVAILABLE")
-                        + " · " + (root.gateway.rtt != "" ? ("RTT: " + root.gateway.rtt) : "RTT: NOT AVAILABLE");
+                        + " Â· " + (root.gateway.rtt != "" ? ("RTT: " + root.gateway.rtt) : "RTT: NOT AVAILABLE");
                     sub-tone: root.gateway.tone != 0 ? root.gateway.tone : 3;
                     source-text: root.gateway.conn-state != "" ? ("EC2 WSS (" + root.gateway.conn-state + ")") : (root.gateway.detail != "" ? root.gateway.detail : "EC2 WSS");
                 }
@@ -830,7 +693,7 @@ export component LiveScreen inherits Rectangle {
                     label: "MARKET DATA";
                     value-text: root.md.status != "" ? root.md.status : (root.market.state-label != "" ? root.market.state-label : "NO DATA");
                     tone: root.md.tone != 0 ? root.md.tone : root.market.tone;
-                    sub-text: (root.md.freshness != "" ? root.md.freshness : "—") + " · " + (root.md.sub != "" ? root.md.sub : "FEED");
+                    sub-text: (root.md.freshness != "" ? root.md.freshness : "â€”") + " Â· " + (root.md.sub != "" ? root.md.sub : "FEED");
                     sub-tone: root.md.tone;
                     source-text: "MARKET WSS";
                 }
@@ -842,7 +705,7 @@ export component LiveScreen inherits Rectangle {
                     label: "ORDER WS";
                     value-text: root.ws.status != "" ? root.ws.status : "DISCONNECTED";
                     tone: root.ws.tone;
-                    sub-text: (root.ws.latency != "" ? root.ws.latency : "—") + " · " + (root.ws.sub != "" ? root.ws.sub : "ORDERS");
+                    sub-text: (root.ws.latency != "" ? root.ws.latency : "â€”") + " Â· " + (root.ws.sub != "" ? root.ws.sub : "ORDERS");
                     sub-tone: root.ws.tone;
                     source-text: "ORDER WSS";
                 }
@@ -897,7 +760,7 @@ export component LiveScreen inherits Rectangle {
 
                 Rectangle { horizontal-stretch: 1; background: transparent; }
 
-                // Single strategy selector for the Live screen (budgeted above).
+                // Single strategy selector, always visible in the top bar.
                 Rectangle {
                     height: 34px;
                     width: LiveTiers.bar-strategy-width();
@@ -999,7 +862,7 @@ export component LiveScreen inherits Rectangle {
                 // start, and never while LIVE consent is still outstanding.
                 VButton {
                     width: 112px;
-                    label: "▶ START";
+                    label: "â–¶ START";
                     variant: 0;
                     enabled: root.setup.can-start && !root.setup.needs-live-confirm;
                     clicked => { root.start-requested(); }
@@ -1010,7 +873,7 @@ export component LiveScreen inherits Rectangle {
                 // button that silently does nothing.
                 VButton {
                     width: 74px;
-                    label: "■ STOP";
+                    label: "â–  STOP";
                     variant: 3;
                     enabled: root.setup.can-stop;
                     clicked => { root.stop-requested(); }
@@ -1021,7 +884,7 @@ export component LiveScreen inherits Rectangle {
                 // halt-enabled fact. Idle it is neutral and inert.
                 VButton {
                     width: 76px;
-                    label: root.bar.halted ? "■ HALTED" : "■ HALT";
+                    label: root.bar.halted ? "â–  HALTED" : "â–  HALT";
                     variant: root.bar.halted ? 3 : 2;
                     enabled: root.bar.halt-enabled && !root.bar.halted;
                     clicked => { root.halt-requested(); }
@@ -1029,7 +892,7 @@ export component LiveScreen inherits Rectangle {
             }
         }
 
-        // ══ 2. MAIN 3-COLUMN WORKSPACE ══════════════════════════════════════
+        // â•â• 2. MAIN 3-COLUMN WORKSPACE â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
         Rectangle {
             vertical-stretch: 1;
             min-width: 0px;
@@ -1047,600 +910,16 @@ export component LiveScreen inherits Rectangle {
                 padding-right: root.inspector-docked ? root.inspector-w + 10px : 10px;
                 spacing: 10px;
 
-                // ── COLUMN 1: WORKSTATION WORKSPACE (LEFT ~70%) ──
+                // â”€â”€ COLUMN 1: WORKSTATION WORKSPACE (LEFT ~70%) â”€â”€
                 VerticalLayout {
                     horizontal-stretch: 70;
                     min-width: 0px;
                     spacing: 10px;
 
-                    // 1.1 STRATEGY WATCHLIST PANEL
-                    Rectangle {
-                        vertical-stretch: 3;
-                        min-height: 220px;
-                        min-width: 0px;
-                        width: 100%;
-                        clip: true;
-                        background: VayrenPalette.live-panel;
-                        border-radius: 6px;
-                        border-width: 1px;
-                        border-color: VayrenPalette.live-line;
-
-                        VerticalLayout {
-                            padding: 10px;
-                            spacing: 6px;
-
-                            // Watchlist Header: Title, Filter Chips, Search
-                            //
-                            // Adaptive, never clipped. The full row (title +
-                            // count + NINE chips + a 150px search box) needs
-                            // ~1340px of workspace; below that the chips move
-                            // onto their own horizontally scrollable strip, so
-                            // every chip stays reachable instead of being cut
-                            // at the panel edge — which is exactly what
-                            // happened at 1024x640, 1366x768 and 1600x900.
-                            HorizontalLayout {
-                                height: 28px;
-                                spacing: 8px;
-                                alignment: center;
-
-                                Text {
-                                    text: "STRATEGY WATCHLIST";
-                                    color: VayrenPalette.text-bright;
-                                    font-size: 13px;
-                                    font-weight: 700;
-                                    vertical-alignment: center;
-                                }
-
-                                VBadge {
-                                    text: root.watchlist.length > 0 ? (root.watchlist.length + " SYMBOLS") : root.setup.symbol-total;
-                                    tone: 0;
-                                    vertical-alignment: center;
-                                }
-
-                                Rectangle { width: 8px; background: transparent; }
-
-                                // Filter chips — inline only while the whole row fits.
-                                if root.chips-inline: HorizontalLayout {
-                                    vertical-stretch: 1;
-                                    spacing: 6px;
-                                    for chip[c-idx] in root.filter-chips: Rectangle {
-                                        height: 22px;
-                                        border-radius: 11px;
-                                        background: root.filter-chip-selected == c-idx ? VayrenPalette.live-teal-deep : VayrenPalette.live-panel-deep;
-                                        border-width: 1px;
-                                        border-color: root.filter-chip-selected == c-idx ? VayrenPalette.live-teal : VayrenPalette.live-line-soft;
-                                        TouchArea { clicked => { root.filter-chip-picked(c-idx); } }
-                                        HorizontalLayout {
-                                            padding-left: 8px;
-                                            padding-right: 8px;
-                                            alignment: center;
-                                            Text {
-                                                text: chip;
-                                                color: root.filter-chip-selected == c-idx ? VayrenPalette.live-teal : VayrenPalette.live-ink-mute;
-                                                font-size: 10px;
-                                                font-weight: root.filter-chip-selected == c-idx ? 700 : 600;
-                                                vertical-alignment: center;
-                                            }
-                                        }
-                                    }
-                                }
-
-                                Rectangle { horizontal-stretch: 1; background: transparent; }
-
-                                // Search shrinks before it is ever cut: full width when there is room,
-                                // and a shorter placeholder with it, so the
-                                // label is never elided to "Search symbo".
-                                LineEdit {
-                                    width: root.chips-inline ? 150px : (root.blotters-compact ? 110px : 130px);
-                                    height: 26px;
-                                    placeholder-text: root.chips-inline ? "Search symbol..." : "Search";
-                                    text: root.filter-text;
-                                    edited(t) => {
-                                        root.filter-text = t;
-                                        root.watchlist-search-changed(t);
-                                        root.symbol-filter-changed(t);
-                                    }
-                                }
-                            }
-
-                            // Filter chips on their own strip (narrow workspaces):
-                            // a horizontal ScrollView keeps every chip reachable,
-                            // so no filter is ever silently unreachable.
-                            if !root.chips-inline: chip-scroll := ScrollView {
-                                width: 100%;
-                                height: 26px;
-                                viewport-width: self.width;
-
-                                HorizontalLayout {
-                                    width: Math.max(chip-scroll.visible-width, 200px);
-                                    height: 26px;
-                                    spacing: 6px;
-                                    for chip[c-idx] in root.filter-chips: Rectangle {
-                                        height: 22px;
-                                        border-radius: 11px;
-                                        background: root.filter-chip-selected == c-idx ? VayrenPalette.live-teal-deep : VayrenPalette.live-panel-deep;
-                                        border-width: 1px;
-                                        border-color: root.filter-chip-selected == c-idx ? VayrenPalette.live-teal : VayrenPalette.live-line-soft;
-                                        TouchArea { clicked => { root.filter-chip-picked(c-idx); } }
-                                        HorizontalLayout {
-                                            padding-left: 8px;
-                                            padding-right: 8px;
-                                            alignment: center;
-                                            Text {
-                                                text: chip;
-                                                color: root.filter-chip-selected == c-idx ? VayrenPalette.live-teal : VayrenPalette.live-ink-mute;
-                                                font-size: 10px;
-                                                font-weight: root.filter-chip-selected == c-idx ? 700 : 600;
-                                                vertical-alignment: center;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Watchlist Table with Synchronized Header & Scrollable Body
-                            wl-scroll := ScrollView {
-                                width: 100%;
-                                min-width: 0px;
-                                vertical-stretch: 1;
-
-                                VerticalLayout {
-                                    width: Math.max(wl-scroll.visible-width, 1180px);
-                                    spacing: 1px;
-
-                                    // Table Header (Synchronously scrolled with rows)
-                                    Rectangle {
-                                        height: 22px;
-                                        background: VayrenPalette.bg1;
-                                        HorizontalLayout {
-                                            padding-left: 6px;
-                                            padding-right: 6px;
-                                            spacing: 4px;
-                                            Text { width: 22px; text: "#"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
-                                            Text { width: 80px; text: "SYMBOL"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
-                                            Text { width: 65px; text: "LTP"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
-                                            Text { width: 52px; text: "CHG %"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
-                                            Text { width: 65px; text: "BREAK C1"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
-                                            Text { width: 65px; text: "BREAK C4"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
-                                            Text { width: 65px; text: "TRIGGER"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
-                                            Text { width: 65px; text: "STOP LOSS"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
-                                            Text { width: 58px; text: "RISK/SH"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
-                                            Text { width: 44px; text: "QTY"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
-                                            Text { width: 68px; text: "MAX RISK"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
-                                            Text { width: 72px; text: "PLANNED"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
-                                            Text { width: 54px; text: "UTIL %"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
-                                            Text { width: 76px; text: "STATUS"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
-                                            Text { width: 84px; text: "ELIG"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
-                                            Text { width: 56px; text: "SIGNAL"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
-                                            Text { width: 70px; text: "ORDER"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
-                                            Text { width: 70px; text: "POSITION"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
-                                            Text { width: 66px; text: "P&L"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
-                                            Rectangle { horizontal-stretch: 1; }
-                                        }
-                                    }
-
-                                    if root.watchlist.length > 0: VerticalLayout {
-                                        spacing: 1px;
-                                        for row[idx] in root.watchlist: Rectangle {
-                                            height: 26px;
-                                            border-radius: 3px;
-                                            background: row.selected ? VayrenPalette.live-row-checked : (Math.mod(idx, 2) == 1 ? VayrenPalette.live-panel-deep : transparent);
-                                            border-width: row.selected ? 1px : 0px;
-                                            border-color: row.selected ? VayrenPalette.live-teal : transparent;
-
-                                            TouchArea { clicked => { root.watchlist-selected(row.symbol); } }
-
-                                            HorizontalLayout {
-                                                padding-left: 6px;
-                                                padding-right: 6px;
-                                                spacing: 4px;
-                                                alignment: center;
-
-                                                Text { width: 22px; text: idx + 1; color: VayrenPalette.live-ink-dim; font-size: 10px; vertical-alignment: center; }
-                                                Text { width: 80px; text: row.symbol; color: row.selected ? VayrenPalette.text-bright : VayrenPalette.live-ink; font-size: 11px; font-weight: row.selected ? 700 : 600; vertical-alignment: center; overflow: elide; }
-                                                Text { width: 65px; text: row.ltp; color: VayrenPalette.text; font-size: 11px; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                                Text { width: 52px; text: row.change; color: LiveTone.ink(row.change-tone); font-size: 10px; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                                Text { width: 65px; text: row.ref-high; color: VayrenPalette.muted; font-size: 10px; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                                Text { width: 65px; text: row.ref-low; color: VayrenPalette.muted; font-size: 10px; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                                Text { width: 65px; text: row.entry; color: VayrenPalette.text; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                                Text { width: 65px; text: row.stop; color: VayrenPalette.neg; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                                Text { width: 58px; text: row.risk-share; color: VayrenPalette.text; font-size: 10px; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                                Text { width: 44px; text: row.qty; color: VayrenPalette.text; font-size: 10px; font-weight: 700; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                                Text { width: 68px; text: row.max-allowed-risk; color: VayrenPalette.live-ink; font-size: 10px; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                                Text { width: 72px; text: row.planned-risk; color: VayrenPalette.live-ink; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                                Text { width: 54px; text: row.risk-util; color: row.risk-util-tone == 3 ? VayrenPalette.neg : VayrenPalette.text; font-size: 10px; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                                Text { width: 76px; text: row.status; color: LiveTone.ink(row.status-tone); font-size: 10px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
-                                                Text { width: 84px; text: row.eligibility; color: LiveTone.ink(row.eligibility-tone); font-size: 10px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
-                                                Text { width: 56px; text: row.signal; color: LiveTone.ink(row.signal-tone); font-size: 10px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
-                                                Text { width: 70px; text: row.order; color: LiveTone.ink(row.order-tone); font-size: 10px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
-                                                Text { width: 70px; text: row.position; color: VayrenPalette.text; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
-                                                Text { width: 66px; text: row.pnl; color: LiveTone.ink(row.pnl-tone); font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                                Rectangle { horizontal-stretch: 1; }
-                                            }
-                                        }
-                                    }
-
-                                    // Fallback for idle state without populated quotes
-                                    if root.watchlist.length == 0: VerticalLayout {
-                                        spacing: 1px;
-                                        // Phase 1 strategy-first universe header: the
-                                        // checked list below IS this strategy's
-                                        // configuration surface (toggles persist
-                                        // via setup actions; SAVE UNIVERSE
-                                        // re-confirms with backend verdict).
-                                        HorizontalLayout {
-                                            height: 28px;
-                                            spacing: 8px;
-                                            alignment: center;
-                                            Text { text: "UNIVERSE"; color: VayrenPalette.live-ink-faint; font-size: 10px; font-weight: 700; vertical-alignment: center; }
-                                            Text { horizontal-stretch: 1; min-width: 0px; text: root.setup.symbol-total; color: VayrenPalette.live-ink; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
-                                            VButton {
-                                                width: 118px;
-                                                label: "SAVE UNIVERSE";
-                                                variant: 1;
-                                                enabled: root.strategy-selected >= 0;
-                                                clicked => { root.universe-save(); }
-                                            }
-                                        }
-                                        if root.symbols.length == 0: Rectangle {
-                                            height: 50px;
-                                            Text {
-                                                text: root.strategy-selected < 0 ? "Select a strategy to configure symbols." : (root.filter-text != "" ? "No symbol matches the filter" : "No symbols configured for this strategy.");
-                                                color: VayrenPalette.live-ink-dim;
-                                                font-size: 11px;
-                                                horizontal-alignment: center;
-                                                vertical-alignment: center;
-                                            }
-                                        }
-                                        for sym[idx] in root.symbols: Rectangle {
-                                            height: 18px;
-                                            border-radius: 3px;
-                                            background: sym.checked ? VayrenPalette.live-row-checked : (Math.mod(idx, 2) == 1 ? VayrenPalette.live-panel-deep : transparent);
-                                            // Universe configuration is disabled
-                                            // until a strategy is selected.
-                                            TouchArea { enabled: root.strategy-selected >= 0; clicked => { root.symbol-toggled(sym.real-index); } }
-                                            HorizontalLayout {
-                                                padding-left: 6px;
-                                                padding-right: 6px;
-                                                spacing: 4px;
-                                                alignment: center;
-                                                Text { width: 20px; text: idx + 1; color: VayrenPalette.live-ink-dim; font-size: 10px; vertical-alignment: center; }
-                                                Text { width: 75px; text: sym.name; color: sym.checked ? VayrenPalette.text-bright : VayrenPalette.live-ink; font-size: 11px; font-weight: sym.checked ? 700 : 500; vertical-alignment: center; overflow: elide; }
-                                                Text { width: 62px; text: sym.ltp; color: VayrenPalette.text; font-size: 11px; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                                Text { width: 48px; text: sym.change; color: LiveTone.ink(sym.change-tone); font-size: 10px; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                                Text { horizontal-stretch: 1; text: sym.status; color: LiveTone.ink(sym.status-tone); font-size: 10px; font-weight: 700; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // 1.2 TABBED BLOTTER & EVENTS STREAM PANEL
-                    Rectangle {
-                        vertical-stretch: 2;
-                        min-height: 180px;
-                        min-width: 0px;
-                        width: 100%;
-                        clip: true;
-                        background: VayrenPalette.live-panel;
-                        border-radius: 6px;
-                        border-width: 1px;
-                        border-color: VayrenPalette.live-line;
-
-                        VerticalLayout {
-                            padding-left: 12px;
-                            padding-right: 12px;
-                            padding-top: 6px;
-                            padding-bottom: 6px;
-                            spacing: 4px;
-
-                            // Tab Bar — adaptive (LiveTiers.blotters-side-by-side). The full row needs
-                            // ~780px of panel; below that the labels shorten and
-                            // Clear becomes icon-sized, instead of every tab
-                            // being elided mid-word and Clear sliced in half.
-                            if root.blotters-compact: HorizontalLayout {
-                                height: 32px;
-                                spacing: 10px;
-                                LiveTabHeader { label: "Events (" + root.events.length + ")"; active: root.active-blotter-tab == 0; clicked => { root.active-blotter-tab = 0; } }
-                                LiveTabHeader { label: "Pos (" + root.positions.length + ")"; active: root.active-blotter-tab == 1; clicked => { root.active-blotter-tab = 1; } }
-                                LiveTabHeader { label: "Ord (" + root.orders.length + ")"; active: root.active-blotter-tab == 2; clicked => { root.active-blotter-tab = 2; } }
-                                LiveTabHeader { label: "Fill (" + root.fills.length + ")"; active: root.active-blotter-tab == 3; clicked => { root.active-blotter-tab = 3; } }
-                                LiveTabHeader { label: "P&L"; active: root.active-blotter-tab == 4; clicked => { root.active-blotter-tab = 4; } }
-                                Rectangle { horizontal-stretch: 1; background: transparent; }
-
-                                if root.active-blotter-tab == 0: Rectangle {
-                                    width: 30px;
-                                    height: 24px;
-                                    border-radius: 4px;
-                                    background: VayrenPalette.live-panel-deep;
-                                    border-width: 1px;
-                                    border-color: VayrenPalette.live-line-faint;
-                                    TouchArea { clicked => { root.clear-events(); } }
-                                    Text {
-                                        // U+00D7 multiplication sign, not a dingbat:
-                                        // the U+2715 glyph renders as an EMPTY BOX at
-                                        // this size in the default font, which is how a
-                                        // compact Clear control shipped blank.
-                                        text: "×";
-                                        color: VayrenPalette.live-ink-faint;
-                                        font-size: 14px;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                    }
-                                }
-                            }
-
-                            if !root.blotters-compact: HorizontalLayout {
-                                height: 32px;
-                                spacing: 16px;
-                                LiveTabHeader { label: "Live Events Stream (" + root.events.length + ")"; active: root.active-blotter-tab == 0; clicked => { root.active-blotter-tab = 0; } }
-                                LiveTabHeader { label: "Positions (" + root.positions.length + ")"; active: root.active-blotter-tab == 1; clicked => { root.active-blotter-tab = 1; } }
-                                LiveTabHeader { label: "Open Orders (" + root.orders.length + ")"; active: root.active-blotter-tab == 2; clicked => { root.active-blotter-tab = 2; } }
-                                LiveTabHeader { label: "Recent Fills (" + root.fills.length + ")"; active: root.active-blotter-tab == 3; clicked => { root.active-blotter-tab = 3; } }
-                                LiveTabHeader { label: "Daily P&L"; active: root.active-blotter-tab == 4; clicked => { root.active-blotter-tab = 4; } }
-                                Rectangle { horizontal-stretch: 1; background: transparent; }
-
-                                if root.active-blotter-tab == 0: Rectangle {
-                                    width: 56px;
-                                    height: 24px;
-                                    border-radius: 4px;
-                                    background: VayrenPalette.live-panel-deep;
-                                    border-width: 1px;
-                                    border-color: VayrenPalette.live-line-faint;
-                                    TouchArea { clicked => { root.clear-events(); } }
-                                    Text {
-                                        text: "Clear";
-                                        color: VayrenPalette.live-ink-faint;
-                                        font-size: 11px;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                    }
-                                }
-                            }
-
-                            // Tab 0: Live Events Stream
-                            if root.active-blotter-tab == 0: VerticalLayout {
-                                spacing: 4px;
-                                vertical-stretch: 1;
-
-                                // Category chips
-                                HorizontalLayout {
-                                    height: 22px;
-                                    spacing: 6px;
-                                    for cat[idx] in root.event-types: Rectangle {
-                                        height: 20px;
-                                        border-radius: 10px;
-                                        background: root.event-type-index == idx ? VayrenPalette.live-teal-deep : VayrenPalette.live-panel-deep;
-                                        border-width: 1px;
-                                        border-color: root.event-type-index == idx ? VayrenPalette.live-teal : VayrenPalette.live-line-soft;
-                                        TouchArea { clicked => { root.event-type-picked(cat); } }
-                                        HorizontalLayout {
-                                            padding-left: 8px; padding-right: 8px; alignment: center;
-                                            Text {
-                                                text: cat == "ALL" ? "All" : (cat == "MARKET DATA" ? "Data" : cat);
-                                                color: root.event-type-index == idx ? VayrenPalette.live-teal : VayrenPalette.live-ink-mute;
-                                                font-size: 10px;
-                                                font-weight: root.event-type-index == idx ? 700 : 600;
-                                                vertical-alignment: center;
-                                            }
-                                        }
-                                    }
-                                    Rectangle { horizontal-stretch: 1; background: transparent; }
-                                }
-
-                                // Table Header
-                                Rectangle {
-                                    height: 20px;
-                                    background: VayrenPalette.bg1;
-                                    HorizontalLayout {
-                                        padding-left: 6px; padding-right: 6px; spacing: 6px;
-                                        Text { width: 62px; text: "Time"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { width: 44px; text: "Level"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { horizontal-stretch: 1; text: "Event"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { width: 80px; text: "Symbol"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { width: 70px; text: "Source"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { width: 70px; text: "Strategy"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                    }
-                                }
-
-                                ev-scroll := ScrollView {
-                                    width: 100%;
-                                    vertical-stretch: 1;
-
-                                    VerticalLayout {
-                                        width: ev-scroll.visible-width;
-                                        spacing: 2px;
-                                        if root.events.length == 0: Rectangle {
-                                            height: 48px;
-                                            Text {
-                                                text: "NO EVENTS · No live events recorded";
-                                                color: VayrenPalette.live-ink-dim;
-                                                font-size: 11px;
-                                                horizontal-alignment: center;
-                                                vertical-alignment: center;
-                                            }
-                                        }
-                                        for ev in root.events: HorizontalLayout {
-                                            height: 22px; padding-left: 6px; padding-right: 6px; spacing: 6px; alignment: center;
-                                            Text { width: 62px; text: ev.timestamp; color: VayrenPalette.text; font-size: 10px; vertical-alignment: center; overflow: elide; }
-                                            Text { width: 44px; text: ev.level; color: LiveTone.ink(ev.status-tone); font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
-                                            Text { horizontal-stretch: 1; text: ev.event; color: ev.status-tone == 3 ? VayrenPalette.neg : VayrenPalette.live-ink; font-size: 11px; font-weight: ev.status-tone == 3 ? 700 : 500; vertical-alignment: center; overflow: elide; }
-                                            Text { width: 80px; text: ev.symbol; color: VayrenPalette.text-bright; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
-                                            Text { width: 70px; text: ev.category; color: VayrenPalette.live-ink-soft; font-size: 10px; vertical-alignment: center; overflow: elide; }
-                                            Text { width: 70px; text: ev.strategy; color: VayrenPalette.live-ink-soft; font-size: 10px; vertical-alignment: center; overflow: elide; }
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Tab 1: Positions
-                            if root.active-blotter-tab == 1: VerticalLayout {
-                                spacing: 0;
-                                vertical-stretch: 1;
-                                Rectangle {
-                                    height: 22px;
-                                    background: VayrenPalette.bg1;
-                                    HorizontalLayout {
-                                        padding-left: 8px; padding-right: 8px; spacing: 6px;
-                                        Text { width: 80px; text: "Symbol"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; overflow: elide; }
-                                        Text { width: 44px; text: "Side"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; overflow: elide; }
-                                        Text { width: 40px; text: "Qty"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; overflow: elide; }
-                                        Text { width: 66px; text: "Entry"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; overflow: elide; }
-                                        Text { width: 66px; text: "LTP"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; overflow: elide; }
-                                        Text { width: 66px; text: "P&L"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; overflow: elide; }
-                                        Text { width: 62px; text: "P&L %"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; overflow: elide; }
-                                        Text { width: 56px; text: "Status"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; overflow: elide; }
-                                        Rectangle { horizontal-stretch: 1; background: transparent; }
-                                    }
-                                }
-
-                                if root.positions.length == 0: Rectangle {
-                                    height: 56px;
-                                    Text {
-                                        text: "No open positions (SOURCE: BROKER / RECONCILIATION)";
-                                        color: VayrenPalette.live-ink-dim;
-                                        font-size: 11px;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                    }
-                                }
-
-                                for pos in root.positions: Rectangle {
-                                    height: 28px;
-                                    background: VayrenPalette.live-panel-deep;
-                                    HorizontalLayout {
-                                        padding-left: 8px; padding-right: 8px; spacing: 6px; alignment: center;
-                                        Text { width: 80px; text: pos.symbol; color: VayrenPalette.text-bright; font-size: 11px; font-weight: 700; vertical-alignment: center; overflow: elide; }
-                                        Text { width: 44px; text: pos.side; color: LiveTone.ink(pos.side-tone); font-size: 11px; font-weight: 700; vertical-alignment: center; overflow: elide; }
-                                        Text { width: 40px; text: pos.qty; color: VayrenPalette.text; font-size: 11px; vertical-alignment: center; overflow: elide; }
-                                        Text { width: 66px; text: pos.entry; color: VayrenPalette.text; font-size: 11px; vertical-alignment: center; overflow: elide; }
-                                        Text { width: 66px; text: pos.current; color: VayrenPalette.text; font-size: 11px; vertical-alignment: center; overflow: elide; }
-                                        Text { width: 66px; text: pos.pnl; color: LiveTone.ink(pos.pnl-tone); font-size: 11px; font-weight: 700; vertical-alignment: center; overflow: elide; }
-                                        Text { width: 62px; text: pos.pnl-pct; color: LiveTone.ink(pos.pnl-tone); font-size: 11px; font-weight: 700; vertical-alignment: center; overflow: elide; }
-                                        Text { width: 56px; text: pos.status; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
-                                        Rectangle { horizontal-stretch: 1; background: transparent; }
-                                    }
-                                }
-                            }
-
-                            // Tab 2: Open Orders
-                            if root.active-blotter-tab == 2: VerticalLayout {
-                                spacing: 0;
-                                vertical-stretch: 1;
-                                Rectangle {
-                                    height: 22px;
-                                    background: VayrenPalette.bg1;
-                                    HorizontalLayout {
-                                        padding-left: 8px; padding-right: 8px; spacing: 8px;
-                                        Text { width: 70px; text: "TIME"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { width: 90px; text: "ORDER ID"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { width: 80px; text: "STRATEGY"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { width: 80px; text: "SYMBOL"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { width: 50px; text: "SIDE"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { width: 50px; text: "QTY"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { width: 80px; text: "PRICE"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { horizontal-stretch: 1; text: "STATUS"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                    }
-                                }
-
-                                if root.orders.length == 0: Rectangle {
-                                    height: 56px;
-                                    Text {
-                                        text: "No active orders (SOURCE: ORDER / TRADE WS)";
-                                        color: VayrenPalette.live-ink-dim;
-                                        font-size: 11px;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                    }
-                                }
-
-                                for ord in root.orders: Rectangle {
-                                    height: 28px;
-                                    background: VayrenPalette.live-panel-deep;
-                                    HorizontalLayout {
-                                        padding-left: 8px; padding-right: 8px; spacing: 8px; alignment: center;
-                                        Text { width: 70px; text: ord.time; color: VayrenPalette.muted; font-size: 10px; vertical-alignment: center; }
-                                        Text { width: 90px; text: ord.order-id; color: VayrenPalette.text; font-size: 11px; vertical-alignment: center; overflow: elide; }
-                                        Text { width: 80px; text: ord.strategy; color: VayrenPalette.text; font-size: 11px; vertical-alignment: center; overflow: elide; }
-                                        Text { width: 80px; text: ord.symbol; color: VayrenPalette.text-bright; font-size: 11px; font-weight: 700; vertical-alignment: center; overflow: elide; }
-                                        Text { width: 50px; text: ord.side; color: LiveTone.ink(ord.side-tone); font-size: 11px; font-weight: 700; vertical-alignment: center; }
-                                        Text { width: 50px; text: ord.qty; color: VayrenPalette.text; font-size: 11px; vertical-alignment: center; }
-                                        Text { width: 80px; text: ord.price; color: VayrenPalette.text; font-size: 11px; vertical-alignment: center; }
-                                        Text { horizontal-stretch: 1; text: ord.status; color: LiveTone.ink(ord.status-tone); font-size: 11px; font-weight: 700; vertical-alignment: center; }
-                                    }
-                                }
-                            }
-
-                            // Tab 3: Recent Fills
-                            if root.active-blotter-tab == 3: VerticalLayout {
-                                spacing: 0;
-                                vertical-stretch: 1;
-                                Rectangle {
-                                    height: 22px;
-                                    background: VayrenPalette.bg1;
-                                    HorizontalLayout {
-                                        padding-left: 8px; padding-right: 8px; spacing: 8px;
-                                        Text { width: 70px; text: "TIME"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { width: 80px; text: "SYMBOL"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { width: 50px; text: "SIDE"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { width: 50px; text: "QTY"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { width: 80px; text: "PRICE"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { width: 80px; text: "STRATEGY"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { horizontal-stretch: 1; text: "ORDER ID"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                    }
-                                }
-
-                                if root.fills.length == 0: Rectangle {
-                                    height: 56px;
-                                    Text {
-                                        text: "No order fills (SOURCE: ORDER / TRADE WS)";
-                                        color: VayrenPalette.live-ink-dim;
-                                        font-size: 11px;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                    }
-                                }
-
-                                for fill in root.fills: Rectangle {
-                                    height: 28px;
-                                    background: VayrenPalette.live-panel-deep;
-                                    HorizontalLayout {
-                                        padding-left: 8px; padding-right: 8px; spacing: 8px; alignment: center;
-                                        Text { width: 70px; text: fill.time; color: VayrenPalette.muted; font-size: 10px; vertical-alignment: center; }
-                                        Text { width: 80px; text: fill.symbol; color: VayrenPalette.text-bright; font-size: 11px; font-weight: 700; vertical-alignment: center; overflow: elide; }
-                                        Text { width: 50px; text: fill.side; color: LiveTone.ink(fill.side-tone); font-size: 11px; font-weight: 700; vertical-alignment: center; }
-                                        Text { width: 50px; text: fill.qty; color: VayrenPalette.text; font-size: 11px; vertical-alignment: center; }
-                                        Text { width: 80px; text: fill.price; color: VayrenPalette.text; font-size: 11px; vertical-alignment: center; }
-                                        Text { width: 80px; text: fill.strategy; color: VayrenPalette.text; font-size: 11px; vertical-alignment: center; overflow: elide; }
-                                        Text { horizontal-stretch: 1; text: fill.order-id; color: VayrenPalette.live-ink-dim; font-size: 11px; vertical-alignment: center; overflow: elide; }
-                                    }
-                                }
-                            }
-
-                            // Tab 4: Daily P&L
-                            if root.active-blotter-tab == 4: HorizontalLayout {
-                                spacing: 16px;
-                                padding: 12px;
-                                alignment: center;
-                                if root.stats.length == 0: Text {
-                                    text: "No P&L data";
-                                    color: VayrenPalette.live-ink-dim;
-                                    font-size: 11px;
-                                }
-                                for stat in root.stats: VerticalLayout {
-                                    spacing: 4px;
-                                    Text { text: stat.label; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                    Text { text: stat.value; color: stat.tone == 1 ? VayrenPalette.pos : stat.tone == 3 ? VayrenPalette.neg : VayrenPalette.text; font-size: 14px; font-weight: 700; }
-                                }
-                            }
-                        }
-                    }
                 }
             }
 
-            // ── COLUMN 2: INSPECTOR (RIGHT COLUMN ~30%) ─────────────────────────
+            // â”€â”€ COLUMN 2: INSPECTOR (RIGHT COLUMN ~30%) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             if root.show-inspector: Rectangle {
                 x: parent.width - root.inspector-w;
                 y: 0;
@@ -1689,7 +968,7 @@ export component LiveScreen inherits Rectangle {
                                     }
 
                                     VBadge {
-                                        text: "● " + (root.active-strat.mode != "" ? root.active-strat.mode : (root.bar.mode == 2 ? "LIVE" : root.bar.mode == 1 ? "SANDBOX" : "PAPER"));
+                                        text: "â— " + (root.active-strat.mode != "" ? root.active-strat.mode : (root.bar.mode == 2 ? "LIVE" : root.bar.mode == 1 ? "SANDBOX" : "PAPER"));
                                         tone: root.active-strat.mode-tone != 0 ? root.active-strat.mode-tone : (root.bar.mode == 2 ? 3 : 0);
                                         vertical-alignment: center;
                                     }
@@ -1705,7 +984,7 @@ export component LiveScreen inherits Rectangle {
                                         border-color: VayrenPalette.live-btn-line;
                                         TouchArea { clicked => { root.inspector-toggled(); } }
                                         Text {
-                                            text: "›";
+                                            text: "â€º";
                                             color: VayrenPalette.live-ink;
                                             font-size: 14px;
                                             font-weight: 700;
@@ -1717,15 +996,15 @@ export component LiveScreen inherits Rectangle {
 
                                 // STRATEGY + STATUS is the operator's first read
                                 // (STEP 32 hierarchy): name left, lifecycle right,
-                                // and the lifecycle is the DOMAIN's session label —
+                                // and the lifecycle is the DOMAIN's session label â€”
                                 // never a locally invented "ACTIVE".
                                 HorizontalLayout {
                                     height: 18px;
                                     spacing: 4px;
                                     Text { width: 80px; text: "STRATEGY"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
-                                    Text { horizontal-stretch: 1; min-width: 0px; text: root.active-strat.name != "" ? root.active-strat.name : "—"; color: VayrenPalette.live-teal; font-size: 11px; font-weight: 800; vertical-alignment: center; overflow: elide; }
+                                    Text { horizontal-stretch: 1; min-width: 0px; text: root.active-strat.name != "" ? root.active-strat.name : "â€”"; color: VayrenPalette.live-teal; font-size: 11px; font-weight: 800; vertical-alignment: center; overflow: elide; }
                                     Text { width: 50px; text: "STATUS"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
-                                    Text { width: 65px; text: root.active-strat.status != "" ? root.active-strat.status : "—"; color: LiveTone.ink(root.active-strat.status-tone != 0 ? root.active-strat.status-tone : root.bar.exec-tone); font-size: 11px; font-weight: 700; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 65px; text: root.active-strat.status != "" ? root.active-strat.status : "â€”"; color: LiveTone.ink(root.active-strat.status-tone != 0 ? root.active-strat.status-tone : root.bar.exec-tone); font-size: 11px; font-weight: 700; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
                                 }
 
                                 // MODE is independent of STATUS: a LIVE selection
@@ -1736,695 +1015,29 @@ export component LiveScreen inherits Rectangle {
                                     Text { width: 80px; text: "MODE"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
                                     Text { horizontal-stretch: 1; min-width: 0px; text: root.active-strat.mode != "" ? root.active-strat.mode : (root.bar.mode == 2 ? "LIVE" : root.bar.mode == 1 ? "SANDBOX" : "PAPER"); color: LiveTone.ink(root.active-strat.mode-tone != 0 ? root.active-strat.mode-tone : (root.bar.mode == 2 ? 3 : 0)); font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
                                     Text { width: 50px; text: "SYMBOLS"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
-                                    Text { width: 65px; text: root.active-strat.symbols-count != "" ? root.active-strat.symbols-count : "—"; color: VayrenPalette.text; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 65px; text: root.active-strat.symbols-count != "" ? root.active-strat.symbols-count : "â€”"; color: VayrenPalette.text; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
                                 }
 
                                 HorizontalLayout {
                                     height: 18px;
                                     spacing: 4px;
                                     Text { width: 80px; text: "SIGNALS TODAY"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
-                                    Text { horizontal-stretch: 1; min-width: 0px; text: root.active-strat.today-signals != "" ? root.active-strat.today-signals : "—"; color: VayrenPalette.text; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
+                                    Text { horizontal-stretch: 1; min-width: 0px; text: root.active-strat.today-signals != "" ? root.active-strat.today-signals : "â€”"; color: VayrenPalette.text; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
                                     Text { width: 50px; text: "ORDERS"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
-                                    Text { width: 65px; text: root.active-strat.orders-today != "" ? root.active-strat.orders-today : "—"; color: VayrenPalette.text; font-size: 10px; font-weight: 700; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 65px; text: root.active-strat.orders-today != "" ? root.active-strat.orders-today : "â€”"; color: VayrenPalette.text; font-size: 10px; font-weight: 700; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
                                 }
 
                                 HorizontalLayout {
                                     height: 18px;
                                     spacing: 4px;
                                     Text { width: 80px; text: "POSITIONS"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
-                                    Text { horizontal-stretch: 1; min-width: 0px; text: root.active-strat.current-position != "" ? root.active-strat.current-position : "—"; color: VayrenPalette.pos; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
+                                    Text { horizontal-stretch: 1; min-width: 0px; text: root.active-strat.current-position != "" ? root.active-strat.current-position : "â€”"; color: VayrenPalette.pos; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
                                     Text { width: 50px; text: "STARTED"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
-                                    Text { width: 65px; text: root.active-strat.started-at != "" ? root.active-strat.started-at : "—"; color: VayrenPalette.muted; font-size: 10px; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 65px; text: root.active-strat.started-at != "" ? root.active-strat.started-at : "â€”"; color: VayrenPalette.muted; font-size: 10px; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
                                 }
                             }
                         }
 
-                        // 3.2 SELECTED STOCK DETAILS CARD (Visible only when an instrument is selected)
-                        if root.selected-stock.symbol != "": Rectangle {
-                            min-height: 220px;
-                            background: VayrenPalette.live-panel;
-                            border-radius: 6px;
-                            border-width: 1px;
-                            border-color: VayrenPalette.live-line;
-
-                            VerticalLayout {
-                                padding: 10px;
-                                spacing: 4px;
-
-                                HorizontalLayout {
-                                    height: 20px;
-                                    spacing: 6px;
-                                    alignment: center;
-
-                                    Text {
-                                        min-width: 0px;
-                                        text: (root.selected-stock.symbol != "" ? root.selected-stock.symbol : "NO STOCK SELECTED") + " — DETAILS";
-                                        color: VayrenPalette.text-bright;
-                                        font-size: 11px;
-                                        font-weight: 700;
-                                        vertical-alignment: center;
-                                        overflow: elide;
-                                    }
-
-                                    VBadge {
-                                        text: root.selected-stock.current-position != "" ? root.selected-stock.current-position : "FLAT";
-                                        tone: 1;
-                                        vertical-alignment: center;
-                                    }
-
-                                    Rectangle { horizontal-stretch: 1; background: transparent; }
-
-                                    Text {
-                                        min-width: 0px;
-                                        text: root.selected-stock.ltp != "" ? ("LTP " + root.selected-stock.ltp) : "LTP —";
-                                        color: VayrenPalette.live-teal;
-                                        font-size: 11px;
-                                        font-weight: 700;
-                                        vertical-alignment: center;
-                                        overflow: elide;
-                                    }
-                                }
-
-                                // STEP 11/27: SIGNAL, ORDER and POSITION are
-                                // three independent facts, each on its own line,
-                                // each with its own tone. A signal does not imply
-                                // an order, and an order does not imply a
-                                // position — so they can never be read off one
-                                // another.
-                                HorizontalLayout {
-                                    height: 17px;
-                                    spacing: 4px;
-                                    Text { width: 50px; text: "SIGNAL"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
-                                    Text {
-                                        min-width: 0px;
-                                        text: root.selected-stock.signal;
-                                        color: root.selected-stock.signal == "NONE" ? VayrenPalette.muted : (root.selected-stock.signal == "SELL" || root.selected-stock.signal == "SHORT" ? VayrenPalette.neg : VayrenPalette.pos);
-                                        font-size: 10px;
-                                        font-weight: 800;
-                                        vertical-alignment: center;
-                                        overflow: elide;
-                                    }
-                                    Rectangle { width: 4px; background: transparent; }
-                                    Text { width: 44px; text: "ORDER"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
-                                    Text {
-                                        min-width: 0px;
-                                        text: root.selected-stock.order;
-                                        color: root.selected-stock.order == "NONE" ? VayrenPalette.muted : (root.selected-stock.order == "FILLED" ? VayrenPalette.pos : (root.selected-stock.order == "REJECTED" ? VayrenPalette.neg : VayrenPalette.amber));
-                                        font-size: 10px;
-                                        font-weight: 800;
-                                        vertical-alignment: center;
-                                        overflow: elide;
-                                    }
-                                    Rectangle { horizontal-stretch: 1; background: transparent; }
-                                    Text { width: 54px; text: "POSITION"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
-                                    Text {
-                                        min-width: 0px;
-                                        text: root.selected-stock.current-position;
-                                        color: root.selected-stock.current-position == "FLAT" || root.selected-stock.current-position == "FLAT (0 shares)" ? VayrenPalette.muted : VayrenPalette.pos;
-                                        font-size: 10px;
-                                        font-weight: 800;
-                                        horizontal-alignment: right;
-                                        vertical-alignment: center;
-                                        overflow: elide;
-                                    }
-                                }
-
-                                Rectangle { height: 1px; background: VayrenPalette.live-line; }
-
-                                // 1. Risk & Position Sizing Flow
-                                HorizontalLayout {
-                                    height: 18px;
-                                    spacing: 4px;
-                                    Text {
-                                        horizontal-stretch: 1;
-                                        min-width: 0px;
-                                        text: "RISK & POSITION SIZING FLOW";
-                                        color: VayrenPalette.text-bright;
-                                        font-size: 10px;
-                                        font-weight: 700;
-                                        vertical-alignment: center;
-                                        overflow: elide;
-                                    }
-                                    Text {
-                                        min-width: 0px;
-                                        text: root.selected-stock.capital-source != "" ? root.selected-stock.capital-source : "SOURCE: RISK ENGINE";
-                                        color: VayrenPalette.live-teal;
-                                        font-size: 10px;
-                                        font-weight: 700;
-                                        vertical-alignment: center;
-                                        overflow: elide;
-                                    }
-                                }
-
-                                HorizontalLayout {
-                                    height: 18px;
-                                    spacing: 4px;
-                                    Text { width: 125px; text: "BROKER AVAILABLE CAPITAL"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
-                                    Text { horizontal-stretch: 1; min-width: 0px; text: root.selected-stock.broker-capital != "" && root.selected-stock.broker-capital != "—" ? root.selected-stock.broker-capital : "NOT AVAILABLE"; color: VayrenPalette.text; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
-                                    Text { width: 75px; text: "SRC: FYERS"; color: VayrenPalette.live-ink-faint; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                }
-
-                                HorizontalLayout {
-                                    height: 18px;
-                                    spacing: 4px;
-                                    Text { width: 125px; text: "  ↓ EFFECTIVE CAPITAL"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
-                                    Text { horizontal-stretch: 1; min-width: 0px; text: root.selected-stock.effective-capital != "" && root.selected-stock.effective-capital != "—" ? root.selected-stock.effective-capital : "NOT AVAILABLE"; color: VayrenPalette.text; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
-                                    Text { width: 75px; text: "SRC: BROKER"; color: VayrenPalette.live-ink-faint; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                }
-
-                                HorizontalLayout {
-                                    height: 18px;
-                                    spacing: 4px;
-                                    Text { width: 125px; text: "  ↓ MAX RISK / TRADE"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
-                                    Text { horizontal-stretch: 1; min-width: 0px; text: root.selected-stock.max-allowed-risk != "" && root.selected-stock.max-allowed-risk != "—" ? root.selected-stock.max-allowed-risk : "NOT AVAILABLE"; color: VayrenPalette.live-ink; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
-                                    Text { width: 75px; text: "SRC: LIMITS"; color: VayrenPalette.live-ink-faint; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                }
-
-                                HorizontalLayout {
-                                    height: 18px;
-                                    spacing: 4px;
-                                    Text { width: 125px; text: "  ↓ ENTRY (BREAK LOW)"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
-                                    Text { horizontal-stretch: 1; min-width: 0px; text: root.selected-stock.entry-price != "" && root.selected-stock.entry-price != "—" ? root.selected-stock.entry-price : "NOT READY"; color: VayrenPalette.text; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
-                                    Text { width: 75px; text: "SRC: STRATEGY"; color: VayrenPalette.live-ink-faint; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                }
-
-                                HorizontalLayout {
-                                    height: 18px;
-                                    spacing: 4px;
-                                    Text { width: 125px; text: "  ↓ STOP LOSS (C1-C4)"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
-                                    Text { horizontal-stretch: 1; min-width: 0px; text: root.selected-stock.stop-price != "" && root.selected-stock.stop-price != "—" ? root.selected-stock.stop-price : "NOT READY"; color: VayrenPalette.neg; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
-                                    Text { width: 75px; text: "SRC: STRATEGY"; color: VayrenPalette.live-ink-faint; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                }
-
-                                HorizontalLayout {
-                                    height: 18px;
-                                    spacing: 4px;
-                                    Text { width: 125px; text: "  ↓ RISK / SHARE"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
-                                    Text { horizontal-stretch: 1; min-width: 0px; text: root.selected-stock.risk-share != "" && root.selected-stock.risk-share != "—" ? root.selected-stock.risk-share : "NOT READY"; color: VayrenPalette.live-teal; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
-                                    Text { width: 75px; text: "SRC: RISK ENG"; color: VayrenPalette.live-ink-faint; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                }
-
-                                HorizontalLayout {
-                                    height: 18px;
-                                    spacing: 4px;
-                                    Text { width: 125px; text: "  ↓ QUANTITY"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
-                                    Text { horizontal-stretch: 1; min-width: 0px; text: root.selected-stock.calculated-qty != "" && root.selected-stock.calculated-qty != "—" ? root.selected-stock.calculated-qty : "NOT READY"; color: VayrenPalette.live-teal; font-size: 10px; font-weight: 800; vertical-alignment: center; overflow: elide; }
-                                    Text { width: 75px; text: "SRC: RISK ENG"; color: VayrenPalette.live-ink-faint; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                }
-
-                                HorizontalLayout {
-                                    height: 18px;
-                                    spacing: 4px;
-                                    Text { width: 125px; text: "  ↓ PLANNED RISK"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
-                                    Text { horizontal-stretch: 1; min-width: 0px; text: root.selected-stock.planned-risk != "" && root.selected-stock.planned-risk != "—" ? root.selected-stock.planned-risk : "NOT READY"; color: VayrenPalette.live-ink; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
-                                    Text { width: 75px; text: "SRC: RISK ENG"; color: VayrenPalette.live-ink-faint; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                }
-
-                                HorizontalLayout {
-                                    height: 18px;
-                                    spacing: 4px;
-                                    Text { width: 125px; text: "    CURRENT OPEN RISK"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
-                                    Text { horizontal-stretch: 1; min-width: 0px; text: root.selected-stock.current-open-risk != "" && root.selected-stock.current-open-risk != "—" ? root.selected-stock.current-open-risk : "NOT AVAILABLE"; color: root.selected-stock.current-open-risk == "" || root.selected-stock.current-open-risk == "—" ? VayrenPalette.muted : VayrenPalette.text; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
-                                    Text { width: 75px; text: "SRC: POSITION"; color: VayrenPalette.live-ink-faint; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                }
-
-                                HorizontalLayout {
-                                    height: 18px;
-                                    spacing: 4px;
-                                    Text { width: 125px; text: "    RISK UTILIZATION"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
-                                    Text { horizontal-stretch: 1; min-width: 0px; text: root.selected-stock.risk-util != "" && root.selected-stock.risk-util != "—" ? root.selected-stock.risk-util : "—"; color: VayrenPalette.text; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
-                                    Text { width: 75px; text: "SRC: RISK ENG"; color: VayrenPalette.live-ink-faint; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                }
-
-                                VBanner {
-                                    height: 20px;
-                                    message: root.selected-stock.risk-banner-text != "" ? root.selected-stock.risk-banner-text : (root.selected-stock.risk-validated ? "[✓] RISK VALIDATED · Within risk limits" : "[✕] RISK NOT READY · Capital or limits unavailable");
-                                    tone: root.selected-stock.risk-validated ? 1 : 3;
-                                }
-
-                                Rectangle { height: 1px; background: VayrenPalette.live-line; }
-
-                                // STEP 12: the ORDER PIPELINE, rendered from the
-                                // engine's OWN recorded transitions. The previous
-                                // strip was a fixed set of green words that read
-                                // "…→ FILLED" with no backend state behind it — it
-                                // now walks `selected-stock.pipeline`, where every
-                                // step's reached/failed/current flags come from
-                                // `OrderSnapshot::history`. No order in the
-                                // backend means NO pipeline is drawn at all.
-                                Text { text: "ORDER PIPELINE"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 700; }
-
-                                if root.selected-stock.pipeline.length == 0: Text {
-                                    text: "NO ORDER — backend has not created one for this symbol";
-                                    color: VayrenPalette.muted;
-                                    font-size: 10px;
-                                    font-weight: 600;
-                                    height: 18px;
-                                    vertical-alignment: center;
-                                }
-
-                                for step[s-idx] in root.selected-stock.pipeline: HorizontalLayout {
-                                    height: 18px;
-                                    spacing: 6px;
-                                    alignment: center;
-
-                                    // Completion mark: reached-and-not-current is a
-                                    // completed step, `current` is the live one, and
-                                    // a failed step is marked as failed rather than
-                                    // ticked off (colour always travels with text).
-                                    Text {
-                                        text: step.failed ? "✕" : (step.reached ? "✓" : "○");
-                                        color: step.failed ? VayrenPalette.neg : (step.reached ? VayrenPalette.pos : VayrenPalette.muted);
-                                        font-size: 10px;
-                                        font-weight: 800;
-                                        width: 10px;
-                                        vertical-alignment: center;
-                                    }
-                                    Text {
-                                        text: step.label;
-                                        color: step.current ? VayrenPalette.live-teal : (step.reached ? VayrenPalette.text : VayrenPalette.muted);
-                                        font-size: 10px;
-                                        font-weight: step.current ? 800 : 600;
-                                        vertical-alignment: center;
-                                        overflow: elide;
-                                    }
-                                    Rectangle { horizontal-stretch: 1; background: transparent; }
-                                    if step.current: Text {
-                                        text: "◉ CURRENT";
-                                        color: VayrenPalette.live-teal;
-                                        font-size: 10px;
-                                        font-weight: 800;
-                                        vertical-alignment: center;
-                                    }
-                                }
-
-                                // STEP 13: the failure text is the ENGINE's own
-                                // rejection reason (or the risk verdict that stopped
-                                // creation). It is never a UI-authored excuse.
-                                if root.selected-stock.order-reason != "": VBanner {
-                                    height: 20px;
-                                    message: "✕ NOT FILLED · " + root.selected-stock.order-reason;
-                                    tone: 3;
-                                }
-                            }
-                        }
-
-                        // 3.3 LIVE READINESS GATES
-                        Rectangle {
-                            min-height: 150px;
-                            background: VayrenPalette.live-panel;
-                            border-radius: 6px;
-                            border-width: 1px;
-                            border-color: VayrenPalette.live-line;
-
-                            VerticalLayout {
-                                padding: 12px;
-                                spacing: 5px;
-
-                                HorizontalLayout {
-                                    height: 24px;
-                                    spacing: 6px;
-                                    alignment: center;
-
-                                    Text {
-                                        text: "LIVE READINESS";
-                                        color: VayrenPalette.text-bright;
-                                        font-size: 12px;
-                                        font-weight: 700;
-                                        vertical-alignment: center;
-                                    }
-
-                                    Rectangle { horizontal-stretch: 1; background: transparent; }
-
-                                    Text {
-                                        text: "EC2 LINK: " + (root.gateway.status != "" ? root.gateway.status : "DISCONNECTED");
-                                        color: root.gateway.tone == 1 ? VayrenPalette.pos : (root.gateway.tone == 2 ? VayrenPalette.amber : VayrenPalette.neg);
-                                        font-size: 10px;
-                                        font-weight: 700;
-                                        vertical-alignment: center;
-                                    }
-                                }
-
-                                // STEP 4/5: ONE consolidated verdict block. This is
-                                // the single place START is judged, so the operator
-                                // reads the answer and the reason in one glance
-                                // instead of hunting across the bar, the readiness
-                                // gates and the footer for three partial verdicts.
-                                Rectangle {
-                                    height: 30px;
-                                    border-radius: 4px;
-                                    background: LiveTone.chip(root.setup.can-stop ? 1 : (root.blockers.length > 0 ? 3 : 2));
-                                    border-width: 1px;
-                                    border-color: LiveTone.ink(root.setup.can-stop ? 1 : (root.blockers.length > 0 ? 3 : 2));
-                                    HorizontalLayout {
-                                        padding-left: 10px;
-                                        padding-right: 10px;
-                                        spacing: 6px;
-                                        alignment: center;
-                                        Text {
-                                            min-width: 0px;
-                                            text: root.start-verdict;
-                                            color: LiveTone.ink(root.setup.can-stop ? 1 : (root.blockers.length > 0 ? 3 : 2));
-                                            font-size: 13px;
-                                            font-weight: 800;
-                                            vertical-alignment: center;
-                                            overflow: elide;
-                                        }
-                                        Rectangle { horizontal-stretch: 1; background: transparent; }
-                                        // Mode + session side by side, so "LIVE but
-                                        // STOPPED" is readable in one line.
-                                        Text {
-                                            text: (root.bar.mode == 2 ? "LIVE" : root.bar.mode == 1 ? "SANDBOX" : "PAPER");
-                                            color: LiveTone.ink(root.bar.mode == 2 ? 3 : 0);
-                                            font-size: 10px;
-                                            font-weight: 700;
-                                            vertical-alignment: center;
-                                        }
-                                        Text {
-                                            text: "·";
-                                            color: VayrenPalette.muted;
-                                            font-size: 10px;
-                                            vertical-alignment: center;
-                                        }
-                                        Text {
-                                            min-width: 0px;
-                                            text: root.setup.session-label;
-                                            color: LiveTone.ink(root.setup.session-tone);
-                                            font-size: 10px;
-                                            font-weight: 700;
-                                            vertical-alignment: center;
-                                            overflow: elide;
-                                        }
-                                    }
-                                }
-
-                                // Blockers print ONCE, here — the readiness gate rows
-                                // below carry per-gate detail, not a second copy of
-                                // this list (STEP 5: no blocker repeated 3-4 times).
-                                if root.blockers.length > 0: Text {
-                                    text: "WHY START IS BLOCKED (EXACT REASONS):";
-                                    color: VayrenPalette.live-ink-faint;
-                                    font-size: 10px;
-                                    font-weight: 700;
-                                    height: 18px;
-                                    vertical-alignment: center;
-                                }
-
-                                for b in root.blockers: Text {
-                                    min-width: 0px;
-                                    width: 100%;
-                                    text: "• " + b;
-                                    color: VayrenPalette.neg;
-                                    font-size: 10px;
-                                    font-weight: 600;
-                                    wrap: word-wrap;
-                                }
-
-                                if root.blockers.length == 0: Text {
-                                    text: "No blockers reported by the backend.";
-                                    color: VayrenPalette.muted;
-                                    font-size: 10px;
-                                    font-weight: 500;
-                                    height: 18px;
-                                    vertical-alignment: center;
-                                }
-
-                                HorizontalLayout {
-                                    height: 34px;
-                                    spacing: 8px;
-
-                                    VButton {
-                                        label: "ARM LIVE";
-                                        variant: root.setup.can-arm ? 0 : 2;
-                                        enabled: root.setup.can-arm;
-                                        clicked => { root.arm-requested(); }
-                                    }
-
-                                    if root.setup.confirmed-live: VBadge {
-                                        text: "CONSENT GIVEN";
-                                        tone: 1;
-                                        vertical-alignment: center;
-                                    }
-
-                                    Rectangle { horizontal-stretch: 1; background: transparent; }
-                                }
-
-                                if root.setup.needs-live-confirm: VBanner {
-                                    message: "LIVE mode requires explicit confirmation before starting.";
-                                    tone: 2;
-                                    action-label: "CONFIRM LIVE";
-                                    action => { root.confirm-requested(); }
-                                }
-
-                                if root.gates.length == 0: VEmptyState {
-                                    title: "No readiness facts reported";
-                                    detail: "the execution backend has published no gate verdicts";
-                                }
-
-                                for g in root.gates: LiveGateRow {
-                                    name: g.name;
-                                    status: g.status;
-                                    tone: g.tone;
-                                    reason: g.reason;
-                                    show-reason: root.tall-inspector;
-                                }
-
-                                if root.arm-note != "": Text {
-                                    min-width: 0px;
-                                    width: 100%;
-                                    text: root.arm-note;
-                                    color: root.setup.can-arm ? VayrenPalette.pos : VayrenPalette.amber;
-                                    font-size: 10px;
-                                    font-weight: 600;
-                                    wrap: word-wrap;
-                                }
-
-                                if root.bar.note != "": Text {
-                                    min-width: 0px;
-                                    width: 100%;
-                                    text: root.bar.note;
-                                    color: LiveTone.ink(root.bar.note-tone);
-                                    font-size: 11px;
-                                    font-weight: 600;
-                                    wrap: word-wrap;
-                                }
-                            }
-                        }
-
-                        // 3.3b UNIFIED ELIGIBILITY (Phase-6/7 backend section,
-                        // verbatim). Its own card so the verdict block can
-                        // never disturb the readiness gates above. Unreported
-                        // backends show "NOT REPORTED" — the card never
-                        // invents a verdict, and per-instrument rows come
-                        // only from reported backend rows.
-                        Rectangle {
-                            background: VayrenPalette.live-panel;
-                            border-radius: 6px;
-                            border-width: 1px;
-                            border-color: VayrenPalette.live-line;
-
-                            VerticalLayout {
-                                padding: 12px;
-                                spacing: 5px;
-
-                                Text {
-                                    text: "ELIGIBILITY";
-                                    color: VayrenPalette.text-bright;
-                                    font-size: 12px;
-                                    font-weight: 700;
-                                    height: 24px;
-                                    vertical-alignment: center;
-                                }
-                                Rectangle {
-                                    height: 30px;
-                                    border-radius: 4px;
-                                    background: LiveTone.chip(root.eligibility.final-tone);
-                                    border-width: 1px;
-                                    border-color: LiveTone.ink(root.eligibility.final-tone);
-                                    HorizontalLayout {
-                                        padding-left: 10px;
-                                        padding-right: 10px;
-                                        spacing: 6px;
-                                        alignment: center;
-                                        Text {
-                                            min-width: 0px;
-                                            text: root.eligibility.reported ? root.eligibility.final-label : "NOT REPORTED";
-                                            color: LiveTone.ink(root.eligibility.final-tone);
-                                            font-size: 13px;
-                                            font-weight: 800;
-                                            vertical-alignment: center;
-                                            overflow: elide;
-                                        }
-                                        Rectangle { horizontal-stretch: 1; background: transparent; }
-                                        Text {
-                                            text: root.eligibility.enforcement ? "ENFORCING" : "ADVISORY";
-                                            color: VayrenPalette.muted;
-                                            font-size: 10px;
-                                            font-weight: 700;
-                                            vertical-alignment: center;
-                                        }
-                                    }
-                                }
-                                if root.eligibility.reported && root.eligibility.reason != "": Text {
-                                    min-width: 0px;
-                                    width: 100%;
-                                    text: root.eligibility.reason;
-                                    color: VayrenPalette.live-ink-dim;
-                                    font-size: 10px;
-                                    font-weight: 600;
-                                    wrap: word-wrap;
-                                }
-                                LiveGateRow {
-                                    name: "MARKET DATA";
-                                    status: root.eligibility.reported ? root.eligibility.market : "—";
-                                    tone: 0;
-                                    reason: "";
-                                    show-reason: false;
-                                }
-                                LiveGateRow {
-                                    name: "EXECUTION";
-                                    status: root.eligibility.reported ? root.eligibility.execution : "—";
-                                    tone: 0;
-                                    reason: "";
-                                    show-reason: false;
-                                }
-                                LiveGateRow {
-                                    name: "RISK";
-                                    status: root.eligibility.reported ? root.eligibility.risk : "—";
-                                    tone: 0;
-                                    reason: "";
-                                    show-reason: false;
-                                }
-                                Text {
-                                    min-width: 0px;
-                                    width: 100%;
-                                    text: root.eligibility.reported ? root.eligibility.strategy-counts : "No strategy verdicts reported.";
-                                    color: VayrenPalette.live-ink-dim;
-                                    font-size: 10px;
-                                    font-weight: 600;
-                                    wrap: word-wrap;
-                                }
-                                for erow in root.eligibility-rows: HorizontalLayout {
-                                    height: 18px;
-                                    spacing: 6px;
-                                    Text { width: 80px; text: erow.symbol; color: VayrenPalette.text; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
-                                    Text { width: 110px; text: erow.level; color: LiveTone.ink(erow.level-tone); font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
-                                    Text { horizontal-stretch: 1; min-width: 0px; text: erow.reasons; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
-                                }
-                            }
-                        }
-
-                        // 3.4 SESSION FACTS
-                        Rectangle {
-                            min-height: 120px;
-                            background: VayrenPalette.live-panel;
-                            border-radius: 6px;
-                            border-width: 1px;
-                            border-color: VayrenPalette.live-line;
-                            clip: true;
-
-                            VerticalLayout {
-                                padding: 12px;
-                                spacing: 3px;
-
-                                HorizontalLayout {
-                                    height: 24px;
-                                    spacing: 8px;
-                                    alignment: center;
-                                    Text { text: "Session Facts"; color: VayrenPalette.text-bright; font-size: 12px; font-weight: 700; vertical-alignment: center; }
-                                    Rectangle { horizontal-stretch: 1; background: transparent; }
-                                    VBadge {
-                                        text: root.bar.risk-label;
-                                        tone: root.bar.risk-tone;
-                                        vertical-alignment: center;
-                                    }
-                                    VButton {
-                                        width: 92px;
-                                        label: "CONFIGURE";
-                                        variant: 2;
-                                        enabled: root.bar.broker-tone != 1;
-                                        clicked => { root.configure-broker(); }
-                                    }
-                                }
-
-                                Text { text: "ACCOUNT & RISK"; color: VayrenPalette.live-ink-soft; font-size: 10px; font-weight: 700; }
-                                for r in root.account-rows: LiveKvRow { key: r.key; value: r.value; tone: r.tone; }
-
-                                Rectangle { height: 1px; background: VayrenPalette.live-line; }
-                                Text { text: "RISK LIMITS"; color: VayrenPalette.live-ink-soft; font-size: 10px; font-weight: 700; }
-                                for r in root.risk-rows: LiveKvRow { key: r.key; value: r.value; tone: r.tone; }
-
-                                Rectangle { height: 1px; background: VayrenPalette.live-line; }
-                                Text { text: "POSITION FACTS"; color: VayrenPalette.live-ink-soft; font-size: 10px; font-weight: 700; }
-                                for r in root.position-rows: LiveKvRow { key: r.key; value: r.value; tone: r.tone; }
-
-                                Rectangle { height: 1px; background: VayrenPalette.live-line; }
-                                Text { text: "ACTIVE STRATEGY"; color: VayrenPalette.live-ink-soft; font-size: 10px; font-weight: 700; }
-                                for r in root.strategy-rows: LiveKvRow { key: r.key; value: r.value; tone: r.tone; }
-
-                                Rectangle { height: 1px; background: VayrenPalette.live-line; }
-                                Text { text: "VENUE"; color: VayrenPalette.live-ink-soft; font-size: 10px; font-weight: 700; }
-                                for r in root.broker-rows: LiveKvRow { key: r.key; value: r.value; tone: r.tone; }
-
-                                Rectangle { height: 1px; background: VayrenPalette.live-line; }
-                                Text { text: "RECONCILIATION"; color: VayrenPalette.live-ink-soft; font-size: 10px; font-weight: 700; }
-                                for r in root.recon-rows: LiveKvRow { key: r.key; value: r.value; tone: r.tone; }
-
-                                Rectangle { height: 1px; background: VayrenPalette.live-line; }
-                                Text { text: "TELEMETRY & ACTIVITY"; color: VayrenPalette.live-ink-soft; font-size: 10px; font-weight: 700; }
-                                LiveKvRow { key: "LAST MARKET TICK"; value: root.md.last-tick != "" ? root.md.last-tick : "NOT AVAILABLE"; tone: root.md.tone; }
-                                LiveKvRow { key: "MARKET FRESHNESS"; value: root.md.freshness != "" ? root.md.freshness : "NOT AVAILABLE"; tone: root.md.tone; }
-                                LiveKvRow { key: "LAST ORDER WS"; value: root.ws.last-tick != "" ? root.ws.last-tick : "NOT AVAILABLE"; tone: root.ws.tone; }
-                                LiveKvRow { key: "ORDER WS LATENCY"; value: root.ws.latency != "" ? root.ws.latency : "NOT AVAILABLE"; tone: root.ws.tone; }
-                                LiveKvRow { key: "RECON STATUS"; value: root.bar.recon-label != "" ? root.bar.recon-label : "NOT AVAILABLE"; tone: root.bar.recon-tone; }
-
-                                Rectangle { height: 1px; background: VayrenPalette.live-line; }
-                                Text { text: "ORDER"; color: VayrenPalette.live-ink-soft; font-size: 10px; font-weight: 700; }
-                                HorizontalLayout {
-                                    height: 28px;
-                                    spacing: 8px;
-                                    Text { text: "QUANTITY"; color: VayrenPalette.live-ink-faint; font-size: 10px; font-weight: 700; vertical-alignment: center; }
-                                    Rectangle { horizontal-stretch: 1; background: transparent; }
-                                    LineEdit {
-                                        width: 96px;
-                                        height: 28px;
-                                        text <=> root.qty-text;
-                                        edited(t) => { root.qty-dirty = true; }
-                                        accepted(t) => { root.qty-dirty = false; root.quantity-edited(t); }
-                                    }
-                                }
-                                HorizontalLayout {
-                                    height: 22px;
-                                    spacing: 8px;
-                                    Text { text: "TIMEFRAME"; color: VayrenPalette.live-ink-faint; font-size: 10px; font-weight: 700; vertical-alignment: center; }
-                                    Rectangle { horizontal-stretch: 1; background: transparent; }
-                                    Rectangle {
-                                        TouchArea {
-                                            enabled: !root.setup.can-stop && root.timeframe-names.length > 0;
-                                            clicked => {
-                                                root.timeframe-picked(root.timeframe-names[Math.mod(root.timeframe-selected + 1, root.timeframe-names.length)]);
-                                            }
-                                        }
-                                        Text { text: root.selected-timeframe + "  ▾"; color: root.setup.can-stop ? VayrenPalette.faint : VayrenPalette.accent; font-size: 10px; font-weight: 700; vertical-alignment: center; }
-                                    }
-                                }
-                                HorizontalLayout {
-                                    height: 22px;
-                                    spacing: 8px;
-                                    Text { text: "STRATEGY"; color: VayrenPalette.live-ink-faint; font-size: 10px; font-weight: 700; vertical-alignment: center; }
-                                    Rectangle { horizontal-stretch: 1; background: transparent; }
-                                    Rectangle {
-                                        TouchArea {
-                                            enabled: !root.setup.can-stop && root.strategy-names.length > 0;
-                                            clicked => {
-                                                root.strategy-picked(root.strategy-names[Math.mod(root.strategy-selected + 1, root.strategy-names.length)]);
-                                            }
-                                        }
-                                        Text { text: (root.strategy-selected >= 0 ? root.selected-strategy : "Select Strategy") + "  ▾"; color: root.setup.can-stop ? VayrenPalette.faint : VayrenPalette.text; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
-                                    }
-                                }
-                            }
-                        }
                     }
                 }
             }
@@ -2438,7 +1051,7 @@ export component LiveScreen inherits Rectangle {
                 background: VayrenPalette.bg;
                 TouchArea { clicked => { root.inspector-toggled(); } }
                 Text {
-                    text: "‹";
+                    text: "â€¹";
                     color: VayrenPalette.live-ink;
                     font-size: 14px;
                     font-weight: 700;
@@ -2448,7 +1061,7 @@ export component LiveScreen inherits Rectangle {
             }
         }
 
-        // ══ 3. FOOTER STATUS STRIP (Height 24px) ════════════════════════════
+        // â•â• 3. FOOTER STATUS STRIP (Height 24px) â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
         Rectangle {
             height: 24px;
             min-width: 0px;
@@ -2506,7 +1119,7 @@ export component LiveScreen inherits Rectangle {
                     }
                 }
 
-                // Strategy Status — MODE and STATUS are separate words, and the
+                // Strategy Status â€” MODE and STATUS are separate words, and the
                 // fallback carries neither a hardcoded name nor a fake RUNNING.
                 HorizontalLayout {
                     min-width: 0px;
@@ -2515,7 +1128,7 @@ export component LiveScreen inherits Rectangle {
                     VStatusDot { tone: root.active-strat.status-tone; }
                     Text {
                         min-width: 0px;
-                        text: "STRATEGY: " + (root.active-strat.name != "" ? root.active-strat.name : "—") + " · " + (root.bar.mode == 2 ? "LIVE" : root.bar.mode == 1 ? "SANDBOX" : "PAPER") + " · " + (root.active-strat.status != "" ? root.active-strat.status : "—");
+                        text: "STRATEGY: " + (root.active-strat.name != "" ? root.active-strat.name : "â€”") + " Â· " + (root.bar.mode == 2 ? "LIVE" : root.bar.mode == 1 ? "SANDBOX" : "PAPER") + " Â· " + (root.active-strat.status != "" ? root.active-strat.status : "â€”");
                         color: LiveTone.ink(root.active-strat.status-tone);
                         font-size: 10px;
                         font-weight: 700;
@@ -2532,7 +1145,7 @@ export component LiveScreen inherits Rectangle {
                     spacing: 4px;
                     alignment: center;
                     Text {
-                        text: root.footer.risk != "" ? root.footer.risk : (root.bar.halted ? "✕ EXECUTION HALTED" : (root.setup.can-stop ? "● RUNNING" : (root.blockers.length > 0 ? "✕ START BLOCKED" : "✓ READY TO START")));
+                        text: root.footer.risk != "" ? root.footer.risk : (root.bar.halted ? "âœ• EXECUTION HALTED" : (root.setup.can-stop ? "â— RUNNING" : (root.blockers.length > 0 ? "âœ• START BLOCKED" : "âœ“ READY TO START")));
                         color: root.bar.halted || root.blockers.length > 0 ? VayrenPalette.neg : VayrenPalette.pos;
                         font-size: 10px;
                         font-weight: 800;

@@ -2596,15 +2596,6 @@ pub fn demo_lab_state() -> LabState {
                 favorite: true,
                 last_backtest: "—".into(),
             },
-            lab::LabStrategy {
-                name: "SMA".into(),
-                description: "SMA crossover".into(),
-                tags: vec!["TREND".into()],
-                version: "1.0".into(),
-                modified: "—".into(),
-                favorite: false,
-                last_backtest: "—".into(),
-            },
         ],
         selected: Some(0),
         config: lab::LabConfig {
