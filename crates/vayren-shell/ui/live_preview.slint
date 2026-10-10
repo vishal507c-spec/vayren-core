@@ -1,0 +1,12 @@
+import { LiveScreen } from "live.slint";
+
+export component LivePreview inherits Window {
+    preferred-width: 1600px;
+    preferred-height: 900px;
+    title: "VAYREN LIVE PREVIEW";
+
+    LiveScreen {
+        width: parent.width;
+        height: parent.height;
+    }
+}

@@ -1,4 +1,4 @@
-// VAYREN application shell — Rust + Slint native UI (AI_ENTRY.md §1).
+﻿// VAYREN application shell â€” Rust + Slint native UI (AI_ENTRY.md Â§1).
 //
 // Presentation only: every displayed value is bound to a property fed by the
 // Rust side from the BrokerPanel view-model (backend facts, never UI
@@ -9,7 +9,7 @@ import { VBadge, VButton } from "components.slint";
 import { StrategyLabScreen, LabHeader, LabLibraryRow, LabKpi, LabRankRow, LabTradeRow, LabPoint, LabParam, LabDetailMetric, LabBoardCell, LabMatrixRow, LabPreset, RankWindow } from "lab.slint";
 import { MarketScreen, MarketWatchRow, MarketCandle, MarketTick, MarketRayLevel, MarketTimeframe, MarketIndicator, MarketStatusRow, MarketSettingsRow, MarketPopupRow, MarketPlotSeg, MarketMarker, MarketTradeContext, DlPlan, DlStatus, DlCalDay, DlCredField, DlStock } from "market.slint";
 import { ResearchScreen, ResearchMetric, ResearchSignalRow, ResearchTradeRow, ResearchRobustRow, ResearchKv, ResearchCompareRow, ResearchStrategyRow, ResearchExperimentRow, ResearchField, ResearchConfigGroup, ResearchEvidenceDim, ResearchEvidenceWhy, ResearchKvGroup } from "research.slint";
-import { PortfolioScreen, PortfolioKpi, PortfolioGate, PortfolioPosition, PortfolioAlloc, PortfolioOrder, PortfolioFill, PortfolioRisk } from "portfolio.slint";
+import { PortfolioKpi, PortfolioGate, PortfolioPosition, PortfolioAlloc, PortfolioOrder, PortfolioFill, PortfolioRisk } from "portfolio.slint";
 import { LiveScreen, LiveBar, LiveSetup, LiveMarket, LiveSymbolRow, LiveGate, LiveKv, LiveStat, LivePosition, LiveOrder, LiveFill, LiveEventRow, LiveTiers, LiveWebSocket, LiveMarketData, LiveActiveStrategy, LiveWatchlistRow, LiveEligibility, LiveEligibilityRow, LiveSelectedStock, LiveFooter, LiveRemoteGateway } from "live.slint";
 import { BrokerPanel, BrokerCheckRow } from "broker.slint";
 import { BrokerConnectionWorkspace, BrokerRowView, CredentialFieldView, ProgressStepView } from "broker_connection.slint";
@@ -75,7 +75,7 @@ export component AppWindow inherits Window {
 
     // Broker parity actions (Slint reports intent only; the embed host
     // dispatches to BrokerManager. The standalone shell leaves these
-    // unwired — demo surface, no backend).
+    // unwired â€” demo surface, no backend).
     callback broker-login-requested();
     callback broker-refresh-requested();
     callback broker-disconnect-requested();
@@ -138,7 +138,7 @@ export component AppWindow inherits Window {
     callback lab-run-buy-requested();
     callback lab-run-sell-requested();
     callback lab-run-all-requested();
-    // Strategy Lab redesign — reference-layout callbacks.
+    // Strategy Lab redesign â€” reference-layout callbacks.
     callback lab-lens-picked(int);
     callback lab-inspector-close();
     callback lab-diag-link-clicked();
@@ -270,26 +270,26 @@ export component AppWindow inherits Window {
     in-out property <bool> live-ready: false;
     in-out property <[string]> blockers;
     // Broker parity card (Rust `project_card`; render data only).
-    in-out property <string> status-glyph: "○";
+    in-out property <string> status-glyph: "â—‹";
     in-out property <string> status-label: "";
     in-out property <int> status-tone: 0;
     in-out property <string> status-explanation: "";
     in-out property <string> reason-line: "";
-    in-out property <string> account-id: "—";
+    in-out property <string> account-id: "â€”";
     in-out property <string> conn-label: "Not connected";
     in-out property <int> conn-tone: 0;
-    in-out property <string> last-sync: "—";
+    in-out property <string> last-sync: "â€”";
     in-out property <string> health-summary: "";
     in-out property <int> health-summary-tone: 0;
     in-out property <[BrokerCheckRow]> check-rows;
-    in-out property <string> funds-line: "—";
+    in-out property <string> funds-line: "â€”";
     in-out property <string> funds-sub: "";
-    in-out property <string> positions-line: "—";
+    in-out property <string> positions-line: "â€”";
     in-out property <string> positions-sub: "";
-    in-out property <string> orders-line: "—";
+    in-out property <string> orders-line: "â€”";
     in-out property <string> orders-sub: "";
     in-out property <string> credentials-line: "";
-    in-out property <string> callback-display: "—";
+    in-out property <string> callback-display: "â€”";
     in-out property <bool> refresh-visible: false;
     in-out property <string> refresh-label: "REFRESH";
     in-out property <bool> refresh-enabled: false;
@@ -374,7 +374,7 @@ export component AppWindow inherits Window {
     in-out property <bool> market-last-volume-up: true;
     in-out property <bool> market-has-last-volume: false;
     in-out property <int> market-scale-mode: 0;
-    in-out property <string> market-scale-label: "₹";
+    in-out property <string> market-scale-label: "â‚¹";
     in-out property <bool> market-cross-visible: true;
     in-out property <[MarketIndicator]> market-indicator-rows;
     in-out property <bool> market-popup-open: false;
@@ -424,7 +424,7 @@ export component AppWindow inherits Window {
     in-out property <float> chart-zoom-level: 1.0;
     in-out property <string> chart-zoom-label: "100%";
 
-    // Strategy Lab — projected LabState (Rust owns it; these are render data).
+    // Strategy Lab â€” projected LabState (Rust owns it; these are render data).
     in-out property <LabHeader> lab;
     in-out property <[LabLibraryRow]> lab-library;
     in-out property <[LabKpi]> lab-kpis;
@@ -457,14 +457,14 @@ export component AppWindow inherits Window {
     in-out property <[bool]> lab-sym-visible-on;
     in-out property <int> lab-filter-active: 0;
     in-out property <[LabPreset]> lab-date-presets;
-    // §02 config row: the real ladder's first cells and the real range
+    // Â§02 config row: the real ladder's first cells and the real range
     // preset labels (presentation caps, not data caps).
     in-out property <[string]> lab-tf-short;
     in-out property <[string]> lab-range-preset-labels;
     // Explicit visual-check fixture watermark (empty = real app path).
     in-out property <string> visual-check-label: "";
 
-    // Research — projected ResearchState. Breakpoints derive from the
+    // Research â€” projected ResearchState. Breakpoints derive from the
     // content width (window minus rail) so recomposition follows the
     // available logical viewport, never a physical screen.
     in-out property <bool> research-wide: (root.width - VayrenDesign.rail-width) >= VayrenDesign.research-wide;
@@ -530,7 +530,7 @@ export component AppWindow inherits Window {
     in-out property <string> research-log-status;
     in-out property <bool> research-log-expanded;
 
-    // Portfolio — projected PortfolioState (Rust owns it; render data only).
+    // Portfolio â€” projected PortfolioState (Rust owns it; render data only).
     in-out property <string> portfolio-account-title: "";
     in-out property <int> portfolio-account-tone: 0;
     in-out property <string> portfolio-account-info: "";
@@ -574,7 +574,7 @@ export component AppWindow inherits Window {
     in-out property <bool> portfolio-risk-has-data: false;
     in-out property <string> portfolio-risk-empty-detail: "";
 
-    // LIVE — projected LiveState (Rust owns it; these are render data only).
+    // LIVE â€” projected LiveState (Rust owns it; these are render data only).
     in-out property <LiveBar> live-bar;
     in-out property <LiveSetup> live-setup;
     in-out property <LiveMarket> live-market;
@@ -618,7 +618,7 @@ export component AppWindow inherits Window {
     callback live-watchlist-search-changed(string);
     in-out property <bool> live-inspector-open: true;
     // LIVE recomposition tiers evaluated against the content column width
-    // (the window size is platform-owned — screens derive layout from these
+    // (the window size is platform-owned â€” screens derive layout from these
     // inputs, never from their own width: single LiveTiers decision source).
     in-out property <length> live-screen-width: root.width - VayrenDesign.rail-width;
     in-out property <bool> live-dock-inspector: LiveTiers.dock-inspector(root.live-screen-width);
@@ -877,55 +877,6 @@ export component AppWindow inherits Window {
                     add-broker-requested() => { root.broker-add-requested(); }
                     paste-requested(i) => { root.broker-paste-requested(i); }
                 }
-                if !root.screen-pending && root.active-screen == ShellScreen.portfolio: PortfolioScreen {
-                    width: 100%;
-                    height: 100%;
-                    account-title: root.portfolio-account-title;
-                    account-tone: root.portfolio-account-tone;
-                    account-info: root.portfolio-account-info;
-                    account-detail: root.portfolio-account-detail;
-                    updated-label: root.portfolio-updated;
-                    kpis-primary: root.portfolio-kpis-primary;
-                    kpis-secondary: root.portfolio-kpis-secondary;
-                    perf-has-data: root.portfolio-perf-has-data;
-                    perf-trades: root.portfolio-perf-trades;
-                    perf-wins: root.portfolio-perf-wins;
-                    perf-losses: root.portfolio-perf-losses;
-                    perf-winrate: root.portfolio-perf-winrate;
-                    gates: root.portfolio-gates;
-                    positions-count: root.portfolio-positions-count;
-                    positions: root.portfolio-positions;
-                    has-positions: root.portfolio-has-positions;
-                    positions-empty-title: root.portfolio-positions-empty-title;
-                    positions-empty-detail: root.portfolio-positions-empty-detail;
-                    selected-position: root.portfolio-selected-position;
-                    allocation: root.portfolio-allocation;
-                    alloc-has-data: root.portfolio-alloc-has-data;
-                    detail-symbol: root.portfolio-detail-symbol;
-                    detail-side: root.portfolio-detail-side;
-                    detail-side-tone: root.portfolio-detail-side-tone;
-                    detail-qty: root.portfolio-detail-qty;
-                    detail-avg: root.portfolio-detail-avg;
-                    detail-value: root.portfolio-detail-value;
-                    detail-pnl: root.portfolio-detail-pnl;
-                    detail-pnl-tone: root.portfolio-detail-pnl-tone;
-                    detail-alloc: root.portfolio-detail-alloc;
-                    orders-tab: root.portfolio-orders-tab;
-                    orders: root.portfolio-orders;
-                    fills: root.portfolio-fills;
-                    active-has-rows: root.portfolio-active-has-rows;
-                    active-empty-title: root.portfolio-active-empty-title;
-                    active-empty-detail: root.portfolio-active-empty-detail;
-                    health-label: root.portfolio-health-label;
-                    health-tone: root.portfolio-health-tone;
-                    health-note: root.portfolio-health-note;
-                    risk-rows: root.portfolio-risk-rows;
-                    risk-has-data: root.portfolio-risk-has-data;
-                    risk-empty-detail: root.portfolio-risk-empty-detail;
-                    refresh-requested() => { root.portfolio-refresh-requested(); }
-                    orders-tab-picked(idx) => { root.portfolio-orders-tab-picked(idx); }
-                    position-picked(idx) => { root.portfolio-position-picked(idx); }
-                }
                 if !root.screen-pending && root.active-screen == ShellScreen.lab: StrategyLabScreen {
                     head-roomy: root.width >= 1210px;
                     lab: root.lab;
@@ -1013,87 +964,6 @@ export component AppWindow inherits Window {
                     diag-link-clicked() => { root.lab-diag-link-clicked(); }
                     equity-select-picked(idx) => { root.lab-equity-select-picked(idx); }
                     reset-requested() => { root.lab-reset-requested(); }
-                }
-                if !root.screen-pending && root.active-screen == ShellScreen.research: ResearchScreen {
-                    wide: root.research-wide;
-                    medium: root.research-medium;
-                    strategy-name: root.research-strategy-name;
-                    strategy-version: root.research-strategy-version;
-                    experiment-id: root.research-experiment-id;
-                    context-line: root.research-context-line;
-                    strategies: root.research-strategies;
-                    experiments: root.research-experiments;
-                    strategy-count: root.research-strategy-count;
-                    experiment-count: root.research-experiment-count;
-                    config-groups: root.research-config-groups;
-                    hypothesis: root.research-hypothesis;
-                    question: root.research-question;
-                    effect: root.research-effect;
-                    create-error: root.research-create-error;
-                    state-label: root.research-state-label;
-                    state-tone: root.research-state-tone;
-                    has-strategy: root.research-has-strategy;
-                    show-results: root.research-show-results;
-                    stale: root.research-stale;
-                    run-enabled: root.research-run-enabled;
-                    run-blocked-reason: root.research-run-blocked-reason;
-                    cancel-visible: root.research-cancel-visible;
-                    create-visible: root.research-create-visible;
-                    metrics: root.research-metrics;
-                    signal-count-line: root.research-signal-count-line;
-                    trade-count-line: root.research-trade-count-line;
-                    signals: root.research-signals;
-                    trades: root.research-trades;
-                    robustness: root.research-robustness;
-                    validation-rows: root.research-validation-rows;
-                    quality-rows: root.research-quality-rows;
-                    inspector-rows: root.research-inspector-rows;
-                    report-sections: root.research-report-sections;
-                    compare-rows: root.research-compare-rows;
-                    compare-verdict: root.research-compare-verdict;
-                    empty-title: root.research-empty-title;
-                    empty-detail: root.research-empty-detail;
-                    conclusion: root.research-conclusion;
-                    validation-status: root.research-validation-status;
-                    validation-summary: root.research-validation-summary;
-                    fingerprint-line: root.research-fingerprint-line;
-                    evidence-verdict: root.research-evidence-verdict;
-                    evidence-tone: root.research-evidence-tone;
-                    evidence-grade: root.research-evidence-grade;
-                    evidence-why: root.research-evidence-why;
-                    evidence-dims: root.research-evidence-dims;
-                    stats-rows: root.research-stats-rows;
-                    montecarlo-rows: root.research-montecarlo-rows;
-                    benchmark-rows: root.research-benchmark-rows;
-                    inspector-groups: root.research-inspector-groups;
-                    tab: root.research-tab;
-                    inspector-open: root.research-inspector-open;
-                    narrow-view: root.research-narrow-view;
-                    signal-filter: root.research-signal-filter;
-                    log-lines: root.research-log-lines;
-                    log-status: root.research-log-status;
-                    log-expanded: root.research-log-expanded;
-                    hypothesis-open: root.research-hypothesis-open;
-                    why-open: root.research-why-open;
-                    technical-open: root.research-technical-open;
-                    show-next-steps: root.research-show-next-steps;
-                    strategy-picked(idx) => { root.research-strategy-picked(idx); }
-                    config-edited(k, t) => { root.research-config-edited(k, t); }
-                    config-option(k, v) => { root.research-config-option(k, v); }
-                    hypothesis-edited(t) => { root.research-hypothesis-edited(t); }
-                    question-edited(t) => { root.research-question-edited(t); }
-                    effect-edited(t) => { root.research-effect-edited(t); }
-                    create-pressed() => { root.research-create-pressed(); }
-                    run-pressed() => { root.research-run-pressed(); }
-                    cancel-pressed() => { root.research-cancel-pressed(); }
-                    tab-picked(i) => { root.research-tab-picked(i); }
-                    inspector-toggled() => { root.research-inspector-toggled(); }
-                    narrow-view-picked(i) => { root.research-narrow-view-picked(i); }
-                    signal-filter-changed(t) => { root.research-signal-filter-changed(t); }
-                    experiment-picked(i) => { root.research-experiment-picked(i); }
-                    hypothesis-toggled() => { root.research-hypothesis-toggled(); }
-                    why-toggled() => { root.research-why-toggled(); }
-                    technical-toggled() => { root.research-technical-toggled(); }
                 }
                 if !root.screen-pending && root.active-screen == ShellScreen.live: LiveScreen {
                     width: 100%;

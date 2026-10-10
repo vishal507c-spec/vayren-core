@@ -21,6 +21,7 @@ use slint::platform::software_renderer::{
 };
 use slint::platform::{Platform, PlatformError, WindowAdapter};
 use slint::{ComponentHandle, Model, PhysicalSize, Rgb8Pixel, SharedPixelBuffer};
+use vayren_domain::lab;
 use vayren_shell::{shell, ShellScreen};
 
 struct MiniPlatform {
@@ -108,7 +109,17 @@ fn research_object_rows_are_fully_visible_and_unobstructed() {
 
     let ui = vayren_shell::AppWindow::new().unwrap();
     shell::apply(&ui, &shell::demo_snapshot());
-    shell::apply_lab(&ui, &shell::demo_lab_state());
+    let mut state = shell::demo_lab_state();
+    state.strategies.push(lab::LabStrategy {
+        name: "SMA".into(),
+        description: "Moving Average Cross".into(),
+        tags: vec!["TREND".into()],
+        version: "1.0".into(),
+        modified: "11 Sep 26".into(),
+        favorite: false,
+        last_backtest: "—".into(),
+    });
+    shell::apply_lab(&ui, &state);
     shell::select(&ui, ShellScreen::Lab);
 
     let (w, h) = (1280u32, 720u32);

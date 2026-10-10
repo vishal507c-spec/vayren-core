@@ -679,8 +679,8 @@ component LabMetaCell inherits Rectangle {
         padding-right: 16px;
         alignment: center;
         spacing: 5px;
-        Text { text: root.mc-label; font-size: 10px; letter-spacing: 0.6px; color: LabPalette.dim; }
-        Text { text: root.mc-value; font-size: 11.5px; font-family: "monospace"; color: LabPalette.lab-text; overflow: elide; }
+        Text { text: root.mc-label; font-size: 9.5px; font-weight: 600; letter-spacing: 1px; color: LabPalette.dim; }
+        Text { text: root.mc-value; font-size: 13px; font-weight: 600; color: LabPalette.lab-text; overflow: elide; }
     }
 }
 
@@ -3096,8 +3096,9 @@ overflow: elide;
                                     height: 18px;
                                     Text {
                                         text: "Strategy source — " + (root.lab.description == "" ? "working copy" : root.lab.description);
-                                        font-size: 11px;
-                                        color: LabPalette.dim;
+                                        font-size: 10.5px;
+                                        font-weight: 500;
+                                        color: LabPalette.lab-muted;
                                         vertical-alignment: center;
                                     }
                                 }
@@ -3105,12 +3106,12 @@ overflow: elide;
                                     height: 380px;
                                     background: LabPalette.code-bg;
                                     TextEdit {
-                                        x: 4px; y: 4px;
-                                        width: parent.width - 8px;
-                                        height: parent.height - 8px;
+                                        x: 16px; y: 14px;
+                                        width: parent.width - 32px;
+                                        height: parent.height - 28px;
                                         text: root.lab.code;
                                         font-family: "monospace";
-                                        font-size: 12px;
+                                        font-size: 12.5px;
                                         wrap: word-wrap;
                                         edited(t) => { root.code-changed(t); }
                                     }
@@ -3125,8 +3126,8 @@ overflow: elide;
                                         spacing: 12px;
                                         alignment: center;
                                         Rectangle {
-                                            width: 90px; height: 34px;
-                                            border-radius: 8px;
+                                            width: 96px; height: 36px;
+                                            border-radius: 10px;
                                             background: LabPalette.inset;
                                             border-width: 1px;
                                             border-color: rstta.has-hover ? LabPalette.white-20 : LabPalette.line;
@@ -3155,8 +3156,8 @@ overflow: elide;
                                         // now gets an amber tint instead of asking
                                         // the eye to parse the word.
                                         Rectangle {
-                                            width: 120px; height: 34px;
-                                            border-radius: 8px;
+                                            width: 128px; height: 36px;
+                                            border-radius: 10px;
                                             background: root.lab.dirty ? LabPalette.run-ink : LabPalette.btn-idle-bg;
                                             svta := TouchArea {
                                                 enabled: root.lab.dirty;
@@ -3237,7 +3238,7 @@ overflow: elide;
                                                     }
                                                 }
                                                 if root.lab.saved-universe-chips.length == 0: Text {
-                                                    text: "No stocks saved for this strategy";
+                                                    text: "No stocks saved";
                                                     font-size: 10.5px;
                                                     color: LabPalette.dim;
                                                     vertical-alignment: center;
@@ -3246,6 +3247,7 @@ overflow: elide;
                                         }
                                         Text {
                                             text: root.lab.universe-count-line;
+                                            horizontal-alignment: right;
                                             font-family: "monospace";
                                             font-size: 10px;
                                             color: LabPalette.lab-muted;
@@ -3258,7 +3260,6 @@ overflow: elide;
                                             max-width: 180px;
                                             text: root.lab.universe-state == "error" ? root.lab.universe-error
                                                 : root.lab.universe-state == "pending" ? "Saving stocks…"
-                                                : root.lab.universe-state == "saved" ? "Stocks saved"
                                                 : "";
                                             font-size: 10px;
                                             color: root.lab.universe-state == "error" ? LabPalette.lab-red : LabPalette.lab-muted;

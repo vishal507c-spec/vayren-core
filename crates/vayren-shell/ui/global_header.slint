@@ -99,20 +99,6 @@ export component VGlobalHeader inherits Rectangle {
             clicked => { root.nav-selected(ShellScreen.lab); }
         }
 
-        // 3. RESEARCH
-        VGlobalNavItem {
-            label: "RESEARCH";
-            active: root.active-screen == ShellScreen.research;
-            clicked => { root.nav-selected(ShellScreen.research); }
-        }
-
-        // 4. PORTFOLIO
-        VGlobalNavItem {
-            label: "PORTFOLIO";
-            active: root.active-screen == ShellScreen.portfolio;
-            clicked => { root.nav-selected(ShellScreen.portfolio); }
-        }
-
         // 5. LIVE
         VGlobalNavItem {
             label: "LIVE";

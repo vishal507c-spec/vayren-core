@@ -752,7 +752,6 @@ def _lab_library_rows(strategy_dir: str) -> list[dict]:
 def _build_lab_library_rows(strategy_dir: str) -> list[dict]:
     """Strategy library rows: authoritative registry, library files, marked built-ins."""
     try:
-        from strategy import builtins
         from strategy.language.storage import list_strategies
         from strategy.registry import get_strategy_registry
     except Exception as exc:  # noqa: BLE001
@@ -837,30 +836,6 @@ def _build_lab_library_rows(strategy_dir: str) -> list[dict]:
             }
         )
         known.add(name.lower())
-
-    # 3. Built-in strategies (SMA Crossover, EMA Crossover, RSI Strategy)
-    for entry in builtins.list_builtins():
-        if entry.name.lower() in known:
-            continue
-        rows.append(
-            {
-                "name": entry.name,
-                "description": entry.description,
-                "tags": list(entry.tags),
-                "version": entry.version,
-                "modified": "built-in",
-                "last_backtest": "—",
-                "favorite": False,
-                "status": "ACTIVE",
-                "timeframe": "",
-                "direction": "",
-                "symbol_count": "",
-                "runtime_state": "IDLE",
-                "configured_symbols": [],
-                "metadata": {},
-            }
-        )
-        known.add(entry.name.lower())
 
     return rows
 

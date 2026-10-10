@@ -216,7 +216,7 @@ fn the_date_preset_row_has_one_cell_per_real_preset() {
     let ui = vayren_shell::AppWindow::new().unwrap();
     let state = configured_state(false);
     let expected = lab::project(&state).range_presets.len();
-    assert_eq!(expected, 5, "the §02 row is specified as five presets");
+    assert_eq!(expected, 4, "the §02 row is specified as four presets");
 
     shell::apply(&ui, &shell::demo_snapshot());
     shell::apply_lab(&ui, &state);
@@ -229,7 +229,7 @@ fn the_date_preset_row_has_one_cell_per_real_preset() {
     assert_eq!(ui.get_lab_range_preset_labels().row_count(), expected);
     // The committed range IS the full store window here, so the MAX cell is
     // the one that lights — a hand-picked narrower range must clear it.
-    assert_eq!(ui.get_lab().range_preset_idx, 4);
+    assert_eq!(ui.get_lab().range_preset_idx, 3);
     let mut narrowed = state.clone();
     narrowed.cfg_dates_start = "2024-06-03".into();
     shell::apply_lab(&ui, &narrowed);
