@@ -1759,8 +1759,8 @@ export component LiveScreen inherits Rectangle {
                             }
                         }
 
-                        // 3.2 SELECTED STOCK DETAILS CARD
-                        Rectangle {
+                        // 3.2 SELECTED STOCK DETAILS CARD (Visible only when an instrument is selected)
+                        if root.selected-stock.symbol != "": Rectangle {
                             min-height: 220px;
                             background: VayrenPalette.live-panel;
                             border-radius: 6px;
