@@ -416,18 +416,18 @@ component LiveTopCard inherits Rectangle {
     in property <string> source-text: "";
 
     background: VayrenPalette.live-panel;
-    border-radius: 6px;
+    border-radius: 10px;
     border-width: 1px;
-    border-color: VayrenPalette.live-line-mist;
-    min-width: 90px;
-    max-width: 175px;
-    height: 52px;
+    border-color: VayrenPalette.live-line-soft;
+    min-width: 100px;
+    max-width: 185px;
+    height: 56px;
     clip: true;
 
     HorizontalLayout {
-        padding-left: 8px;
-        padding-right: 8px;
-        spacing: 7px;
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 9px;
         alignment: center;
 
         if root.show-icon: Rectangle {
@@ -710,18 +710,6 @@ export component LiveScreen inherits Rectangle {
                     source-text: "STRATEGY RT";
                 }
 
-                // Card 4: Risk engine verdict + capital
-                LiveTopCard {
-                    icon-char: "R";
-                    show-icon: root.bar-extended;
-                    label: "RISK ENGINE";
-                    value-text: root.bar.risk-label != "" ? root.bar.risk-label : "NOT READY";
-                    tone: root.bar.risk-tone;
-                    sub-text: root.bar.risk-sub != "" ? root.bar.risk-sub : "CAPITAL: NOT AVAILABLE";
-                    sub-tone: root.bar.risk-tone == 3 ? 3 : 0;
-                    source-text: "RISK ENGINE";
-                }
-
                 // Reconciliation + executor: only on the extended tier, where
                 // there is room. Narrow screens keep the four facts above.
                 if root.bar-extended: LiveTopCard {
@@ -886,14 +874,6 @@ export component LiveScreen inherits Rectangle {
                     alignment: center;
 
                     Text {
-                        text: root.footer.risk != "" ? root.footer.risk : (root.bar.halted ? "✕ EXECUTION HALTED" : (root.setup.can-stop ? "● RUNNING" : (root.blockers.length > 0 ? "✕ START BLOCKED" : "✓ READY TO START")));
-                        color: root.bar.halted || root.blockers.length > 0 ? VayrenPalette.neg : VayrenPalette.pos;
-                        font-size: 10px;
-                        font-weight: 800;
-                        vertical-alignment: center;
-                    }
-
-                    Text {
                         text: root.footer.clock;
                         color: VayrenPalette.live-ink-dim;
                         font-size: 10px;
@@ -945,7 +925,7 @@ export component LiveScreen inherits Rectangle {
                 inspector-scroll := ScrollView {
                     width: 100%;
                     height: 100%;
-                    content-width: self.width;
+                    viewport-width: self.width;
 
                     VerticalLayout {
                         width: 100%;
