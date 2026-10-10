@@ -172,6 +172,12 @@ def build_snapshot(live: dict[str, Any]) -> dict[str, Any]:
     strategy = _strategy_status(live)
     strategy["mode"] = str(live.get("mode", "PAPER") or "PAPER")
     strategy["source"] = "live session lifecycle + start blockers"
+    live_strat = live.get("strategy") or {}
+    live_strat_id = str(
+        live_strat.get("id") or live_strat.get("name") or live.get("selected_strategy") or ""
+    )
+    strategy["id"] = live_strat_id
+    strategy["name"] = str(live_strat.get("name") or live_strat_id)
 
     sizing_status = str(risk_engine.get("sizing_status", "") or "").upper()
     risk_status = str(risk_engine.get("status", "") or "").upper()

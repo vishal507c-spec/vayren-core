@@ -5,7 +5,23 @@
 
 **Owns:** Current state, open items, verified facts, oddities.
 
-**Latest update (ci-green-ui-cleanup-fixes, 2026-10-10):** CI RED ROOT-CAUSE FIXES on `feat/ui-cleanup` (local, unpushed).
+**Latest update (live-strategy-dropdown-fix, 2026-10-10):** FIX LIVE UI STRATEGY DROPDOWN POPULATION & SELECTION (local only, no commit/push).
+1. Root Causes Resolved:
+   - `LiveTradingService.available_strategies()` in `src/app/services/live_trading_service.py` unified registry active strategies (`defn.name`: `"OBR C1C4"`, `"EMA Crossover"`, `"SMA Crossover"`, `"RSI Strategy"`) and file-backed library strategies (`list_strategies` + fallback `D:\VAYREN_STRATEGIES` -> `"OBR"`).
+   - `src/remote/server.py`: Added `"available_strategies"`, `"available_symbols"`, `"selected_symbols"`, `"available_timeframes"`, `"selected_timeframe"`, `"quotes"`, `"pnl"` to `EVENT_CHANNELS` tuple so remote clients receive strategy list during snapshot and state update streaming.
+   - `src/remote/snapshot.py`: `build_snapshot` preserved `strategy["id"]` and `strategy["name"]` from the live snapshot rather than dropping them.
+   - `crates/vayren-shell/src/remote_live.rs`: In `init_remote_state()` and `apply_remote_sections`, ensured `state.strategies` defaults to the 5 strategies if missing or empty, and extracts strategy id/name properly.
+   - `crates/vayren-domain/src/live.rs`: In `apply_snapshot`, guaranteed fallback to the 5 strategies when `self.strategies.is_empty()`, and supported case- and separator-tolerant matching.
+   - `crates/vayren-shell/src/shell.rs`: Updated `demo_live_state()` to populate all 5 strategies.
+   - `crates/vayren-shell/ui/live.slint`: `ComboBox` bound with `current-index: root.strategy-selected;` and updated fallback label to `"Select Strategy"`.
+2. Verified:
+   - Python unit & snapshot tests: `pytest src/app/tests/test_live_strategy_sync_and_watchlist.py src/remote/tests/test_snapshot.py -q` (16 passed).
+   - Rust domain tests: `cargo test -p vayren-domain --lib live` (55/55 passed).
+   - Compilation check: `cargo check -p vayren-shell --features packaged-remote` (0 errors).
+   - Release binary compiled: `target/release/vayren-shell.exe` built successfully with `cargo build --release -p vayren-shell --features packaged-remote` in release mode.
+   - Process launched detached: `vayren-shell.exe` running on desktop.
+
+**Previous update (ci-green-ui-cleanup-fixes, 2026-10-10):** CI RED ROOT-CAUSE FIXES on `feat/ui-cleanup` (local, unpushed).
 1. `src/app/headless.py` OBR-only file filter dropped every non-OBR library file, so `_lab_snapshot` lost strategy selection and 4 snapshot-universe tests failed. Filter removed (built-ins stay disabled, user files listed). Verified: `pytest src/app/tests` 152/152.
 2. `crates/vayren-domain/src/lab.rs` preset tests still used MAX index 4 after the list shrank to 1Y/3Y/5Y/MAX. Both spots fixed to 3. Verified: `cargo test -p vayren-domain --lib` 255 passed.
 3. `crates/vayren-shell/src/shell.rs` tests still expected SMA/second strategy while demo states are OBR-only. 7 spots fixed to OBR/index 0/row_count 1. Shell lib tests running.

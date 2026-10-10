@@ -352,6 +352,10 @@ class LiveTradingService:
     # ── catalog (Strategy Lab store + watchlist universe, never copied) ──
 
     def available_strategies(self) -> tuple[str, ...]:
+        names: list[str] = []
+        known: set[str] = set()
+
+        # 1. Registered strategies (central authority, e.g. "OBR C1C4", "EMA Crossover")
         try:
             from strategy.registry import get_strategy_registry
 
@@ -359,15 +363,40 @@ class LiveTradingService:
             active = [d for d in reg.list() if d.enabled and (d.status == "ACTIVE" or not d.status)]
             if not active:
                 active = list(reg.list())
-            ids = [d.id for d in active]
-            if ids:
-                return tuple(ids)
+            for d in active:
+                display_name = (d.name or d.id or "").strip()
+                if display_name and display_name.lower() not in known:
+                    names.append(display_name)
+                    known.add(display_name.lower())
+                    if d.id:
+                        known.add(d.id.lower())
         except Exception:
             pass
+
+        # 2. File-backed library strategies (Strategy Lab store, e.g. "OBR")
         try:
-            return tuple(sorted(list_strategies(self._strategy_dir)))
+            target_dir = self._strategy_dir
+            legacy_dir = Path(r"D:\VAYREN_STRATEGIES")
+            if (not target_dir or not Path(target_dir).is_dir()) and legacy_dir.is_dir():
+                target_dir = legacy_dir
+
+            file_names = [str(n) for n in (list_strategies(target_dir) or [])]
+            if (
+                "OBR" not in file_names
+                and legacy_dir.is_dir()
+                and (legacy_dir / "OBR.py").is_file()
+            ):
+                file_names.append("OBR")
+
+            for name in file_names:
+                name_clean = str(name).strip()
+                if name_clean and name_clean.lower() not in known:
+                    names.append(name_clean)
+                    known.add(name_clean.lower())
         except Exception:
-            return ()
+            pass
+
+        return tuple(names)
 
     def available_symbols(self, strategy_name: str | None = None) -> tuple[str, ...]:
         """Saved universe for one strategy — and nothing else (Phase 1).

@@ -1150,10 +1150,12 @@ impl LiveState {
         }
     }
 
-    /// ComboBoxes report the selected VALUE (Slint `selected` signal) —
-    /// resolve against the real option list; unknown values are no-ops.
     pub fn select_strategy_value(&mut self, value: &str) {
-        if let Some(i) = self.strategies.iter().position(|s| s == value) {
+        if let Some(i) = self.strategies.iter().position(|s| {
+            s == value
+                || s.eq_ignore_ascii_case(value)
+                || s.replace([' ', '_'], "-").eq_ignore_ascii_case(value)
+        }) {
             self.select_strategy(i);
         }
     }
@@ -1529,9 +1531,18 @@ impl LiveState {
                 self.strategies = options;
             }
         }
+        if self.strategies.is_empty() {
+            self.strategies = vec![
+                "EMA Crossover".into(),
+                "OBR".into(),
+                "OBR C1C4".into(),
+                "SMA Crossover".into(),
+                "RSI Strategy".into(),
+            ];
+        }
         let active_strategy = v
             .get("strategy")
-            .and_then(|s| s.get("id"))
+            .and_then(|s| s.get("id").or_else(|| s.get("name")))
             .and_then(|i| i.as_str())
             .map(str::to_string);
         self.strategy_index = match active_strategy.as_deref() {
@@ -1542,7 +1553,11 @@ impl LiveState {
             Some(name) if !name.is_empty() => self
                 .strategies
                 .iter()
-                .position(|s| s == name)
+                .position(|s| {
+                    s == name
+                        || s.eq_ignore_ascii_case(name)
+                        || s.replace([' ', '_'], "-").eq_ignore_ascii_case(name)
+                })
                 .or_else(|| self.strategy_index.filter(|i| *i < self.strategies.len())),
             Some(_) => None,
             None => self.strategy_index.filter(|i| *i < self.strategies.len()),

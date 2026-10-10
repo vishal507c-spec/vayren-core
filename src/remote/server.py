@@ -73,6 +73,13 @@ EVENT_CHANNELS = (
     "system",
     "blockers",
     "events",
+    "available_strategies",
+    "available_symbols",
+    "selected_symbols",
+    "available_timeframes",
+    "selected_timeframe",
+    "quotes",
+    "pnl",
 )
 
 _CLOSE_POLICY = 1008

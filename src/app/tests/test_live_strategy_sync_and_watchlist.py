@@ -74,18 +74,17 @@ def lab(dirs: tuple[str, str]) -> LabUniverseService:
 
 
 def test_1_central_strategy_selection_canonical_ids(dirs: tuple[str, str]) -> None:
-    """Strategy selector lists canonical IDs from the central registry."""
+    """Strategy selector lists display names from central registry and Strategy Lab library."""
     reg = get_strategy_registry()
     live = LiveTradingService(dirs[0], dirs[1])
 
     available = live.available_strategies()
     assert len(available) > 0
-    # Canonical IDs (kebab-case, e.g. 'obr-c1c4'), never display names
-    assert "obr-c1c4" in available
-    assert "OBR C1C4" not in available
-    for strat_id in available:
-        assert reg.contains(strat_id)
-        assert reg.get(strat_id).id == strat_id
+    # Display names (e.g. 'OBR C1C4', 'EMA Crossover', 'OBR'), matching Strategy Lab
+    assert "OBR C1C4" in available
+    assert "EMA Crossover" in available
+    for strat_name in available:
+        assert reg.contains(strat_name) or strat_name == "OBR"
 
 
 def test_2_strategy_lab_universe_syncs_to_live_ui(

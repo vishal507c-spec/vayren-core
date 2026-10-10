@@ -135,10 +135,20 @@ pub fn apply_remote_sections(state: &mut LiveState, sections: &serde_json::Value
             "session_status".to_string(),
             serde_json::Value::String(session.to_string()),
         );
+        let strat_id = text_at(sections, "strategy", "id");
+        let strat_name = if strat_id.is_empty() {
+            text_at(sections, "strategy", "name")
+        } else {
+            strat_id
+        };
         translated.insert(
             "strategy".to_string(),
-            serde_json::json!({"id": "", "status": strategy_status,
-                "mode": text_at(sections, "strategy", "mode")}),
+            serde_json::json!({
+                "id": strat_name,
+                "name": strat_name,
+                "status": strategy_status,
+                "mode": text_at(sections, "strategy", "mode")
+            }),
         );
     }
     let reason = text_at(sections, "strategy", "reason");
@@ -293,6 +303,15 @@ pub fn apply_remote_sections(state: &mut LiveState, sections: &serde_json::Value
     if !state.has_valid_capital() {
         state.risk_status = RiskStatus::NotReady;
     }
+    if state.strategies.is_empty() {
+        state.strategies = vec![
+            "EMA Crossover".to_string(),
+            "OBR".to_string(),
+            "OBR C1C4".to_string(),
+            "SMA Crossover".to_string(),
+            "RSI Strategy".to_string(),
+        ];
+    }
 
     // Order-stream fact rides as a readiness gate (extra gates never affect
     // the five named venue gates; START stays disabled via bridge_wired).
@@ -371,6 +390,13 @@ pub fn init_remote_state() -> LiveState {
     let mut state = LiveState::default();
     state.host_mode = true;
     state.bridge_wired = false;
+    state.strategies = vec![
+        "EMA Crossover".to_string(),
+        "OBR".to_string(),
+        "OBR C1C4".to_string(),
+        "SMA Crossover".to_string(),
+        "RSI Strategy".to_string(),
+    ];
     // Unknown venue funds ⇒ sizing NOT READY, never the default basis.
     state.capital.source = "broker".to_string();
     state.capital.broker_capital = None;
