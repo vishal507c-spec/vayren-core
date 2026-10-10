@@ -119,4 +119,52 @@ fn live_watchlist_shows_only_the_selected_strategys_saved_universe() {
         painted_with_row > 0,
         "rendered frame must contain painted content"
     );
+
+    // Strategy dropdown properties exposed on AppWindow:
+    let strat_names = ui.get_live_strategy_names();
+    assert_eq!(strat_names.row_count(), 1);
+    assert_eq!(strat_names.row_data(0).unwrap().to_string(), "Empty");
+    assert_eq!(ui.get_live_strategy_selected(), 0);
+
+    // Verify switching strategy via live_state / UI selection
+    let multi_strat_snapshot = serde_json::json!({
+        "strategy": {"id": "obr-c1c4"},
+        "available_strategies": ["obr-c1c4", "sma-crossover"],
+        "available_symbols": ["NSE:SBIN", "NSE:TCS"],
+        "selected_symbols": ["NSE:SBIN", "NSE:TCS"],
+        "quotes": [],
+    });
+    live_state
+        .borrow_mut()
+        .apply_snapshot(&multi_strat_snapshot);
+    shell::apply_live(&ui, &live_state.borrow());
+    assert_eq!(ui.get_live_strategy_selected(), 0);
+    assert_eq!(ui.get_live_strategy_names().row_count(), 2);
+    assert_eq!(
+        ui.get_live_strategy_names()
+            .row_data(0)
+            .unwrap()
+            .to_string(),
+        "obr-c1c4"
+    );
+    assert_eq!(
+        ui.get_live_strategy_names()
+            .row_data(1)
+            .unwrap()
+            .to_string(),
+        "sma-crossover"
+    );
+    assert_eq!(
+        watchlist_names(&ui),
+        vec!["NSE:SBIN".to_string(), "NSE:TCS".to_string()]
+    );
+
+    // Switching to sma-crossover immediately isolates symbols
+    live_state
+        .borrow_mut()
+        .select_strategy_value("sma-crossover");
+    shell::apply_live(&ui, &live_state.borrow());
+    assert_eq!(ui.get_live_strategy_selected(), 1);
+    // Symbols cleared immediately to avoid leaking previous strategy symbols before new snapshot
+    assert!(watchlist_names(&ui).is_empty());
 }

@@ -11,7 +11,7 @@
 
 import { VayrenPalette, VayrenDesign } from "palette.slint";
 import { VBadge, VButton, VBanner, VEmptyState, VCell, VStatusDot } from "components.slint";
-import { LineEdit, ScrollView } from "std-widgets.slint";
+import { LineEdit, ScrollView, ComboBox } from "std-widgets.slint";
 
 // ── projected shapes (mirror domain live.rs) ──────────────────────────────────
 
@@ -329,25 +329,27 @@ export global LiveTiers {
     public pure function bar-card-width() -> length { return 150px; }
     public pure function bar-mode-width() -> length { return 168px; }
     public pure function bar-transport-width() -> length { return 264px; }
+    public pure function bar-strategy-width() -> length { return 170px; }
     // 12px padding each side + the one 8px gap before the first card.
     public pure function bar-chrome() -> length { return 32px; }
     public pure function bar-gap() -> length { return 8px; }
 
     // BROKER + RISK ENGINE only: the two facts that decide whether the
     // workstation is safe to touch at all.
+    // The strategy selector is always present, so its width is in every tier.
     public pure function bar-core(w: length) -> bool {
-        return w >= bar-chrome() + bar-mode-width() + bar-transport-width()
-            + 2 * bar-card-width() + 5 * bar-gap();
+        return w >= bar-chrome() + bar-strategy-width() + bar-mode-width() + bar-transport-width()
+            + 2 * bar-card-width() + 6 * bar-gap();
     }
     // + MARKET DATA / ORDER WS / STRATEGY: the session's own inputs.
     public pure function bar-secondary(w: length) -> bool {
-        return w >= bar-chrome() + bar-mode-width() + bar-transport-width()
-            + 5 * bar-card-width() + 9 * bar-gap();
+        return w >= bar-chrome() + bar-strategy-width() + bar-mode-width() + bar-transport-width()
+            + 5 * bar-card-width() + 10 * bar-gap();
     }
     // + RECONCILIATION / EXECUTOR: only while all seven stay readable.
     public pure function bar-extended(w: length) -> bool {
-        return w >= bar-chrome() + bar-mode-width() + bar-transport-width()
-            + 7 * bar-card-width() + 11 * bar-gap();
+        return w >= bar-chrome() + bar-strategy-width() + bar-mode-width() + bar-transport-width()
+            + 7 * bar-card-width() + 12 * bar-gap();
     }
 
     // The inspector docks only when the workspace floor STILL fits beside it.
@@ -894,6 +896,41 @@ export component LiveScreen inherits Rectangle {
                 }
 
                 Rectangle { horizontal-stretch: 1; background: transparent; }
+
+                // Single strategy selector for the Live screen (budgeted above).
+                Rectangle {
+                    height: 34px;
+                    width: LiveTiers.bar-strategy-width();
+                    border-radius: 6px;
+                    background: VayrenPalette.live-panel;
+                    border-width: 1px;
+                    border-color: root.strategy-selected >= 0 ? VayrenPalette.live-teal : VayrenPalette.live-line-soft;
+
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 6px;
+                        spacing: 6px;
+                        alignment: center;
+
+                        Text {
+                            text: "STRATEGY";
+                            color: root.strategy-selected >= 0 ? VayrenPalette.live-teal : VayrenPalette.live-ink-dim;
+                            font-size: 9px;
+                            font-weight: 800;
+                            vertical-alignment: center;
+                        }
+
+                        ComboBox {
+                            horizontal-stretch: 1;
+                            min-width: 70px;
+                            height: 26px;
+                            enabled: !root.setup.can-stop && root.strategy-names.length > 0;
+                            model: root.strategy-names;
+                            current-value: root.selected-strategy;
+                            selected(v) => { root.strategy-picked(v); }
+                        }
+                    }
+                }
 
                 // Segmented Mode Selector: PAPER | SANDBOX | LIVE
                 Rectangle {

@@ -1140,11 +1140,9 @@ impl LiveState {
             self.strategy_index = Some(index);
             // Immediate visible switch: the newly selected strategy's rows
             // arrive with the next backend snapshot, so the previous
-            // strategy's checks are cleared now rather than displayed as the
+            // strategy's symbols and checks are cleared now rather than displayed as the
             // new strategy's universe for a frame.
-            for pick in self.symbols.iter_mut() {
-                pick.checked = false;
-            }
+            self.symbols.clear();
             self.watchlist_rows.clear();
             self.selected_symbol.clear();
             self.action_note = None;
