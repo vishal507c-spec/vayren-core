@@ -99,7 +99,9 @@ class MockTransport:
 @pytest.fixture
 def connected_adapter() -> tuple[FyersSessionAdapter, MockTransport]:
     transport = MockTransport()
-    adapter = FyersSessionAdapter("APP_ID_123", "TOKEN_ABC_XYZ", transport=transport)
+    adapter = FyersSessionAdapter(
+        "APP_ID_123", "TOKEN_ABC_XYZ", transport=transport, enable_order_ws=False
+    )
     adapter.connect()
     transport.calls.clear()
     return adapter, transport

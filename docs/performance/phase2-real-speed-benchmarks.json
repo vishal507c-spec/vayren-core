@@ -1,0 +1,100 @@
+{
+  "audit_version": "phase2_final",
+  "timestamp": "2026-10-10T09:25:00+05:30",
+  "system_environment": {
+    "os": "Windows 11 Home (10.0.26200)",
+    "cpu": "12 logical cores",
+    "ram_gb": 16,
+    "rustc": "1.98.1",
+    "python": "3.11.9"
+  },
+  "benchmarks": {
+    "python_broker_live_trading_tests": {
+      "baseline_seconds": 47.35,
+      "optimized_seconds": 3.08,
+      "speedup_factor": 15.37,
+      "percentage_improvement": 93.5,
+      "cause": "Disabled unmocked WebSocket auto-connect during REST mock tests; eliminated 22x 2.0s socket connect timeouts."
+    },
+    "python_context_engine_check": {
+      "baseline_seconds": 12.81,
+      "optimized_seconds": 2.13,
+      "speedup_factor": 6.01,
+      "percentage_improvement": 83.4,
+      "cause": "Pruned dead legacy chapter paths; memoized git availability and caller lookups."
+    },
+    "python_validate_authority": {
+      "baseline_seconds": 9.20,
+      "optimized_seconds": 2.25,
+      "speedup_factor": 4.09,
+      "percentage_improvement": 75.5,
+      "cause": "Memoized repeated AST parsing using lru_cache across authority checks."
+    },
+    "python_validate_imports": {
+      "baseline_seconds": 5.04,
+      "optimized_seconds": 1.27,
+      "speedup_factor": 3.97,
+      "percentage_improvement": 74.8,
+      "cause": "Pruned .git/target directory traversal and unified 3 separate AST walks into a single pass."
+    },
+    "cargo_check_workspace_noop": {
+      "baseline_seconds": 1.21,
+      "optimized_seconds": 0.83,
+      "speedup_factor": 1.46,
+      "percentage_improvement": 31.4,
+      "cause": "Clean compilation artifact tree and decoupled standalone harness tracking."
+    },
+    "cargo_check_shell_noop": {
+      "baseline_seconds": 1.15,
+      "optimized_seconds": 0.88,
+      "speedup_factor": 1.31,
+      "percentage_improvement": 23.5,
+      "cause": "FNV-1a fingerprint cache validation."
+    },
+    "cargo_test_core_noop": {
+      "baseline_seconds": 0.95,
+      "optimized_seconds": 0.70,
+      "speedup_factor": 1.36,
+      "percentage_improvement": 26.3,
+      "cause": "Warm artifact reuse on vayren-core."
+    },
+    "make_check_fast_warm": {
+      "baseline_seconds": 18.50,
+      "optimized_seconds": 4.92,
+      "speedup_factor": 3.76,
+      "percentage_improvement": 73.4,
+      "cause": "Optimized python validation passes running in <1.3s each alongside instant cargo check."
+    }
+  },
+  "three_task_experiment": {
+    "task_a_rust_logic_vayren_core": {
+      "target": "crates/vayren-core/src/lib.rs",
+      "incremental_check_seconds": 0.91,
+      "incremental_test_seconds": 3.50,
+      "agent_iteration_latency_seconds": 4.41,
+      "status": "PASS",
+      "notes": "Fastest tier; core crate changes avoid all Slint codegen overhead."
+    },
+    "task_b_slint_ui_vayren_shell": {
+      "target": "crates/vayren-shell/ui/market.slint",
+      "incremental_codegen_and_check_seconds": 50.98,
+      "status": "PASS",
+      "notes": "Triggers full 31.6MB app.rs regeneration. Decoupling test harnesses isolated live_harness and research_harness."
+    },
+    "task_c_cross_crate_domain_propagation": {
+      "target": "crates/vayren-domain/src/lib.rs",
+      "crate_test_seconds": 4.54,
+      "downstream_shell_check_seconds": 45.48,
+      "status": "PASS",
+      "notes": "Domain changes recheck shell rustc layer in 45s without re-running Slint codegen."
+    }
+  },
+  "verifications": {
+    "make_check_fast": "PASS",
+    "python_validators": "PASS",
+    "broker_unit_tests": "197/197 PASS (32.25s)",
+    "shell_lib_tests": "49/49 PASS, 17 ignored bench (0.10s)",
+    "shell_render_matrix_tests": "1/1 PASS (2.81s)",
+    "core_lib_tests": "403/403 PASS (0.18s)"
+  }
+}

@@ -118,6 +118,24 @@ class CanonicalInstrumentRegistry:
             )
         )
 
+    def load_symbols(self, symbols: tuple[str, ...]) -> int:
+        """Register verified NSE equity symbols as ACTIVE; returns records added.
+
+        Existing identities are kept as they are, so this never demotes or
+        duplicates a record. Symbols that fail the NSE display grammar are
+        skipped, not coerced.
+        """
+        added = 0
+        for symbol in symbols:
+            reference = f"NSE:{str(symbol).strip().upper()}"
+            if parse_reference(reference) is None:
+                continue
+            if self.get(canonical_id(EXCHANGE_NSE, SEGMENT_EQUITY, reference.split(":")[1])):
+                continue
+            self.register_display(reference)
+            added += 1
+        return added
+
     def get(self, instrument_id: str) -> CanonicalInstrument | None:
         """The record for a stable id, or None (never a guess)."""
         with self._lock:

@@ -134,6 +134,13 @@ export struct LabHeader {
     sym-button-line: string,
     sym-count-line: string,
     sym-selected-line: string,
+    // Compact stock row under Reset/Save (saved universe of the selected strategy).
+    universe-chips: [string],
+    saved-universe-chips: [string],
+    universe-count-line: string,
+    // "clean" | "pending" | "saved" | "error"
+    universe-state: string,
+    universe-error: string,
     // ── Reference redesign additions ──
     run-id: string,
     run-ts: string,
@@ -1085,6 +1092,7 @@ export component StrategyLabScreen inherits Rectangle {
     callback sym-all-visible();
     callback sym-clear();
     callback sym-apply();
+    callback sym-remove(string);
     callback rank-search-changed(string);
     callback rankby-picked(string);
     callback rank-order-toggled();
@@ -1933,18 +1941,17 @@ export component StrategyLabScreen inherits Rectangle {
                                         // looks exactly as before when nothing is wrong.
                                         ScrollView {
                                             horizontal-stretch: 1;
-                                            height: 22px;
+                                            height: 36px;
                                             horizontal-scrollbar-policy: always-off;
                                             vertical-scrollbar-policy: always-off;
                                             HorizontalLayout {
                                             spacing: 16px; alignment: start;
                                             for chk in root.lab.cfg-checks: HorizontalLayout {
                                                 spacing: 6px; alignment: center;
-                                                Text {
-                                                    text: chk.kind == 0 ? "✓" : chk.kind == 1 ? "●" : "✕";
-                                                    font-size: 10px;
-                                                    color: chk.kind == 0 ? LabPalette.green : chk.kind == 1 ? LabPalette.lab-amber : LabPalette.lab-red;
-                                                    vertical-alignment: center;
+                                                Rectangle {
+                                                    width: 6px; height: 6px;
+                                                    border-radius: 3px;
+                                                    background: chk.kind == 0 ? LabPalette.green : chk.kind == 1 ? LabPalette.lab-amber : LabPalette.lab-red;
                                                 }
                                                 Text {
                                                     text: chk.label;
@@ -2016,7 +2023,7 @@ Rectangle {
                                             // spacing around it now does the
                                             // separating.
 Text {
-                                                text: "CTRL + ⏎";
+                                                text: "CTRL + ENTER";
                                                 font-family: "monospace";
                                                 font-size: 10px;
                                                 color: LabPalette.dim;
@@ -3164,6 +3171,111 @@ overflow: elide;
                                                 horizontal-alignment: center;
                                                 vertical-alignment: center;
                                             }
+                                        }
+                                    }
+                                }
+                                // NSE stock row: this strategy's saved universe. Saving
+                                // it never touches the code buffer, and vice versa.
+                                Rectangle {
+                                    height: 40px;
+                                    background: LabPalette.inset;
+                                    border-width: 0px;
+                                    HorizontalLayout {
+                                        padding-left: 16px;
+                                        padding-right: 16px;
+                                        spacing: 10px;
+                                        alignment: stretch;
+                                        Text {
+                                            text: "LIVE TRADE STOCKS";
+                                            font-family: "monospace";
+                                            font-size: 10px;
+                                            font-weight: 700;
+                                            color: LabPalette.soft;
+                                            vertical-alignment: center;
+                                            horizontal-stretch: 0;
+                                        }
+                                        Text {
+                                            horizontal-stretch: 0;
+                                            text: "NSE";
+                                            font-family: "monospace";
+                                            font-size: 9.5px;
+                                            color: LabPalette.lab-muted;
+                                            vertical-alignment: center;
+                                        }
+                                        ScrollView {
+                                            horizontal-stretch: 1;
+                                            min-width: 160px;
+                                            height: 26px;
+                                            horizontal-scrollbar-policy: as-needed;
+                                            vertical-scrollbar-policy: always-off;
+                                            HorizontalLayout {
+                                                spacing: 6px;
+                                                alignment: start;
+                                                for symbol in root.lab.saved-universe-chips: Rectangle {
+                                                    height: 22px;
+                                                    width: chip-text.preferred-width + 26px;
+                                                    border-radius: 11px;
+                                                    background: LabPalette.white-20;
+                                                    chip-text := Text {
+                                                        x: 9px;
+                                                        text: symbol;
+                                                        font-family: "monospace";
+                                                        font-size: 10px;
+                                                        color: LabPalette.soft;
+                                                        vertical-alignment: center;
+                                                    }
+                                                    Text {
+                                                        x: parent.width - 14px;
+                                                        text: "×";
+                                                        font-size: 11px;
+                                                        color: LabPalette.lab-muted;
+                                                        vertical-alignment: center;
+                                                    }
+                                                    TouchArea {
+                                                        mouse-cursor: pointer;
+                                                        clicked => { root.sym-remove(symbol); }
+                                                    }
+                                                }
+                                                if root.lab.saved-universe-chips.length == 0: Text {
+                                                    text: "No stocks saved for this strategy";
+                                                    font-size: 10.5px;
+                                                    color: LabPalette.dim;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+                                        }
+                                        Text {
+                                            text: root.lab.universe-count-line;
+                                            font-family: "monospace";
+                                            font-size: 10px;
+                                            color: LabPalette.lab-muted;
+                                            vertical-alignment: center;
+                                            horizontal-stretch: 0;
+                                            overflow: elide;
+                                        }
+                                        Text {
+                                            horizontal-stretch: 0;
+                                            max-width: 180px;
+                                            text: root.lab.universe-state == "error" ? root.lab.universe-error
+                                                : root.lab.universe-state == "pending" ? "Saving stocks…"
+                                                : root.lab.universe-state == "saved" ? "Stocks saved"
+                                                : "";
+                                            font-size: 10px;
+                                            color: root.lab.universe-state == "error" ? LabPalette.lab-red : LabPalette.lab-muted;
+                                            vertical-alignment: center;
+                                            overflow: elide;
+                                        }
+                                        Rectangle {
+                                            width: 64px; height: 26px;
+                                            border-radius: 6px;
+                                            background: LabPalette.inset;
+                                            border-width: 1px;
+                                            border-color: LabPalette.line;
+                                            add-touch := TouchArea {
+                                                mouse-cursor: pointer;
+                                                clicked => { root.sym-open(); }
+                                            }
+                                            Text { text: "+ Add"; font-size: 10.5px; color: LabPalette.soft; horizontal-alignment: center; vertical-alignment: center; }
                                         }
                                     }
                                 }

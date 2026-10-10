@@ -1145,6 +1145,8 @@ impl LiveState {
             for pick in self.symbols.iter_mut() {
                 pick.checked = false;
             }
+            self.watchlist_rows.clear();
+            self.selected_symbol.clear();
             self.action_note = None;
             self.push_setup_action();
         }
@@ -1926,9 +1928,7 @@ impl LiveState {
                     last_update: str_of(q, "last_update"),
                 });
             }
-            if !wl_rows.is_empty() {
-                self.watchlist_rows = wl_rows;
-            }
+            self.watchlist_rows = wl_rows;
         }
         if let Some(feed) = v.get("feed").and_then(|f| f.as_str()) {
             self.feed_kind = feed.to_string();
@@ -5088,6 +5088,23 @@ mod tests {
         assert_eq!(action["action"], "setup");
         assert_eq!(action["strategy_name"], "Strategy B");
         assert_eq!(action["symbols"], serde_json::json!([]));
+        assert!(st.watchlist_rows.is_empty());
+        assert!(st.selected_symbol.is_empty());
+    }
+
+    #[test]
+    fn empty_quotes_in_snapshot_clears_watchlist_rows() {
+        let mut st = configured(LiveState::default());
+        st.watchlist_rows = vec![watchlist_row_fixture("NSE:RELIANCE")];
+        assert!(!st.watchlist_rows.is_empty());
+        st.apply_snapshot(&serde_json::json!({
+            "strategy": {"id": "EmptyStrat"},
+            "available_strategies": ["OBR", "EmptyStrat"],
+            "available_symbols": [],
+            "selected_symbols": [],
+            "quotes": [],
+        }));
+        assert!(st.watchlist_rows.is_empty());
     }
 
     #[test]

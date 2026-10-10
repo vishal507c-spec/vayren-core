@@ -114,6 +114,67 @@ fn parse_limit(raw: Option<String>) -> Result<Option<i64>, String> {
     Ok(Some(parsed))
 }
 
+#[cfg(test)]
+mod universe_action_tests {
+    use super::parse_universe_action;
+
+    #[test]
+    fn parses_strategy_id_and_symbols() {
+        let parsed =
+            parse_universe_action(r#"universe:{"strategy_id":"OBR","symbols":["RELIANCE","TCS"]}"#);
+        assert_eq!(
+            parsed,
+            Some((
+                "OBR".to_string(),
+                vec!["RELIANCE".to_string(), "TCS".to_string()]
+            ))
+        );
+    }
+
+    #[test]
+    fn empty_universe_is_a_valid_clear() {
+        let parsed = parse_universe_action(r#"universe:{"strategy_id":"OBR","symbols":[]}"#);
+        assert_eq!(parsed, Some(("OBR".to_string(), vec![])));
+    }
+
+    #[test]
+    fn refuses_action_without_strategy() {
+        assert_eq!(
+            parse_universe_action(r#"universe:{"symbols":["TCS"]}"#),
+            None
+        );
+        assert_eq!(
+            parse_universe_action(r#"universe:{"strategy_id":"  ","symbols":[]}"#),
+            None
+        );
+    }
+
+    #[test]
+    fn refuses_non_universe_and_malformed_input() {
+        assert_eq!(parse_universe_action("symbols:TCS,INFY"), None);
+        assert_eq!(parse_universe_action("universe:not-json"), None);
+    }
+}
+
+/// Parse one queued `universe:{"strategy_id":..,"symbols":[..]}` action.
+/// Returns None for anything without a non-empty strategy ID, so a universe
+/// can never be saved to an unnamed or wrong strategy.
+fn parse_universe_action(raw: &str) -> Option<(String, Vec<String>)> {
+    let body = raw.strip_prefix("universe:")?;
+    let value: serde_json::Value = serde_json::from_str(body).ok()?;
+    let strategy = value.get("strategy_id")?.as_str()?.trim().to_string();
+    if strategy.is_empty() {
+        return None;
+    }
+    let symbols = value
+        .get("symbols")?
+        .as_array()?
+        .iter()
+        .filter_map(|v| v.as_str().map(str::to_string))
+        .collect();
+    Some((strategy, symbols))
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Explicit flags win; otherwise env vars; otherwise per-user defaults
     // (same precedence family as the Python CLI).
@@ -308,6 +369,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         LabSelect(u64, Option<serde_json::Value>),
         LabRun(u64, Option<serde_json::Value>),
         LabCoverage(u64, Option<serde_json::Value>),
+        /// Result of one stock-universe save: `(strategy_id, saved, error)`.
+        /// The domain drops a reply whose strategy is no longer selected.
+        LabUniverse(String, bool, String),
         /// A measured progress event, applied on the UI thread as it arrives.
         /// The run sequence rides along so a progress event from a SUPERSEDED
         /// run can be dropped: without it, a run that was cancelled and
@@ -760,6 +824,46 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         shell::apply_live(&ui, &live_state.borrow());
                     }
                 } else {
+                    // Lab stock-universe saves: drained here, sent on a worker,
+                    // answered through FetchResult::LabUniverse. Code saves never
+                    // come through this queue (they use fetch_lab_save).
+                    let universe_actions = lab_state.borrow_mut().drain_universe_actions();
+                    for raw in universe_actions {
+                        match parse_universe_action(&raw) {
+                            Some((strategy, symbols)) => {
+                                let backend = Arc::clone(&backend);
+                                let tx = tx.clone();
+                                std::thread::spawn(move || {
+                                    let command = BackendCommand::SaveLabUniverse {
+                                        strategy: strategy.clone(),
+                                        symbols,
+                                    };
+                                    let (saved, error) =
+                                        match PythonBackend::lock_send(&backend, command) {
+                                            Ok(BackendResponse::LabUniverse { data }) => {
+                                                let ok = data
+                                                    .get("state")
+                                                    .and_then(|v| v.as_str())
+                                                    == Some("saved");
+                                                let err = data
+                                                    .get("error")
+                                                    .and_then(|v| v.as_str())
+                                                    .unwrap_or("")
+                                                    .to_string();
+                                                (ok, err)
+                                            }
+                                            Ok(other) => (
+                                                false,
+                                                format!("unexpected universe response ({other:?})"),
+                                            ),
+                                            Err(err) => (false, format!("universe save failed: {err}")),
+                                        };
+                                    let _ = tx.send(FetchResult::LabUniverse(strategy, saved, error));
+                                });
+                            }
+                            None => eprintln!("lab: ignoring malformed universe action: {raw}"),
+                        }
+                    }
                     // Ordered dispatch. The drain used to spawn ONE THREAD PER
                     // action, each contending for the same backend mutex — so
                     // `service.configure()` could apply intents in an order
@@ -846,6 +950,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let mut latest_lab_select: Option<(u64, Option<serde_json::Value>)> = None;
                 let mut latest_lab_run: Option<(u64, Option<serde_json::Value>)> = None;
                 let mut latest_lab_coverage: Option<(u64, Option<serde_json::Value>)> = None;
+                // Every universe reply applies (none may be coalesced away: each
+                // one is a distinct save outcome for its own strategy).
+                let mut lab_universe_results: Vec<(String, bool, String)> = Vec::new();
                 let mut latest_system: Option<Option<serde_json::Value>> = None;
                 // Latest-wins coalesce: one tick applies at most ONE progress
                 // event (the newest in this batch) instead of repainting per
@@ -871,6 +978,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             {
                                 latest_lab_select = Some((id, data));
                             }
+                        }
+                        FetchResult::LabUniverse(strategy, saved, error) => {
+                            lab_universe_results.push((strategy, saved, error));
                         }
                         FetchResult::LabRun(id, data) => {
                             if id > last_run
@@ -969,6 +1079,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if let Some((_, event)) = latest_progress {
                     lab_state.borrow_mut().apply_progress(&event);
                     shell::apply_lab_progress(&ui, &lab_state.borrow());
+                }
+                if !lab_universe_results.is_empty() {
+                    for (strategy, saved, error) in lab_universe_results {
+                        lab_state
+                            .borrow_mut()
+                            .apply_universe_result(&strategy, saved, &error);
+                    }
+                    shell::apply_lab(&ui, &lab_state.borrow());
                 }
                 if let Some((id, data)) = latest_lab_coverage {
                     last_coverage = id;

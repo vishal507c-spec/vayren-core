@@ -199,6 +199,24 @@ fn apply_state(ui: &LabHostWindow, state: &LabState) {
         sym_button_line: view.sym_button_line.into(),
         sym_count_line: view.sym_count_line.into(),
         sym_selected_line: view.sym_selected_line.into(),
+        universe_chips: Rc::new(slint::VecModel::from(
+            view.universe_chips
+                .iter()
+                .cloned()
+                .map(slint::SharedString::from)
+                .collect::<Vec<_>>(),
+        ))
+        .into(),
+        saved_universe_chips: Rc::new(slint::VecModel::from(
+            view.saved_universe_chips
+                .into_iter()
+                .map(slint::SharedString::from)
+                .collect::<Vec<_>>(),
+        ))
+        .into(),
+        universe_count_line: view.universe_count_line.into(),
+        universe_state: view.universe_state.into(),
+        universe_error: view.universe_error.into(),
         run_id: view.run_id.into(),
         run_ts: view.run_ts.into(),
         cfg_hash: view.cfg_hash.into(),
@@ -594,15 +612,6 @@ fn apply_state(ui: &LabHostWindow, state: &LabState) {
         .into(),
     );
     ui.set_sym_visible_on(Rc::new(slint::VecModel::from(view.sym_visible_on)).into());
-    ui.set_universe_chips(
-        Rc::new(slint::VecModel::from(
-            view.universe_chips
-                .into_iter()
-                .map(slint::SharedString::from)
-                .collect::<Vec<_>>(),
-        ))
-        .into(),
-    );
     ui.set_filter_active(lab::filter_kind(state.filter));
 }
 
@@ -710,7 +719,7 @@ fn wire_view(ui: &LabHostWindow, state: Rc<RefCell<LabState>>) {
     ui.on_rank_picked(move |symbol| {
         {
             let mut guard = strong.borrow_mut();
-            guard.interaction_simple(&format!("ranksel:{}", symbol.as_str()));
+            guard.interaction_rank_picked(symbol.as_str());
         }
         if let Some(ui) = weak.upgrade() {
             apply_state(&ui, &strong.borrow());
@@ -739,6 +748,38 @@ fn wire_view(ui: &LabHostWindow, state: Rc<RefCell<LabState>>) {
     on_text!(on_rankby_picked, LabState::interaction_rankby);
     on_text!(on_trade_filter_changed, LabState::interaction_tradefilter);
     on_text!(on_sym_search_changed, LabState::interaction_symsearch);
+    on_text!(on_trade_search_changed, LabState::interaction_tradefilter);
+    // Numeric callbacks (scroll / viewport px): same commit + re-project contract.
+    macro_rules! on_num {
+        ($on:ident, $act:expr) => {{
+            let strong = state.clone();
+            let weak = ui.as_weak();
+            ui.$on(move |value| {
+                {
+                    let mut guard = strong.borrow_mut();
+                    $act(&mut guard, value);
+                }
+                if let Some(ui) = weak.upgrade() {
+                    apply_state(&ui, &strong.borrow());
+                }
+            });
+        }};
+    }
+    on_num!(on_rank_scrolled, LabState::interaction_rank_scroll);
+    on_num!(on_rank_scroll_to, LabState::interaction_rank_scroll_to);
+    on_num!(
+        on_rank_viewport_reported,
+        LabState::interaction_rank_viewport
+    );
+    on_num!(on_trade_scrolled, LabState::interaction_trade_scroll);
+    on_num!(
+        on_trade_viewport_reported,
+        LabState::interaction_trade_viewport
+    );
+    ui.on_trade_sort_picked(bind(ui, &state, |s, i| s.interaction_tradesort(i)));
+    ui.on_trade_side_picked(bind(ui, &state, |s, i| s.interaction_trade_side(i)));
+    ui.on_trade_result_picked(bind(ui, &state, |s, i| s.interaction_trade_result(i)));
+    ui.on_trade_detail_close(bind0(ui, &state, |s| s.interaction_trade_detail_close()));
     {
         let strong = state.clone();
         let weak = ui.as_weak();

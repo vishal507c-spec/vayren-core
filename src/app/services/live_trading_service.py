@@ -356,9 +356,12 @@ class LiveTradingService:
             from strategy.registry import get_strategy_registry
 
             reg = get_strategy_registry()
-            names = [d.name for d in reg.list()]
-            if names:
-                return tuple(names)
+            active = [d for d in reg.list() if d.enabled and (d.status == "ACTIVE" or not d.status)]
+            if not active:
+                active = list(reg.list())
+            ids = [d.id for d in active]
+            if ids:
+                return tuple(ids)
         except Exception:
             pass
         try:
@@ -417,13 +420,13 @@ class LiveTradingService:
         strat_def = None
         strategy_changed = False
         if strategy_name is not None:
-            cleaned = str(strategy_name)
-            strategy_changed = cleaned != self._config.strategy_name
-            self._config.strategy_name = cleaned
-            if reg.contains(strategy_name):
-                strat_def = reg.get(strategy_name)
+            cleaned = str(strategy_name).strip()
+            if cleaned and reg.contains(cleaned):
+                strat_def = reg.get(cleaned)
                 if strat_def.timeframe and not timeframe:
                     self._config.timeframe = strat_def.timeframe
+            strategy_changed = cleaned != self._config.strategy_name
+            self._config.strategy_name = cleaned
         elif self._config.strategy_name and reg.contains(self._config.strategy_name):
             strat_def = reg.get(self._config.strategy_name)
 
@@ -1936,6 +1939,28 @@ class LiveTradingService:
                     entry_price, stop_price
                 )
 
+            sym_pnl = None
+            sym_order = None
+            if session is not None:
+                try:
+                    pos = session.ledger.position(symbol)
+                    if not pos.flat:
+                        px = price or pos.avg_price
+                        sym_pnl = round(float(pos.unrealized(px) + pos.realized_pnl), 2)
+                except Exception:
+                    pass
+                try:
+                    snap_orders = session.engine.open_orders()
+                    for o in snap_orders:
+                        if getattr(o, "symbol", "") == symbol:
+                            sym_order = str(getattr(o, "state", "WORKING"))
+                            break
+                except Exception:
+                    pass
+                stop_levels = getattr(session, "_stop_levels", {})
+                if symbol in stop_levels:
+                    stop_price = round(float(stop_levels[symbol]), 2)
+
             out.append(
                 {
                     "symbol": symbol,
@@ -1955,6 +1980,8 @@ class LiveTradingService:
                     "risk_util": risk_util,
                     "position": pos_side,
                     "signal": signal,
+                    "order": sym_order,
+                    "pnl": sym_pnl,
                     "last_update": last_update,
                 }
             )

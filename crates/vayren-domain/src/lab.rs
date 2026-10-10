@@ -456,6 +456,34 @@ pub struct LabResults {
 }
 
 /// The single source of Strategy Lab presentation state.
+/// Per-strategy stock-universe save status. Kept apart from code dirtiness:
+/// saving code can never move a universe out of `Saved`, and vice versa.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum UniverseSaveState {
+    /// Nothing saved or changed since the strategy was selected.
+    #[default]
+    Clean,
+    /// Selection applied locally; backend has not confirmed yet.
+    Pending,
+    Saved,
+    /// Backend refused or failed; the previously saved universe still stands.
+    Error(String),
+}
+
+/// Load state of the selected strategy's persisted stock universe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SavedUniverseStatus {
+    /// Never saved for this strategy (or no strategy selected).
+    #[default]
+    Missing,
+    /// Saved with symbols.
+    Ok,
+    /// Saved as cleared: a valid, explicitly empty universe.
+    Empty,
+    /// The store could not be read; the row says so instead of guessing.
+    Error,
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct LabState {
     pub strategies: Vec<LabStrategy>,
@@ -565,6 +593,13 @@ pub struct LabState {
     pub universe_symbols: Vec<String>,
     /// Applied selection echo (backend-owned).
     pub universe_selected: Vec<String>,
+    /// Save status of the selected strategy's stock universe (independent of code).
+    pub universe_state: UniverseSaveState,
+    /// The selected strategy's PERSISTED stock universe, from the backend's
+    /// `saved_universe` block. Authority for the stock row (never the run echo).
+    pub saved_universe_symbols: Vec<String>,
+    pub saved_universe_status: SavedUniverseStatus,
+    pub saved_universe_error: String,
     /// Selector panel open + working draft (draft mirrors the echo while
     /// closed; edits stay local until Apply — same precedent as search).
     pub sym_open: bool,
@@ -596,6 +631,15 @@ impl LabState {
     pub fn select(&mut self, index: usize) -> bool {
         if index >= self.strategies.len() {
             return false;
+        }
+        if self.selected != Some(index) {
+            // A switch must never carry the previous strategy's universe or
+            // save status onto the new one. The next snapshot restores the
+            // new strategy's persisted universe.
+            self.saved_universe_symbols.clear();
+            self.saved_universe_status = SavedUniverseStatus::Missing;
+            self.saved_universe_error.clear();
+            self.universe_state = UniverseSaveState::Clean;
         }
         self.selected = Some(index);
         self.tab = 0;
@@ -1176,7 +1220,58 @@ impl LabState {
         };
         self.refresh_staleness();
         self.sym_open = false;
-        self.queue_action(format!("symbols:{}", self.cfg_universe_csv));
+        let strategy_id = self
+            .selected_strategy()
+            .map(|s| s.name.clone())
+            .unwrap_or_default();
+        if strategy_id.is_empty() {
+            self.universe_state =
+                UniverseSaveState::Error("no strategy selected; universe not saved".to_string());
+            return;
+        }
+        self.universe_state = UniverseSaveState::Pending;
+        let action = serde_json::json!({
+            "strategy_id": strategy_id,
+            "symbols": selected,
+        });
+        self.queue_action(format!("universe:{action}"));
+    }
+
+    /// Chip ×: drop one symbol from the APPLIED selection and save it. Routes
+    /// through the same queue as Apply, so the removal is persisted.
+    pub fn interaction_symremove(&mut self, symbol: &str) {
+        if !self.universe_selected.iter().any(|s| s == symbol) {
+            return;
+        }
+        self.sym_draft = self
+            .universe_selected
+            .iter()
+            .filter(|s| s.as_str() != symbol)
+            .cloned()
+            .collect();
+        self.interaction_symapply();
+    }
+
+    /// Stock-universe save status for the selected strategy (never code).
+    pub fn universe_save_state(&self) -> &UniverseSaveState {
+        &self.universe_state
+    }
+
+    /// Record the backend's answer for one strategy's universe save. A reply
+    /// for a strategy that is no longer selected is ignored (no cross-talk).
+    pub fn apply_universe_result(&mut self, strategy_id: &str, saved: bool, error: &str) {
+        let current = self
+            .selected_strategy()
+            .map(|s| s.name.clone())
+            .unwrap_or_default();
+        if current != strategy_id {
+            return;
+        }
+        self.universe_state = if saved {
+            UniverseSaveState::Saved
+        } else {
+            UniverseSaveState::Error(error.to_string())
+        };
     }
 
     /// Visible universe rows under the current search (legacy popup rule:
@@ -1205,6 +1300,17 @@ impl LabState {
     /// Drain pending user actions (host forwards them to the backend).
     pub fn drain_actions(&mut self) -> Vec<String> {
         std::mem::take(&mut self.pending_actions)
+    }
+
+    /// Drain only the stock-universe saves; every other queued action stays
+    /// in order for its own consumer.
+    pub fn drain_universe_actions(&mut self) -> Vec<String> {
+        let (universe, rest): (Vec<String>, Vec<String>) =
+            std::mem::take(&mut self.pending_actions)
+                .into_iter()
+                .partition(|a| a.starts_with("universe:"));
+        self.pending_actions = rest;
+        universe
     }
 
     pub fn set_mode(&mut self, mode: LabMode) {
@@ -1563,11 +1669,16 @@ pub struct LabView {
     pub sym_count_line: String,
     /// Compact draft count for the dialog header ("3 selected").
     pub sym_selected_line: String,
+    /// Compact stock row under Reset/Save (saved universe of the selected strategy).
+    pub universe_chips: Vec<String>,
+    /// The selected strategy's PERSISTED universe (the saved stock row's chips).
+    pub saved_universe_chips: Vec<String>,
+    pub universe_count_line: String,
+    /// "clean" | "pending" | "saved" | "error" (drives the row's status text).
+    pub universe_state: String,
+    pub universe_error: String,
     pub sym_visible: Vec<String>,
     pub sym_visible_on: Vec<bool>,
-    /// Applied-universe chips (split of `cfg_universe_csv`) — presentation
-    /// projection only; Slint strings have no split, so it happens here.
-    pub universe_chips: Vec<String>,
     // Reference-layout projection (see project() derivations).
     pub run_id: String,
     pub run_ts: String,
@@ -3292,6 +3403,7 @@ pub fn project(state: &LabState) -> LabView {
             .take(UNIVERSE_CHIP_CAP)
             .cloned()
             .collect(),
+        saved_universe_chips: state.saved_universe_symbols.clone(),
         timeframes: state.timeframes.clone(),
         timeframe_index: state.timeframe_index,
         cfg_dates_start: state.cfg_dates_start.clone(),
@@ -3327,6 +3439,31 @@ pub fn project(state: &LabState) -> LabView {
         sym_button_line,
         sym_count_line,
         sym_selected_line,
+        universe_count_line: match (
+            state.saved_universe_status,
+            state.saved_universe_symbols.len(),
+        ) {
+            (SavedUniverseStatus::Error, _) => "Saved stocks unavailable".to_string(),
+            (SavedUniverseStatus::Missing, _) => "No stocks saved".to_string(),
+            (_, 0) => "No stocks saved".to_string(),
+            (_, 1) => "1 stock saved".to_string(),
+            (_, n) => format!("{n} stocks saved"),
+        },
+        // A save in flight or refused overrides the loaded state; otherwise
+        // the row reports how the strategy's saved universe loaded.
+        universe_state: match (&state.universe_state, state.saved_universe_status) {
+            (UniverseSaveState::Pending, _) => "pending",
+            (UniverseSaveState::Error(_), _) => "error",
+            (_, SavedUniverseStatus::Error) => "error",
+            (UniverseSaveState::Saved, _) => "saved",
+            _ => "clean",
+        }
+        .to_string(),
+        universe_error: match (&state.universe_state, state.saved_universe_status) {
+            (UniverseSaveState::Error(message), _) => message.clone(),
+            (_, SavedUniverseStatus::Error) => state.saved_universe_error.clone(),
+            _ => String::new(),
+        },
         sym_visible,
         sym_visible_on,
         run_id: String::new(),
@@ -3397,6 +3534,139 @@ pub fn project(state: &LabState) -> LabView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn two_strategy_state() -> LabState {
+        let mut st = LabState::default();
+        for name in ["OBR", "ORB"] {
+            st.strategies.push(LabStrategy {
+                name: name.into(),
+                description: String::new(),
+                tags: Vec::new(),
+                version: String::new(),
+                modified: String::new(),
+                favorite: false,
+                last_backtest: String::new(),
+            });
+        }
+        st.selected = Some(0);
+        st.universe_symbols = vec!["RELIANCE".into(), "TCS".into(), "INFY".into()];
+        st
+    }
+
+    #[test]
+    fn apply_queues_universe_action_with_strategy_id() {
+        let mut st = two_strategy_state();
+        st.sym_draft = vec!["RELIANCE".into(), "TCS".into()];
+        st.interaction_symapply();
+        assert_eq!(st.universe_save_state(), &UniverseSaveState::Pending);
+        let actions = st.drain_universe_actions();
+        assert_eq!(actions.len(), 1);
+        assert!(actions[0].starts_with("universe:"));
+        assert!(actions[0].contains(r#""strategy_id":"OBR""#));
+        assert!(actions[0].contains(r#""symbols":["RELIANCE","TCS"]"#));
+    }
+
+    #[test]
+    fn universe_save_success_and_refusal_are_recorded() {
+        let mut st = two_strategy_state();
+        st.apply_universe_result("OBR", true, "");
+        assert_eq!(st.universe_save_state(), &UniverseSaveState::Saved);
+        st.apply_universe_result("OBR", false, "Instrument not found");
+        assert_eq!(
+            st.universe_save_state(),
+            &UniverseSaveState::Error("Instrument not found".into())
+        );
+    }
+
+    #[test]
+    fn reply_for_a_different_strategy_is_ignored() {
+        let mut st = two_strategy_state();
+        st.apply_universe_result("OBR", true, "");
+        st.selected = Some(1);
+        st.apply_universe_result("OBR", false, "late reply");
+        assert_eq!(st.universe_save_state(), &UniverseSaveState::Saved);
+    }
+
+    #[test]
+    fn drain_universe_actions_leaves_other_actions_queued() {
+        let mut st = two_strategy_state();
+        st.queue_action("tab:1".into());
+        st.queue_action(r#"universe:{"strategy_id":"OBR","symbols":[]}"#.into());
+        st.queue_action("save:OBR".into());
+        let drained = st.drain_universe_actions();
+        assert_eq!(drained.len(), 1);
+        assert_eq!(
+            st.pending_actions,
+            vec!["tab:1".to_string(), "save:OBR".to_string()]
+        );
+    }
+
+    #[test]
+    fn snapshot_restores_each_strategys_saved_universe_on_switch() {
+        let mut st = two_strategy_state();
+        let alpha = r#"{"saved_universe":{"state":"ok","symbols":["NSE:RELIANCE"],"error":""}}"#;
+        let beta =
+            r#"{"saved_universe":{"state":"ok","symbols":["NSE:INFY","NSE:TCS"],"error":""}}"#;
+        apply_snapshot_json(&mut st, &serde_json::from_str(alpha).unwrap());
+        assert_eq!(st.saved_universe_symbols, vec!["NSE:RELIANCE".to_string()]);
+        assert_eq!(st.saved_universe_status, SavedUniverseStatus::Ok);
+
+        st.select(1);
+        assert!(
+            st.saved_universe_symbols.is_empty(),
+            "switch must not carry Alpha's chips"
+        );
+        apply_snapshot_json(&mut st, &serde_json::from_str(beta).unwrap());
+        assert_eq!(
+            st.saved_universe_symbols,
+            vec!["NSE:INFY".to_string(), "NSE:TCS".to_string()]
+        );
+        let view = project(&st);
+        assert_eq!(view.saved_universe_chips, vec!["NSE:INFY", "NSE:TCS"]);
+        assert_eq!(view.universe_count_line, "2 stocks saved");
+    }
+
+    #[test]
+    fn empty_missing_and_error_universes_are_distinct_truthful_states() {
+        let mut st = two_strategy_state();
+        apply_snapshot_json(
+            &mut st,
+            &serde_json::from_str(r#"{"saved_universe":{"state":"empty","symbols":[]}}"#).unwrap(),
+        );
+        assert_eq!(st.saved_universe_status, SavedUniverseStatus::Empty);
+        assert_eq!(project(&st).universe_count_line, "No stocks saved");
+
+        apply_snapshot_json(
+            &mut st,
+            &serde_json::from_str(r#"{"strategies":[]}"#).unwrap(),
+        );
+        assert_eq!(st.saved_universe_status, SavedUniverseStatus::Missing);
+
+        apply_snapshot_json(
+            &mut st,
+            &serde_json::from_str(
+                r#"{"saved_universe":{"state":"error","symbols":[],"error":"store offline"}}"#,
+            )
+            .unwrap(),
+        );
+        let view = project(&st);
+        assert_eq!(view.universe_state, "error");
+        assert_eq!(view.universe_error, "store offline");
+        assert!(view.saved_universe_chips.is_empty());
+    }
+
+    #[test]
+    fn apply_without_a_selected_strategy_is_an_error_not_a_guess() {
+        let mut st = two_strategy_state();
+        st.selected = None;
+        st.sym_draft = vec!["TCS".into()];
+        st.interaction_symapply();
+        assert!(matches!(
+            st.universe_save_state(),
+            UniverseSaveState::Error(_)
+        ));
+        assert!(st.drain_universe_actions().is_empty());
+    }
 
     #[test]
     fn money_split_carries_a_hundredth_that_rounds_to_one_hundred() {
@@ -4561,6 +4831,7 @@ mod tests {
     #[test]
     fn symbol_selector_uses_backend_universe_only() {
         let mut st = state_with_obr();
+        st.selected = Some(0);
         // Backend echo adopts while closed; draft tracks it.
         st.universe_symbols = vec!["RELIANCE".into(), "TCS".into(), "INFY".into()];
         st.universe_selected = vec!["RELIANCE".into()];
@@ -4593,7 +4864,10 @@ mod tests {
             vec!["TCS".to_string(), "INFY".to_string()]
         );
         assert_eq!(st.cfg_universe_csv, "TCS,INFY");
-        assert_eq!(st.pending_actions, vec!["symbols:TCS,INFY".to_string()]);
+        assert_eq!(
+            st.pending_actions,
+            vec![r#"universe:{"strategy_id":"OBR","symbols":["TCS","INFY"]}"#.to_string()]
+        );
         // Close discards local edits back to the (newly applied) echo.
         st.interaction_symopen();
         st.interaction_symclear();
@@ -6127,4 +6401,42 @@ fn apply_parity_keys(state: &mut LabState, value: &serde_json::Value) {
             state.sym_draft = state.universe_selected.clone();
         }
     }
+    apply_saved_universe_json(state, value);
+}
+
+/// Adopt the selected strategy's PERSISTED stock universe from the snapshot.
+///
+/// Authority: the backend's `saved_universe` block (per strategy, from the
+/// universe store). A missing or unreadable block clears the row to a truthful
+/// state rather than keeping the previous strategy's chips; an explicit empty
+/// universe is a real state, never treated as "absence" like the run echo.
+fn apply_saved_universe_json(state: &mut LabState, value: &serde_json::Value) {
+    let Some(saved) = value.get("saved_universe") else {
+        state.saved_universe_symbols.clear();
+        state.saved_universe_status = SavedUniverseStatus::Missing;
+        state.saved_universe_error.clear();
+        return;
+    };
+    let symbols: Vec<String> = saved
+        .get("symbols")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|s| s.as_str().map(str::to_string))
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+    state.saved_universe_status = match saved.get("state").and_then(|v| v.as_str()) {
+        Some("ok") => SavedUniverseStatus::Ok,
+        Some("empty") => SavedUniverseStatus::Empty,
+        Some("error") => SavedUniverseStatus::Error,
+        _ => SavedUniverseStatus::Missing,
+    };
+    state.saved_universe_error = saved
+        .get("error")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    state.saved_universe_symbols = symbols;
 }

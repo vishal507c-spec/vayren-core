@@ -1253,16 +1253,49 @@ def _lab_workspace(
     return snapshot
 
 
+def _lab_saved_universe(data_dir: str | None, strategy_name: str) -> dict:
+    """The selected strategy's PERSISTED NSE universe, for the Lab selector.
+
+    Read through the same store Live uses (``live/strategy_universes.json``),
+    keyed by the canonical strategy id, so the two screens cannot disagree.
+    Every failure is a state, never a raised error and never another
+    strategy's symbols: ``missing`` (never saved / no strategy),
+    ``empty`` (saved as cleared), ``ok``, or ``error``.
+    """
+    base = {"state": "missing", "symbols": [], "error": ""}
+    if not data_dir or not strategy_name:
+        return base
+    try:
+        from app.services.lab_universe_service import LabUniverseService
+
+        service = LabUniverseService(data_dir)
+        universe = service.saved_universe(strategy_name)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Lab saved universe unavailable for %r: %s", strategy_name, exc)
+        return {"state": "error", "symbols": [], "error": f"saved universe unreadable: {exc}"}
+    if universe is None:
+        return base
+    symbols = list(universe.symbols)
+    state = "ok" if symbols else "empty"
+    notes = [f"Unresolved in saved universe: {s} ({status})" for s, status in universe.unresolved]
+    return {"state": state, "symbols": symbols, "error": "; ".join(notes)}
+
+
 def _lab_snapshot(
     strategy_dir: str,
     command: dict | None = None,
     repository: Any = None,
+    data_dir: str | None = None,
 ) -> dict:
     """Build the native Strategy Lab snapshot from the strategy library.
 
     Rows come from real library files plus clearly-marked built-ins; the
     workspace opens populated from the same canonical market-data service
     the Chart uses. Nothing has been run, so results stay None.
+
+    The selected strategy's saved NSE stock universe is attached as
+    ``saved_universe`` (per strategy, read from the universe store). Strategy
+    code is never written to that store, so this block is the stock authority.
     """
     try:
         rows = _lab_library_rows(strategy_dir)
@@ -1270,6 +1303,8 @@ def _lab_snapshot(
         return {"strategies": [], "error": str(exc)}
     snapshot = _lab_workspace(strategy_dir, command or {}, rows, repository)
     snapshot["strategies"] = rows
+    selected = str(snapshot.get("selected_name") or "")
+    snapshot["saved_universe"] = _lab_saved_universe(data_dir, selected)
     return snapshot
 
 
@@ -1550,6 +1585,39 @@ def parse_headless_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+_LAB_UNIVERSE_COMMANDS = frozenset(
+    {"save_lab_universe", "lab_universe_search", "refresh_instrument_master"}
+)
+
+
+def _lab_universe_result(cmd_type: str, command: dict, data_dir: Path | str) -> dict:
+    from app.services.lab_universe_service import LabUniverseService
+
+    universe_service = LabUniverseService(data_dir)
+    if cmd_type == "save_lab_universe":
+        strategy_name = str(command.get("strategy") or "").strip()
+        raw_symbols = command.get("symbols") or []
+        if isinstance(raw_symbols, str):
+            raw_symbols = [s.strip() for s in raw_symbols.split(",") if s.strip()]
+        data = (
+            universe_service.save(strategy_name, list(raw_symbols))
+            if strategy_name
+            else {"state": "refused", "error": "no strategy selected"}
+        )
+        return {"type": "lab_universe", "data": data}
+    if cmd_type == "lab_universe_search":
+        return {
+            "type": "lab_universe_search",
+            "data": {
+                "symbols": universe_service.search(
+                    str(command.get("query") or ""), int(command.get("limit") or 50)
+                ),
+                "catalog": universe_service.catalog_summary(),
+            },
+        }
+    return {"type": "instrument_master", "data": universe_service.refresh_summary()}
+
+
 def run_headless_backend(args: argparse.Namespace) -> int:
     """Run the headless backend service.
 
@@ -1701,13 +1769,24 @@ def run_headless_backend(args: argparse.Namespace) -> int:
                             file_path = target / file_name
                             try:
                                 file_path.write_text(code, encoding="utf-8")
+                                from strategy.registry import get_strategy_registry
+
+                                reg = get_strategy_registry(data_dir=str(strategy_dir))
+                                reg.create_or_update(name=strategy_name, code=code)
                                 logger.info("Saved strategy %s to %s", strategy_name, file_path)
                             except Exception as exc:  # noqa: BLE001
                                 logger.error("Failed to save strategy %s: %s", strategy_name, exc)
                             _LAB_ROWS_CACHE.clear()
                             _DESCRIBE_CACHE.clear()
-                    snapshot = _lab_snapshot(str(strategy_dir), command, repository)
+                    snapshot = _lab_snapshot(
+                        str(strategy_dir), command, repository, data_dir=str(data_dir)
+                    )
                     result = {"type": "lab_snapshot", "data": snapshot}
+                    if not _emit(result):
+                        break
+
+                elif cmd_type in _LAB_UNIVERSE_COMMANDS:
+                    result = _lab_universe_result(cmd_type, command, data_dir)
                     if not _emit(result):
                         break
 
@@ -1726,6 +1805,116 @@ def run_headless_backend(args: argparse.Namespace) -> int:
                     result = {
                         "type": "lab_coverage",
                         "data": coverage if coverage is not None else {},
+                    }
+                    if not _emit(result):
+                        break
+
+                elif cmd_type == "create_strategy":
+                    from strategy.language.storage import DEFAULT_CODE, create_strategy
+                    from strategy.registry import get_strategy_registry
+
+                    name = str(command.get("name") or "New Strategy").strip()
+                    code = str(command.get("code") or DEFAULT_CODE)
+                    try:
+                        record = create_strategy(name, code, data_dir=str(strategy_dir))
+                        reg = get_strategy_registry(data_dir=str(strategy_dir))
+                        reg.create_or_update(name=record.name, code=record.code)
+                        _LAB_ROWS_CACHE.clear()
+                        result = {
+                            "type": "strategy_created",
+                            "data": {"status": "ok", "id": record.id, "name": record.name},
+                        }
+                    except Exception as exc:  # noqa: BLE001
+                        result = {
+                            "type": "strategy_created",
+                            "data": {"status": "error", "error": str(exc)},
+                        }
+                    if not _emit(result):
+                        break
+
+                elif cmd_type == "duplicate_strategy":
+                    from strategy.language.storage import duplicate_strategy
+                    from strategy.registry import get_strategy_registry
+
+                    source_name = str(command.get("source_name") or "").strip()
+                    copy_name = str(command.get("copy_name") or f"{source_name} Copy").strip()
+                    try:
+                        path = duplicate_strategy(
+                            source_name, copy_name, data_dir=str(strategy_dir)
+                        )
+                        reg = get_strategy_registry(data_dir=str(strategy_dir))
+                        reg.sync_storage(data_dir=str(strategy_dir))
+                        _LAB_ROWS_CACHE.clear()
+                        result = {
+                            "type": "strategy_duplicated",
+                            "data": {"status": "ok", "name": copy_name, "path": str(path)},
+                        }
+                    except Exception as exc:  # noqa: BLE001
+                        result = {
+                            "type": "strategy_duplicated",
+                            "data": {"status": "error", "error": str(exc)},
+                        }
+                    if not _emit(result):
+                        break
+
+                elif cmd_type == "archive_strategy":
+                    from strategy.language.storage import archive_strategy
+                    from strategy.registry import get_strategy_registry
+
+                    strategy_name = str(command.get("strategy") or "").strip()
+                    try:
+                        ok = archive_strategy(strategy_name, data_dir=str(strategy_dir))
+                        reg = get_strategy_registry(data_dir=str(strategy_dir))
+                        if reg.contains(strategy_name):
+                            reg.archive(strategy_name)
+                        _LAB_ROWS_CACHE.clear()
+                        result = {
+                            "type": "strategy_archived",
+                            "data": {"status": "ok" if ok else "not_found", "name": strategy_name},
+                        }
+                    except Exception as exc:  # noqa: BLE001
+                        result = {
+                            "type": "strategy_archived",
+                            "data": {"status": "error", "error": str(exc)},
+                        }
+                    if not _emit(result):
+                        break
+
+                elif cmd_type == "validate_strategy":
+                    from strategy.assistant import analyze_strategy_code
+
+                    code = str(command.get("code") or "")
+                    diag = analyze_strategy_code(code)
+                    result = {
+                        "type": "strategy_validated",
+                        "data": {
+                            "is_valid": diag.is_valid,
+                            "syntax_error": diag.syntax_error,
+                            "security_violations": diag.security_violations,
+                            "indicators": diag.detected_indicators,
+                            "timeframes": diag.detected_timeframes,
+                            "parameters": diag.parameters,
+                            "warnings": diag.warnings,
+                        },
+                    }
+                    if not _emit(result):
+                        break
+
+                elif cmd_type == "ai_assist_strategy":
+                    from strategy.assistant import analyze_strategy_code, generate_strategy_template
+
+                    name = str(command.get("name") or "AI Strategy")
+                    code = generate_strategy_template(name=name)
+                    diag = analyze_strategy_code(code)
+                    result = {
+                        "type": "ai_strategy_assisted",
+                        "data": {
+                            "generated_code": code,
+                            "diagnostics": {
+                                "is_valid": diag.is_valid,
+                                "warnings": diag.warnings,
+                            },
+                        },
                     }
                     if not _emit(result):
                         break

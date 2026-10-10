@@ -125,6 +125,7 @@ export component AppWindow inherits Window {
     callback lab-sym-all-visible();
     callback lab-sym-clear();
     callback lab-sym-apply();
+    callback lab-sym-remove(string);
     callback lab-timeframe-picked(string);
     callback lab-range-preset-picked(int);
     callback lab-capital-committed(string);
@@ -994,6 +995,7 @@ export component AppWindow inherits Window {
                     sym-all-visible() => { root.lab-sym-all-visible(); }
                     sym-clear() => { root.lab-sym-clear(); }
                     sym-apply() => { root.lab-sym-apply(); }
+                    sym-remove(symbol) => { root.lab-sym-remove(symbol); }
                     timeframe-picked(text) => { root.lab-timeframe-picked(text); }
                     range-preset-picked(idx) => { root.lab-range-preset-picked(idx); }
                     capital-committed(text) => { root.lab-capital-committed(text); }

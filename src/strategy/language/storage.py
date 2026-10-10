@@ -9,6 +9,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 DEFAULT_NAME = "Untitled Strategy"
 DEFAULT_CODE = """from strategy.strategies.base import PythonStrategy
@@ -91,6 +92,8 @@ class StrategyRecord:
     created_at: str
     updated_at: str
     version: str = "1.0"
+    status: str = "ACTIVE"
+    versions: tuple[dict[str, Any], ...] = ()
 
 
 def _now_iso() -> str:
@@ -105,6 +108,8 @@ def _read_record(path: Path) -> StrategyRecord | None:
     try:
         data = json.loads(text)
         if isinstance(data, dict) and "id" in data and "code" in data:
+            raw_versions = data.get("versions", [])
+            versions_tuple = tuple(raw_versions) if isinstance(raw_versions, list) else ()
             return StrategyRecord(
                 id=str(data["id"]),
                 name=str(data.get("name", path.stem)),
@@ -112,6 +117,8 @@ def _read_record(path: Path) -> StrategyRecord | None:
                 created_at=str(data.get("created_at", "")),
                 updated_at=str(data.get("updated_at", "")),
                 version=str(data.get("version", "1.0")),
+                status=str(data.get("status", "ACTIVE")),
+                versions=versions_tuple,
             )
     except Exception:
         pass
@@ -127,6 +134,8 @@ def _write_record(path: Path, record: StrategyRecord) -> Path:
         "created_at": record.created_at,
         "updated_at": record.updated_at,
         "version": record.version,
+        "status": record.status,
+        "versions": list(record.versions),
     }
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return path
@@ -250,12 +259,37 @@ def update_strategy(
     strategy_id: str,
     new_code: str | None = None,
     new_name: str | None = None,
+    new_status: str | None = None,
+    bump_version: bool = False,
     data_dir: Path | str | None = None,
 ) -> StrategyRecord | None:
     for rec in list_strategy_records(data_dir):
         if rec.id == strategy_id:
             code = new_code if new_code is not None else rec.code
             name = new_name if new_name is not None else rec.name
+            status = new_status if new_status is not None else rec.status
+            now = _now_iso()
+
+            # Version history snapshot
+            versions = list(rec.versions)
+            version = rec.version
+            if bump_version or (new_code is not None and new_code != rec.code):
+                versions.append(
+                    {
+                        "version": rec.version,
+                        "code": rec.code,
+                        "saved_at": now,
+                    }
+                )
+                # Bump minor version if code changed or explicitly requested
+                try:
+                    parts = rec.version.split(".")
+                    major = int(parts[0])
+                    minor = int(parts[1]) if len(parts) > 1 else 0
+                    version = f"{major}.{minor + 1}"
+                except Exception:
+                    version = f"{rec.version}.1"
+
             if name != rec.name:
                 old_path = strategy_path(rec.name, data_dir)
                 new_path = strategy_path(name, data_dir)
@@ -266,27 +300,75 @@ def update_strategy(
                     name=name,
                     code=code,
                     created_at=rec.created_at,
-                    updated_at=_now_iso(),
+                    updated_at=now,
+                    version=version,
+                    status=status,
+                    versions=tuple(versions),
                 )
                 _write_record(new_path, updated)
                 if old_path != new_path:
                     old_path.unlink(missing_ok=True)
                 return updated
+
             updated = StrategyRecord(
-                id=rec.id, name=name, code=code, created_at=rec.created_at, updated_at=_now_iso()
+                id=rec.id,
+                name=name,
+                code=code,
+                created_at=rec.created_at,
+                updated_at=now,
+                version=version,
+                status=status,
+                versions=tuple(versions),
             )
             _write_record(strategy_path(name, data_dir), updated)
             return updated
     return None
 
 
-def create_strategy(name: str, code: str, data_dir: Path | str | None = None) -> StrategyRecord:
+def archive_strategy(name_or_id: str, data_dir: Path | str | None = None) -> bool:
+    """Set strategy lifecycle status to ARCHIVED."""
+    for rec in list_strategy_records(data_dir):
+        if rec.id == name_or_id or rec.name.lower() == name_or_id.lower():
+            update_strategy(rec.id, new_status="ARCHIVED", data_dir=data_dir)
+            return True
+    return False
+
+
+def rollback_strategy(
+    name_or_id: str, target_version: str, data_dir: Path | str | None = None
+) -> StrategyRecord | None:
+    """Roll back strategy code to a previous version from its history."""
+    for rec in list_strategy_records(data_dir):
+        if rec.id == name_or_id or rec.name.lower() == name_or_id.lower():
+            for v_entry in reversed(rec.versions):
+                if v_entry.get("version") == target_version:
+                    target_code = v_entry.get("code", "")
+                    return update_strategy(
+                        rec.id, new_code=target_code, bump_version=True, data_dir=data_dir
+                    )
+    return None
+
+
+def create_strategy(
+    name: str,
+    code: str,
+    version: str = "1.0",
+    status: str = "ACTIVE",
+    data_dir: Path | str | None = None,
+) -> StrategyRecord:
     p = strategy_path(name, data_dir)
     if p.exists():
         raise FileExistsError(f"strategy already exists: {name}")
     now = _now_iso()
     record = StrategyRecord(
-        id=str(uuid.uuid4()), name=name, code=code, created_at=now, updated_at=now
+        id=str(uuid.uuid4()),
+        name=name,
+        code=code,
+        created_at=now,
+        updated_at=now,
+        version=version,
+        status=status,
+        versions=(),
     )
     _write_record(p, record)
     return record

@@ -192,6 +192,29 @@ pub enum BackendCommand {
         strategy: String,
         code: String,
     },
+    CreateStrategy {
+        name: String,
+        code: String,
+    },
+    DuplicateStrategy {
+        source_name: String,
+        copy_name: String,
+    },
+    ArchiveStrategy {
+        strategy: String,
+    },
+    ValidateStrategy {
+        code: String,
+    },
+    AiAssistStrategy {
+        prompt: String,
+        name: String,
+    },
+    /// Replace ONE strategy's NSE stock universe. Never touches strategy code.
+    SaveLabUniverse {
+        strategy: String,
+        symbols: Vec<String>,
+    },
     Shutdown,
 }
 
@@ -208,6 +231,12 @@ pub enum BackendResponse {
     ResearchSnapshot { data: serde_json::Value },
     LabSnapshot { data: serde_json::Value },
     LabCoverage { data: serde_json::Value },
+    LabUniverse { data: serde_json::Value },
+    StrategyCreated { data: serde_json::Value },
+    StrategyDuplicated { data: serde_json::Value },
+    StrategyArchived { data: serde_json::Value },
+    StrategyValidated { data: serde_json::Value },
+    AiStrategyAssisted { data: serde_json::Value },
     Error { data: ErrorData },
 }
 
@@ -804,6 +833,19 @@ mod tests {
         assert_eq!(state.strategies.len(), 1);
         assert_eq!(state.strategies[0].name, "OBR");
         assert_eq!(state.selected, Some(0));
+    }
+
+    #[test]
+    fn test_save_lab_universe_command_serialization() {
+        let cmd = BackendCommand::SaveLabUniverse {
+            strategy: "OBR".to_string(),
+            symbols: vec!["RELIANCE".to_string(), "TCS".to_string()],
+        };
+        let json = serde_json::to_string(&cmd).unwrap();
+        assert_eq!(
+            json,
+            r#"{"type":"save_lab_universe","strategy":"OBR","symbols":["RELIANCE","TCS"]}"#
+        );
     }
 
     #[test]

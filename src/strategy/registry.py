@@ -247,6 +247,110 @@ class StrategyRegistry:
             self._definitions[strategy_id] = updated
             return updated
 
+    def create_or_update(
+        self,
+        name: str,
+        code: str,
+        kind: str | None = None,
+        version: str = "1.0",
+        description: str = "",
+        timeframe: str = "",
+        direction: str = "",
+        status: str = "ACTIVE",
+        symbols: tuple[str, ...] = (),
+    ) -> StrategyDefinition:
+        """Create or update a strategy in the registry with automatic compiler registration."""
+        from strategy.language.compiler import compile_strategy
+
+        compiled = compile_strategy(code)
+        kind_name = kind or f"dynamic_{name.lower().replace(' ', '_').replace('-', '_')}"
+
+        with self._lock:
+
+            def factory(params):
+                return compiled.create_logic(params, owner_id=name)
+
+            if kind_name in self._kinds:
+                self.update_kind(kind_name, factory, compiled.param_specs)
+            else:
+                self.register_kind(kind_name, factory, compiled.param_specs)
+
+            strategy_slug = name.lower().replace(" ", "-")
+            existing = None
+            for d in self._definitions.values():
+                if d.name.lower() == name.lower() or d.id.lower() == strategy_slug:
+                    existing = d
+                    break
+
+            specs = compiled.param_specs
+            params = StrategyParameters.from_specs(specs).validated(specs)
+            strat_id = existing.id if existing else strategy_slug
+            definition = StrategyDefinition(
+                id=strat_id,
+                name=name,
+                version=version,
+                kind=kind_name,
+                params=params,
+                allocation_pct=existing.allocation_pct if existing else 100.0,
+                enabled=existing.enabled if existing else True,
+                status=status,
+                timeframe=timeframe or (existing.timeframe if existing else ""),
+                direction=direction or (existing.direction if existing else ""),
+                symbols=symbols or (existing.symbols if existing else ()),
+                runtime_state=existing.runtime_state if existing else "IDLE",
+                description=description or (existing.description if existing else ""),
+                source_code=code,
+            )
+            self._definitions[strat_id] = definition
+            return definition
+
+    def archive(self, strategy_id: str) -> StrategyDefinition:
+        """Mark a strategy as ARCHIVED in the registry."""
+        with self._lock:
+            defn = self.get(strategy_id)
+            updated = defn.with_status("ARCHIVED")
+            self._definitions[defn.id] = updated
+            return updated
+
+    def sync_storage(self, data_dir=None) -> None:
+        """Synchronize file-backed storage and built-in strategies into canonical registry."""
+        from strategy.builtins import builtin_source, list_builtins
+        from strategy.language.storage import list_strategy_records
+
+        # 1. Sync built-in strategies
+        for b in list_builtins():
+            slug = b.name.lower().replace(" ", "-")
+            if not self.contains(slug) and not self.contains(b.name):
+                try:
+                    src = builtin_source(b.name)
+                    self.create_or_update(
+                        name=b.name,
+                        code=src,
+                        kind="built-in",
+                        version=b.version,
+                        description=b.description,
+                        status="ACTIVE",
+                    )
+                except Exception as exc:
+                    logger.warning("Could not sync built-in strategy %s: %s", b.name, exc)
+
+        # 2. Sync file records
+        try:
+            records = list_strategy_records(data_dir)
+            for rec in records:
+                if not self.contains(rec.id) and not self.contains(rec.name):
+                    try:
+                        self.create_or_update(
+                            name=rec.name,
+                            code=rec.code,
+                            version=rec.version,
+                            status=rec.status,
+                        )
+                    except Exception as exc:
+                        logger.warning("Could not sync stored strategy %s: %s", rec.name, exc)
+        except Exception as exc:
+            logger.warning("Error reading stored strategy records: %s", exc)
+
 
 # ── Canonical OBR C1C4 Authority ──────────────────────────────────────
 
@@ -387,7 +491,7 @@ _GLOBAL_REGISTRY: StrategyRegistry | None = None
 _GLOBAL_LOCK = RLock()
 
 
-def get_strategy_registry() -> StrategyRegistry:
+def get_strategy_registry(data_dir=None) -> StrategyRegistry:
     """Return the canonical StrategyRegistry instance (single authority)."""
     global _GLOBAL_REGISTRY
     with _GLOBAL_LOCK:
@@ -404,6 +508,7 @@ def get_strategy_registry() -> StrategyRegistry:
 
             reg.register_kind("obr_c1c4", _obr_factory, OBR_C1C4_SPECS)
             reg.register_definition(create_obr_c1c4_definition())
+            reg.sync_storage(data_dir)
             _GLOBAL_REGISTRY = reg
         return _GLOBAL_REGISTRY
 

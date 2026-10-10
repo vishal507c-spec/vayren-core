@@ -1562,6 +1562,23 @@ pub fn apply_lab(ui: &AppWindow, state: &LabState) {
         sym_button_line: view.sym_button_line.into(),
         sym_count_line: view.sym_count_line.into(),
         sym_selected_line: view.sym_selected_line.into(),
+        universe_chips: std::rc::Rc::new(slint::VecModel::from(
+            view.universe_chips
+                .iter()
+                .map(|s| slint::SharedString::from(s.as_str()))
+                .collect::<Vec<_>>(),
+        ))
+        .into(),
+        saved_universe_chips: std::rc::Rc::new(slint::VecModel::from(
+            view.saved_universe_chips
+                .iter()
+                .map(|s| slint::SharedString::from(s.as_str()))
+                .collect::<Vec<_>>(),
+        ))
+        .into(),
+        universe_count_line: view.universe_count_line.clone().into(),
+        universe_state: view.universe_state.clone().into(),
+        universe_error: view.universe_error.clone().into(),
         // Trade blotter: honest counters, filter/sort state and the ONE
         // selected trade's facts (`spec §2/§27`).
         trade_summary: view.trade_summary.into(),
@@ -2326,6 +2343,24 @@ pub fn wire_lab(
         s.interaction_cmpside(i);
     }));
     ui.on_lab_rank_order_toggled(bind0(ui, &state, |s| s.interaction_ranktoggle()));
+    {
+        let strong = state.clone();
+        let handle = ui.as_weak();
+        let fetch = fetch_coverage.clone();
+        ui.on_lab_sym_remove(move |symbol| {
+            let request = {
+                let mut guard = strong.borrow_mut();
+                guard.interaction_symremove(symbol.as_str());
+                LabCoverageRequest::gather(&guard)
+            };
+            if let Some(ui) = handle.upgrade() {
+                apply_lab(&ui, &strong.borrow());
+            }
+            if let Some(request) = request {
+                fetch(request);
+            }
+        });
+    }
     ui.on_lab_sym_open(bind0(ui, &state, |s| s.interaction_symopen()));
     ui.on_lab_sym_close(bind0(ui, &state, |s| s.interaction_symclose()));
     ui.on_lab_sym_clear(bind0(ui, &state, |s| s.interaction_symclear()));

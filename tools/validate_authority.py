@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import functools
 import json
 import re
 import sys
@@ -194,6 +195,7 @@ def _is_test(rel: str) -> bool:
     return "/tests/" in rel or Path(rel).name.startswith("test_")
 
 
+@functools.lru_cache(maxsize=1024)
 def _parse(source: str) -> ast.AST | None:
     try:
         return ast.parse(source)

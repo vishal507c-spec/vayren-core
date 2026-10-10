@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import functools
 import hashlib
 import json
 import re
@@ -40,16 +41,10 @@ CACHE_DIR = ROOT / ".context_cache"
 
 LEVELS = ("L0", "L1", "L2", "L3")
 SCOPES = ("internal", "contract", "ownership", "full")
+
 CHAPTERS = (
-    "00_app",
-    "01_core",
-    "02_data",
-    "03_market",
-    "05_strategy",
-    "06_backtest",
-    "07_risk",
-    "08_execution",
-    "09_broker",
+    "src",
+    "crates",
 )
 
 SYMBOL_DEF = re.compile(
@@ -88,6 +83,7 @@ def resolve_symbol(name: str, source: str) -> int | None:
     return None
 
 
+@functools.lru_cache(maxsize=8)
 def _git_available(root: Path) -> bool:
     """Is `root` a git work tree? (never raises; drives the degraded path)"""
     try:
@@ -104,6 +100,7 @@ def _git_available(root: Path) -> bool:
 
 
 _FALLBACK_CALLERS: dict[tuple[str, str, str], list[str]] = {}
+_GIT_CALLERS: dict[tuple[str, str, str], list[str]] = {}
 
 
 def _scan_callers(name: str, defining_file: str, root: Path, limit: int = 10) -> list[str]:
@@ -146,13 +143,19 @@ def find_callers(name: str, defining_file: str, root: Path = ROOT) -> list[str]:
     Degrades to a full-tree scan when git is unavailable: a warning plus a real
     answer, never a silent `[]`.
     """
+    key = (name, defining_file, str(root))
+    cached = _GIT_CALLERS.get(key)
+    if cached is not None:
+        return cached
     if not _git_available(root):
         print(
             f"warn: no git work tree at {root}; caller scan for '{name}' falls back "
             "to a full-tree text scan",
             file=sys.stderr,
         )
-        return _scan_callers(name, defining_file, root)
+        res = _scan_callers(name, defining_file, root)
+        _GIT_CALLERS[key] = res
+        return res
     try:
         proc = subprocess.run(
             ["git", "grep", "-l", "-E", "-e", name, "--", *CHAPTERS],
@@ -166,7 +169,9 @@ def find_callers(name: str, defining_file: str, root: Path = ROOT) -> list[str]:
             f"warn: git grep failed for '{name}' ({exc}); using a full-tree scan",
             file=sys.stderr,
         )
-        return _scan_callers(name, defining_file, root)
+        res = _scan_callers(name, defining_file, root)
+        _GIT_CALLERS[key] = res
+        return res
     if proc.returncode != 0:
         # rc 1 = no match (a real answer); anything else is a broken probe.
         if proc.returncode != 1:
@@ -174,13 +179,18 @@ def find_callers(name: str, defining_file: str, root: Path = ROOT) -> list[str]:
                 f"warn: git grep exited {proc.returncode} for '{name}'; using a full-tree scan",
                 file=sys.stderr,
             )
-            return _scan_callers(name, defining_file, root)
+            res = _scan_callers(name, defining_file, root)
+            _GIT_CALLERS[key] = res
+            return res
+        _GIT_CALLERS[key] = []
         return []
-    return sorted(
+    res = sorted(
         line.strip()
         for line in proc.stdout.splitlines()
         if line.strip() and line.strip() != defining_file and "/tests/" not in line
     )[:10]
+    _GIT_CALLERS[key] = res
+    return res
 
 
 def symbol_snippet(source: str, line: int | None, window: int) -> str:

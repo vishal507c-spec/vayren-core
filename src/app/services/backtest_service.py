@@ -27,7 +27,18 @@ class BacktestError(Exception):
 
 
 def _strategy_source(name: str, strategy_dir=None) -> tuple[str, str]:
-    """Resolve `name` to ``(kind, code)``: library file wins over built-in."""
+    """Resolve `name` to ``(kind, code)``: registry wins, then library file, then built-in."""
+    from strategy.registry import get_strategy_registry
+
+    try:
+        registry = get_strategy_registry()
+        if registry.contains(name):
+            defn = registry.get(name)
+            if defn.source_code:
+                return defn.kind, defn.source_code
+    except Exception:
+        pass
+
     from strategy.language.storage import load_strategy
 
     code = load_strategy(name, strategy_dir)
@@ -39,7 +50,7 @@ def _strategy_source(name: str, strategy_dir=None) -> tuple[str, str]:
         return "built-in", builtins.builtin_source(name)
     except KeyError:
         raise BacktestError(
-            f"Unknown strategy {name!r}: no library file and no built-in by that name"
+            f"Unknown strategy {name!r}: no registry entry, library file or built-in"
         ) from None
 
 

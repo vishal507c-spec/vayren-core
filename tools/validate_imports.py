@@ -7,6 +7,7 @@ Files under docs are excluded.
 import argparse
 import ast
 import json
+import os
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -104,12 +105,23 @@ def _iter_runtime_imports(tree: ast.AST) -> Iterator[ast.stmt]:
         stack.extend((child, in_tc) for child in ast.iter_child_nodes(node))
 
 
+def _collect_py_files() -> list[Path]:
+    skip = {".git", "target", ".venv", "venv", "__pycache__", "node_modules"}
+    py_files = []
+    for dirpath, dirnames, filenames in os.walk(ROOT):
+        dirnames[:] = [d for d in dirnames if d not in skip]
+        for f in filenames:
+            if f.endswith(".py"):
+                py_files.append(Path(dirpath) / f)
+    return py_files
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate import rules across the repository")
     parser.add_argument("--json", action="store_true", help="print a JSON summary instead of text")
     args = parser.parse_args()
     errors: list[str] = []
-    for pyfile in ROOT.rglob("*.py"):
+    for pyfile in _collect_py_files():
         domain = check_file_domain(pyfile)
         try:
             rel = pyfile.relative_to(ROOT).as_posix()
@@ -118,12 +130,25 @@ def main() -> int:
         is_test = "test" in pyfile.name or pyfile.parent.name == "tests"
         try:
             source = pyfile.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if "import" not in source:
+            continue
+        try:
             tree = ast.parse(source)
         except SyntaxError:
             if domain is not None and not is_test:
                 errors.append(f"Syntax error: {pyfile}")
             continue
-        if not is_test and not rel.startswith(SDK_ALLOWLIST_PREFIXES):
+
+        check_sdk = not is_test and not rel.startswith(SDK_ALLOWLIST_PREFIXES)
+        check_net = (
+            not is_test
+            and not rel.startswith(NETWORK_ALLOWLIST_PREFIXES)
+            and not rel.startswith(NETWORK_EXCLUDED_PREFIXES)
+        )
+
+        if check_sdk or check_net:
             for node in ast.walk(tree):
                 if not isinstance(node, (ast.Import, ast.ImportFrom)):
                     continue
@@ -132,31 +157,20 @@ def main() -> int:
                     names = [a.name.split(".")[0] for a in node.names]
                 elif node.module:
                     names = [node.module.split(".")[0]]
-                for top in names:
-                    if top in SDK_DENYLIST:
-                        errors.append(
-                            f"{pyfile}:{node.lineno}: broker SDK import {top!r} outside "
-                            f"isolated provider packages"
-                        )
-        if (
-            not is_test
-            and not rel.startswith(NETWORK_ALLOWLIST_PREFIXES)
-            and not rel.startswith(NETWORK_EXCLUDED_PREFIXES)
-        ):
-            for node in ast.walk(tree):
-                if not isinstance(node, (ast.Import, ast.ImportFrom)):
-                    continue
-                names = []
-                if isinstance(node, ast.Import):
-                    names = [a.name.split(".")[0] for a in node.names]
-                elif node.module:
-                    names = [node.module.split(".")[0]]
-                for top in names:
-                    if top in NETWORK_DENYLIST:
-                        errors.append(
-                            f"{pyfile}:{node.lineno}: broker network import {top!r} outside "
-                            f"adapter/transport boundary (Core → UBL → Adapter → Network)"
-                        )
+                if check_sdk:
+                    for top in names:
+                        if top in SDK_DENYLIST:
+                            errors.append(
+                                f"{pyfile}:{node.lineno}: broker SDK import {top!r} outside "
+                                f"isolated provider packages"
+                            )
+                if check_net:
+                    for top in names:
+                        if top in NETWORK_DENYLIST:
+                            errors.append(
+                                f"{pyfile}:{node.lineno}: broker network import {top!r} outside "
+                                f"adapter/transport boundary (Core → UBL → Adapter → Network)"
+                            )
         if domain is None:
             continue
         if is_test:

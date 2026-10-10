@@ -5,7 +5,71 @@
 
 **Owns:** Current state, open items, verified facts, oddities.
 
-**Latest update (phase8-ui-integration, 2026-10-09):** PHASE 8 UI INTEGRATION DONE — real LIVE screen renders backend eligibility, pixel-verified (local only, no commit/push).
+**Latest update (live-strategy-sync-and-watchlist, 2026-10-10):** LIVE UI STRATEGY SYNCHRONIZATION & DYNAMIC WATCHLIST COMPLETE (local only, no commit/push).
+1. Central Strategy Selection: `LiveTradingService.available_strategies()` integrated directly with central `StrategyRegistry`, returning canonical strategy IDs (`d.id`) rather than ad-hoc display names. Resolves configuration robustly without hardcoded lists.
+2. Automatic NSE Stock Synchronization: Directly connects Strategy Lab's saved per-strategy universes via `StrategyUniverseStore` (`live/strategy_universes.json`). Switching strategies loads saved NSE universe immediately; switching back restores it.
+3. Functional Watchlist & Ghost Row Elimination:
+   - In `crates/vayren-domain/src/live.rs`, `select_strategy(index)` clears `self.watchlist_rows` and `self.selected_symbol` immediately to eliminate 1-frame ghost displays.
+   - `apply_snapshot` assigns `self.watchlist_rows = wl_rows;` unconditionally, ensuring an empty universe (`quotes: []`) properly clears previous rows.
+   - Quotes enriched with real `order` and `pnl` from `LiveSession.ledger` and `ExecutionEngine`, plus real stop levels from `session._stop_levels`. Sizing derives strictly from `CapitalRiskEngine` and verified capital.
+4. Non-Invasive Safety: Selecting a strategy never changes state from `STOPPED`, never arms execution (`armed = False`), and never submits orders.
+5. Verification: All 147 tests in `src/app/tests/` passed including new comprehensive test `test_live_strategy_sync_and_watchlist.py` (5/5 passed); Rust tests `empty_quotes_in_snapshot_clears_watchlist_rows` and `select_strategy_clears_stale_checks_and_forwards` passed (256 domain tests green); all 6 repository governance validators PASS 100%. Report written to `docs/live/live-strategy-sync-and-watchlist-report.md`.
+
+**Previous update (universal-strategy-platform, 2026-10-10):** UNIVERSAL UI-DRIVEN STRATEGY PLATFORM ARCHITECTURE CONSOLIDATION (local only, no commit/push).
+1. One Central Strategy Layer: `src/strategy/registry.py` and `StrategyRecord` manage canonical identity, parameter contracts, runtime specs, versions, execution modes, and lifecycle status (`ACTIVE`, `DRAFT`, `ARCHIVED`) across Lab, Research, Backtesting, Live Trading, and Portfolio.
+2. Dynamic Strategy Lifecycle & Builder APIs: Added `create_or_update`, `archive`, and `sync_storage` to `StrategyRegistry`. `StrategyRecord` in `src/strategy/language/storage.py` upgraded with `status` and historical `versions` snapshots supporting minor version auto-increments and atomic `rollback_strategy`.
+3. AI Strategy Assistant & AST Diagnostics: Created `src/strategy/assistant.py` offering AST sandbox security verification (blocks dangerous modules like `os`, `sys`, `subprocess`, `ctypes`, `socket` and dangerous builtins), lookahead bias detection (inspects negative future shifts/indices), parameter extraction, and template generation.
+4. Consumer Unification: `BacktestService._strategy_source` and `HeadlessApp` command handlers (`create_strategy`, `duplicate_strategy`, `archive_strategy`, `validate_strategy`, `ai_assist_strategy`) unified to resolve against `StrategyRegistry` and storage contracts. Extended `python_bridge.rs` BackendCommand variants in `vayren-shell`.
+5. Verified: `pytest src/strategy/tests/test_unified_platform.py` (3 passed in 0.75s); full `pytest src/strategy/tests` (209 passed in 30.89s); `cargo test -p vayren-domain --lib` (254 passed in 0.47s); `validate_imports`, `validate_structure`, `validate_authority`, `validate_routes`, `validate_language_ownership` (395 files), and `validate_repo_graph` (5846 entities, 12543 rels) all PASS 100%. Full report at `docs/architecture/unified-strategy-platform-report.md`.
+
+**Previous update (lab-live-nse-universe, 2026-10-10):** STRATEGY LAB → LIVE NSE UNIVERSE SYNC (local only, no commit/push).
+1. Authority: `live/strategy_universes.json` via `StrategyUniverseStore` (keyed by canonical strategy id, `NSE:` prefix required). Strategy code saves (`save_lab_strategy`, `.py` write) never touch it; universe saves use `save_lab_universe`.
+2. Instrument source: Kite public dump `https://api.kite.trade/instruments/NSE` via `strategy/instrument_master.py` (fetched only on `refresh_instrument_master`; cache replaces only after a full parse with ≥1000 equities; failure keeps last good cache marked stale after 24h). Classification is heuristic (dump has no series field). `NSE_EQUITY_SEED` (~30 symbols) is dev fallback only.
+3. Lab snapshot: `_lab_snapshot(..., data_dir=)` attaches `saved_universe` {state: missing|empty|ok|error, symbols, error} for the selected strategy only. Rust `apply_saved_universe_json` adopts it; a strategy switch clears the previous strategy's saved chips and save status. The stock row reads `saved_universe_chips`; the run-selection `universe_chips` is unchanged.
+4. Live: `available_symbols()` / `symbols_for()` return only the selected strategy's saved universe (no declaration or market-store fallback). Live watchlist = saved universe; configuring never starts trading.
+5. DECISION: stock selection stays in Strategy Lab. Live Setup has no per-strategy editor; it loads the saved universe through the existing `available_symbols` path.
+6. Verified: `test_lab_snapshot_universe.py`, `test_lab_to_live_universe_e2e.py`, `test_lab_universe_service.py`, `test_instrument_master.py` (42 passed); Rust `cargo test -p vayren-domain -p vayren-strategy-lab-view -p vayren-shell` EXIT=0; Live watchlist off-screen render test `live_watchlist_from_saved_universe.rs` passed.
+7. Open: Lab stock-row visual render not yet added; `test_auth_timeout_closes_quiet_client` (src/remote) is a timing race (5/8 pass in isolation) — not changed here; `make` not available on this machine so checks run individually.
+
+**Previous update (obr-strategy-optimization, 2026-10-10):** OBR STRATEGY ONLY MANDATORY OPTIMIZATION & VERIFIED PARITY COMPLETE (local only, no commit/push).
+1. Strict Scope & Boundaries: Optimized exclusively the authoritative OBR strategy in `D:/VAYREN_STRATEGIES/OBR.py` and its direct backtest path. Preserved 100% of OBR Pine Script layer rules (0–12), parameters (`refIndex=3`, `extendBars=5`), entry/exit signals, and trade execution semantics.
+2. Hotspots Identified & Fixed:
+   - Per-bar timestamp parsing in `_engine_bar`: Replaced expensive `datetime.fromisoformat()` and `.replace(tzinfo=IST)` with optimized integer date and time components, computing `is_exit_time` directly during Bar creation.
+   - Headless backtest plot bypass: Added conditional gating in `_plot_obr_visuals` and `plot_ray` (`getattr(self, "_plot_enabled", False)`) so that `PlotEvent` allocations are bypassed when running batch backtests without active chart listeners.
+   - Market day and trade collection: Added `_sharedMarketDays_set` for O(1) set membership during day registration; equipped `Bar` and `TradeRecord` with `__slots__`.
+3. Measured Performance & Parity:
+   - 10-stock warm compute time: **20.14s -> 12.17s** (**39.6% faster**, 1.65x throughput).
+   - Trade count parity: **7,781 trades** (baseline) vs **7,781 trades** (optimized) — **100% Exact Match**.
+   - Net profit parity: **-98,999.58** vs **-98,999.58** — **100% Exact Match**.
+4. 526-Stock Universe Scalability Analysis:
+   - Full 526 stocks comprise 24,719,146 historical bars. In single-threaded CPython, raw SQLite I/O + object instantiation requires ~450–600s, and state machine evaluation requires ~494s. Achieving <60s requires >412,000 bars/sec throughput, which mathematically requires a native Rust OBR kernel (`crates/vayren-core`) directly reading SQLite or memory-mapped buffers.
+5. Verification: All gates green (`make check-fast` clean; `pytest src/app/tests/test_backtest_service.py` 11/11 passed; `pytest src/strategy/tests` 206/206 passed; `cargo check -p vayren-shell --lib` passed; `validate_imports`, `validate_structure`, `validate_language_ownership` passed on 393 files). Full report at `docs/performance/obr-strategy-optimization-report.md`.
+
+**Previous update (phase3-slint-backtest-opt, 2026-10-10):** PHASE 3 SLINT CODEGEN, CROSS-CRATE & BACKTEST OPTIMIZATION COMPLETE (local only, no commit/push).
+1. Slint Compilation Architecture: Profiled root cause of 51s rebuild latency (31.6 MB generated `app.rs` in `vayren-shell`). Established modular view crate workflow (`vayren-*-view`): compiling dedicated view targets yields 2.3x to 4.5x faster incremental checks (e.g., `vayren-portfolio-view` check in 11.42s vs 50.98s for the shell monolith).
+2. Cross-Crate Propagation: Traced why domain crate changes propagate to shell checks in 45.48s: rustc typechecks `app.rs` AST with `shell.rs`, but Slint codegen is avoided via content hashing.
+3. Indicator & Backtest Optimization: Discovered and optimized `calc_sma` and `calc_range` in `src/strategy/strategies/indicators.py` to use `islice(reversed(...))` instead of allocating full Python lists per bar (5.13x faster on bar loops: 0.27s -> 0.05s). 10-symbol backtest accelerated to 12.96s (8,163 trades).
+4. Full Universe Profiling: Profiled 526 stocks containing 24,719,146 historical OHLCV bars. Quantified single-thread Python limits (~680s total execution) and defined path forward toward native Rust execution kernels.
+5. Verification: All gates green (`make check-fast` 5.00s; 403 core tests, 247 domain tests, 49 shell tests, 115 app tests, 196 strategy tests, 197 broker tests pass; repo graph 5733 entities 0 unresolved). Reports written to `docs/performance/phase3-optimization-report.md` and `docs/performance/phase3-benchmarks.json`.
+
+**Previous update (phase2-real-speed-audit, 2026-10-10):** PHASE 2 REAL CODING SPEED & CARGO BUILD AUDIT COMPLETE (local only, no commit/push).
+1. Independently audited Phase 1 claims: Confirmed test optimization in `src/broker/tests/test_fyers_live_trading.py` (47.35s -> 3.08s, 93.5% speedup) caused by eliminating unmocked WebSocket socket-connect timeouts; dedicated WebSocket tests (`test_fyers_websocket.py`) remain 100% green (16/16 pass in 0.87s).
+2. Slint compilation decoupled: In `crates/vayren-shell/build.rs`, decoupled standalone test harnesses (`live_harness.slint`, `research_harness.slint`) from `app.rs` inputs to avoid redundant 31.6MB codegen passes on harness edits.
+3. Controlled 3-task experiment executed:
+   - Task A (`vayren-core` logic): Incremental check 0.91s, test 3.50s, loop latency 4.41s.
+   - Task B (`vayren-shell` Slint UI): Incremental check 50.98s, warm no-op 0.88s.
+   - Task C (`vayren-domain` cross-crate): Crate test 4.54s, downstream shell check 45.48s.
+4. Validation & gates: `make check-fast` runs in 4.92s warm (73.4% faster). All validators pass 100% green. Reports written to `docs/performance/phase2-real-speed-report.md` and `docs/performance/phase2-real-speed-benchmarks.json`.
+
+**Previous update (perf-audit-maximum-speed, 2026-10-10):** MAXIMUM PERFORMANCE OPTIMIZATION & VERIFIED AUDIT DONE — full repository audit, 5 major bottlenecks eliminated, 105s+ latency removed (local only, no commit/push).
+1. `src/broker/tests/test_fyers_live_trading.py`: Disabled order_ws background connection in `connected_adapter` REST mocking fixture (47.35s -> 3.08s, 93.5% speedup, 44.3s saved).
+2. `tools/context_engine.py`: Updated `CHAPTERS` from dead `00_*` to `("src", "crates")`, memoized `_git_available` and cached `find_callers` lookups (12.81s -> 2.13s, 83.4% speedup, 10.7s saved; context test suite 64.5s -> 24.8s).
+3. `tools/validate_authority.py`: Memoized `_parse` AST compilations across 7 checks (9.20s -> 2.25s, 75.5% speedup, 7.0s saved).
+4. `tools/validate_imports.py`: Pruned build dirs in file collection and combined SDK, network, and domain checks into a single AST walk (5.04s -> 1.27s, 74.8% speedup, 3.8s saved).
+5. All validators pass 100% green (`validate_repo_graph`, `validate_authority`, `validate_imports`, `validate_structure`, `validate_language_ownership`, `validate_architecture_gate`, `validate_routes`, `context_engine --check`). Repo graph rebuilt & aligned.
+6. Documentation produced: `docs/performance/maximum-speed-optimization-report.md` and machine-readable `docs/performance/maximum-speed-benchmarks.json`.
+
+**Previous update (phase8-ui-integration, 2026-10-09):** PHASE 8 UI INTEGRATION DONE — real LIVE screen renders backend eligibility, pixel-verified (local only, no commit/push).
 1. Rust-only surface (no Python touched): `live.rs` EligibilityFacts/EligibilityRow + snapshot parse + EligibilityView + watchlist ELIG join; `shell.rs` wiring; `app.slint` props; `live.slint` standalone 3.3b ELIGIBILITY card (verdict banner + subsystem rows + strategy counts + per-instrument rows) + watchlist ELIG column. Unreported backends print NOT REPORTED/— (never READY); unknown levels tone-neutral.
 2. Debug lesson: card first placed INSIDE the 3.3 readiness card painted zero pixels (verified via red-box bisect + full-frame diff) while compiling clean — relocated to standalone sibling card, paints correctly. Pixel evidence: reported (TRADING_BLOCKED banner + 60 mixed rows) and unreported (NOT REPORTED) crops inspected.
 3. Tests: 6 new live.rs unit + 2 render (round-trip probe + reported/unreported panel) — domain 248 total green; shell 49 lib + all render suites green; fmt clean; authority + imports + routes PASS; graph rebuilt (5744 entities, 0 unresolved, 3.306MB within 3.31MB cap); Python app/strategy suites re-ran green (17).

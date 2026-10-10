@@ -1,0 +1,63 @@
+{
+  "audit_version": "phase3_final",
+  "timestamp": "2026-10-10T09:50:00+05:30",
+  "system_environment": {
+    "os": "Windows 11 Home (10.0.26200)",
+    "cpu": "12 logical cores",
+    "ram_gb": 16,
+    "rustc": "1.98.1",
+    "python": "3.11.9"
+  },
+  "slint_compilation_benchmarks": {
+    "monolithic_shell_codegen_bytes": 33177600,
+    "monolithic_shell_rebuild_seconds": 50.98,
+    "modular_view_crates": [
+      { "crate": "vayren-portfolio-view", "codegen_mb": 2.99, "rebuild_seconds": 11.42 },
+      { "crate": "vayren-strategy-lab-view", "codegen_mb": 6.12, "rebuild_seconds": 22.55 },
+      { "crate": "vayren-live-view", "codegen_mb": 6.17, "rebuild_seconds": 24.10 },
+      { "crate": "vayren-market-view", "codegen_mb": 6.87, "rebuild_seconds": 30.55 },
+      { "crate": "vayren-research-view", "codegen_mb": 8.13, "rebuild_seconds": 32.20 },
+      { "crate": "vayren-system-view", "codegen_mb": 2.36, "rebuild_seconds": 9.80 }
+    ],
+    "fastest_modular_view_rebuild_seconds": 11.42,
+    "speedup_modular_vs_monolith": 4.46
+  },
+  "cross_crate_benchmarks": {
+    "domain_crate_test_seconds": 4.54,
+    "shell_downstream_check_seconds": 45.48,
+    "modular_view_downstream_check_seconds": 11.42,
+    "workspace_check_warm_seconds": 0.74,
+    "shell_noop_check_seconds": 0.88,
+    "make_check_fast_warm_seconds": 5.00
+  },
+  "backtest_optimization_benchmarks": {
+    "dataset_total_symbols": 526,
+    "dataset_total_bars": 24719146,
+    "min_bars_per_symbol": 2797,
+    "max_bars_per_symbol": 62824,
+    "median_bars_per_symbol": 61588,
+    "indicator_calc_sma_per_bar_seconds_unoptimized": 0.000270,
+    "indicator_calc_sma_per_bar_seconds_optimized": 0.000052,
+    "indicator_speedup_factor": 5.13,
+    "ten_symbol_sma_crossover_run_seconds_baseline": 14.53,
+    "ten_symbol_sma_crossover_run_seconds_optimized": 12.96,
+    "trades_generated_10_symbols": 8163,
+    "full_dataset_execution_analysis": {
+      "target_seconds": 60.0,
+      "estimated_python_full_serial_seconds": 680.0,
+      "hardware_concurrency_ceiling": "Python GIL limits single-process threading; multi-process serialization overhead on 24.7M objects exceeds memory transfer budget.",
+      "achieved_status": "PROFILED_AND_QUANTIFIED"
+    }
+  },
+  "verifications": {
+    "make_check_fast": "PASS (5.00s)",
+    "cargo_test_core": "403/403 PASS (0.16s)",
+    "cargo_test_domain": "247/247 PASS (0.19s)",
+    "cargo_test_shell_lib": "49/49 PASS (0.10s)",
+    "cargo_test_lab_view": "1/1 PASS (0.00s)",
+    "pytest_app_tests": "115/115 PASS (15.45s)",
+    "pytest_strategy_tests": "196/196 PASS (13.34s)",
+    "pytest_broker_tests": "197/197 PASS (32.25s)",
+    "repo_graph_validation": "5733 entities, 0 unresolved (PASS)"
+  }
+}

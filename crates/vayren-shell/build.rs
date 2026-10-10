@@ -57,7 +57,7 @@ fn main() {
     let build_script = manifest.join("build.rs");
     let app_out = out_dir.join("app.rs");
 
-    // Gather all ui/*.slint files and emit rerun-if-changed
+    // Gather app.slint dependencies (excluding standalone test harnesses) and emit rerun-if-changed
     let mut slint_files = Vec::new();
     if let Ok(entries) = std::fs::read_dir(manifest.join("ui")) {
         for entry in entries.flatten() {
@@ -66,7 +66,11 @@ fn main() {
                 if let Ok(rel) = path.strip_prefix(&manifest) {
                     println!("cargo:rerun-if-changed={}", rel.display());
                 }
-                slint_files.push(path);
+                // Exclude standalone test harnesses from app.rs compilation inputs.
+                let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                if filename != "live_harness.slint" && filename != "research_harness.slint" {
+                    slint_files.push(path);
+                }
             }
         }
     }
