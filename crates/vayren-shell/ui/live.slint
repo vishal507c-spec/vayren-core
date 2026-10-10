@@ -49,6 +49,7 @@ export struct LiveSetup {
     needs-live-confirm: bool,
     confirmed-live: bool,
     symbol-total: string,
+    stock-universe: [string],
 }
 
 export struct LiveMarket {
@@ -879,6 +880,76 @@ export component LiveScreen inherits Rectangle {
                         font-size: 10px;
                         font-weight: 600;
                         vertical-alignment: center;
+                    }
+                }
+            }
+        }
+
+        // ══ 1b. STRATEGY STOCK LIST (read-only; managed in Strategy Lab) ══════
+        Rectangle {
+            height: 34px;
+            min-width: 0px;
+            width: 100%;
+            background: VayrenPalette.live-topbar;
+            border-width: 1px;
+            border-color: VayrenPalette.live-line-deep;
+            clip: true;
+
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                spacing: 10px;
+                alignment: start;
+
+                Text {
+                    text: "NSE";
+                    font-family: "monospace";
+                    font-size: 10px;
+                    font-weight: 700;
+                    color: VayrenPalette.live-teal;
+                    vertical-alignment: center;
+                }
+
+                Text {
+                    text: root.setup.symbol-total;
+                    font-family: "monospace";
+                    font-size: 10px;
+                    color: VayrenPalette.live-ink-dim;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+
+                ScrollView {
+                    horizontal-stretch: 1;
+                    min-width: 160px;
+                    height: 26px;
+                    horizontal-scrollbar-policy: as-needed;
+                    vertical-scrollbar-policy: always-off;
+                    HorizontalLayout {
+                        spacing: 6px;
+                        alignment: start;
+                        for symbol in root.setup.stock-universe: Rectangle {
+                            height: 20px;
+                            width: chip-text.preferred-width + 16px;
+                            border-radius: 10px;
+                            background: VayrenPalette.live-panel;
+                            border-width: 1px;
+                            border-color: VayrenPalette.live-teal;
+                            chip-text := Text {
+                                x: 8px;
+                                text: symbol;
+                                font-family: "monospace";
+                                font-size: 10px;
+                                color: VayrenPalette.live-teal;
+                                vertical-alignment: center;
+                            }
+                        }
+                        if root.setup.stock-universe.length == 0: Text {
+                            text: root.strategy-selected < 0 ? "Select a strategy above" : "No saved stocks — save them in Strategy Lab";
+                            font-size: 10px;
+                            color: VayrenPalette.live-ink-dim;
+                            vertical-alignment: center;
+                        }
                     }
                 }
             }
