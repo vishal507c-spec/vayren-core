@@ -5044,7 +5044,7 @@ mod tests {
     #[test]
     fn a_preset_rewrites_the_committed_iso_bounds_through_the_date_path() {
         let mut st = state_with_bounds(LONG_FIRST, LONG_LAST);
-        st.interaction_range_preset(4); // MAX
+        st.interaction_range_preset(3); // MAX
         assert_eq!(st.cfg_dates_start, "2019-09-19");
         assert_eq!(st.cfg_dates_end, "2026-08-18");
         // It is the SAME commit as the picker: one queued `dates:` action.
@@ -5065,7 +5065,7 @@ mod tests {
         let mut st = state_with_bounds(LONG_FIRST, LONG_LAST);
         st.cfg_dates_start = "2019-09-19".into();
         st.cfg_dates_end = "2026-08-18".into();
-        assert_eq!(project(&st).range_preset_idx, 4);
+        assert_eq!(project(&st).range_preset_idx, 3);
         // A hand-picked range matches no cell — the row shows nothing selected.
         st.cfg_dates_start = "2024-06-03".into();
         assert_eq!(project(&st).range_preset_idx, -1);

@@ -2582,7 +2582,7 @@ impl Tap for LabState {
 }
 
 /// Representative lab state for the standalone shell binary: the real
-/// workstation library (OBR + SMA records), no fabricated results — results
+/// workstation library (OBR record), no fabricated results — results
 /// appear only via `LabState::apply_result` from the engine bridge.
 pub fn demo_lab_state() -> LabState {
     LabState {
@@ -4343,7 +4343,7 @@ mod tests {
         // Bridge unwired: RUN stays inert, creation still works on real input.
         assert!(!ui.get_research_run_enabled());
         assert!(!ui.get_research_run_blocked_reason().is_empty());
-        assert_eq!(ui.get_research_strategies().row_count(), 2);
+        assert_eq!(ui.get_research_strategies().row_count(), 1);
         assert_eq!(ui.get_research_config_groups().row_count(), 5);
         assert_eq!(
             ui.get_research_config_groups()
@@ -4374,8 +4374,8 @@ mod tests {
         assert_eq!(research_state.borrow().timeframe_idx, 2);
         ui.invoke_research_config_edited("symbols".into(), "RELIANCE".into());
         assert!(ui.get_research_context_line().contains("RELIANCE"));
-        ui.invoke_research_strategy_picked(1);
-        assert_eq!(ui.get_research_strategy_name(), "SMA");
+        ui.invoke_research_strategy_picked(0);
+        assert_eq!(ui.get_research_strategy_name(), "OBR");
 
         // ── Strategy Lab: Rust view-model drives the screen ──
         let lab_state = Rc::new(RefCell::new(demo_lab_state()));
@@ -4387,7 +4387,7 @@ mod tests {
         assert_eq!(header.state_label, "● READY");
         assert!(!header.show_results);
         assert!(!header.run_enabled); // engine bridge not wired yet: no fake run
-        assert_eq!(ui.get_lab_library().row_count(), 2);
+        assert_eq!(ui.get_lab_library().row_count(), 1);
         assert!(ui.get_lab_library().row_data(0).unwrap().selected);
 
         let no_fetch: Rc<dyn Fn(LabSelectRequest)> = Rc::new(|_| ());
@@ -4404,10 +4404,9 @@ mod tests {
             no_cancel,
             no_save,
         );
-        ui.invoke_lab_library_picked(1);
-        assert_eq!(ui.get_lab().name, "SMA");
-        assert!(ui.get_lab_library().row_data(1).unwrap().selected);
-        assert!(!ui.get_lab_library().row_data(0).unwrap().selected);
+        ui.invoke_lab_library_picked(0);
+        assert_eq!(ui.get_lab().name, "OBR");
+        assert!(ui.get_lab_library().row_data(0).unwrap().selected);
 
         ui.invoke_lab_mode_picked(1);
         assert_eq!(ui.get_lab().mode, 1);
@@ -4432,7 +4431,7 @@ mod tests {
         ui.invoke_lab_search_changed("".into());
         i_slint_backend_testing::mock_elapsed_time(std::time::Duration::from_millis(250));
         slint::platform::update_timers_and_animations();
-        assert_eq!(ui.get_lab_library().row_count(), 2);
+        assert_eq!(ui.get_lab_library().row_count(), 1);
 
         // KPI placeholders use the legacy tile vocabulary ("--", 8 tiles —
         // no SORTINO tile ever existed), never fabricated numbers.
@@ -5015,7 +5014,7 @@ mod tests {
         state.selected = None;
         assert!(LabRunRequest::gather(&state).is_none());
         // Selection + backend echoes → a complete request.
-        state.selected = Some(1);
+        state.selected = Some(0);
         state.engine_wired = true;
         state.universe_symbols = vec!["RELIANCE".into(), "TCS".into()];
         state.universe_selected = vec!["TCS".into()];
@@ -5025,7 +5024,7 @@ mod tests {
         state.cfg_dates_end = "2026-06-10".into();
         state.cfg_capital = "₹10,00,000".into();
         let request = LabRunRequest::gather(&state).expect("request");
-        assert_eq!(request.strategy, "SMA");
+        assert_eq!(request.strategy, "OBR");
         assert_eq!(request.symbols, vec!["TCS".to_string()]);
         assert_eq!(request.timeframe, "1h");
         assert_eq!(request.start, "2026-01-01");
@@ -5093,7 +5092,7 @@ mod tests {
         state.universe_selected = vec!["RELIANCE".into()];
         state.timeframes = vec!["5m".into(), "15m".into(), "1h".into()];
         state.timeframe_index = 1;
-        assert!(state.interaction_select(1));
+        assert!(state.interaction_select(0));
         state.interaction_symopen();
         state.interaction_symsearch("tcs");
         state.interaction_symtoggle("TCS");
@@ -5104,7 +5103,7 @@ mod tests {
         state.interaction_capital("500000");
         state.interaction_mode(LabMode::Short);
         let select = LabSelectRequest::gather(&state).expect("select request");
-        assert_eq!(select.strategy, "SMA");
+        assert_eq!(select.strategy, "OBR");
         assert_eq!(
             select.symbols,
             vec!["RELIANCE".to_string(), "TCS".to_string()]

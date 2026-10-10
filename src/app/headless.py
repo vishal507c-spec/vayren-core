@@ -800,7 +800,7 @@ def _build_lab_library_rows(strategy_dir: str) -> list[dict]:
         file_names.append("OBR")
 
     for name in file_names:
-        if name.lower() in known or name.upper() != "OBR":
+        if name.lower() in known:
             continue
         modified = ""
         try:

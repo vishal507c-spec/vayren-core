@@ -1245,7 +1245,7 @@
       "to": "src/core/native"
     }
   ],
-  "entity_count": 5856,
+  "entity_count": 5858,
   "files": [
     {
       "domain": "CORE",
@@ -2235,6 +2235,16 @@
       "owner": "crates/vayren-shell",
       "owner_source": "synthetic",
       "path": "crates/vayren-shell/ui/live.slint",
+      "retention_state": null
+    },
+    {
+      "domain": "NATIVE_UI",
+      "is_test": false,
+      "language": "RUST_SLINT",
+      "module": "crates/vayren-shell",
+      "owner": "crates/vayren-shell",
+      "owner_source": "synthetic",
+      "path": "crates/vayren-shell/ui/live_demo.slint",
       "retention_state": null
     },
     {
@@ -6592,6 +6602,7 @@
         "crates/vayren-shell/ui/global_header.slint",
         "crates/vayren-shell/ui/lab.slint",
         "crates/vayren-shell/ui/live.slint",
+        "crates/vayren-shell/ui/live_demo.slint",
         "crates/vayren-shell/ui/live_harness.slint",
         "crates/vayren-shell/ui/live_preview.slint",
         "crates/vayren-shell/ui/market.slint",
@@ -48451,6 +48462,21 @@
       "name": "LiveWebSocket",
       "public": true,
       "qualified": "crates::vayren-shell::ui::live::LiveWebSocket",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-shell::ui::live_demo::LiveDemo",
+      "file": "crates/vayren-shell/ui/live_demo.slint",
+      "kind": "slint-component",
+      "language": "RUST_SLINT",
+      "line": 19,
+      "module": "crates/vayren-shell",
+      "name": "LiveDemo",
+      "public": true,
+      "qualified": "crates::vayren-shell::ui::live_demo::LiveDemo",
       "tests": []
     },
     {
