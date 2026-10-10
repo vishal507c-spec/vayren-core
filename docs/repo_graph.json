@@ -1245,7 +1245,7 @@
       "to": "src/core/native"
     }
   ],
-  "entity_count": 5859,
+  "entity_count": 5857,
   "files": [
     {
       "domain": "CORE",
@@ -2225,16 +2225,6 @@
       "owner": "crates/vayren-shell",
       "owner_source": "synthetic",
       "path": "crates/vayren-shell/ui/lab.slint",
-      "retention_state": null
-    },
-    {
-      "domain": "NATIVE_UI",
-      "is_test": false,
-      "language": "RUST_SLINT",
-      "module": "crates/vayren-shell",
-      "owner": "crates/vayren-shell",
-      "owner_source": "synthetic",
-      "path": "crates/vayren-shell/ui/lab_demo_preview.slint",
       "retention_state": null
     },
     {
@@ -6601,7 +6591,6 @@
         "crates/vayren-shell/ui/components.slint",
         "crates/vayren-shell/ui/global_header.slint",
         "crates/vayren-shell/ui/lab.slint",
-        "crates/vayren-shell/ui/lab_demo_preview.slint",
         "crates/vayren-shell/ui/live.slint",
         "crates/vayren-shell/ui/live_harness.slint",
         "crates/vayren-shell/ui/live_preview.slint",
@@ -48087,21 +48076,6 @@
       "name": "StrategyLabScreen",
       "public": true,
       "qualified": "crates::vayren-shell::ui::lab::StrategyLabScreen",
-      "tests": []
-    },
-    {
-      "called_by": [],
-      "callers_complete": false,
-      "calls": [],
-      "dotted": "crates::vayren-shell::ui::lab_demo_preview::LabDemoPreview",
-      "file": "crates/vayren-shell/ui/lab_demo_preview.slint",
-      "kind": "slint-component",
-      "language": "RUST_SLINT",
-      "line": 5,
-      "module": "crates/vayren-shell",
-      "name": "LabDemoPreview",
-      "public": true,
-      "qualified": "crates::vayren-shell::ui::lab_demo_preview::LabDemoPreview",
       "tests": []
     },
     {
