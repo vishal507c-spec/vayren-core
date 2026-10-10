@@ -2653,13 +2653,11 @@ pub fn apply_snapshot(state: &mut ResearchState, bundle: SnapshotBundle) {
 /// identity, empty hypothesis, no fabricated results.
 pub fn demo_research_state() -> ResearchState {
     let mut state = ResearchState {
-        strategies: vec![
-            ResearchStrategy {
-                name: "OBR".into(),
-                description: "Opening Breakout Strategy".into(),
-                version: "1.0".into(),
-            },
-        ],
+        strategies: vec![ResearchStrategy {
+            name: "OBR".into(),
+            description: "Opening Breakout Strategy".into(),
+            version: "1.0".into(),
+        }],
         ..ResearchState::default()
     };
     state.selected = Some(0);

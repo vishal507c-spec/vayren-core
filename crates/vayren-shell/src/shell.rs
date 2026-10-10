@@ -2586,17 +2586,15 @@ impl Tap for LabState {
 /// appear only via `LabState::apply_result` from the engine bridge.
 pub fn demo_lab_state() -> LabState {
     LabState {
-        strategies: vec![
-            lab::LabStrategy {
-                name: "OBR".into(),
-                description: "Opening Range Breakout".into(),
-                tags: vec!["BREAKOUT".into(), "INTRADAY".into()],
-                version: "1.0".into(),
-                modified: "11 Sep 26".into(),
-                favorite: true,
-                last_backtest: "—".into(),
-            },
-        ],
+        strategies: vec![lab::LabStrategy {
+            name: "OBR".into(),
+            description: "Opening Range Breakout".into(),
+            tags: vec!["BREAKOUT".into(), "INTRADAY".into()],
+            version: "1.0".into(),
+            modified: "11 Sep 26".into(),
+            favorite: true,
+            last_backtest: "—".into(),
+        }],
         selected: Some(0),
         config: lab::LabConfig {
             universe: "RELIANCE".into(),
