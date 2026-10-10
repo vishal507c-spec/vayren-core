@@ -1,5 +1,5 @@
-﻿// VAYREN LIVE â€” Native Slint execution workstation (no chart: this surface
-// is a terminal blotter, not a charting page â€” freed space goes to the
+// VAYREN LIVE — Native Slint execution workstation (no chart: this surface
+// is a terminal blotter, not a charting page — freed space goes to the
 // blotter, events, watchlist and readiness panels).
 //
 // Single integrated workspace layout:
@@ -13,7 +13,7 @@ import { VayrenPalette, VayrenDesign } from "palette.slint";
 import { VBadge, VButton, VBanner, VEmptyState, VCell, VStatusDot } from "components.slint";
 import { LineEdit, ScrollView, ComboBox } from "std-widgets.slint";
 
-// â”€â”€ projected shapes (mirror domain live.rs) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── projected shapes (mirror domain live.rs) ──────────────────────────────────
 
 export struct LiveBar {
     mode: int, // 0 PAPER, 1 SANDBOX, 2 LIVE
@@ -216,7 +216,7 @@ export struct LiveWatchlistRow {
 }
 
 // Unified eligibility verdict (Phase-6/7 backend section, verbatim).
-// Unreported backends leave every field at its fallback â€” the screen
+// Unreported backends leave every field at its fallback — the screen
 // prints "NOT REPORTED", never an invented verdict.
 export struct LiveEligibility {
     reported: bool,
@@ -291,10 +291,10 @@ export struct LiveFooter {
     clock: string,
 }
 
-// â”€â”€ recomposition tiers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── recomposition tiers ──────────────────────────────────────────────────
 
 export global LiveTiers {
-    // â”€â”€ the two hard content floors of the workstation â”€â”€
+    // ── the two hard content floors of the workstation ──
     public pure function workspace-min-width() -> length {
         return 440px;
     }
@@ -312,7 +312,7 @@ export global LiveTiers {
         return Math.max(440px, Math.min(520px, w * 0.32));
     }
 
-    // â”€â”€ the width the workspace column actually receives â”€â”€
+    // ── the width the workspace column actually receives ──
     // Every workspace-region tier below is measured against THIS, not the
     // window: with the inspector docked the workspace gets `w` minus the
     // inspector, its gutter and the layout padding, so a threshold applied
@@ -323,7 +323,7 @@ export global LiveTiers {
         return w - (dock-inspector(w) ? inspector-width(w) + 20px : 0px) - 20px;
     }
 
-    // â”€â”€ command bar: computed from the widgets, never guessed â”€â”€
+    // ── command bar: computed from the widgets, never guessed ──
     // Width each command-bar region needs to render un-elided: one status
     // card, the PAPER|SANDBOX|LIVE selector and the START/STOP/HALT group.
     public pure function bar-card-width() -> length { return 150px; }
@@ -354,8 +354,8 @@ export global LiveTiers {
 
     // The inspector docks only when the workspace floor STILL fits beside it.
     // The old fixed 800px threshold docked a 440px inspector into an 800px
-    // window, leaving the workspace 330px â€” narrower than the screen's own
-    // declared `workspace-min-width()` â€” so the watchlist chips and the
+    // window, leaving the workspace 330px — narrower than the screen's own
+    // declared `workspace-min-width()` — so the watchlist chips and the
     // search box were clipped with no way to reach them.
     public pure function dock-inspector(w: length) -> bool {
         return w >= VayrenDesign.live-dock-inspector
@@ -377,9 +377,9 @@ export global LiveTiers {
     }
 }
 
-// â”€â”€ safety tone authority â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── safety tone authority ────────────────────────────────────────────────
 // The single place a backend badge tone becomes a colour. Tone convention is
-// the shared one (components.slint Â§tone): 0 muted/unknown, 1 pos/ready,
+// the shared one (components.slint §tone): 0 muted/unknown, 1 pos/ready,
 // 2 warn, 3 neg/NOT READY, 4 accent/info. A surface NEVER invents a tone: it
 // passes the domain badge through, so an unconfigured fact can never paint
 // itself healthy.
@@ -399,7 +399,7 @@ export global LiveTone {
     }
 }
 
-// â”€â”€ UI Helper Components â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── UI Helper Components ─────────────────────────────────────────────────
 
 component LiveTopCard inherits Rectangle {
     // A status card carries ONE backend fact: the domain label string plus its
@@ -493,7 +493,7 @@ component LiveTopCard inherits Rectangle {
 // own reason. There is no `is-ready` input - readiness is never assumed, only
 // reported. A NOT READY / BLOCKED gate carries the semantic left edge and the
 // NOT READY verdict, so it can never be mistaken for a satisfied one.
-// â”€â”€ The Complete LiveScreen UI â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── The Complete LiveScreen UI ───────────────────────────────────────────
 
 export component LiveScreen inherits Rectangle {
     in property <LiveBar> bar;
@@ -551,7 +551,7 @@ export component LiveScreen inherits Rectangle {
 
     // Out properties strictly satisfying test suites. They read the RECOMPOSITION
     // TIERS (decided from the window size one level up), never this screen's own
-    // height â€” a height-derived size would close a layout binding loop.
+    // height — a height-derived size would close a layout binding loop.
     out property <bool> show-inspector: root.inspector-open;
     out property <bool> drawer-open: !root.dock-inspector && root.inspector-open;
     out property <bool> inspector-docked: root.dock-inspector && root.inspector-open;
@@ -586,8 +586,8 @@ export component LiveScreen inherits Rectangle {
 
     // The selected timeframe is the BACKEND's selection (index into
     // timeframe-names), never a locally shadowed string.
-    property <string> selected-timeframe: root.timeframe-selected >= 0 && root.timeframe-selected < root.timeframe-names.length ? root.timeframe-names[root.timeframe-selected] : "â€”";
-    property <string> selected-strategy: root.strategy-selected >= 0 && root.strategy-selected < root.strategy-names.length ? root.strategy-names[root.strategy-selected] : "â€”";
+    property <string> selected-timeframe: root.timeframe-selected >= 0 && root.timeframe-selected < root.timeframe-names.length ? root.timeframe-names[root.timeframe-selected] : "—";
+    property <string> selected-strategy: root.strategy-selected >= 0 && root.strategy-selected < root.strategy-names.length ? root.strategy-names[root.strategy-selected] : "—";
 
     // Internal state
     property <int> active-blotter-tab: 0; // 0 Positions, 1 Orders, 2 Fills, 3 Daily P&L
@@ -596,18 +596,18 @@ export component LiveScreen inherits Rectangle {
     // field to the model would fight the caret on every keystroke.
     property <string> filter-text: "";
     // The quantity field owns its text like the search box above: the
-    // backend normalises every commit ("25" â†’ "2.00"), so a live model
+    // backend normalises every commit ("25" → "2.00"), so a live model
     // binding rewrites the field mid-keystroke and eats digits. Commits
     // go out on Enter only; backend updates sync back only while the
     // operator holds no uncommitted edit.
     property <string> qty-text: "";
     property <bool> qty-dirty: false;
 
-    // STEP 4: the ONE start verdict. Derived from backend facts only â€” a
+    // STEP 4: the ONE start verdict. Derived from backend facts only — a
     // running session reads RUNNING, a session with reported blockers reads
     // START BLOCKED, and an unblocked stopped session reads READY TO START.
     // Never optimistic: nothing here is set by a click.
-    property <string> start-verdict: root.setup.can-stop ? "â— RUNNING" : (root.blockers.length > 0 ? "âœ• START BLOCKED" : "âœ“ READY TO START");
+    property <string> start-verdict: root.setup.can-stop ? "● RUNNING" : (root.blockers.length > 0 ? "✕ START BLOCKED" : "✓ READY TO START");
 
     // Watchlist columns always preserved. Internal horizontal scrolling handles narrow viewports.
     property <bool> watchlist-columns-wide: true;
@@ -624,7 +624,7 @@ export component LiveScreen inherits Rectangle {
         min-width: 0px;
         width: 100%;
 
-        // â•â• 0. HALT BANNER (Placed right at top of LiveScreen for y:50..76 in AppWindow, strictly satisfying 36 < y < 70) â•â•
+        // ══ 0. HALT BANNER (Placed right at top of LiveScreen for y:50..76 in AppWindow, strictly satisfying 36 < y < 70) ══
         if root.bar.halted: Rectangle {
             height: 24px;
             background: VayrenPalette.bg;
@@ -635,13 +635,13 @@ export component LiveScreen inherits Rectangle {
                 VBanner {
                     height: 20px;
                     width: 100%;
-                    message: "EXECUTION HALTED â€” kill switch engaged. Reconcile before restarting.";
+                    message: "EXECUTION HALTED — kill switch engaged. Reconcile before restarting.";
                     tone: 3;
                 }
             }
         }
 
-        // â•â• 1. TOP STATUS & CONTROL BAR â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+        // ══ 1. TOP STATUS & CONTROL BAR ══════════════════════════════════════
         Rectangle {
             height: 60px;
             min-width: 0px;
@@ -681,48 +681,36 @@ export component LiveScreen inherits Rectangle {
                     value-text: root.gateway.status != "" ? root.gateway.status : "DISCONNECTED";
                     tone: root.gateway.tone != 0 ? root.gateway.tone : 3;
                     sub-text: (root.gateway.last-heartbeat != "" ? ("HB: " + root.gateway.last-heartbeat) : "HB: NOT AVAILABLE")
-                        + " Â· " + (root.gateway.rtt != "" ? ("RTT: " + root.gateway.rtt) : "RTT: NOT AVAILABLE");
+                        + " · " + (root.gateway.rtt != "" ? ("RTT: " + root.gateway.rtt) : "RTT: NOT AVAILABLE");
                     sub-tone: root.gateway.tone != 0 ? root.gateway.tone : 3;
                     source-text: root.gateway.conn-state != "" ? ("EC2 WSS (" + root.gateway.conn-state + ")") : (root.gateway.detail != "" ? root.gateway.detail : "EC2 WSS");
                 }
 
-                // Card 2: Market data state + freshness
+                // Card 2: Market data + order WS, merged into one data-feed fact
                 if root.bar-secondary: LiveTopCard {
                     icon-char: "M";
                     show-icon: root.bar-extended;
                     label: "MARKET DATA";
                     value-text: root.md.status != "" ? root.md.status : (root.market.state-label != "" ? root.market.state-label : "NO DATA");
                     tone: root.md.tone != 0 ? root.md.tone : root.market.tone;
-                    sub-text: (root.md.freshness != "" ? root.md.freshness : "â€”") + " Â· " + (root.md.sub != "" ? root.md.sub : "FEED");
-                    sub-tone: root.md.tone;
+                    sub-text: root.ws.status != "" ? ("ORDER WS: " + root.ws.status) : "ORDER WS: DISCONNECTED";
+                    sub-tone: root.ws.tone;
                     source-text: "MARKET WSS";
                 }
 
-                // Card 3: Order WebSocket live status + latency
-                if root.bar-secondary: LiveTopCard {
-                    icon-char: "W";
-                    show-icon: root.bar-extended;
-                    label: "ORDER WS";
-                    value-text: root.ws.status != "" ? root.ws.status : "DISCONNECTED";
-                    tone: root.ws.tone;
-                    sub-text: (root.ws.latency != "" ? root.ws.latency : "â€”") + " Â· " + (root.ws.sub != "" ? root.ws.sub : "ORDERS");
-                    sub-tone: root.ws.tone;
-                    source-text: "ORDER WSS";
-                }
-
-                // Card 4: Strategy fact (real id + running status)
+                // Card 3: Strategy fact (real id + running status)
                 if root.bar-secondary: LiveTopCard {
                     icon-char: "S";
                     show-icon: root.bar-extended;
                     label: "STRATEGY";
-                    value-text: root.active-strat.name != "" ? root.active-strat.name : (root.bar.strategy-label != "" ? root.bar.strategy-label : "OBR C1C4");
+                    value-text: root.active-strat.name != "" ? root.active-strat.name : (root.bar.strategy-label != "" ? root.bar.strategy-label : "NOT SELECTED");
                     tone: root.active-strat.status-tone != 0 ? root.active-strat.status-tone : root.bar.strategy-tone;
                     sub-text: root.active-strat.status != "" ? root.active-strat.status : (root.bar.strategy-sub != "" ? root.bar.strategy-sub : "STOPPED");
                     sub-tone: root.active-strat.status-tone;
                     source-text: "STRATEGY RT";
                 }
 
-                // Card 5: Risk engine verdict + leverage/limits
+                // Card 4: Risk engine verdict + capital
                 LiveTopCard {
                     icon-char: "R";
                     show-icon: root.bar-extended;
@@ -734,10 +722,11 @@ export component LiveScreen inherits Rectangle {
                     source-text: "RISK ENGINE";
                 }
 
-                // Card 6: Reconciliation verdict + venue counts
+                // Reconciliation + executor: only on the extended tier, where
+                // there is room. Narrow screens keep the four facts above.
                 if root.bar-extended: LiveTopCard {
                     icon-char: "RC";
-                    show-icon: root.bar-extended;
+                    show-icon: false;
                     label: "RECONCILIATION";
                     value-text: root.bar.recon-label != "" ? root.bar.recon-label : "NOT CONFIGURED";
                     tone: root.bar.recon-tone;
@@ -746,10 +735,9 @@ export component LiveScreen inherits Rectangle {
                     source-text: "RECON ENGINE";
                 }
 
-                // Card 7: Executor / recovery state
                 if root.bar-extended: LiveTopCard {
                     icon-char: "EX";
-                    show-icon: root.bar-extended;
+                    show-icon: false;
                     label: "EXECUTOR";
                     value-text: root.bar.exec-label != "" ? root.bar.exec-label : "STANDBY";
                     tone: root.bar.exec-tone;
@@ -862,7 +850,7 @@ export component LiveScreen inherits Rectangle {
                 // start, and never while LIVE consent is still outstanding.
                 VButton {
                     width: 112px;
-                    label: "â–¶ START";
+                    label: "▶ START";
                     variant: 0;
                     enabled: root.setup.can-start && !root.setup.needs-live-confirm;
                     clicked => { root.start-requested(); }
@@ -873,7 +861,7 @@ export component LiveScreen inherits Rectangle {
                 // button that silently does nothing.
                 VButton {
                     width: 74px;
-                    label: "â–  STOP";
+                    label: "■ STOP";
                     variant: 3;
                     enabled: root.setup.can-stop;
                     clicked => { root.stop-requested(); }
@@ -884,15 +872,38 @@ export component LiveScreen inherits Rectangle {
                 // halt-enabled fact. Idle it is neutral and inert.
                 VButton {
                     width: 76px;
-                    label: root.bar.halted ? "â–  HALTED" : "â–  HALT";
+                    label: root.bar.halted ? "■ HALTED" : "■ HALT";
                     variant: root.bar.halted ? 3 : 2;
                     enabled: root.bar.halt-enabled && !root.bar.halted;
                     clicked => { root.halt-requested(); }
                 }
+
+                // One verdict + one clock, carried here because the duplicated
+                // footer strip is gone: every fact now lives in exactly one place.
+                HorizontalLayout {
+                    spacing: 10px;
+                    alignment: center;
+
+                    Text {
+                        text: root.footer.risk != "" ? root.footer.risk : (root.bar.halted ? "✕ EXECUTION HALTED" : (root.setup.can-stop ? "● RUNNING" : (root.blockers.length > 0 ? "✕ START BLOCKED" : "✓ READY TO START")));
+                        color: root.bar.halted || root.blockers.length > 0 ? VayrenPalette.neg : VayrenPalette.pos;
+                        font-size: 10px;
+                        font-weight: 800;
+                        vertical-alignment: center;
+                    }
+
+                    Text {
+                        text: root.footer.clock;
+                        color: VayrenPalette.live-ink-dim;
+                        font-size: 10px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                    }
+                }
             }
         }
 
-        // â•â• 2. MAIN 3-COLUMN WORKSPACE â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+        // ══ 2. MAIN 3-COLUMN WORKSPACE ══════════════════════════════════════
         Rectangle {
             vertical-stretch: 1;
             min-width: 0px;
@@ -910,7 +921,7 @@ export component LiveScreen inherits Rectangle {
                 padding-right: root.inspector-docked ? root.inspector-w + 10px : 10px;
                 spacing: 10px;
 
-                // â”€â”€ COLUMN 1: WORKSTATION WORKSPACE (LEFT ~70%) â”€â”€
+                // ── COLUMN 1: WORKSTATION WORKSPACE (LEFT ~70%) ──
                 VerticalLayout {
                     horizontal-stretch: 70;
                     min-width: 0px;
@@ -919,7 +930,7 @@ export component LiveScreen inherits Rectangle {
                 }
             }
 
-            // â”€â”€ COLUMN 2: INSPECTOR (RIGHT COLUMN ~30%) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // ── COLUMN 2: INSPECTOR (RIGHT COLUMN ~30%) ─────────────────────────
             if root.show-inspector: Rectangle {
                 x: parent.width - root.inspector-w;
                 y: 0;
@@ -968,7 +979,7 @@ export component LiveScreen inherits Rectangle {
                                     }
 
                                     VBadge {
-                                        text: "â— " + (root.active-strat.mode != "" ? root.active-strat.mode : (root.bar.mode == 2 ? "LIVE" : root.bar.mode == 1 ? "SANDBOX" : "PAPER"));
+                                        text: "● " + (root.active-strat.mode != "" ? root.active-strat.mode : (root.bar.mode == 2 ? "LIVE" : root.bar.mode == 1 ? "SANDBOX" : "PAPER"));
                                         tone: root.active-strat.mode-tone != 0 ? root.active-strat.mode-tone : (root.bar.mode == 2 ? 3 : 0);
                                         vertical-alignment: center;
                                     }
@@ -984,7 +995,7 @@ export component LiveScreen inherits Rectangle {
                                         border-color: VayrenPalette.live-btn-line;
                                         TouchArea { clicked => { root.inspector-toggled(); } }
                                         Text {
-                                            text: "â€º";
+                                            text: "›";
                                             color: VayrenPalette.live-ink;
                                             font-size: 14px;
                                             font-weight: 700;
@@ -996,15 +1007,15 @@ export component LiveScreen inherits Rectangle {
 
                                 // STRATEGY + STATUS is the operator's first read
                                 // (STEP 32 hierarchy): name left, lifecycle right,
-                                // and the lifecycle is the DOMAIN's session label â€”
+                                // and the lifecycle is the DOMAIN's session label —
                                 // never a locally invented "ACTIVE".
                                 HorizontalLayout {
                                     height: 18px;
                                     spacing: 4px;
                                     Text { width: 80px; text: "STRATEGY"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
-                                    Text { horizontal-stretch: 1; min-width: 0px; text: root.active-strat.name != "" ? root.active-strat.name : "â€”"; color: VayrenPalette.live-teal; font-size: 11px; font-weight: 800; vertical-alignment: center; overflow: elide; }
+                                    Text { horizontal-stretch: 1; min-width: 0px; text: root.active-strat.name != "" ? root.active-strat.name : "—"; color: VayrenPalette.live-teal; font-size: 11px; font-weight: 800; vertical-alignment: center; overflow: elide; }
                                     Text { width: 50px; text: "STATUS"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
-                                    Text { width: 65px; text: root.active-strat.status != "" ? root.active-strat.status : "â€”"; color: LiveTone.ink(root.active-strat.status-tone != 0 ? root.active-strat.status-tone : root.bar.exec-tone); font-size: 11px; font-weight: 700; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 65px; text: root.active-strat.status != "" ? root.active-strat.status : "—"; color: LiveTone.ink(root.active-strat.status-tone != 0 ? root.active-strat.status-tone : root.bar.exec-tone); font-size: 11px; font-weight: 700; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
                                 }
 
                                 // MODE is independent of STATUS: a LIVE selection
@@ -1015,25 +1026,25 @@ export component LiveScreen inherits Rectangle {
                                     Text { width: 80px; text: "MODE"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
                                     Text { horizontal-stretch: 1; min-width: 0px; text: root.active-strat.mode != "" ? root.active-strat.mode : (root.bar.mode == 2 ? "LIVE" : root.bar.mode == 1 ? "SANDBOX" : "PAPER"); color: LiveTone.ink(root.active-strat.mode-tone != 0 ? root.active-strat.mode-tone : (root.bar.mode == 2 ? 3 : 0)); font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
                                     Text { width: 50px; text: "SYMBOLS"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
-                                    Text { width: 65px; text: root.active-strat.symbols-count != "" ? root.active-strat.symbols-count : "â€”"; color: VayrenPalette.text; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 65px; text: root.active-strat.symbols-count != "" ? root.active-strat.symbols-count : "—"; color: VayrenPalette.text; font-size: 10px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
                                 }
 
                                 HorizontalLayout {
                                     height: 18px;
                                     spacing: 4px;
                                     Text { width: 80px; text: "SIGNALS TODAY"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
-                                    Text { horizontal-stretch: 1; min-width: 0px; text: root.active-strat.today-signals != "" ? root.active-strat.today-signals : "â€”"; color: VayrenPalette.text; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
+                                    Text { horizontal-stretch: 1; min-width: 0px; text: root.active-strat.today-signals != "" ? root.active-strat.today-signals : "—"; color: VayrenPalette.text; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
                                     Text { width: 50px; text: "ORDERS"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
-                                    Text { width: 65px; text: root.active-strat.orders-today != "" ? root.active-strat.orders-today : "â€”"; color: VayrenPalette.text; font-size: 10px; font-weight: 700; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 65px; text: root.active-strat.orders-today != "" ? root.active-strat.orders-today : "—"; color: VayrenPalette.text; font-size: 10px; font-weight: 700; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
                                 }
 
                                 HorizontalLayout {
                                     height: 18px;
                                     spacing: 4px;
                                     Text { width: 80px; text: "POSITIONS"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
-                                    Text { horizontal-stretch: 1; min-width: 0px; text: root.active-strat.current-position != "" ? root.active-strat.current-position : "â€”"; color: VayrenPalette.pos; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
+                                    Text { horizontal-stretch: 1; min-width: 0px; text: root.active-strat.current-position != "" ? root.active-strat.current-position : "—"; color: VayrenPalette.pos; font-size: 10px; font-weight: 700; vertical-alignment: center; overflow: elide; }
                                     Text { width: 50px; text: "STARTED"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; }
-                                    Text { width: 65px; text: root.active-strat.started-at != "" ? root.active-strat.started-at : "â€”"; color: VayrenPalette.muted; font-size: 10px; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+                                    Text { width: 65px; text: root.active-strat.started-at != "" ? root.active-strat.started-at : "—"; color: VayrenPalette.muted; font-size: 10px; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
                                 }
                             }
                         }
@@ -1051,114 +1062,11 @@ export component LiveScreen inherits Rectangle {
                 background: VayrenPalette.bg;
                 TouchArea { clicked => { root.inspector-toggled(); } }
                 Text {
-                    text: "â€¹";
+                    text: "‹";
                     color: VayrenPalette.live-ink;
                     font-size: 14px;
                     font-weight: 700;
                     horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-            }
-        }
-
-        // â•â• 3. FOOTER STATUS STRIP (Height 24px) â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-        Rectangle {
-            height: 24px;
-            min-width: 0px;
-            width: 100%;
-            clip: true;
-            background: VayrenPalette.live-topbar;
-            border-width: 1px;
-            border-color: VayrenPalette.live-line-deep;
-
-            HorizontalLayout {
-                padding-left: 12px;
-                padding-right: 12px;
-                spacing: 16px;
-                alignment: center;
-
-                // WebSocket Status
-                HorizontalLayout {
-                    spacing: 4px;
-                    alignment: center;
-                    VStatusDot { tone: root.ws.tone; }
-                    Text {
-                        text: "WEBSOCKET: " + (root.footer.websocket != "" ? root.footer.websocket : (root.ws.status != "" ? root.ws.status : "CONNECTED"));
-                        color: LiveTone.ink(root.ws.tone);
-                        font-size: 10px;
-                        font-weight: 700;
-                        vertical-alignment: center;
-                    }
-                }
-
-                // Market Data Status
-                HorizontalLayout {
-                    spacing: 4px;
-                    alignment: center;
-                    VStatusDot { tone: root.md.tone; }
-                    Text {
-                        text: "MARKET DATA: " + (root.footer.market-data != "" ? root.footer.market-data : (root.md.status != "" ? root.md.status : "STREAMING"));
-                        color: LiveTone.ink(root.md.tone);
-                        font-size: 10px;
-                        font-weight: 700;
-                        vertical-alignment: center;
-                    }
-                }
-
-                // Broker Status
-                HorizontalLayout {
-                    spacing: 4px;
-                    alignment: center;
-                    VStatusDot { tone: root.bar.broker-tone; }
-                    Text {
-                        text: "BROKER: " + (root.footer.broker != "" ? root.footer.broker : (root.bar.broker-label != "" ? root.bar.broker-label : "FYERS"));
-                        color: LiveTone.ink(root.bar.broker-tone);
-                        font-size: 10px;
-                        font-weight: 700;
-                        vertical-alignment: center;
-                    }
-                }
-
-                // Strategy Status â€” MODE and STATUS are separate words, and the
-                // fallback carries neither a hardcoded name nor a fake RUNNING.
-                HorizontalLayout {
-                    min-width: 0px;
-                    spacing: 4px;
-                    alignment: center;
-                    VStatusDot { tone: root.active-strat.status-tone; }
-                    Text {
-                        min-width: 0px;
-                        text: "STRATEGY: " + (root.active-strat.name != "" ? root.active-strat.name : "â€”") + " Â· " + (root.bar.mode == 2 ? "LIVE" : root.bar.mode == 1 ? "SANDBOX" : "PAPER") + " Â· " + (root.active-strat.status != "" ? root.active-strat.status : "â€”");
-                        color: LiveTone.ink(root.active-strat.status-tone);
-                        font-size: 10px;
-                        font-weight: 700;
-                        vertical-alignment: center;
-                        overflow: elide;
-                    }
-                }
-
-                Rectangle { horizontal-stretch: 1; background: transparent; }
-
-                // One verdict only. The READINESS card owns the blockers; this
-                // strip states the verdict without reprinting the reasons.
-                HorizontalLayout {
-                    spacing: 4px;
-                    alignment: center;
-                    Text {
-                        text: root.footer.risk != "" ? root.footer.risk : (root.bar.halted ? "âœ• EXECUTION HALTED" : (root.setup.can-stop ? "â— RUNNING" : (root.blockers.length > 0 ? "âœ• START BLOCKED" : "âœ“ READY TO START")));
-                        color: root.bar.halted || root.blockers.length > 0 ? VayrenPalette.neg : VayrenPalette.pos;
-                        font-size: 10px;
-                        font-weight: 800;
-                        vertical-alignment: center;
-                    }
-                }
-
-                // Clock
-                Text {
-                    text: root.footer.clock != "" ? root.footer.clock : "12:14:25 IST";
-                    color: VayrenPalette.live-ink-dim;
-                    font-size: 10px;
-                    font-weight: 600;
                     vertical-alignment: center;
                 }
             }
