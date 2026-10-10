@@ -10,6 +10,7 @@
 2. `crates/vayren-domain/src/lab.rs` preset tests still used MAX index 4 after the list shrank to 1Y/3Y/5Y/MAX. Both spots fixed to 3. Verified: `cargo test -p vayren-domain --lib` 255 passed.
 3. `crates/vayren-shell/src/shell.rs` tests still expected SMA/second strategy while demo states are OBR-only. 7 spots fixed to OBR/index 0/row_count 1. Shell lib tests running.
 4. Open: shell lib result, then commit + push, then CI watch till green. `main` untouched; squash merge only on explicit command.
+5. Follow-up: `live_demo.slint` (palette-bahar color, authority red) deleted + graph rebuilt; `lab_config_render.rs` preset count 5→4 fixed and render suite 7/7 green.
 
 **Latest update (live-strategy-sync-and-watchlist, 2026-10-10):** LIVE UI STRATEGY SYNCHRONIZATION & DYNAMIC WATCHLIST COMPLETE (local only, no commit/push).
 1. Central Strategy Selection: `LiveTradingService.available_strategies()` integrated directly with central `StrategyRegistry`, returning canonical strategy IDs (`d.id`) rather than ad-hoc display names. Resolves configuration robustly without hardcoded lists.
