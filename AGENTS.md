@@ -171,6 +171,14 @@ Migration rules sirf instructions nahi — `make check` / CI mein **hard gate** 
 - **Feature flow:** Rust-owned file ko touch karo → usi feature mein related slice migrate karo → retention entry update karo → `validate_language_ownership.py` PASS hona chahiye. Sirf tests pass hona enough nahi.
 - **"Smallest useful slice" = minimum migration scope, migration skip karne ka excuse nahi.** Slice bada lage toh scope feature tak limited rakho, lekin Python mein naya wrong-language code mat likho — validator fail karega.
 
+## Auto Fast-Gate Rule (har edit par, bina poochhe)
+
+- Har code/config edit ke turant baad sirf judi validation chalao: `make fast` (Windows par na ho to `python tools/benchmark.py impact --run`). Agar fail ho to usi edit mein fix karo, aage mat badho.
+- Full `make check` sirf task ke end par chalao (upar wala rule), har edit par nahi.
+- Jo test flaky ho (timing/socket wala, jaise `test_auth_timeout_closes_quiet_client`) use gate ka blocker mat maano; alag se report karo.
+- Shared/tracked files par gate tests live tree ko badal sakte hain; gate ke beech koi commit/edit mat karo, warna result hil jata hai.
+- Kaam khatam hone par `docs/ai_memory.md` update karo, aur ek line mein batao gate kitne se kitne mein chala.
+
 ## Commit Style
 
 Conventional commits, ek commit = ek kaam: `feat:` / `fix:` / `docs:` / `refactor:` / `test:` / `chore:`
