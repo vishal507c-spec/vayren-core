@@ -1,4 +1,4 @@
-﻿// VAYREN Market â€” native Slint workstation surface (AI_ENTRY.md Â§1).
+// VAYREN Market â€” native Slint workstation surface (AI_ENTRY.md Â§1).
 // Rust `market.rs` owns ALL state; this screen renders
 // bound properties and reports interactions. The feature surface mirrors the
 // ORIGINAL legacy Market exactly: watchlist (switch/add/remove/filter/sort +
@@ -1727,6 +1727,33 @@ component StatusFact inherits Rectangle {
     }
 }
 
+// One titled fact group (legacy grid split: MARKET REGIME + DATA STATUS).
+component StatusGroup inherits Rectangle {
+    in property <string> title;
+    in property <[MarketStatusRow]> rows;
+
+    horizontal-stretch: 1;
+    min-width: 0px;
+    VerticalLayout {
+        spacing: VayrenDesign.sp-md;
+        Text {
+            text: root.title;
+            color: VayrenPalette.faint;
+            font-size: VayrenDesign.fs-label;
+            font-weight: 700;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        HorizontalLayout {
+            spacing: VayrenDesign.sp-lg;
+            for r in root.rows: StatusFact {
+                caption: r.key;
+                value: r.value;
+                muted: r.muted;
+            }
+        }
+    }
+}
 
 export component MarketScreen inherits Rectangle {
     // â”€â”€ bound view state (Rust -> screen) â”€â”€
@@ -2779,6 +2806,36 @@ export component MarketScreen inherits Rectangle {
                         }
                     }
 
+                    // Market-status strip (legacy `MarketStatusPanel`).
+                    // Collapsed by default; the rail "MS" button toggles it.
+                    // Sizes by content, so it never steals chart space while
+                    // closed and the chart keeps priority while open.
+                    if root.market-status-open
+                        && (root.market-status-regime.length + root.market-status-data.length) > 0: Rectangle {
+                        background: VayrenPalette.surface;
+                        Rectangle {
+                            y: 0;
+                            height: 1px;
+                            width: parent.width;
+                            background: VayrenPalette.hairline;
+                        }
+                        HorizontalLayout {
+                            padding: VayrenDesign.sp-md;
+                            spacing: VayrenDesign.sp-lg;
+                            StatusGroup {
+                                title: "MARKET REGIME";
+                                rows: root.market-status-regime;
+                            }
+                            Rectangle {
+                                width: 1px;
+                                background: VayrenPalette.hairline-soft;
+                            }
+                            StatusGroup {
+                                title: "DATA STATUS";
+                                rows: root.market-status-data;
+                            }
+                        }
+                    }
                 }
             }
 

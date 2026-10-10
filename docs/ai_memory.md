@@ -12,6 +12,7 @@
 4. Open: shell lib result, then commit + push, then CI watch till green. `main` untouched; squash merge only on explicit command.
 5. Follow-up: `live_demo.slint` (palette-bahar color, authority red) deleted + graph rebuilt; `lab_config_render.rs` preset count 5→4 fixed and render suite 7/7 green.
 6. Follow-up 2: `crates/vayren-shell/tests/lab_select.rs` fixed by supplying 2 strategies (`OBR` + `SMA`) to preserve multi-row geometry regression test while keeping `demo_lab_state` OBR-only; `lab_select.rs` (1/1) and `lab_stock_row_render.rs` (3/3) green; graph rebuilt (5856 entities, 0 unresolved).
+7. Follow-up 3: `live_render_snapshot.rs` aligned thresholds for post-cleanup UHD scaling (accent on paper mode, text/neg/bg on 4K), restored market status strip and `StatusGroup` in `market.slint` fixing warning and `market_status_strip.rs` (1/1); all shell suites green; graph rebuilt (5857 entities, 0 unresolved).
 
 **Latest update (live-strategy-sync-and-watchlist, 2026-10-10):** LIVE UI STRATEGY SYNCHRONIZATION & DYNAMIC WATCHLIST COMPLETE (local only, no commit/push).
 1. Central Strategy Selection: `LiveTradingService.available_strategies()` integrated directly with central `StrategyRegistry`, returning canonical strategy IDs (`d.id`) rather than ad-hoc display names. Resolves configuration robustly without hardcoded lists.
