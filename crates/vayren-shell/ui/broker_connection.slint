@@ -592,13 +592,7 @@ field-input := TextInput {
                                              selection-background-color: VayrenPalette.accent-dim;
                                              key-pressed(event) => {
                                                  if (event.modifiers.control && (event.text == "v" || event.text == "V" || event.text == "\u{16}")) {
-                                                     self.paste();
-                                                     if i == 0 { root.field-v0 = self.text; }
-                                                     else if i == 1 { root.field-v1 = self.text; }
-                                                     else if i == 2 { root.field-v2 = self.text; }
-                                                     else if i == 3 { root.field-v3 = self.text; }
-                                                     else if i == 4 { root.field-v4 = self.text; }
-                                                     else { root.field-v5 = self.text; }
+                                                     root.paste-requested(i);
                                                      return accept;
                                                  }
                                                 if (event.modifiers.control && (event.text == "c" || event.text == "C" || event.text == "\u{03}")) {
@@ -627,6 +621,9 @@ field-input := TextInput {
                                                     root.remove-armed = false;
                                                     return reject;
                                                 }
+                                                if (self.text == root.saved-sentinel && event.text != "") {
+                                                    self.text = "";
+                                                }
                                                 return reject;
                                             }
                                             edited => {
@@ -636,14 +633,7 @@ field-input := TextInput {
                                                 else if i == 3 { root.field-v3 = field-input.text; }
                                                 else if i == 4 { root.field-v4 = field-input.text; }
                                                 else { root.field-v5 = field-input.text; }
-                                                // A committed edit on a REVEALED
-                                                // field is a real save intent:
-                                                // report the venue's own key
-                                                // (never a guessed one) with the
-                                                // typed value.
-                                                if !f.secret || root.field-shown(i) {
-                                                    root.config-saved(f.key, field-input.text);
-                                                }
+                                                root.config-saved(f.key, field-input.text);
                                             }
                                         }
 
@@ -670,14 +660,6 @@ field-input := TextInput {
                                                 mouse-cursor: pointer;
                                                 clicked => {
                                                     field-input.focus();
-                                                    field-input.select-all();
-                                                    field-input.paste();
-                                                    if i == 0 { root.field-v0 = field-input.text; }
-                                                    else if i == 1 { root.field-v1 = field-input.text; }
-                                                    else if i == 2 { root.field-v2 = field-input.text; }
-                                                    else if i == 3 { root.field-v3 = field-input.text; }
-                                                    else if i == 4 { root.field-v4 = field-input.text; }
-                                                    else { root.field-v5 = field-input.text; }
                                                     root.paste-requested(i);
                                                 }
                                             }

@@ -68,12 +68,14 @@ fn lab_stock_row_renders_saved_chips_count_and_state() {
     let view = lab::project(&state);
     assert_eq!(view.universe_count_line, "3 stocks saved");
     assert_eq!(view.saved_universe_chips.len(), 3);
+    assert_eq!(view.universe_exchange, "NSE");
 
     // Model the row binds to must match the Rust projection exactly.
     assert_eq!(
         saved_chips(&ui),
         vec!["NSE:RELIANCE", "NSE:TCS", "NSE:INFY"]
     );
+    assert_eq!(ui.get_lab().universe_exchange, "NSE");
 
     win.set_size(PhysicalSize::new(1280, 2400));
     ui.window().request_redraw();
@@ -105,6 +107,7 @@ fn lab_stock_row_renders_empty_state_when_nothing_is_saved() {
 
     assert!(saved_chips(&ui).is_empty());
     assert_eq!(ui.get_lab().universe_count_line, "No stocks saved");
+    assert_eq!(ui.get_lab().universe_exchange, "");
 
     win.set_size(PhysicalSize::new(1280, 2400));
     ui.window().request_redraw();

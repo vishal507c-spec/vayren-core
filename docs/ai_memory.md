@@ -7,7 +7,66 @@
 
 **Build-performance history:** read `docs/CARGO_BUILD_EXPERIMENTS.md` before any Cargo/release build-speed work (measured baseline, rejected `codegen-units = 256`, `target-exp` deleted, User-scope `CARGO_TARGET_DIR` removed (verified; `vayren-core-main\target` retained, not deleted)).
 
-**Latest update (live-strategy-dropdown-fix, 2026-10-10):** FIX LIVE UI STRATEGY DROPDOWN POPULATION & SELECTION (local only, no commit/push).
+**Latest update (fyers-live-config-and-broker-ui-fix, 2026-10-11):** FYERS LIVE ACCOUNT SECURE CONFIGURATION & BROKER CONNECTION UI FIX (local only, no commit/push).
+1. Broker Connection UI & Clipboard Input Fixes:
+   - Secret Input Saving (`crates/vayren-shell/ui/broker_connection.slint`): Fixed `edited` callback to always report `root.config-saved(f.key, field-input.text)` regardless of whether secret field was revealed, ensuring typed secrets are never dropped.
+   - Clipboard Paste Integration: Routed `Ctrl+V` and the `PASTE` touch button to `root.paste-requested(i)` using native Windows clipboard (`clipboard-win`). In `crates/vayren-shell/src/main.rs`, `on_broker_paste_requested` now immediately persists pasted credentials into the vault backend via `BackendCommand::ConnectBroker` and refreshes UI connection snapshot.
+   - Sentinel Replacement: When user types into a field holding `root.saved-sentinel` (`••••••••`), the input field automatically clears the sentinel bullets rather than prepending/appending them. In `main.rs`, stripped any residual bullet characters so real credentials are never discarded.
+   - Crate Verification: `cargo check -p vayren-shell` clean in 2.47s (0 errors, 0 warnings).
+2. FYERS Secure Account Verification:
+   - Stored secrets exclusively in Windows Credential Manager under `vayren:fyers` (`app_id`, `client_id`, `pin`, `redirect_uri`, `secret`, `totp_secret`) with zero leakage in git/logs/code.
+   - Verified automated authentication (`FyersAutoAuthEngine` with TOTP + PIN): authenticated as `XV29244`.
+   - Verified Market Data streaming: WebSocket connected and symbol subscriptions active (`code: 1605, status: ok`).
+   - Verified Account & Funds access: `VISHAL SINGH` (`XV29244`), Available Funds `₹400.72`.
+   - Fail-closed safeguard: All live orders stopped before execution; no live trades placed.
+
+**Previous update (live-broker-agnostic-capital-display, 2026-10-11):** BROKER-AGNOSTIC CAPITAL DISPLAY IN LIVE TOOLBAR (local only, no commit/push).
+1. Architecture & Data Flow:
+   - Broker-Agnostic Resolution (`src/app/services/live_trading_service.py`): Dynamically discovers configured/connected broker (`fyers`, `zerodha`, etc.) from `BrokerManager` snapshot; prefers connected venues over disconnected ones; supports case-insensitive statuses (`CONNECTED`, `LOGIN_REQUIRED`, `SESSION_EXPIRED`, `DISCONNECTED`, `NOT_CONFIGURED`); maps broker-specific funds/margins (`available`, `available_margin`, `used`, `total`).
+   - Honest State Transitions: Connected broker formats truthful available margin in INR (`₹5,40,250.00`); ₹0.00 reports truthfully as `₹0.00` with connected tone; login expired reports `Unavailable` with `LOGIN REQUIRED` badge; disconnected reports `Unavailable` with `DISCONNECTED` badge; unconfigured reports `Unavailable` with `NOT CONFIGURED`. Never fabricates or estimates funds.
+   - Live Refresh Action (`src/app/headless.py`): Handled `"refresh_capital"` action in `_live_action` which dispatches `broker_manager.refresh_funds(current_broker)` synchronously or via background worker and immediately returns a fresh snapshot with updated funds.
+   - Dedicated Toolbar Panel (`crates/vayren-shell/ui/live.slint`): Added `LiveBrokerCapitalCard` to the LIVE top toolbar between `HALT` and `Clock`. Removed redundant `RECONCILIATION` and `EXECUTOR` toolbar cards (retaining all underlying risk engine checks, policies, and trading safeguards 100% intact). Display features header "BROKER CAPITAL", broker tag pill, large bold formatted amount in INR, subtext with description + last-updated timestamp (`HH:MM:SS`), and hoverable `↻` refresh button.
+   - Rust Domain & UI Wiring (`crates/vayren-domain/src/live.rs`, `crates/vayren-shell/src/shell.rs`, `crates/vayren-live-view`): Added `format_inr(value: f64)` with standard Indian comma grouping; added `refresh_broker_capital(&mut self)` host action queueing; bound `broker-capital-refresh` callback end-to-end to `LiveState::refresh_broker_capital`.
+2. Verified:
+   - Rust Domain Tests: `cargo test -p vayren-domain --lib live` (59/59 passed in 0.01s).
+   - Rust Shell & UI Render Tests: `cargo test -p vayren-shell --test live_stock_row_render` (1/1 passed in 0.69s; verified 22 stocks, stock refresh callback, broker capital render `₹5,40,250.00` FYERS CONNECTED, and broker capital refresh action queueing `refresh_capital`).
+   - Python Unit Tests: `pytest src/app/tests/test_live_broker_capital.py` (5/5 passed in 1.41s); full live suite `pytest src/app/tests/test_live*.py src/app/tests/test_lab_to_live_universe_e2e.py` (37/37 passed in 4.83s).
+   - Rust Crate Compilation: `cargo check -p vayren-live-view` (PASS), `cargo check -p vayren-shell` (PASS).
+   - Code Quality & Governance: `pyright` (0 errors, 0 warnings); `ruff check` (0 errors); `ruff format --check` (0 errors); `python tools/validate_language_ownership.py` (397 files checked, PASSED).
+
+**Previous update (live-screen-stock-display-fix, 2026-10-11):** FIX VAYREN LIVE SCREEN STOCK DISPLAY & DATA FLOW (local only, no commit/push).
+1. Root Causes Resolved:
+   - Destructive Overwrite in LIVE Setup Action: When `configure()` in `src/app/services/live_trading_service.py` was called from the client with empty symbols list `[]` (queued whenever the Live setup was synced), if `strategy_changed` was false, it called `self._universes.save(strat, tuple(symbols))`, which destroyed the saved universe in `strategy_universes.json` by overwriting it with an empty list. Fixed: `configure()` now preserves the saved universe when `not symbols` by loading from `self._universes.symbols_for()`, and `headless.py::_live_action` treats empty `symbols=[]` as `None`.
+   - Real-time Strategy Lab to Live Synchronization: In `crates/vayren-shell/src/main.rs`, on receiving `FetchResult::LabUniverse(strategy, saved, error)` where `saved == true`, the shell immediately dispatches `BackendCommand::GetLiveSnapshot`, instantly pushing the freshly saved universe to the LIVE screen without needing an app restart.
+   - Dedicated "LIVE TRADE STOCKS" Section: In `crates/vayren-shell/ui/live.slint`, placed a dedicated 38px strip immediately below the toolbar with "LIVE TRADE STOCKS" header, dynamic exchange (`root.setup.universe-exchange != "" ? root.setup.universe-exchange : "NSE"`), actual count (`"X stocks saved"` / `"No saved stocks"`), scrollable compact chips for every saved symbol, `"Read-only · Managed in Strategy Lab"` badge, and a `↻` refresh button.
+   - Live Refresh Handling: Wired `refresh-stocks` in `crates/vayren-shell/ui/app.slint` to `live-refresh-stocks()`, wired unit callback in `crates/vayren-shell/src/shell.rs` calling `LiveState::refresh_universe()`, and handled `"refresh"` in `src/app/headless.py` to reload the universe from disk and return a fresh snapshot.
+   - Strategy Isolation: Switching strategies in `crates/vayren-domain/src/live.rs` isolates universes immediately, clears `stock_universe` until the next snapshot, and forwards the setup action to Python.
+2. Verified:
+   - Visual Render Regression Test: `crates/vayren-shell/tests/live_stock_row_render.rs` passed in 1.38s; verified 22 stocks (OBR C1C4) rendered with exchange "NSE", chip count, refresh callback execution, and empty state; generated `saved-twenty-two.ppm` and `empty-live.ppm` in `target/tmp/live-stock-row`.
+   - Python Regression Tests: `pytest src/app/tests/test_live_strategy_sync_and_watchlist.py` (7/7 passed), `test_live_actions.py` (8/8 passed), `test_lab_to_live_universe_e2e.py` (1/1 passed).
+   - Rust Domain Tests: `cargo test -p vayren-domain --lib live` (57/57 passed).
+   - Validation Gate: `python tools/benchmark.py impact --run` PASSED in 287.80s (`pytest src/app/tests`: 154 passed; `cargo test -p vayren-shell`: PASS).
+   - Governance & Type Check: `python tools/validate_language_ownership.py` PASSED (396 files); `pyright` (0 errors); `ruff check` (0 errors).
+   - Restored original 22 OBR C1C4 stocks in `D:\ZerodhaTradingData\live\strategy_universes.json`.
+
+**Previous update (lab-universe-persistence-display-fix, 2026-10-11):** FIX STRATEGY LAB STOCK UNIVERSE PERSISTENCE & CONTRADICTORY STATUS BUG (local only, no commit/push).
+1. Root Causes Resolved:
+   - Contradictory Status: `interaction_symapply()` in `lab.rs` previously set `universe_state = UniverseSaveState::Pending` immediately on modal Apply, but `dirty` only checked `code != synced_code`. Consequently, the editor status said "Saved · no unsaved changes", while the universe row displayed "Saving stocks…", and the "Save changes" button was disabled. Fixed by making Apply update local draft (`universe_selected`) and mark dirty (`is_universe_dirty()`), keeping `universe_state = UniverseSaveState::Clean` until the operator clicks "Save changes" (`interaction_save()`).
+   - Drain Loop Starvation: In `crates/vayren-shell/src/main.rs`, `drain_universe_actions()` was erroneously placed inside the `else` branch of `if let Some(ref rx) = remote_rx`. In any remote or packaged-remote build, the `else` branch never executed, causing queued universe saves to freeze in `Pending` forever. Moved `drain_universe_actions()` to the top of the 50ms fetch timer closure, executing unconditionally regardless of Live mode.
+   - Save Request Dispatch in Shell: In `crates/vayren-shell/src/shell.rs`, `on_lab_save_requested` now checks `code_dirty = guard.code != guard.synced_code` before calling `fetch_save(name, code)`, avoiding redundant code saves when only the universe changed.
+   - Dynamic Exchange Display: Removed hardcoded `"NSE"` text in `crates/vayren-shell/ui/lab.slint`. Added `universe-exchange: string` to `LabHeader`, bound to `root.lab.universe-exchange`, dynamically resolved in `lab::project()` from saved symbols (or empty if no stocks saved).
+   - Saved Status Indication: In `lab.slint`, added `: root.lab.universe-state == "saved" ? "Saved"` with `LabPalette.green` so saving success cleanly displays `"Saved"` alongside the stock count, rather than blank text.
+   - Normalized Token Matching: Added `normalize_symbol_token()` and `normalize_to_canonical_nse()` to `lab.rs` so bare symbols (`"RELIANCE"`) and prefixed symbols (`"NSE:RELIANCE"`) match accurately across chip removal, modal search, selection, and dirty checks.
+   - Snapshot Adoption Logic: In `apply_saved_universe_json`, checked `was_dirty` before setting `saved_universe_symbols`, ensuring that loading or switching strategies accurately populates `universe_selected` and clears dirty state.
+2. Verified:
+   - `cargo test -p vayren-domain --lib`: 259 passed (including 3 new comprehensive universe lifecycle, retry, and chip removal tests).
+   - `cargo test -p vayren-shell --test lab_stock_row_render`: 3 passed in 0.80s (verified saved chips, exchange binding, count lines, empty state).
+   - `pytest src/app/tests/test_lab_snapshot_universe.py -q`: 8 passed in 3.26s.
+   - `python tools/benchmark.py impact --run`: PASSED in 255.71s (`cargo test -p vayren-shell` PASS).
+   - `python tools/validate_language_ownership.py`: PASSED (396 files checked).
+   - `cargo check -p vayren-shell`: PASSED with 0 errors/warnings.
+
+**Previous update (live-strategy-dropdown-fix, 2026-10-10):** FIX LIVE UI STRATEGY DROPDOWN POPULATION & SELECTION (local only, no commit/push).
 1. Root Causes Resolved:
    - `LiveTradingService.available_strategies()` in `src/app/services/live_trading_service.py` unified registry active strategies (`defn.name`: `"OBR C1C4"`, `"EMA Crossover"`, `"SMA Crossover"`, `"RSI Strategy"`) and file-backed library strategies (`list_strategies` + fallback `D:\VAYREN_STRATEGIES` -> `"OBR"`).
    - `src/remote/server.py`: Added `"available_strategies"`, `"available_symbols"`, `"selected_symbols"`, `"available_timeframes"`, `"selected_timeframe"`, `"quotes"`, `"pnl"` to `EVENT_CHANNELS` tuple so remote clients receive strategy list during snapshot and state update streaming.

@@ -762,6 +762,47 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             std::time::Duration::from_millis(50),
             move || {
                 let Some(ui) = weak.upgrade() else { return };
+                // Lab stock-universe saves: drained here, sent on a worker,
+                // answered through FetchResult::LabUniverse. Strategy Lab operates
+                // against the backend regardless of whether Live streaming is remote.
+                let universe_actions = lab_state.borrow_mut().drain_universe_actions();
+                for raw in universe_actions {
+                    match parse_universe_action(&raw) {
+                        Some((strategy, symbols)) => {
+                            let backend = Arc::clone(&backend);
+                            let tx = tx.clone();
+                            std::thread::spawn(move || {
+                                let command = BackendCommand::SaveLabUniverse {
+                                    strategy: strategy.clone(),
+                                    symbols,
+                                };
+                                let (saved, error) =
+                                    match PythonBackend::lock_send(&backend, command) {
+                                        Ok(BackendResponse::LabUniverse { data }) => {
+                                            let ok = data
+                                                .get("state")
+                                                .and_then(|v| v.as_str())
+                                                == Some("saved");
+                                            let err = data
+                                                .get("error")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("")
+                                                .to_string();
+                                            (ok, err)
+                                        }
+                                        Ok(other) => (
+                                            false,
+                                            format!("unexpected universe response ({other:?})"),
+                                        ),
+                                        Err(err) => (false, format!("universe save failed: {err}")),
+                                    };
+                                let _ = tx.send(FetchResult::LabUniverse(strategy, saved, error));
+                            });
+                        }
+                        None => eprintln!("lab: ignoring malformed universe action: {raw}"),
+                    }
+                }
+
                 // LIVE is HOST-MODE: the buttons queue an action and the
                 // backend owns the transition. Drain them here and forward
                 // each on a worker thread — a blocking round-trip on the UI
@@ -824,46 +865,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         shell::apply_live(&ui, &live_state.borrow());
                     }
                 } else {
-                    // Lab stock-universe saves: drained here, sent on a worker,
-                    // answered through FetchResult::LabUniverse. Code saves never
-                    // come through this queue (they use fetch_lab_save).
-                    let universe_actions = lab_state.borrow_mut().drain_universe_actions();
-                    for raw in universe_actions {
-                        match parse_universe_action(&raw) {
-                            Some((strategy, symbols)) => {
-                                let backend = Arc::clone(&backend);
-                                let tx = tx.clone();
-                                std::thread::spawn(move || {
-                                    let command = BackendCommand::SaveLabUniverse {
-                                        strategy: strategy.clone(),
-                                        symbols,
-                                    };
-                                    let (saved, error) =
-                                        match PythonBackend::lock_send(&backend, command) {
-                                            Ok(BackendResponse::LabUniverse { data }) => {
-                                                let ok = data
-                                                    .get("state")
-                                                    .and_then(|v| v.as_str())
-                                                    == Some("saved");
-                                                let err = data
-                                                    .get("error")
-                                                    .and_then(|v| v.as_str())
-                                                    .unwrap_or("")
-                                                    .to_string();
-                                                (ok, err)
-                                            }
-                                            Ok(other) => (
-                                                false,
-                                                format!("unexpected universe response ({other:?})"),
-                                            ),
-                                            Err(err) => (false, format!("universe save failed: {err}")),
-                                        };
-                                    let _ = tx.send(FetchResult::LabUniverse(strategy, saved, error));
-                                });
-                            }
-                            None => eprintln!("lab: ignoring malformed universe action: {raw}"),
-                        }
-                    }
                     // Ordered dispatch. The drain used to spawn ONE THREAD PER
                     // action, each contending for the same backend mutex — so
                     // `service.configure()` could apply intents in an order
@@ -1081,12 +1082,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     shell::apply_lab_progress(&ui, &lab_state.borrow());
                 }
                 if !lab_universe_results.is_empty() {
+                    let mut any_saved = false;
                     for (strategy, saved, error) in lab_universe_results {
+                        if saved {
+                            any_saved = true;
+                        }
                         lab_state
                             .borrow_mut()
                             .apply_universe_result(&strategy, saved, &error);
                     }
                     shell::apply_lab(&ui, &lab_state.borrow());
+                    if any_saved && !is_remote {
+                        let id = live_seq.fetch_add(1, Ordering::SeqCst) + 1;
+                        live_busy += 1;
+                        let backend = Arc::clone(&backend);
+                        let tx = tx.clone();
+                        std::thread::spawn(move || {
+                            let data = match PythonBackend::lock_send(
+                                &backend,
+                                BackendCommand::GetLiveSnapshot,
+                            ) {
+                                Ok(BackendResponse::LiveSnapshot { data }) => Some(data),
+                                Ok(other) => {
+                                    eprintln!("Live poll on lab save: unexpected response ({other:?})");
+                                    None
+                                }
+                                Err(err) => {
+                                    eprintln!("Live poll on lab save failed: {err}");
+                                    None
+                                }
+                            };
+                            let _ = tx.send(FetchResult::Live(id, data));
+                        });
+                        next_live_poll = std::time::Instant::now() + std::time::Duration::from_secs(1);
+                    }
                 }
                 if let Some((id, data)) = latest_lab_coverage {
                     last_coverage = id;
@@ -1151,14 +1180,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // OS vault.  If the user has not changed the field, the sentinel is
             // still there — we must not forward it to the backend, which would
             // overwrite the stored value with literal bullet characters.
-            const SAVED_SENTINEL: &str =
-                "\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}";
             let mut credentials = std::collections::HashMap::new();
             for (i, f) in fields.iter().enumerate() {
                 if let Some(v) = raw_values.get(i) {
                     let s = v.as_str().trim();
-                    if !s.is_empty() && s != SAVED_SENTINEL {
-                        credentials.insert(f.key.clone(), s.to_string());
+                    let clean = s.replace('\u{2022}', "").trim().to_string();
+                    if !clean.is_empty() {
+                        credentials.insert(f.key.clone(), clean);
                     }
                 }
             }
@@ -1408,15 +1436,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             move |key: slint::SharedString, value: slint::SharedString| {
                 let key = key.as_str().trim().to_string();
                 let value = value.as_str().trim().to_string();
-                if key.is_empty() {
+                let clean_val = value.replace('\u{2022}', "").trim().to_string();
+                if clean_val.is_empty() {
                     return;
                 }
                 let broker_id = cur_ws.borrow().selected_id.clone();
                 println!("Broker config saved for '{}' (key '{}')", broker_id, key);
                 let mut credentials = std::collections::HashMap::new();
-                if !value.is_empty() {
-                    credentials.insert(key, value);
-                }
+                credentials.insert(key, clean_val);
                 let handle_bg = handle.clone();
                 let backend_bg = Arc::clone(&backend);
                 std::thread::spawn(move || {
@@ -1491,6 +1518,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     {
         let handle = ui.as_weak();
+        let backend = Arc::clone(&backend);
+        let cur_ws = current_workspace.clone();
         ui.on_broker_paste_requested(move |idx: i32| {
             // clipboard-win is a Windows-only crate (empty elsewhere), so the
             // read itself is platform-gated; other platforms report unavailable.
@@ -1500,16 +1529,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let pasted: Option<String> = None;
             if let Some(text) = pasted {
                 let trimmed = text.trim();
+                let clean_text = trimmed.replace('\u{2022}', "").trim().to_string();
+                if clean_text.is_empty() {
+                    return;
+                }
                 println!(
                     "Broker paste requested for field {idx}: length {}",
-                    trimmed.len()
+                    clean_text.len()
                 );
                 if let Some(ui) = handle.upgrade() {
-                    let s = slint::SharedString::from(trimmed);
-                    // Indexed, NOT defaulted: the old `_ => v5` arm meant any
-                    // out-of-range index silently OVERWROTE the sixth
-                    // credential field (usually the secret) with whatever was
-                    // on the clipboard. An unknown index is a no-op.
+                    let s = slint::SharedString::from(clean_text.as_str());
                     match idx {
                         0 => ui.set_broker_field_v0(s),
                         1 => ui.set_broker_field_v1(s),
@@ -1517,8 +1546,39 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         3 => ui.set_broker_field_v3(s),
                         4 => ui.set_broker_field_v4(s),
                         5 => ui.set_broker_field_v5(s),
-                        _ => eprintln!("Broker paste ignored: no field {idx}"),
+                        _ => {
+                            eprintln!("Broker paste ignored: no field {idx}");
+                            return;
+                        }
                     }
+                }
+                if let Some(field) = cur_ws.borrow().fields.get(idx as usize) {
+                    let broker_id = cur_ws.borrow().selected_id.clone();
+                    let key = field.key.clone();
+                    println!("Broker config auto-saving pasted key '{key}' for '{broker_id}'");
+                    let mut credentials = std::collections::HashMap::new();
+                    credentials.insert(key, clean_text);
+                    let handle_bg = handle.clone();
+                    let backend_bg = Arc::clone(&backend);
+                    std::thread::spawn(move || {
+                        match PythonBackend::lock_send(
+                            &backend_bg,
+                            BackendCommand::ConnectBroker {
+                                broker_id,
+                                credentials,
+                            },
+                        ) {
+                            Ok(BackendResponse::SystemSnapshot { data }) => {
+                                let workspace = BrokerWorkspace::from_json(&data);
+                                let _ = slint::invoke_from_event_loop(move || {
+                                    if let Some(ui) = handle_bg.upgrade() {
+                                        shell::apply_connection(&ui, &workspace);
+                                    }
+                                });
+                            }
+                            _ => {}
+                        }
+                    });
                 }
             } else {
                 eprintln!("Broker paste failed: clipboard empty or unavailable");

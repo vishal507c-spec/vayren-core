@@ -16,6 +16,10 @@ from broker.providers.fyers.adapter import (
 )
 from broker.providers.fyers.auto_auth import FyersAutoAuthEngine
 from broker.providers.fyers.credentials import FyersCredentials
+from broker.providers.fyers.live_activation import (
+    register_fyers_live_instance,
+    unregister_fyers_live,
+)
 from broker.providers.fyers.live_auth import (
     DEFAULT_CALLBACK_PORT as FYERS_CALLBACK_PORT,
 )
@@ -57,14 +61,6 @@ def _schema_rows(fields: Iterable[Any] | None) -> tuple[dict[str, object], ...]:
 
 def fyers_management_spec() -> BrokerSpec:
     """The FYERS venue's SYSTEM → BROKERS management wiring."""
-
-    def _register_session(adapter: object, _market_data: object | None) -> tuple[bool, str]:
-        if adapter is None:
-            return False, "no authenticated adapter provided"
-        return True, "authenticated FYERS session (auth-only — no trading venue in this phase)"
-
-    def _unregister() -> None:
-        return None
 
     def _auto_authenticate(config: dict[str, str], session_store: object) -> tuple[bool, str]:
         """Startup/check-time automatic login (API-first, Selenium fallback)."""
@@ -126,13 +122,13 @@ def fyers_management_spec() -> BrokerSpec:
         ),
         build_flow=FyersAuthFlow,
         build_session_store=lambda store, service: FyersSessionStore(store, service),
-        venue_register=_register_session,
-        venue_unregister=_unregister,
+        venue_register=register_fyers_live_instance,
+        venue_unregister=unregister_fyers_live,
         interactive_login=fyers_selenium_interactive_login,
         auto_authenticate=_auto_authenticate,
         callback_port=FYERS_CALLBACK_PORT,
         callback_url=fyers_redirect_url(FYERS_CALLBACK_PORT),
-        extra={"venue_subtitle": VENUE_SUBTITLE, "auth_only": "true"},
+        extra={"venue_subtitle": VENUE_SUBTITLE},
     )
 
 

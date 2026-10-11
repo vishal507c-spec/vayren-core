@@ -484,6 +484,47 @@ pub enum SavedUniverseStatus {
     Error,
 }
 
+/// Normalize symbol token for flexible matching (e.g. "NSE:RELIANCE" <-> "RELIANCE").
+pub fn normalize_symbol_token(s: &str) -> String {
+    let s = s.trim().to_uppercase();
+    if let Some(rest) = s.strip_prefix("NSE:") {
+        rest.to_string()
+    } else {
+        s
+    }
+}
+
+/// Ensure symbol has canonical "NSE:" prefix when persisted.
+pub fn normalize_to_canonical_nse(s: &str) -> String {
+    let clean = s.trim().to_uppercase();
+    if clean.is_empty() {
+        clean
+    } else if clean.starts_with("NSE:") {
+        clean
+    } else {
+        format!("NSE:{clean}")
+    }
+}
+
+/// Check if two symbol slices differ (order-insensitive, case-insensitive, prefix-normalized).
+pub fn universes_differ(a: &[String], b: &[String]) -> bool {
+    let mut norm_a: Vec<String> = a
+        .iter()
+        .map(|s| normalize_symbol_token(s))
+        .filter(|s| !s.is_empty())
+        .collect();
+    let mut norm_b: Vec<String> = b
+        .iter()
+        .map(|s| normalize_symbol_token(s))
+        .filter(|s| !s.is_empty())
+        .collect();
+    norm_a.sort();
+    norm_a.dedup();
+    norm_b.sort();
+    norm_b.dedup();
+    norm_a != norm_b
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct LabState {
     pub strategies: Vec<LabStrategy>,
@@ -622,6 +663,14 @@ pub const RANK_HEADERS: [&str; 9] = [
 ];
 
 impl LabState {
+    pub fn is_dirty(&self) -> bool {
+        (self.code != self.synced_code) || self.is_universe_dirty()
+    }
+
+    pub fn is_universe_dirty(&self) -> bool {
+        universes_differ(&self.universe_selected, &self.saved_universe_symbols)
+    }
+
     pub fn selected_strategy(&self) -> Option<&LabStrategy> {
         self.selected.and_then(|i| self.strategies.get(i))
     }
@@ -640,6 +689,8 @@ impl LabState {
             self.saved_universe_status = SavedUniverseStatus::Missing;
             self.saved_universe_error.clear();
             self.universe_state = UniverseSaveState::Clean;
+            self.universe_selected.clear();
+            self.sym_draft.clear();
         }
         self.selected = Some(index);
         self.tab = 0;
@@ -711,7 +762,28 @@ impl LabState {
     }
 
     pub fn interaction_save(&mut self) {
-        self.queue_action(format!("save:{}", self.code));
+        if self.code != self.synced_code || !self.is_universe_dirty() {
+            self.queue_action(format!("save:{}", self.code));
+        }
+        let strategy_id = self
+            .selected_strategy()
+            .map(|s| s.name.clone())
+            .unwrap_or_default();
+        if strategy_id.is_empty() {
+            if self.is_universe_dirty() {
+                self.universe_state =
+                    UniverseSaveState::Error("no strategy selected; universe not saved".to_string());
+            }
+            return;
+        }
+        if self.is_universe_dirty() {
+            self.universe_state = UniverseSaveState::Pending;
+            let action = serde_json::json!({
+                "strategy_id": strategy_id,
+                "symbols": self.universe_selected,
+            });
+            self.queue_action(format!("universe:{action}"));
+        }
     }
 
     pub fn interaction_compile(&mut self) {
@@ -1156,11 +1228,13 @@ impl LabState {
         self.code = self.synced_code.clone();
     }
 
-    /// Symbol selector: open seeds the draft from the applied echo; toggles
-    /// and search stay local; Apply commits through the existing backend
-    /// selection path (unknown symbols can never be queued — only echoed
-    /// universe members go out).
+    /// Symbol selector: open seeds the draft from the applied echo (or saved universe);
+    /// toggles and search stay local; Apply updates the draft selection and marks
+    /// the strategy dirty for review before saving.
     pub fn interaction_symopen(&mut self) {
+        if self.universe_selected.is_empty() && !self.saved_universe_symbols.is_empty() {
+            self.universe_selected = self.saved_universe_symbols.clone();
+        }
         self.sym_draft = self.universe_selected.clone();
         self.sym_search.clear();
         self.sym_open = true;
@@ -1177,10 +1251,13 @@ impl LabState {
     }
 
     pub fn interaction_symtoggle(&mut self, symbol: &str) {
-        if !self.universe_symbols.iter().any(|s| s == symbol) {
+        let ns = normalize_symbol_token(symbol);
+        if !self.universe_symbols.is_empty()
+            && !self.universe_symbols.iter().any(|s| normalize_symbol_token(s) == ns)
+        {
             return;
         }
-        if let Some(pos) = self.sym_draft.iter().position(|s| s == symbol) {
+        if let Some(pos) = self.sym_draft.iter().position(|s| normalize_symbol_token(s) == ns) {
             self.sym_draft.remove(pos);
         } else {
             self.sym_draft.push(symbol.to_string());
@@ -1189,7 +1266,8 @@ impl LabState {
 
     pub fn interaction_symall(&mut self) {
         for symbol in self.sym_visible() {
-            if !self.sym_draft.iter().any(|s| s == &symbol) {
+            let ns = normalize_symbol_token(&symbol);
+            if !self.sym_draft.iter().any(|s| normalize_symbol_token(s) == ns) {
                 self.sym_draft.push(symbol);
             }
         }
@@ -1200,16 +1278,21 @@ impl LabState {
     }
 
     pub fn interaction_symapply(&mut self) {
-        let selected: Vec<String> = self
-            .sym_draft
-            .iter()
-            .filter(|s| self.universe_symbols.iter().any(|u| u == *s))
-            .cloned()
-            .collect();
+        let selected: Vec<String> = if self.universe_symbols.is_empty() {
+            self.sym_draft.clone()
+        } else {
+            self.sym_draft
+                .iter()
+                .filter(|s| {
+                    let ns = normalize_symbol_token(s);
+                    self.universe_symbols.iter().any(|u| normalize_symbol_token(u) == ns)
+                })
+                .cloned()
+                .collect()
+        };
         // Optimistic echo: gather() reads universe_selected/cfg_universe_csv,
-        // so Apply must commit them locally now — otherwise the next run
-        // backtests the pre-dialog selection while the button shows the new
-        // one. The queued action is future backend sync, not the run path.
+        // so Apply commits them locally now — otherwise the next run
+        // backtests the pre-dialog selection while the button shows the new one.
         self.universe_selected = selected.clone();
         self.cfg_universe_csv = selected.join(",");
         self.cfg_universe_count = self.universe_selected.len();
@@ -1220,36 +1303,31 @@ impl LabState {
         };
         self.refresh_staleness();
         self.sym_open = false;
-        let strategy_id = self
-            .selected_strategy()
-            .map(|s| s.name.clone())
-            .unwrap_or_default();
-        if strategy_id.is_empty() {
-            self.universe_state =
-                UniverseSaveState::Error("no strategy selected; universe not saved".to_string());
-            return;
+        if self.is_universe_dirty() {
+            self.universe_state = UniverseSaveState::Clean;
         }
-        self.universe_state = UniverseSaveState::Pending;
-        let action = serde_json::json!({
-            "strategy_id": strategy_id,
-            "symbols": selected,
-        });
-        self.queue_action(format!("universe:{action}"));
     }
 
-    /// Chip ×: drop one symbol from the APPLIED selection and save it. Routes
-    /// through the same queue as Apply, so the removal is persisted.
+    /// Chip ×: drop one symbol from the draft selection. The removal is committed
+    /// to draft state, marking the strategy dirty until saved.
     pub fn interaction_symremove(&mut self, symbol: &str) {
-        if !self.universe_selected.iter().any(|s| s == symbol) {
-            return;
+        let ns = normalize_symbol_token(symbol);
+        let before_len = self.universe_selected.len();
+        self.universe_selected.retain(|s| normalize_symbol_token(s) != ns);
+        if self.universe_selected.len() != before_len {
+            self.cfg_universe_csv = self.universe_selected.join(",");
+            self.cfg_universe_count = self.universe_selected.len();
+            self.config.universe = if self.universe_selected.is_empty() {
+                "NO UNIVERSE".to_string()
+            } else {
+                self.universe_selected.join(", ")
+            };
+            self.sym_draft = self.universe_selected.clone();
+            self.refresh_staleness();
+            if self.is_universe_dirty() {
+                self.universe_state = UniverseSaveState::Clean;
+            }
         }
-        self.sym_draft = self
-            .universe_selected
-            .iter()
-            .filter(|s| s.as_str() != symbol)
-            .cloned()
-            .collect();
-        self.interaction_symapply();
     }
 
     /// Stock-universe save status for the selected strategy (never code).
@@ -1264,7 +1342,11 @@ impl LabState {
             .selected_strategy()
             .map(|s| s.name.clone())
             .unwrap_or_default();
-        if current != strategy_id {
+        if current.is_empty()
+            || (!current.eq_ignore_ascii_case(strategy_id)
+                && current.replace(' ', "-").to_lowercase()
+                    != strategy_id.replace(' ', "-").to_lowercase())
+        {
             return;
         }
         self.universe_state = if saved {
@@ -1273,7 +1355,13 @@ impl LabState {
             UniverseSaveState::Error(error.to_string())
         };
         if saved {
-            self.saved_universe_symbols = self.universe_selected.clone();
+            self.saved_universe_symbols = self
+                .universe_selected
+                .iter()
+                .filter(|s| !s.trim().is_empty())
+                .map(|s| normalize_to_canonical_nse(s))
+                .collect();
+            self.universe_selected = self.saved_universe_symbols.clone();
             self.saved_universe_status = if self.saved_universe_symbols.is_empty() {
                 SavedUniverseStatus::Empty
             } else {
@@ -1682,6 +1770,7 @@ pub struct LabView {
     pub universe_chips: Vec<String>,
     /// The selected strategy's PERSISTED universe (the saved stock row's chips).
     pub saved_universe_chips: Vec<String>,
+    pub universe_exchange: String,
     pub universe_count_line: String,
     /// "clean" | "pending" | "saved" | "error" (drives the row's status text).
     pub universe_state: String,
@@ -2934,7 +3023,10 @@ pub fn project(state: &LabState) -> LabView {
     };
     let sym_visible_on: Vec<bool> = sym_visible
         .iter()
-        .map(|s| state.sym_draft.iter().any(|d| d == s))
+        .map(|s| {
+            let ns = normalize_symbol_token(s);
+            state.sym_draft.iter().any(|d| normalize_symbol_token(d) == ns)
+        })
         .collect();
 
     // Reference-layout derivations — presentation mapping of engine facts
@@ -2983,7 +3075,7 @@ pub fn project(state: &LabState) -> LabView {
     } else {
         format!("{} STRATEGIES", state.strategies.len())
     };
-    let dirty_now = state.code != state.synced_code;
+    let dirty_now = state.is_dirty();
     let editing_hint = if !has_strategy {
         String::new()
     } else if dirty_now {
@@ -3376,7 +3468,7 @@ pub fn project(state: &LabState) -> LabView {
             String::new()
         },
         code: state.code.clone(),
-        dirty: state.code != state.synced_code,
+        dirty: state.is_dirty(),
         params: state
             .params
             .iter()
@@ -3397,6 +3489,15 @@ pub fn project(state: &LabState) -> LabView {
             .cloned()
             .collect(),
         saved_universe_chips: state.saved_universe_symbols.clone(),
+        universe_exchange: if state.saved_universe_symbols.is_empty() {
+            String::new()
+        } else {
+            state
+                .saved_universe_symbols
+                .iter()
+                .find_map(|s| s.split_once(':').map(|(ex, _)| ex.to_string()))
+                .unwrap_or_else(|| "NSE".to_string())
+        },
         timeframes: state.timeframes.clone(),
         timeframe_index: state.timeframe_index,
         cfg_dates_start: state.cfg_dates_start.clone(),
@@ -3551,12 +3652,23 @@ mod tests {
         let mut st = two_strategy_state();
         st.sym_draft = vec!["RELIANCE".into(), "TCS".into()];
         st.interaction_symapply();
+        assert!(st.is_universe_dirty());
+        assert!(st.is_dirty());
+        assert_eq!(st.universe_save_state(), &UniverseSaveState::Clean);
+        assert!(st.drain_universe_actions().is_empty());
+
+        st.interaction_save();
         assert_eq!(st.universe_save_state(), &UniverseSaveState::Pending);
         let actions = st.drain_universe_actions();
         assert_eq!(actions.len(), 1);
         assert!(actions[0].starts_with("universe:"));
         assert!(actions[0].contains(r#""strategy_id":"OBR""#));
         assert!(actions[0].contains(r#""symbols":["RELIANCE","TCS"]"#));
+
+        st.apply_universe_result("OBR", true, "");
+        assert_eq!(st.universe_save_state(), &UniverseSaveState::Saved);
+        assert_eq!(st.saved_universe_symbols, vec!["NSE:RELIANCE", "NSE:TCS"]);
+        assert!(!st.is_universe_dirty());
     }
 
     #[test]
@@ -3654,11 +3766,141 @@ mod tests {
         st.selected = None;
         st.sym_draft = vec!["TCS".into()];
         st.interaction_symapply();
+        st.interaction_save();
         assert!(matches!(
             st.universe_save_state(),
             UniverseSaveState::Error(_)
         ));
         assert!(st.drain_universe_actions().is_empty());
+    }
+
+    #[test]
+    fn universe_lifecycle_select_apply_save_success_and_independent_strategies() {
+        let mut st = two_strategy_state();
+        let initial_view = project(&st);
+        assert_eq!(initial_view.universe_count_line, "No stocks saved");
+        assert_eq!(initial_view.universe_state, "clean");
+        assert!(!initial_view.dirty);
+        assert_eq!(initial_view.universe_exchange, "");
+
+        // 1. Open modal and select symbols
+        st.interaction_symopen();
+        assert!(st.sym_open);
+        st.interaction_symtoggle("RELIANCE");
+        st.interaction_symtoggle("TCS");
+        assert_eq!(st.sym_draft, vec!["RELIANCE".to_string(), "TCS".to_string()]);
+
+        // 2. Apply updates draft, marks dirty, does NOT queue or set Pending prematurely
+        st.interaction_symapply();
+        assert!(!st.sym_open);
+        assert!(st.is_universe_dirty());
+        assert!(st.is_dirty());
+        assert_eq!(st.universe_save_state(), &UniverseSaveState::Clean);
+        let applied_view = project(&st);
+        assert!(applied_view.dirty);
+        assert_eq!(applied_view.universe_state, "clean");
+        assert!(st.drain_universe_actions().is_empty());
+
+        // 3. Save Changes triggers persistence and transitions to Pending
+        st.interaction_save();
+        assert_eq!(st.universe_save_state(), &UniverseSaveState::Pending);
+        let pending_view = project(&st);
+        assert_eq!(pending_view.universe_state, "pending");
+        let actions = st.drain_universe_actions();
+        assert_eq!(actions.len(), 1);
+        assert!(actions[0].contains(r#""strategy_id":"OBR""#));
+        assert!(actions[0].contains(r#""symbols":["RELIANCE","TCS"]"#));
+
+        // 4. Persistence success updates saved stocks and clears dirty
+        st.apply_universe_result("OBR", true, "");
+        assert_eq!(st.universe_save_state(), &UniverseSaveState::Saved);
+        assert!(!st.is_universe_dirty());
+        assert!(!st.is_dirty());
+        let saved_view = project(&st);
+        assert_eq!(saved_view.universe_state, "saved");
+        assert_eq!(saved_view.universe_count_line, "2 stocks saved");
+        assert_eq!(saved_view.saved_universe_chips, vec!["NSE:RELIANCE", "NSE:TCS"]);
+        assert_eq!(saved_view.universe_exchange, "NSE");
+
+        // 5. Switching to Strategy 1 keeps universes isolated (no leak)
+        st.select(1);
+        assert!(st.saved_universe_symbols.is_empty());
+        assert!(st.universe_selected.is_empty());
+        assert!(!st.is_dirty());
+        let strat1_view = project(&st);
+        assert_eq!(strat1_view.universe_count_line, "No stocks saved");
+        assert!(strat1_view.saved_universe_chips.is_empty());
+
+        // 6. Loading Strategy 1's saved universe
+        let beta = r#"{"saved_universe":{"state":"ok","symbols":["NSE:INFY"],"error":""}}"#;
+        apply_snapshot_json(&mut st, &serde_json::from_str(beta).unwrap());
+        assert_eq!(st.saved_universe_symbols, vec!["NSE:INFY".to_string()]);
+        assert_eq!(st.universe_selected, vec!["NSE:INFY".to_string()]);
+        let strat1_saved_view = project(&st);
+        assert_eq!(strat1_saved_view.universe_count_line, "1 stock saved");
+        assert_eq!(strat1_saved_view.saved_universe_chips, vec!["NSE:INFY"]);
+    }
+
+    #[test]
+    fn universe_save_failure_preserves_selection_for_retry() {
+        let mut st = two_strategy_state();
+        st.interaction_symopen();
+        st.interaction_symtoggle("TCS");
+        st.interaction_symapply();
+        st.interaction_save();
+        assert_eq!(st.universe_save_state(), &UniverseSaveState::Pending);
+        assert_eq!(st.drain_universe_actions().len(), 1);
+
+        // Fail save
+        st.apply_universe_result("OBR", false, "Disk full");
+        assert_eq!(
+            st.universe_save_state(),
+            &UniverseSaveState::Error("Disk full".to_string())
+        );
+        // Draft selection preserved for retry
+        assert_eq!(st.universe_selected, vec!["TCS".to_string()]);
+        assert!(st.is_universe_dirty());
+        assert!(st.is_dirty());
+        let error_view = project(&st);
+        assert_eq!(error_view.universe_state, "error");
+        assert_eq!(error_view.universe_error, "Disk full");
+
+        // Retry save
+        st.interaction_save();
+        assert_eq!(st.universe_save_state(), &UniverseSaveState::Pending);
+        let retry_actions = st.drain_universe_actions();
+        assert_eq!(retry_actions.len(), 1);
+
+        // Success on retry
+        st.apply_universe_result("OBR", true, "");
+        assert_eq!(st.universe_save_state(), &UniverseSaveState::Saved);
+        assert_eq!(st.saved_universe_symbols, vec!["NSE:TCS".to_string()]);
+        assert!(!st.is_dirty());
+    }
+
+    #[test]
+    fn universe_symremove_chip_updates_draft_and_marks_dirty() {
+        let mut st = two_strategy_state();
+        let snap = r#"{"saved_universe":{"state":"ok","symbols":["NSE:RELIANCE","NSE:TCS"],"error":""}}"#;
+        apply_snapshot_json(&mut st, &serde_json::from_str(snap).unwrap());
+        assert_eq!(st.saved_universe_symbols.len(), 2);
+        assert!(!st.is_dirty());
+
+        // Remove RELIANCE by token
+        st.interaction_symremove("RELIANCE");
+        assert_eq!(st.universe_selected, vec!["NSE:TCS".to_string()]);
+        assert!(st.is_universe_dirty());
+        assert!(st.is_dirty());
+
+        // Save new single-stock universe
+        st.interaction_save();
+        assert_eq!(st.universe_save_state(), &UniverseSaveState::Pending);
+        st.apply_universe_result("OBR", true, "");
+        assert_eq!(st.saved_universe_symbols, vec!["NSE:TCS".to_string()]);
+        assert!(!st.is_dirty());
+        let view = project(&st);
+        assert_eq!(view.saved_universe_chips, vec!["NSE:TCS"]);
+        assert_eq!(view.universe_count_line, "1 stock saved");
     }
 
     #[test]
@@ -4857,6 +5099,9 @@ mod tests {
             vec!["TCS".to_string(), "INFY".to_string()]
         );
         assert_eq!(st.cfg_universe_csv, "TCS,INFY");
+        assert!(st.is_universe_dirty());
+        assert!(st.pending_actions.is_empty());
+        st.interaction_save();
         assert_eq!(
             st.pending_actions,
             vec![r#"universe:{"strategy_id":"OBR","symbols":["TCS","INFY"]}"#.to_string()]
@@ -6421,5 +6666,14 @@ fn apply_saved_universe_json(state: &mut LabState, value: &serde_json::Value) {
         .and_then(|v| v.as_str())
         .unwrap_or_default()
         .to_string();
+    let was_dirty = state.is_universe_dirty();
     state.saved_universe_symbols = symbols;
+    if state.universe_state != UniverseSaveState::Pending && !was_dirty {
+        state.universe_selected = state.saved_universe_symbols.clone();
+        state.cfg_universe_csv = state.universe_selected.join(",");
+        state.cfg_universe_count = state.universe_selected.len();
+        if !state.sym_open {
+            state.sym_draft = state.universe_selected.clone();
+        }
+    }
 }

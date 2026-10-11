@@ -79,6 +79,7 @@ export component LiveHostWindow inherits Window {
     callback watchlist-selected(string);
     callback filter-chip-picked(int);
     callback watchlist-search-changed(string);
+    callback broker-capital-refresh();
 
     LiveScreen {
         width: 100%;
@@ -141,5 +142,6 @@ export component LiveHostWindow inherits Window {
         watchlist-selected(s) => { root.watchlist-selected(s); }
         filter-chip-picked(i) => { root.filter-chip-picked(i); }
         watchlist-search-changed(t) => { root.watchlist-search-changed(t); }
+        broker-capital-refresh() => { root.broker-capital-refresh(); }
     }
 }

@@ -1579,6 +1579,7 @@ pub fn apply_lab(ui: &AppWindow, state: &LabState) {
         universe_count_line: view.universe_count_line.clone().into(),
         universe_state: view.universe_state.clone().into(),
         universe_error: view.universe_error.clone().into(),
+        universe_exchange: view.universe_exchange.clone().into(),
         // Trade blotter: honest counters, filter/sort state and the ONE
         // selected trade's facts (`spec §2/§27`).
         trade_summary: view.trade_summary.into(),
@@ -2243,17 +2244,18 @@ pub fn wire_lab(
         let handle = ui.as_weak();
         let fetch = fetch_save.clone();
         ui.on_lab_save_requested(move || {
-            let (name, code) = {
+            let (name, code, code_dirty) = {
                 let mut guard = strong.borrow_mut();
+                let code_dirty = guard.code != guard.synced_code;
                 guard.interaction_save();
                 let strat_name = guard
                     .selected_strategy()
                     .map(|s| s.name.clone())
                     .unwrap_or_default();
                 let code = guard.code.clone();
-                (strat_name, code)
+                (strat_name, code, code_dirty)
             };
-            if !name.is_empty() {
+            if !name.is_empty() && code_dirty {
                 fetch(name, code);
             }
             if let Some(ui) = handle.upgrade() {
@@ -3390,6 +3392,12 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
         inspector_open: view.bar.inspector_open,
         note: view.bar.note.into(),
         note_tone: view.bar.note_tone,
+        capital_broker_name: view.bar.capital_broker_name.into(),
+        capital_value: view.bar.capital_value.into(),
+        capital_sub: view.bar.capital_sub.into(),
+        capital_status: view.bar.capital_status.into(),
+        capital_tone: view.bar.capital_tone,
+        capital_last_updated: view.bar.capital_last_updated.into(),
     });
     ui.set_live_inspector_open(view.bar.inspector_open);
     ui.set_live_setup(LiveSetup {
@@ -3410,6 +3418,7 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
                 .collect::<Vec<_>>(),
         ))
         .into(),
+        universe_exchange: view.setup.universe_exchange.into(),
     });
     ui.set_live_strategy_names(
         Rc::new(slint::VecModel::from(
@@ -3835,6 +3844,8 @@ pub fn wire_live(ui: &AppWindow, state: Rc<RefCell<LiveState>>) {
         s.toggle_symbol(i.max(0) as usize);
     });
     wire_unit!(on_live_universe_save, LiveState::save_universe);
+    wire_unit!(on_live_refresh_stocks, LiveState::refresh_universe);
+    wire_unit!(on_broker_capital_refresh, LiveState::refresh_broker_capital);
     wire_text!(on_live_timeframe_picked, LiveState::select_timeframe_value);
     wire_text!(on_live_event_type_picked, LiveState::apply_event_category);
     wire_text!(on_live_symbol_filter_changed, LiveState::set_symbol_filter);
@@ -4170,6 +4181,7 @@ pub fn demo_live_state_running() -> LiveState {
             available_margin: Some(100_000.0),
             used_margin: Some(0.0),
             configured_capital: Some(100_000.0),
+            ..Default::default()
         },
         bars: (0..48)
             .map(|i| {
@@ -4852,6 +4864,7 @@ mod tests {
             symbol_total: "527 symbols (OBR C1C4)".into(),
             stock_universe: Rc::new(slint::VecModel::from(Vec::<slint::SharedString>::new()))
                 .into(),
+            universe_exchange: "NSE".into(),
         });
         harness.set_market(LiveMarket {
             has_data: false,

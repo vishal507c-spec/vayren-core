@@ -466,31 +466,34 @@ class LiveSession:
         self, context: StrategyContext, signal: StrategySignal, now_epoch: float
     ) -> None:
         ledger_qty, side, _ = self._ledger.strategy_state_for(signal.symbol)
-        if signal.side == "BUY" and ledger_qty > 0:
+        raw_side = str(signal.side).upper()
+        if raw_side == "BUY" and ledger_qty > 0:
             return  # already long — single-position model skips re-entry
-        if signal.side == "SELL" and ledger_qty <= 0:
+        if raw_side in ("SELL", "CLOSE") and ledger_qty <= 0:
             return  # nothing to exit in the single-position model
         context.intent_seq += 1
         intent_id = make_intent_id(
             signal.strategy_id, signal.strategy_version, signal.event_seq, context.intent_seq
         )
-        if signal.side == "BUY":
+        if raw_side == "CLOSE":
+            effective_side = "SELL" if ledger_qty > 0 else "BUY"
+            quantity = abs(ledger_qty)
+            target = 0.0
+        elif raw_side == "BUY":
+            effective_side = "BUY"
             if self._mode == ExecutionMode.LIVE:
-                # LIVE entries size ONLY from the risk engine: broker
-                # available capital × 4 × 0.15% against the strategy's own
-                # entry/stop. A denial blocks the order here (fail-closed).
-                sized = self._live_sized_quantity(intent_id, signal, now_epoch)
+                sized = self._live_sized_quantity(intent_id, signal, now_epoch, context=context)
                 if sized is None:
                     return
                 quantity = float(sized.quantity)
             else:
                 quantity = self._default_quantity(signal)
-                # Non-live entries still anchor protective-stop placement on
-                # the strategy's own stop (consumed, never invented).
-                if signal.stop_loss is not None and signal.stop_loss > 0:
-                    self._stop_levels[signal.symbol] = signal.stop_loss
+                resolved_stop = self._resolve_signal_stop(signal, context)
+                if resolved_stop is not None and resolved_stop > 0:
+                    self._stop_levels[signal.symbol] = resolved_stop
             target = ledger_qty + quantity
-        else:
+        else:  # SELL
+            effective_side = "SELL"
             quantity = abs(ledger_qty)
             target = 0.0
         posture = self._confidence.evaluate(self._confidence_input(signal.symbol))
@@ -508,7 +511,7 @@ class LiveSession:
             timestamp=signal.timestamp,
             event_seq=signal.event_seq,
             symbol=signal.symbol,
-            side=signal.side,
+            side=effective_side,
             target_position_qty=target,
             quantity=quantity,
             urgency="normal",
@@ -617,20 +620,46 @@ class LiveSession:
             return None
         return BrokerCapital(available=available, fetched_epoch=now_epoch, source="broker")
 
+    def _resolve_signal_stop(
+        self, signal: StrategySignal, context: StrategyContext | None = None
+    ) -> float | None:
+        """Resolve stop loss from signal or strategy internal state (never invent)."""
+        if signal.stop_loss is not None and signal.stop_loss > 0:
+            return float(signal.stop_loss)
+        if context is not None and context.logic is not None:
+            engine = getattr(context.logic, "engine", None)
+            sl = getattr(engine, "slPrice", None) if engine is not None else None
+            if sl is None:
+                sl = getattr(context.logic, "_pending_sl", None)
+            if sl is None:
+                sl = getattr(context.logic, "stop_loss", None)
+            if sl is not None:
+                try:
+                    val = float(sl)
+                    if val > 0:
+                        return val
+                except (TypeError, ValueError):
+                    pass
+        return None
+
     def _live_sized_quantity(
-        self, intent_id: str, signal: StrategySignal, now_epoch: float
+        self,
+        intent_id: str,
+        signal: StrategySignal,
+        now_epoch: float,
+        context: StrategyContext | None = None,
     ) -> SizingVerdict | None:
         """Size one LIVE entry through the Phase-3 risk pipeline.
 
         Returns the READY verdict (remembered for the final ``_submit``
         gate) or records ``RISK_DENIED`` and returns ``None`` to block.
-        The strategy's entry/stop values are consumed unchanged — this
-        method never invents a stop level.
+        Consumes the strategy's stop level, or resolves defensive risk stop.
         """
+        stop_price = self._resolve_signal_stop(signal, context)
         verdict = size_position(
             broker_capital=self._live_broker_capital(now_epoch),
             entry_price=signal.price,
-            stop_price=signal.stop_loss,
+            stop_price=stop_price,
             mode="LIVE",
             now_epoch=now_epoch,
         )

@@ -682,13 +682,18 @@ class FyersSessionAdapter:
             raise BrokerError("order symbol required", code=ErrorCode.INVALID_SYMBOL)
         if ":" not in sym:
             return f"NSE:{sym}-EQ"
+        parts = sym.split(":", 1)
+        exchange = parts[0].upper()
+        ticker = parts[1]
+        if not ticker.endswith("-EQ") and "-" not in ticker:
+            return f"{exchange}:{ticker}-EQ"
         return sym
 
     def _venue_side(self, plan: Any) -> tuple[int, str]:
         raw_side = str(getattr(plan, "side", "") or "").strip().upper()
         if raw_side in ("1", "BUY"):
             return 1, "BUY"
-        if raw_side in ("-1", "SELL"):
+        if raw_side in ("-1", "SELL", "CLOSE"):
             return -1, "SELL"
         raise BrokerError(f"invalid order side: {raw_side}", code=ErrorCode.INVALID_REQUEST)
 

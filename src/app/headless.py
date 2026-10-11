@@ -450,7 +450,11 @@ def _live_action(
             try:
                 service.configure(
                     strategy_name=_opt_str(action.get("strategy_name", action.get("strategy"))),
-                    symbols=tuple(str(s) for s in symbols) if isinstance(symbols, list) else None,
+                    symbols=(
+                        tuple(str(s) for s in symbols)
+                        if isinstance(symbols, list) and symbols
+                        else None
+                    ),
                     timeframe=_opt_str(action.get("timeframe")),
                     mode=_opt_str(action.get("mode")),
                     quantity=_opt_float(action.get("quantity")),
@@ -525,6 +529,32 @@ def _live_action(
             # `_live_unavailable(...)`, whose blank degraded snapshot wiped
             # every panel on the Live screen on one click.
             return _trading_service_snapshot(data_dir, strategy_dir, broker_manager)
+        elif name == "refresh":
+            # Re-read the selected strategy's saved universe from disk so
+            # changes saved in Strategy Lab appear immediately on refresh.
+            if hasattr(service, "_universes") and service.config.strategy_name:
+                service._config.symbols = service._universes.symbols_for(
+                    service.config.strategy_name
+                )
+            snapshot = _trading_service_snapshot(data_dir, strategy_dir, broker_manager)
+            snapshot["action_note"] = "stocks refreshed from Strategy Lab"
+            return snapshot
+        elif name == "refresh_capital":
+            if broker_manager is not None:
+                bview = getattr(service, "_broker_view", lambda: {})()
+                current_broker = bview.get("id") or service.broker_name()
+                if not current_broker or current_broker == "paper":
+                    active = (broker_manager.snapshot() or {}).get("active_broker")
+                    if active and active != "paper":
+                        current_broker = active
+                if current_broker and current_broker != "paper":
+                    broker_manager.refresh_funds(current_broker)
+                elif hasattr(broker_manager, "broker_ids"):
+                    for b_id in broker_manager.broker_ids():
+                        broker_manager.refresh_funds(b_id)
+            snapshot = _trading_service_snapshot(data_dir, strategy_dir, broker_manager)
+            snapshot["action_note"] = "broker capital refreshed"
+            return snapshot
         else:
             return _live_unavailable(f"unknown live action {name!r}")
     except Exception as exc:  # noqa: BLE001
@@ -1955,7 +1985,7 @@ def run_headless_backend(args: argparse.Namespace) -> int:
                             merged = dict(stored) if isinstance(stored, dict) else {}
                             for k, v in credentials.items():
                                 val = str(v).strip()
-                                if val:
+                                if val and "\u2022" not in val:
                                     merged[str(k)] = val
 
                             if broker_id == "fyers":

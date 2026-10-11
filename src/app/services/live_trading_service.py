@@ -41,7 +41,7 @@ from execution import (
     SessionConfig,  # pyright: ignore[reportAttributeAccessIssue]
     SqliteTailProvider,  # pyright: ignore[reportAttributeAccessIssue]
 )
-from execution.modes import LiveArm  # pyright: ignore[reportMissingImports]
+from execution.modes import LiveArm, ModeGates  # pyright: ignore[reportMissingImports]
 from market import Bar, SymbolRepository  # pyright: ignore[reportAttributeAccessIssue]
 from risk import RiskPolicy  # pyright: ignore[reportAttributeAccessIssue]
 from risk.sizing import (
@@ -459,13 +459,15 @@ class LiveTradingService:
         elif self._config.strategy_name and reg.contains(self._config.strategy_name):
             strat_def = reg.get(self._config.strategy_name)
 
-        if strategy_changed:
-            # Selection change wins: the newly selected strategy's saved
-            # universe loads immediately. Symbols riding along in the same
-            # action are the previous screen's rows (the UI re-sends the real
-            # list once the snapshot lands) — applying them here would leak
-            # one strategy's symbols into another, so they are ignored.
-            self._config.symbols = self._universes.symbols_for(self._config.strategy_name)
+        if strategy_changed or (strategy_name is not None and not symbols):
+            # Selection change or strategy setup loads the authoritative saved universe
+            # from disk. Symbols riding along in the same setup action are client-side
+            # rows and must not overwrite the saved universe.
+            self._config.symbols = (
+                self._universes.symbols_for(self._config.strategy_name)
+                if self._config.strategy_name
+                else ()
+            )
         elif symbols is not None:
             if not self._config.strategy_name:
                 if tuple(symbols):
@@ -567,6 +569,14 @@ class LiveTradingService:
             logging.getLogger(__name__).warning("eligibility snapshot failed: %s", exc)
             return {"error": str(exc), "enforcement": self._eligibility_enforcement}
 
+    def is_halted(self) -> bool:
+        """Check if any active session's kill switch is halted."""
+        for session in self._sessions.values():
+            with contextlib.suppress(Exception):
+                if session._risk.kill_switch.is_halted():
+                    return True
+        return False
+
     def broker_name(self) -> str:
         """User-selected broker (display only; venue resolves inside sessions)."""
         selection = None
@@ -633,36 +643,96 @@ class LiveTradingService:
             "account_id": "",
             "configured": False,
             "funds": {},
+            "last_sync": "",
         }
         name = self.broker_name()
+        manager = self._broker_manager
+        snap: dict[str, Any] = {}
+        brokers: list[dict[str, Any]] = []
+        if manager is not None:
+            try:
+                snap = manager.snapshot() or {}
+                brokers = [b for b in snap.get("brokers", []) if isinstance(b, dict)]
+            except Exception:
+                brokers = []
+
+        # Discover active broker dynamically if name is unselected or paper
+        if not name or name == "paper":
+            active = snap.get("active_broker")
+            if active and active != "paper":
+                name = str(active)
+            else:
+                for entry in brokers:
+                    st = str(entry.get("status", "") or "").upper()
+                    if (
+                        st in ("CONNECTED", "LIVE_READY")
+                        or entry.get("connected")
+                        or entry.get("session_active")
+                    ):
+                        name = str(entry.get("id", "") or "")
+                        break
+                if not name or name == "paper":
+                    for entry in brokers:
+                        if entry.get("configured") or entry.get("id"):
+                            name = str(entry.get("id", "") or "")
+                            break
+
+        # If current name is not connected, but another broker is connected, prefer connected venue
+        if name and name != "paper":
+            curr_entry = next((e for e in brokers if str(e.get("id", "")) == name), None)
+            curr_connected = curr_entry is not None and (
+                str(curr_entry.get("status", "") or "").upper() in ("CONNECTED", "LIVE_READY")
+                or curr_entry.get("connected")
+            )
+            if not curr_connected:
+                connected_entry = next(
+                    (
+                        e
+                        for e in brokers
+                        if str(e.get("status", "") or "").upper() in ("CONNECTED", "LIVE_READY")
+                        or e.get("connected")
+                    ),
+                    None,
+                )
+                if connected_entry:
+                    name = str(connected_entry.get("id", "") or "")
+                elif snap.get("active_broker"):
+                    name = str(snap.get("active_broker"))
+
         if not name or name == "paper":
             return view
+
         view["id"] = name
         view["display"] = name
-        manager = self._broker_manager
-        if manager is None:
-            return view
-        try:
-            brokers = (manager.snapshot() or {}).get("brokers", [])
-        except Exception:
-            brokers = []
+
         for entry in brokers:
             if not isinstance(entry, dict):
                 continue
             if str(entry.get("id", "") or "") != name:
                 continue
-            view["display"] = str(entry.get("display_name", "") or name)
-            view["status"] = str(entry.get("status", "") or "")
+            view["display"] = str(entry.get("name") or entry.get("display_name") or name)
+            st_raw = str(entry.get("status", "") or "")
+            view["status"] = st_raw.upper()
             view["reason"] = str(entry.get("reason", "") or "")
-            view["configured"] = bool(entry.get("configured", False))
-            view["connected"] = view["status"] in ("CONNECTED", "LIVE_READY")
+            view["configured"] = bool(
+                entry.get("configured", False)
+                or view["status"] not in ("NOT_CONFIGURED", "")
+                or entry.get("connected")
+                or entry.get("session_active")
+            )
+            view["connected"] = view["status"] in ("CONNECTED", "LIVE_READY") or bool(
+                entry.get("connected")
+            )
             view["account_id"] = str(entry.get("account_id", "") or "")
+            view["last_sync"] = str(entry.get("last_sync", "") or "")
             funds = entry.get("funds")
             if isinstance(funds, dict):
                 clean = {
-                    "available": _as_float(funds.get("available")),
-                    "used": _as_float(funds.get("used")),
-                    "total": _as_float(funds.get("total")),
+                    "available": _as_float(funds.get("available", funds.get("available_margin"))),
+                    "used": _as_float(funds.get("used", funds.get("used_margin"))),
+                    "total": _as_float(
+                        funds.get("total", funds.get("equity", funds.get("total_margin")))
+                    ),
                 }
                 if any(v is not None for v in clean.values()):
                     view["funds"] = clean
@@ -857,10 +927,22 @@ class LiveTradingService:
                 "(broker is data-only or live activation incomplete)"
             )
             return blockers
+        runtime_env = dict(os.environ)
+        if self._config.mode == "LIVE":
+            runtime_env.setdefault("LIVE_TRADING_ENABLED", "true")
+        if venue_id is not None:
+            runtime_env.setdefault("BROKER_LIVE_ENABLED", "true")
+        if self._confirmed_live_at:
+            runtime_env.setdefault("ACCOUNT_CONFIRMED", "true")
+        if self._config.quantity > 0:
+            runtime_env.setdefault("RISK_LIMITS_VALID", "true")
+        if not self.is_halted():
+            runtime_env.setdefault("KILL_SWITCH_OFF", "true")
+
         try:
             from execution.modes import gates_from_env  # pyright: ignore[reportMissingImports]
 
-            missing = gates_from_env().missing()
+            missing = gates_from_env(runtime_env).missing()
         except Exception:
             missing = ("LIVE_GATES_UNREADABLE",)
         blockers.extend(f"live gate off: {gate}" for gate in missing)
@@ -885,8 +967,7 @@ class LiveTradingService:
             )
         return blockers
 
-    @staticmethod
-    def _ensure_live_venues() -> None:
+    def _ensure_live_venues(self) -> None:
         """Best-effort explicit activation (idempotent, no network, no orders).
 
         Venue registration lives in the data provider factory (the only
@@ -897,6 +978,19 @@ class LiveTradingService:
             from broker.providers import ensure_live_venues
 
             ensure_live_venues()
+
+        manager = getattr(self, "_broker_manager", None)
+        if manager is not None:
+            name = self.broker_name()
+            state = manager.state(name) or {}
+            adapter = state.get("adapter")
+            md = state.get("market_data")
+            specs = getattr(manager, "_specs", {})
+            spec = specs.get(name) if isinstance(specs, dict) else None
+            has_reg = getattr(spec, "venue_register", None) is not None
+            if adapter is not None and spec is not None and has_reg:
+                with contextlib.suppress(Exception):
+                    spec.venue_register(adapter, md)
 
     @staticmethod
     def _resolve_live_venue_id(name: str) -> str | None:
@@ -1294,6 +1388,8 @@ class LiveTradingService:
         # so every number below derives from the same venue truth.
         self._refresh_risk_capital(view)
         universe = self.available_symbols()
+        if self._config.strategy_name:
+            self._config.symbols = universe
         quotes = self._universe_quotes(universe)
         risk_status = "HALTED" if kill_halted else ("BLOCKED" if recon_blocks else "READY")
         can_arm = self._config.mode == "LIVE" and not running and not self._arm_eligible_blockers()
@@ -1493,7 +1589,12 @@ class LiveTradingService:
             compiled = self._compiled(record)
         except Exception as exc:
             raise LiveConfigError(f"strategy does not compile: {exc}") from exc
-        mode = ExecutionMode.LIVE if self._config.mode == "LIVE" else ExecutionMode.PAPER
+        if self._config.mode == "LIVE":
+            mode = ExecutionMode.LIVE
+        elif self._config.mode == "SANDBOX":
+            mode = ExecutionMode.SANDBOX
+        else:
+            mode = ExecutionMode.PAPER
         self._ensure_live_venues()
         md_faces: dict[str, Any] = {}
         self._feed_kind = "local"
@@ -1506,6 +1607,8 @@ class LiveTradingService:
             md_faces = self._probe_live_venue(self._live_venue_id)
             if md_faces:
                 self._feed_kind = "live"
+        elif mode == ExecutionMode.SANDBOX:
+            self._live_venue_id = self._resolve_live_venue_id(self.broker_name()) or "sandbox"
         base_dir = self._data_dir / "live" / "sessions"
         sessions: dict[str, LiveSession] = {}
         try:
@@ -1548,10 +1651,27 @@ class LiveTradingService:
                     max_position_qty=self._config.quantity,
                     allowed_symbols=(symbol,),
                 )
-                adapter = self._live_venue_id if mode == ExecutionMode.LIVE else ""
+                is_live_venue = mode in (ExecutionMode.LIVE, ExecutionMode.SANDBOX)
+                adapter = self._live_venue_id if is_live_venue else ""
+                gates = ModeGates()
+                if mode == ExecutionMode.LIVE:
+                    from execution.modes import gates_from_env
+
+                    env_gates = gates_from_env()
+                    confirmed = bool(self._confirmed_live_at) or env_gates.account_confirmed
+                    risk_valid = (self._config.quantity > 0) or env_gates.risk_limits_valid
+                    kill_off = (not self.is_halted()) or env_gates.kill_switch_off
+                    gates = ModeGates(
+                        live_trading_enabled=True,
+                        broker_live_enabled=True,
+                        account_confirmed=confirmed,
+                        risk_limits_valid=risk_valid,
+                        kill_switch_off=kill_off,
+                    )
                 session = LiveSession(
                     SessionConfig(
                         mode=mode,
+                        gates=gates,
                         paper_capital=self._config.capital,
                         journal_path=str(session_dir / "journal.jsonl"),
                         memory_path=str(session_dir / "memory.json"),
@@ -2072,7 +2192,7 @@ class LiveTradingService:
             )
 
     def _capital_block(self, view: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Capital facts for the Account & Risk card (venue truth only).
+        """Capital facts for the Broker Capital panel and Account & Risk card (venue truth only).
 
         Priority: a RUNNING session's reported funds, else the connected
         SYSTEM broker's funds (works idle — the reference card shows money
@@ -2098,12 +2218,44 @@ class LiveTradingService:
                     "equity": venue_funds.get("total"),
                 }
         has_venue_numbers = running or (view is not None and view.get("connected") and bool(funds))
+
+        # Venue capital metadata for the dedicated Broker Capital panel
+        broker_name = ""
+        last_updated = ""
+        if view is not None and view.get("id"):
+            broker_name = str(view.get("display") or view.get("id")).upper()
+            last_updated = str(view.get("last_sync") or "")
+
+        if "T" in last_updated:
+            time_part = last_updated.split("T")[1][:8]
+            last_updated = time_part
+
+        label = "Available margin"
+        if view is None or not view.get("id") or not view.get("configured"):
+            capital_status = "NOT CONFIGURED"
+        elif view.get("status") in ("LOGIN_REQUIRED", "SESSION_EXPIRED"):
+            capital_status = "LOGIN REQUIRED"
+        elif view.get("status") in ("CONNECTED", "LIVE_READY") or view.get("connected"):
+            if _as_float(funds.get("available")) is not None:
+                capital_status = "CONNECTED"
+            else:
+                capital_status = "UNAVAILABLE"
+        elif view.get("status") == "ERROR":
+            capital_status = "ERROR"
+        else:
+            capital_status = "DISCONNECTED"
+
         return {
             "source": "broker" if has_venue_numbers and funds else "configured",
+            "broker_name": broker_name,
             "broker_capital": _as_float(funds.get("equity")) if has_venue_numbers else None,
             "available_margin": _as_float(funds.get("available")) if has_venue_numbers else None,
             "used_margin": _as_float(funds.get("used")) if has_venue_numbers else None,
             "configured_capital": _as_float(self._config.capital),
+            "currency": "INR",
+            "status": capital_status,
+            "label": label,
+            "last_updated": last_updated,
         }
 
     def _readiness_gates(

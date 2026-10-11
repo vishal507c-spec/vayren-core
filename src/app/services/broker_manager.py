@@ -231,7 +231,18 @@ class BrokerManager:
         if spec is None:
             return False, f"unknown broker: {broker_id}"
         clean = {str(k): str(v or "").strip() for k, v in values.items()}
-        stored = {spec.config_key_map.get(key, key): value for key, value in clean.items()}
+        existing = {}
+        try:
+            loaded = self._store.load(spec.config_service)
+            if isinstance(loaded, dict):
+                existing = loaded
+        except Exception:
+            existing = {}
+        stored = dict(existing)
+        for key, value in clean.items():
+            storage_key = spec.config_key_map.get(key, key)
+            if "\u2022" not in value and value:
+                stored[storage_key] = value
         missing = [key for key in spec.required_config if not stored.get(key)]
         if missing:
             return False, f"missing configuration: {', '.join(missing)}"
@@ -266,6 +277,22 @@ class BrokerManager:
     def submit_check(self, broker_id: str) -> None:
         """Queue the read-only startup/session check (async)."""
         if broker_id in self._specs:
+            self._worker.submit(_SESSION_JOB, broker_id)
+
+    def refresh_funds(self, broker_id: str) -> None:
+        """Run or queue an immediate health & funds check for a broker."""
+        spec = self._specs.get(broker_id)
+        if spec is None:
+            return
+        with self._lock:
+            state = self._states.get(broker_id, {})
+            has_adapter = state.get("adapter") is not None
+        if has_adapter:
+            try:
+                self._job_health(spec)
+            except Exception:
+                self._worker.submit(_HEALTH_JOB, broker_id)
+        else:
             self._worker.submit(_SESSION_JOB, broker_id)
 
     def disconnect_broker(self, broker_id: str) -> tuple[bool, str]:

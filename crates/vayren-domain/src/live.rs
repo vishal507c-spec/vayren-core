@@ -383,6 +383,11 @@ pub struct CapitalFacts {
     pub available_margin: Option<f64>,
     pub used_margin: Option<f64>,
     pub configured_capital: Option<f64>,
+    pub broker_name: String,
+    pub currency: String,
+    pub status: String,
+    pub label: String,
+    pub last_updated: String,
 }
 
 /// WebSocket status model for the first-class connection card.
@@ -1062,13 +1067,20 @@ impl LiveState {
         if !self.host_mode {
             return;
         }
-        self.push_action(serde_json::json!({
-            "action": "setup",
-            "strategy_name": self.selected_strategy().unwrap_or(""),
-            "symbols": self.checked_symbols(),
-            "timeframe": self.selected_timeframe().unwrap_or(""),
-            "quantity": self.quantity,
-        }));
+        let checked = self.checked_symbols();
+        let mut map = serde_json::Map::new();
+        map.insert("action".into(), serde_json::json!("setup"));
+        map.insert(
+            "strategy_name".into(),
+            serde_json::json!(self.selected_strategy().unwrap_or("")),
+        );
+        map.insert(
+            "timeframe".into(),
+            serde_json::json!(self.selected_timeframe().unwrap_or("")),
+        );
+        map.insert("quantity".into(), serde_json::json!(self.quantity));
+        map.insert("symbols".into(), serde_json::json!(checked));
+        self.push_action(serde_json::Value::Object(map));
     }
 
     pub fn set_mode(&mut self, mode: ExecMode) {
@@ -1143,6 +1155,7 @@ impl LiveState {
             // strategy's symbols and checks are cleared now rather than displayed as the
             // new strategy's universe for a frame.
             self.symbols.clear();
+            self.store_total = None;
             self.watchlist_rows.clear();
             self.selected_symbol.clear();
             self.action_note = None;
@@ -1158,6 +1171,25 @@ impl LiveState {
         }) {
             self.select_strategy(i);
         }
+    }
+
+    pub fn refresh_universe(&mut self) {
+        if self.host_mode {
+            self.push_action(serde_json::json!({"action": "refresh"}));
+        }
+    }
+
+    pub fn universe_exchange(&self) -> String {
+        self.symbols
+            .iter()
+            .find_map(|s| {
+                if s.symbol.contains(':') {
+                    Some(s.symbol.split(':').next().unwrap_or("NSE").to_string())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| "NSE".to_string())
     }
 
     pub fn toggle_symbol(&mut self, index: usize) {
@@ -1202,6 +1234,10 @@ impl LiveState {
         if let Some(i) = self.timeframes.iter().position(|t| t == value) {
             self.select_timeframe(i);
         }
+    }
+
+    pub fn refresh_broker_capital(&mut self) {
+        self.push_action(serde_json::json!({"action": "refresh_capital"}));
     }
 
     /// Quantity edits parse honestly: garbage is rejected with a note, the
@@ -1832,6 +1868,11 @@ impl LiveState {
                 available_margin: c.get("available_margin").and_then(|x| x.as_f64()),
                 used_margin: c.get("used_margin").and_then(|x| x.as_f64()),
                 configured_capital: c.get("configured_capital").and_then(|x| x.as_f64()),
+                broker_name: str_of(c, "broker_name"),
+                currency: str_of(c, "currency"),
+                status: str_of(c, "status"),
+                label: str_of(c, "label"),
+                last_updated: str_of(c, "last_updated"),
             };
             if let Some(bc) = self.capital.broker_capital {
                 if bc > 0.0 {
@@ -2161,6 +2202,34 @@ pub fn grouped(value: f64) -> String {
     )
 }
 
+/// Formats a float as Indian Rupees with Indian comma grouping (e.g. ₹5,40,250.00).
+pub fn format_inr(value: f64) -> String {
+    let negative = value < 0.0;
+    let abs_val = value.abs();
+    let digits = format!("{:.2}", abs_val);
+    let (int_part, frac) = digits.split_once('.').unwrap_or((&digits, "00"));
+    if int_part.len() <= 3 {
+        return format!("{}{}.{}", if negative { "-₹" } else { "₹" }, int_part, frac);
+    }
+    let last_three = &int_part[int_part.len() - 3..];
+    let remaining = &int_part[..int_part.len() - 3];
+    let mut grouped_rem = String::new();
+    let rem_len = remaining.len();
+    for (i, ch) in remaining.chars().enumerate() {
+        if i > 0 && (rem_len - i) % 2 == 0 {
+            grouped_rem.push(',');
+        }
+        grouped_rem.push(ch);
+    }
+    format!(
+        "{}{},{}.{}",
+        if negative { "-₹" } else { "₹" },
+        grouped_rem,
+        last_three,
+        frac
+    )
+}
+
 // ── projection: LiveState -> flat render data (testable) ───────────────────
 
 /// Presentation caps — viewport policy only; count labels always state the
@@ -2348,6 +2417,12 @@ pub struct BarView {
     pub inspector_open: bool,
     pub note: String,
     pub note_tone: i32,
+    pub capital_broker_name: String,
+    pub capital_value: String,
+    pub capital_sub: String,
+    pub capital_status: String,
+    pub capital_tone: i32,
+    pub capital_last_updated: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -2368,6 +2443,7 @@ pub struct SetupView {
     /// from Strategy Lab, as delivered by the live snapshot
     /// (`available_symbols` for the active strategy). No second source.
     pub stock_universe: Vec<String>,
+    pub universe_exchange: String,
     pub timeframe_names: Vec<String>,
     pub timeframe_selected: i32,
 }
@@ -3090,6 +3166,103 @@ pub fn project(state: &LiveState) -> LiveView {
         );
         (raw_label.to_string(), raw_tone, sub)
     };
+
+    // Broker Capital facts for the dedicated toolbar panel
+    let cap_broker_name = if !state.capital.broker_name.is_empty() {
+        state.capital.broker_name.clone()
+    } else if !state.broker.name.is_empty()
+        && state.broker.name != "NOT CONFIGURED"
+        && state.broker.name != "N/A"
+    {
+        state.broker.name.to_uppercase()
+    } else {
+        String::new()
+    };
+
+    let (cap_value, cap_tone, cap_sub, cap_status) = match state.capital.status.as_str() {
+        "CONNECTED" => {
+            if let Some(avail) = state.capital.available_margin {
+                (
+                    format_inr(avail),
+                    1,
+                    if !state.capital.label.is_empty() {
+                        state.capital.label.clone()
+                    } else {
+                        "Available margin".to_string()
+                    },
+                    "CONNECTED".to_string(),
+                )
+            } else {
+                (
+                    "Unavailable".to_string(),
+                    0,
+                    "Funds unavailable".to_string(),
+                    "UNAVAILABLE".to_string(),
+                )
+            }
+        }
+        "LOGIN REQUIRED" => (
+            "Unavailable".to_string(),
+            3,
+            "Session expired — login required".to_string(),
+            "LOGIN REQUIRED".to_string(),
+        ),
+        "ERROR" => (
+            "Unavailable".to_string(),
+            3,
+            "Broker API error".to_string(),
+            "ERROR".to_string(),
+        ),
+        "UNAVAILABLE" => (
+            "Unavailable".to_string(),
+            0,
+            "Funds not exposed by broker".to_string(),
+            "UNAVAILABLE".to_string(),
+        ),
+        "NOT CONFIGURED" => (
+            "Unavailable".to_string(),
+            0,
+            "Configure in SYSTEM → BROKERS".to_string(),
+            "NOT CONFIGURED".to_string(),
+        ),
+        _ => {
+            if state.broker.connected == Some(true) {
+                if let Some(avail) = state.capital.available_margin {
+                    (
+                        format_inr(avail),
+                        1,
+                        if !state.capital.label.is_empty() {
+                            state.capital.label.clone()
+                        } else {
+                            "Available margin".to_string()
+                        },
+                        "CONNECTED".to_string(),
+                    )
+                } else {
+                    (
+                        "Unavailable".to_string(),
+                        0,
+                        "Funds unavailable".to_string(),
+                        "UNAVAILABLE".to_string(),
+                    )
+                }
+            } else {
+                (
+                    "Unavailable".to_string(),
+                    0,
+                    "Broker disconnected".to_string(),
+                    "DISCONNECTED".to_string(),
+                )
+            }
+        }
+    };
+
+    let cap_last_updated = if !state.capital.last_updated.is_empty() {
+        state.capital.last_updated.clone()
+    } else {
+        snapshot_clock(state)
+    };
+
     let bar = BarView {
         mode: state.mode.kind(),
         broker_label: broker_name.into(),
@@ -3125,6 +3298,12 @@ pub fn project(state: &LiveState) -> LiveView {
         inspector_open: state.inspector_open,
         note: state.action_note.clone().unwrap_or_default(),
         note_tone,
+        capital_broker_name: cap_broker_name,
+        capital_value: cap_value,
+        capital_sub: cap_sub,
+        capital_status: cap_status,
+        capital_tone: cap_tone,
+        capital_last_updated: cap_last_updated,
     };
 
     // ── market region ──
@@ -3228,6 +3407,7 @@ pub fn project(state: &LiveState) -> LiveView {
         strategy_names: state.strategies.clone(),
         strategy_selected: state.strategy_index.map_or(-1, |i| i as i32),
         stock_universe: state.symbols.iter().map(|s| s.symbol.clone()).collect(),
+        universe_exchange: state.universe_exchange(),
         timeframe_names: state.timeframes.clone(),
         timeframe_selected: state.timeframe_index.map_or(-1, |i| i as i32),
     };
@@ -5124,10 +5304,78 @@ mod tests {
         }));
         let view = project(&st);
         assert_eq!(view.setup.stock_universe, vec!["NSE:INFY", "NSE:TCS"]);
+        assert_eq!(view.setup.universe_exchange, "NSE");
         // A strategy switch clears the strip until the next snapshot
         // delivers the new strategy's universe (never the old symbols).
         st.select_strategy(0);
         assert!(project(&st).setup.stock_universe.is_empty());
+    }
+
+    #[test]
+    fn live_strategy_switch_isolates_universes_and_refresh_action_queues() {
+        let mut st = LiveState::default();
+        st.host_mode = true;
+        // 1. Initial snapshot with Strategy A (2 stocks)
+        st.apply_snapshot(&serde_json::json!({
+            "strategy": {"id": "Alpha"},
+            "available_strategies": ["Alpha", "Beta", "Gamma"],
+            "available_symbols": ["NSE:RELIANCE", "NSE:TCS"],
+            "selected_symbols": ["NSE:RELIANCE", "NSE:TCS"],
+        }));
+        let view_a = project(&st);
+        assert_eq!(view_a.setup.stock_universe, vec!["NSE:RELIANCE", "NSE:TCS"]);
+        assert_eq!(view_a.setup.universe_exchange, "NSE");
+        assert_eq!(view_a.setup.strategy_selected, 0);
+
+        // 2. Switch to Strategy B (index 1)
+        st.select_strategy(1);
+        assert_eq!(st.selected_strategy(), Some("Beta"));
+        assert!(project(&st).setup.stock_universe.is_empty());
+        let action: serde_json::Value = serde_json::from_str(&st.take_action().unwrap()).unwrap();
+        assert_eq!(action["action"], "setup");
+        assert_eq!(action["strategy_name"], "Beta");
+
+        // Strategy B snapshot arrives with 1 stock
+        st.apply_snapshot(&serde_json::json!({
+            "strategy": {"id": "Beta"},
+            "available_strategies": ["Alpha", "Beta", "Gamma"],
+            "available_symbols": ["NSE:INFY"],
+            "selected_symbols": ["NSE:INFY"],
+        }));
+        let view_b = project(&st);
+        assert_eq!(view_b.setup.stock_universe, vec!["NSE:INFY"]);
+        assert_eq!(view_b.setup.universe_exchange, "NSE");
+        assert_eq!(view_b.setup.strategy_selected, 1);
+
+        // 3. Switch to Strategy C (index 2, empty universe)
+        st.select_strategy(2);
+        st.apply_snapshot(&serde_json::json!({
+            "strategy": {"id": "Gamma"},
+            "available_strategies": ["Alpha", "Beta", "Gamma"],
+            "available_symbols": [],
+            "selected_symbols": [],
+        }));
+        let view_c = project(&st);
+        assert!(view_c.setup.stock_universe.is_empty());
+        assert_eq!(view_c.setup.universe_exchange, "NSE");
+        assert_eq!(view_c.setup.strategy_selected, 2);
+
+        // 4. Switch back to Strategy A
+        st.select_strategy(0);
+        st.apply_snapshot(&serde_json::json!({
+            "strategy": {"id": "Alpha"},
+            "available_strategies": ["Alpha", "Beta", "Gamma"],
+            "available_symbols": ["NSE:RELIANCE", "NSE:TCS"],
+            "selected_symbols": ["NSE:RELIANCE", "NSE:TCS"],
+        }));
+        let view_a_restored = project(&st);
+        assert_eq!(view_a_restored.setup.stock_universe, vec!["NSE:RELIANCE", "NSE:TCS"]);
+
+        // 5. Calling refresh_universe queues "refresh" host action
+        while st.take_action().is_some() {}
+        st.refresh_universe();
+        let ref_action: serde_json::Value = serde_json::from_str(&st.take_action().unwrap()).unwrap();
+        assert_eq!(ref_action["action"], "refresh");
     }
 
     #[test]
@@ -5859,5 +6107,77 @@ mod tests {
         assert_eq!(drop_view.gateway.tone, 2);
         assert_eq!(drop_view.gateway.conn_state, "link lost — retrying in 2s");
         assert_eq!(drop_view.gateway.last_heartbeat, "12:14:25");
+    }
+
+    #[test]
+    fn format_inr_formats_indian_numbering_correctly() {
+        assert_eq!(format_inr(0.0), "₹0.00");
+        assert_eq!(format_inr(0.5), "₹0.50");
+        assert_eq!(format_inr(500.0), "₹500.00");
+        assert_eq!(format_inr(1500.0), "₹1,500.00");
+        assert_eq!(format_inr(5000.0), "₹5,000.00");
+        assert_eq!(format_inr(10000.0), "₹10,000.00");
+        assert_eq!(format_inr(100000.0), "₹1,00,000.00");
+        assert_eq!(format_inr(540250.75), "₹5,40,250.75");
+        assert_eq!(format_inr(10000000.0), "₹1,00,00,000.00");
+        assert_eq!(format_inr(-250.0), "-₹250.00");
+    }
+
+    #[test]
+    fn broker_capital_projection_truthful_states() {
+        // 1. Connected broker with positive margin
+        let mut st1 = LiveState::default();
+        st1.capital.broker_name = "FYERS".to_string();
+        st1.capital.status = "CONNECTED".to_string();
+        st1.capital.available_margin = Some(540250.0);
+        st1.capital.label = "Available margin".to_string();
+        st1.capital.last_updated = "10:15:30".to_string();
+        let view1 = project(&st1);
+        assert_eq!(view1.bar.capital_broker_name, "FYERS");
+        assert_eq!(view1.bar.capital_value, "₹5,40,250.00");
+        assert_eq!(view1.bar.capital_sub, "Available margin");
+        assert_eq!(view1.bar.capital_status, "CONNECTED");
+        assert_eq!(view1.bar.capital_tone, 1);
+        assert_eq!(view1.bar.capital_last_updated, "10:15:30");
+
+        // 2. Connected broker with truthful ₹0.00 margin
+        let mut st2 = LiveState::default();
+        st2.capital.broker_name = "ZERODHA".to_string();
+        st2.capital.status = "CONNECTED".to_string();
+        st2.capital.available_margin = Some(0.0);
+        st2.capital.label = "Available cash".to_string();
+        let view2 = project(&st2);
+        assert_eq!(view2.bar.capital_broker_name, "ZERODHA");
+        assert_eq!(view2.bar.capital_value, "₹0.00");
+        assert_eq!(view2.bar.capital_sub, "Available cash");
+        assert_eq!(view2.bar.capital_status, "CONNECTED");
+        assert_eq!(view2.bar.capital_tone, 1);
+
+        // 3. Login required state
+        let mut st3 = LiveState::default();
+        st3.capital.broker_name = "FYERS".to_string();
+        st3.capital.status = "LOGIN REQUIRED".to_string();
+        let view3 = project(&st3);
+        assert_eq!(view3.bar.capital_broker_name, "FYERS");
+        assert_eq!(view3.bar.capital_value, "Unavailable");
+        assert_eq!(view3.bar.capital_status, "LOGIN REQUIRED");
+        assert_eq!(view3.bar.capital_tone, 3);
+
+        // 4. Broker disconnected
+        let mut st4 = LiveState::default();
+        st4.capital.broker_name = "ZERODHA".to_string();
+        st4.capital.status = "DISCONNECTED".to_string();
+        let view4 = project(&st4);
+        assert_eq!(view4.bar.capital_broker_name, "ZERODHA");
+        assert_eq!(view4.bar.capital_value, "Unavailable");
+        assert_eq!(view4.bar.capital_status, "DISCONNECTED");
+        assert_eq!(view4.bar.capital_tone, 0);
+
+        // 5. Action queue for refresh
+        let mut st5 = LiveState::default();
+        st5.refresh_broker_capital();
+        let action = st5.take_action();
+        assert!(action.is_some());
+        assert!(action.unwrap().contains("refresh_capital"));
     }
 }

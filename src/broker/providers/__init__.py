@@ -49,6 +49,14 @@ def ensure_live_venues() -> tuple[bool, str]:
         results.append(f"zerodha-live: {'registered' if ok else reason}")
     except ImportError as exc:
         results.append(f"zerodha-live: unavailable ({exc})")
+    try:
+        from broker.providers.fyers.live_activation import register_fyers_live
+
+        ok, reason = register_fyers_live()
+        registered = registered or ok
+        results.append(f"fyers-live: {'registered' if ok else reason}")
+    except ImportError as exc:
+        results.append(f"fyers-live: unavailable ({exc})")
     return registered, "; ".join(results)
 
 

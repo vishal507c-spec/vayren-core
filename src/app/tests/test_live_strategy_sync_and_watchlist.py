@@ -21,6 +21,7 @@ if str(ROOT / "src") not in sys.path:
 
 import pytest  # noqa: E402
 
+import app.headless as headless  # noqa: E402
 from app.services.lab_universe_service import (  # noqa: E402
     SAVE_SAVED,
     LabUniverseService,
@@ -188,3 +189,77 @@ def test_5_order_safety_selection_never_starts_or_submits(
     assert snap["orders"] == []
     assert snap["fills"] == []
     assert snap["can_arm"] is False  # In PAPER mode, or without valid live confirmation
+
+
+def test_6_live_action_refresh_syncs_latest_saved_universe(
+    dirs: tuple[str, str], lab: LabUniverseService
+) -> None:
+    """Live action 'refresh' re-reads the selected strategy's universe from disk."""
+    lab.save("obr-c1c4", ["RELIANCE"])
+
+    # Configure strategy in Live via host action
+    snap1 = headless._live_action(
+        dirs[0],
+        dirs[1],
+        {"action": "setup", "strategy_name": "obr-c1c4", "symbols": []},
+    )
+    assert snap1["available_symbols"] == ("NSE:RELIANCE",)
+    assert snap1["selected_symbols"] == ("NSE:RELIANCE",)
+
+    # Strategy Lab saves updated universe with more stocks
+    lab.save("obr-c1c4", ["RELIANCE", "TCS", "INFY"])
+
+    # Dispatch 'refresh' live action (triggered by refresh button)
+    snap2 = headless._live_action(dirs[0], dirs[1], {"action": "refresh"})
+    assert snap2["available_symbols"] == ("NSE:RELIANCE", "NSE:TCS", "NSE:INFY")
+    assert snap2["selected_symbols"] == ("NSE:RELIANCE", "NSE:TCS", "NSE:INFY")
+    assert snap2["action_note"] == "stocks refreshed from Strategy Lab"
+
+
+def test_7_live_strategy_switch_isolates_universes_via_live_action(
+    dirs: tuple[str, str], lab: LabUniverseService
+) -> None:
+    """Switching strategies via live action strictly isolates universes with no leak."""
+    lab.save("obr-c1c4", ["RELIANCE", "TCS"])
+    lab.save("sma-crossover", ["INFY"])
+
+    # Select strategy A
+    snap_a = headless._live_action(
+        dirs[0],
+        dirs[1],
+        {"action": "setup", "strategy_name": "obr-c1c4", "symbols": []},
+    )
+    assert snap_a["strategy"]["id"] == "obr-c1c4"
+    assert snap_a["available_symbols"] == ("NSE:RELIANCE", "NSE:TCS")
+    assert snap_a["selected_symbols"] == ("NSE:RELIANCE", "NSE:TCS")
+
+    # Switch to strategy B
+    snap_b = headless._live_action(
+        dirs[0],
+        dirs[1],
+        {"action": "setup", "strategy_name": "sma-crossover", "symbols": []},
+    )
+    assert snap_b["strategy"]["id"] == "sma-crossover"
+    assert snap_b["available_symbols"] == ("NSE:INFY",)
+    assert snap_b["selected_symbols"] == ("NSE:INFY",)
+
+    # Switch to strategy with no saved stocks
+    snap_c = headless._live_action(
+        dirs[0],
+        dirs[1],
+        {"action": "setup", "strategy_name": "ema-crossover", "symbols": []},
+    )
+    assert snap_c["strategy"]["id"] == "ema-crossover"
+    assert snap_c["available_symbols"] == ()
+    assert snap_c["selected_symbols"] == ()
+
+    # Switch back to strategy A
+    snap_a_restored = headless._live_action(
+        dirs[0],
+        dirs[1],
+        {"action": "setup", "strategy_name": "obr-c1c4", "symbols": []},
+    )
+    assert snap_a_restored["strategy"]["id"] == "obr-c1c4"
+    assert snap_a_restored["available_symbols"] == ("NSE:RELIANCE", "NSE:TCS")
+    assert snap_a_restored["selected_symbols"] == ("NSE:RELIANCE", "NSE:TCS")
+

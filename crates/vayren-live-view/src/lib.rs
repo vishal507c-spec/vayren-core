@@ -163,6 +163,12 @@ fn apply_view(ui: &LiveHostWindow, state: &LiveState) {
         inspector_open: view.bar.inspector_open,
         note: view.bar.note.into(),
         note_tone: view.bar.note_tone,
+        capital_broker_name: view.bar.capital_broker_name.into(),
+        capital_value: view.bar.capital_value.into(),
+        capital_sub: view.bar.capital_sub.into(),
+        capital_status: view.bar.capital_status.into(),
+        capital_tone: view.bar.capital_tone,
+        capital_last_updated: view.bar.capital_last_updated.into(),
     });
     ui.set_inspector_open(view.bar.inspector_open);
     ui.set_setup(LiveSetup {
@@ -176,6 +182,7 @@ fn apply_view(ui: &LiveHostWindow, state: &LiveState) {
         confirmed_live: view.setup.confirmed_live,
         symbol_total: view.setup.symbol_total.into(),
         stock_universe: strings(view.setup.stock_universe),
+        universe_exchange: view.setup.universe_exchange.into(),
     });
     ui.set_strategy_names(strings(view.setup.strategy_names));
     ui.set_strategy_selected(view.setup.strategy_selected);
@@ -434,6 +441,7 @@ fn wire_view(ui: &LiveHostWindow, state: Rc<RefCell<LiveState>>, refresh: Rc<Cel
     wire_unit!(on_halt_requested, LiveState::halt);
     wire_unit!(on_confirm_requested, LiveState::confirm_live);
     wire_unit!(on_inspector_toggled, LiveState::toggle_inspector);
+    wire_unit!(on_broker_capital_refresh, LiveState::refresh_broker_capital);
     {
         // CLEAR EVENTS is UI-hygiene only (same contract as shell::wire_live):
         // drops the rendered history, never queues a host action.

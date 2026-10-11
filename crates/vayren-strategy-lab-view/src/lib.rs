@@ -217,6 +217,7 @@ fn apply_state(ui: &LabHostWindow, state: &LabState) {
         universe_count_line: view.universe_count_line.into(),
         universe_state: view.universe_state.into(),
         universe_error: view.universe_error.into(),
+        universe_exchange: view.universe_exchange.into(),
         run_id: view.run_id.into(),
         run_ts: view.run_ts.into(),
         cfg_hash: view.cfg_hash.into(),

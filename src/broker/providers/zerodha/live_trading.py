@@ -241,11 +241,21 @@ class ZerodhaTradingAdapter:
         quantity = self._venue_quantity(plan)
         order_type, price = self._venue_price(plan)
         kite = self._kite_client()
+        sym_str = str(plan.symbol).strip()
+        exchange = self._exchange
+        if ":" in sym_str:
+            parts = sym_str.split(":", 1)
+            if parts[0]:
+                exchange = parts[0].upper()
+            tradingsymbol = parts[1]
+        else:
+            tradingsymbol = sym_str
+        tradingsymbol = tradingsymbol.removesuffix("-EQ")
         try:
             broker_id = kite.place_order(
                 variety=kite.VARIETY_REGULAR,
-                exchange=self._exchange,
-                tradingsymbol=str(plan.symbol),
+                exchange=exchange,
+                tradingsymbol=tradingsymbol,
                 transaction_type=(
                     kite.TRANSACTION_TYPE_BUY if plan.side == "BUY" else kite.TRANSACTION_TYPE_SELL
                 ),

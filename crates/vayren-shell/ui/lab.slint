@@ -141,6 +141,7 @@ export struct LabHeader {
     // "clean" | "pending" | "saved" | "error"
     universe-state: string,
     universe-error: string,
+    universe-exchange: string,
     // ── Reference redesign additions ──
     run-id: string,
     run-ts: string,
@@ -3197,7 +3198,8 @@ overflow: elide;
                                         }
                                         Text {
                                             horizontal-stretch: 0;
-                                            text: "NSE";
+                                            visible: root.lab.universe-exchange != "";
+                                            text: root.lab.universe-exchange;
                                             font-family: "monospace";
                                             font-size: 9.5px;
                                             color: LabPalette.lab-muted;
@@ -3260,9 +3262,12 @@ overflow: elide;
                                             max-width: 180px;
                                             text: root.lab.universe-state == "error" ? root.lab.universe-error
                                                 : root.lab.universe-state == "pending" ? "Saving stocks…"
+                                                : root.lab.universe-state == "saved" ? "Saved"
                                                 : "";
                                             font-size: 10px;
-                                            color: root.lab.universe-state == "error" ? LabPalette.lab-red : LabPalette.lab-muted;
+                                            color: root.lab.universe-state == "error" ? LabPalette.lab-red
+                                                : root.lab.universe-state == "saved" ? LabPalette.green
+                                                : LabPalette.lab-muted;
                                             vertical-alignment: center;
                                             overflow: elide;
                                         }

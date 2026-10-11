@@ -210,6 +210,20 @@ class FyersAutoAuthEngine:
                 "VAYREN_FYERS_TOTP_SECRET / VAYREN_FYERS_PIN) — "
                 "falling back to the interactive browser flow",
             )
+        cid = self._credentials.client_id
+        if cid.startswith("HTTP") or "/" in cid or len(cid) > 20:
+            return (
+                False,
+                "FYERS Client ID is invalid: must be your FYERS User ID / Login ID "
+                "(e.g. XY12345), not a URL or link",
+            )
+        totp_sec = self._credentials.totp_secret
+        if "\u2022" in totp_sec or not totp_sec.isascii():
+            return (
+                False,
+                "FYERS TOTP Secret is invalid. Enter your 32-character External 2FA "
+                "secret key from the FYERS portal",
+            )
         return True, "ready"
 
     def ensure_session(self, session_store: Any) -> tuple[bool, str]:

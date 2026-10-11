@@ -37,6 +37,12 @@ export struct LiveBar {
     inspector-open: bool,
     note: string,
     note-tone: int,
+    capital-broker-name: string,
+    capital-value: string,
+    capital-sub: string,
+    capital-status: string,
+    capital-tone: int,
+    capital-last-updated: string,
 }
 
 export struct LiveSetup {
@@ -50,6 +56,7 @@ export struct LiveSetup {
     confirmed-live: bool,
     symbol-total: string,
     stock-universe: [string],
+    universe-exchange: string,
 }
 
 export struct LiveMarket {
@@ -331,26 +338,24 @@ export global LiveTiers {
     public pure function bar-mode-width() -> length { return 168px; }
     public pure function bar-transport-width() -> length { return 264px; }
     public pure function bar-strategy-width() -> length { return 170px; }
+    public pure function bar-capital-width() -> length { return 195px; }
     // 12px padding each side + the one 8px gap before the first card.
     public pure function bar-chrome() -> length { return 32px; }
     public pure function bar-gap() -> length { return 8px; }
 
-    // BROKER + RISK ENGINE only: the two facts that decide whether the
-    // workstation is safe to touch at all.
-    // The strategy selector is always present, so its width is in every tier.
+    // BROKER + EC2 cards + Controls + Broker Capital.
     public pure function bar-core(w: length) -> bool {
         return w >= bar-chrome() + bar-strategy-width() + bar-mode-width() + bar-transport-width()
-            + 2 * bar-card-width() + 6 * bar-gap();
+            + bar-capital-width() + 2 * bar-card-width() + 6 * bar-gap();
     }
     // + MARKET DATA / ORDER WS / STRATEGY: the session's own inputs.
     public pure function bar-secondary(w: length) -> bool {
         return w >= bar-chrome() + bar-strategy-width() + bar-mode-width() + bar-transport-width()
-            + 5 * bar-card-width() + 10 * bar-gap();
+            + bar-capital-width() + 4 * bar-card-width() + 8 * bar-gap();
     }
-    // + RECONCILIATION / EXECUTOR: only while all seven stay readable.
     public pure function bar-extended(w: length) -> bool {
         return w >= bar-chrome() + bar-strategy-width() + bar-mode-width() + bar-transport-width()
-            + 7 * bar-card-width() + 12 * bar-gap();
+            + bar-capital-width() + 4 * bar-card-width() + 8 * bar-gap();
     }
 
     // The inspector docks only when the workspace floor STILL fits beside it.
@@ -489,6 +494,118 @@ component LiveTopCard inherits Rectangle {
     }
 }
 
+component LiveBrokerCapitalCard inherits Rectangle {
+    in property <string> broker-name: "";
+    in property <string> value-text: "Unavailable";
+    in property <string> sub-text: "Available margin";
+    in property <string> status-text: "DISCONNECTED";
+    in property <int> tone: 0;
+    in property <string> last-updated: "";
+    callback refresh-requested();
+
+    background: VayrenPalette.live-panel;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: root.tone == 1 ? VayrenPalette.live-teal-deep : VayrenPalette.live-line-soft;
+    min-width: 175px;
+    max-width: 235px;
+    height: 52px;
+    clip: true;
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 8px;
+        padding-top: 5px;
+        padding-bottom: 5px;
+        spacing: 6px;
+        alignment: space-between;
+
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            spacing: 2px;
+
+            // Top row: Header "BROKER CAPITAL" + Broker Name tag
+            HorizontalLayout {
+                spacing: 6px;
+                alignment: start;
+
+                Text {
+                    text: "BROKER CAPITAL";
+                    color: VayrenPalette.live-ink-faint;
+                    font-size: 9px;
+                    font-weight: 800;
+                    vertical-alignment: center;
+                }
+
+                if root.broker-name != "": Rectangle {
+                    height: 14px;
+                    border-radius: 3px;
+                    background: LiveTone.chip(root.tone);
+                    border-width: 1px;
+                    border-color: LiveTone.ink(root.tone);
+                    HorizontalLayout {
+                        padding-left: 4px;
+                        padding-right: 4px;
+                        Text {
+                            text: root.broker-name;
+                            color: LiveTone.ink(root.tone);
+                            font-size: 8px;
+                            font-weight: 800;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+
+            // Main value: Capital amount formatted in INR
+            Text {
+                text: root.value-text;
+                color: root.tone == 1 ? VayrenPalette.live-teal : (root.tone == 3 ? VayrenPalette.neg : (root.tone == 2 ? VayrenPalette.amber : VayrenPalette.live-ink-dim));
+                font-size: 13px;
+                font-weight: 800;
+                overflow: elide;
+            }
+
+            // Sub text: Description ("Available margin") + timestamp
+            Text {
+                text: (root.sub-text != "" ? root.sub-text : "Available margin")
+                    + (root.last-updated != "" ? (" · " + root.last-updated) : "");
+                color: VayrenPalette.live-ink-dim;
+                font-size: 9px;
+                font-weight: 500;
+                overflow: elide;
+            }
+        }
+
+        // Right side: Compact refresh button
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 24px;
+                height: 24px;
+                border-radius: 4px;
+                background: refresh-touch.has-hover ? VayrenPalette.hover : transparent;
+                border-width: 1px;
+                border-color: refresh-touch.has-hover ? VayrenPalette.live-line-soft : transparent;
+
+                refresh-touch := TouchArea {
+                    clicked => { root.refresh-requested(); }
+                }
+
+                Text {
+                    text: "↻";
+                    color: refresh-touch.has-hover ? VayrenPalette.live-teal : VayrenPalette.live-ink-dim;
+                    font-size: 14px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}
+
 
 // One real readiness gate: name + the domain's own verdict + the backend's
 // own reason. There is no `is-ready` input - readiness is never assumed, only
@@ -584,6 +701,8 @@ export component LiveScreen inherits Rectangle {
     callback watchlist-selected(string);
     callback filter-chip-picked(int);
     callback watchlist-search-changed(string);
+    callback refresh-stocks();
+    callback broker-capital-refresh();
 
     // The selected timeframe is the BACKEND's selection (index into
     // timeframe-names), never a locally shadowed string.
@@ -709,30 +828,6 @@ export component LiveScreen inherits Rectangle {
                     sub-text: root.active-strat.status != "" ? root.active-strat.status : (root.bar.strategy-sub != "" ? root.bar.strategy-sub : "STOPPED");
                     sub-tone: root.active-strat.status-tone;
                     source-text: "STRATEGY RT";
-                }
-
-                // Reconciliation + executor: only on the extended tier, where
-                // there is room. Narrow screens keep the four facts above.
-                if root.bar-extended: LiveTopCard {
-                    icon-char: "RC";
-                    show-icon: false;
-                    label: "RECONCILIATION";
-                    value-text: root.bar.recon-label != "" ? root.bar.recon-label : "NOT CONFIGURED";
-                    tone: root.bar.recon-tone;
-                    sub-text: root.bar.recon-sub != "" ? root.bar.recon-sub : "0 MISMATCHES";
-                    sub-tone: root.bar.recon-tone;
-                    source-text: "RECON ENGINE";
-                }
-
-                if root.bar-extended: LiveTopCard {
-                    icon-char: "EX";
-                    show-icon: false;
-                    label: "EXECUTOR";
-                    value-text: root.bar.exec-label != "" ? root.bar.exec-label : "STANDBY";
-                    tone: root.bar.exec-tone;
-                    sub-text: root.setup.session-label != "" ? root.setup.session-label : "PHASE 6 RT";
-                    sub-tone: root.bar.exec-tone;
-                    source-text: "PHASE 6 RT";
                 }
 
                 Rectangle { horizontal-stretch: 1; background: transparent; }
@@ -868,6 +963,17 @@ export component LiveScreen inherits Rectangle {
                     clicked => { root.halt-requested(); }
                 }
 
+                // Dedicated Broker Capital Panel
+                LiveBrokerCapitalCard {
+                    broker-name: root.bar.capital-broker-name;
+                    value-text: root.bar.capital-value;
+                    sub-text: root.bar.capital-sub;
+                    status-text: root.bar.capital-status;
+                    tone: root.bar.capital-tone;
+                    last-updated: root.bar.capital-last-updated;
+                    refresh-requested => { root.broker-capital-refresh(); }
+                }
+
                 // One verdict + one clock, carried here because the duplicated
                 // footer strip is gone: every fact now lives in exactly one place.
                 HorizontalLayout {
@@ -887,7 +993,7 @@ export component LiveScreen inherits Rectangle {
 
         // ══ 1b. STRATEGY STOCK LIST (read-only; managed in Strategy Lab) ══════
         Rectangle {
-            height: 34px;
+            height: 38px;
             min-width: 0px;
             width: 100%;
             background: VayrenPalette.live-topbar;
@@ -896,13 +1002,22 @@ export component LiveScreen inherits Rectangle {
             clip: true;
 
             HorizontalLayout {
-                padding-left: 12px;
-                padding-right: 12px;
-                spacing: 10px;
+                padding-left: 14px;
+                padding-right: 14px;
+                spacing: 12px;
                 alignment: start;
 
                 Text {
-                    text: "NSE";
+                    text: "LIVE TRADE STOCKS";
+                    font-family: "monospace";
+                    font-size: 10px;
+                    font-weight: 700;
+                    color: VayrenPalette.live-ink;
+                    vertical-alignment: center;
+                }
+
+                Text {
+                    text: root.setup.universe-exchange != "" ? root.setup.universe-exchange : "NSE";
                     font-family: "monospace";
                     font-size: 10px;
                     font-weight: 700;
@@ -911,12 +1026,15 @@ export component LiveScreen inherits Rectangle {
                 }
 
                 Text {
-                    text: root.setup.symbol-total;
+                    text: root.strategy-selected < 0
+                        ? "Select a strategy above"
+                        : (root.setup.stock-universe.length > 0
+                            ? (root.setup.stock-universe.length + " stocks saved")
+                            : "No saved stocks");
                     font-family: "monospace";
                     font-size: 10px;
                     color: VayrenPalette.live-ink-dim;
                     vertical-alignment: center;
-                    overflow: elide;
                 }
 
                 ScrollView {
@@ -944,12 +1062,45 @@ export component LiveScreen inherits Rectangle {
                                 vertical-alignment: center;
                             }
                         }
-                        if root.setup.stock-universe.length == 0: Text {
-                            text: root.strategy-selected < 0 ? "Select a strategy above" : "No saved stocks — save them in Strategy Lab";
-                            font-size: 10px;
+                    }
+                }
+
+                Rectangle {
+                    height: 20px;
+                    border-radius: 10px;
+                    background: VayrenPalette.live-panel;
+                    border-width: 1px;
+                    border-color: VayrenPalette.live-line-soft;
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        alignment: center;
+                        Text {
+                            text: "Read-only · Managed in Strategy Lab";
+                            font-size: 9.5px;
                             color: VayrenPalette.live-ink-dim;
                             vertical-alignment: center;
                         }
+                    }
+                }
+
+                Rectangle {
+                    width: 22px;
+                    height: 22px;
+                    border-radius: 11px;
+                    background: refresh-touch.has-hover ? VayrenPalette.live-line-soft : VayrenPalette.live-panel;
+                    border-width: 1px;
+                    border-color: VayrenPalette.live-line-soft;
+                    Text {
+                        text: "↻";
+                        font-size: 12px;
+                        color: refresh-touch.has-hover ? VayrenPalette.live-ink : VayrenPalette.live-teal;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    refresh-touch := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.refresh-stocks(); }
                     }
                 }
             }
