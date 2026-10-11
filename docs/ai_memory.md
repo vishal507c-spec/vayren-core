@@ -7,7 +7,27 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (live-terminal-synchronization-and-production-binary, 2026-10-12):** RESOLVE LIVE TERMINAL SYNCHRONIZATION AND BUILD UPDATED PRODUCTION RELEASE EXE.
+**Latest update (live-controls-mode-simplification-and-production-binary, 2026-10-12):** SIMPLIFY LIVE TRADING MODE (KEEP LIVE ONLY) & UPDATE PRODUCTION RELEASE EXE.
+1. Trading Mode Simplification:
+   - Kept LIVE as the single visible trading mode on the LIVE execution workstation.
+   - Removed PAPER and SANDBOX mode selector buttons from both wide and narrow top status/control bars in `crates/vayren-shell/ui/live.slint`.
+   - Preserved all underlying backend and domain execution mode structures (`PAPER`, `SANDBOX`, `LIVE`) for future or headless use without deleting domain capability.
+   - Preserved start prevention rule: selecting LIVE mode never automatically starts trading.
+2. Control Responsiveness & Live Verification:
+   - START/STOP/HALT button dispatch verified end-to-end: UI button click triggers callback -> `LiveState` pushes JSON action -> main UI loop drains into worker thread -> forwarded to local Python backend (`_live_action`) -> applied to `LiveTradingService` -> fresh snapshot projected back to UI.
+   - Pending states (`STARTING...`, `STOPPING...`, `HALTING...`) provide immediate UI feedback while awaiting backend confirmation.
+   - Runtime timing, FYERS broker status, and order tracking preserved accurately from authoritative sources.
+3. Production Release Binary Built & Verified:
+   - Output Path: `C:\Users\visha\Desktop\vayren-core\target\release\vayren-shell.exe`
+   - Timestamp: `26/10/12 01:07:49 AM`
+   - File Size: `37,605,888` bytes (~35.86 MB)
+   - SHA-256: `EEBD26019FAB3F46DF7F6FCDFE5ADE6CD62355F6ECDD479C931B32333AADC178`
+   - Desktop Shortcut `C:\Users\visha\Desktop\VAYREN.lnk` verified targeting `C:\Users\visha\Desktop\vayren-core\target\release\vayren-shell.exe` with arguments `--data-dir D:\ZerodhaTradingData --strategy-dir D:\ZerodhaTradingData\strategies`.
+4. Verification & Test Suite:
+   - Rust tests: `cargo test -p vayren-domain --lib live` (59 passed in 0.02s); `cargo test -p vayren-shell --lib` (50 passed in 0.18s).
+   - Python tests: `pytest src/app/tests/test_live_broker_capital.py src/app/tests/test_live_strategy_sync_and_watchlist.py src/app/tests/test_lab_to_live_universe_e2e.py -q` (25 passed in 4.01s).
+
+**Previous update (live-terminal-synchronization-and-production-binary, 2026-10-12):** RESOLVE LIVE TERMINAL SYNCHRONIZATION AND BUILD UPDATED PRODUCTION RELEASE EXE.
 1. Live Action & Snapshot Unification in Packaged Remote Shell:
    - Initial Snapshot Ingestion: In `crates/vayren-shell/src/main.rs`, removed `if !is_remote` gate at startup so `GetLiveSnapshot` is always requested from the workstation's local `PythonBackend`, truthfully populating the persisted session (`OBR C1C4`, 22 saved stocks, FYERS selection and capital) regardless of launch mode.
    - Action Refusal Removed: Removed the control refusal drain that previously discarded START, STOP, HALT, and setup actions with `"remote UI: control '{name}' refused (read-only client, nothing sent)"`. All actions are now drained and forwarded to the local backend worker thread in order.
