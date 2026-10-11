@@ -7,7 +7,18 @@
 
 **Build-performance history:** read `docs/CARGO_BUILD_EXPERIMENTS.md` before any Cargo/release build-speed work (measured baseline, rejected `codegen-units = 256`, `target-exp` deleted, User-scope `CARGO_TARGET_DIR` removed (verified; `vayren-core-main\target` retained, not deleted)).
 
-**Latest update (green-ci-and-live-workstation, 2026-10-11):** GREEN CI STABILIZATION & RESPONSIVE LIVE WORKSTATION BLOTTER (clean commit & push ready).
+**Latest update (live-small-display-scale-fix, 2026-10-11):** FIX LIVE SCREEN FOR SMALL/SCALED DESKTOP DISPLAYS (1080p @ 150% Scale / 1280x720).
+1. Root Causes Resolved:
+   - High DPI / 150% Scaling (1280x720 effective resolution): The threshold `is-narrow-bar: root.width < 1340px` forced all standard 1080p laptops at 150% scale into the 2-row layout, unnecessarily taking 96px of vertical height. Fixed threshold to `root.width < 1160px;`, allowing 1280x720 screens to render a compact, elegant single-row 58px toolbar with ~100px breathing room.
+   - Status Card Vertical Text Clipping: In narrow mode, Row 1 had `height: 40px` while cards were 52px, cutting off timestamps and account IDs. Fixed: Reduced card height to 48px with proportional typography and set Row 1 height to 48px, completely eliminating vertical clipping.
+   - Strategy Dropdown Truncation ("OBR ...", "SMA ...", "EMA ..."): The strategy selector had a hardcoded narrow width of 175px/185px with a 65px label, leaving only 90px for the ComboBox, which forced Slint's popup dropdown to truncate all strategy names with ellipsis. Fixed: Increased strategy container width to 220px with `min-width: 125px` for ComboBox, displaying full strategy names cleanly with zero ellipsis.
+   - Compact Stocks Strip: Compacted `LIVE TRADE STOCKS` from 74px to 66px, returning 8 more pixels to the screen.
+2. Verified Facts:
+   - Slint UI Compilation: `cargo check -p vayren-shell` (0 errors, 0 warnings).
+   - Offscreen Visual Rasterization Suite: `cargo test -p vayren-shell --test live_stock_row_render` (1/1 passed) and `cargo test -p vayren-shell --test live_render_snapshot` (all 6 viewport tier tests passed including 1280x720, 1024x640, 960x640).
+   - Language Ownership: `python tools/validate_language_ownership.py` (398 files passed).
+
+**Previous update (green-ci-and-live-workstation, 2026-10-11):** GREEN CI STABILIZATION & RESPONSIVE LIVE WORKSTATION BLOTTER (clean commit & push ready).
 1. Root Causes Resolved:
    - Live Snapshot Suite Edge Clipping: Fixed edge viewport (1024x640, 960x540) toolbar clipping in `crates/vayren-shell/ui/live.slint`. LiveBrokerCapitalCard and controls dynamically adapt with proportional bounds, passing all 6 tests in `cargo test -p vayren-shell --test live_render_snapshot`.
    - Workstation Blotter & Inspector Restoration: Restored multi-tabbed blotter (Positions, Orders, Fills, Live Events Stream, Daily P&L) and side inspector cards in `live.slint`, satisfying text pixel density requirements across all viewport tiers up to UHD 4K (3840x2160).

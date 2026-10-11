@@ -425,21 +425,21 @@ component LiveTopCard inherits Rectangle {
     border-radius: 8px;
     border-width: 1px;
     border-color: VayrenPalette.live-line-soft;
-    min-width: 130px;
-    max-width: 205px;
-    height: 52px;
+    min-width: 120px;
+    max-width: 175px;
+    height: 48px;
     clip: true;
 
     HorizontalLayout {
         padding-left: 8px;
         padding-right: 8px;
-        spacing: 9px;
+        spacing: 7px;
         alignment: center;
 
         if root.show-icon: Rectangle {
-            width: 28px;
-            height: 28px;
-            border-radius: 14px;
+            width: 26px;
+            height: 26px;
+            border-radius: 13px;
             background: LiveTone.chip(root.tone);
             border-width: 1px;
             border-color: LiveTone.ink(root.tone);
@@ -447,7 +447,7 @@ component LiveTopCard inherits Rectangle {
             Text {
                 text: root.icon-char;
                 color: LiveTone.ink(root.tone);
-                font-size: 10px;
+                font-size: 9.5px;
                 font-weight: 800;
                 horizontal-alignment: center;
                 vertical-alignment: center;
@@ -462,7 +462,7 @@ component LiveTopCard inherits Rectangle {
             if root.label != "": Text {
                 text: root.label;
                 color: VayrenPalette.live-ink-faint;
-                font-size: 10px;
+                font-size: 9px;
                 font-weight: 700;
                 overflow: elide;
             }
@@ -478,7 +478,7 @@ component LiveTopCard inherits Rectangle {
             if root.sub-text != "": Text {
                 text: root.sub-text;
                 color: LiveTone.ink(root.sub-tone);
-                font-size: 10px;
+                font-size: 9px;
                 font-weight: 500;
                 overflow: elide;
             }
@@ -486,7 +486,7 @@ component LiveTopCard inherits Rectangle {
             if root.source-text != "": Text {
                 text: "SRC: " + root.source-text;
                 color: VayrenPalette.live-ink-dim;
-                font-size: 10px;
+                font-size: 9px;
                 font-weight: 600;
                 overflow: elide;
             }
@@ -504,42 +504,42 @@ component LiveBrokerCapitalCard inherits Rectangle {
     callback refresh-requested();
 
     background: VayrenPalette.live-panel;
-    border-radius: 8px;
+    border-radius: 6px;
     border-width: 1px;
     border-color: root.tone == 1 ? VayrenPalette.live-teal-deep : VayrenPalette.live-line-soft;
-    min-width: 180px;
-    max-width: 230px;
-    height: 52px;
+    min-width: 170px;
+    max-width: 215px;
+    height: 48px;
     clip: true;
 
     HorizontalLayout {
-        padding-left: 10px;
-        padding-right: 8px;
-        padding-top: 5px;
-        padding-bottom: 5px;
+        padding-left: 8px;
+        padding-right: 7px;
+        padding-top: 3px;
+        padding-bottom: 3px;
         spacing: 6px;
         alignment: space-between;
 
         VerticalLayout {
             horizontal-stretch: 1;
             alignment: center;
-            spacing: 2px;
+            spacing: 1px;
 
             // Top row: Header "BROKER CAPITAL" + Broker Name tag
             HorizontalLayout {
-                spacing: 6px;
+                spacing: 5px;
                 alignment: start;
 
                 Text {
                     text: "BROKER CAPITAL";
                     color: VayrenPalette.live-ink-faint;
-                    font-size: 9px;
+                    font-size: 8.5px;
                     font-weight: 800;
                     vertical-alignment: center;
                 }
 
                 if root.broker-name != "": Rectangle {
-                    height: 14px;
+                    height: 13px;
                     border-radius: 3px;
                     background: LiveTone.chip(root.tone);
                     border-width: 1px;
@@ -572,7 +572,7 @@ component LiveBrokerCapitalCard inherits Rectangle {
                 text: (root.sub-text != "" ? root.sub-text : "Available margin")
                     + (root.last-updated != "" ? (" · " + root.last-updated) : "");
                 color: VayrenPalette.live-ink-dim;
-                font-size: 9px;
+                font-size: 8.5px;
                 font-weight: 500;
                 overflow: elide;
             }
@@ -582,8 +582,8 @@ component LiveBrokerCapitalCard inherits Rectangle {
         VerticalLayout {
             alignment: center;
             Rectangle {
-                width: 24px;
-                height: 24px;
+                width: 22px;
+                height: 22px;
                 border-radius: 4px;
                 background: refresh-touch.has-hover ? VayrenPalette.hover : transparent;
                 border-width: 1px;
@@ -596,7 +596,7 @@ component LiveBrokerCapitalCard inherits Rectangle {
                 Text {
                     text: "↻";
                     color: refresh-touch.has-hover ? VayrenPalette.live-teal : VayrenPalette.live-ink-dim;
-                    font-size: 14px;
+                    font-size: 13px;
                     font-weight: 700;
                     horizontal-alignment: center;
                     vertical-alignment: center;
@@ -773,7 +773,7 @@ export component LiveScreen inherits Rectangle {
 
     // Watchlist columns always preserved. Internal horizontal scrolling handles narrow viewports.
     property <bool> watchlist-columns-wide: true;
-    property <bool> is-narrow-bar: root.width < 1340px;
+    property <bool> is-narrow-bar: root.width < 1160px;
 
     init => { root.qty-text = root.setup.quantity; }
     changed setup => { if (!root.qty-dirty) { root.qty-text = root.setup.quantity; } }
@@ -806,7 +806,7 @@ export component LiveScreen inherits Rectangle {
 
         // ══ 1. TOP STATUS & CONTROL BAR ══════════════════════════════════════
         Rectangle {
-            height: root.is-narrow-bar ? 96px : 62px;
+            height: root.is-narrow-bar ? 98px : 58px;
             min-width: 0px;
             width: 100%;
             background: VayrenPalette.live-topbar;
@@ -816,9 +816,9 @@ export component LiveScreen inherits Rectangle {
 
             // WIDE VIEW: Single row with clearly separated groups (Status on left, Controls on right)
             if !root.is-narrow-bar: HorizontalLayout {
-                padding-left: 14px;
-                padding-right: 14px;
-                spacing: 8px;
+                padding-left: 12px;
+                padding-right: 12px;
+                spacing: 6px;
                 alignment: center;
 
                 // ── Group 1: Venue & Account Status ──
@@ -855,12 +855,12 @@ export component LiveScreen inherits Rectangle {
                     source-text: root.gateway.conn-state != "" ? ("EC2 (" + root.gateway.conn-state + ")") : (root.gateway.detail != "" ? root.gateway.detail : "EC2 WSS");
                 }
 
-                Rectangle { horizontal-stretch: 1; background: transparent; }
+                Rectangle { horizontal-stretch: 1; min-width: 6px; background: transparent; }
 
                 // ── Group 2: Strategy & Trading Mode ──
                 Rectangle {
-                    height: 36px;
-                    width: 185px;
+                    height: 34px;
+                    width: 220px;
                     border-radius: 6px;
                     background: VayrenPalette.live-panel;
                     border-width: 1px;
@@ -875,15 +875,15 @@ export component LiveScreen inherits Rectangle {
                         Text {
                             text: "STRATEGY";
                             color: root.strategy-selected >= 0 ? VayrenPalette.live-teal : VayrenPalette.live-ink-dim;
-                            font-size: 10px;
+                            font-size: 9.5px;
                             font-weight: 800;
                             vertical-alignment: center;
                         }
 
                         ComboBox {
                             horizontal-stretch: 1;
-                            min-width: 80px;
-                            height: 28px;
+                            min-width: 125px;
+                            height: 26px;
                             enabled: !root.setup.can-stop && root.strategy-names.length > 0;
                             model: root.strategy-names;
                             current-value: root.selected-strategy;
@@ -894,8 +894,8 @@ export component LiveScreen inherits Rectangle {
                 }
 
                 Rectangle {
-                    height: 36px;
-                    width: 180px;
+                    height: 34px;
+                    width: 165px;
                     border-radius: 6px;
                     background: VayrenPalette.live-panel;
                     border-width: 1px;
@@ -913,7 +913,7 @@ export component LiveScreen inherits Rectangle {
                             Text {
                                 text: "PAPER";
                                 color: root.bar.mode == 0 ? VayrenPalette.accent-text : VayrenPalette.live-ink-faint;
-                                font-size: 11px;
+                                font-size: 10px;
                                 font-weight: 700;
                                 horizontal-alignment: center;
                                 vertical-alignment: center;
@@ -928,7 +928,7 @@ export component LiveScreen inherits Rectangle {
                             Text {
                                 text: "SANDBOX";
                                 color: root.bar.mode == 1 ? VayrenPalette.accent-text : VayrenPalette.live-ink-faint;
-                                font-size: 11px;
+                                font-size: 10px;
                                 font-weight: 700;
                                 horizontal-alignment: center;
                                 vertical-alignment: center;
@@ -943,7 +943,7 @@ export component LiveScreen inherits Rectangle {
                             Text {
                                 text: "LIVE";
                                 color: root.bar.mode == 2 ? VayrenPalette.text-bright : VayrenPalette.live-ink-faint;
-                                font-size: 11px;
+                                font-size: 10px;
                                 font-weight: 700;
                                 horizontal-alignment: center;
                                 vertical-alignment: center;
@@ -954,8 +954,8 @@ export component LiveScreen inherits Rectangle {
 
                 // ── Group 3: Execution Controls & Clock ──
                 VButton {
-                    width: 96px;
-                    height: 36px;
+                    width: 82px;
+                    height: 34px;
                     label: "▶ START";
                     variant: 0;
                     enabled: root.setup.can-start && !root.setup.needs-live-confirm;
@@ -963,8 +963,8 @@ export component LiveScreen inherits Rectangle {
                 }
 
                 VButton {
-                    width: 80px;
-                    height: 36px;
+                    width: 72px;
+                    height: 34px;
                     label: "■ STOP";
                     variant: 3;
                     enabled: root.setup.can-stop;
@@ -972,8 +972,8 @@ export component LiveScreen inherits Rectangle {
                 }
 
                 VButton {
-                    width: 80px;
-                    height: 36px;
+                    width: 72px;
+                    height: 34px;
                     label: root.bar.halted ? "■ HALTED" : "■ HALT";
                     variant: root.bar.halted ? 3 : 2;
                     enabled: root.bar.halt-enabled && !root.bar.halted;
@@ -981,7 +981,7 @@ export component LiveScreen inherits Rectangle {
                 }
 
                 HorizontalLayout {
-                    min-width: 55px;
+                    min-width: 50px;
                     alignment: center;
                     Text {
                         text: root.footer.clock;
@@ -995,16 +995,16 @@ export component LiveScreen inherits Rectangle {
 
             // NARROW VIEW: Reflows into two neat, unclipped rows
             if root.is-narrow-bar: VerticalLayout {
-                padding-left: 12px;
-                padding-right: 12px;
+                padding-left: 10px;
+                padding-right: 10px;
                 padding-top: 5px;
                 padding-bottom: 5px;
-                spacing: 6px;
+                spacing: 5px;
                 alignment: center;
 
                 // Row 1: Venue & Account Status + Clock
                 HorizontalLayout {
-                    height: 40px;
+                    height: 48px;
                     spacing: 8px;
                     alignment: start;
 
@@ -1063,7 +1063,7 @@ export component LiveScreen inherits Rectangle {
 
                     Rectangle {
                         height: 34px;
-                        width: 175px;
+                        width: 220px;
                         border-radius: 6px;
                         background: VayrenPalette.live-panel;
                         border-width: 1px;
@@ -1078,14 +1078,14 @@ export component LiveScreen inherits Rectangle {
                             Text {
                                 text: "STRATEGY";
                                 color: root.strategy-selected >= 0 ? VayrenPalette.live-teal : VayrenPalette.live-ink-dim;
-                                font-size: 10px;
+                                font-size: 9.5px;
                                 font-weight: 800;
                                 vertical-alignment: center;
                             }
 
                             ComboBox {
                                 horizontal-stretch: 1;
-                                min-width: 75px;
+                                min-width: 125px;
                                 height: 26px;
                                 enabled: !root.setup.can-stop && root.strategy-names.length > 0;
                                 model: root.strategy-names;
@@ -1098,7 +1098,7 @@ export component LiveScreen inherits Rectangle {
 
                     Rectangle {
                         height: 34px;
-                        width: 170px;
+                        width: 165px;
                         border-radius: 6px;
                         background: VayrenPalette.live-panel;
                         border-width: 1px;
@@ -1158,7 +1158,7 @@ export component LiveScreen inherits Rectangle {
                     Rectangle { horizontal-stretch: 1; background: transparent; }
 
                     VButton {
-                        width: 90px;
+                        width: 82px;
                         height: 34px;
                         label: "▶ START";
                         variant: 0;
@@ -1167,7 +1167,7 @@ export component LiveScreen inherits Rectangle {
                     }
 
                     VButton {
-                        width: 76px;
+                        width: 72px;
                         height: 34px;
                         label: "■ STOP";
                         variant: 3;
@@ -1176,7 +1176,7 @@ export component LiveScreen inherits Rectangle {
                     }
 
                     VButton {
-                        width: 76px;
+                        width: 72px;
                         height: 34px;
                         label: root.bar.halted ? "■ HALTED" : "■ HALT";
                         variant: root.bar.halted ? 3 : 2;
@@ -1189,7 +1189,7 @@ export component LiveScreen inherits Rectangle {
 
         // ══ 1b. STRATEGY STOCK LIST (read-only; managed in Strategy Lab) ══════
         Rectangle {
-            height: 74px;
+            height: 66px;
             min-width: 0px;
             width: 100%;
             background: VayrenPalette.live-panel-deep;
@@ -1198,16 +1198,16 @@ export component LiveScreen inherits Rectangle {
             clip: true;
 
             VerticalLayout {
-                padding-left: 14px;
-                padding-right: 14px;
-                padding-top: 8px;
-                padding-bottom: 8px;
-                spacing: 6px;
+                padding-left: 12px;
+                padding-right: 12px;
+                padding-top: 6px;
+                padding-bottom: 6px;
+                spacing: 4px;
 
                 // Row 1: Header Row (Heading, exchange, count on left; Read-only badge and refresh on right)
                 HorizontalLayout {
-                    height: 24px;
-                    spacing: 10px;
+                    height: 22px;
+                    spacing: 8px;
                     alignment: center;
 
                     Text {
@@ -1247,7 +1247,7 @@ export component LiveScreen inherits Rectangle {
                                 ? (root.setup.stock-universe.length + " stocks saved")
                                 : "No saved stocks");
                         font-family: "monospace";
-                        font-size: 10.5px;
+                        font-size: 10px;
                         font-weight: 600;
                         color: root.setup.stock-universe.length > 0 ? VayrenPalette.live-ink : VayrenPalette.live-ink-dim;
                         vertical-alignment: center;
@@ -1267,7 +1267,7 @@ export component LiveScreen inherits Rectangle {
                             alignment: center;
                             Text {
                                 text: "Read-only · Managed in Strategy Lab";
-                                font-size: 9.5px;
+                                font-size: 9px;
                                 font-weight: 600;
                                 color: VayrenPalette.live-ink-dim;
                                 vertical-alignment: center;
@@ -1276,8 +1276,8 @@ export component LiveScreen inherits Rectangle {
                     }
 
                     Rectangle {
-                        width: 24px;
-                        height: 24px;
+                        width: 22px;
+                        height: 22px;
                         border-radius: 4px;
                         background: refresh-touch.has-hover ? VayrenPalette.live-line-soft : VayrenPalette.live-panel;
                         border-width: 1px;
@@ -1298,20 +1298,20 @@ export component LiveScreen inherits Rectangle {
 
                 // Row 2: Dedicated Chips Row Below Header
                 if root.setup.stock-universe.length == 0: HorizontalLayout {
-                    height: 26px;
+                    height: 24px;
                     alignment: start;
                     Text {
                         text: root.strategy-selected < 0
                             ? "Choose a strategy above to load its saved trading universe"
                             : "No stocks saved for this strategy · Configure and save universe in Strategy Lab";
-                        font-size: 11px;
+                        font-size: 10.5px;
                         color: VayrenPalette.live-ink-dim;
                         vertical-alignment: center;
                     }
                 }
 
                 if root.setup.stock-universe.length > 0: ScrollView {
-                    height: 26px;
+                    height: 24px;
                     horizontal-stretch: 1;
                     horizontal-scrollbar-policy: as-needed;
                     vertical-scrollbar-policy: always-off;
