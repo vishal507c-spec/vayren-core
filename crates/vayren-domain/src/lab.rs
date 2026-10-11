@@ -771,8 +771,9 @@ impl LabState {
             .unwrap_or_default();
         if strategy_id.is_empty() {
             if self.is_universe_dirty() {
-                self.universe_state =
-                    UniverseSaveState::Error("no strategy selected; universe not saved".to_string());
+                self.universe_state = UniverseSaveState::Error(
+                    "no strategy selected; universe not saved".to_string(),
+                );
             }
             return;
         }
@@ -1253,11 +1254,18 @@ impl LabState {
     pub fn interaction_symtoggle(&mut self, symbol: &str) {
         let ns = normalize_symbol_token(symbol);
         if !self.universe_symbols.is_empty()
-            && !self.universe_symbols.iter().any(|s| normalize_symbol_token(s) == ns)
+            && !self
+                .universe_symbols
+                .iter()
+                .any(|s| normalize_symbol_token(s) == ns)
         {
             return;
         }
-        if let Some(pos) = self.sym_draft.iter().position(|s| normalize_symbol_token(s) == ns) {
+        if let Some(pos) = self
+            .sym_draft
+            .iter()
+            .position(|s| normalize_symbol_token(s) == ns)
+        {
             self.sym_draft.remove(pos);
         } else {
             self.sym_draft.push(symbol.to_string());
@@ -1267,7 +1275,11 @@ impl LabState {
     pub fn interaction_symall(&mut self) {
         for symbol in self.sym_visible() {
             let ns = normalize_symbol_token(&symbol);
-            if !self.sym_draft.iter().any(|s| normalize_symbol_token(s) == ns) {
+            if !self
+                .sym_draft
+                .iter()
+                .any(|s| normalize_symbol_token(s) == ns)
+            {
                 self.sym_draft.push(symbol);
             }
         }
@@ -1285,7 +1297,9 @@ impl LabState {
                 .iter()
                 .filter(|s| {
                     let ns = normalize_symbol_token(s);
-                    self.universe_symbols.iter().any(|u| normalize_symbol_token(u) == ns)
+                    self.universe_symbols
+                        .iter()
+                        .any(|u| normalize_symbol_token(u) == ns)
                 })
                 .cloned()
                 .collect()
@@ -1313,7 +1327,8 @@ impl LabState {
     pub fn interaction_symremove(&mut self, symbol: &str) {
         let ns = normalize_symbol_token(symbol);
         let before_len = self.universe_selected.len();
-        self.universe_selected.retain(|s| normalize_symbol_token(s) != ns);
+        self.universe_selected
+            .retain(|s| normalize_symbol_token(s) != ns);
         if self.universe_selected.len() != before_len {
             self.cfg_universe_csv = self.universe_selected.join(",");
             self.cfg_universe_count = self.universe_selected.len();
@@ -3025,7 +3040,10 @@ pub fn project(state: &LabState) -> LabView {
         .iter()
         .map(|s| {
             let ns = normalize_symbol_token(s);
-            state.sym_draft.iter().any(|d| normalize_symbol_token(d) == ns)
+            state
+                .sym_draft
+                .iter()
+                .any(|d| normalize_symbol_token(d) == ns)
         })
         .collect();
 
@@ -3788,7 +3806,10 @@ mod tests {
         assert!(st.sym_open);
         st.interaction_symtoggle("RELIANCE");
         st.interaction_symtoggle("TCS");
-        assert_eq!(st.sym_draft, vec!["RELIANCE".to_string(), "TCS".to_string()]);
+        assert_eq!(
+            st.sym_draft,
+            vec!["RELIANCE".to_string(), "TCS".to_string()]
+        );
 
         // 2. Apply updates draft, marks dirty, does NOT queue or set Pending prematurely
         st.interaction_symapply();
@@ -3819,7 +3840,10 @@ mod tests {
         let saved_view = project(&st);
         assert_eq!(saved_view.universe_state, "saved");
         assert_eq!(saved_view.universe_count_line, "2 stocks saved");
-        assert_eq!(saved_view.saved_universe_chips, vec!["NSE:RELIANCE", "NSE:TCS"]);
+        assert_eq!(
+            saved_view.saved_universe_chips,
+            vec!["NSE:RELIANCE", "NSE:TCS"]
+        );
         assert_eq!(saved_view.universe_exchange, "NSE");
 
         // 5. Switching to Strategy 1 keeps universes isolated (no leak)
@@ -3881,7 +3905,8 @@ mod tests {
     #[test]
     fn universe_symremove_chip_updates_draft_and_marks_dirty() {
         let mut st = two_strategy_state();
-        let snap = r#"{"saved_universe":{"state":"ok","symbols":["NSE:RELIANCE","NSE:TCS"],"error":""}}"#;
+        let snap =
+            r#"{"saved_universe":{"state":"ok","symbols":["NSE:RELIANCE","NSE:TCS"],"error":""}}"#;
         apply_snapshot_json(&mut st, &serde_json::from_str(snap).unwrap());
         assert_eq!(st.saved_universe_symbols.len(), 2);
         assert!(!st.is_dirty());

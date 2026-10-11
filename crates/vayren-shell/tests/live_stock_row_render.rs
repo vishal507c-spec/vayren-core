@@ -64,12 +64,28 @@ fn live_stock_row_renders_twenty_two_chips_and_exchange() {
     shell::select(&ui, ShellScreen::Live);
 
     let symbols: Vec<&str> = vec![
-        "NSE:ABB", "NSE:ADANIENT", "NSE:ADANIPORTS", "NSE:APOLLOHOSP",
-        "NSE:ASIANPAINT", "NSE:AXISBANK", "NSE:BAJAJ-AUTO", "NSE:BAJFINANCE",
-        "NSE:BAJAJFINSV", "NSE:BPCL", "NSE:BHARTIARTL", "NSE:BRITANNIA",
-        "NSE:CIPLA", "NSE:COALINDIA", "NSE:DIVISLAB", "NSE:DRREDDY",
-        "NSE:EICHERMOT", "NSE:GRASIM", "NSE:HCLTECH", "NSE:HDFCBANK",
-        "NSE:HDFCLIFE", "NSE:HEROMOTOCO",
+        "NSE:ABB",
+        "NSE:ADANIENT",
+        "NSE:ADANIPORTS",
+        "NSE:APOLLOHOSP",
+        "NSE:ASIANPAINT",
+        "NSE:AXISBANK",
+        "NSE:BAJAJ-AUTO",
+        "NSE:BAJFINANCE",
+        "NSE:BAJAJFINSV",
+        "NSE:BPCL",
+        "NSE:BHARTIARTL",
+        "NSE:BRITANNIA",
+        "NSE:CIPLA",
+        "NSE:COALINDIA",
+        "NSE:DIVISLAB",
+        "NSE:DRREDDY",
+        "NSE:EICHERMOT",
+        "NSE:GRASIM",
+        "NSE:HCLTECH",
+        "NSE:HDFCBANK",
+        "NSE:HDFCLIFE",
+        "NSE:HEROMOTOCO",
     ];
 
     // Backend snapshot arrives with OBR C1C4, 22 saved stocks, and connected broker capital
@@ -107,14 +123,20 @@ fn live_stock_row_renders_twenty_two_chips_and_exchange() {
     while live_state.borrow_mut().take_action().is_some() {}
     ui.invoke_live_refresh_stocks();
     let action = live_state.borrow_mut().take_action();
-    assert!(action.is_some(), "invoking refresh-stocks must queue an action");
+    assert!(
+        action.is_some(),
+        "invoking refresh-stocks must queue an action"
+    );
     let parsed: serde_json::Value = serde_json::from_str(&action.unwrap()).unwrap();
     assert_eq!(parsed["action"], "refresh");
 
     // Verify broker capital refresh button invokes wire callback and queues host action
     ui.invoke_broker_capital_refresh();
     let cap_action = live_state.borrow_mut().take_action();
-    assert!(cap_action.is_some(), "invoking broker-capital-refresh must queue an action");
+    assert!(
+        cap_action.is_some(),
+        "invoking broker-capital-refresh must queue an action"
+    );
     let cap_parsed: serde_json::Value = serde_json::from_str(&cap_action.unwrap()).unwrap();
     assert_eq!(cap_parsed["action"], "refresh_capital");
 
@@ -129,7 +151,10 @@ fn live_stock_row_renders_twenty_two_chips_and_exchange() {
         });
     }
     let path = save_ppm("saved-twenty-two", &buffer);
-    eprintln!("rendered Live stock row frame (22 stocks): {}", path.display());
+    eprintln!(
+        "rendered Live stock row frame (22 stocks): {}",
+        path.display()
+    );
 
     // Switch to empty strategy: verify empty state renders
     live_state.borrow_mut().apply_snapshot(&serde_json::json!({
@@ -152,5 +177,8 @@ fn live_stock_row_renders_twenty_two_chips_and_exchange() {
         });
     }
     let empty_path = save_ppm("empty-live", &buffer);
-    eprintln!("rendered Live stock row frame (0 stocks): {}", empty_path.display());
+    eprintln!(
+        "rendered Live stock row frame (0 stocks): {}",
+        empty_path.display()
+    );
 }

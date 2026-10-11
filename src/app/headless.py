@@ -98,6 +98,9 @@ def _logs_to_stderr(level: str) -> None:
     root.addHandler(handler)
 
 
+_IPC_STREAM: Any = sys.stdout
+
+
 def _emit(payload: dict) -> bool:
     """Write one JSON response line. False when the pipe is gone.
 
@@ -111,11 +114,8 @@ def _emit(payload: dict) -> bool:
     """
     try:
         line = json.dumps(payload, ensure_ascii=False)
-        reconfig = getattr(sys.stdout, "reconfigure", None)
-        if callable(reconfig):
-            with contextlib.suppress(AttributeError, OSError, ValueError):
-                reconfig(encoding="utf-8", errors="replace")
-        print(line, flush=True)
+        _IPC_STREAM.write(line + "\n")
+        _IPC_STREAM.flush()
     except (OSError, ValueError, TypeError):
         return False
     return True
@@ -929,12 +929,8 @@ def _progress_emitter():
     def emit(event: dict) -> None:
         payload = {"type": "lab_progress", "data": event}
         try:
-            reconfig = getattr(sys.stdout, "reconfigure", None)
-            if callable(reconfig):
-                with contextlib.suppress(AttributeError, OSError, ValueError):
-                    reconfig(encoding="utf-8", errors="replace")
-            sys.stdout.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n")
-            sys.stdout.flush()
+            _IPC_STREAM.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n")
+            _IPC_STREAM.flush()
         except (OSError, ValueError, TypeError):
             pass
 
@@ -1631,6 +1627,15 @@ def run_headless_backend(args: argparse.Namespace) -> int:
     spawns this process and communicates via this protocol.
     """
     _logs_to_stderr(args.log_level)
+    global _IPC_STREAM
+    _IPC_STREAM = sys.stdout
+    reconfig = getattr(_IPC_STREAM, "reconfigure", None)
+    if callable(reconfig):
+        with contextlib.suppress(AttributeError, OSError, ValueError):
+            reconfig(encoding="utf-8", errors="replace")
+    # Divert standard print calls to stderr so third-party libraries (e.g. Fyers WebSocket)
+    # cannot corrupt the Rust-Python JSON IPC pipe.
+    sys.stdout = sys.stderr
     data_dir = Path(args.data_dir)
     strategy_dir = Path(args.strategy_dir)
 

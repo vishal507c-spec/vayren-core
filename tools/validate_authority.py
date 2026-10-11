@@ -61,6 +61,7 @@ AUTHORITIES = {
 # is listed here instead of flagged.
 REGISTER_WRITERS = {
     "src/broker/providers/__init__.py",
+    "src/broker/providers/fyers/live_activation.py",
     "src/broker/providers/zerodha/live_activation.py",
     "src/broker/registry.py",
     "src/execution/broker/factory.py",

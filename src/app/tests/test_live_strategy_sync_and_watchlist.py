@@ -262,4 +262,3 @@ def test_7_live_strategy_switch_isolates_universes_via_live_action(
     assert snap_a_restored["strategy"]["id"] == "obr-c1c4"
     assert snap_a_restored["available_symbols"] == ("NSE:RELIANCE", "NSE:TCS")
     assert snap_a_restored["selected_symbols"] == ("NSE:RELIANCE", "NSE:TCS")
-

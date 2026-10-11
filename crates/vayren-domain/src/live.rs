@@ -5369,12 +5369,16 @@ mod tests {
             "selected_symbols": ["NSE:RELIANCE", "NSE:TCS"],
         }));
         let view_a_restored = project(&st);
-        assert_eq!(view_a_restored.setup.stock_universe, vec!["NSE:RELIANCE", "NSE:TCS"]);
+        assert_eq!(
+            view_a_restored.setup.stock_universe,
+            vec!["NSE:RELIANCE", "NSE:TCS"]
+        );
 
         // 5. Calling refresh_universe queues "refresh" host action
         while st.take_action().is_some() {}
         st.refresh_universe();
-        let ref_action: serde_json::Value = serde_json::from_str(&st.take_action().unwrap()).unwrap();
+        let ref_action: serde_json::Value =
+            serde_json::from_str(&st.take_action().unwrap()).unwrap();
         assert_eq!(ref_action["action"], "refresh");
     }
 

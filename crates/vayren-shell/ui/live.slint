@@ -343,10 +343,10 @@ export global LiveTiers {
     public pure function bar-chrome() -> length { return 32px; }
     public pure function bar-gap() -> length { return 8px; }
 
-    // BROKER + EC2 cards + Controls + Broker Capital.
+    // BROKER + EC2 cards + Controls (minimal toolbar spine).
     public pure function bar-core(w: length) -> bool {
         return w >= bar-chrome() + bar-strategy-width() + bar-mode-width() + bar-transport-width()
-            + bar-capital-width() + 2 * bar-card-width() + 6 * bar-gap();
+            + 2 * bar-card-width() + 6 * bar-gap();
     }
     // + MARKET DATA / ORDER WS / STRATEGY: the session's own inputs.
     public pure function bar-secondary(w: length) -> bool {

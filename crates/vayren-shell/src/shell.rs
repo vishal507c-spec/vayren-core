@@ -4851,6 +4851,12 @@ mod tests {
             inspector_open: false,
             note: String::default().into(),
             note_tone: 0,
+            capital_broker_name: "BROKER".into(),
+            capital_value: "Unavailable".into(),
+            capital_sub: "Not configured".into(),
+            capital_status: "NOT CONFIGURED".into(),
+            capital_tone: 0,
+            capital_last_updated: "--:--:--".into(),
         });
         harness.set_setup(LiveSetup {
             quantity: "0.00".into(),
