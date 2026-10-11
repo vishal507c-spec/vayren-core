@@ -2364,6 +2364,10 @@ pub struct SetupView {
     pub symbol_total: String,
     pub strategy_names: Vec<String>,
     pub strategy_selected: i32,
+    /// Read-only stock list of the selected strategy: the saved universe
+    /// from Strategy Lab, as delivered by the live snapshot
+    /// (`available_symbols` for the active strategy). No second source.
+    pub stock_universe: Vec<String>,
     pub timeframe_names: Vec<String>,
     pub timeframe_selected: i32,
 }
@@ -3223,6 +3227,7 @@ pub fn project(state: &LiveState) -> LiveView {
         },
         strategy_names: state.strategies.clone(),
         strategy_selected: state.strategy_index.map_or(-1, |i| i as i32),
+        stock_universe: state.symbols.iter().map(|s| s.symbol.clone()).collect(),
         timeframe_names: state.timeframes.clone(),
         timeframe_selected: state.timeframe_index.map_or(-1, |i| i as i32),
     };
@@ -5103,6 +5108,26 @@ mod tests {
         assert_eq!(action["symbols"], serde_json::json!([]));
         assert!(st.watchlist_rows.is_empty());
         assert!(st.selected_symbol.is_empty());
+    }
+
+    #[test]
+    fn stock_strip_projects_saved_universe_symbols() {
+        // The LIVE stock strip is a read-only projection of the snapshot's
+        // saved universe (available_symbols for the active strategy) — the
+        // same source the symbol checklist uses, never a second copy.
+        let mut st = LiveState::default();
+        st.apply_snapshot(&serde_json::json!({
+            "strategy": {"id": "OBR"},
+            "available_strategies": ["OBR"],
+            "available_symbols": ["NSE:INFY", "NSE:TCS"],
+            "selected_symbols": ["NSE:INFY"],
+        }));
+        let view = project(&st);
+        assert_eq!(view.setup.stock_universe, vec!["NSE:INFY", "NSE:TCS"]);
+        // A strategy switch clears the strip until the next snapshot
+        // delivers the new strategy's universe (never the old symbols).
+        st.select_strategy(0);
+        assert!(project(&st).setup.stock_universe.is_empty());
     }
 
     #[test]

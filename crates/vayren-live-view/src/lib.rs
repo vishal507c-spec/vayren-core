@@ -175,6 +175,7 @@ fn apply_view(ui: &LiveHostWindow, state: &LiveState) {
         needs_live_confirm: view.setup.needs_live_confirm,
         confirmed_live: view.setup.confirmed_live,
         symbol_total: view.setup.symbol_total.into(),
+        stock_universe: strings(view.setup.stock_universe),
     });
     ui.set_strategy_names(strings(view.setup.strategy_names));
     ui.set_strategy_selected(view.setup.strategy_selected);

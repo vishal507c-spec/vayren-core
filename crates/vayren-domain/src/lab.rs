@@ -1272,6 +1272,15 @@ impl LabState {
         } else {
             UniverseSaveState::Error(error.to_string())
         };
+        if saved {
+            self.saved_universe_symbols = self.universe_selected.clone();
+            self.saved_universe_status = if self.saved_universe_symbols.is_empty() {
+                SavedUniverseStatus::Empty
+            } else {
+                SavedUniverseStatus::Ok
+            };
+            self.saved_universe_error.clear();
+        }
     }
 
     /// Visible universe rows under the current search (legacy popup rule:

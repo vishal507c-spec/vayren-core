@@ -3402,6 +3402,14 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
         needs_live_confirm: view.setup.needs_live_confirm,
         confirmed_live: view.setup.confirmed_live,
         symbol_total: view.setup.symbol_total.into(),
+        stock_universe: Rc::new(slint::VecModel::from(
+            view.setup
+                .stock_universe
+                .into_iter()
+                .map(<_>::into)
+                .collect::<Vec<_>>(),
+        ))
+        .into(),
     });
     ui.set_live_strategy_names(
         Rc::new(slint::VecModel::from(
@@ -4842,6 +4850,8 @@ mod tests {
             needs_live_confirm: false,
             confirmed_live: false,
             symbol_total: "527 symbols (OBR C1C4)".into(),
+            stock_universe: Rc::new(slint::VecModel::from(Vec::<slint::SharedString>::new()))
+                .into(),
         });
         harness.set_market(LiveMarket {
             has_data: false,
