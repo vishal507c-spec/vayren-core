@@ -189,6 +189,7 @@ class BrokerManager:
                     "reason": state["reason"],
                     "checks": dict(state["checks"]),
                     "configured": state["configured"],
+                    "connected": self.is_connected(broker_id),
                     "api_key_masked": state["api_key_masked"],
                     "can_login": state["configured"]
                     and state["status"]
@@ -198,7 +199,10 @@ class BrokerManager:
                         BrokerStatus.ERROR,
                     ),
                     "can_disconnect": state["configured"]
-                    and state["status"] in (BrokerStatus.CONNECTED, BrokerStatus.LIVE_READY),
+                    and (
+                        self.is_connected(broker_id)
+                        or state["status"] in (BrokerStatus.CONNECTED, BrokerStatus.LIVE_READY)
+                    ),
                     # Read-only UI details (safe scalars only — never secrets).
                     # Older consumers ignore unknown keys; new cards render
                     # account/funds/counts/last-sync from these.
@@ -217,7 +221,12 @@ class BrokerManager:
                     "credential_schema": [dict(row) for row in spec.credential_schema],
                 }
             )
-        return {"brokers": brokers, "callback_url": self._callback_url()}
+        active_broker = next((b["id"] for b in brokers if b.get("connected")), "")
+        return {
+            "brokers": brokers,
+            "active_broker": active_broker,
+            "callback_url": self._callback_url(),
+        }
 
     def configure(self, broker_id: str, values: dict[str, str]) -> tuple[bool, str]:
         """Save required config (credentials store). Secret values never echoed.
@@ -293,7 +302,10 @@ class BrokerManager:
             except Exception:
                 self._worker.submit(_HEALTH_JOB, broker_id)
         else:
-            self._worker.submit(_SESSION_JOB, broker_id)
+            try:
+                self._job_session_check(spec)
+            except Exception:
+                self._worker.submit(_SESSION_JOB, broker_id)
 
     def disconnect_broker(self, broker_id: str) -> tuple[bool, str]:
         """Clear the session, keep the configuration, stop the venue.
@@ -335,8 +347,23 @@ class BrokerManager:
         return True, "broker removed"
 
     def is_connected(self, broker_id: str) -> bool:
-        status = self._states.get(broker_id, {}).get("status")
-        return status in (BrokerStatus.CONNECTED, BrokerStatus.LIVE_READY)
+        with self._lock:
+            state = self._states.get(broker_id, {})
+            status = state.get("status")
+            adapter = state.get("adapter")
+            checks = state.get("checks", {})
+        if status in (
+            BrokerStatus.CONNECTED,
+            BrokerStatus.LIVE_READY,
+            BrokerStatus.MARKET_DATA_NOT_READY,
+        ):
+            return True
+        return bool(
+            adapter is not None
+            and getattr(adapter, "connected", False)
+            and checks.get("connection") == "READY"
+            and checks.get("account") == "READY"
+        )
 
     def stop_worker(self) -> None:
         if not self._stopping:
@@ -499,17 +526,30 @@ class BrokerManager:
         if adapter is None:
             return
         details = self._empty_details()
+        is_auth_error = False
+        auth_error_msg = ""
         try:
             healthy, reason = adapter.health()
             checks: dict[str, str] = {"connection": "READY" if healthy else f"FAILED: {reason}"}
+            if not healthy and any(
+                k in reason.lower() for k in ("unauthorized", "expired", "token", "401")
+            ):
+                is_auth_error = True
+                auth_error_msg = reason
         except Exception as exc:
             checks = {"connection": f"FAILED: {type(exc).__name__}"}
+            if any(k in str(exc).lower() for k in ("unauthorized", "expired", "token", "401")):
+                is_auth_error = True
+                auth_error_msg = str(exc)
         try:
             account = adapter.account()
             checks["account"] = "READY"
             details["account_id"] = self._account_id_of(account)
         except Exception as exc:
             checks["account"] = f"FAILED: {type(exc).__name__}"
+            if any(k in str(exc).lower() for k in ("unauthorized", "expired", "token", "401")):
+                is_auth_error = True
+                auth_error_msg = str(exc)
         try:
             funds = adapter.funds()
             checks["funds"] = "READY"
@@ -520,6 +560,9 @@ class BrokerManager:
                 details["funds_total"] = self._safe_float(total)
         except Exception as exc:
             checks["funds"] = f"FAILED: {type(exc).__name__}"
+            if any(k in str(exc).lower() for k in ("unauthorized", "expired", "token", "401")):
+                is_auth_error = True
+                auth_error_msg = str(exc)
         for key, fn in (
             ("positions", "positions"),
             ("orders", "open_orders"),
@@ -536,10 +579,14 @@ class BrokerManager:
         if md is not None:
             try:
                 md_ok, md_reason = md.health()
+                if not md_ok and hasattr(md, "connect"):
+                    with contextlib.suppress(Exception):
+                        md.connect()
+                    md_ok, md_reason = md.health()
                 checks["market_data"] = "READY" if md_ok else f"FAILED: {md_reason}"
             except Exception as exc:
                 checks["market_data"] = f"FAILED: {type(exc).__name__}"
-        failed = [k for k, v in checks.items() if v != "READY"]
+
         with self._lock:
             live = self._states.get(spec.broker_id)
             if live is None:
@@ -547,12 +594,21 @@ class BrokerManager:
             live["checks"] = checks
             live["details"] = details
             live["last_sync"] = self._now_stamp()
-            if failed:
+            if is_auth_error:
+                live["status"] = BrokerStatus.LOGIN_REQUIRED
+                live["reason"] = f"session expired — {auth_error_msg or 'login required'}"
+            elif checks.get("connection") != "READY":
+                live["status"] = BrokerStatus.DISCONNECTED
+                live["reason"] = checks.get("connection", "connection check failed")
+            elif checks.get("account") != "READY":
                 live["status"] = BrokerStatus.ACCOUNT_NOT_READY
-                live["reason"] = f"checks failed: {', '.join(failed)}"
+                live["reason"] = checks.get("account", "account check failed")
             else:
                 live["status"] = BrokerStatus.CONNECTED
-                live["reason"] = "all checks passed"
+                if checks.get("market_data") not in ("READY", None):
+                    live["reason"] = f"account verified; market data: {checks.get('market_data')}"
+                else:
+                    live["reason"] = "all checks passed"
         self.state_changed.emit(spec.broker_id)
 
     # ── internals ────────────────────────────────────────────────
@@ -576,6 +632,8 @@ class BrokerManager:
         with contextlib.suppress(Exception):
             if spec.build_market_data is not None:
                 md = spec.build_market_data(config.get(spec.key_field, ""), token)
+                if hasattr(md, "connect"):
+                    md.connect()
         registered, reg_reason = False, "venue registration unavailable"
         with contextlib.suppress(Exception):
             if spec.venue_register is not None:

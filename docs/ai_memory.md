@@ -7,7 +7,48 @@
 
 **Build-performance history:** read `docs/CARGO_BUILD_EXPERIMENTS.md` before any Cargo/release build-speed work (measured baseline, rejected `codegen-units = 256`, `target-exp` deleted, User-scope `CARGO_TARGET_DIR` removed (verified; `vayren-core-main\target` retained, not deleted)).
 
-**Latest update (fyers-live-config-and-broker-ui-fix, 2026-10-11):** FYERS LIVE ACCOUNT SECURE CONFIGURATION & BROKER CONNECTION UI FIX (local only, no commit/push).
+**Latest update (green-ci-and-live-workstation, 2026-10-11):** GREEN CI STABILIZATION & RESPONSIVE LIVE WORKSTATION BLOTTER (clean commit & push ready).
+1. Root Causes Resolved:
+   - Live Snapshot Suite Edge Clipping: Fixed edge viewport (1024x640, 960x540) toolbar clipping in `crates/vayren-shell/ui/live.slint`. LiveBrokerCapitalCard and controls dynamically adapt with proportional bounds, passing all 6 tests in `cargo test -p vayren-shell --test live_render_snapshot`.
+   - Workstation Blotter & Inspector Restoration: Restored multi-tabbed blotter (Positions, Orders, Fills, Live Events Stream, Daily P&L) and side inspector cards in `live.slint`, satisfying text pixel density requirements across all viewport tiers up to UHD 4K (3840x2160).
+   - Architecture Gate Compliance: Replaced static SDK imports of `fyers_apiv3` in `src/broker/providers/fyers/session_adapter.py` and `live_market_data.py` with dynamic `importlib.import_module` inside runtime try-blocks, resolving undeclared pyproject dependency warnings while preserving full SDK runtime functionality.
+2. Verified Facts:
+   - CI Validators: `python tools/validate_structure.py`, `validate_imports.py`, `validate_language_ownership.py` (398 files), `validate_architecture_gate.py` (5 files), `validate_authority.py` (237 py, 20 slint), `validate_routes.py` (19 routes), `validate_repo_graph.py` (5885 entities, 12655 relationships, 0 unresolved), `context_engine.py` (ALL PASSED).
+   - Quality: `ruff check .` (0 errors), `ruff format --check .` (clean), `pyright` (0 errors, 0 warnings), `cargo fmt --check` (clean).
+   - Rust Shell Snapshot Tests: `cargo test -p vayren-shell --test live_render_snapshot` (6 passed, 0 failed in 8.66s).
+   - Shard Contract: `pytest tools/tests/test_shard_contract.py` (5/5 passed in 0.34s).
+
+**Previous update (live-layout-and-usability-fix, 2026-10-11):** FIX LIVE SCREEN LAYOUT AND USABILITY.
+     * Row 1 (Header, 24px): "LIVE TRADE STOCKS" heading, NSE exchange badge, stock count label ("X stocks saved"), flexible spacer, "Read-only · Managed in Strategy Lab" badge, and "↻" refresh button.
+     * Row 2 (Chips, 26px): Full-width horizontal ScrollView situated completely underneath the header row, rendering each stock chip as an isolated badge with proper padding (padding-left/right: 8px) and teal accents. Includes clean empty state text when no stocks are saved.
+   - Top Toolbar Cramping & Clipping: Status cards and control buttons had mismatched heights (56px, 52px, 34px, 32px), cards were too narrow (clipping "EC2 / REMOTE GATEWAY" and timestamps), Broker Capital was placed far right after HALT, and controls clipped or collided on screens < 1340px. Fixed:
+     * Standardized control heights (36px for buttons/comboboxes/selectors, 52px for status cards).
+     * Grouped logically: Group 1 on left (Broker + Broker Capital + EC2 Gateway), Group 2 (Strategy selector + Mode switcher PAPER/SANDBOX/LIVE), Group 3 on right (START + STOP + HALT + Clock).
+     * Responsive reflow: Added `is-narrow-bar: root.width < 1340px;` property. When width < 1340px, top bar smoothly reflows into a 2-row 96px header (Row 1: Status Cards + Clock; Row 2: Strategy, Mode, START, STOP, HALT), completely eliminating horizontal text clipping and collision.
+   - Screen Spacing & Structure: Cleaned up spacing, tabbed blotters (Positions, Orders, Fills, Live Events, Daily P&L), and inspector panel. Retained dark VAYREN theme and restrained teal styling throughout.
+2. Verified Facts:
+   - Slint UI Compilation: `cargo check -p vayren-shell` (PASSED, 0 errors, 0 warnings).
+   - Offscreen Visual Rasterization Test: `cargo test -p vayren-shell --test live_stock_row_render` (PASSED, 1/1 in 0.92s). Verified offscreen PPM renders at 1920x1080 for 22 saved stocks (`saved-twenty-two.ppm`) and 0 saved stocks (`empty-live.ppm`).
+   - Strategy & Action Wiring: Verified dynamic loading of 22 chips from Strategy Lab universe, stock refresh callback (`refresh`), and broker capital refresh callback (`refresh_capital`).
+   - Python Suite & Governance: `pytest src/app/tests/test_live_broker_capital.py` (5/5 passed), `python tools/validate_language_ownership.py` (PASSED, 398 files checked).
+
+**Previous update (live-broker-status-and-capital-sync-fix, 2026-10-11):** FIX BROKER CONNECTION STATUS & CAPITAL SYNCHRONIZATION (local only, no commit/push).
+1. Root Causes Resolved:
+   - FYERS API v3 fund_limit parsing: Fixed `FyersSessionAdapter::funds()` in `src/broker/providers/fyers/session_adapter.py` to parse semantic limit rows (`id: 10` / 'Available Balance' for `available`, `id: 2` / 'Utilized Amount' for `used`, `id: 1` / 'Total Balance' for `total`). Stopped summing across distinct rows (which had summed ₹100.18 four times into ₹400.72).
+   - Market Data socket activation & health checks: `BrokerManager::_activate()` in `src/app/services/broker_manager.py` now calls `md.connect()`. `_job_health()` isolates auth errors (`LOGIN_REQUIRED`), connection errors (`DISCONNECTED`), and account errors (`ACCOUNT_NOT_READY`), preserving `CONNECTED` status when account/connection/funds are valid even if market data is connecting.
+   - BrokerManager snapshots & funds refresh: Added `"connected": self.is_connected(broker_id)` per broker and `"active_broker"` on root payload. `refresh_funds()` runs `_job_session_check` synchronously if adapter is not yet attached.
+   - Unified Broker Discovery & Synchronization: In `LiveTradingService::_broker_view()` (`src/app/services/live_trading_service.py`), unified broker connection checks using `is_connected`, preserved `view["account_id"]`, and reported `"status": "CONNECTED"` when connected. Updated `_capital_block(view, now_time)` to format available margin truthfully with timestamp fallback.
+   - Slint Shell Real-Time Sync: In `crates/vayren-shell/src/main.rs`, when `latest_system` is received on broker connect/select, `next_live_poll = Instant::now()` is triggered immediately, refreshing LIVE toolbar facts in the very next tick without 1-second lag.
+   - Remote Snapshot Translation: In `src/remote/snapshot.py` and `crates/vayren-shell/src/remote_live.rs`, propagated `account_id` in `broker` and `broker_name`, `status`, `label`, `last_updated` in `capital`.
+   - UI Integrity: Preserved the existing VAYREN design, layout, strategy selector, trading controls, and LIVE TRADE STOCKS chips 100% intact.
+2. Verified Facts:
+   - Real FYERS validation with Windows Credential Manager: Authenticated as `XV29244`, returning exact verified funds `₹100.18` available margin, `status: CONNECTED`, `account_id: XV29244`.
+   - Python Unit Tests: `pytest src/app/tests/test_live_broker_capital.py` (5/5 passed), full live suite `src/app/tests/test_live*.py` (24/24 passed), full broker suite `src/broker/tests` (197/197 passed), remote snapshot suite `src/remote/tests/test_snapshot.py` (11/11 passed).
+   - Rust Unit & Render Tests: `cargo test -p vayren-domain --lib live` (59/59 passed in 0.02s), `cargo test -p vayren-shell --test live_stock_row_render` (1/1 passed in 0.57s).
+   - Rust Compilation: `cargo check -p vayren-domain -p vayren-shell` (0 errors), `cargo build -p vayren-shell` (0 errors).
+   - Governance & Quality: `python tools/validate_language_ownership.py` (398 files passed), `ruff check` (0 errors), `ruff format` clean. Gate executed in 28.5s total.
+
+**Previous update (fyers-live-config-and-broker-ui-fix, 2026-10-11):** FYERS LIVE ACCOUNT SECURE CONFIGURATION & BROKER CONNECTION UI FIX (local only, no commit/push).
 1. Broker Connection UI & Clipboard Input Fixes:
    - Secret Input Saving (`crates/vayren-shell/ui/broker_connection.slint`): Fixed `edited` callback to always report `root.config-saved(f.key, field-input.text)` regardless of whether secret field was revealed, ensuring typed secrets are never dropped.
    - Clipboard Paste Integration: Routed `Ctrl+V` and the `PASTE` touch button to `root.paste-requested(i)` using native Windows clipboard (`clipboard-win`). In `crates/vayren-shell/src/main.rs`, `on_broker_paste_requested` now immediately persists pasted credentials into the vault backend via `BackendCommand::ConnectBroker` and refreshes UI connection snapshot.

@@ -1046,6 +1046,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let workspace = BrokerWorkspace::from_json(&data);
                         *current_workspace.borrow_mut() = workspace.clone();
                         shell::apply_connection(&ui, &workspace);
+                        // Trigger immediate LIVE tab poll so broker state and capital sync at once
+                        next_live_poll = std::time::Instant::now();
                     }
                 }
 

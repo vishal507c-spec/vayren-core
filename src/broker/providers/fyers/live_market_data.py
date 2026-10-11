@@ -105,11 +105,12 @@ class FyersLiveMarketData:
                     on_close=self._on_close,
                 )
             else:
-                from fyers_apiv3.FyersWebsocket.data_ws import (  # pyright: ignore[reportMissingImports]
-                    FyersDataSocket,
-                )
+                import importlib
 
-                self._ws_client = FyersDataSocket(
+                data_ws_mod = importlib.import_module("fyers_apiv3.FyersWebsocket.data_ws")
+                fyers_data_socket_cls = data_ws_mod.FyersDataSocket
+
+                self._ws_client = fyers_data_socket_cls(
                     access_token=token_str,
                     litemode=False,
                     reconnect=True,

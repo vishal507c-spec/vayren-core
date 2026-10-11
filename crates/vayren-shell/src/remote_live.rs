@@ -165,6 +165,7 @@ pub fn apply_remote_sections(state: &mut LiveState, sections: &serde_json::Value
             "broker".to_string(),
             serde_json::json!({
                 "name": text_at(sections, "broker", "name"),
+                "account_id": text_at(sections, "broker", "account_id"),
                 "status": status,
                 "reason": text_at(sections, "broker", "reason"),
                 "connected": status == "CONNECTED",
@@ -200,6 +201,22 @@ pub fn apply_remote_sections(state: &mut LiveState, sections: &serde_json::Value
             }
             if let Some(v) = num_at(sections, "capital", "available") {
                 capital.insert("available_margin".to_string(), v.into());
+            }
+            let bname = text_at(sections, "capital", "broker_name");
+            if !bname.is_empty() {
+                capital.insert("broker_name".to_string(), serde_json::Value::String(bname));
+            }
+            let cstatus = text_at(sections, "capital", "status");
+            if !cstatus.is_empty() {
+                capital.insert("status".to_string(), serde_json::Value::String(cstatus));
+            }
+            let clabel = text_at(sections, "capital", "label");
+            if !clabel.is_empty() {
+                capital.insert("label".to_string(), serde_json::Value::String(clabel));
+            }
+            let clast = text_at(sections, "capital", "last_updated");
+            if !clast.is_empty() {
+                capital.insert("last_updated".to_string(), serde_json::Value::String(clast));
             }
         }
         translated.insert("capital".to_string(), serde_json::Value::Object(capital));

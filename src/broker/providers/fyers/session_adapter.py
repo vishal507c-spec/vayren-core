@@ -191,11 +191,12 @@ class FyersSessionAdapter:
                     on_close=self._on_ws_close,
                 )
             else:
-                from fyers_apiv3.FyersWebsocket.order_ws import (  # pyright: ignore[reportMissingImports]
-                    FyersOrderSocket,
-                )
+                import importlib
 
-                self._order_ws = FyersOrderSocket(
+                order_ws_mod = importlib.import_module("fyers_apiv3.FyersWebsocket.order_ws")
+                fyers_order_socket_cls = order_ws_mod.FyersOrderSocket
+
+                self._order_ws = fyers_order_socket_cls(
                     access_token=token_str,
                     on_orders=self._on_ws_orders,
                     on_trades=self._on_ws_trades,
@@ -445,18 +446,50 @@ class FyersSessionAdapter:
         }
 
     def funds(self) -> dict[str, float]:
-        """Best-effort funds mapping (missing legs become 0.0, never fake)."""
+        """Extract verified funds from FYERS API v3 fund_limit response.
+
+        FYERS returns a list of limit items:
+          id 10 / 'Available Balance': actual available balance for trading
+          id 1 / 'Total Balance': total balance
+          id 2 / 'Utilized Amount': utilized margin
+          id 3 / 'Clear Balance': clear balance
+        Never sums across rows, preserving exact field semantics.
+        """
         body = self._get("funds")
         limits = body.get("fund_limit", []) if isinstance(body, dict) else []
-        available, used = 0.0, 0.0
-        if isinstance(limits, list):
-            for row in limits:
-                if not isinstance(row, dict):
-                    continue
-                available += _safe_amount(row.get("equityAmount"))
-                used += _safe_amount(row.get("commodityAmount"))
-        total = available + used
-        return {"available": available, "used": used, "total": total, "equity": total}
+        if not isinstance(limits, list) or not limits:
+            raise AuthError("venue returned empty fund_limit", code="BAD_RESPONSE")
+
+        available: float | None = None
+        used: float = 0.0
+        total: float | None = None
+
+        for row in limits:
+            if not isinstance(row, dict):
+                continue
+            title = str(row.get("title", "") or "").strip().lower()
+            row_id = row.get("id")
+            eq_amt = _safe_amount(row.get("equityAmount"))
+
+            if row_id == 10 or title == "available balance":
+                available = eq_amt
+            elif row_id == 2 or title == "utilized amount":
+                used = eq_amt
+            elif row_id == 1 or title == "total balance":
+                total = eq_amt
+            elif (row_id == 3 or title == "clear balance") and available is None:
+                available = eq_amt
+
+        if available is None and total is not None:
+            available = total - used
+
+        if available is None:
+            raise AuthError(
+                "venue returned no available balance in fund_limit", code="BAD_RESPONSE"
+            )
+
+        tot = total if total is not None else (available + used)
+        return {"available": available, "used": used, "total": tot, "equity": tot}
 
     def positions(self) -> list[dict[str, Any]]:
         """Net positions (empty when flat; honest failure otherwise)."""

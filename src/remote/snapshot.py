@@ -194,12 +194,17 @@ def build_snapshot(live: dict[str, Any]) -> dict[str, Any]:
         "max_risk": _num(risk_engine.get("max_allowed_risk")),
         "broker_capital": _num(risk_engine.get("broker_capital")),
         "capital_source": str(capital.get("source", "") or "NOT REPORTED"),
+        "broker_name": str(capital.get("broker_name", "") or ""),
+        "status": str(capital.get("status", "") or ""),
+        "label": str(capital.get("label", "") or ""),
+        "last_updated": str(capital.get("last_updated", "") or ""),
         "source": "broker-reported funds via risk engine (no fallback)",
     }
     snapshot = {
         "broker": {
             "status": "CONNECTED" if broker_connected else "DISCONNECTED",
             "name": str(broker.get("name", "") or ""),
+            "account_id": str(broker.get("account_id", "") or ""),
             "reason": str(broker.get("reason", "") or ""),
             "source": "SYSTEM broker manager view",
         },

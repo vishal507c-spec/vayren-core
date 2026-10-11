@@ -680,17 +680,34 @@ class LiveTradingService:
         # If current name is not connected, but another broker is connected, prefer connected venue
         if name and name != "paper":
             curr_entry = next((e for e in brokers if str(e.get("id", "")) == name), None)
-            curr_connected = curr_entry is not None and (
-                str(curr_entry.get("status", "") or "").upper() in ("CONNECTED", "LIVE_READY")
-                or curr_entry.get("connected")
-            )
+            if curr_entry is not None:
+                if curr_entry.get("connected") is not None:
+                    curr_connected = bool(curr_entry.get("connected"))
+                else:
+                    curr_connected = str(curr_entry.get("status", "") or "").upper() in (
+                        "CONNECTED",
+                        "LIVE_READY",
+                    ) or (manager is not None and manager.is_connected(name) is True)
+            else:
+                curr_connected = False
+
             if not curr_connected:
                 connected_entry = next(
                     (
                         e
                         for e in brokers
-                        if str(e.get("status", "") or "").upper() in ("CONNECTED", "LIVE_READY")
-                        or e.get("connected")
+                        if (
+                            bool(e.get("connected"))
+                            if e.get("connected") is not None
+                            else (
+                                str(e.get("status", "") or "").upper()
+                                in ("CONNECTED", "LIVE_READY")
+                                or (
+                                    manager is not None
+                                    and manager.is_connected(str(e.get("id", ""))) is True
+                                )
+                            )
+                        )
                     ),
                     None,
                 )
@@ -714,15 +731,20 @@ class LiveTradingService:
             st_raw = str(entry.get("status", "") or "")
             view["status"] = st_raw.upper()
             view["reason"] = str(entry.get("reason", "") or "")
+            if entry.get("connected") is not None:
+                is_entry_connected = bool(entry.get("connected"))
+            else:
+                is_entry_connected = bool(
+                    view["status"] in ("CONNECTED", "LIVE_READY")
+                    or (manager is not None and manager.is_connected(name) is True)
+                )
             view["configured"] = bool(
                 entry.get("configured", False)
                 or view["status"] not in ("NOT_CONFIGURED", "")
-                or entry.get("connected")
+                or is_entry_connected
                 or entry.get("session_active")
             )
-            view["connected"] = view["status"] in ("CONNECTED", "LIVE_READY") or bool(
-                entry.get("connected")
-            )
+            view["connected"] = is_entry_connected
             view["account_id"] = str(entry.get("account_id", "") or "")
             view["last_sync"] = str(entry.get("last_sync", "") or "")
             funds = entry.get("funds")
@@ -1489,7 +1511,7 @@ class LiveTradingService:
                 "connected": connected,
                 "reason": broker_reason,
                 "account_id": view["account_id"],
-                "status": view["status"],
+                "status": "CONNECTED" if connected else view["status"],
             },
             "strategy": strategy_state,
             "positions": positions,
@@ -1529,7 +1551,7 @@ class LiveTradingService:
             "lifecycle": lifecycle,
             "events": list(self._activity)[-100:],
             "quotes": quotes,
-            "capital": self._capital_block(view),
+            "capital": self._capital_block(view, now_time),
             "market_symbol": self._config.symbols[0] if self._config.symbols else "",
             "market_timeframe": self._config.timeframe,
             "market_bars": self._chart_bars(),
@@ -2191,7 +2213,9 @@ class LiveTradingService:
                 BROKER_CAPITAL_UNAVAILABLE if self._config.mode == "LIVE" else "CAPITAL_UNAVAILABLE"
             )
 
-    def _capital_block(self, view: dict[str, Any] | None = None) -> dict[str, Any]:
+    def _capital_block(
+        self, view: dict[str, Any] | None = None, now_time: str = ""
+    ) -> dict[str, Any]:
         """Capital facts for the Broker Capital panel and Account & Risk card (venue truth only).
 
         Priority: a RUNNING session's reported funds, else the connected
@@ -2229,6 +2253,8 @@ class LiveTradingService:
         if "T" in last_updated:
             time_part = last_updated.split("T")[1][:8]
             last_updated = time_part
+        if not last_updated and has_venue_numbers and now_time:
+            last_updated = now_time
 
         label = "Available margin"
         if view is None or not view.get("id") or not view.get("configured"):
