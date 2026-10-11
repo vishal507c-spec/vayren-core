@@ -5,6 +5,8 @@
 
 **Owns:** Current state, open items, verified facts, oddities.
 
+**Build-performance history:** read `docs/CARGO_BUILD_EXPERIMENTS.md` before any Cargo/release build-speed work (measured baseline, rejected `codegen-units = 256`, `target-exp` deleted, User-scope `CARGO_TARGET_DIR` removed (verified; `vayren-core-main\target` retained, not deleted)).
+
 **Latest update (live-strategy-dropdown-fix, 2026-10-10):** FIX LIVE UI STRATEGY DROPDOWN POPULATION & SELECTION (local only, no commit/push).
 1. Root Causes Resolved:
    - `LiveTradingService.available_strategies()` in `src/app/services/live_trading_service.py` unified registry active strategies (`defn.name`: `"OBR C1C4"`, `"EMA Crossover"`, `"SMA Crossover"`, `"RSI Strategy"`) and file-backed library strategies (`list_strategies` + fallback `D:\VAYREN_STRATEGIES` -> `"OBR"`).
