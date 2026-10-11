@@ -126,9 +126,21 @@ class StrategyRegistry:
         with self._lock:
             if strategy_id in self._definitions:
                 return self._definitions[strategy_id]
-            target = strategy_id.strip().lower()
+            clean = strategy_id.strip()
+            if clean.lower().endswith(".py"):
+                clean = clean[:-3].strip()
+            target = clean.lower()
+            target_norm = target.replace("_", "-").replace(" ", "-")
             for defn in self._definitions.values():
-                if defn.id.lower() == target or defn.name.lower() == target:
+                d_id_norm = defn.id.lower().replace("_", "-").replace(" ", "-")
+                d_name_norm = defn.name.lower().replace("_", "-").replace(" ", "-")
+                if (
+                    defn.id.lower() == target
+                    or defn.name.lower() == target
+                    or d_id_norm == target_norm
+                    or d_name_norm == target_norm
+                    or (target_norm in ("obr", "obr-c1c4") and defn.id == "obr-c1c4")
+                ):
                     return defn
             raise StrategyRegistryError(f"unknown strategy: {strategy_id}")
 
@@ -137,9 +149,17 @@ class StrategyRegistry:
         with self._lock:
             if strategy_id in self._definitions:
                 return True
-            target = strategy_id.strip().lower()
+            clean = strategy_id.strip()
+            if clean.lower().endswith(".py"):
+                clean = clean[:-3].strip()
+            target = clean.lower()
+            target_norm = target.replace("_", "-").replace(" ", "-")
             return any(
-                d.id.lower() == target or d.name.lower() == target
+                d.id.lower() == target
+                or d.name.lower() == target
+                or d.id.lower().replace("_", "-").replace(" ", "-") == target_norm
+                or d.name.lower().replace("_", "-").replace(" ", "-") == target_norm
+                or (target_norm in ("obr", "obr-c1c4") and d.id == "obr-c1c4")
                 for d in self._definitions.values()
             )
 

@@ -33,15 +33,15 @@ Allowed graph (machine truth: `DOMAIN_DEPS` in `tools/validate_imports.py`). Qua
 
 | Module | May Import | Forbidden |
 |---|---|---|
-| `00_app` | `core`, `data`, `market`, `chart`, `strategy`, `backtest`, `risk`, `execution`, `broker` | — |
-| `01_core` | stdlib only | every other chapter |
-| `02_data` | `core`, `broker` (UBL registry/faces only) | `market`, `app`, `strategy`, `backtest`, `risk`, `execution` |
-| `03_market` | `core` | every other chapter |
-| `05_strategy` | `core`, `market` | `data`, `app` internals, `risk`, `execution`, `broker` |
-| `06_backtest` | `core`, `market`, `strategy` | `data`, `app` internals, `risk`, `execution`, `broker` |
-| `07_risk` | `core` | everything except `core` |
-| `08_execution` | `core`, `market` (`Bar` only), `strategy` (public surface), `risk`, `broker` (UBL faces only) | `data`, `app` internals, `backtest`, `market.database` |
-| `09_broker` | stdlib only | every other chapter |
+| `src/app` | `core`, `data`, `market`, `strategy`, `backtest`, `risk`, `execution`, `broker` | — |
+| `src/core` | stdlib only | every other chapter |
+| `src/data` | `core`, `broker` (UBL registry/faces only) | `market`, `app`, `strategy`, `backtest`, `risk`, `execution` |
+| `src/market` | `core` | every other chapter |
+| `src/strategy` | `core`, `market` | `data`, `app` internals, `risk`, `execution`, `broker` |
+| `src/backtest` | `core`, `market`, `strategy` | `data`, `app` internals, `risk`, `execution`, `broker` |
+| `src/risk` | `core` | everything except `core` |
+| `src/execution` | `core`, `market` (`Bar` only), `strategy` (public surface), `risk`, `broker` (UBL faces only) | `data`, `app` internals, `backtest` |
+| `src/broker` | stdlib only | every other chapter |
 
 **INVARIANT:** `from market.database import ...`, `from ..market import ...`, `from x import *` are violations. **`if TYPE_CHECKING:`** imports are annotations-only (no runtime coupling); never use them to hide a real dependency.
 

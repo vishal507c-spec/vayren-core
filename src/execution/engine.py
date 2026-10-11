@@ -55,7 +55,13 @@ class ExecutionEngine:
         client_id = self._by_intent.get(intent_id)
         return self._orders.get(client_id) if client_id else None
 
-    def transition(self, client_order_id: str, target: OrderState, reason: str = "") -> BrokerOrder:
+    def transition(
+        self,
+        client_order_id: str,
+        target: OrderState,
+        reason: str = "",
+        broker_order_id: str | None = None,
+    ) -> BrokerOrder:
         """Advance one order along a legal edge (UNKNOWN exits need reconcile).
 
         Legality is judged by the Rust-owned lifecycle table
@@ -72,6 +78,22 @@ class ExecutionEngine:
         if target == OrderState.UNKNOWN:
             reason = reason or "state unknown"
         advanced = order.with_state(target, self._now(), reason=reason)
+        if broker_order_id:
+            advanced = BrokerOrder(
+                client_order_id=advanced.client_order_id,
+                intent_id=advanced.intent_id,
+                symbol=advanced.symbol,
+                side=advanced.side,
+                quantity=advanced.quantity,
+                order_type=advanced.order_type,
+                limit_price=advanced.limit_price,
+                state=advanced.state,
+                filled_qty=advanced.filled_qty,
+                avg_fill_price=advanced.avg_fill_price,
+                broker_order_id=str(broker_order_id),
+                reason=advanced.reason,
+                history=advanced.history,
+            )
         self._orders[client_order_id] = advanced
         return advanced
 

@@ -57,6 +57,9 @@ export struct LiveSetup {
     symbol-total: string,
     stock-universe: [string],
     universe-exchange: string,
+    pending-start: bool,
+    pending-stop: bool,
+    pending-halt: bool,
 }
 
 export struct LiveMarket {
@@ -127,6 +130,7 @@ export struct LiveOrder {
     time: string,
     broker: string,
     status-tone: int,
+    reason: string,
 }
 
 export struct LiveFill {
@@ -183,10 +187,13 @@ export struct LiveActiveStrategy {
     mode: string,
     mode-tone: int,
     started-at: string,
+    stopped-at: string,
+    duration: string,
     symbols-count: string,
     today-signals: string,
     current-position: string,
     orders-today: string,
+    orders-detail: string,
     strategy-logic: string,
 }
 
@@ -255,7 +262,8 @@ export struct LivePipelineStep {
     failed: bool,
 }
 
-export struct LiveSelectedStock {    symbol: string,
+export struct LiveSelectedStock {
+    symbol: string,
     ltp: string,
     change: string,
     change-tone: int,
@@ -649,11 +657,9 @@ component LiveTabHeader inherits Rectangle {
 }
 
 
-// One real readiness gate: name + the domain's own verdict + the backend's
-// own reason. There is no `is-ready` input - readiness is never assumed, only
-// reported. A NOT READY / BLOCKED gate carries the semantic left edge and the
-// NOT READY verdict, so it can never be mistaken for a satisfied one.
 // ── The Complete LiveScreen UI ───────────────────────────────────────────
+// Readiness gates (LiveGate) are reported by the backend, never assumed:
+// a NOT READY / BLOCKED gate keeps its own verdict and reason.
 
 export component LiveScreen inherits Rectangle {
     in property <LiveBar> bar;
@@ -778,7 +784,6 @@ export component LiveScreen inherits Rectangle {
     init => { root.qty-text = root.setup.quantity; }
     changed setup => { if (!root.qty-dirty) { root.qty-text = root.setup.quantity; } }
     min-width: 0px;
-    width: 100%;
     clip: true;
     background: VayrenPalette.bg;
 
@@ -954,29 +959,29 @@ export component LiveScreen inherits Rectangle {
 
                 // ── Group 3: Execution Controls & Clock ──
                 VButton {
-                    width: 82px;
+                    width: root.setup.pending-start ? 104px : 82px;
                     height: 34px;
-                    label: "▶ START";
+                    label: root.setup.pending-start ? "⏳ STARTING…" : "▶ START";
                     variant: 0;
-                    enabled: root.setup.can-start && !root.setup.needs-live-confirm;
+                    enabled: root.setup.can-start && !root.setup.needs-live-confirm && !root.setup.pending-start;
                     clicked => { root.start-requested(); }
                 }
 
                 VButton {
-                    width: 72px;
+                    width: root.setup.pending-stop ? 100px : 72px;
                     height: 34px;
-                    label: "■ STOP";
+                    label: root.setup.pending-stop ? "⏳ STOPPING…" : "■ STOP";
                     variant: 3;
-                    enabled: root.setup.can-stop;
+                    enabled: root.setup.can-stop && !root.setup.pending-stop;
                     clicked => { root.stop-requested(); }
                 }
 
                 VButton {
-                    width: 72px;
+                    width: root.setup.pending-halt ? 96px : 72px;
                     height: 34px;
-                    label: root.bar.halted ? "■ HALTED" : "■ HALT";
+                    label: root.bar.halted ? "■ HALTED" : (root.setup.pending-halt ? "⏳ HALTING…" : "■ HALT");
                     variant: root.bar.halted ? 3 : 2;
-                    enabled: root.bar.halt-enabled && !root.bar.halted;
+                    enabled: root.bar.halt-enabled && !root.bar.halted && !root.setup.pending-halt;
                     clicked => { root.halt-requested(); }
                 }
 
@@ -1158,29 +1163,29 @@ export component LiveScreen inherits Rectangle {
                     Rectangle { horizontal-stretch: 1; background: transparent; }
 
                     VButton {
-                        width: 82px;
+                        width: root.setup.pending-start ? 104px : 82px;
                         height: 34px;
-                        label: "▶ START";
+                        label: root.setup.pending-start ? "⏳ STARTING…" : "▶ START";
                         variant: 0;
-                        enabled: root.setup.can-start && !root.setup.needs-live-confirm;
+                        enabled: root.setup.can-start && !root.setup.needs-live-confirm && !root.setup.pending-start;
                         clicked => { root.start-requested(); }
                     }
 
                     VButton {
-                        width: 72px;
+                        width: root.setup.pending-stop ? 100px : 72px;
                         height: 34px;
-                        label: "■ STOP";
+                        label: root.setup.pending-stop ? "⏳ STOPPING…" : "■ STOP";
                         variant: 3;
-                        enabled: root.setup.can-stop;
+                        enabled: root.setup.can-stop && !root.setup.pending-stop;
                         clicked => { root.stop-requested(); }
                     }
 
                     VButton {
-                        width: 72px;
+                        width: root.setup.pending-halt ? 96px : 72px;
                         height: 34px;
-                        label: root.bar.halted ? "■ HALTED" : "■ HALT";
+                        label: root.bar.halted ? "■ HALTED" : (root.setup.pending-halt ? "⏳ HALTING…" : "■ HALT");
                         variant: root.bar.halted ? 3 : 2;
-                        enabled: root.bar.halt-enabled && !root.bar.halted;
+                        enabled: root.bar.halt-enabled && !root.bar.halted && !root.setup.pending-halt;
                         clicked => { root.halt-requested(); }
                     }
                 }
@@ -1254,46 +1259,6 @@ export component LiveScreen inherits Rectangle {
                     }
 
                     Rectangle { horizontal-stretch: 1; background: transparent; }
-
-                    Rectangle {
-                        height: 20px;
-                        border-radius: 4px;
-                        background: VayrenPalette.live-panel;
-                        border-width: 1px;
-                        border-color: VayrenPalette.live-line-soft;
-                        HorizontalLayout {
-                            padding-left: 8px;
-                            padding-right: 8px;
-                            alignment: center;
-                            Text {
-                                text: "Read-only · Managed in Strategy Lab";
-                                font-size: 9px;
-                                font-weight: 600;
-                                color: VayrenPalette.live-ink-dim;
-                                vertical-alignment: center;
-                            }
-                        }
-                    }
-
-                    Rectangle {
-                        width: 22px;
-                        height: 22px;
-                        border-radius: 4px;
-                        background: refresh-touch.has-hover ? VayrenPalette.live-line-soft : VayrenPalette.live-panel;
-                        border-width: 1px;
-                        border-color: VayrenPalette.live-line-soft;
-                        Text {
-                            text: "↻";
-                            font-size: 13px;
-                            color: refresh-touch.has-hover ? VayrenPalette.text-bright : VayrenPalette.live-teal;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                        refresh-touch := TouchArea {
-                            mouse-cursor: pointer;
-                            clicked => { root.refresh-stocks(); }
-                        }
-                    }
                 }
 
                 // Row 2: Dedicated Chips Row Below Header
@@ -1486,7 +1451,7 @@ export component LiveScreen inherits Rectangle {
                                 if root.orders.length == 0: Rectangle {
                                     vertical-stretch: 1;
                                     Text {
-                                        text: "No active orders (SOURCE: ORDER / TRADE WS)";
+                                        text: "No orders submitted yet";
                                         color: VayrenPalette.live-ink-dim;
                                         font-size: 11px;
                                         horizontal-alignment: center;
@@ -1506,7 +1471,8 @@ export component LiveScreen inherits Rectangle {
                                         Text { width: 50px; text: ord.side; color: LiveTone.ink(ord.side-tone); font-size: 11px; font-weight: 700; vertical-alignment: center; }
                                         Text { width: 50px; text: ord.qty; color: VayrenPalette.text; font-size: 11px; vertical-alignment: center; }
                                         Text { width: 80px; text: ord.price; color: VayrenPalette.text; font-size: 11px; vertical-alignment: center; }
-                                        Text { horizontal-stretch: 1; text: ord.status; color: LiveTone.ink(ord.status-tone); font-size: 11px; font-weight: 700; vertical-alignment: center; }
+                                        Text { width: 70px; text: ord.status; color: LiveTone.ink(ord.status-tone); font-size: 11px; font-weight: 700; vertical-alignment: center; }
+                                        Text { horizontal-stretch: 1; text: ord.reason != "" ? " · " + ord.reason : ""; color: VayrenPalette.neg; font-size: 10px; vertical-alignment: center; overflow: elide; }
                                     }
                                 }
                             }
@@ -1726,10 +1692,37 @@ export component LiveScreen inherits Rectangle {
                                 }
 
                                 Text {
-                                    text: "Runtime Status: " + (root.active-strat.status != "" ? root.active-strat.status : "IDLE");
+                                    text: "Runtime Status: " + (root.active-strat.status != "" ? root.active-strat.status : "STOPPED");
                                     color: LiveTone.ink(root.active-strat.status-tone);
                                     font-size: 10px;
                                     font-weight: 600;
+                                }
+
+                                if root.active-strat.started-at != "" && root.active-strat.started-at != "—": Text {
+                                    text: root.active-strat.stopped-at != "" && root.active-strat.stopped-at != "—"
+                                        ? "Started at: " + root.active-strat.started-at + "  ·  Stopped at: " + root.active-strat.stopped-at
+                                        : "Started at: " + root.active-strat.started-at;
+                                    color: VayrenPalette.live-ink;
+                                    font-size: 10px;
+                                }
+
+                                if root.active-strat.duration != "" && root.active-strat.duration != "—": Text {
+                                    text: root.active-strat.duration;
+                                    color: VayrenPalette.live-ink;
+                                    font-size: 10px;
+                                    font-weight: 600;
+                                }
+
+                                Text {
+                                    text: "Signals generated: " + root.active-strat.today-signals;
+                                    color: VayrenPalette.live-ink-dim;
+                                    font-size: 10px;
+                                }
+
+                                if root.active-strat.orders-detail != "": Text {
+                                    text: "Orders: " + root.active-strat.orders-detail;
+                                    color: VayrenPalette.live-ink-dim;
+                                    font-size: 10px;
                                 }
 
                                 Text {
@@ -1763,6 +1756,7 @@ export component LiveScreen inherits Rectangle {
                                     spacing: 8px;
                                     Text {
                                         text: "Broker:";
+                                        width: 112px;
                                         color: VayrenPalette.live-ink-dim;
                                         font-size: 10px;
                                     }
@@ -1778,6 +1772,7 @@ export component LiveScreen inherits Rectangle {
                                     spacing: 8px;
                                     Text {
                                         text: "Available Capital:";
+                                        width: 112px;
                                         color: VayrenPalette.live-ink-dim;
                                         font-size: 10px;
                                     }
@@ -1793,6 +1788,7 @@ export component LiveScreen inherits Rectangle {
                                     spacing: 8px;
                                     Text {
                                         text: "Status:";
+                                        width: 112px;
                                         color: VayrenPalette.live-ink-dim;
                                         font-size: 10px;
                                     }

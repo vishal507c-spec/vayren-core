@@ -31,6 +31,7 @@ import os
 import time
 from collections import deque
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -139,6 +140,15 @@ def _as_float(value: Any) -> float | None:
     if number != number or number in (float("inf"), float("-inf")):
         return None
     return number
+
+
+def format_duration(seconds: int | float) -> str:
+    """Format elapsed seconds as HH:MM:SS."""
+    secs = max(0, int(seconds))
+    hrs = secs // 3600
+    mins = (secs % 3600) // 60
+    s = secs % 60
+    return f"{hrs:02d}:{mins:02d}:{s:02d}"
 
 
 class CapitalRiskEngine:
@@ -336,6 +346,11 @@ class LiveTradingService:
         self._risk_status: str = "NOT READY"
         self._risk_reason: str = BROKER_CAPITAL_UNAVAILABLE
         self._started_at: str = ""
+        self._stopped_at: str = ""
+        self._session_start_epoch: float | None = None
+        self._session_stop_epoch: float | None = None
+        self._elapsed_seconds: int = 0
+        self._signals_generated: int = 0
         self._timer = IntervalTimer(_TICK_MS, self.tick)
         self._restore_config()
 
@@ -390,7 +405,22 @@ class LiveTradingService:
 
             for name in file_names:
                 name_clean = str(name).strip()
-                if name_clean and name_clean.lower() not in known:
+                if not name_clean:
+                    continue
+                try:
+                    from strategy.registry import get_strategy_registry
+
+                    reg = get_strategy_registry()
+                    if reg.contains(name_clean):
+                        defn = reg.get(name_clean)
+                        if defn.name:
+                            known.add(defn.name.lower())
+                        if defn.id:
+                            known.add(defn.id.lower())
+                        continue
+                except Exception:
+                    pass
+                if name_clean.lower() not in known:
                     names.append(name_clean)
                     known.add(name_clean.lower())
         except Exception:
@@ -447,22 +477,19 @@ class LiveTradingService:
 
         reg = get_strategy_registry()
         strat_def = None
-        strategy_changed = False
         if strategy_name is not None:
             cleaned = str(strategy_name).strip()
             if cleaned and reg.contains(cleaned):
                 strat_def = reg.get(cleaned)
                 if strat_def.timeframe and not timeframe:
                     self._config.timeframe = strat_def.timeframe
-            strategy_changed = cleaned != self._config.strategy_name
             self._config.strategy_name = cleaned
         elif self._config.strategy_name and reg.contains(self._config.strategy_name):
             strat_def = reg.get(self._config.strategy_name)
 
-        if strategy_changed or (strategy_name is not None and not symbols):
-            # Selection change or strategy setup loads the authoritative saved universe
-            # from disk. Symbols riding along in the same setup action are client-side
-            # rows and must not overwrite the saved universe.
+        if strategy_name is not None:
+            # Setting or re-setting strategy always loads the authoritative saved universe
+            # from disk. Stock management is exclusively in Strategy Lab; LIVE is read-only.
             self._config.symbols = (
                 self._universes.symbols_for(self._config.strategy_name)
                 if self._config.strategy_name
@@ -470,15 +497,16 @@ class LiveTradingService:
             )
         elif symbols is not None:
             if not self._config.strategy_name:
-                if tuple(symbols):
-                    raise LiveConfigError("select a strategy before configuring its universe")
                 self._config.symbols = ()
-            else:
+            elif tuple(symbols):
                 try:
                     saved = self._universes.save(self._config.strategy_name, tuple(symbols))
                 except UniverseStoreError as exc:
                     raise LiveConfigError(str(exc)) from exc
                 self._config.symbols = saved.symbols
+            else:
+                # An empty symbol list from the UI must NEVER overwrite an authoritative saved universe on disk.
+                self._config.symbols = self._universes.symbols_for(self._config.strategy_name)
 
         if timeframe is not None:
             self._config.timeframe = str(timeframe)
@@ -580,6 +608,16 @@ class LiveTradingService:
     def broker_name(self) -> str:
         """User-selected broker (display only; venue resolves inside sessions)."""
         selection = None
+        if self._selection is None and hasattr(self, "_data_dir"):
+            try:
+                from app.services.broker_selection_service import (
+                    BrokerSelectionService,
+                    app_selection_store,
+                )
+
+                self._selection = BrokerSelectionService(app_selection_store(self._data_dir))
+            except Exception:
+                pass
         try:
             current = getattr(self._selection, "current", None)
             if callable(current):
@@ -656,65 +694,42 @@ class LiveTradingService:
             except Exception:
                 brokers = []
 
-        # Discover active broker dynamically if name is unselected or paper
-        if not name or name == "paper":
-            active = snap.get("active_broker")
-            if active and active != "paper":
-                name = str(active)
-            else:
-                for entry in brokers:
-                    st = str(entry.get("status", "") or "").upper()
-                    if (
-                        st in ("CONNECTED", "LIVE_READY")
-                        or entry.get("connected")
-                        or entry.get("session_active")
-                    ):
-                        name = str(entry.get("id", "") or "")
-                        break
-                if not name or name == "paper":
-                    for entry in brokers:
-                        if entry.get("configured") or entry.get("id"):
-                            name = str(entry.get("id", "") or "")
-                            break
-
-        # If current name is not connected, but another broker is connected, prefer connected venue
-        if name and name != "paper":
-            curr_entry = next((e for e in brokers if str(e.get("id", "")) == name), None)
-            if curr_entry is not None:
-                if curr_entry.get("connected") is not None:
-                    curr_connected = bool(curr_entry.get("connected"))
-                else:
-                    curr_connected = str(curr_entry.get("status", "") or "").upper() in (
-                        "CONNECTED",
-                        "LIVE_READY",
-                    ) or (manager is not None and manager.is_connected(name) is True)
-            else:
-                curr_connected = False
-
-            if not curr_connected:
-                connected_entry = next(
-                    (
-                        e
-                        for e in brokers
-                        if (
-                            bool(e.get("connected"))
-                            if e.get("connected") is not None
-                            else (
-                                str(e.get("status", "") or "").upper()
-                                in ("CONNECTED", "LIVE_READY")
-                                or (
-                                    manager is not None
-                                    and manager.is_connected(str(e.get("id", ""))) is True
-                                )
-                            )
+        # Discover active broker dynamically:
+        # 1. Prefer genuinely connected broker across all venues
+        connected_entry = next(
+            (
+                e
+                for e in brokers
+                if (
+                    bool(e.get("connected"))
+                    if e.get("connected") is not None
+                    else (
+                        str(e.get("status", "") or "").upper() in ("CONNECTED", "LIVE_READY")
+                        or (
+                            manager is not None
+                            and manager.is_connected(str(e.get("id", ""))) is True
                         )
-                    ),
-                    None,
+                    )
                 )
-                if connected_entry:
-                    name = str(connected_entry.get("id", "") or "")
-                elif snap.get("active_broker"):
-                    name = str(snap.get("active_broker"))
+            ),
+            None,
+        )
+        snap_active = str(snap.get("active_broker", "") or "")
+        if connected_entry:
+            name = str(connected_entry.get("id", "") or "")
+        elif snap_active and snap_active != "paper" and (not name or name == "paper" or (brokers and not any(e.get("id") == name for e in brokers))):
+            name = snap_active
+        elif name and name != "paper":
+            # The operator explicitly selected a broker (e.g. 'fyers' in SYSTEM -> BROKERS).
+            # Respect the authoritative selection! NEVER silently overwrite it with Zerodha!
+            pass
+        elif snap_active and snap_active != "paper":
+            name = snap_active
+        elif not name or name == "paper":
+            # Only when no broker was selected and no broker is active, check if any broker is configured
+            configured_entry = next((e for e in brokers if e.get("configured")), None)
+            if configured_entry:
+                name = str(configured_entry.get("id", "") or "")
 
         if not name or name == "paper":
             return view
@@ -1082,6 +1097,14 @@ class LiveTradingService:
             self._status_reason = str(exc)
             self.state_changed.emit()
             return False, (str(exc),)
+        now = time.time()
+        now_dt = datetime.now()
+        self._started_at = now_dt.strftime("%H:%M:%S")
+        self._stopped_at = ""
+        self._session_start_epoch = now
+        self._session_stop_epoch = None
+        self._elapsed_seconds = 0
+        self._signals_generated = 0
         self._status = "RUNNING"
         self._status_reason = ""
         self._timer.start()
@@ -1136,7 +1159,8 @@ class LiveTradingService:
             with contextlib.suppress(Exception):
                 session.stop()
         self._drain_activity()
-        self._status = "STOPPED"
+        halted = "halt" in str(reason).lower()
+        self._status = "HALTED" if halted else "STOPPED"
         self._status_reason = reason if reason != "operator stop" else ""
         # Consent is per start, not per service lifetime: without this the
         # snapshot keeps hiding the consent blocker after a STOP, so START
@@ -1144,8 +1168,16 @@ class LiveTradingService:
         self._confirmed_live_at = ""
         self.invalidate_validation_cache()
         self._tick_count = 0
+        now = time.time()
+        now_dt = datetime.now()
+        if self._session_start_epoch is not None:
+            self._elapsed_seconds = max(0, int(now - self._session_start_epoch))
+            self._session_stop_epoch = now
+            self._stopped_at = now_dt.strftime("%H:%M:%S")
+            self._session_start_epoch = None
+        elif self._started_at and not self._stopped_at:
+            self._stopped_at = now_dt.strftime("%H:%M:%S")
         self._persist()
-        halted = "halt" in str(reason).lower()
         self._record_activity(
             self._config.strategy_name or "session",
             "",
@@ -1287,8 +1319,12 @@ class LiveTradingService:
                         # an order pipeline and could not show why an order
                         # failed. Forwarding both lets the UI render the
                         # backend's own lifecycle instead of a guess.
+                        broker_oid = str(
+                            item.get("broker_order_id", "") or item.get("broker_id", "") or ""
+                        )
                         order_row = {
                             "order_id": str(item.get("client_order_id", "")),
+                            "broker_order_id": broker_oid,
                             "strategy": self._config.strategy_name,
                             "symbol": str(item.get("symbol", "")),
                             "side": str(item.get("side", "")),
@@ -1425,29 +1461,61 @@ class LiveTradingService:
                 arm_blockers.append("sessions not armed")
         now_iso = _utcnow_iso()
         now_time = now_iso.split("T")[1][:8] if "T" in now_iso else ""
+
+        if running and self._session_start_epoch is not None:
+            elapsed_sec = max(0, int(time.time() - self._session_start_epoch))
+            duration_str = f"Running for: {format_duration(elapsed_sec)}"
+            started_str = self._started_at or "—"
+            stopped_str = "—"
+        elif self._started_at and self._stopped_at:
+            elapsed_sec = self._elapsed_seconds
+            duration_str = f"Total runtime: {format_duration(elapsed_sec)}"
+            started_str = self._started_at
+            stopped_str = self._stopped_at
+        elif self._started_at:
+            elapsed_sec = self._elapsed_seconds
+            duration_str = f"Total runtime: {format_duration(elapsed_sec)}"
+            started_str = self._started_at
+            stopped_str = "—"
+        else:
+            elapsed_sec = 0
+            duration_str = "—"
+            started_str = "—"
+            stopped_str = "—"
+
+        orders_submitted = len(orders)
+        orders_pending = sum(
+            1
+            for o in orders
+            if str(o.get("status", "")).upper()
+            in ("OPEN", "PENDING", "WORKING", "SUBMITTED", "ACCEPTED")
+        )
+        orders_filled = sum(
+            1 for o in orders if str(o.get("status", "")).upper() in ("FILLED", "COMPLETE")
+        )
+        orders_rejected = sum(
+            1
+            for o in orders
+            if str(o.get("status", "")).upper() in ("REJECTED", "CANCELLED", "DENIED")
+        )
+
         if isinstance(strategy_state, dict):
             strat_name_str = str(strategy_state.get("id") or "")
-            strategy_state["started_at"] = self._started_at or (
-                "2026-10-04 12:10:23" if running else "—"
-            )
-            strategy_state["today_signals"] = 2 if running else 0
-            strategy_state["signals_executed"] = 1 if running else 0
-            strategy_state["signals_rejected"] = 0
+            strategy_state["started_at"] = started_str
+            strategy_state["stopped_at"] = stopped_str
+            strategy_state["duration"] = duration_str
+            strategy_state["today_signals"] = self._signals_generated
+            strategy_state["signals_executed"] = orders_filled
+            strategy_state["signals_rejected"] = orders_rejected
             strategy_state["positions_long_count"] = sum(
                 1 for p in positions if p.get("side") in ("LONG", "BUY")
             )
             strategy_state["positions_short_count"] = sum(
                 1 for p in positions if p.get("side") in ("SHORT", "SELL")
             )
-            strategy_state["orders_filled_count"] = sum(
-                1 for o in orders if o.get("status") in ("FILLED", "COMPLETE")
-            )
-            strategy_state["orders_working_count"] = sum(
-                1 for o in orders if o.get("status") in ("OPEN", "PENDING", "WORKING")
-            )
-            strategy_state["orders_rejected_count"] = sum(
-                1 for o in orders if o.get("status") in ("REJECTED",)
-            )
+            strategy_state["orders_filled_count"] = orders_filled
+            strategy_state["orders_working_count"] = orders_pending
+            strategy_state["orders_rejected_count"] = orders_rejected
             strategy_state["logic"] = f"{strat_name_str} (unchanged)"
 
         ws_status = (
@@ -1564,6 +1632,18 @@ class LiveTradingService:
             "start_blockers": blockers,
             "active_positions": len(positions),
             "open_orders": open_count,
+            "session_timing": {
+                "status": self._status,
+                "started_at": started_str,
+                "stopped_at": stopped_str,
+                "duration": duration_str,
+                "elapsed_seconds": elapsed_sec,
+            },
+            "signals_generated": self._signals_generated,
+            "orders_submitted": orders_submitted,
+            "orders_pending": orders_pending,
+            "orders_filled": orders_filled,
+            "orders_rejected": orders_rejected,
         }
         # Readiness rows always exist (idle included): the checklist renders
         # backend verdicts, never an empty panel.
@@ -1841,6 +1921,7 @@ class LiveTradingService:
             for entry in new:
                 self._append_activity(symbol, entry)
                 if entry.kind == "SIGNAL_GENERATED":
+                    self._signals_generated += 1
                     payload = entry.payload or {}
                     self._last_signal[symbol] = (
                         f"{payload.get('signal_id', 'signal')} @ {entry.timestamp}"
@@ -2234,12 +2315,22 @@ class LiveTradingService:
         if not running and view is not None and view.get("connected"):
             venue_funds = view.get("funds")
             if isinstance(venue_funds, dict) and any(
-                venue_funds.get(k) is not None for k in ("available", "used", "total")
+                venue_funds.get(k) is not None
+                for k in ("available", "available_margin", "used", "used_margin", "total", "equity")
             ):
+                avail_val = venue_funds.get("available")
+                if avail_val is None:
+                    avail_val = venue_funds.get("available_margin")
+                used_val = venue_funds.get("used")
+                if used_val is None:
+                    used_val = venue_funds.get("used_margin")
+                eq_val = venue_funds.get("total")
+                if eq_val is None:
+                    eq_val = venue_funds.get("equity")
                 funds = {
-                    "available": venue_funds.get("available"),
-                    "used": venue_funds.get("used"),
-                    "equity": venue_funds.get("total"),
+                    "available": avail_val,
+                    "used": used_val,
+                    "equity": eq_val,
                 }
         has_venue_numbers = running or (view is not None and view.get("connected") and bool(funds))
 
@@ -2274,8 +2365,32 @@ class LiveTradingService:
         return {
             "source": "broker" if has_venue_numbers and funds else "configured",
             "broker_name": broker_name,
-            "broker_capital": _as_float(funds.get("equity")) if has_venue_numbers else None,
-            "available_margin": _as_float(funds.get("available")) if has_venue_numbers else None,
+            "broker_capital": (
+                _as_float(
+                    funds.get("equity")
+                    if funds.get("equity") is not None
+                    else (
+                        funds.get("available")
+                        if funds.get("available") is not None
+                        else funds.get("total")
+                    )
+                )
+                if has_venue_numbers
+                else None
+            ),
+            "available_margin": (
+                _as_float(
+                    funds.get("available")
+                    if funds.get("available") is not None
+                    else (
+                        funds.get("equity")
+                        if funds.get("equity") is not None
+                        else funds.get("total")
+                    )
+                )
+                if has_venue_numbers
+                else None
+            ),
             "used_margin": _as_float(funds.get("used")) if has_venue_numbers else None,
             "configured_capital": _as_float(self._config.capital),
             "currency": "INR",
@@ -2592,7 +2707,20 @@ class LiveTradingService:
             self._config.symbols = ()
 
         # Restored config NEVER auto-starts (real-money safety + paper hygiene).
-        self._status = "STOPPED"
+        timing = data.get("session_timing")
+        if isinstance(timing, dict):
+            self._started_at = str(timing.get("started_at", ""))
+            self._stopped_at = str(timing.get("stopped_at", ""))
+            self._elapsed_seconds = int(timing.get("elapsed_seconds", 0) or 0)
+            self._signals_generated = int(timing.get("signals_generated", 0) or 0)
+            saved_status = str(timing.get("status", "")).upper()
+            if saved_status == "HALTED":
+                self._status = "HALTED"
+                self._status_reason = "operator halt"
+            else:
+                self._status = "STOPPED"
+        else:
+            self._status = "STOPPED"
 
     def _persist_config(self) -> None:
         data = self._store.load()
@@ -2637,6 +2765,13 @@ class LiveTradingService:
         data["checkpoints"] = checkpoints
         data["open_since"] = dict(self._open_since)
         data["activity"] = list(self._activity)[-200:]
+        data["session_timing"] = {
+            "status": self._status,
+            "started_at": self._started_at,
+            "stopped_at": self._stopped_at,
+            "elapsed_seconds": self._elapsed_seconds,
+            "signals_generated": self._signals_generated,
+        }
         try:
             self._store.save(data)
         except Exception as exc:  # noqa: BLE001

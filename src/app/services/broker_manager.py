@@ -652,6 +652,16 @@ class BrokerManager:
             state["status"] = BrokerStatus.CONNECTED
             state["reason"] = f"{why}; {reg_reason}" if not registered else why
         self._note(spec.broker_id, "connected")
+        try:
+            from app.services.broker_selection_service import (
+                BrokerSelectionService,
+                app_selection_store,
+            )
+
+            selection_svc = BrokerSelectionService(app_selection_store(self._data_dir))
+            selection_svc.select(spec.broker_id)
+        except Exception:
+            pass
         self.state_changed.emit(spec.broker_id)
         self._worker.submit(_HEALTH_JOB, spec.broker_id)
 

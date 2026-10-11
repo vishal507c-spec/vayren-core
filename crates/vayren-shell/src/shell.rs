@@ -3419,6 +3419,9 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
         ))
         .into(),
         universe_exchange: view.setup.universe_exchange.into(),
+        pending_start: view.setup.pending_start,
+        pending_stop: view.setup.pending_stop,
+        pending_halt: view.setup.pending_halt,
     });
     ui.set_live_strategy_names(
         Rc::new(slint::VecModel::from(
@@ -3551,6 +3554,7 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
                     time: o.time.into(),
                     broker: o.broker.into(),
                     status_tone: o.status_tone,
+                    reason: o.reason.into(),
                 })
                 .collect::<Vec<_>>(),
         ))
@@ -3645,10 +3649,13 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
         mode: view.active_strat.mode.into(),
         mode_tone: view.active_strat.mode_tone,
         started_at: view.active_strat.started_at.into(),
+        stopped_at: view.active_strat.stopped_at.into(),
+        duration: view.active_strat.duration.into(),
         symbols_count: view.active_strat.symbols_count.into(),
         today_signals: view.active_strat.today_signals.into(),
         current_position: view.active_strat.current_position.into(),
         orders_today: view.active_strat.orders_today.into(),
+        orders_detail: view.active_strat.orders_detail.into(),
         strategy_logic: view.active_strat.strategy_logic.into(),
     });
     ui.set_live_watchlist(
@@ -4871,6 +4878,9 @@ mod tests {
             stock_universe: Rc::new(slint::VecModel::from(Vec::<slint::SharedString>::new()))
                 .into(),
             universe_exchange: "NSE".into(),
+            pending_start: false,
+            pending_stop: false,
+            pending_halt: false,
         });
         harness.set_market(LiveMarket {
             has_data: false,

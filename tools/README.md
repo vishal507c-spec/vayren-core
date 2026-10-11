@@ -1,33 +1,36 @@
-# Scripts — Chhote Helper Tools
+# Tools — Developer & Validation Tooling
 
-## 1. Ye kya hai?
+## 1. What is this?
 
-`scripts/` — development ke chhote tools. Ye app ka hissa nahi hain, sirf kaam mein aate hain.
+`tools/` contains developer workflows, build drivers, velocity benchmarking, and deterministic CI validators. These are tooling scripts; they are not imported by the runtime application.
 
-## 2. Tools
+## 2. Tools & Validators
 
-| Script | Kaam | Kab chalao |
+| Script | Purpose | When to Run |
 |---|---|---|
-| `run_tests.py` | Suite-partitioned pytest driver — har partition apne fresh interpreter mein (suite isolation); live test files wale domains | `make test` ke bajaye stable full run ke liye; CI bhi yahi chalata hai |
-| `validate_structure.py` | 9 domains ka layout check (`app`/`core`/`data`/`market`/`strategy`/`backtest`/`risk`/`execution`/`broker`) | `make check` mein |
-| `validate_imports.py` | Cross-module dependency rules check (AST se; `if TYPE_CHECKING:` imports runtime coupling nahi maane jate) | `make check` mein |
-| `benchmark.py` | AEOS velocity harness (`gate`/`begin`/`record`/`impact`/`replay`/`scoreboard`, output regenerated on use) | Validation cost measure karne, impact plan, scoreboard regen ke liye |
-| `validate_architecture_gate.py` | Wrong-language change gate: Rust-owned Python additions bina retention ke FAIL; declared third-party imports ke bahar kuch nahi | Har commit se pehle, pre-commit hook aur `make check` mein (`validate-architecture`) |
-| `speed/__main__.py` | Phase-18 speed instrumentation (`mark`/`record`/`compile-context`/`recommend`/`dashboard`) — engineering-loop timing, task journal, context compiler | Har benchmarked task par (negligible overhead: ek JSONL line) |
+| `route.py` | Sub-second task router (deterministic task → domain, language, primary files, tests) | At the start of any new task |
+| `context_engine.py` | Context compiler & validation level escalation | For task planning and context verification |
+| `build_rust.py` | Rust build driver (lean tests, packaging, shortcut sync) | During setup, packaging (`make exe`), or Rust compilation |
+| `validate_structure.py` | Verifies domain package directory structure | In `make check` / CI |
+| `validate_imports.py` | AST check enforcing `DOMAIN_DEPS` cross-module boundaries | In `make check` / CI |
+| `validate_language_ownership.py` | Hard gate enforcing Rust vs Python ownership via `ownership_policy.json` | In `make check` / CI |
+| `validate_architecture_gate.py` | Wrong-language & unauthorized dependency change gate | In `make check` / CI |
+| `validate_authority.py` | Single-registry, single-authority, contract drift check | In `make check` / CI |
+| `validate_routes.py` | Verifies `task_routes.json` against filesystem | In `make check` / CI |
+| `validate_repo_graph.py` | Validates `repo_graph.json` consistency against canonical sources | In `make check` / CI |
+| `validate_scope.py` | Change impact & test scope calculator | In `make check` / CI |
+| `benchmark.py` | Velocity & impact execution harness (`make fast` uses impact mode) | During development loop (`make fast`) |
+| `forensics/__main__.py` | Coding-time forensics measurement & timeline reporting | For developer session instrumentation |
 
 ## 3. Example
 
 ```bash
-python scripts/validate_structure.py
-python scripts/validate_imports.py
+python tools/route.py --task "order state"
+python tools/validate_structure.py
+python tools/validate_imports.py
 ```
 
-## 4. Ye Kya Nahi Karega
+## 4. Invariants
 
-- Ye koi service nahi hai — app inhe kabhi import nahi karta
-- `90_brain` validation se bahar hai
-- Asli market data `D:\ZerodhaTradingData` par aayega — repo mein kabhi fabricate mat karo
-
-## 5. Future
-
-Naya module aayega → validators mein naya domain add hoga, scripts wahi rahenge.
+- Tooling scripts are never imported by application runtime code.
+- Market data is read from configured data directories (e.g. `D:\ZerodhaTradingData`); never fabricate mock market data.

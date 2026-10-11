@@ -189,10 +189,15 @@ def build_snapshot(live: dict[str, Any]) -> dict[str, Any]:
         "source": "risk engine sizing verdict",
     }
     capital_block = {
-        "available": _num(capital.get("available_margin")),
+        "available": _num(capital.get("available_margin") or capital.get("available")),
+        "available_margin": _num(capital.get("available_margin") or capital.get("available")),
         "effective": _num(risk_engine.get("effective_capital")),
         "max_risk": _num(risk_engine.get("max_allowed_risk")),
-        "broker_capital": _num(risk_engine.get("broker_capital")),
+        "broker_capital": _num(
+            capital.get("broker_capital")
+            or capital.get("available_margin")
+            or risk_engine.get("broker_capital")
+        ),
         "capital_source": str(capital.get("source", "") or "NOT REPORTED"),
         "broker_name": str(capital.get("broker_name", "") or ""),
         "status": str(capital.get("status", "") or ""),

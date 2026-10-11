@@ -836,7 +836,10 @@ class LiveSession:
             return
         self._broker_calls += 1
         tracked = self._engine.transition(
-            tracked.client_order_id, OrderState.SUBMITTED, reason="sent to broker"
+            tracked.client_order_id,
+            OrderState.SUBMITTED,
+            reason="sent to broker",
+            broker_order_id=str(broker_id),
         )
         self._journal.record(
             "ORDER_SUBMITTED",

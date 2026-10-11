@@ -443,18 +443,20 @@ def _live_action(
         if name == "setup":
             from app.services.live_trading_service import LiveConfigError
 
-            symbols = action.get("symbols")
             # Rust sends `strategy_name` (live.rs::push_setup_action); accept
-            # the legacy `strategy` key too — reading only one silently
-            # dropped every strategy pick while symbols/timeframe applied.
+            # the legacy `strategy` key too. Stock universe management is exclusively
+            # in Strategy Lab (LIVE is read-only for stocks), so symbols are always
+            # loaded from the authoritative store on disk rather than client chips.
+            raw_strat = action.get("strategy_name", action.get("strategy"))
+            strat_param = str(raw_strat).strip() if raw_strat is not None else None
+            raw_syms = action.get("symbols")
+            symbols_param = (
+                tuple(str(s) for s in raw_syms) if isinstance(raw_syms, (list, tuple)) else None
+            )
             try:
                 service.configure(
-                    strategy_name=_opt_str(action.get("strategy_name", action.get("strategy"))),
-                    symbols=(
-                        tuple(str(s) for s in symbols)
-                        if isinstance(symbols, list) and symbols
-                        else None
-                    ),
+                    strategy_name=strat_param,
+                    symbols=symbols_param,
                     timeframe=_opt_str(action.get("timeframe")),
                     mode=_opt_str(action.get("mode")),
                     quantity=_opt_float(action.get("quantity")),
@@ -489,14 +491,17 @@ def _live_action(
             if ok:
                 _ARMED[0] = False
                 _LIVE_ACTION_ERRORS.pop("start", None)
+                note = "strategy started"
             else:
                 _LIVE_ACTION_ERRORS["start"] = "; ".join(reasons)
+                note = f"START blocked: {'; '.join(reasons)}"
         elif name == "stop":
             service.stop()
             _LIVE_ACTION_ERRORS.pop("start", None)
             # A finished run voids consent: the next START needs a fresh ARM.
             _ARMED[0] = False
             service.note_armed(False)
+            note = "strategy stopped"
         elif name == "halt":
             # HALT is the emergency stop: same teardown as STOP, but the reason
             # is recorded so the journal and the UI say a halt happened rather
@@ -505,6 +510,7 @@ def _live_action(
             _LIVE_ACTION_ERRORS.pop("start", None)
             _ARMED[0] = False
             service.note_armed(False)
+            note = "EXECUTION HALTED — emergency stop engaged"
         elif name == "arm":
             # Arming is the operator's LIVE consent; it is carried on the next
             # START rather than being a session of its own.
@@ -1605,6 +1611,16 @@ def _lab_universe_result(cmd_type: str, command: dict, data_dir: Path | str) -> 
             if strategy_name
             else {"state": "refused", "error": "no strategy selected"}
         )
+        if data.get("state") == "saved":
+            from strategy.universe_store import universe_strategy_id
+
+            target_id = universe_strategy_id(strategy_name)
+            for svc in _TRADING_SERVICES.values():
+                if hasattr(svc, "_config") and hasattr(svc, "_universes"):
+                    current_id = universe_strategy_id(svc._config.strategy_name)
+                    if current_id == target_id:
+                        svc._config.symbols = svc._universes.symbols_for(svc._config.strategy_name)
+                        svc.invalidate_validation_cache()
         return {"type": "lab_universe", "data": data}
     if cmd_type == "lab_universe_search":
         return {

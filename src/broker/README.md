@@ -34,8 +34,8 @@ broker/
   bool helpers preserved for compatibility.
 - No `if broker == ...` anywhere; branching is capability-based.
 - Real broker SDKs may only appear inside isolated adapter packages;
-  network clients only inside `09_broker/broker/adapters/` or the retained
-  historical transport `02_data/data/provider/` (validator-enforced).
+  network clients only inside `src/broker/providers/` or the retained
+  historical transport `src/data/provider/` (validator-enforced).
 - Credentials are key-references only (UBL `credentials.py`); values never
   in selection, logs, events, journals or UI.
 - Health is connection-only and never implies LIVE readiness.

@@ -55,6 +55,8 @@ def universe_strategy_id(strategy_name: object) -> str:
     name = str(strategy_name or "").strip()
     if not name:
         return ""
+    if name.lower().endswith(".py"):
+        name = name[:-3].strip()
     try:
         from strategy.registry import get_strategy_registry
 
@@ -64,6 +66,9 @@ def universe_strategy_id(strategy_name: object) -> str:
             return resolved or name
     except Exception:
         pass
+    target_norm = name.lower().replace("_", "-").replace(" ", "-")
+    if target_norm in ("obr", "obr-c1c4"):
+        return "obr-c1c4"
     return name
 
 
@@ -188,16 +193,35 @@ class StrategyUniverseStore:
         """The saved universe for one strategy, or None when never saved."""
         if not strategy_id:
             return None
-        return self.load_all().get(strategy_id)
+        all_universes = self.load_all()
+        if strategy_id in all_universes:
+            return all_universes[strategy_id]
+        canonical = universe_strategy_id(strategy_id)
+        if canonical and canonical in all_universes:
+            return all_universes[canonical]
+        target_norm = (canonical or str(strategy_id)).lower().replace("_", "-").replace(" ", "-")
+        for k, v in all_universes.items():
+            k_norm = k.lower().replace("_", "-").replace(" ", "-")
+            if (
+                k_norm == target_norm
+                or universe_strategy_id(k).lower().replace("_", "-").replace(" ", "-")
+                == target_norm
+            ):
+                return v
+        return None
 
     def symbols_for(self, strategy_name: object) -> tuple[str, ...]:
         """Saved symbols for a configured strategy name (empty when none)."""
-        universe = self.get(universe_strategy_id(strategy_name))
+        if not strategy_name:
+            return ()
+        universe = self.get(str(strategy_name))
         return universe.symbols if universe is not None else ()
 
     def instrument_ids_for(self, strategy_name: object) -> tuple[str, ...]:
         """Authoritative internal ids for a strategy (empty when none)."""
-        universe = self.get(universe_strategy_id(strategy_name))
+        if not strategy_name:
+            return ()
+        universe = self.get(str(strategy_name))
         return universe.instrument_ids if universe is not None else ()
 
     def migration_report(self) -> dict[str, dict[str, Any]]:

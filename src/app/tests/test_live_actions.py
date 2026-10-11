@@ -198,3 +198,82 @@ def test_stop_clears_recorded_consent(dirs: tuple[str, str]) -> None:
     service._confirmed_live_at = "2026-10-03T00:00:00+00:00"
     service.stop()
     assert service._confirmed_live_at == ""
+
+
+def test_start_records_timing_and_stop_freezes_runtime(dirs: tuple[str, str]) -> None:
+    service = _service(dirs)
+    with (
+        patch.object(service, "validate", return_value=()),
+        patch.object(service, "_build_sessions"),
+    ):
+        ok, blockers = service.start()
+        assert ok
+        assert not blockers
+        assert service.status == "RUNNING"
+        assert service._started_at != ""
+        assert service._stopped_at == ""
+        assert service._session_start_epoch is not None
+
+        snap = service.snapshot()
+        assert snap["session_status"] == "RUNNING"
+        timing = snap["session_timing"]
+        assert timing["status"] == "RUNNING"
+        assert timing["started_at"] == service._started_at
+        assert "Running for:" in timing["duration"]
+
+        service.stop(reason="operator stop")
+        assert service.status == "STOPPED"
+        assert service._stopped_at != ""
+        assert service._session_start_epoch is None
+        frozen_elapsed = service._elapsed_seconds
+
+        snap2 = service.snapshot()
+        assert snap2["session_status"] == "STOPPED"
+        timing2 = snap2["session_timing"]
+        assert timing2["status"] == "STOPPED"
+        assert timing2["started_at"] == service._started_at
+        assert timing2["stopped_at"] == service._stopped_at
+        assert "Total runtime:" in timing2["duration"]
+        assert timing2["elapsed_seconds"] == frozen_elapsed
+
+
+def test_halt_records_halted_status_and_freezes_runtime(dirs: tuple[str, str]) -> None:
+    service = _service(dirs)
+    with (
+        patch.object(service, "validate", return_value=()),
+        patch.object(service, "_build_sessions"),
+    ):
+        ok, _ = service.start()
+        assert ok
+        service.stop(reason="operator halt")
+        assert service.status == "HALTED"
+        snap = service.snapshot()
+        assert snap["session_status"] == "HALTED"
+        assert snap["session_timing"]["status"] == "HALTED"
+        assert "Total runtime:" in snap["session_timing"]["duration"]
+
+
+def test_session_timing_persists_across_reopen(dirs: tuple[str, str]) -> None:
+    service = _service(dirs)
+    with (
+        patch.object(service, "validate", return_value=()),
+        patch.object(service, "_build_sessions"),
+    ):
+        service.start()
+        service.stop(reason="operator stop")
+        orig_started = service._started_at
+        orig_stopped = service._stopped_at
+        orig_elapsed = service._elapsed_seconds
+
+    # Create fresh service loading from same data_dir
+    service2 = LiveTradingService(data_dir=dirs[0], strategy_dir=dirs[1])
+    assert service2.status == "STOPPED"
+    assert service2._started_at == orig_started
+    assert service2._stopped_at == orig_stopped
+    assert service2._elapsed_seconds == orig_elapsed
+
+    snap = service2.snapshot()
+    assert snap["session_status"] == "STOPPED"
+    assert snap["session_timing"]["started_at"] == orig_started
+    assert snap["session_timing"]["stopped_at"] == orig_stopped
+    assert "Total runtime:" in snap["session_timing"]["duration"]

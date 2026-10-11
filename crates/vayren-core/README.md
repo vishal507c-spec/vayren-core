@@ -17,7 +17,7 @@ Market/Data, Execution, Backtest). Zero dependencies (std only).
 ## C ABI
 
 `lib.rs` exposes `vy_*` symbols consumed by Python via `ctypes`
-(`01_core/core/native/loader.py`). Rules: fixed-width ints, `f64`,
+(`src/core/native/loader.py`). Rules: fixed-width ints, `f64`,
 caller-allocated buffers, no panics across the boundary, unknown inputs
 fail closed. `vy_abi_version()` handshakes every load.
 

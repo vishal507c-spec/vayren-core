@@ -624,28 +624,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         shell::demo_live_state()
     };
-    if !is_remote {
-        println!("Requesting live snapshot...");
-        match PythonBackend::lock_send(&backend, BackendCommand::GetLiveSnapshot)? {
-            BackendResponse::LiveSnapshot { data } => {
-                live_state.apply_snapshot(&data);
-                println!(
-                    "Live ready: {} {} ({} bars, last {})",
-                    live_state.market_symbol,
-                    live_state.market_timeframe,
-                    live_state.market_bar_count,
-                    live_state
-                        .market_last_price
-                        .map(|p| p.to_string())
-                        .unwrap_or_else(|| "N/A".to_string())
-                );
-            }
-            BackendResponse::Error { data } => {
-                eprintln!("Live snapshot failed: {}", data.message);
-            }
-            _ => {
-                eprintln!("Unexpected response");
-            }
+    println!("Requesting live snapshot...");
+    match PythonBackend::lock_send(&backend, BackendCommand::GetLiveSnapshot)? {
+        BackendResponse::LiveSnapshot { data } => {
+            live_state.apply_snapshot(&data);
+            println!(
+                "Live ready: {} {} ({} bars, last {})",
+                live_state.market_symbol,
+                live_state.market_timeframe,
+                live_state.market_bar_count,
+                live_state
+                    .market_last_price
+                    .map(|p| p.to_string())
+                    .unwrap_or_else(|| "N/A".to_string())
+            );
+        }
+        BackendResponse::Error { data } => {
+            eprintln!("Live snapshot failed: {}", data.message);
+        }
+        _ => {
+            eprintln!("Unexpected response");
         }
     }
     let live_state = Rc::new(RefCell::new(live_state));
@@ -812,19 +810,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     use vayren_shell::remote_live::{
                         apply_remote_sections, mark_link, push_remote_event, RemoteUiUpdate,
                     };
-                    while let Some(raw) = live_state.borrow_mut().take_action() {
-                        let name: String = serde_json::from_str::<serde_json::Value>(&raw)
-                            .ok()
-                            .and_then(|v| {
-                                v.get("action")
-                                    .and_then(|a| a.as_str())
-                                    .map(str::to_string)
-                            })
-                            .unwrap_or_else(|| "unknown".to_string());
-                        eprintln!(
-                            "remote UI: control '{name}' refused (read-only client, nothing sent)"
-                        );
-                    }
                     let mut dirty = false;
                     for update in rx.try_iter() {
                         match update {
@@ -864,88 +849,88 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if dirty {
                         shell::apply_live(&ui, &live_state.borrow());
                     }
-                } else {
-                    // Ordered dispatch. The drain used to spawn ONE THREAD PER
-                    // action, each contending for the same backend mutex — so
-                    // `service.configure()` could apply intents in an order
-                    // different from the operator's. It then became visible
-                    // WRONG, not merely slow: the seq-guard keeps only the
-                    // highest id, so if action 2 won the mutex the screen
-                    // painted action 2's snapshot while the backend's real
-                    // state was action 1's, until the next poll corrected it.
-                    // One worker, the queue in order: the last intent the
-                    // operator made is the last intent the service applies.
-                    if live_busy == 0 {
-                        let batch: Vec<serde_json::Value> = live_state
-                            .borrow_mut()
-                            .drain_actions()
-                            .into_iter()
-                            .filter_map(|raw| match serde_json::from_str(&raw) {
-                                Ok(value) => Some(value),
-                                Err(err) => {
-                                    eprintln!("Live action is not valid JSON ({err}): {raw}");
-                                    None
-                                }
-                            })
-                            .collect();
-                        if !batch.is_empty() {
-                            live_busy = batch.len() as u32;
-                            let backend = Arc::clone(&backend);
-                            let tx = tx.clone();
-                            let base = live_seq.fetch_add(batch.len() as u64, Ordering::SeqCst);
-                            std::thread::spawn(move || {
-                                for (offset, action) in batch.into_iter().enumerate() {
-                                    // Ids stay ascending WITH dispatch order, so
-                                    // the pump's latest-wins guard can no longer
-                                    // drop the genuinely newest snapshot.
-                                    let id = base + offset as u64 + 1;
-                                    let data = match PythonBackend::lock_send(
-                                        &backend,
-                                        BackendCommand::LiveAction { action },
-                                    ) {
-                                        Ok(BackendResponse::LiveSnapshot { data }) => Some(data),
-                                        Ok(other) => {
-                                            eprintln!("Live action: unexpected response ({other:?})");
-                                            None
-                                        }
-                                        Err(err) => {
-                                            eprintln!("Live action failed: {err}");
-                                            None
-                                        }
-                                    };
-                                    let _ = tx.send(FetchResult::Live(id, data));
-                                }
-                            });
-                        }
-                    }
-                    // Periodic LIVE snapshot poll (see `next_live_poll`): keeps
-                    // fills, P&L, positions, events, quotes and broker edges
-                    // live while a session runs — and re-reads the broker
-                    // selection, so SYSTEM connects surface within one tick.
-                    if live_busy == 0 && std::time::Instant::now() >= next_live_poll {
-                        let id = live_seq.fetch_add(1, Ordering::SeqCst) + 1;
-                        live_busy += 1;
+                }
+
+                // Ordered dispatch. The drain used to spawn ONE THREAD PER
+                // action, each contending for the same backend mutex — so
+                // `service.configure()` could apply intents in an order
+                // different from the operator's. It then became visible
+                // WRONG, not merely slow: the seq-guard keeps only the
+                // highest id, so if action 2 won the mutex the screen
+                // painted action 2's snapshot while the backend's real
+                // state was action 1's, until the next poll corrected it.
+                // One worker, the queue in order: the last intent the
+                // operator made is the last intent the service applies.
+                if live_busy == 0 {
+                    let batch: Vec<serde_json::Value> = live_state
+                        .borrow_mut()
+                        .drain_actions()
+                        .into_iter()
+                        .filter_map(|raw| match serde_json::from_str(&raw) {
+                            Ok(value) => Some(value),
+                            Err(err) => {
+                                eprintln!("Live action is not valid JSON ({err}): {raw}");
+                                None
+                            }
+                        })
+                        .collect();
+                    if !batch.is_empty() {
+                        live_busy = batch.len() as u32;
                         let backend = Arc::clone(&backend);
                         let tx = tx.clone();
+                        let base = live_seq.fetch_add(batch.len() as u64, Ordering::SeqCst);
                         std::thread::spawn(move || {
-                            let data = match PythonBackend::lock_send(
-                                &backend,
-                                BackendCommand::GetLiveSnapshot,
-                            ) {
-                                Ok(BackendResponse::LiveSnapshot { data }) => Some(data),
-                                Ok(other) => {
-                                    eprintln!("Live poll: unexpected response ({other:?})");
-                                    None
-                                }
-                                Err(err) => {
-                                    eprintln!("Live poll failed: {err}");
-                                    None
-                                }
-                            };
-                            let _ = tx.send(FetchResult::Live(id, data));
+                            for (offset, action) in batch.into_iter().enumerate() {
+                                // Ids stay ascending WITH dispatch order, so
+                                // the pump's latest-wins guard can no longer
+                                // drop the genuinely newest snapshot.
+                                let id = base + offset as u64 + 1;
+                                let data = match PythonBackend::lock_send(
+                                    &backend,
+                                    BackendCommand::LiveAction { action },
+                                ) {
+                                    Ok(BackendResponse::LiveSnapshot { data }) => Some(data),
+                                    Ok(other) => {
+                                        eprintln!("Live action: unexpected response ({other:?})");
+                                        None
+                                    }
+                                    Err(err) => {
+                                        eprintln!("Live action failed: {err}");
+                                        None
+                                    }
+                                };
+                                let _ = tx.send(FetchResult::Live(id, data));
+                            }
                         });
-                        next_live_poll = std::time::Instant::now() + std::time::Duration::from_secs(1);
                     }
+                }
+                // Periodic LIVE snapshot poll (see `next_live_poll`): keeps
+                // fills, P&L, positions, events, quotes and broker edges
+                // live while a session runs — and re-reads the broker
+                // selection, so SYSTEM connects surface within one tick.
+                if live_busy == 0 && std::time::Instant::now() >= next_live_poll {
+                    let id = live_seq.fetch_add(1, Ordering::SeqCst) + 1;
+                    live_busy += 1;
+                    let backend = Arc::clone(&backend);
+                    let tx = tx.clone();
+                    std::thread::spawn(move || {
+                        let data = match PythonBackend::lock_send(
+                            &backend,
+                            BackendCommand::GetLiveSnapshot,
+                        ) {
+                            Ok(BackendResponse::LiveSnapshot { data }) => Some(data),
+                            Ok(other) => {
+                                eprintln!("Live poll: unexpected response ({other:?})");
+                                None
+                            }
+                            Err(err) => {
+                                eprintln!("Live poll failed: {err}");
+                                None
+                            }
+                        };
+                        let _ = tx.send(FetchResult::Live(id, data));
+                    });
+                    next_live_poll = std::time::Instant::now() + std::time::Duration::from_secs(1);
                 }
                 let mut latest_market: Option<(u64, Option<serde_json::Value>)> = None;
                 let mut latest_lab_select: Option<(u64, Option<serde_json::Value>)> = None;
@@ -1030,7 +1015,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         // paint over a fresher action result).
                         FetchResult::Live(id, data) => {
                             live_busy = live_busy.saturating_sub(1);
-                            if !is_remote && id > last_live {
+                            if id > last_live {
                                 last_live = id;
                                 if let Some(data) = data {
                                     live_state.borrow_mut().apply_snapshot(&data);
@@ -1094,7 +1079,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             .apply_universe_result(&strategy, saved, &error);
                     }
                     shell::apply_lab(&ui, &lab_state.borrow());
-                    if any_saved && !is_remote {
+                    if any_saved {
                         let id = live_seq.fetch_add(1, Ordering::SeqCst) + 1;
                         live_busy += 1;
                         let backend = Arc::clone(&backend);

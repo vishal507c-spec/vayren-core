@@ -639,6 +639,18 @@ pub struct LiveState {
     /// embedding host via [`LiveState::take_action`] and dispatched to the
     /// Python services. The model never mutates runtime state from these.
     pub host_actions: std::collections::VecDeque<String>,
+    /// Currently pending action intent awaiting backend confirmation (e.g. "start", "stop", "halt").
+    pub pending_action: Option<String>,
+    /// Truthful session timing facts.
+    pub started_at: String,
+    pub stopped_at: String,
+    pub session_duration: String,
+    /// Truthful counter facts.
+    pub signals_generated: usize,
+    pub orders_submitted: usize,
+    pub orders_pending: usize,
+    pub orders_filled: usize,
+    pub orders_rejected: usize,
     /// Secondary-panel (inspector) drawer state for narrow recomposition.
     pub inspector_open: bool,
     /// Last action feedback note (arm/halt/mode refusals); never fabricated.
@@ -724,6 +736,15 @@ impl Default for LiveState {
             backend_can_halt: None,
             open_order_count: None,
             host_actions: std::collections::VecDeque::new(),
+            pending_action: None,
+            started_at: "—".into(),
+            stopped_at: "—".into(),
+            session_duration: "—".into(),
+            signals_generated: 0,
+            orders_submitted: 0,
+            orders_pending: 0,
+            orders_filled: 0,
+            orders_rejected: 0,
             // The inspector (session setup + LIVE readiness) is the most
             // important panel on an execution workstation, so it starts
             // open; the responsive layer collapses it to a drawer when the
@@ -972,18 +993,22 @@ impl LiveState {
         matches!(self.session, SessionStatus::Stopped | SessionStatus::Error)
             && self.bridge_wired
             && self.start_blockers().is_empty()
+            && self.pending_action.is_none()
     }
 
     pub fn can_stop(&self) -> bool {
         matches!(
             self.session,
             SessionStatus::Running | SessionStatus::Starting
-        )
+        ) && self.pending_action.as_deref() != Some("stop")
     }
 
     /// HALT follows the service (`can_halt` while RUNNING or armed; in host
     /// mode the provider's explicit `can_halt` fact wins).
     pub fn can_halt(&self) -> bool {
+        if self.pending_action.as_deref() == Some("halt") {
+            return false;
+        }
         if let Some(value) = self.backend_can_halt {
             return value;
         }
@@ -1271,12 +1296,16 @@ impl LiveState {
             self.action_note = Some("No execution backend attached.".into());
             return;
         }
+        if self.pending_action.as_deref() == Some("start") {
+            return;
+        }
         match self.start_blockers().first() {
             Some(reason) => self.action_note = Some(reason.clone()),
             None if self.host_mode => {
                 // Host mode: the Python service owns start/stop — forward the
                 // request (with the operator's LIVE consent, if given) and
                 // let the next snapshot report what actually happened.
+                self.pending_action = Some("start".into());
                 self.push_action(serde_json::json!({
                     "action": "start",
                     "confirmed": self.live_confirmed,
@@ -1300,7 +1329,11 @@ impl LiveState {
         if !self.can_stop() {
             return;
         }
+        if self.pending_action.as_deref() == Some("stop") {
+            return;
+        }
         if self.host_mode {
+            self.pending_action = Some("stop".into());
             self.push_action(serde_json::json!({"action": "stop"}));
             self.action_note = Some("stop requested — backend halts ticks".into());
             return;
@@ -1321,7 +1354,11 @@ impl LiveState {
         if !self.can_halt() {
             return;
         }
+        if self.pending_action.as_deref() == Some("halt") {
+            return;
+        }
         if self.host_mode {
+            self.pending_action = Some("halt".into());
             self.push_action(serde_json::json!({"action": "halt"}));
             self.action_note = Some("halt requested — backend engaging".into());
             return;
@@ -1436,15 +1473,36 @@ impl LiveState {
                 .collect();
         }
         if let Some(s) = v.get("session_status").and_then(|s| s.as_str()) {
-            self.session = match s {
-                "RUNNING" => SessionStatus::Running,
-                "STARTING" => SessionStatus::Starting,
-                "STOPPING" => SessionStatus::Stopping,
-                "HALTED" => SessionStatus::Halted,
-                "ERROR" => SessionStatus::Error,
-                "STOPPED" => SessionStatus::Stopped,
-                _ => self.session,
+            let new_session = match s {
+                "RUNNING" => Some(SessionStatus::Running),
+                "STARTING" => Some(SessionStatus::Starting),
+                "STOPPING" => Some(SessionStatus::Stopping),
+                "HALTED" => Some(SessionStatus::Halted),
+                "ERROR" => Some(SessionStatus::Error),
+                "STOPPED" => Some(SessionStatus::Stopped),
+                _ => None,
             };
+            if let Some(ns) = new_session {
+                let status_reason = v.get("status_reason").and_then(|r| r.as_str()).unwrap_or("");
+                let update_session = match (self.pending_action.as_deref(), ns) {
+                    (Some("start"), SessionStatus::Stopped) => !status_reason.is_empty(),
+                    (Some("stop"), SessionStatus::Running) => false,
+                    (Some("halt"), SessionStatus::Running) => false,
+                    _ => true,
+                };
+                if update_session {
+                    self.session = ns;
+                    if matches!(
+                        ns,
+                        SessionStatus::Running | SessionStatus::Halted | SessionStatus::Error
+                    ) || (ns == SessionStatus::Stopped
+                        && (self.pending_action.as_deref() != Some("start")
+                            || !status_reason.is_empty()))
+                    {
+                        self.pending_action = None;
+                    }
+                }
+            }
         }
         if v.get("status_reason").is_some() {
             self.status_reason = str_of(v, "status_reason");
@@ -1471,6 +1529,48 @@ impl LiveState {
         }
         if let Some(list) = v.get("lifecycle") {
             self.lifecycle = value_to_text(list);
+        }
+        if let Some(st) = v.get("session_timing") {
+            let started = str_of(st, "started_at");
+            if !started.is_empty() {
+                self.started_at = started;
+            }
+            let stopped = str_of(st, "stopped_at");
+            if !stopped.is_empty() {
+                self.stopped_at = stopped;
+            }
+            let dur = str_of(st, "duration");
+            if !dur.is_empty() {
+                self.session_duration = dur;
+            }
+        } else if let Some(s) = v.get("strategy") {
+            let started = str_of(s, "started_at");
+            if !started.is_empty() && (self.started_at.is_empty() || self.started_at == "—") {
+                self.started_at = started;
+            }
+            let stopped = str_of(s, "stopped_at");
+            if !stopped.is_empty() && (self.stopped_at.is_empty() || self.stopped_at == "—") {
+                self.stopped_at = stopped;
+            }
+            let dur = str_of(s, "duration");
+            if !dur.is_empty() && (self.session_duration.is_empty() || self.session_duration == "—") {
+                self.session_duration = dur;
+            }
+        }
+        if let Some(sg) = v.get("signals_generated").and_then(|n| n.as_u64()) {
+            self.signals_generated = sg as usize;
+        }
+        if let Some(os) = v.get("orders_submitted").and_then(|n| n.as_u64()) {
+            self.orders_submitted = os as usize;
+        }
+        if let Some(op) = v.get("orders_pending").and_then(|n| n.as_u64()) {
+            self.orders_pending = op as usize;
+        }
+        if let Some(of) = v.get("orders_filled").and_then(|n| n.as_u64()) {
+            self.orders_filled = of as usize;
+        }
+        if let Some(or) = v.get("orders_rejected").and_then(|n| n.as_u64()) {
+            self.orders_rejected = or as usize;
         }
 
         // ── unified eligibility (Phase-6/7 backend section) ──
@@ -1656,7 +1756,19 @@ impl LiveState {
             self.orders = list
                 .iter()
                 .map(|o| OrderRow {
-                    order_id: str_of(o, "order_id"),
+                    order_id: {
+                        let cl_id = str_of(o, "order_id");
+                        let br_id = str_of(o, "broker_order_id");
+                        if !br_id.is_empty() && br_id != "—" {
+                            if !cl_id.is_empty() && cl_id != "—" && cl_id != br_id {
+                                format!("{cl_id} · {br_id}")
+                            } else {
+                                br_id
+                            }
+                        } else {
+                            cl_id
+                        }
+                    },
                     strategy: str_of(o, "strategy"),
                     symbol: str_of(o, "symbol"),
                     side: str_of(o, "side"),
@@ -1862,10 +1974,18 @@ impl LiveState {
 
         // Capital facts ingest (determines raw_capital and sizing availability)
         if let Some(c) = v.get("capital") {
+            let avail = c
+                .get("available_margin")
+                .or_else(|| c.get("available"))
+                .and_then(|x| x.as_f64());
+            let broker_capital = c
+                .get("broker_capital")
+                .and_then(|x| x.as_f64())
+                .or(avail);
             self.capital = CapitalFacts {
                 source: str_of(c, "source"),
-                broker_capital: c.get("broker_capital").and_then(|x| x.as_f64()),
-                available_margin: c.get("available_margin").and_then(|x| x.as_f64()),
+                broker_capital,
+                available_margin: avail.or(broker_capital),
                 used_margin: c.get("used_margin").and_then(|x| x.as_f64()),
                 configured_capital: c.get("configured_capital").and_then(|x| x.as_f64()),
                 broker_name: str_of(c, "broker_name"),
@@ -2001,6 +2121,18 @@ impl LiveState {
             // note ("start requested — awaiting backend") would be a lie.
             if let Some(note) = &self.action_note {
                 if note.starts_with("start requested") || note.starts_with("arm requested") {
+                    self.action_note = None;
+                }
+            }
+        } else if self.session == SessionStatus::Stopped {
+            if let Some(note) = &self.action_note {
+                if note.starts_with("stop requested") {
+                    self.action_note = None;
+                }
+            }
+        } else if self.session == SessionStatus::Halted {
+            if let Some(note) = &self.action_note {
+                if note.starts_with("halt requested") {
                     self.action_note = None;
                 }
             }
@@ -2363,6 +2495,7 @@ pub struct OrderRowView {
     pub time: String,
     pub broker: String,
     pub status_tone: i32,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -2446,6 +2579,9 @@ pub struct SetupView {
     pub universe_exchange: String,
     pub timeframe_names: Vec<String>,
     pub timeframe_selected: i32,
+    pub pending_start: bool,
+    pub pending_stop: bool,
+    pub pending_halt: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -2500,10 +2636,13 @@ pub struct ActiveStrategyView {
     pub mode: String,
     pub mode_tone: i32,
     pub started_at: String,
+    pub stopped_at: String,
+    pub duration: String,
     pub symbols_count: String,
     pub today_signals: String,
     pub current_position: String,
     pub orders_today: String,
+    pub orders_detail: String,
     pub strategy_logic: String,
 }
 
@@ -3410,6 +3549,9 @@ pub fn project(state: &LiveState) -> LiveView {
         universe_exchange: state.universe_exchange(),
         timeframe_names: state.timeframes.clone(),
         timeframe_selected: state.timeframe_index.map_or(-1, |i| i as i32),
+        pending_start: state.pending_action.as_deref() == Some("start"),
+        pending_stop: state.pending_action.as_deref() == Some("stop"),
+        pending_halt: state.pending_action.as_deref() == Some("halt"),
     };
 
     // ── readiness (gate rows + arm note, exact backend reasons) ──
@@ -3474,6 +3616,7 @@ pub fn project(state: &LiveState) -> LiveView {
             time: o.time.clone(),
             broker: o.broker.clone(),
             status_tone: order_status_tone(&o.status),
+            reason: o.reason.clone(),
         })
         .collect();
     let fills: Vec<FillRowView> = state
@@ -3662,12 +3805,17 @@ pub fn project(state: &LiveState) -> LiveView {
     // configured-but-stopped session read as if it were executing. The only
     // authority for "is it running" is the backend session fact, and a kill
     // switch outranks even that.
-    let active_strat_status: &'static str = if state.kill_halted {
-        "HALTED"
+    let (active_strat_status, active_strat_status_tone) = if state.kill_halted {
+        ("HALTED", 3)
+    } else if state.pending_action.as_deref() == Some("start") {
+        ("STARTING", 2)
+    } else if state.pending_action.as_deref() == Some("stop") {
+        ("STOPPING", 2)
+    } else if state.pending_action.as_deref() == Some("halt") {
+        ("HALTED", 3)
     } else {
-        state.session.label()
+        (state.session.label(), state.session.badge())
     };
-    let active_strat_status_tone = state.session.badge();
     let mode_str = state.mode.label();
     // Counts come from the real book. The registry reports a configured
     // universe size; the signal/order tallies are only printed when the
@@ -3677,7 +3825,23 @@ pub fn project(state: &LiveState) -> LiveView {
         .iter()
         .filter(|r| !r.signal.is_empty() && r.signal != "—" && r.signal != "--")
         .count();
-    let orders_sent = state.pnl.orders.map(|n| n as usize).unwrap_or(0);
+    let orders_sent = if state.orders_submitted > 0 {
+        state.orders_submitted
+    } else {
+        state.pnl.orders.map(|n| n as usize).unwrap_or(0)
+    };
+    let fills_count = if state.orders_filled > 0 {
+        state.orders_filled
+    } else {
+        state.fills.len()
+    };
+    let orders_detail = format!(
+        "{} submitted · {} filled · {} rejected · {} pending",
+        state.orders_submitted,
+        state.orders_filled,
+        state.orders_rejected,
+        state.orders_pending,
+    );
     let active_strat = ActiveStrategyView {
         name: strategy_label.clone(),
         status: active_strat_status.into(),
@@ -3688,20 +3852,23 @@ pub fn project(state: &LiveState) -> LiveView {
             "PAPER" => 4,
             _ => 2,
         },
-        started_at: state
-            .snapshot_time
-            .rsplit_once(' ')
-            .map(|(_, t)| t.to_string())
-            .unwrap_or_else(|| "—".into()),
+        started_at: state.started_at.clone(),
+        stopped_at: state.stopped_at.clone(),
+        duration: state.session_duration.clone(),
         symbols_count: state
             .strategy_facts
             .as_ref()
             .and_then(|f| f.universe)
             .map(|n| format!("{n}"))
             .unwrap_or_else(|| format!("{}", state.watchlist_rows.len().max(state.symbols.len()))),
-        today_signals: signals_today.to_string(),
+        today_signals: if state.signals_generated > 0 {
+            state.signals_generated.to_string()
+        } else {
+            signals_today.to_string()
+        },
         current_position: state.positions.len().to_string(),
-        orders_today: format!("{} sent ({} filled)", orders_sent, state.fills.len()),
+        orders_today: format!("{} sent ({} filled)", orders_sent, fills_count),
+        orders_detail,
         strategy_logic: state
             .strategy_facts
             .as_ref()

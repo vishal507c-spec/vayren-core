@@ -51,10 +51,22 @@ tooling           → tools/                   → Py → tools/validate_*.py   
 ```
 
 Boundaries (machine-enforced): allowed deps `tools/validate_imports.py`
-(`DOMAIN_DEPS`); SDK/network only in `src/data/provider/`, `src/broker/adapters/`;
+(`DOMAIN_DEPS`); SDK/network only in `src/data/provider/`, `src/broker/providers/`;
 bridges = marshal→delegate→return (`*/native_*.py` only may import `core.native`).
 
-## 3. Binding rules (detail: `AGENTS.md`; ownership: AI_ENTRY.md §1; policy: `docs/*.json`)
+## 3. Fast Speed Protocol (10x Developer Loop)
+
+```text
+1. Fast Route (1s): python tools/route.py --task "<task>" (yields exact files + contract section).
+2. Targeted Slice: Read only the relevant 50-100 lines; do not read entire files or repos.
+3. Language Check: Check AI_ENTRY.md §1 & docs/ownership_policy.json (Rust vs Python).
+4. Surgical Edit: Single contiguous block, 5-20 lines, zero whole-file rewrites.
+5. Fast Inner Loop (<1s): pytest <module>/tests -q (Python) or cargo check -p <crate> (Rust).
+6. Full Verification Gate: make check (run once at the end of task before finishing).
+7. Concise Memory: Append concise verified facts to docs/ai_memory.md (<150 lines total).
+```
+
+## 4. Binding rules (detail: `AGENTS.md`; ownership: AI_ENTRY.md §1; policy: `docs/*.json`)
 
 ```text
 1. One responsibility = one owner = one language (duplicates forbidden).
@@ -65,20 +77,21 @@ bridges = marshal→delegate→return (`*/native_*.py` only may import `core.nat
 6. New file in Rust-owned domain without retention entry → validator FAIL. New language → gate FAIL.
 ```
 
-## 4. New code order (new behavior → new module, never expand old ones)
+## 5. New code order (new behavior → new module, never expand old ones)
 
 ```text
 MODEL (models/file.py) → EVENT (events/file.py) → SERVICE (services/file.py) → TEST (tests/test_file.py)
 ```
 File/type/model/event standards live in `AGENTS.md` only (not repeated here).
 
-## 5. Validate (`make check` = rust + lint + format + typecheck + test + validators)
+## 6. Validate (`make check` = rust + lint + format + typecheck + test + validators)
 
 ```text
 make check              # full gate (must pass before merge)
 pytest <module>/tests   # fast impact scope while iterating
+make fast               # automated impact runner (<2s)
 python tools/forensics/__main__.py report --name "..."   # LAST command of a task
 ```
 
-State: `docs/ai_memory.md` (current only).
+State: `docs/ai_memory.md` (current only, archive in `docs/archive/ai_memory_history.md`).
 Contracts: `docs/module_contracts.md`. Events: `docs/event_catalog.md`. Map/layers: `docs/architecture.md`.

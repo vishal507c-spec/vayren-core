@@ -39,26 +39,26 @@ trace files under `.forensics/` (gitignored).
 ```
 # 1. just work — the first invocation auto-opens the session at the turn's
 #    REAL start (from the agent lifecycle log); the session name is optional
-python scripts/forensics/__main__.py mark --phase CONTEXT_READING --action read_file --file 90_brain --name "My task"
+python tools/forensics/__main__.py mark --phase CONTEXT_READING --action read_file --file AI_ENTRY.md --name "My task"
 
 # 2. record phase evidence while working
-python scripts/forensics/__main__.py mark --phase CONTEXT_READING   --action read_file    --file 05_strategy/strategy/runtime.py
-python scripts/forensics/__main__.py mark --phase ARCHITECTURE_ANALYSIS --action design --note "..."
+python tools/forensics/__main__.py mark --phase CONTEXT_READING   --action read_file    --file src/strategy/runtime.py
+python tools/forensics/__main__.py mark --phase ARCHITECTURE_ANALYSIS --action design --note "..."
 
 # 3. wrap commands that have measurable duration (time belongs to that phase)
-python scripts/forensics/__main__.py run --phase TESTING -- python -m pytest -q
+python tools/forensics/__main__.py run --phase TESTING -- python -m pytest -q
 
 # 4. at task end, render the report (the report is ALSO auto-appended when
 #    the next task's session opens — see "Auto-report")
-python scripts/forensics/__main__.py report --name "My task"
+python tools/forensics/__main__.py report --name "My task"
 
 # 5. other commands
-python scripts/forensics/__main__.py sweep        # scan for file modifications now
-python scripts/forensics/__main__.py status       # current turn + session
-python scripts/forensics/__main__.py report --full          # + detailed audit sections
-python scripts/forensics/__main__.py report --task-id ID    # a specific task
-python scripts/forensics/__main__.py aggregate              # all tasks
-python scripts/forensics/__main__.py list
+python tools/forensics/__main__.py sweep        # scan for file modifications now
+python tools/forensics/__main__.py status       # current turn + session
+python tools/forensics/__main__.py report --full          # + detailed audit sections
+python tools/forensics/__main__.py report --task-id ID    # a specific task
+python tools/forensics/__main__.py aggregate              # all tasks
+python tools/forensics/__main__.py list
 ```
 
 File edits are auto-detected: every CLI call runs a tree sweep and logs

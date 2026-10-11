@@ -141,15 +141,17 @@ pub fn apply_remote_sections(state: &mut LiveState, sections: &serde_json::Value
         } else {
             strat_id
         };
-        translated.insert(
-            "strategy".to_string(),
-            serde_json::json!({
-                "id": strat_name,
-                "name": strat_name,
-                "status": strategy_status,
-                "mode": text_at(sections, "strategy", "mode")
-            }),
-        );
+        if !strat_name.is_empty() {
+            translated.insert(
+                "strategy".to_string(),
+                serde_json::json!({
+                    "id": strat_name,
+                    "name": strat_name,
+                    "status": strategy_status,
+                    "mode": text_at(sections, "strategy", "mode")
+                }),
+            );
+        }
     }
     let reason = text_at(sections, "strategy", "reason");
     if !reason.is_empty() {
@@ -161,10 +163,16 @@ pub fn apply_remote_sections(state: &mut LiveState, sections: &serde_json::Value
 
     if !section(sections, "broker").is_null() {
         let status = text_at(sections, "broker", "status");
+        let name = text_at(sections, "broker", "name");
+        let bname = if name.is_empty() {
+            state.broker.name.clone()
+        } else {
+            name
+        };
         translated.insert(
             "broker".to_string(),
             serde_json::json!({
-                "name": text_at(sections, "broker", "name"),
+                "name": bname,
                 "account_id": text_at(sections, "broker", "account_id"),
                 "status": status,
                 "reason": text_at(sections, "broker", "reason"),

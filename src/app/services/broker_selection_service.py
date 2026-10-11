@@ -111,14 +111,30 @@ class BrokerSelectionService:
         return persisted
 
     def _compatibility_default(self) -> BrokerSelection:
-        """Migration default (design §9 M4): the legacy history provider,
-        recorded openly — behavior unchanged, provenance visible."""
-        if DEFAULT_HISTORY_BROKER not in self._registry:
-            raise SelectionError(
-                f"compatibility default broker {DEFAULT_HISTORY_BROKER!r} is not registered"
-            )
+        """Migration default (design §9 M4): discover configured credentials,
+        or legacy history provider, recorded openly — behavior unchanged, provenance visible."""
+        chosen = DEFAULT_HISTORY_BROKER
+        try:
+            store_path = getattr(self._store, "path", None)
+            if store_path is not None:
+                data_dir = Path(store_path).parent
+                from broker.common.credentials_store import default_store
+
+                cred_store = default_store(data_dir)
+                for reg_name in self._registry.names():
+                    if reg_name == chosen:
+                        continue
+                    if cred_store.load(f"{reg_name}_config") or cred_store.load(reg_name):
+                        chosen = reg_name
+                        break
+        except Exception:
+            pass
+        if chosen not in self._registry:
+            chosen = DEFAULT_HISTORY_BROKER
+        if chosen not in self._registry:
+            raise SelectionError(f"compatibility default broker {chosen!r} is not registered")
         return BrokerSelection(
-            name=DEFAULT_HISTORY_BROKER,
+            name=chosen,
             environment=Environment.PAPER,
             selected_at=datetime.now().astimezone().isoformat(timespec="seconds"),
             reason=_COMPAT_REASON,
