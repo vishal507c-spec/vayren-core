@@ -497,6 +497,8 @@ class LiveTradingService:
             )
         elif symbols is not None:
             if not self._config.strategy_name:
+                if tuple(symbols):
+                    raise LiveConfigError("select a strategy before configuring its universe")
                 self._config.symbols = ()
             elif tuple(symbols):
                 try:
@@ -505,7 +507,7 @@ class LiveTradingService:
                     raise LiveConfigError(str(exc)) from exc
                 self._config.symbols = saved.symbols
             else:
-                # An empty symbol list from the UI must NEVER overwrite an authoritative saved universe on disk.
+                # Empty symbol list from UI must NEVER overwrite saved universe on disk.
                 self._config.symbols = self._universes.symbols_for(self._config.strategy_name)
 
         if timeframe is not None:
@@ -717,7 +719,15 @@ class LiveTradingService:
         snap_active = str(snap.get("active_broker", "") or "")
         if connected_entry:
             name = str(connected_entry.get("id", "") or "")
-        elif snap_active and snap_active != "paper" and (not name or name == "paper" or (brokers and not any(e.get("id") == name for e in brokers))):
+        elif (
+            snap_active
+            and snap_active != "paper"
+            and (
+                not name
+                or name == "paper"
+                or (brokers and not any(e.get("id") == name for e in brokers))
+            )
+        ):
             name = snap_active
         elif name and name != "paper":
             # The operator explicitly selected a broker (e.g. 'fyers' in SYSTEM -> BROKERS).
@@ -726,7 +736,7 @@ class LiveTradingService:
         elif snap_active and snap_active != "paper":
             name = snap_active
         elif not name or name == "paper":
-            # Only when no broker was selected and no broker is active, check if any broker is configured
+            # If no broker was selected/active, check if any broker is configured
             configured_entry = next((e for e in brokers if e.get("configured")), None)
             if configured_entry:
                 name = str(configured_entry.get("id", "") or "")

@@ -1483,7 +1483,10 @@ impl LiveState {
                 _ => None,
             };
             if let Some(ns) = new_session {
-                let status_reason = v.get("status_reason").and_then(|r| r.as_str()).unwrap_or("");
+                let status_reason = v
+                    .get("status_reason")
+                    .and_then(|r| r.as_str())
+                    .unwrap_or("");
                 let update_session = match (self.pending_action.as_deref(), ns) {
                     (Some("start"), SessionStatus::Stopped) => !status_reason.is_empty(),
                     (Some("stop"), SessionStatus::Running) => false,
@@ -1553,7 +1556,8 @@ impl LiveState {
                 self.stopped_at = stopped;
             }
             let dur = str_of(s, "duration");
-            if !dur.is_empty() && (self.session_duration.is_empty() || self.session_duration == "—") {
+            if !dur.is_empty() && (self.session_duration.is_empty() || self.session_duration == "—")
+            {
                 self.session_duration = dur;
             }
         }
@@ -1978,10 +1982,7 @@ impl LiveState {
                 .get("available_margin")
                 .or_else(|| c.get("available"))
                 .and_then(|x| x.as_f64());
-            let broker_capital = c
-                .get("broker_capital")
-                .and_then(|x| x.as_f64())
-                .or(avail);
+            let broker_capital = c.get("broker_capital").and_then(|x| x.as_f64()).or(avail);
             self.capital = CapitalFacts {
                 source: str_of(c, "source"),
                 broker_capital,
@@ -3837,10 +3838,7 @@ pub fn project(state: &LiveState) -> LiveView {
     };
     let orders_detail = format!(
         "{} submitted · {} filled · {} rejected · {} pending",
-        state.orders_submitted,
-        state.orders_filled,
-        state.orders_rejected,
-        state.orders_pending,
+        state.orders_submitted, state.orders_filled, state.orders_rejected, state.orders_pending,
     );
     let active_strat = ActiveStrategyView {
         name: strategy_label.clone(),

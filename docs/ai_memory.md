@@ -7,7 +7,26 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (documentation-and-coding-speed-optimization, 2026-10-12):** DOCUMENTATION & CODING SPEED OPTIMIZATION.
+**Latest update (live-terminal-synchronization-and-production-binary, 2026-10-12):** RESOLVE LIVE TERMINAL SYNCHRONIZATION AND BUILD UPDATED PRODUCTION RELEASE EXE.
+1. Live Action & Snapshot Unification in Packaged Remote Shell:
+   - Initial Snapshot Ingestion: In `crates/vayren-shell/src/main.rs`, removed `if !is_remote` gate at startup so `GetLiveSnapshot` is always requested from the workstation's local `PythonBackend`, truthfully populating the persisted session (`OBR C1C4`, 22 saved stocks, FYERS selection and capital) regardless of launch mode.
+   - Action Refusal Removed: Removed the control refusal drain that previously discarded START, STOP, HALT, and setup actions with `"remote UI: control '{name}' refused (read-only client, nothing sent)"`. All actions are now drained and forwarded to the local backend worker thread in order.
+   - Live Polling & Strategy Lab Sync: Unified periodic live snapshot polling and Strategy Lab universe save triggers so saving stocks in Strategy Lab immediately updates the LIVE workspace and disk universe without restart.
+   - Safeguarded Strategy and Broker Translation: In `crates/vayren-shell/src/remote_live.rs`, only insert strategy when name/id is non-empty (preventing empty frames from clearing `strategy_index` to item 0 `"EMA Crossover"`), and preserve current broker name when remote sections omit broker identity.
+2. Backend Broker Resolution Hardening:
+   - In `src/app/services/live_trading_service.py` (`_broker_view`), prioritize the active broker reported in manager snapshot (`fyers`) when the fallback selection is not present in the manager's registered venues.
+   - In `src/app/headless.py`, immediately refresh `LiveTradingService` active configuration upon Strategy Lab universe save.
+3. Production Release Binary Built & Verified:
+   - Output Path: `C:\Users\visha\Desktop\vayren-core\target\release\vayren-shell.exe`
+   - Timestamp: `26/10/12 12:41:47 AM`
+   - File Size: `37,674,496` bytes (~35.93 MB)
+   - SHA-256: `DBC91B334554AC2739B17F25369FBDCD73E6A04842D3723491F2857C240B3479`
+   - Desktop Shortcut `C:\Users\visha\Desktop\VAYREN.lnk` verified targeting `C:\Users\visha\Desktop\vayren-core\target\release\vayren-shell.exe` with arguments `--data-dir D:\ZerodhaTradingData --strategy-dir D:\ZerodhaTradingData\strategies`.
+4. Verification & Tests:
+   - Python tests: `pytest src/app/tests/test_live_broker_capital.py src/app/tests/test_live_strategy_sync_and_watchlist.py src/app/tests/test_lab_to_live_universe_e2e.py -q` (25 passed in 2.80s).
+   - Rust tests: `cargo test -p vayren-domain --lib live` (59 passed in 0.01s); `cargo test -p vayren-shell --lib` (50 passed in 0.12s).
+
+**Previous update (documentation-and-coding-speed-optimization, 2026-10-12):** DOCUMENTATION & CODING SPEED OPTIMIZATION.
 1. Active Documentation Overhead Pruned:
    - `docs/ai_memory.md` pruned from 363 KB (1,434 lines) down to 5 KB (52 lines), achieving a 98.6% reduction in context overhead. Full 1,389-line history preserved in `docs/archive/ai_memory_history.md`.
    - Historical static milestone reports & benchmark logs (9 files) consolidated from `docs/architecture/`, `docs/live/`, and `docs/performance/` into `docs/archive/reports/` with catalog index `docs/archive/README.md`.
