@@ -900,7 +900,7 @@ export component LiveScreen inherits Rectangle {
 
                 Rectangle {
                     height: 34px;
-                    width: 165px;
+                    width: 70px;
                     border-radius: 6px;
                     background: VayrenPalette.live-panel;
                     border-width: 1px;
@@ -913,41 +913,11 @@ export component LiveScreen inherits Rectangle {
                         Rectangle {
                             horizontal-stretch: 1;
                             border-radius: 4px;
-                            background: root.bar.mode == 0 ? VayrenPalette.live-teal : transparent;
-                            TouchArea { clicked => { root.mode-picked(0); } }
-                            Text {
-                                text: "PAPER";
-                                color: root.bar.mode == 0 ? VayrenPalette.accent-text : VayrenPalette.live-ink-faint;
-                                font-size: 10px;
-                                font-weight: 700;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
-                            }
-                        }
-
-                        Rectangle {
-                            horizontal-stretch: 1;
-                            border-radius: 4px;
-                            background: root.bar.mode == 1 ? VayrenPalette.amber : transparent;
-                            TouchArea { clicked => { root.mode-picked(1); } }
-                            Text {
-                                text: "SANDBOX";
-                                color: root.bar.mode == 1 ? VayrenPalette.accent-text : VayrenPalette.live-ink-faint;
-                                font-size: 10px;
-                                font-weight: 700;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
-                            }
-                        }
-
-                        Rectangle {
-                            horizontal-stretch: 1;
-                            border-radius: 4px;
-                            background: root.bar.mode == 2 ? VayrenPalette.neg : transparent;
+                            background: VayrenPalette.neg;
                             TouchArea { clicked => { root.mode-picked(2); } }
                             Text {
                                 text: "LIVE";
-                                color: root.bar.mode == 2 ? VayrenPalette.text-bright : VayrenPalette.live-ink-faint;
+                                color: VayrenPalette.text-bright;
                                 font-size: 10px;
                                 font-weight: 700;
                                 horizontal-alignment: center;
@@ -1103,7 +1073,7 @@ export component LiveScreen inherits Rectangle {
 
                     Rectangle {
                         height: 34px;
-                        width: 165px;
+                        width: 70px;
                         border-radius: 6px;
                         background: VayrenPalette.live-panel;
                         border-width: 1px;
@@ -1116,41 +1086,11 @@ export component LiveScreen inherits Rectangle {
                             Rectangle {
                                 horizontal-stretch: 1;
                                 border-radius: 4px;
-                                background: root.bar.mode == 0 ? VayrenPalette.live-teal : transparent;
-                                TouchArea { clicked => { root.mode-picked(0); } }
-                                Text {
-                                    text: "PAPER";
-                                    color: root.bar.mode == 0 ? VayrenPalette.accent-text : VayrenPalette.live-ink-faint;
-                                    font-size: 10px;
-                                    font-weight: 700;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
-                                }
-                            }
-
-                            Rectangle {
-                                horizontal-stretch: 1;
-                                border-radius: 4px;
-                                background: root.bar.mode == 1 ? VayrenPalette.amber : transparent;
-                                TouchArea { clicked => { root.mode-picked(1); } }
-                                Text {
-                                    text: "SANDBOX";
-                                    color: root.bar.mode == 1 ? VayrenPalette.accent-text : VayrenPalette.live-ink-faint;
-                                    font-size: 10px;
-                                    font-weight: 700;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
-                                }
-                            }
-
-                            Rectangle {
-                                horizontal-stretch: 1;
-                                border-radius: 4px;
-                                background: root.bar.mode == 2 ? VayrenPalette.neg : transparent;
+                                background: VayrenPalette.neg;
                                 TouchArea { clicked => { root.mode-picked(2); } }
                                 Text {
                                     text: "LIVE";
-                                    color: root.bar.mode == 2 ? VayrenPalette.text-bright : VayrenPalette.live-ink-faint;
+                                    color: VayrenPalette.text-bright;
                                     font-size: 10px;
                                     font-weight: 700;
                                     horizontal-alignment: center;

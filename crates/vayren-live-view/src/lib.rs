@@ -183,6 +183,9 @@ fn apply_view(ui: &LiveHostWindow, state: &LiveState) {
         symbol_total: view.setup.symbol_total.into(),
         stock_universe: strings(view.setup.stock_universe),
         universe_exchange: view.setup.universe_exchange.into(),
+        pending_start: view.setup.pending_start,
+        pending_stop: view.setup.pending_stop,
+        pending_halt: view.setup.pending_halt,
     });
     ui.set_strategy_names(strings(view.setup.strategy_names));
     ui.set_strategy_selected(view.setup.strategy_selected);
@@ -278,6 +281,7 @@ fn apply_view(ui: &LiveHostWindow, state: &LiveState) {
                 time: o.time.into(),
                 broker: o.broker.into(),
                 status_tone: o.status_tone,
+                reason: o.reason.into(),
             })
             .collect::<Vec<_>>(),
     ));
