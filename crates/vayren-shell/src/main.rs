@@ -1235,8 +1235,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
     {
-        let backend = Arc::clone(&backend);
-        let tx = fetch_tx.clone();
         // SET AS DEFAULT — persist the open panel's broker as VAYREN's
         // authoritative default. Reuses the EXISTING authenticated
         // `select_broker` command; it never connects, authenticates, or
@@ -1281,12 +1279,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Refresh the snapshot either way: in remote mode it carries the
             // gateway's confirmed default; locally it carries the persisted
             // store. Neither path asserts success on its own.
-            spawn_fetch(
-                &backend,
-                &tx,
-                BackendCommand::GetSystemSnapshot { selected_id: None },
-                FetchResult::System,
-            );
+            // Persist the default broker locally as well and refresh the snapshot
+            let b_clone = Arc::clone(&backend);
+            let tx_clone = tx.clone();
+            let b_id = broker_id.clone();
+            std::thread::spawn(move || {
+                let act_cmd = BackendCommand::LiveAction {
+                    action: serde_json::json!({
+                        "action": "select_broker",
+                        "broker": b_id,
+                    }),
+                };
+                let _ = PythonBackend::lock_send(&b_clone, act_cmd);
+                spawn_fetch(
+                    &b_clone,
+                    &tx_clone,
+                    BackendCommand::GetSystemSnapshot { selected_id: None },
+                    FetchResult::System,
+                );
+            });
         });
     }
     {

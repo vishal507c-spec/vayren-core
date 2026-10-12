@@ -396,6 +396,7 @@ def _system_snapshot(
     return {
         "brokers": brokers,
         "selected_id": selected_id,
+        "default_id": selected_id,
         "panel_id": panel_id,
         "display_name": record["display_name"] if record else "",
         "venue_subtitle": record["venue_subtitle"] if record else "",
