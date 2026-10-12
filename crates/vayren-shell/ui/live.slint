@@ -1259,26 +1259,6 @@ export component LiveScreen inherits Rectangle {
                     clicked => { root.stop-requested(); }
                 }
 
-                VButton {
-                    width: root.setup.pending-halt ? 96px : 72px;
-                    height: 34px;
-                    label: root.bar.halted ? "■ HALTED" : (root.setup.pending-halt ? "⏳ HALTING…" : "■ HALT");
-                    variant: root.bar.halted ? 3 : 2;
-                    enabled: root.bar.halt-enabled && !root.bar.halted && !root.setup.pending-halt;
-                    clicked => { root.halt-requested(); }
-                }
-
-                HorizontalLayout {
-                    min-width: 50px;
-                    alignment: center;
-                    Text {
-                        text: root.footer.clock;
-                        color: VayrenPalette.live-ink-dim;
-                        font-size: 10px;
-                        font-weight: 600;
-                        vertical-alignment: center;
-                    }
-                }
             }
 
             // NARROW VIEW: Reflows into two neat, unclipped rows
@@ -1330,17 +1310,6 @@ export component LiveScreen inherits Rectangle {
 
                     Rectangle { horizontal-stretch: 1; background: transparent; }
 
-                    HorizontalLayout {
-                        min-width: 50px;
-                        alignment: center;
-                        Text {
-                            text: root.footer.clock;
-                            color: VayrenPalette.live-ink-dim;
-                            font-size: 10px;
-                            font-weight: 600;
-                            vertical-alignment: center;
-                        }
-                    }
                 }
 
                 // Row 2: Strategy Selector, Mode Selector, Action Controls
@@ -1433,14 +1402,6 @@ export component LiveScreen inherits Rectangle {
                         clicked => { root.stop-requested(); }
                     }
 
-                    VButton {
-                        width: root.setup.pending-halt ? 96px : 72px;
-                        height: 34px;
-                        label: root.bar.halted ? "■ HALTED" : (root.setup.pending-halt ? "⏳ HALTING…" : "■ HALT");
-                        variant: root.bar.halted ? 3 : 2;
-                        enabled: root.bar.halt-enabled && !root.bar.halted && !root.setup.pending-halt;
-                        clicked => { root.halt-requested(); }
-                    }
                 }
             }
         }
