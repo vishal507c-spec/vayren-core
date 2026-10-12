@@ -476,39 +476,48 @@ class LiveTradingService:
         from strategy.registry import get_strategy_registry
 
         reg = get_strategy_registry()
-        strat_def = None
+        old_strategy = self._config.strategy_name
+        strategy_changed = False
         if strategy_name is not None:
             cleaned = str(strategy_name).strip()
             if cleaned and reg.contains(cleaned):
                 strat_def = reg.get(cleaned)
                 if strat_def.timeframe and not timeframe:
                     self._config.timeframe = strat_def.timeframe
+            if cleaned != old_strategy:
+                strategy_changed = True
             self._config.strategy_name = cleaned
         elif self._config.strategy_name and reg.contains(self._config.strategy_name):
             strat_def = reg.get(self._config.strategy_name)
 
-        if strategy_name is not None:
-            # Setting or re-setting strategy always loads the authoritative saved universe
-            # from disk. Stock management is exclusively in Strategy Lab; LIVE is read-only.
-            self._config.symbols = (
-                self._universes.symbols_for(self._config.strategy_name)
-                if self._config.strategy_name
-                else ()
-            )
+        if not self._config.strategy_name:
+            self._config.symbols = ()
+            if symbols is not None and tuple(symbols):
+                raise LiveConfigError("select a strategy before configuring its universe")
+        elif strategy_changed:
+            # Switching or selecting strategy loads its authoritative saved universe from disk.
+            # Stale symbols from a previous selection are dropped.
+            self._config.symbols = self._universes.symbols_for(self._config.strategy_name)
         elif symbols is not None:
-            if not self._config.strategy_name:
-                if tuple(symbols):
-                    raise LiveConfigError("select a strategy before configuring its universe")
-                self._config.symbols = ()
-            elif tuple(symbols):
-                try:
-                    saved = self._universes.save(self._config.strategy_name, tuple(symbols))
-                except UniverseStoreError as exc:
-                    raise LiveConfigError(str(exc)) from exc
-                self._config.symbols = saved.symbols
+            syms_tuple = tuple(symbols)
+            if syms_tuple:
+                saved_universe = self._universes.symbols_for(self._config.strategy_name)
+                matching = tuple(s for s in syms_tuple if s in saved_universe) if saved_universe else ()
+                if matching:
+                    # Operator selected specific symbols from the saved universe
+                    self._config.symbols = matching
+                else:
+                    try:
+                        saved = self._universes.save(self._config.strategy_name, syms_tuple)
+                    except UniverseStoreError as exc:
+                        raise LiveConfigError(str(exc)) from exc
+                    self._config.symbols = saved.symbols
             else:
-                # Empty symbol list from UI must NEVER overwrite saved universe on disk.
-                self._config.symbols = self._universes.symbols_for(self._config.strategy_name)
+                # Empty symbol list from UI retains/defaults to saved universe if none currently selected
+                if not self._config.symbols:
+                    self._config.symbols = self._universes.symbols_for(self._config.strategy_name)
+        elif not self._config.symbols:
+            self._config.symbols = self._universes.symbols_for(self._config.strategy_name)
 
         if timeframe is not None:
             self._config.timeframe = str(timeframe)
@@ -1463,7 +1472,7 @@ class LiveTradingService:
         # so every number below derives from the same venue truth.
         self._refresh_risk_capital(view)
         universe = self.available_symbols()
-        if self._config.strategy_name:
+        if self._config.strategy_name and not self._config.symbols and universe:
             self._config.symbols = universe
         quotes = self._universe_quotes(universe)
         risk_status = "HALTED" if kill_halted else ("BLOCKED" if recon_blocks else "READY")
@@ -2719,7 +2728,18 @@ class LiveTradingService:
         except Exception:
             pass
         if self._config.strategy_name:
-            self._config.symbols = self._universes.symbols_for(self._config.strategy_name)
+            saved_symbols = self._universes.symbols_for(self._config.strategy_name)
+            if saved_symbols:
+                restored_matching = tuple(s for s in self._config.symbols if s in saved_symbols)
+                self._config.symbols = restored_matching or saved_symbols
+            elif self._config.symbols:
+                try:
+                    saved = self._universes.save(self._config.strategy_name, self._config.symbols)
+                    self._config.symbols = saved.symbols
+                except Exception:
+                    pass
+            else:
+                self._config.symbols = ()
         else:
             self._config.symbols = ()
 

@@ -262,3 +262,76 @@ def test_7_live_strategy_switch_isolates_universes_via_live_action(
     assert snap_a_restored["strategy"]["id"] == "obr-c1c4"
     assert snap_a_restored["available_symbols"] == ("NSE:RELIANCE", "NSE:TCS")
     assert snap_a_restored["selected_symbols"] == ("NSE:RELIANCE", "NSE:TCS")
+
+
+def test_8_watchlist_selection_subset_preserves_saved_universe(
+    dirs: tuple[str, str], lab: LabUniverseService
+) -> None:
+    """Checking a subset in Market Watchlist updates selected_symbols without modifying saved universe."""
+    lab.save("obr-c1c4", ["RELIANCE", "TCS", "INFY"])
+
+    live = LiveTradingService(dirs[0], dirs[1])
+    live.configure(strategy_name="obr-c1c4")
+
+    # Initial selection defaults to all 3 saved symbols
+    assert live.available_symbols() == ("NSE:RELIANCE", "NSE:TCS", "NSE:INFY")
+    assert live.config.symbols == ("NSE:RELIANCE", "NSE:TCS", "NSE:INFY")
+
+    # Operator unchecks INFY, selecting only RELIANCE and TCS
+    live.configure(strategy_name="obr-c1c4", symbols=("NSE:RELIANCE", "NSE:TCS"))
+    assert live.config.symbols == ("NSE:RELIANCE", "NSE:TCS")
+    assert live.available_symbols() == ("NSE:RELIANCE", "NSE:TCS", "NSE:INFY")
+
+    # Snapshot preserves available vs selected distinction and does NOT clobber on repeated ticks
+    snap = live.snapshot()
+    assert snap["available_symbols"] == ("NSE:RELIANCE", "NSE:TCS", "NSE:INFY")
+    assert snap["selected_symbols"] == ("NSE:RELIANCE", "NSE:TCS")
+
+    snap2 = live.snapshot()
+    assert snap2["available_symbols"] == ("NSE:RELIANCE", "NSE:TCS", "NSE:INFY")
+    assert snap2["selected_symbols"] == ("NSE:RELIANCE", "NSE:TCS")
+
+    # Host action setup also preserves distinction
+    snap3 = headless._live_action(
+        dirs[0],
+        dirs[1],
+        {"action": "setup", "strategy_name": "obr-c1c4", "symbols": ["NSE:RELIANCE"]},
+    )
+    assert snap3["available_symbols"] == ("NSE:RELIANCE", "NSE:TCS", "NSE:INFY")
+    assert snap3["selected_symbols"] == ("NSE:RELIANCE",)
+
+
+def test_9_restore_config_auto_seeds_missing_universe_store(dirs: tuple[str, str]) -> None:
+    """When strategy_universes.json is absent, live_session.json seeds the universe store."""
+    import json
+    live_dir = Path(dirs[0]) / "live"
+    live_dir.mkdir(parents=True, exist_ok=True)
+    session_file = live_dir / "live_session.json"
+    session_file.write_text(
+        json.dumps({
+            "config": {
+                "strategy_name": "OBR C1C4",
+                "symbols": ["NSE:KAYNES", "NSE:DREDGECORP"],
+                "timeframe": "30m",
+                "mode": "LIVE",
+                "quantity": 1.0,
+            }
+        }),
+        encoding="utf-8",
+    )
+    # Ensure strategy_universes.json does NOT exist
+    universe_file = live_dir / "strategy_universes.json"
+    if universe_file.exists():
+        universe_file.unlink()
+
+    live = LiveTradingService(dirs[0], dirs[1])
+    assert live.config.strategy_name == "OBR C1C4"
+    assert "NSE:KAYNES" in live.config.symbols
+    assert "NSE:DREDGECORP" in live.config.symbols
+    assert live.available_symbols() == ("NSE:KAYNES", "NSE:DREDGECORP")
+
+    snap = live.snapshot()
+    assert "NSE:KAYNES" in snap["available_symbols"]
+    assert "NSE:KAYNES" in snap["selected_symbols"]
+    assert "no symbols selected (pick from Market Watchlist)" not in (snap.get("start_blockers") or [])
+
