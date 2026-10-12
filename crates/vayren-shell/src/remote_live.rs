@@ -802,10 +802,8 @@ pub fn spawn_remote_pump(
                                 if !reason.is_empty() {
                                     reason
                                 } else {
-                                    let err = payload
-                                        .get("error")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("");
+                                    let err =
+                                        payload.get("error").and_then(|v| v.as_str()).unwrap_or("");
                                     if !err.is_empty() {
                                         err.to_string()
                                     } else {

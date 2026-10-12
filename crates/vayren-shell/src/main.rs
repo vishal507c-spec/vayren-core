@@ -1872,7 +1872,10 @@ fn apply_server_op_ack(
                 .and_then(|d| d.get("percent"))
                 .and_then(|p| p.as_f64())
                 .unwrap_or(0.0);
-            let metrics_str = format!("RAM: {:.0}% · Disk: {:.0}% · Up: {}", mem_pct, disk_pct, uptime);
+            let metrics_str = format!(
+                "RAM: {:.0}% · Disk: {:.0}% · Up: {}",
+                mem_pct, disk_pct, uptime
+            );
             ui.set_server_metrics(slint::SharedString::from(metrics_str));
 
             ui.set_server_status(slint::SharedString::from(if ec2_status == "HEALTHY" {
@@ -1911,7 +1914,10 @@ fn apply_server_op_ack(
                 .get("archive_name")
                 .and_then(|v| v.as_str())
                 .unwrap_or("backup.tar.gz");
-            let size = payload.get("size_bytes").and_then(|v| v.as_u64()).unwrap_or(0);
+            let size = payload
+                .get("size_bytes")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
             let sha = payload.get("sha256").and_then(|v| v.as_str()).unwrap_or("");
             let sha_short = if sha.len() >= 8 { &sha[..8] } else { sha };
             let size_kb = size / 1024;
@@ -1921,27 +1927,45 @@ fn apply_server_op_ack(
         }
         "logs" => {
             ui.set_server_op_tone(1);
-            let count = payload.get("lines_count").and_then(|v| v.as_u64()).unwrap_or(0);
+            let count = payload
+                .get("lines_count")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
             let logs_arr = payload.get("logs").and_then(|v| v.as_array());
-            let last_log = logs_arr.and_then(|a| a.last()).and_then(|v| v.as_str()).unwrap_or("");
+            let last_log = logs_arr
+                .and_then(|a| a.last())
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             if count == 0 {
-                ui.set_server_op_feedback(slint::SharedString::from("✓ Logs: 0 errors recorded today."));
+                ui.set_server_op_feedback(slint::SharedString::from(
+                    "✓ Logs: 0 errors recorded today.",
+                ));
             } else if !last_log.is_empty() {
-                let snippet = if last_log.len() > 60 { &last_log[..60] } else { last_log };
+                let snippet = if last_log.len() > 60 {
+                    &last_log[..60]
+                } else {
+                    last_log
+                };
                 ui.set_server_op_feedback(slint::SharedString::from(format!(
                     "✓ Logs: {count} errors. Latest: {snippet}…"
                 )));
             } else {
-                ui.set_server_op_feedback(slint::SharedString::from(format!("✓ Logs: {count} errors recorded today.")));
+                ui.set_server_op_feedback(slint::SharedString::from(format!(
+                    "✓ Logs: {count} errors recorded today."
+                )));
             }
         }
         "restart" => {
             ui.set_server_op_tone(1);
-            ui.set_server_op_feedback(slint::SharedString::from("✓ Gateway service restart initiated."));
+            ui.set_server_op_feedback(slint::SharedString::from(
+                "✓ Gateway service restart initiated.",
+            ));
         }
         _ => {
             ui.set_server_op_tone(1);
-            ui.set_server_op_feedback(slint::SharedString::from("✓ Operation completed successfully."));
+            ui.set_server_op_feedback(slint::SharedString::from(
+                "✓ Operation completed successfully.",
+            ));
         }
     }
 }
@@ -2215,11 +2239,24 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                             if resync {
                                 println!("Remote resync: replacing state with fresh snapshot");
                             }
-                            if let Some(worker) = sections.get("worker").and_then(|w| w.as_object()) {
-                                let status = worker.get("status").and_then(|s| s.as_str()).unwrap_or("STOPPED");
-                                let running = worker.get("running").and_then(|r| r.as_bool()).unwrap_or(false);
+                            if let Some(worker) = sections.get("worker").and_then(|w| w.as_object())
+                            {
+                                let status = worker
+                                    .get("status")
+                                    .and_then(|s| s.as_str())
+                                    .unwrap_or("STOPPED");
+                                let running = worker
+                                    .get("running")
+                                    .and_then(|r| r.as_bool())
+                                    .unwrap_or(false);
                                 ui.set_worker_status(slint::SharedString::from(status));
-                                ui.set_worker_status_tone(if running { 1 } else if status == "ERROR" { 3 } else { 2 });
+                                ui.set_worker_status_tone(if running {
+                                    1
+                                } else if status == "ERROR" {
+                                    3
+                                } else {
+                                    2
+                                });
                                 ui.set_server_status(slint::SharedString::from("CONNECTED"));
                                 ui.set_server_status_tone(1);
                             }
@@ -2227,11 +2264,24 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                             dirty = true;
                         }
                         RemoteUiUpdate::StateUpdate { sections } => {
-                            if let Some(worker) = sections.get("worker").and_then(|w| w.as_object()) {
-                                let status = worker.get("status").and_then(|s| s.as_str()).unwrap_or("STOPPED");
-                                let running = worker.get("running").and_then(|r| r.as_bool()).unwrap_or(false);
+                            if let Some(worker) = sections.get("worker").and_then(|w| w.as_object())
+                            {
+                                let status = worker
+                                    .get("status")
+                                    .and_then(|s| s.as_str())
+                                    .unwrap_or("STOPPED");
+                                let running = worker
+                                    .get("running")
+                                    .and_then(|r| r.as_bool())
+                                    .unwrap_or(false);
                                 ui.set_worker_status(slint::SharedString::from(status));
-                                ui.set_worker_status_tone(if running { 1 } else if status == "ERROR" { 3 } else { 2 });
+                                ui.set_worker_status_tone(if running {
+                                    1
+                                } else if status == "ERROR" {
+                                    3
+                                } else {
+                                    2
+                                });
                                 ui.set_server_status(slint::SharedString::from("CONNECTED"));
                                 ui.set_server_status_tone(1);
                             }
