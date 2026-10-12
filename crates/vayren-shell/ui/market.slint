@@ -77,11 +77,6 @@ export struct MarketIndicator {
 
 // One market-status row (legacy `MarketStatusPanel` grid parity): key + value
 // where `muted = true` renders the honest-unknown `--` state.
-export struct MarketStatusRow {
-    key: string,
-    value: string,
-    muted: bool,
-}
 
 // One editable parameter of an indicator (the native settings panel renders
 // exactly these rows â€” the backend owns spec + current values).
@@ -1699,62 +1694,6 @@ component DownloadDock inherits Rectangle {
 
 // One fact cell: caption above the value. Both elide â€” the strip is a fixed
 // row of eight cells, so a long value must truncate, never clip mid-glyph.
-component StatusFact inherits Rectangle {
-    in property <string> caption;
-    in property <string> value;
-    in property <bool> muted: false;
-
-    horizontal-stretch: 1;
-    min-width: 0px;
-    VerticalLayout {
-        spacing: VayrenDesign.sp-xs;
-        Text {
-            text: root.caption;
-            color: VayrenPalette.faint;
-            font-size: VayrenDesign.fs-label;
-            font-weight: 600;
-            vertical-alignment: center;
-            overflow: elide;
-        }
-        Text {
-            text: root.value;
-            color: root.muted ? VayrenPalette.faint : VayrenPalette.text;
-            font-size: VayrenDesign.fs-small;
-            font-weight: 600;
-            vertical-alignment: center;
-            overflow: elide;
-        }
-    }
-}
-
-// One titled fact group (legacy grid split: MARKET REGIME + DATA STATUS).
-component StatusGroup inherits Rectangle {
-    in property <string> title;
-    in property <[MarketStatusRow]> rows;
-
-    horizontal-stretch: 1;
-    min-width: 0px;
-    VerticalLayout {
-        spacing: VayrenDesign.sp-md;
-        Text {
-            text: root.title;
-            color: VayrenPalette.faint;
-            font-size: VayrenDesign.fs-label;
-            font-weight: 700;
-            vertical-alignment: center;
-            overflow: elide;
-        }
-        HorizontalLayout {
-            spacing: VayrenDesign.sp-lg;
-            for r in root.rows: StatusFact {
-                caption: r.key;
-                value: r.value;
-                muted: r.muted;
-            }
-        }
-    }
-}
-
 export component MarketScreen inherits Rectangle {
     // â”€â”€ bound view state (Rust -> screen) â”€â”€
     in property <bool> panel-visible: true;
@@ -1814,12 +1753,6 @@ export component MarketScreen inherits Rectangle {
     in property <[MarketSettingsRow]> settings-rows;
     in property <string> active-label;
     in property <MarketTradeContext> trade-context;
-    // Market-status strip (legacy `MarketStatusPanel` parity): collapsed by
-    // default (the legacy dock starts hidden), rows render honest "--" values.
-    in property <bool> market-status-open: false;
-    in property <[MarketStatusRow]> market-status-regime;
-    in property <[MarketStatusRow]> market-status-data;
-    callback status-toggle();
     in property <bool> wide: true;
     in property <bool> medium: true;
 
@@ -1928,9 +1861,12 @@ export component MarketScreen inherits Rectangle {
     callback chart-opt-picked(string);
 
     // â”€â”€ local presentation state (menus, drag) â”€â”€
-    property <string> open-menu: "none";
-    property <length> menu-x: 0px;
-    property <length> menu-y: 0px;
+    // Menu state is in-out (not internal) so the Slint viewer and the
+    // off-screen render tests can open a menu without a synthetic click.
+    // Production still only ever sets these from the buttons/TouchArea.
+    in-out property <string> open-menu: "none";
+    in-out property <length> menu-x: 0px;
+    in-out property <length> menu-y: 0px;
     property <length> popup-x: 0px;
     property <bool> dragging: false;
     property <bool> price-dragging: false;
@@ -1970,11 +1906,6 @@ export component MarketScreen inherits Rectangle {
                         code: "DL";
                         active: root.dl-open;
                         picked => { root.dl-toggle(); }
-                    }
-                    RailButton {
-                        code: "MS";
-                        active: root.market-status-open;
-                        picked => { root.status-toggle(); }
                     }
                     Rectangle { vertical-stretch: 1; background: transparent; }
                 }
@@ -2780,61 +2711,6 @@ export component MarketScreen inherits Rectangle {
                                 reject
                             }
                         }
-
-                        // Active crosshair date/time label on bottom time axis
-                        if root.has-hover && root.cross-visible: Rectangle {
-                            property <length> lbl-w: 140px;
-                            property <length> lbl-h: 20px;
-                            x: Math.max(4px, Math.min(root.hover-x * (parent.width - root.price-strip) - self.lbl-w / 2, parent.width - root.price-strip - self.lbl-w - 4px));
-                            y: (parent.height - self.lbl-h) / 2;
-                            width: self.lbl-w;
-                            height: self.lbl-h;
-                            background: VayrenPalette.crosshair-bg;
-                            border-width: 1px;
-                            border-color: VayrenPalette.crosshair-border;
-                            border-radius: 4px;
-                            clip: true;
-
-                            Text {
-                                text: root.hover-time;
-                                color: VayrenPalette.text;
-                                font-size: VayrenDesign.fs-label;
-                                font-weight: 600;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
-                            }
-                        }
-                    }
-
-                    // Market-status strip (legacy `MarketStatusPanel`).
-                    // Collapsed by default; the rail "MS" button toggles it.
-                    // Sizes by content, so it never steals chart space while
-                    // closed and the chart keeps priority while open.
-                    if root.market-status-open
-                        && (root.market-status-regime.length + root.market-status-data.length) > 0: Rectangle {
-                        background: VayrenPalette.surface;
-                        Rectangle {
-                            y: 0;
-                            height: 1px;
-                            width: parent.width;
-                            background: VayrenPalette.hairline;
-                        }
-                        HorizontalLayout {
-                            padding: VayrenDesign.sp-md;
-                            spacing: VayrenDesign.sp-lg;
-                            StatusGroup {
-                                title: "MARKET REGIME";
-                                rows: root.market-status-regime;
-                            }
-                            Rectangle {
-                                width: 1px;
-                                background: VayrenPalette.hairline-soft;
-                            }
-                            StatusGroup {
-                                title: "DATA STATUS";
-                                rows: root.market-status-data;
-                            }
-                        }
                     }
                 }
             }
@@ -2947,6 +2823,9 @@ export component MarketScreen inherits Rectangle {
         x: root.menu-x;
         y: root.menu-y;
         width: 200px;
+        // Fit exactly to the rows: an unsized Rectangle fills its parent, so a
+        // menu without an explicit height stretched to the whole chart height.
+        height: root.watchlists.length * VayrenDesign.row-height;
         border-radius: VayrenDesign.radius-sm;
         border-width: 1px;
         border-color: VayrenPalette.hairline;
@@ -2967,6 +2846,7 @@ export component MarketScreen inherits Rectangle {
         x: Math.max(0px, root.menu-x - 120px);
         y: root.menu-y;
         width: 160px;
+        height: 2 * VayrenDesign.row-height;
         border-radius: VayrenDesign.radius-sm;
         border-width: 1px;
         border-color: VayrenPalette.hairline;
@@ -2989,6 +2869,7 @@ export component MarketScreen inherits Rectangle {
         x: Math.max(0px, root.menu-x - 120px);
         y: root.menu-y;
         width: 180px;
+        height: 2 * VayrenDesign.row-height;
         border-radius: VayrenDesign.radius-sm;
         border-width: 1px;
         border-color: VayrenPalette.hairline;
@@ -3010,6 +2891,7 @@ export component MarketScreen inherits Rectangle {
         x: root.menu-x;
         y: root.menu-y;
         width: 96px;
+        height: root.timeframes-overflow.length * VayrenDesign.row-height;
         border-radius: VayrenDesign.radius-sm;
         border-width: 1px;
         border-color: VayrenPalette.hairline;
@@ -3030,6 +2912,7 @@ export component MarketScreen inherits Rectangle {
         x: root.menu-x;
         y: root.menu-y;
         width: 190px;
+        height: VayrenDesign.row-height;
         border-radius: VayrenDesign.radius-sm;
         border-width: 1px;
         border-color: VayrenPalette.hairline;

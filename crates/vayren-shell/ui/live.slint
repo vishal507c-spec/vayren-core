@@ -55,6 +55,7 @@ export struct LiveSetup {
     can-arm: bool,
     needs-live-confirm: bool,
     confirmed-live: bool,
+    confirm-dialog-open: bool,
     symbol-total: string,
     stock-universe: [string],
     universe-exchange: string,
@@ -658,6 +659,254 @@ component LiveTabHeader inherits Rectangle {
 }
 
 
+component LiveConfirmModal inherits Rectangle {
+    in property <string> broker-name;
+    in property <string> broker-conn;
+    in property <int> broker-tone: 0;
+    in property <string> strategy-name;
+    in property <string> timeframe;
+    in property <string> quantity;
+    in property <string> symbol-count;
+    in property <string> capital-value;
+    in property <int> capital-tone: 0;
+    in property <[string]> blockers;
+    in property <bool> can-confirm: true;
+
+    callback confirm();
+    callback cancel();
+
+    background: #000000c0;
+
+    TouchArea {
+        // Backdrop click absorber
+    }
+
+    Rectangle {
+        width: 500px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        border-radius: VayrenDesign.radius;
+        border-width: 1px;
+        border-color: VayrenPalette.amber;
+        background: VayrenPalette.surface;
+        clip: true;
+
+        VerticalLayout {
+            spacing: 0;
+
+            // Modal Header
+            Rectangle {
+                height: 44px;
+                background: VayrenPalette.elevated;
+                HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 16px;
+                    alignment: space-between;
+                    VerticalLayout {
+                        alignment: center;
+                        HorizontalLayout {
+                            spacing: 8px;
+                            VStatusDot { tone: 2; }
+                            Text {
+                                text: "CONFIRM LIVE EXECUTION";
+                                color: VayrenPalette.amber;
+                                font-size: VayrenDesign.fs-body;
+                                font-weight: 700;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        VBadge {
+                            text: "OPERATOR CONSENT";
+                            tone: 2;
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                height: 1px;
+                background: VayrenPalette.hairline;
+            }
+
+            // Modal Body
+            VerticalLayout {
+                padding: 16px;
+                spacing: 12px;
+
+                // Warning Notice Box
+                Rectangle {
+                    background: VayrenPalette.warn-dim;
+                    border-radius: VayrenDesign.radius-sm;
+                    border-width: 1px;
+                    border-color: VayrenPalette.amber;
+                    VerticalLayout {
+                        padding: 10px;
+                        spacing: 4px;
+                        Text {
+                            text: "⚠ WARNING: REAL CAPITAL AT RISK";
+                            color: VayrenPalette.amber;
+                            font-size: VayrenDesign.fs-small;
+                            font-weight: 700;
+                        }
+                        Text {
+                            text: "Orders in LIVE mode are submitted directly to the broker and risk real funds. Verify venue connectivity, strategy parameters, and capital limits before giving operator consent.";
+                            color: VayrenPalette.text;
+                            font-size: VayrenDesign.fs-label;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+
+                // Configuration Parameter Grid
+                Rectangle {
+                    background: VayrenPalette.bg;
+                    border-radius: VayrenDesign.radius-sm;
+                    border-width: 1px;
+                    border-color: VayrenPalette.hairline;
+                    VerticalLayout {
+                        padding: 12px;
+                        spacing: 8px;
+
+                        // Row: Mode & Broker
+                        HorizontalLayout {
+                            spacing: 12px;
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                spacing: 2px;
+                                Text { text: "EXECUTION MODE"; color: VayrenPalette.muted; font-size: VayrenDesign.fs-label; font-weight: 600; }
+                                Text { text: "LIVE (Real Broker Orders)"; color: VayrenPalette.neg; font-size: VayrenDesign.fs-small; font-weight: 700; }
+                            }
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                spacing: 2px;
+                                Text { text: "BROKER / VENUE"; color: VayrenPalette.muted; font-size: VayrenDesign.fs-label; font-weight: 600; }
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    VStatusDot { tone: root.broker-tone; }
+                                    Text { text: root.broker-name + " (" + root.broker-conn + ")"; color: VayrenPalette.text; font-size: VayrenDesign.fs-small; font-weight: 700; }
+                                }
+                            }
+                        }
+
+                        // Row: Strategy & Timeframe
+                        HorizontalLayout {
+                            spacing: 12px;
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                spacing: 2px;
+                                Text { text: "ACTIVE STRATEGY"; color: VayrenPalette.muted; font-size: VayrenDesign.fs-label; font-weight: 600; }
+                                Text { text: root.strategy-name; color: VayrenPalette.text; font-size: VayrenDesign.fs-small; font-weight: 700; }
+                            }
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                spacing: 2px;
+                                Text { text: "TIMEFRAME"; color: VayrenPalette.muted; font-size: VayrenDesign.fs-label; font-weight: 600; }
+                                Text { text: root.timeframe; color: VayrenPalette.text; font-size: VayrenDesign.fs-small; font-weight: 700; }
+                            }
+                        }
+
+                        // Row: Order Sizing & Universe
+                        HorizontalLayout {
+                            spacing: 12px;
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                spacing: 2px;
+                                Text { text: "DEFAULT QUANTITY / SIZING"; color: VayrenPalette.muted; font-size: VayrenDesign.fs-label; font-weight: 600; }
+                                Text { text: root.quantity; color: VayrenPalette.accent; font-size: VayrenDesign.fs-small; font-weight: 700; }
+                            }
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                spacing: 2px;
+                                Text { text: "ACTIVE UNIVERSE"; color: VayrenPalette.muted; font-size: VayrenDesign.fs-label; font-weight: 600; }
+                                Text { text: root.symbol-count; color: VayrenPalette.text; font-size: VayrenDesign.fs-small; font-weight: 700; }
+                            }
+                        }
+
+                        // Row: Account Capital / Available Margin
+                        HorizontalLayout {
+                            spacing: 12px;
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                spacing: 2px;
+                                Text { text: "REPORTED CAPITAL"; color: VayrenPalette.muted; font-size: VayrenDesign.fs-label; font-weight: 600; }
+                                Text { text: root.capital-value; color: root.capital-tone == 1 ? VayrenPalette.pos : (root.capital-tone == 3 ? VayrenPalette.neg : VayrenPalette.text); font-size: VayrenDesign.fs-small; font-weight: 700; }
+                            }
+                        }
+                    }
+                }
+
+                // Safety Gate & Blocker Status
+                if root.blockers.length > 0: Rectangle {
+                    background: VayrenPalette.neg-dim;
+                    border-radius: VayrenDesign.radius-sm;
+                    border-width: 1px;
+                    border-color: VayrenPalette.neg;
+                    VerticalLayout {
+                        padding: 8px;
+                        spacing: 4px;
+                        Text {
+                            text: "START BLOCKED BY SAFETY GATES:";
+                            color: VayrenPalette.neg;
+                            font-size: VayrenDesign.fs-label;
+                            font-weight: 700;
+                        }
+                        for b in root.blockers: Text {
+                            text: "• " + b;
+                            color: VayrenPalette.neg;
+                            font-size: VayrenDesign.fs-label;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+
+                if root.blockers.length == 0: Rectangle {
+                    background: VayrenPalette.pos-dim;
+                    border-radius: VayrenDesign.radius-sm;
+                    border-width: 1px;
+                    border-color: VayrenPalette.pos;
+                    HorizontalLayout {
+                        padding: 8px;
+                        spacing: 6px;
+                        alignment: center;
+                        VStatusDot { tone: 1; }
+                        Text {
+                            text: "All venue safety gates and readiness checks satisfied. Review the parameters above and confirm to arm LIVE execution.";
+                            color: VayrenPalette.pos;
+                            font-size: VayrenDesign.fs-label;
+                            font-weight: 600;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+
+                // Buttons
+                HorizontalLayout {
+                    spacing: 12px;
+                    alignment: end;
+
+                    VButton {
+                        width: 110px;
+                        label: "CANCEL";
+                        variant: 1;
+                        clicked => { root.cancel(); }
+                    }
+
+                    VButton {
+                        width: 180px;
+                        label: "CONFIRM & ARM LIVE";
+                        variant: 0;
+                        enabled: root.can-confirm;
+                        clicked => { root.confirm(); }
+                    }
+                }
+            }
+        }
+    }
+}
+
 // ── The Complete LiveScreen UI ───────────────────────────────────────────
 // Readiness gates (LiveGate) are reported by the backend, never assumed:
 // a NOT READY / BLOCKED gate keeps its own verdict and reason.
@@ -675,6 +924,7 @@ export component LiveScreen inherits Rectangle {
     in property <[LiveGate]> gates;
     in property <string> arm-note: "";
     in property <[string]> blockers;
+    in property <[string]> venue-blockers;
     in property <[LiveKv]> strategy-rows;
     in property <[LiveKv]> position-rows;
     in property <[LiveKv]> risk-rows;
@@ -742,6 +992,8 @@ export component LiveScreen inherits Rectangle {
     callback arm-requested();
     callback halt-requested();
     callback confirm-requested();
+    callback confirm-open-requested();
+    callback confirm-cancel-requested();
     callback event-filter-changed(string);
     callback event-type-picked(string);
     callback clear-events();
@@ -755,7 +1007,7 @@ export component LiveScreen inherits Rectangle {
 
     // The selected timeframe is the BACKEND's selection (index into
     // timeframe-names), never a locally shadowed string.
-    property <string> selected-timeframe: root.timeframe-selected >= 0 && root.timeframe-selected < root.timeframe-names.length ? root.timeframe-names[root.timeframe-selected] : "—";
+    property <string> selected-timeframe: root.timeframe-selected >= 0 && root.timeframe-selected < root.timeframe-names.length ? root.timeframe-names[root.timeframe-selected] : (root.timeframe-names.length > 0 ? root.timeframe-names[0] : "15m");
     property <string> selected-strategy: root.strategy-selected >= 0 && root.strategy-selected < root.strategy-names.length ? root.strategy-names[root.strategy-selected] : (root.strategy-names.length > 0 ? "Select Strategy" : "—");
 
     // Internal state
@@ -831,6 +1083,41 @@ export component LiveScreen inherits Rectangle {
                     width: 100%;
                     message: root.bar.note != "" ? root.bar.note : root.start-verdict + " — " + root.start-reason;
                     tone: root.bar.note-tone;
+                }
+            }
+        }
+
+        // ══ 0c. LIVE CONFIRMATION BANNER ═════════════════════════════════════
+        if root.setup.needs-live-confirm: Rectangle {
+            height: 28px;
+            background: VayrenPalette.bg;
+            VerticalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                alignment: center;
+                VBanner {
+                    height: 24px;
+                    width: 100%;
+                    message: "LIVE mode requires explicit operator confirmation before starting.";
+                    tone: 2;
+                    action-label: "CONFIRM LIVE";
+                    action => { root.confirm-open-requested(); }
+                }
+            }
+        }
+
+        if root.setup.confirmed-live && root.bar.mode == 2 && !root.setup.can-stop: Rectangle {
+            height: 24px;
+            background: VayrenPalette.bg;
+            VerticalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                alignment: center;
+                VBanner {
+                    height: 20px;
+                    width: 100%;
+                    message: "✓ LIVE mode confirmed by operator — press START to begin execution.";
+                    tone: 1;
                 }
             }
         }
@@ -1789,5 +2076,23 @@ export component LiveScreen inherits Rectangle {
                 }
             }
         }
+    }
+
+    if root.setup.confirm-dialog-open: LiveConfirmModal {
+        width: parent.width;
+        height: parent.height;
+        broker-name: root.bar.broker-label;
+        broker-conn: root.bar.conn-label;
+        broker-tone: root.bar.conn-tone;
+        strategy-name: root.selected-strategy;
+        timeframe: root.selected-timeframe;
+        quantity: root.setup.quantity;
+        symbol-count: root.setup.symbol-total;
+        capital-value: root.bar.capital-value;
+        capital-tone: root.bar.capital-tone;
+        blockers: root.venue-blockers;
+        can-confirm: root.setup.needs-live-confirm;
+        cancel => { root.confirm-cancel-requested(); }
+        confirm => { root.confirm-requested(); }
     }
 }

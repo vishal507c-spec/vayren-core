@@ -281,9 +281,6 @@ pub enum MarketAction {
     TradePrev,
     TradeNext,
     TradeOpen,
-    /// Toggle the market-status strip (rail button; view-local like
-    /// `PanelToggle` — no backend wire).
-    ToggleStatus,
     /// Cycle the price-scale mode Regular → Percent → Logarithmic.
     CycleScaleMode,
     /// Toggle crosshair visibility (display only, no geometry rebuild).
@@ -360,39 +357,6 @@ pub struct MarketHover {
     pub x_frac: f32,
     pub y_frac: f32,
     pub price: f64,
-}
-
-/// Market-status panel facts — the native port of legacy `MarketStatusPanel`.
-/// Honest-unknown semantics preserved exactly: every value defaults to "--"
-/// and `--` renders muted (never zero-filled, never invented).
-#[derive(Debug, Clone, PartialEq)]
-pub struct MarketStatusFacts {
-    /// Collapsed by default (legacy dock starts hidden; the app toggles it).
-    pub open: bool,
-    pub regime_current: String,
-    pub regime_trend: String,
-    pub regime_volatility: String,
-    pub regime_momentum: String,
-    pub provider: String,
-    pub latency: String,
-    pub last_update: String,
-    pub bars_loaded: String,
-}
-
-impl Default for MarketStatusFacts {
-    fn default() -> Self {
-        Self {
-            open: false,
-            regime_current: "--".to_string(),
-            regime_trend: "--".to_string(),
-            regime_volatility: "--".to_string(),
-            regime_momentum: "--".to_string(),
-            provider: "--".to_string(),
-            latency: "--".to_string(),
-            last_update: "--".to_string(),
-            bars_loaded: "--".to_string(),
-        }
-    }
 }
 
 /// Single source of Market presentation state.
@@ -474,9 +438,6 @@ pub struct MarketState {
     pub width_cap: usize,
     /// Historical-Download console (native port of the retained legacy panel).
     pub download: DownloadState,
-    /// Market-status panel (regime + data-status grid; legacy
-    /// `MarketStatusPanel` parity).
-    pub market_status: MarketStatusFacts,
     /// Queued backend intents for the embedded host to drain (mirrors
     /// `LabState::pending_actions`).
     pub pending_actions: Vec<String>,
@@ -536,7 +497,6 @@ impl Default for MarketState {
             trade_context: TradeContext::default(),
             width_cap: MAX_VISIBLE_BARS,
             download: DownloadState::default(),
-            market_status: MarketStatusFacts::default(),
             pending_actions: Vec::new(),
             dropped_pending_actions: 0,
             scale_mode: ChartScaleMode::Regular,
@@ -790,10 +750,6 @@ impl MarketState {
         match action {
             MarketAction::PanelToggle => {
                 self.panel_visible = !self.panel_visible;
-                true
-            }
-            MarketAction::ToggleStatus => {
-                self.market_status.open = !self.market_status.open;
                 true
             }
             MarketAction::SelectSymbol(symbol) => {
@@ -1924,13 +1880,6 @@ pub struct MarketView {
     pub scale_label: String,
     pub cross_visible: bool,
     pub download: DownloadView,
-    /// Market-status strip (legacy `MarketStatusPanel` parity): open flag +
-    /// (key, value, muted) rows in the legacy grid order.
-    pub market_status_open: bool,
-    /// "MARKET REGIME" section rows.
-    pub market_status_regime: Vec<(String, String, bool)>,
-    /// "DATA STATUS" section rows.
-    pub market_status_data: Vec<(String, String, bool)>,
 }
 
 fn last_change(bars: &[MarketBar]) -> (String, Tone) {
@@ -3151,13 +3100,6 @@ fn project_inner(state: &MarketState, viewport_only: bool) -> MarketView {
     } else {
         mdownload::project_download(&state.download)
     };
-    // Single call: the old code evaluated the same 8 rows twice (`.0` then
-    // `.1`); one evaluation feeds both sections on the full path.
-    let (market_status_regime, market_status_data) = if viewport_only {
-        (Vec::new(), Vec::new())
-    } else {
-        market_status_rows(&state.market_status)
-    };
 
     MarketView {
         panel_visible: state.panel_visible,
@@ -3213,37 +3155,7 @@ fn project_inner(state: &MarketState, viewport_only: bool) -> MarketView {
         scale_label: state.scale_mode.label().to_string(),
         cross_visible: state.cross_visible,
         download,
-        market_status_open: state.market_status.open,
-        market_status_regime,
-        market_status_data,
     }
-}
-
-/// legacy grid split: MARKET REGIME (4 rows) + DATA STATUS (4 rows).
-/// `"--"` renders muted — the honest-unknown styling rule (never zero-filled).
-fn market_status_rows(
-    facts: &MarketStatusFacts,
-) -> (Vec<(String, String, bool)>, Vec<(String, String, bool)>) {
-    let mut regime = Vec::with_capacity(4);
-    let mut data = Vec::with_capacity(4);
-    for (k, v) in [
-        ("Current regime", facts.regime_current.as_str()),
-        ("Trend strength", facts.regime_trend.as_str()),
-        ("Volatility", facts.regime_volatility.as_str()),
-        ("Momentum", facts.regime_momentum.as_str()),
-        ("Data provider", facts.provider.as_str()),
-        ("Latency", facts.latency.as_str()),
-        ("Last update", facts.last_update.as_str()),
-        ("Bars loaded", facts.bars_loaded.as_str()),
-    ] {
-        let row = (k.to_string(), v.to_string(), v == "--");
-        if regime.len() < 4 {
-            regime.push(row);
-        } else {
-            data.push(row);
-        }
-    }
-    (regime, data)
 }
 
 // ── bridge: Python backend snapshot -> canonical state (embedded view) ────
@@ -3595,29 +3507,6 @@ pub fn apply_snapshot_json(state: &mut MarketState, value: &serde_json::Value) {
             mdownload::apply_download_snapshot(&mut state.download, dl);
         }
     }
-    // Market status (legacy `MarketStatusPanel` read-only projection; the
-    // panel's `open` state is view-local and never overwritten here).
-    if let Some(ms) = value.get("market_status") {
-        if ms.is_object() {
-            let facts = &mut state.market_status;
-            let set = |slot: &mut String, val: String| {
-                if !val.is_empty() {
-                    *slot = val;
-                }
-            };
-            set(&mut facts.regime_current, snap_str(ms, "regime_current"));
-            set(&mut facts.regime_trend, snap_str(ms, "regime_trend"));
-            set(
-                &mut facts.regime_volatility,
-                snap_str(ms, "regime_volatility"),
-            );
-            set(&mut facts.regime_momentum, snap_str(ms, "regime_momentum"));
-            set(&mut facts.provider, snap_str(ms, "provider"));
-            set(&mut facts.latency, snap_str(ms, "latency"));
-            set(&mut facts.last_update, snap_str(ms, "last_update"));
-            set(&mut facts.bars_loaded, snap_str(ms, "bars_loaded"));
-        }
-    }
 }
 
 #[cfg(test)]
@@ -3962,8 +3851,6 @@ mod tests {
         assert!(vp.indicator_rows.is_empty());
         assert!(vp.popup_rows.is_empty());
         assert!(vp.settings_rows.is_empty());
-        assert!(vp.market_status_regime.is_empty());
-        assert!(vp.market_status_data.is_empty());
     }
 
     /// Sustained-interaction stress (Phase 18, headless): thousands of mixed
@@ -4917,70 +4804,6 @@ mod tests {
         }
     }
 
-    // ── market status panel (legacy MarketStatusPanel parity) ────────────────
-
-    #[test]
-    fn market_status_defaults_to_honest_unknown() {
-        let state = MarketState::default();
-        assert!(!state.market_status.open);
-        let view = project(&state);
-        assert!(!view.market_status_open);
-        // Exact legacy grid: 4 regime rows then 4 data rows, all "--", all muted.
-        let regime_keys: Vec<&str> = view
-            .market_status_regime
-            .iter()
-            .map(|(k, _, _)| k.as_str())
-            .collect();
-        let data_keys: Vec<&str> = view
-            .market_status_data
-            .iter()
-            .map(|(k, _, _)| k.as_str())
-            .collect();
-        assert_eq!(
-            regime_keys,
-            vec!["Current regime", "Trend strength", "Volatility", "Momentum"]
-        );
-        assert_eq!(
-            data_keys,
-            vec!["Data provider", "Latency", "Last update", "Bars loaded"]
-        );
-        let all: Vec<_> = view
-            .market_status_regime
-            .iter()
-            .chain(view.market_status_data.iter())
-            .collect();
-        assert!(all.iter().all(|(_, v, muted)| v == "--" && *muted));
-    }
-
-    #[test]
-    fn market_status_snapshot_sets_values_and_unmutes() {
-        let mut state = MarketState::default();
-        let json = serde_json::json!({
-            "market_status": {
-                "provider": "Zerodha",
-                "latency": "12ms",
-                "last_update": "2026-09-17 15:30:00",
-                "bars_loaded": "61,676",
-                "regime_current": "TRENDING",
-            }
-        });
-        apply_snapshot_json(&mut state, &json);
-        let view = project(&state);
-        let by_key: std::collections::HashMap<&str, (&str, bool)> = view
-            .market_status_data
-            .iter()
-            .chain(view.market_status_regime.iter())
-            .map(|(k, v, m)| (k.as_str(), (v.as_str(), *m)))
-            .collect();
-        assert_eq!(by_key["Data provider"], ("Zerodha", false));
-        assert_eq!(by_key["Latency"], ("12ms", false));
-        assert_eq!(by_key["Bars loaded"], ("61,676", false));
-        assert_eq!(by_key["Current regime"], ("TRENDING", false));
-        // Untouched rows stay honest-unknown + muted.
-        assert_eq!(by_key["Trend strength"], ("--", true));
-        // Snapshot NEVER touches the view-local open flag.
-        assert!(!view.market_status_open);
-    }
 
     fn scale_bars() -> Vec<MarketBar> {
         (0..100)
@@ -5724,21 +5547,6 @@ mod tests {
             st.interact_download(mdownload::DownloadAction::ClearLog);
         }
         assert_eq!(st.dropped_pending_actions, 1 + PENDING_ACTIONS_CAP as u64);
-    }
-
-    #[test]
-    fn market_status_toggle_is_view_local() {
-        let mut state = MarketState::default();
-        assert!(state.apply(MarketAction::ToggleStatus));
-        assert!(state.market_status.open);
-        assert!(state.apply(MarketAction::ToggleStatus));
-        assert!(!state.market_status.open);
-        // Toggle is view-local: no wire is queued for the backend.
-        assert!(state.pending_actions.is_empty());
-        let view = project(&state);
-        state.apply(MarketAction::ToggleStatus);
-        let view2 = project(&state);
-        assert_ne!(view.market_status_open, view2.market_status_open);
     }
 
     #[test]

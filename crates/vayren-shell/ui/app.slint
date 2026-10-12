@@ -7,7 +7,7 @@
 import { VayrenPalette, VayrenDesign } from "palette.slint";
 import { VBadge, VButton } from "components.slint";
 import { StrategyLabScreen, LabHeader, LabLibraryRow, LabKpi, LabRankRow, LabTradeRow, LabPoint, LabParam, LabDetailMetric, LabBoardCell, LabMatrixRow, LabPreset, RankWindow } from "lab.slint";
-import { MarketScreen, MarketWatchRow, MarketCandle, MarketTick, MarketRayLevel, MarketTimeframe, MarketIndicator, MarketStatusRow, MarketSettingsRow, MarketPopupRow, MarketPlotSeg, MarketMarker, MarketTradeContext, DlPlan, DlStatus, DlCalDay, DlCredField, DlStock } from "market.slint";
+import { MarketScreen, MarketWatchRow, MarketCandle, MarketTick, MarketRayLevel, MarketTimeframe, MarketIndicator, MarketSettingsRow, MarketPopupRow, MarketPlotSeg, MarketMarker, MarketTradeContext, DlPlan, DlStatus, DlCalDay, DlCredField, DlStock } from "market.slint";
 import { ResearchScreen, ResearchMetric, ResearchSignalRow, ResearchTradeRow, ResearchRobustRow, ResearchKv, ResearchCompareRow, ResearchStrategyRow, ResearchExperimentRow, ResearchField, ResearchConfigGroup, ResearchEvidenceDim, ResearchEvidenceWhy, ResearchKvGroup } from "research.slint";
 import { PortfolioKpi, PortfolioGate, PortfolioPosition, PortfolioAlloc, PortfolioOrder, PortfolioFill, PortfolioRisk } from "portfolio.slint";
 import { LiveScreen, LiveBar, LiveSetup, LiveMarket, LiveSymbolRow, LiveGate, LiveKv, LiveStat, LivePosition, LiveOrder, LiveFill, LiveEventRow, LiveTiers, LiveWebSocket, LiveMarketData, LiveActiveStrategy, LiveWatchlistRow, LiveEligibility, LiveEligibilityRow, LiveSelectedStock, LiveFooter, LiveRemoteGateway } from "live.slint";
@@ -191,6 +191,8 @@ export component AppWindow inherits Window {
     callback live-arm-requested();
     callback live-halt-requested();
     callback live-confirm-requested();
+    callback live-confirm-open-requested();
+    callback live-confirm-cancel-requested();
     callback live-event-filter-changed(string);
     callback live-event-type-picked(string);
     callback live-clear-events();
@@ -236,7 +238,6 @@ export component AppWindow inherits Window {
     callback market-trade-next();
     callback market-trade-open();
     callback market-chart-opt-picked(string);
-    callback market-status-toggle();
     callback market-dl-toggle();
     callback market-dl-interval(string);
     callback market-dl-toggle-symbol(string);
@@ -411,9 +412,6 @@ export component AppWindow inherits Window {
     in-out property <[MarketSettingsRow]> market-settings-rows;
     in-out property <string> market-active-label: "";
     in-out property <MarketTradeContext> market-trade-context;
-    in-out property <bool> market-status-open: false;
-    in-out property <[MarketStatusRow]> market-status-regime;
-    in-out property <[MarketStatusRow]> market-status-data;
     in-out property <bool> market-dl-open: false;
     in-out property <bool> market-dl-busy: false;
     in-out property <int> market-dl-interval-index: 0;
@@ -612,6 +610,7 @@ export component AppWindow inherits Window {
     in-out property <[LiveGate]> live-gates;
     in-out property <string> live-arm-note;
     in-out property <[string]> live-blockers;
+    in-out property <[string]> live-venue-blockers;
     in-out property <[LiveKv]> live-strategy-rows;
     in-out property <[LiveKv]> live-position-rows;
     in-out property <[LiveKv]> live-risk-rows;
@@ -757,9 +756,6 @@ export component AppWindow inherits Window {
                     settings-rows: root.market-settings-rows;
                     active-label: root.market-active-label;
                     trade-context: root.market-trade-context;
-                    market-status-open: root.market-status-open;
-                    market-status-regime: root.market-status-regime;
-                    market-status-data: root.market-status-data;
                     dl-open: root.market-dl-open;
                     dl-busy: root.market-dl-busy;
                     dl-interval-index: root.market-dl-interval-index;
@@ -826,7 +822,6 @@ export component AppWindow inherits Window {
                     trade-next() => { root.market-trade-next(); }
                     trade-open() => { root.market-trade-open(); }
                     chart-opt-picked(s) => { root.market-chart-opt-picked(s); }
-                    status-toggle() => { root.market-status-toggle(); }
                     dl-toggle() => { root.market-dl-toggle(); }
                     dl-interval(s) => { root.market-dl-interval(s); }
                     dl-toggle-symbol(s) => { root.market-dl-toggle-symbol(s); }
@@ -1028,6 +1023,7 @@ export component AppWindow inherits Window {
                     gates: root.live-gates;
                     arm-note: root.live-arm-note;
                     blockers: root.live-blockers;
+                    venue-blockers: root.live-venue-blockers;
                     strategy-rows: root.live-strategy-rows;
                     position-rows: root.live-position-rows;
                     risk-rows: root.live-risk-rows;
@@ -1069,6 +1065,8 @@ export component AppWindow inherits Window {
                     arm-requested() => { root.live-arm-requested(); }
                     halt-requested() => { root.live-halt-requested(); }
                     confirm-requested() => { root.live-confirm-requested(); }
+                    confirm-open-requested() => { root.live-confirm-open-requested(); }
+                    confirm-cancel-requested() => { root.live-confirm-cancel-requested(); }
                     event-filter-changed(t) => { root.live-event-filter-changed(t); }
                     event-type-picked(i) => { root.live-event-type-picked(i); }
                     clear-events() => { root.live-clear-events(); }

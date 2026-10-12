@@ -169,14 +169,33 @@ pub fn apply_remote_sections(state: &mut LiveState, sections: &serde_json::Value
         } else {
             name
         };
+        let reason = text_at(sections, "broker", "reason");
+        let r_lower = reason.to_lowercase();
+        let has_failure = r_lower.contains("timeout")
+            || r_lower.contains("timed out")
+            || r_lower.contains("unreachable")
+            || r_lower.contains("failed")
+            || r_lower.contains("rejected")
+            || r_lower.contains("expired");
+        let is_conn = if has_failure || status == "DISCONNECTED" || status == "ERROR" || status == "CONNECTION FAILED" {
+            false
+        } else {
+            sections
+                .get("broker")
+                .and_then(|b| b.get("connected"))
+                .and_then(|c| c.as_bool())
+                .unwrap_or(status == "CONNECTED")
+        };
+        let last_sync = text_at(sections, "broker", "last_sync");
         translated.insert(
             "broker".to_string(),
             serde_json::json!({
                 "name": bname,
                 "account_id": text_at(sections, "broker", "account_id"),
                 "status": status,
-                "reason": text_at(sections, "broker", "reason"),
-                "connected": status == "CONNECTED",
+                "reason": reason,
+                "connected": is_conn,
+                "last_heartbeat": last_sync,
             }),
         );
     }
@@ -274,6 +293,7 @@ pub fn apply_remote_sections(state: &mut LiveState, sections: &serde_json::Value
     for key in [
         "quotes",
         "events",
+        "gates",
         "available_strategies",
         "available_symbols",
         "selected_symbols",
@@ -289,10 +309,40 @@ pub fn apply_remote_sections(state: &mut LiveState, sections: &serde_json::Value
     if let Some(risk_engine) = sections.get("risk_engine").filter(|v| v.is_object()) {
         translated.insert("risk_engine".to_string(), risk_engine.clone());
     }
-    if let Some(stf) = sections.get("selected_timeframe").and_then(|v| v.as_str()) {
+    let stf = sections
+        .get("selected_timeframe")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            sections
+                .get("market_timeframe")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+        })
+        .or_else(|| {
+            sections
+                .get("market")
+                .and_then(|m| m.get("timeframe"))
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+        })
+        .or_else(|| {
+            sections
+                .get("strategy")
+                .and_then(|m| m.get("timeframe"))
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+        });
+    if let Some(stf) = stf {
         translated.insert(
             "selected_timeframe".to_string(),
             serde_json::Value::String(stf.to_string()),
+        );
+    }
+    if !translated.contains_key("available_timeframes") {
+        translated.insert(
+            "available_timeframes".to_string(),
+            serde_json::json!(["1m", "3m", "5m", "15m", "30m", "45m", "1h", "1d"]),
         );
     }
     if let Some(qty) = sections.get("quantity").and_then(|v| v.as_f64()) {
@@ -943,6 +993,7 @@ mod tests {
             "system": {"execution_ready": false, "execution_reason": "",
                 "kill_halted": false, "websocket": "CONNECTED"},
             "blockers": ["no strategy selected"],
+            "gates": [],
             "as_of": "2026-10-06T00:00:00",
         })
     }

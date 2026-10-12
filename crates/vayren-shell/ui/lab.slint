@@ -2015,21 +2015,6 @@ Rectangle {
                                                     opacity: root.lab.run-enabled && !root.lab.prog-active && !root.lab.run-stop ? 1 : 0.6;
                                                 }
                                             }
-                                            // Keyboard hint, not a state chip. The
-                                            // 18px bordered pill was
-                                            // indistinguishable from the status
-                                            // pills elsewhere on the bar, so it read
-                                            // as a fourth piece of run state. Same
-                                            // glyphs, same place, no chrome — the
-                                            // spacing around it now does the
-                                            // separating.
-Text {
-                                                text: "CTRL + ENTER";
-                                                font-family: "monospace";
-                                                font-size: 10px;
-                                                color: LabPalette.dim;
-                                                vertical-alignment: center;
-                                            }
                                         }
                                         // right auto — real facts only. The
                                         // mock's "Est. runtime" is gone: nothing
@@ -2038,27 +2023,6 @@ Text {
                                         // own every spare pixel, so a long fail reason
                                         // scrolls inside its own cell instead of stealing
                                         // the facts' share.
-                                        HorizontalLayout {
-                                            spacing: 22px; alignment: center;
-                                            VerticalLayout {
-                                                spacing: 3px; alignment: center;
-                                                Text { text: "UNIVERSE"; font-size: 10px; letter-spacing: 1.2px; color: LabPalette.dim; }
-                                                Text {
-                                                    text: root.lab.sym-button-line;
-                                                    font-family: "monospace"; font-size: 11px;
-                                                    color: LabPalette.soft; vertical-alignment: center;
-                                                }
-                                            }
-                                            VerticalLayout {
-                                                spacing: 3px; alignment: center;
-                                                Text { text: "CAPITAL"; font-size: 10px; letter-spacing: 1.2px; color: LabPalette.dim; }
-                                                Text {
-                                                    text: root.lab.capital-label;
-                                                    font-family: "monospace"; font-size: 11px;
-                                                    color: LabPalette.soft; vertical-alignment: center;
-                                                }
-                                            }
-                                        }
                                     }
                                     Rectangle { y: 0; height: 1px; width: 100%; background: LabPalette.line; }
                                 }

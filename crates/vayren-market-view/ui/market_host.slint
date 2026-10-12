@@ -18,7 +18,6 @@ import {
     MarketPlotSeg,
     MarketMarker,
     MarketTradeContext,
-    MarketStatusRow,
     DlPlan,
     DlStatus,
     DlCalDay,
@@ -68,11 +67,6 @@ export component MarketHostWindow inherits Window {
     in-out property <[MarketSettingsRow]> settings-rows;
     in-out property <string> active-label;
     in-out property <MarketTradeContext> trade-context;
-    // Market-status strip pass-through (pure glue, no visuals here).
-    in-out property <bool> market-status-open: false;
-    in-out property <[MarketStatusRow]> market-status-regime;
-    in-out property <[MarketStatusRow]> market-status-data;
-    callback status-toggle();
     in-out property <bool> wide: true;
     in-out property <bool> medium: true;
 
@@ -211,10 +205,6 @@ export component MarketHostWindow inherits Window {
         settings-rows: root.settings-rows;
         active-label: root.active-label;
         trade-context: root.trade-context;
-        market-status-open: root.market-status-open;
-        market-status-regime: root.market-status-regime;
-        market-status-data: root.market-status-data;
-        status-toggle() => { root.status-toggle(); }
         wide: root.wide;
         medium: root.medium;
         panel-toggle() => { root.panel-toggle(); }

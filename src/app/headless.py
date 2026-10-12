@@ -354,6 +354,7 @@ def _system_snapshot(
     if not selected_id:
         selected_id = str(snap.get("active_broker", "") or "")
     panel_id = selected_broker or selected_id
+    target_id = panel_id if panel_id else selected_id
     brokers = []
     for entry in snap.get("brokers", []):
         if not isinstance(entry, dict):
@@ -367,14 +368,15 @@ def _system_snapshot(
                 "display_name": str(entry.get("name", "") or broker_id),
                 "venue_subtitle": str(entry.get("venue_subtitle", "") or ""),
                 "status": str(entry.get("status", "") or ""),
+                "connected": bool(entry.get("connected", False)),
                 "selected": broker_id == selected_id,
             }
         )
     full = next(
-        (e for e in snap.get("brokers", []) if isinstance(e, dict) and e.get("id") == selected_id),
+        (e for e in snap.get("brokers", []) if isinstance(e, dict) and e.get("id") == target_id),
         {},
     )
-    record = next((b for b in brokers if b["id"] == selected_id), None)
+    record = next((b for b in brokers if b["id"] == target_id), None)
     environment = ""
     if selection is not None:
         try:
@@ -388,7 +390,7 @@ def _system_snapshot(
         from broker.common.credentials_store import default_store, provider_service
 
         vault_store = default_store(data_dir)
-        stored = vault_store.load(provider_service(selected_id)) if selected_id else None
+        stored = vault_store.load(provider_service(target_id)) if target_id else None
         if isinstance(stored, dict):
             saved_keys = {k for k, v in stored.items() if isinstance(v, str) and v.strip()}
     except Exception:  # noqa: BLE001
@@ -406,6 +408,9 @@ def _system_snapshot(
         "can_login": bool(full.get("can_login", False)),
         "can_disconnect": bool(full.get("can_disconnect", False)),
         "reason": str(full.get("reason", "") or ""),
+        "last_sync": str(full.get("last_sync", "") or ""),
+        "connected": bool(full.get("connected", False)),
+        "checks": dict(full.get("checks", {})),
         "credential_fields": _credential_field_rows(full, saved_keys),
         # A refused switch (e.g. requested mid-session) is reported here so
         # SYSTEM can say why the requested broker is not the selected one,
@@ -517,11 +522,16 @@ def _live_action(
             _ARMED[0] = False
             service.note_armed(False)
             note = "EXECUTION HALTED — emergency stop engaged"
-        elif name == "arm":
-            # Arming is the operator's LIVE consent; it is carried on the next
-            # START rather than being a session of its own.
+        elif name in ("arm", "confirm_live"):
+            # Arming / operator confirmation is the LIVE consent ceremony.
             _ARMED[0] = True
             service.note_armed(True)
+            service.confirm_live_execution()
+            note = "armed — confirm LIVE consent on START"
+        elif name == "confirm_account":
+            account_id = str(action.get("account_id") or "").strip()
+            service.confirm_account(account_id)
+            note = f"account confirmed: {account_id}" if account_id else "account confirmed"
         elif name == "select_broker":
             # SYSTEM's "make this the default broker" action. It lives in the
             # ONE gated action path so the remote gateway can apply the very
@@ -603,12 +613,9 @@ def _live_action(
     reason = _LIVE_ACTION_ERRORS.get("start")
     if reason and snapshot.get("session_status") != "RUNNING":
         snapshot["status_reason"] = reason
-    if _ARMED[0] and snapshot.get("session_status") != "RUNNING":
-        snapshot["action_note"] = "armed — confirm LIVE consent on START"
-        # The service cannot see the headless ARM flag, so its validate()
-        # still lists the consent line. The ARM ceremony satisfied it, so the
-        # snapshot drops exactly those lines — START enables and the next
-        # start() carries confirmed=True (see service.start).
+    if (_ARMED[0] or getattr(service, "is_live_confirmed", lambda: False)()) and snapshot.get("session_status") != "RUNNING":
+        snapshot["action_note"] = note or "armed — confirm LIVE consent on START"
+        # The operator has confirmed LIVE consent, so the snapshot drops exactly those lines.
         snapshot["start_blockers"] = [
             b
             for b in snapshot.get("start_blockers", [])
@@ -2132,9 +2139,14 @@ def run_headless_backend(args: argparse.Namespace) -> int:
                         st = broker_manager.state(broker_id)
                         status = st.get("status")
                         if status not in (BrokerStatus.CONNECTED, BrokerStatus.LIVE_READY):
-                            snapshot["status_raw"] = "ERROR"
+                            if status == BrokerStatus.DISCONNECTED:
+                                snapshot["status_raw"] = "DISCONNECTED"
+                            elif status == BrokerStatus.LOGIN_REQUIRED:
+                                snapshot["status_raw"] = "LOGIN_REQUIRED"
+                            else:
+                                snapshot["status_raw"] = "ERROR"
                             snapshot["reason"] = (
-                                st.get("reason") or "Authentication failed. Check your credentials."
+                                st.get("reason") or "Connection failed"
                             )
                         else:
                             snapshot["status_raw"] = "CONNECTED"

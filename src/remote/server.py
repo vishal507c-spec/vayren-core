@@ -84,6 +84,7 @@ EVENT_CHANNELS = (
     "reconciliation",
     "system",
     "blockers",
+    "gates",
     "events",
     "available_strategies",
     "available_symbols",
@@ -650,7 +651,7 @@ class RemoteServer:
         """Map a remote command onto the existing headless action shape."""
         args = dict(params) if isinstance(params, dict) else {}
         if action == "start":
-            if args.get("confirmed") is not True:
+            if bool(args.get("confirmed", False)) is not True:
                 return None
             return {"action": "start", "confirmed": True, "request_id": request_id}
         if action == "setup":
@@ -660,8 +661,10 @@ class RemoteServer:
             if args.get("mode") not in ("PAPER", "LIVE"):
                 return None
             return {"action": "mode", "mode": args["mode"]}
-        if action in ("stop", "halt", "arm", "tick"):
+        if action in ("stop", "halt", "arm", "tick", "confirm_live"):
             return {"action": action}
+        if action == "confirm_account":
+            return {"action": "confirm_account", "account_id": args.get("account_id", "")}
         if action == "select_broker":
             # SYSTEM's "make this the default broker" action. Translated here
             # so the gateway's OWN selection store is updated — without this a

@@ -335,6 +335,8 @@ class LiveTradingService:
         # alongside its own flag) + enforcement posture (default off — strict
         # evaluation needs configured mappings; diagnostics always available).
         self.armed: bool = False
+        self._account_confirmed: bool = False
+        self._confirmed_account_id: str = ""
         self._eligibility_enforcement: bool = False
         self._eligibility_mappings: Any = None
         self._eligibility_mappings_mtime: float | None = None
@@ -363,6 +365,62 @@ class LiveTradingService:
     def note_armed(self, armed: bool) -> None:
         """Mirror the operator ARM ceremony (set by headless per action)."""
         self.armed = bool(armed)
+
+    def is_account_confirmed(self) -> bool:
+        """Evaluate whether the broker account is legitimately confirmed.
+
+        Satisfied when:
+        1. Explicitly confirmed via confirm_account(), OR
+        2. Connected broker venue reports a valid non-empty account ID and
+           the account health check is not in a FAILED state.
+        """
+        if self._account_confirmed:
+            return True
+        view = self._broker_view()
+        if isinstance(view, dict) and view.get("connected"):
+            acc_id = str(view.get("account_id", "") or "").strip()
+            if acc_id:
+                manager = self._broker_manager
+                if manager is not None:
+                    name = self.broker_name()
+                    state = manager.state(name) or {}
+                    checks = state.get("checks", {})
+                    if isinstance(checks, dict):
+                        if str(checks.get("account", "") or "").startswith("FAILED"):
+                            return False
+                return True
+        return False
+
+    def confirm_account(self, account_id: str = "") -> None:
+        """Operator or system confirmation of the live trading account."""
+        self._account_confirmed = True
+        if account_id:
+            self._confirmed_account_id = str(account_id).strip()
+        self.invalidate_validation_cache()
+        self.state_changed.emit()
+
+    def clear_account_confirmation(self) -> None:
+        """Clear account confirmation (e.g. on broker switch or disconnect)."""
+        self._account_confirmed = False
+        self._confirmed_account_id = ""
+        self.invalidate_validation_cache()
+        self.state_changed.emit()
+
+    def confirm_live_execution(self) -> None:
+        """Record explicit operator consent for LIVE execution."""
+        self._confirmed_live_at = _utcnow_iso()
+        self.invalidate_validation_cache()
+        self.state_changed.emit()
+
+    def clear_live_confirmation(self) -> None:
+        """Clear operator consent (on stop, mode switch, or setup change)."""
+        self._confirmed_live_at = ""
+        self.invalidate_validation_cache()
+        self.state_changed.emit()
+
+    def is_live_confirmed(self) -> bool:
+        """Whether explicit operator consent has been given."""
+        return bool(self._confirmed_live_at)
 
     # ── catalog (Strategy Lab store + watchlist universe, never copied) ──
 
@@ -770,6 +828,8 @@ class LiveTradingService:
                     view["status"] in ("CONNECTED", "LIVE_READY")
                     or (manager is not None and manager.is_connected(name) is True)
                 )
+            if not is_entry_connected and view["status"] in ("CONNECTED", "LIVE_READY"):
+                view["status"] = "DISCONNECTED"
             view["configured"] = bool(
                 entry.get("configured", False)
                 or view["status"] not in ("NOT_CONFIGURED", "")
@@ -959,7 +1019,14 @@ class LiveTradingService:
                         blockers.append(f"no market data for {symbol} {self._config.timeframe}")
         if self._config.mode == "LIVE":
             blockers.extend(self._live_blockers())
-        return tuple(blockers)
+        seen = set()
+        deduped = []
+        for b in blockers:
+            norm = b.strip()
+            if norm and norm not in seen:
+                seen.add(norm)
+                deduped.append(b)
+        return tuple(deduped)
 
     def invalidate_validation_cache(self) -> None:
         """Force the next validate() to re-check (after venue/run changes)."""
@@ -998,7 +1065,7 @@ class LiveTradingService:
             runtime_env.setdefault("LIVE_TRADING_ENABLED", "true")
         if venue_id is not None:
             runtime_env.setdefault("BROKER_LIVE_ENABLED", "true")
-        if self._confirmed_live_at:
+        if self.is_account_confirmed():
             runtime_env.setdefault("ACCOUNT_CONFIRMED", "true")
         if self._config.quantity > 0:
             runtime_env.setdefault("RISK_LIMITS_VALID", "true")
@@ -1012,7 +1079,7 @@ class LiveTradingService:
         except Exception:
             missing = ("LIVE_GATES_UNREADABLE",)
         blockers.extend(f"live gate off: {gate}" for gate in missing)
-        if not self._confirmed_live_at:
+        if not self.is_live_confirmed():
             blockers.append("live confirmation required (explicit operator consent)")
         # Phase-3: a connected LIVE venue without usable broker capital must
         # never start — sizing would otherwise fall back to a fabricated
@@ -1088,15 +1155,14 @@ class LiveTradingService:
         """
         if self._status == "RUNNING":
             return False, ("already running",)
+        if self._config.mode == "LIVE" and confirmed:
+            self.confirm_live_execution()
         self.invalidate_validation_cache()
         blockers = self.validate()
         if self._config.mode == "LIVE":
-            if confirmed:
+            if confirmed or self.is_live_confirmed():
                 # A confirmed start SATISFIES the consent requirement — the
-                # validate() consent line must not block the very start that
-                # carries the confirmation (otherwise LIVE could never start:
-                # nothing but a successful start records the confirmation).
-                # Same consent-line filter as _arm_eligible_blockers().
+                # validate() consent line must not block the start.
                 blockers = tuple(
                     b for b in blockers if "confirmation" not in b and "consent" not in b
                 )
@@ -1116,8 +1182,6 @@ class LiveTradingService:
             )
             self.state_changed.emit()
             return False, blockers
-        if self._config.mode == "LIVE" and confirmed:
-            self._confirmed_live_at = _utcnow_iso()
         try:
             self._build_sessions()
         except LiveConfigError as exc:

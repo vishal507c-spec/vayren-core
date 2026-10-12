@@ -235,20 +235,6 @@ fn apply_state(ui: &MarketHostWindow, state: &MarketState) {
         pnl: view.trade_context.pnl.into(),
         r: view.trade_context.r.into(),
     });
-    ui.set_market_status_open(view.market_status_open);
-    let status_rows = |rows: Vec<(String, String, bool)>| -> slint::ModelRc<MarketStatusRow> {
-        model(
-            rows.into_iter()
-                .map(|(key, value, muted)| MarketStatusRow {
-                    key: key.into(),
-                    value: value.into(),
-                    muted,
-                })
-                .collect(),
-        )
-    };
-    ui.set_market_status_regime(status_rows(view.market_status_regime));
-    ui.set_market_status_data(status_rows(view.market_status_data));
     set_dl(ui, &view.download);
 }
 
@@ -524,10 +510,6 @@ fn wire_view(ui: &MarketHostWindow, state: Rc<RefCell<MarketState>>) {
     bind!(on_trade_prev, "trade:prev", MarketAction::TradePrev);
     bind!(on_trade_next, "trade:next", MarketAction::TradeNext);
     bind!(on_trade_open, "trade:open", MarketAction::TradeOpen);
-    // View-local market-status strip toggle (legacy MarketStatusPanel parity;
-    // no backend wire — same track as PanelToggle).
-    bind!(on_status_toggle, "", MarketAction::ToggleStatus);
-
     macro_rules! bind_str {
         ($set:ident, $make:expr) => {{
             let strong = state.clone();

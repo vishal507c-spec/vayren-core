@@ -371,18 +371,20 @@ class BrokerManager:
             status = state.get("status")
             adapter = state.get("adapter")
             checks = state.get("checks", {})
-        if status in (
+        if status not in (
             BrokerStatus.CONNECTED,
             BrokerStatus.LIVE_READY,
             BrokerStatus.MARKET_DATA_NOT_READY,
         ):
-            return True
-        return bool(
-            adapter is not None
-            and getattr(adapter, "connected", False)
-            and checks.get("connection") == "READY"
-            and checks.get("account") == "READY"
-        )
+            return False
+        # Authoritative session verification:
+        # Never report connected based solely on saved credentials or cached status.
+        if adapter is None or not getattr(adapter, "connected", False):
+            return False
+        conn_check = checks.get("connection")
+        if conn_check is not None and conn_check != "READY":
+            return False
+        return True
 
     def stop_worker(self) -> None:
         if not self._stopping:
@@ -445,8 +447,9 @@ class BrokerManager:
             return
         ok, reason = flow.validate(config[spec.key_field], token)
         if not ok:
-            if "unreachable" in reason:
-                self._set_status(spec.broker_id, BrokerStatus.DISCONNECTED, reason)
+            r_lower = reason.lower()
+            if any(k in r_lower for k in ("unreachable", "timeout", "timed out", "oserror", "connection refused")):
+                self._set_status(spec.broker_id, BrokerStatus.DISCONNECTED, f"venue unreachable: {reason}")
             elif self._try_auto_auth(spec, config):
                 return
             else:
@@ -616,9 +619,15 @@ class BrokerManager:
             if is_auth_error:
                 live["status"] = BrokerStatus.LOGIN_REQUIRED
                 live["reason"] = f"session expired — {auth_error_msg or 'login required'}"
+                if adapter is not None:
+                    with contextlib.suppress(Exception):
+                        adapter._connected = False
             elif checks.get("connection") != "READY":
                 live["status"] = BrokerStatus.DISCONNECTED
                 live["reason"] = checks.get("connection", "connection check failed")
+                if adapter is not None:
+                    with contextlib.suppress(Exception):
+                        adapter._connected = False
             elif checks.get("account") != "READY":
                 live["status"] = BrokerStatus.ACCOUNT_NOT_READY
                 live["reason"] = checks.get("account", "account check failed")
@@ -640,9 +649,12 @@ class BrokerManager:
             adapter.connect()
         except Exception as exc:
             text = str(exc)
-            if "CREDENTIALS" in str(getattr(exc, "code", "")) or "auth" in text.lower():
+            text_lower = text.lower()
+            if any(k in text_lower for k in ("unreachable", "timeout", "timed out", "oserror", "connection refused")):
+                self._set_status(spec.broker_id, BrokerStatus.DISCONNECTED, f"venue unreachable: {text}")
+            elif "credentials" in str(getattr(exc, "code", "")).lower() or "auth" in text_lower or "401" in text_lower:
                 self._set_status(
-                    spec.broker_id, BrokerStatus.LOGIN_REQUIRED, "venue rejected the session"
+                    spec.broker_id, BrokerStatus.LOGIN_REQUIRED, f"venue rejected the session: {text}"
                 )
             else:
                 self._set_status(spec.broker_id, BrokerStatus.ERROR, f"connection failed: {text}")

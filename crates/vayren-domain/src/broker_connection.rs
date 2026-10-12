@@ -304,6 +304,7 @@ pub struct BrokerWorkspace {
     pub can_connect: bool,
     pub can_disconnect: bool,
     pub reason: String,
+    pub last_sync: String,
     pub fields: Vec<CredentialFieldView>,
 }
 
@@ -324,6 +325,7 @@ impl BrokerWorkspace {
             can_connect: false,
             can_disconnect: false,
             reason: String::new(),
+            last_sync: String::new(),
             fields: Vec::new(),
         }
     }
@@ -365,13 +367,19 @@ impl BrokerWorkspace {
                 }
             }
             ConnectionState::Failed => {
-                if self.reason.trim().is_empty() {
-                    "Authentication failed. Check your credentials and try again.".to_string()
-                } else {
+                let r = self.reason.trim();
+                let r_lower = r.to_lowercase();
+                if r.is_empty() {
+                    "Connection failed. Please retry.".to_string()
+                } else if r_lower.contains("timeout") || r_lower.contains("timed out") || r_lower.contains("unreachable") {
+                    format!("Connection timed out: {}. Check network/venue status and retry.", r)
+                } else if r_lower.contains("auth") || r_lower.contains("credential") || r_lower.contains("expired") || r_lower.contains("invalid") || r_lower.contains("401") || r_lower.contains("rejected") {
                     format!(
                         "Authentication failed: {}. Check your credentials and try again.",
-                        self.reason.trim()
+                        r
                     )
+                } else {
+                    format!("Connection failed: {}. Review the details and retry.", r)
                 }
             }
             ConnectionState::Authenticating
@@ -400,7 +408,12 @@ impl BrokerWorkspace {
                 "Authenticating with the broker API. Keep this window open.".to_string()
             }
             ConnectionState::Failed => {
-                "Connection failed. Review the details and retry.".to_string()
+                let r = self.reason.trim().to_lowercase();
+                if r.contains("timeout") || r.contains("timed out") || r.contains("unreachable") {
+                    "Broker API timed out / venue unreachable. Check network connectivity and retry.".to_string()
+                } else {
+                    "Connection failed. Review the details and retry.".to_string()
+                }
             }
             ConnectionState::NotConfigured | ConnectionState::Ready => {
                 description_line(&self.display_name)
@@ -461,7 +474,10 @@ impl BrokerWorkspace {
                         .and_then(|v| v.as_str())
                         .unwrap_or("")
                         .to_string(),
-                    connected: is_connected_status(status),
+                    connected: row
+                        .get("connected")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or_else(|| is_connected_status(status)),
                     selected: row
                         .get("selected")
                         .and_then(|v| v.as_bool())
@@ -550,6 +566,7 @@ impl BrokerWorkspace {
         let can_login = bool_of("can_login");
         let can_disconnect = bool_of("can_disconnect");
         let reason = str_of("reason");
+        let last_sync = str_of("last_sync");
 
         // Credential schema (never values).
         let mut fields = Vec::new();
@@ -633,6 +650,7 @@ impl BrokerWorkspace {
             can_connect,
             can_disconnect,
             reason,
+            last_sync,
             fields,
         }
     }

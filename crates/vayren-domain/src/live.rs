@@ -674,6 +674,8 @@ pub struct LiveState {
     /// Unified eligibility facts (Phase-6/7 backend section). Unreported
     /// until a snapshot carries it — the UI prints "NOT REPORTED".
     pub eligibility: EligibilityFacts,
+    /// Explicit operator confirmation dialog open state for LIVE mode.
+    pub confirm_dialog_open: bool,
 }
 
 impl Default for LiveState {
@@ -770,6 +772,7 @@ impl Default for LiveState {
             inspector_open: true,
             action_note: None,
             eligibility: EligibilityFacts::default(),
+            confirm_dialog_open: false,
         }
     }
 }
@@ -943,13 +946,69 @@ impl LiveState {
             .collect()
     }
 
+    /// Check if a blocker string represents the operator confirmation / consent / ACCOUNT_CONFIRMED gate.
+    pub fn is_confirmation_blocker(b: &str) -> bool {
+        let lower = b.to_lowercase();
+        lower.contains("live confirmation required")
+            || lower.contains("operator consent")
+    }
+
+    /// Deduplicate blockers list while normalizing prefixes like "START blocked:" and whitespace.
+    pub fn deduplicate_blockers(blockers: &[String], status_reason: &str) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        let normalize = |s: &str| -> String {
+            s.trim()
+                .trim_start_matches("START blocked:")
+                .trim_start_matches("start blocked:")
+                .trim_start_matches("blocked:")
+                .trim_start_matches('•')
+                .trim()
+                .to_lowercase()
+        };
+        for b in blockers {
+            let b_norm = normalize(b);
+            if b_norm.is_empty() {
+                continue;
+            }
+            if !out.iter().any(|existing| normalize(existing) == b_norm) {
+                out.push(b.clone());
+            }
+        }
+        let reason_norm = normalize(status_reason);
+        if !reason_norm.is_empty() && !out.iter().any(|existing| normalize(existing) == reason_norm) {
+            let parts: Vec<&str> = status_reason.split(';').map(|s| s.trim()).collect();
+            let all_present = parts.iter().all(|p| {
+                let p_norm = normalize(p);
+                p_norm.is_empty() || out.iter().any(|existing| normalize(existing) == p_norm)
+            });
+            if !all_present {
+                out.push(status_reason.trim().to_string());
+            }
+        }
+        out
+    }
+
     /// All five named venue gates report READY — never assumed, only facts.
+    /// In host mode, if the backend snapshot has evaluated readiness and only
+    /// explicit operator consent / account confirmation remains blocking, venue gates are also satisfied.
     pub fn venue_gates_ready(&self) -> bool {
-        VENUE_GATES.iter().all(|name| {
+        let has_all_gates = VENUE_GATES.iter().all(|name| {
             self.gates
                 .iter()
                 .any(|g| g.name == *name && g.status == GateStatus::Ready)
-        })
+        });
+        if has_all_gates {
+            return true;
+        }
+        if self.host_mode {
+            if let Some(blockers) = &self.backend_start_blockers {
+                return blockers.is_empty()
+                    || blockers
+                        .iter()
+                        .all(|s| Self::is_confirmation_blocker(s));
+            }
+        }
+        false
     }
 
     /// Capital sufficiency check: in LIVE mode, broker capital must be explicitly
@@ -977,7 +1036,11 @@ impl LiveState {
     pub fn start_blockers(&self) -> Vec<String> {
         if self.host_mode {
             if let Some(blockers) = &self.backend_start_blockers {
-                return blockers.clone();
+                let mut list = blockers.clone();
+                if self.live_confirmed {
+                    list.retain(|b| !Self::is_confirmation_blocker(b));
+                }
+                return list;
             }
         }
         let mut blockers: Vec<String> = Vec::new();
@@ -1173,11 +1236,23 @@ impl LiveState {
     pub fn confirm_live(&mut self) {
         if self.mode == ExecMode::Live && self.venue_gates_ready() {
             self.live_confirmed = true;
+            self.confirm_dialog_open = false;
             self.action_note = None;
+            if self.host_mode && self.can_start() {
+                self.start();
+            }
         } else {
             self.action_note =
                 Some("confirmation requires LIVE mode with every venue gate ready".into());
         }
+    }
+
+    pub fn open_confirm_dialog(&mut self) {
+        self.confirm_dialog_open = true;
+    }
+
+    pub fn close_confirm_dialog(&mut self) {
+        self.confirm_dialog_open = false;
     }
 
     pub fn select_watchlist_symbol(&mut self, symbol: &str) {
@@ -1330,15 +1405,23 @@ impl LiveState {
             return;
         }
         if self.host_mode {
-            // Host mode: the backend owns start/stop. Forward the request even
-            // when local facts already look blocking, so the operator gets the
-            // SERVICE's exact verdict (and its snapshot) instead of a guess
-            // rendered from stale local state. The backend re-validates every
-            // gate — nothing is bypassed by asking.
+            // In LIVE mode, explicit operator confirmation is required before
+            // sending a start command. If unconfirmed, show the exact blocker
+            // immediately and open confirmation modal.
+            if self.mode == ExecMode::Live && !self.live_confirmed {
+                self.confirm_dialog_open = true;
+                self.action_note =
+                    Some("live confirmation required (explicit operator consent)".into());
+                return;
+            }
             self.set_pending("start");
+            let confirmed = match self.mode {
+                ExecMode::Live => self.live_confirmed,
+                _ => true,
+            };
             self.push_action(serde_json::json!({
                 "action": "start",
-                "confirmed": self.live_confirmed,
+                "confirmed": confirmed,
             }));
             self.action_note = Some("start requested — awaiting backend".into());
             return;
@@ -1782,14 +1865,51 @@ impl LiveState {
             self.store_total = Some(self.symbols.len());
         }
         if let Some(list) = v.get("available_timeframes").and_then(|a| a.as_array()) {
-            self.timeframes = list.iter().map(value_to_text).collect();
+            let parsed: Vec<String> = list.iter().map(value_to_text).filter(|s| !s.is_empty()).collect();
+            if !parsed.is_empty() {
+                self.timeframes = parsed;
+            }
         }
-        if let Some(tf) = v.get("selected_timeframe").and_then(|t| t.as_str()) {
-            self.timeframe_index = self
-                .timeframes
-                .iter()
-                .position(|t| t == tf)
-                .or(self.timeframe_index);
+        if self.timeframes.is_empty() {
+            self.timeframes = vec![
+                "1m".into(), "3m".into(), "5m".into(), "15m".into(), "30m".into(), "45m".into(), "1h".into(), "1d".into(),
+            ];
+        }
+        let tf_candidate = v
+            .get("selected_timeframe")
+            .and_then(|t| t.as_str())
+            .filter(|s| !s.is_empty())
+            .or_else(|| {
+                v.get("market_timeframe")
+                    .and_then(|t| t.as_str())
+                    .filter(|s| !s.is_empty())
+            })
+            .or_else(|| {
+                v.get("market_data")
+                    .and_then(|m| m.get("timeframe"))
+                    .and_then(|t| t.as_str())
+                    .filter(|s| !s.is_empty())
+            })
+            .or_else(|| {
+                v.get("strategy")
+                    .and_then(|s| s.get("timeframe"))
+                    .and_then(|t| t.as_str())
+                    .filter(|s| !s.is_empty())
+            });
+
+        if let Some(tf) = tf_candidate {
+            if !self.timeframes.iter().any(|t| t == tf) {
+                self.timeframes.push(tf.to_string());
+            }
+            if let Some(pos) = self.timeframes.iter().position(|t| t == tf) {
+                self.timeframe_index = Some(pos);
+            }
+        } else if self.timeframe_index.is_none() && !self.timeframes.is_empty() {
+            if let Some(pos) = self.timeframes.iter().position(|t| t == "15m") {
+                self.timeframe_index = Some(pos);
+            } else {
+                self.timeframe_index = Some(0);
+            }
         }
         if let Some(q) = v.get("quantity").and_then(|q| q.as_f64()) {
             if q.is_finite() && q >= 0.0 {
@@ -2634,7 +2754,9 @@ pub struct SetupView {
     pub can_arm: bool,
     pub needs_live_confirm: bool,
     pub confirmed_live: bool,
+    pub confirm_dialog_open: bool,
     pub blockers: Vec<String>,
+    pub venue_blockers: Vec<String>,
     pub symbol_total: String,
     pub strategy_names: Vec<String>,
     pub strategy_selected: i32,
@@ -3294,20 +3416,50 @@ pub fn project(state: &LiveState) -> LiveView {
     } else {
         state.broker.name.as_str()
     };
-    let broker_tone = match state.broker.status.as_str() {
-        "CONNECTED" | "LIVE_READY" => 1,
-        _ if broker_name == "NOT CONFIGURED" || broker_name == "N/A" => 0,
-        _ => 4,
+    let is_really_connected = match state.broker.connected {
+        Some(true) => {
+            let s = state.broker.status.to_uppercase();
+            let r = state.broker.reason.to_lowercase();
+            let disconnected_status = s == "DISCONNECTED" || s == "ERROR" || s.contains("FAIL");
+            let failure_reason = r.contains("timeout")
+                || r.contains("timed out")
+                || r.contains("unreachable")
+                || r.contains("rejected")
+                || r.contains("expired");
+            !disconnected_status && !failure_reason
+        }
+        _ => false,
+    };
+    let broker_tone = if is_really_connected {
+        1
+    } else if broker_name == "NOT CONFIGURED" || broker_name == "N/A" {
+        0
+    } else {
+        3
     };
     let account_suffix = if state.broker.account_id.trim().is_empty() {
         String::new()
     } else {
         format!(" · ACC: {}", state.broker.account_id.trim())
     };
-    let (conn_label, conn_tone) = match state.broker.connected {
-        Some(true) => (format!("● Connected{}", account_suffix), 1),
-        Some(false) => ("○ Disconnected".into(), 3),
-        None => ("Connection: N/A".into(), 0),
+    let (conn_label, conn_tone) = if is_really_connected {
+        (format!("● Connected{}", account_suffix), 1)
+    } else {
+        let r = state.broker.reason.trim();
+        let r_lower = r.to_lowercase();
+        if r_lower.contains("timeout") || r_lower.contains("timed out") || r_lower.contains("unreachable") {
+            ("○ Timeout (Venue Unreachable)".into(), 3)
+        } else if state.broker.connected == Some(false) {
+            if !r.is_empty() {
+                (format!("○ Disconnected ({})", r), 3)
+            } else {
+                ("○ Disconnected".into(), 3)
+            }
+        } else if !r.is_empty() && broker_name != "NOT CONFIGURED" && broker_name != "N/A" {
+            (format!("○ Disconnected ({})", r), 3)
+        } else {
+            ("Connection: N/A".into(), 0)
+        }
     };
     let strategy_id = state
         .strategy_facts
@@ -3589,15 +3741,13 @@ pub fn project(state: &LiveState) -> LiveView {
             && !state.live_confirmed
             && state.venue_gates_ready(),
         confirmed_live: state.live_confirmed,
-        blockers: {
-            let mut lines = blockers.clone();
-            if !state.status_reason.trim().is_empty()
-                && !lines.iter().any(|l| l == &state.status_reason)
-            {
-                lines.push(state.status_reason.clone());
-            }
-            lines
-        },
+        confirm_dialog_open: state.confirm_dialog_open,
+        blockers: LiveState::deduplicate_blockers(&blockers, &state.status_reason),
+        venue_blockers: blockers
+            .iter()
+            .filter(|b| !LiveState::is_confirmation_blocker(b))
+            .cloned()
+            .collect(),
         symbol_total: {
             // Phase 1 strategy-first status: no selection names the required
             // next step instead of a misleading generic count; a selection
@@ -5448,7 +5598,7 @@ mod tests {
         assert_eq!(st.session, SessionStatus::Stopped); // no fake transition
         let action: serde_json::Value = serde_json::from_str(&st.take_action().unwrap()).unwrap();
         assert_eq!(action["action"], "start");
-        assert_eq!(action["confirmed"], false);
+        assert_eq!(action["confirmed"], true);
         assert!(st.take_action().is_none());
         // Setup edits forward the full legacy-shaped setup payload.
         st.toggle_symbol(1);
@@ -5463,6 +5613,45 @@ mod tests {
         let action: serde_json::Value = serde_json::from_str(&st.take_action().unwrap()).unwrap();
         assert_eq!(action["mode"], "LIVE");
         assert_eq!(action["action"], "mode");
+    }
+
+    #[test]
+    fn host_mode_live_start_blocks_without_confirmation_and_dispatches_with_confirmation() {
+        let mut st = configured(LiveState::default());
+        st.apply_snapshot(&serde_json::json!({
+            "mode": "LIVE",
+            "session_status": "STOPPED",
+            "start_blockers": ["live confirmation required (explicit operator consent)"],
+        }));
+        assert!(st.host_mode && st.bridge_wired);
+        assert_eq!(st.mode, ExecMode::Live);
+        assert!(st.venue_gates_ready());
+        assert!(!st.live_confirmed);
+
+        let view = project(&st);
+        assert!(view.setup.needs_live_confirm);
+        assert!(!view.setup.confirmed_live);
+
+        // Clicking START without confirming must be blocked locally and not dispatch to the wire
+        st.start();
+        assert!(st.take_action().is_none());
+        assert_eq!(
+            st.action_note,
+            Some("live confirmation required (explicit operator consent)".into())
+        );
+
+        // Operator confirms LIVE
+        st.confirm_live();
+        assert!(st.live_confirmed);
+        let view2 = project(&st);
+        assert!(!view2.setup.needs_live_confirm);
+        assert!(view2.setup.confirmed_live);
+
+        // Now START successfully dispatches confirmed: true to the gateway
+        st.start();
+        let action: serde_json::Value = serde_json::from_str(&st.take_action().unwrap()).unwrap();
+        assert_eq!(action["action"], "start");
+        assert_eq!(action["confirmed"], true);
     }
 
     // ── START control: the button must be usable, must reach the backend, and
@@ -6592,5 +6781,119 @@ mod tests {
         let action = st5.take_action();
         assert!(action.is_some());
         assert!(action.unwrap().contains("refresh_capital"));
+    }
+
+    #[test]
+    fn live_confirm_dialog_lifecycle_and_operator_consent() {
+        let mut st = configured(LiveState::default());
+        st.bridge_wired = true;
+        st.host_mode = true;
+        st.gates = all_ready_gates();
+        st.mode = ExecMode::Live;
+        assert_eq!(st.mode, ExecMode::Live);
+        assert!(!st.live_confirmed);
+        assert!(!st.confirm_dialog_open);
+
+        // Clicking START while unconfirmed opens the confirmation modal
+        st.start();
+        assert!(st.confirm_dialog_open);
+        assert_eq!(
+            st.action_note.as_deref(),
+            Some("live confirmation required (explicit operator consent)")
+        );
+        // And does not dispatch any start command yet
+        assert!(st.take_action().is_none());
+
+        // Cancelling closes the dialog without confirming
+        st.close_confirm_dialog();
+        assert!(!st.confirm_dialog_open);
+        assert!(!st.live_confirmed);
+
+        // Explicitly opening dialog
+        st.open_confirm_dialog();
+        assert!(st.confirm_dialog_open);
+
+        // Confirming live sets live_confirmed, closes dialog, and dispatches confirmed start
+        st.confirm_live();
+        assert!(!st.confirm_dialog_open);
+        assert!(st.live_confirmed);
+        let action = st.take_action();
+        assert!(action.is_some());
+        let val: serde_json::Value = serde_json::from_str(&action.unwrap()).unwrap();
+        assert_eq!(val["action"], "start");
+        assert_eq!(val["confirmed"], true);
+    }
+
+    #[test]
+    fn test_live_confirmation_modal_blockers_deduplication_and_venue_readiness() {
+        let mut st = configured(LiveState::default());
+        st.bridge_wired = true;
+        st.host_mode = true;
+        st.mode = ExecMode::Live;
+        st.live_confirmed = false;
+
+        // Backend reports consent required blocker
+        st.backend_start_blockers = Some(vec![
+            "live confirmation required (explicit operator consent)".to_string(),
+        ]);
+        st.status_reason = "START blocked: live confirmation required (explicit operator consent)".to_string();
+
+        // 1. Venue gates must be ready because only confirmation remains
+        assert!(st.venue_gates_ready());
+
+        // 2. Project view
+        let view = project(&st);
+        assert!(view.setup.needs_live_confirm);
+        // venue_blockers should exclude confirmation blockers so modal can arm
+        assert!(view.setup.venue_blockers.is_empty());
+        // Deduplication removes redundant status_reason and normalizes
+        assert_eq!(view.setup.blockers.len(), 1);
+        assert!(!view.setup.blockers.iter().any(|b| b.starts_with("START blocked:")));
+
+        // 3. Confirming live satisfies operator consent and dispatches confirmed command
+        st.confirm_live();
+        assert!(st.live_confirmed);
+        assert!(st.start_blockers().is_empty());
+    }
+
+    #[test]
+    fn test_operator_confirmed_retains_consent_but_account_unconfirmed_blocks() {
+        let mut st = configured(LiveState::default());
+        st.bridge_wired = true;
+        st.host_mode = true;
+        st.mode = ExecMode::Live;
+        st.live_confirmed = true;
+
+        // Backend reports ACCOUNT_CONFIRMED gate off after operator gave consent
+        st.backend_start_blockers = Some(vec![
+            "live gate off: ACCOUNT_CONFIRMED".to_string(),
+        ]);
+        st.status_reason = "START blocked: live gate off: ACCOUNT_CONFIRMED".to_string();
+
+        // Operator confirmation is retained (banner is green)
+        let view = project(&st);
+        assert!(view.setup.confirmed_live);
+        assert!(!view.setup.needs_live_confirm);
+
+        // But START remains legitimately blocked by ACCOUNT_CONFIRMED
+        assert!(!st.can_start());
+        let blockers = st.start_blockers();
+        assert_eq!(blockers.len(), 1);
+        assert_eq!(blockers[0], "live gate off: ACCOUNT_CONFIRMED");
+        assert!(!blockers.iter().any(|b| b.contains("consent") || b.contains("confirmation required")));
+    }
+
+    #[test]
+    fn test_broker_timeout_honest_projection() {
+        let mut st = configured(LiveState::default());
+        st.broker.connected = Some(true); // Stale snapshot might have had true
+        st.broker.name = "FYERS".to_string();
+        st.broker.status = "CONNECTED".to_string();
+        st.broker.reason = "venue unreachable: The read operation timed out. Check your credentials and try again.".to_string();
+
+        let view = project(&st);
+        assert_eq!(view.bar.broker_tone, 3);
+        assert_eq!(view.bar.conn_label, "○ Timeout (Venue Unreachable)");
+        assert_eq!(view.bar.conn_tone, 3);
     }
 }

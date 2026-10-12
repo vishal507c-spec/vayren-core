@@ -178,6 +178,12 @@ def build_snapshot(live: dict[str, Any]) -> dict[str, Any]:
     )
     strategy["id"] = live_strat_id
     strategy["name"] = str(live_strat.get("name") or live_strat_id)
+    strategy["timeframe"] = str(
+        live_strat.get("timeframe")
+        or live.get("selected_timeframe")
+        or live.get("market_timeframe")
+        or ""
+    )
 
     sizing_status = str(risk_engine.get("sizing_status", "") or "").upper()
     risk_status = str(risk_engine.get("status", "") or "").upper()
@@ -211,13 +217,20 @@ def build_snapshot(live: dict[str, Any]) -> dict[str, Any]:
             "name": str(broker.get("name", "") or ""),
             "account_id": str(broker.get("account_id", "") or ""),
             "reason": str(broker.get("reason", "") or ""),
+            "connected": broker_connected,
+            "last_sync": str(broker.get("last_sync", "") or ""),
             "source": "SYSTEM broker manager view",
         },
         "market": {
             "status": str(market_data.get("status", "") or "NOT REPORTED"),
             "feed": feed,
             "exchange": str(market_data.get("exchange", "") or ""),
-            "timeframe": str(market_data.get("timeframe", "") or ""),
+            "timeframe": str(
+                market_data.get("timeframe")
+                or live.get("selected_timeframe")
+                or live.get("market_timeframe")
+                or ""
+            ),
             "source": "market-data service + venue feed",
         },
         "order_stream": {**order_stream, "source": "broker connection + feed kind"},
@@ -253,6 +266,7 @@ def build_snapshot(live: dict[str, Any]) -> dict[str, Any]:
             "source": "execution readiness + kill switch + transport",
         },
         "blockers": [str(item) for item in (live.get("start_blockers", []) or [])],
+        "gates": scrub(live.get("gates", [])),
         "quotes": scrub(live.get("quotes", [])),
         "pnl": scrub(live.get("pnl", {})),
         "available_strategies": scrub(live.get("available_strategies", [])),
@@ -262,6 +276,7 @@ def build_snapshot(live: dict[str, Any]) -> dict[str, Any]:
         "selected_timeframe": str(live.get("selected_timeframe", "") or ""),
         "quantity": float(live.get("quantity", 0.0) or 0.0),
         "risk_engine": scrub(risk_engine),
+        "brokers": scrub(live.get("brokers", [])),
         "as_of": str(live.get("as_of", "") or ""),
     }
     return scrub(snapshot)

@@ -16,13 +16,49 @@ use std::sync::{
     mpsc, Arc, Mutex,
 };
 use std::time::{Duration, Instant};
-use vayren_shell::broker_connection::BrokerWorkspace;
+use vayren_shell::broker_connection::{BrokerWorkspace, ConnectionState};
 use vayren_shell::lab;
 use vayren_shell::market;
 use vayren_shell::portfolio;
 use vayren_shell::python_bridge::{BackendCommand, BackendResponse, PythonBackend};
 use vayren_shell::research_state;
 use vayren_shell::shell;
+
+fn sync_broker_ui(ui: &vayren_shell::AppWindow, sections: &serde_json::Value) {
+    if let Some(b) = sections.get("broker").and_then(|v| v.as_object()) {
+        let status = b.get("status").and_then(|s| s.as_str()).unwrap_or("");
+        let reason = b.get("reason").and_then(|r| r.as_str()).unwrap_or("");
+        let connected = b.get("connected").and_then(|c| c.as_bool()).unwrap_or(false);
+        let r_lower = reason.to_lowercase();
+        let is_timeout = r_lower.contains("timeout") || r_lower.contains("timed out") || r_lower.contains("unreachable");
+        if is_timeout {
+            ui.set_conn_pill_label("Connection Failed (Timeout)".into());
+            ui.set_conn_pill_tone(3);
+            ui.set_conn_is_connected(false);
+            ui.set_conn_is_failed(true);
+            if !reason.is_empty() {
+                ui.set_conn_error_message(reason.into());
+            }
+        } else if connected && status == "CONNECTED" {
+            ui.set_conn_pill_label("Connected".into());
+            ui.set_conn_pill_tone(1);
+            ui.set_conn_is_connected(true);
+            ui.set_conn_is_failed(false);
+            ui.set_conn_error_message("".into());
+        } else if !reason.is_empty() {
+            ui.set_conn_pill_label("Connection Failed".into());
+            ui.set_conn_pill_tone(3);
+            ui.set_conn_is_connected(false);
+            ui.set_conn_is_failed(true);
+            ui.set_conn_error_message(reason.into());
+        } else if status == "DISCONNECTED" {
+            ui.set_conn_pill_label("Not Connected".into());
+            ui.set_conn_pill_tone(3);
+            ui.set_conn_is_connected(false);
+            ui.set_conn_is_failed(false);
+        }
+    }
+}
 
 /// Read a `--name value` / `--name=value` CLI argument.
 fn arg_value(argv: &[String], name: &str) -> Option<String> {
@@ -858,6 +894,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     ui.set_server_status_tone(1);
                                 }
                                 apply_remote_sections(&mut live_state.borrow_mut(), &sections, resync);
+                                sync_broker_ui(&ui, &sections);
                                 dirty = true;
                             }
                             RemoteUiUpdate::StateUpdate { sections } => {
@@ -870,6 +907,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     ui.set_server_status_tone(1);
                                 }
                                 apply_remote_sections(&mut live_state.borrow_mut(), &sections, false);
+                                sync_broker_ui(&ui, &sections);
                                 dirty = true;
                             }
                             RemoteUiUpdate::StreamEvent { name, payload } => {
@@ -1172,6 +1210,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         shell::apply_connection(&ui, &workspace);
                         // Trigger immediate LIVE tab poll so broker state and capital sync at once
                         next_live_poll = std::time::Instant::now();
+                        let is_conn = workspace.state == ConnectionState::Connected;
+                        {
+                            let mut ls = live_state.borrow_mut();
+                            ls.broker.name = workspace.selected_id.clone();
+                            ls.broker.status = if is_conn { "CONNECTED".into() } else { "DISCONNECTED".into() };
+                            ls.broker.connected = Some(is_conn);
+                            if !is_conn {
+                                ls.broker.reason = workspace.reason.clone();
+                            }
+                        }
+                        shell::apply_live(&ui, &live_state.borrow());
                         // A fresh SYSTEM snapshot is the answer to a pending
                         // SET AS DEFAULT: whatever it reports (confirmed or
                         // unchanged) is the truth, so the SAVING state ends
@@ -2261,6 +2310,7 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                                 ui.set_server_status_tone(1);
                             }
                             apply_remote_sections(&mut live_state.borrow_mut(), &sections, resync);
+                            sync_broker_ui(&ui, &sections);
                             dirty = true;
                         }
                         RemoteUiUpdate::StateUpdate { sections } => {
@@ -2286,6 +2336,7 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                                 ui.set_server_status_tone(1);
                             }
                             apply_remote_sections(&mut live_state.borrow_mut(), &sections, false);
+                            sync_broker_ui(&ui, &sections);
                             dirty = true;
                         }
                         RemoteUiUpdate::StreamEvent { name, payload } => {

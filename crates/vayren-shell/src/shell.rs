@@ -24,7 +24,7 @@ use crate::{
     LiveFill, LiveFooter, LiveGate, LiveKv, LiveMarket, LiveMarketData, LiveOrder,
     LivePipelineStep, LivePosition, LiveRemoteGateway, LiveSelectedStock, LiveSetup, LiveStat,
     LiveSymbolRow, LiveWatchlistRow, LiveWebSocket, MarketCandle, MarketIndicator, MarketMarker,
-    MarketPlotSeg, MarketPopupRow, MarketRayLevel, MarketSettingsRow, MarketStatusRow, MarketTick,
+    MarketPlotSeg, MarketPopupRow, MarketRayLevel, MarketSettingsRow, MarketTick,
     MarketTimeframe, MarketTradeContext, MarketWatchRow, PortfolioAlloc, PortfolioFill,
     PortfolioGate, PortfolioKpi, PortfolioOrder, PortfolioPosition, PortfolioRisk,
     ProgressStepView, RankWindow, ResearchCompareRow, ResearchConfigGroup, ResearchEvidenceDim,
@@ -488,20 +488,6 @@ pub fn apply_market(ui: &AppWindow, state: &market::MarketState) {
         pnl: view.trade_context.pnl.into(),
         r: view.trade_context.r.into(),
     });
-    ui.set_market_status_open(view.market_status_open);
-    let status_rows = |rows: Vec<(String, String, bool)>| -> slint::ModelRc<MarketStatusRow> {
-        market_model(
-            rows.into_iter()
-                .map(|(key, value, muted)| MarketStatusRow {
-                    key: key.into(),
-                    value: value.into(),
-                    muted,
-                })
-                .collect(),
-        )
-    };
-    ui.set_market_status_regime(status_rows(view.market_status_regime));
-    ui.set_market_status_data(status_rows(view.market_status_data));
     let dl = mdownload::project_download(&state.download);
     ui.set_market_dl_open(dl.open);
     ui.set_market_dl_busy(dl.busy);
@@ -936,11 +922,6 @@ pub fn wire_market(
         on_market_trade_open,
         "trade:open",
         market::MarketAction::TradeOpen
-    );
-    act!(
-        on_market_status_toggle,
-        "",
-        market::MarketAction::ToggleStatus
     );
     act_str!(on_market_filter_changed, |s| (
         String::new(),
@@ -3413,6 +3394,7 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
         can_arm: view.setup.can_arm,
         needs_live_confirm: view.setup.needs_live_confirm,
         confirmed_live: view.setup.confirmed_live,
+        confirm_dialog_open: view.setup.confirm_dialog_open,
         symbol_total: view.setup.symbol_total.into(),
         stock_universe: Rc::new(slint::VecModel::from(
             view.setup
@@ -3498,6 +3480,16 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
         Rc::new(slint::VecModel::from(
             view.setup
                 .blockers
+                .into_iter()
+                .map(<_>::into)
+                .collect::<Vec<_>>(),
+        ))
+        .into(),
+    );
+    ui.set_live_venue_blockers(
+        Rc::new(slint::VecModel::from(
+            view.setup
+                .venue_blockers
                 .into_iter()
                 .map(<_>::into)
                 .collect::<Vec<_>>(),
@@ -3874,6 +3866,8 @@ pub fn wire_live(ui: &AppWindow, state: Rc<RefCell<LiveState>>) {
     wire_unit!(on_live_arm_requested, LiveState::arm);
     wire_unit!(on_live_halt_requested, LiveState::halt);
     wire_unit!(on_live_confirm_requested, LiveState::confirm_live);
+    wire_unit!(on_live_confirm_open_requested, LiveState::open_confirm_dialog);
+    wire_unit!(on_live_confirm_cancel_requested, LiveState::close_confirm_dialog);
     wire_unit!(on_live_inspector_toggled, LiveState::toggle_inspector);
     {
         // CLEAR EVENTS is UI-hygiene only: it drops the rendered event
@@ -4879,6 +4873,7 @@ mod tests {
             can_arm: false,
             needs_live_confirm: false,
             confirmed_live: false,
+            confirm_dialog_open: false,
             symbol_total: "527 symbols (OBR C1C4)".into(),
             stock_universe: Rc::new(slint::VecModel::from(Vec::<slint::SharedString>::new()))
                 .into(),
