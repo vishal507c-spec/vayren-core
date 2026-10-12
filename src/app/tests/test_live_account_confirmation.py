@@ -154,3 +154,109 @@ def test_manual_account_confirmation_workflow(service: LiveTradingService) -> No
 
     service.clear_account_confirmation()
     assert not service.is_account_confirmed()
+
+
+def test_account_identity_change_invalidates_confirmation(service: LiveTradingService) -> None:
+    """When broker connects with a different account than confirmed, confirmation is revoked."""
+    service.confirm_account("ACC_ORIGINAL")
+    assert service.is_account_confirmed()
+
+    # Connected broker view with DIFFERENT account ID
+    mismatched_view = {
+        "id": "fyers",
+        "display": "FYERS",
+        "connected": True,
+        "status": "CONNECTED",
+        "account_id": "ACC_DIFFERENT",
+    }
+    with patch.object(service, "_broker_view", return_value=mismatched_view):
+        assert not service.is_account_confirmed()
+        assert not service._account_confirmed
+
+
+def test_account_confirmation_persists_across_service_recreation(tmp_path) -> None:
+    """Account confirmation survives service restart / recreation with the same session store."""
+    data_dir = tmp_path / "data"
+    strat_dir = tmp_path / "strategies"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    strat_dir.mkdir(parents=True, exist_ok=True)
+
+    svc1 = LiveTradingService(str(data_dir), str(strat_dir))
+    svc1.confirm_account("PERSISTED_ACC_123")
+    assert svc1.is_account_confirmed()
+
+    # Recreate service pointing to same directory
+    svc2 = LiveTradingService(str(data_dir), str(strat_dir))
+    assert svc2._account_confirmed is True
+    assert svc2._confirmed_account_id == "PERSISTED_ACC_123"
+    assert svc2.is_account_confirmed()
+
+
+def test_checklist_gate_honestly_reflects_account_confirmation(service: LiveTradingService) -> None:
+    """Checklist gate 'Account Confirmed' reports NOT READY when unconfirmed and READY when confirmed."""
+    # Unconfirmed broker view
+    unconfirmed_view = {
+        "id": "fyers",
+        "display": "FYERS",
+        "connected": False,
+        "status": "DISCONNECTED",
+        "reason": "not connected",
+        "account_id": "XV29244",
+        "configured": True,
+        "funds": {},
+        "last_sync": "",
+    }
+    with patch.object(service, "_broker_view", return_value=unconfirmed_view):
+        gates = service.snapshot()["gates"]
+        acc_gate = next((g for g in gates if g["name"] == "Account Confirmed"), None)
+        assert acc_gate is not None
+        assert acc_gate["status"] == "NOT READY"
+        assert "unconfirmed" in acc_gate["reason"]
+
+    # Now confirm account
+    service.confirm_account("XV29244")
+    confirmed_view = {
+        "id": "fyers",
+        "display": "FYERS",
+        "connected": True,
+        "status": "CONNECTED",
+        "reason": "all checks passed",
+        "account_id": "XV29244",
+        "configured": True,
+        "funds": {"available": 100.18},
+        "last_sync": "",
+    }
+    with patch.object(service, "_broker_view", return_value=confirmed_view):
+        gates = service.snapshot()["gates"]
+        acc_gate = next((g for g in gates if g["name"] == "Account Confirmed"), None)
+        assert acc_gate is not None
+        assert acc_gate["status"] == "READY"
+        assert "XV29244 confirmed" in acc_gate["reason"]
+
+
+def test_capital_unavailable_blocks_live_start(service: LiveTradingService) -> None:
+    """When broker capital is unavailable in LIVE mode, live start is blocked."""
+    service.confirm_account("XV29244")
+    service.confirm_live_execution()
+
+    broker_view = {
+        "id": "fyers",
+        "display": "FYERS",
+        "connected": True,
+        "status": "CONNECTED",
+        "account_id": "XV29244",
+        "configured": True,
+        "funds": {},  # No funds reported
+    }
+    with patch.object(service, "_resolve_live_venue_id", return_value="fyers-live"), \
+         patch.object(service, "_broker_view", return_value=broker_view), \
+         patch.object(service, "broker_name", return_value="fyers"), \
+         patch.object(service, "available_symbols", return_value=("NSE:KAYNES",)), \
+         patch.object(service, "available_timeframes", return_value=("5m",)), \
+         patch.object(service, "_compiled", return_value=None), \
+         patch.object(service, "_universe_quotes", return_value=[{"symbol": "NSE:KAYNES", "status": "AVAILABLE"}]), \
+         patch.object(service, "_live_available_funds", return_value=None):
+
+        blockers = service.validate()
+        assert any("broker capital unavailable" in b for b in blockers)
+

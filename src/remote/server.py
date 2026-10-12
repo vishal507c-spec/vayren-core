@@ -66,6 +66,8 @@ MUTATING_ACTIONS = (
     "select_broker",
     "tick",
     "server_op",
+    "confirm_account",
+    "confirm_live",
 )
 
 #: Event channels a client may subscribe to (snapshot sections + event stream).

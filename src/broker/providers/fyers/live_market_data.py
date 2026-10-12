@@ -354,6 +354,9 @@ class FyersLiveMarketData:
             return ""
         if ":" not in s:
             return f"NSE:{s}-EQ"
+        exchange, _, ticker = s.partition(":")
+        if not ticker.endswith("-EQ") and "-" not in ticker:
+            return f"{exchange}:{ticker}-EQ"
         return s
 
 

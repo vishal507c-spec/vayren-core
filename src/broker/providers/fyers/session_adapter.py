@@ -152,9 +152,12 @@ class FyersSessionAdapter:
         if not isinstance(body, dict) or body.get("s") != "ok":
             return False, "session check failed"
 
-        # If order WS is enabled, report warning if order WS is in error
-        if self._enable_order_ws and self._order_ws_state == STATE_ERROR:
-            return False, f"order socket error: {self._order_ws_error}"
+        # If order WS is enabled and degraded, attempt reconnection without failing the verified REST session
+        if self._enable_order_ws and self._order_ws_state in (STATE_ERROR, STATE_DISCONNECTED):
+            try:
+                self._start_order_ws()
+            except Exception as exc:
+                logger.warning("ORDER_WS_RESTART_FAILED broker=FYERS reason=%s", exc)
         return True, "ok"
 
     def order_stream_health(self) -> tuple[bool, str]:

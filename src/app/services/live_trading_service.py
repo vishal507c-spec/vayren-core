@@ -403,6 +403,7 @@ class LiveTradingService:
         self._account_confirmed = True
         if account_id:
             self._confirmed_account_id = str(account_id).strip()
+        self._persist_config()
         self.invalidate_validation_cache()
         self.state_changed.emit()
 
@@ -410,6 +411,7 @@ class LiveTradingService:
         """Clear account confirmation (e.g. on broker switch or disconnect)."""
         self._account_confirmed = False
         self._confirmed_account_id = ""
+        self._persist_config()
         self.invalidate_validation_cache()
         self.state_changed.emit()
 
@@ -2609,12 +2611,21 @@ class LiveTradingService:
                     "reason": "broker not configured",
                 }
             )
-        if view.get("account_id"):
+        if self.is_account_confirmed():
+            acc = view.get("account_id") or self._confirmed_account_id or "verified"
             gates.append(
                 {
                     "name": "Account Confirmed",
                     "status": "READY",
-                    "reason": f"account {view['account_id']} confirmed",
+                    "reason": f"account {acc} confirmed",
+                }
+            )
+        elif view.get("account_id"):
+            gates.append(
+                {
+                    "name": "Account Confirmed",
+                    "status": "NOT READY",
+                    "reason": f"account {view['account_id']} unconfirmed (broker disconnected or health check failed)",
                 }
             )
         else:
@@ -2837,6 +2848,8 @@ class LiveTradingService:
             self._config.mode = "PAPER"
         if isinstance(config, dict):
             self._eligibility_enforcement = bool(config.get("eligibility_enabled", False))
+            self._account_confirmed = bool(config.get("account_confirmed", False))
+            self._confirmed_account_id = str(config.get("confirmed_account_id", "") or "")
 
         # Phase 1 strategy-first flow: no pre-selected strategy, ever. The
         # saved per-strategy universe is the only symbol authority — a legacy
@@ -2895,6 +2908,8 @@ class LiveTradingService:
             "quantity": self._config.quantity,
             "capital": self._config.capital,
             "eligibility_enabled": self._eligibility_enforcement,
+            "account_confirmed": self._account_confirmed,
+            "confirmed_account_id": self._confirmed_account_id,
         }
         try:
             self._store.save(data)
@@ -2920,6 +2935,8 @@ class LiveTradingService:
             "quantity": self._config.quantity,
             "capital": self._config.capital,
             "eligibility_enabled": self._eligibility_enforcement,
+            "account_confirmed": self._account_confirmed,
+            "confirmed_account_id": self._confirmed_account_id,
         }
         checkpoints: dict[str, Any] = {}
         for symbol, session in self._sessions.items():
