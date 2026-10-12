@@ -493,6 +493,67 @@ class LiveTradingService:
 
         return tuple(names)
 
+    def _resolve_strategy_record(self, name: str | None) -> StrategyRecord | None:
+        """Resolve a strategy record from registry or storage.
+
+        Accepts user-facing display name ('OBR C1C4'), canonical id ('obr-c1c4'),
+        kind ('obr_c1c4'), or file stem ('OBR').
+        """
+        if not name or not str(name).strip():
+            return None
+        target = str(name).strip()
+        if target.lower().endswith(".py"):
+            target = target[:-3].strip()
+        if not target:
+            return None
+
+        # 1. Central strategy registry (authoritative)
+        try:
+            from strategy.registry import get_strategy_registry
+
+            reg = get_strategy_registry(self._strategy_dir)
+            if reg.contains(target):
+                defn = reg.get(target)
+                if defn.source_code:
+                    return StrategyRecord(
+                        id=defn.id,
+                        name=defn.name,
+                        code=defn.source_code,
+                        created_at="",
+                        updated_at="",
+                        version=defn.version or "1.0",
+                        status=getattr(defn, "status", "ACTIVE") or "ACTIVE",
+                    )
+                for candidate in (defn.id, defn.name):
+                    try:
+                        rec = load_strategy_record(candidate, self._strategy_dir)
+                        if rec is not None:
+                            return rec
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        # 2. File-backed library strategies
+        try:
+            rec = load_strategy_record(target, self._strategy_dir)
+            if rec is not None:
+                return rec
+        except Exception:
+            pass
+
+        # 3. Known aliases and normalization fallback
+        target_norm = target.lower().replace("_", "-").replace(" ", "-")
+        if target_norm in ("obr", "obr-c1c4"):
+            try:
+                rec = load_strategy_record("OBR", self._strategy_dir)
+                if rec is not None:
+                    return rec
+            except Exception:
+                pass
+
+        return None
+
     def available_symbols(self, strategy_name: str | None = None) -> tuple[str, ...]:
         """Saved universe for one strategy — and nothing else (Phase 1).
 
@@ -943,31 +1004,11 @@ class LiveTradingService:
         if not self._config.strategy_name:
             blockers.append("no strategy selected")
         else:
-            try:
-                from strategy.registry import get_strategy_registry
-
-                reg = get_strategy_registry()
-                if reg.contains(self._config.strategy_name):
-                    strat_def = reg.get(self._config.strategy_name)
-                    if strat_def.source_code:
-                        record = StrategyRecord(
-                            id=strat_def.id,
-                            name=strat_def.name,
-                            code=strat_def.source_code,
-                            created_at="",
-                            updated_at="",
-                            version=strat_def.version,
-                        )
-            except Exception:
-                pass
+            record = self._resolve_strategy_record(self._config.strategy_name)
             if record is None:
-                try:
-                    record = load_strategy_record(self._config.strategy_name, self._strategy_dir)
-                except Exception as exc:
-                    record = None
-                    blockers.append(f"strategy load failed: {exc}")
-            if record is None:
-                blockers.append(f"strategy not found: {self._config.strategy_name}")
+                available = list(self.available_strategies())
+                avail_str = f" (available: {', '.join(available)})" if available else " (none registered)"
+                blockers.append(f"strategy not found: {self._config.strategy_name}{avail_str}")
             else:
                 try:
                     self._compiled(record)
@@ -1331,15 +1372,22 @@ class LiveTradingService:
         try:
             from strategy.registry import get_strategy_registry
 
-            reg = get_strategy_registry()
+            reg = get_strategy_registry(self._strategy_dir)
             if name and reg.contains(name):
                 defn = reg.get(name)
+                facts["strategy_id"] = defn.id
+                facts["canonical_id"] = defn.id
+                facts["display_name"] = defn.name
                 facts["direction"] = str(getattr(defn, "direction", "") or "")
                 facts["runtime_state"] = str(getattr(defn, "runtime_state", "") or "")
                 facts["universe"] = len(getattr(defn, "symbols", ()) or ())
                 for key, value in getattr(defn, "metadata", ()) or ():
                     if str(key).strip().lower() == "reference window":
                         facts["reference_window"] = str(value)
+            elif name:
+                facts["strategy_id"] = name
+                facts["canonical_id"] = name
+                facts["display_name"] = name
         except Exception:
             pass
         return facts
@@ -1789,9 +1837,11 @@ class LiveTradingService:
 
     def _build_sessions(self) -> None:
         assert self._config.strategy_name and self._config.symbols and self._config.timeframe
-        record = load_strategy_record(self._config.strategy_name, self._strategy_dir)
+        record = self._resolve_strategy_record(self._config.strategy_name)
         if record is None:
-            raise LiveConfigError(f"strategy not found: {self._config.strategy_name}")
+            available = list(self.available_strategies())
+            avail_str = f" (available: {', '.join(available)})" if available else " (none registered)"
+            raise LiveConfigError(f"strategy not found: {self._config.strategy_name}{avail_str}")
         try:
             compiled = self._compiled(record)
         except Exception as exc:
@@ -1819,13 +1869,14 @@ class LiveTradingService:
         base_dir = self._data_dir / "live" / "sessions"
         sessions: dict[str, LiveSession] = {}
         try:
+            has_local_store = bool(self._repository.list_symbols())
             for symbol in self._config.symbols:
                 history = self._load_history(symbol, self._config.timeframe)
-                if not history:
+                if not history and has_local_store:
                     raise LiveConfigError(f"no market data for {symbol}")
                 params = StrategyParameters(compiled.param_defaults)
 
-                def _factory(compiled=compiled, params=params) -> Any:
+                def _factory(compiled=compiled, params=params, record=record) -> Any:
                     logic = compiled.create_logic(params, owner_id=record.name)
                     # Composition-layer live declaration: library strategies
                     # (e.g. Pine-parity OBR) predate the SUPPORTS_LIVE
@@ -1843,7 +1894,8 @@ class LiveTradingService:
                     kind="live",
                     params=params,
                 )
-                session_dir = base_dir / symbol
+                safe_sym = symbol.replace(":", "_").replace("/", "_")
+                session_dir = base_dir / safe_sym
                 if symbol in md_faces:
                     # DEBT: retained unwired import (see 90_brain/ai_memory.md).
                     from execution import (
@@ -2695,34 +2747,29 @@ class LiveTradingService:
         """Strategy registry truth for the checklist row (no invention)."""
         if not name:
             return False, "no strategy selected"
+        record = self._resolve_strategy_record(name)
+        if record is None:
+            available = list(self.available_strategies())
+            avail_str = f" (available: {', '.join(available)})" if available else " (none registered)"
+            return False, f"strategy not found: {name}{avail_str}"
         try:
-            from strategy.registry import get_strategy_registry
-
-            reg = get_strategy_registry()
-            if not reg.contains(name):
-                return False, f"strategy not found: {name}"
-            defn = reg.get(name)
-            record = None
-            if defn.source_code:
-                record = StrategyRecord(
-                    id=defn.id,
-                    name=defn.name,
-                    code=defn.source_code,
-                    created_at="",
-                    updated_at="",
-                    version=defn.version,
-                )
-            if record is None:
-                record = load_strategy_record(name, self._strategy_dir)
-            if record is None:
-                return False, f"strategy not found: {name}"
             self._compiled(record)
         except Exception as exc:
             return False, f"strategy not ready: {exc}"
-        timeframe = str(getattr(defn, "timeframe", "") or "")
+        timeframe = ""
+        try:
+            from strategy.registry import get_strategy_registry
+
+            reg = get_strategy_registry(self._strategy_dir)
+            if reg.contains(name):
+                timeframe = str(getattr(reg.get(name), "timeframe", "") or "")
+        except Exception:
+            pass
+        if not timeframe:
+            timeframe = self._config.timeframe or ""
         if timeframe:
-            return True, f"{name} ready — {timeframe}"
-        return True, f"{name} ready"
+            return True, f"{record.name} ready — {timeframe}"
+        return True, f"{record.name} ready"
 
     def _setup_timeframes(self) -> tuple[str, ...]:
         if not self._config.symbols:

@@ -178,6 +178,9 @@ def build_snapshot(live: dict[str, Any]) -> dict[str, Any]:
     )
     strategy["id"] = live_strat_id
     strategy["name"] = str(live_strat.get("name") or live_strat_id)
+    strategy["strategy_id"] = str(live_strat.get("strategy_id") or live_strat.get("canonical_id") or live_strat_id)
+    strategy["canonical_id"] = str(live_strat.get("canonical_id") or live_strat.get("strategy_id") or live_strat_id)
+    strategy["display_name"] = str(live_strat.get("display_name") or live_strat.get("name") or live_strat_id)
     strategy["timeframe"] = str(
         live_strat.get("timeframe")
         or live.get("selected_timeframe")
