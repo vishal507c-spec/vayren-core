@@ -295,6 +295,15 @@ impl PythonBackend {
                 }
                 return std::env::join_paths(paths).ok();
             }
+            if dir.join("vayren-core").join("src").join("app").is_dir() {
+                let src_dir = dir.join("vayren-core").join("src");
+                let mut paths: Vec<std::path::PathBuf> = vec![src_dir.clone()];
+                paths.extend(CHAPTERS.iter().map(|c| src_dir.join(c)));
+                if let Some(existing) = std::env::var_os("PYTHONPATH") {
+                    paths.extend(std::env::split_paths(&existing));
+                }
+                return std::env::join_paths(paths).ok();
+            }
             if !dir.pop() {
                 break;
             }
