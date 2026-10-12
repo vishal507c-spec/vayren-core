@@ -988,6 +988,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // click. The startup fetch just landed, so the first poll is one
         // interval out.
         let mut next_live_poll = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        let mut next_live_timer_tick =
+            std::time::Instant::now() + std::time::Duration::from_secs(1);
         let mut last_select: u64 = 0;
         let mut last_run: u64 = 0;
         let mut last_coverage: u64 = 0;
@@ -1500,6 +1502,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             lab::apply_coverage_json(&mut lab_state.borrow_mut(), &data);
                             shell::apply_lab(&ui, &lab_state.borrow());
                         }
+                    }
+                }
+
+                // Requirement 4: Update the displayed duration every second
+                // without making a network request every second.
+                // When RUNNING with a valid start epoch, re-render live UI every 1s.
+                if std::time::Instant::now() >= next_live_timer_tick {
+                    next_live_timer_tick = std::time::Instant::now() + std::time::Duration::from_secs(1);
+                    let st = live_state.borrow();
+                    if st.session == live::SessionStatus::Running && st.start_epoch_secs.is_some() {
+                        shell::apply_live(&ui, &st);
                     }
                 }
             },
@@ -2412,6 +2425,8 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
         let weak = ui.as_weak();
         let live_state = live_state.clone();
         let server_op_timer_pending = server_op_pending.clone();
+        let mut next_live_timer_tick =
+            std::time::Instant::now() + std::time::Duration::from_secs(1);
         fetch_timer.start(
             slint::TimerMode::Repeated,
             std::time::Duration::from_millis(50),
@@ -2590,6 +2605,13 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                 }
                 if dirty {
                     shell::apply_live(&ui, &live_state.borrow());
+                } else if std::time::Instant::now() >= next_live_timer_tick {
+                    next_live_timer_tick =
+                        std::time::Instant::now() + std::time::Duration::from_secs(1);
+                    let st = live_state.borrow();
+                    if st.session == live::SessionStatus::Running && st.start_epoch_secs.is_some() {
+                        shell::apply_live(&ui, &st);
+                    }
                 }
             },
         );
