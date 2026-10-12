@@ -86,13 +86,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
     logger.info("remote transport serving (backend idle; trading starts only via client command)")
     try:
+        from app.observable import pump_events
+
         while True:
             try:
-                stopped = server._stop.wait(timeout=1.0)
+                stopped = server._stop.wait(timeout=0.05)
             except KeyboardInterrupt:
                 break
             if stopped:
                 break
+            pump_events()
     except KeyboardInterrupt:
         pass
     finally:

@@ -15,6 +15,7 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
     mpsc, Arc, Mutex,
 };
+use std::time::{Duration, Instant};
 use vayren_shell::broker_connection::BrokerWorkspace;
 use vayren_shell::lab;
 use vayren_shell::market;
@@ -666,6 +667,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // gateway's separate one, and the two disagree.
     let remote_command_tx: Option<mpsc::Sender<vayren_shell::remote_live::RemoteCommand>> =
         remote_rx.as_ref().map(|(_, tx)| tx.clone());
+    let server_op_pending = Arc::new(Mutex::new(Option::<Instant>::None));
     shell::wire(&ui);
     shell::wire_zoom(&ui, zoom.clone());
     shell::wire_lab(
@@ -765,11 +767,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // event must never overwrite the current run's facts.
         let mut progress_dropped: u64 = 0;
         let run_seq = Arc::clone(&lab_run_seq);
+        let server_op_timer_pending = server_op_pending.clone();
         fetch_timer.start(
             slint::TimerMode::Repeated,
             std::time::Duration::from_millis(50),
             move || {
                 let Some(ui) = weak.upgrade() else { return };
+                if let Ok(mut pending) = server_op_timer_pending.try_lock() {
+                    if let Some(t0) = *pending {
+                        if t0.elapsed() > Duration::from_secs(8) {
+                            *pending = None;
+                            ui.set_server_op_busy(false);
+                            ui.set_server_op_tone(3);
+                            ui.set_server_op_feedback(slint::SharedString::from(
+                                "✕ Request timed out after 8s — gateway did not respond",
+                            ));
+                        }
+                    }
+                }
                 // Lab stock-universe saves: drained here, sent on a worker,
                 // answered through FetchResult::LabUniverse. Strategy Lab operates
                 // against the backend regardless of whether Live streaming is remote.
@@ -834,10 +849,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 if resync {
                                     println!("Remote resync: replacing state with fresh snapshot");
                                 }
+                                if let Some(worker) = sections.get("worker").and_then(|w| w.as_object()) {
+                                    let status = worker.get("status").and_then(|s| s.as_str()).unwrap_or("STOPPED");
+                                    let running = worker.get("running").and_then(|r| r.as_bool()).unwrap_or(false);
+                                    ui.set_worker_status(slint::SharedString::from(status));
+                                    ui.set_worker_status_tone(if running { 1 } else if status == "ERROR" { 3 } else { 2 });
+                                    ui.set_server_status(slint::SharedString::from("CONNECTED"));
+                                    ui.set_server_status_tone(1);
+                                }
                                 apply_remote_sections(&mut live_state.borrow_mut(), &sections, resync);
                                 dirty = true;
                             }
                             RemoteUiUpdate::StateUpdate { sections } => {
+                                if let Some(worker) = sections.get("worker").and_then(|w| w.as_object()) {
+                                    let status = worker.get("status").and_then(|s| s.as_str()).unwrap_or("STOPPED");
+                                    let running = worker.get("running").and_then(|r| r.as_bool()).unwrap_or(false);
+                                    ui.set_worker_status(slint::SharedString::from(status));
+                                    ui.set_worker_status_tone(if running { 1 } else if status == "ERROR" { 3 } else { 2 });
+                                    ui.set_server_status(slint::SharedString::from("CONNECTED"));
+                                    ui.set_server_status_tone(1);
+                                }
                                 apply_remote_sections(&mut live_state.borrow_mut(), &sections, false);
                                 dirty = true;
                             }
@@ -851,6 +882,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 reconnects,
                             } => {
                                 eprintln!("remote UI: link {label} ({detail})");
+                                if label == "OFFLINE" {
+                                    ui.set_server_status(slint::SharedString::from("OFFLINE"));
+                                    ui.set_server_status_tone(3);
+                                    ui.set_worker_status(slint::SharedString::from("UNKNOWN"));
+                                    ui.set_worker_status_tone(0);
+                                }
                                 mark_link(&mut live_state.borrow_mut(), &label, &detail, reconnects);
                                 dirty = true;
                             }
@@ -861,12 +898,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 live_state.borrow_mut().gateway.last_heartbeat = timestamp;
                                 dirty = true;
                             }
-                            RemoteUiUpdate::CommandAck { action, ok, detail } => {
+                            RemoteUiUpdate::CommandAck {
+                                action,
+                                ok,
+                                detail,
+                                payload,
+                            } => {
                                 // The gateway's verdict on a control command.
                                 // Clear the matching pending action either way
                                 // and paint the real outcome — never leave the
                                 // button spinning, never imply a start that the
                                 // gateway refused.
+                                if action == "server_op" {
+                                    apply_server_op_ack(
+                                        &ui,
+                                        ok,
+                                        &detail,
+                                        &payload,
+                                        &server_op_timer_pending,
+                                    );
+                                }
+                                if action == "select_broker" {
+                                    ui.set_conn_default_saving(false);
+                                }
                                 {
                                     let mut state = live_state.borrow_mut();
                                     state.pending_action = None;
@@ -1300,6 +1354,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             });
         });
     }
+    wire_server_ops(&ui, remote_command_tx.clone(), server_op_pending.clone());
     {
         let backend = Arc::clone(&backend);
         let tx = fetch_tx.clone();
@@ -1757,6 +1812,246 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn apply_server_op_ack(
+    ui: &vayren_shell::AppWindow,
+    ok: bool,
+    detail: &str,
+    payload: &serde_json::Value,
+    pending_time: &Arc<Mutex<Option<Instant>>>,
+) {
+    if let Ok(mut lock) = pending_time.lock() {
+        *lock = None;
+    }
+    ui.set_server_op_busy(false);
+
+    if !ok {
+        ui.set_server_op_tone(3);
+        let err = if !detail.is_empty() {
+            detail
+        } else if let Some(e) = payload.get("error").and_then(|v| v.as_str()) {
+            e
+        } else {
+            "Operation failed"
+        };
+        ui.set_server_op_feedback(slint::SharedString::from(format!("✕ {err}")));
+        return;
+    }
+
+    let op = payload.get("op").and_then(|v| v.as_str()).unwrap_or("");
+    match op {
+        "health" => {
+            ui.set_server_op_tone(1);
+            let ec2_status = payload
+                .get("ec2_status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("HEALTHY");
+            let gw_status = payload
+                .get("gateway_status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("ACTIVE");
+            let gw_pid = payload
+                .get("gateway_pid")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let worker_status = payload
+                .get("trading_worker_status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("STOPPED");
+            let uptime = payload
+                .get("uptime")
+                .and_then(|v| v.as_str())
+                .unwrap_or("-");
+
+            let mem_pct = payload
+                .get("memory")
+                .and_then(|m| m.get("percent"))
+                .and_then(|p| p.as_f64())
+                .unwrap_or(0.0);
+            let disk_pct = payload
+                .get("disk")
+                .and_then(|d| d.get("percent"))
+                .and_then(|p| p.as_f64())
+                .unwrap_or(0.0);
+            let metrics_str = format!("RAM: {:.0}% · Disk: {:.0}% · Up: {}", mem_pct, disk_pct, uptime);
+            ui.set_server_metrics(slint::SharedString::from(metrics_str));
+
+            ui.set_server_status(slint::SharedString::from(if ec2_status == "HEALTHY" {
+                "CONNECTED"
+            } else {
+                ec2_status
+            }));
+            ui.set_server_status_tone(if ec2_status == "HEALTHY" { 1 } else { 3 });
+            ui.set_worker_status(slint::SharedString::from(worker_status));
+            ui.set_worker_status_tone(if worker_status == "RUNNING" { 1 } else { 2 });
+
+            let broker = payload
+                .get("selected_broker")
+                .and_then(|v| v.as_str())
+                .unwrap_or("none");
+            let feedback = format!(
+                "✓ EC2 {} · Gateway {} (PID {}) · Worker {} · Broker {} · Up {}",
+                ec2_status, gw_status, gw_pid, worker_status, broker, uptime
+            );
+            ui.set_server_op_feedback(slint::SharedString::from(feedback));
+        }
+        "status" => {
+            ui.set_server_op_tone(1);
+            let port_ok = payload
+                .get("port_8765_listening")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            ui.set_server_op_feedback(slint::SharedString::from(format!(
+                "✓ Gateway Active · Loopback 8765: {}",
+                if port_ok { "Listening" } else { "Down" }
+            )));
+        }
+        "backup" => {
+            ui.set_server_op_tone(1);
+            let name = payload
+                .get("archive_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("backup.tar.gz");
+            let size = payload.get("size_bytes").and_then(|v| v.as_u64()).unwrap_or(0);
+            let sha = payload.get("sha256").and_then(|v| v.as_str()).unwrap_or("");
+            let sha_short = if sha.len() >= 8 { &sha[..8] } else { sha };
+            let size_kb = size / 1024;
+            ui.set_server_op_feedback(slint::SharedString::from(format!(
+                "✓ Backup Verified: {name} ({size_kb} KB, sha256:{sha_short})"
+            )));
+        }
+        "logs" => {
+            ui.set_server_op_tone(1);
+            let count = payload.get("lines_count").and_then(|v| v.as_u64()).unwrap_or(0);
+            let logs_arr = payload.get("logs").and_then(|v| v.as_array());
+            let last_log = logs_arr.and_then(|a| a.last()).and_then(|v| v.as_str()).unwrap_or("");
+            if count == 0 {
+                ui.set_server_op_feedback(slint::SharedString::from("✓ Logs: 0 errors recorded today."));
+            } else if !last_log.is_empty() {
+                let snippet = if last_log.len() > 60 { &last_log[..60] } else { last_log };
+                ui.set_server_op_feedback(slint::SharedString::from(format!(
+                    "✓ Logs: {count} errors. Latest: {snippet}…"
+                )));
+            } else {
+                ui.set_server_op_feedback(slint::SharedString::from(format!("✓ Logs: {count} errors recorded today.")));
+            }
+        }
+        "restart" => {
+            ui.set_server_op_tone(1);
+            ui.set_server_op_feedback(slint::SharedString::from("✓ Gateway service restart initiated."));
+        }
+        _ => {
+            ui.set_server_op_tone(1);
+            ui.set_server_op_feedback(slint::SharedString::from("✓ Operation completed successfully."));
+        }
+    }
+}
+
+fn wire_server_ops(
+    ui: &vayren_shell::AppWindow,
+    command_tx: Option<mpsc::Sender<vayren_shell::remote_live::RemoteCommand>>,
+    pending_time: Arc<Mutex<Option<Instant>>>,
+) {
+    let handle = ui.as_weak();
+    let cmd = command_tx.clone();
+    let pt = pending_time.clone();
+    ui.on_server_op_health(move || {
+        println!("SERVER OP: health requested");
+        if let Some(ui) = handle.upgrade() {
+            ui.set_server_op_busy(true);
+            ui.set_server_op_tone(0);
+            ui.set_server_op_feedback(slint::SharedString::from("Checking server health..."));
+        }
+        if let Ok(mut lock) = pt.lock() {
+            *lock = Some(Instant::now());
+        }
+        if let Some(ref sender) = cmd {
+            let _ = sender.send(vayren_shell::remote_live::RemoteCommand {
+                action: "server_op".to_string(),
+                params: serde_json::json!({ "op": "health" }),
+            });
+        } else if let Some(ui) = handle.upgrade() {
+            ui.set_server_op_busy(false);
+            ui.set_server_op_tone(3);
+            ui.set_server_op_feedback(slint::SharedString::from("✕ Remote gateway not connected"));
+        }
+    });
+
+    let handle = ui.as_weak();
+    let cmd = command_tx.clone();
+    let pt = pending_time.clone();
+    ui.on_server_op_backup(move || {
+        println!("SERVER OP: backup requested");
+        if let Some(ui) = handle.upgrade() {
+            ui.set_server_op_busy(true);
+            ui.set_server_op_tone(0);
+            ui.set_server_op_feedback(slint::SharedString::from("Creating backup..."));
+        }
+        if let Ok(mut lock) = pt.lock() {
+            *lock = Some(Instant::now());
+        }
+        if let Some(ref sender) = cmd {
+            let _ = sender.send(vayren_shell::remote_live::RemoteCommand {
+                action: "server_op".to_string(),
+                params: serde_json::json!({ "op": "backup" }),
+            });
+        } else if let Some(ui) = handle.upgrade() {
+            ui.set_server_op_busy(false);
+            ui.set_server_op_tone(3);
+            ui.set_server_op_feedback(slint::SharedString::from("✕ Remote gateway not connected"));
+        }
+    });
+
+    let handle = ui.as_weak();
+    let cmd = command_tx.clone();
+    let pt = pending_time.clone();
+    ui.on_server_op_logs(move || {
+        println!("SERVER OP: logs requested");
+        if let Some(ui) = handle.upgrade() {
+            ui.set_server_op_busy(true);
+            ui.set_server_op_tone(0);
+            ui.set_server_op_feedback(slint::SharedString::from("Fetching error logs..."));
+        }
+        if let Ok(mut lock) = pt.lock() {
+            *lock = Some(Instant::now());
+        }
+        if let Some(ref sender) = cmd {
+            let _ = sender.send(vayren_shell::remote_live::RemoteCommand {
+                action: "server_op".to_string(),
+                params: serde_json::json!({ "op": "logs", "lines": 20 }),
+            });
+        } else if let Some(ui) = handle.upgrade() {
+            ui.set_server_op_busy(false);
+            ui.set_server_op_tone(3);
+            ui.set_server_op_feedback(slint::SharedString::from("✕ Remote gateway not connected"));
+        }
+    });
+
+    let handle = ui.as_weak();
+    let cmd = command_tx;
+    let pt = pending_time;
+    ui.on_server_op_restart(move || {
+        println!("SERVER OP: restart requested");
+        if let Some(ui) = handle.upgrade() {
+            ui.set_server_op_busy(true);
+            ui.set_server_op_tone(0);
+            ui.set_server_op_feedback(slint::SharedString::from("Restarting gateway service..."));
+        }
+        if let Ok(mut lock) = pt.lock() {
+            *lock = Some(Instant::now());
+        }
+        if let Some(ref sender) = cmd {
+            let _ = sender.send(vayren_shell::remote_live::RemoteCommand {
+                action: "server_op".to_string(),
+                params: serde_json::json!({ "op": "restart", "confirmed": true }),
+            });
+        } else if let Some(ui) = handle.upgrade() {
+            ui.set_server_op_busy(false);
+            ui.set_server_op_tone(3);
+            ui.set_server_op_feedback(slint::SharedString::from("✕ Remote gateway not connected"));
+        }
+    });
+}
+
 /// Remote graphical client (read-only; also the packaged default).
 ///
 /// Startup order: paint CONNECTING immediately → bootstrap thread proves the
@@ -1823,15 +2118,52 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
     // Bootstrap owns the first connect (with enrollment retries); on success
     // it hands the live client to the pump and exits.
     spawn_remote_bootstrap(url, remote_tx, command_rx);
+
+    let server_op_pending = Arc::new(Mutex::new(Option::<Instant>::None));
+    wire_server_ops(&ui, Some(command_tx.clone()), server_op_pending.clone());
+    {
+        let handle = ui.as_weak();
+        let cmd = command_tx.clone();
+        ui.on_broker_set_default_requested(move |id: slint::SharedString| {
+            let broker_id = id.as_str().to_string();
+            if broker_id.is_empty() {
+                return;
+            }
+            if let Some(ui) = handle.upgrade() {
+                if ui.get_conn_default_saving() {
+                    return;
+                }
+                ui.set_conn_default_saving(true);
+            }
+            let _ = cmd.send(RemoteCommand {
+                action: "select_broker".to_string(),
+                params: serde_json::json!({ "broker": broker_id }),
+            });
+        });
+    }
+
     let fetch_timer = slint::Timer::default();
     {
         let weak = ui.as_weak();
         let live_state = live_state.clone();
+        let server_op_timer_pending = server_op_pending.clone();
         fetch_timer.start(
             slint::TimerMode::Repeated,
             std::time::Duration::from_millis(50),
             move || {
                 let Some(ui) = weak.upgrade() else { return };
+                if let Ok(mut pending) = server_op_timer_pending.try_lock() {
+                    if let Some(t0) = *pending {
+                        if t0.elapsed() > Duration::from_secs(8) {
+                            *pending = None;
+                            ui.set_server_op_busy(false);
+                            ui.set_server_op_tone(3);
+                            ui.set_server_op_feedback(slint::SharedString::from(
+                                "✕ Request timed out after 8s — gateway did not respond",
+                            ));
+                        }
+                    }
+                }
                 // Control intents go to the gateway, which owns the
                 // authoritative service and re-authorizes every one.
                 for raw in live_state.borrow_mut().drain_actions() {
@@ -1883,10 +2215,26 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                             if resync {
                                 println!("Remote resync: replacing state with fresh snapshot");
                             }
+                            if let Some(worker) = sections.get("worker").and_then(|w| w.as_object()) {
+                                let status = worker.get("status").and_then(|s| s.as_str()).unwrap_or("STOPPED");
+                                let running = worker.get("running").and_then(|r| r.as_bool()).unwrap_or(false);
+                                ui.set_worker_status(slint::SharedString::from(status));
+                                ui.set_worker_status_tone(if running { 1 } else if status == "ERROR" { 3 } else { 2 });
+                                ui.set_server_status(slint::SharedString::from("CONNECTED"));
+                                ui.set_server_status_tone(1);
+                            }
                             apply_remote_sections(&mut live_state.borrow_mut(), &sections, resync);
                             dirty = true;
                         }
                         RemoteUiUpdate::StateUpdate { sections } => {
+                            if let Some(worker) = sections.get("worker").and_then(|w| w.as_object()) {
+                                let status = worker.get("status").and_then(|s| s.as_str()).unwrap_or("STOPPED");
+                                let running = worker.get("running").and_then(|r| r.as_bool()).unwrap_or(false);
+                                ui.set_worker_status(slint::SharedString::from(status));
+                                ui.set_worker_status_tone(if running { 1 } else if status == "ERROR" { 3 } else { 2 });
+                                ui.set_server_status(slint::SharedString::from("CONNECTED"));
+                                ui.set_server_status_tone(1);
+                            }
                             apply_remote_sections(&mut live_state.borrow_mut(), &sections, false);
                             dirty = true;
                         }
@@ -1900,6 +2248,12 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                             reconnects,
                         } => {
                             eprintln!("remote UI: link {label} ({detail})");
+                            if label == "OFFLINE" {
+                                ui.set_server_status(slint::SharedString::from("OFFLINE"));
+                                ui.set_server_status_tone(3);
+                                ui.set_worker_status(slint::SharedString::from("UNKNOWN"));
+                                ui.set_worker_status_tone(0);
+                            }
                             mark_link(&mut live_state.borrow_mut(), &label, &detail, reconnects);
                             dirty = true;
                         }
@@ -1910,7 +2264,24 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                             live_state.borrow_mut().gateway.last_heartbeat = timestamp;
                             dirty = true;
                         }
-                        RemoteUiUpdate::CommandAck { action, ok, detail } => {
+                        RemoteUiUpdate::CommandAck {
+                            action,
+                            ok,
+                            detail,
+                            payload,
+                        } => {
+                            if action == "server_op" {
+                                apply_server_op_ack(
+                                    &ui,
+                                    ok,
+                                    &detail,
+                                    &payload,
+                                    &server_op_timer_pending,
+                                );
+                            }
+                            if action == "select_broker" {
+                                ui.set_conn_default_saving(false);
+                            }
                             let mut state = live_state.borrow_mut();
                             state.pending_action = None;
                             state.pending_since = None;

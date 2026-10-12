@@ -1277,7 +1277,7 @@ class LiveTradingService:
         from app.observable import pump_events
 
         with contextlib.suppress(Exception):
-            pump_events()
+            pump_events(allow_any_thread=True)
         blockers = self.validate() if self._status != "RUNNING" else ()
         broker_name = self.broker_name()
         connected = False

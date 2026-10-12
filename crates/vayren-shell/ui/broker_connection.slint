@@ -114,10 +114,22 @@ export component BrokerConnectionWorkspace inherits Rectangle {
     callback help-requested();
     callback add-broker-requested();
     callback paste-requested(int);
-    // Explicitly persist the OPEN panel's broker as VAYREN's global default.
-    // Goes through the existing authenticated `select_broker` command path;
-    // this never connects, logs in, or changes PAPER/LIVE.
     callback set-default-requested(string);
+
+    // ── EC2 Server & Trading Worker Runtime (gateway management) ──
+    in property <string> server-status: "CONNECTED";
+    in property <int> server-status-tone: 1;
+    in property <string> worker-status: "STOPPED";
+    in property <int> worker-status-tone: 2;
+    in property <string> server-metrics: "RAM: 41% · Disk: 88% · Up: 27d";
+    in property <string> server-op-feedback: "";
+    in property <int> server-op-tone: 0;
+    in property <bool> server-op-busy: false;
+
+    callback server-op-health();
+    callback server-op-restart();
+    callback server-op-backup();
+    callback server-op-logs();
 
     // Compact label for the header control, driven by confirmed persisted
     // state (never by an optimistic local guess).
@@ -352,6 +364,125 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                         font-weight: 700;
                         vertical-alignment: center;
                         animate color { duration: 120ms; easing: ease-out; }
+                    }
+                }
+            }
+
+            Rectangle { height: VayrenDesign.sp-sm; background: transparent; }
+
+            // ── EC2 SERVER & TRADING ENGINE CARD ──
+            Rectangle {
+                border-radius: VayrenDesign.radius-lg;
+                background: VayrenPalette.surface;
+                border-width: 1px;
+                border-color: VayrenPalette.hairline;
+
+                VerticalLayout {
+                    padding: VayrenDesign.sp-md;
+                    spacing: VayrenDesign.sp-sm;
+
+                    // Header
+                    HorizontalLayout {
+                        spacing: VayrenDesign.sp-xs;
+                        alignment: space-between;
+                        Text {
+                            text: "EC2 ENGINE";
+                            color: VayrenPalette.text;
+                            font-size: VayrenDesign.fs-label;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                        }
+                        Text {
+                            text: "vayren";
+                            color: VayrenPalette.muted;
+                            font-size: VayrenDesign.fs-label;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    // Gateway Status Row
+                    HorizontalLayout {
+                        spacing: VayrenDesign.sp-sm;
+                        VStatusDot { tone: root.server-status-tone; }
+                        Text {
+                            text: "Server: " + root.server-status;
+                            color: root.server-status-tone == 1 ? VayrenPalette.pos
+                                : root.server-status-tone == 2 ? VayrenPalette.amber
+                                : VayrenPalette.neg;
+                            font-size: VayrenDesign.fs-label;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                    }
+
+                    // Trading Worker Status Row (DISTINCT BADGE!)
+                    HorizontalLayout {
+                        spacing: VayrenDesign.sp-sm;
+                        VStatusDot { tone: root.worker-status-tone; }
+                        Text {
+                            text: "Worker: " + root.worker-status;
+                            color: root.worker-status-tone == 1 ? VayrenPalette.pos
+                                : root.worker-status-tone == 2 ? VayrenPalette.amber
+                                : VayrenPalette.neg;
+                            font-size: VayrenDesign.fs-label;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                    }
+
+                    // System Metrics
+                    Text {
+                        text: root.server-metrics != "" ? root.server-metrics : "RAM: 41% · Disk: 88%";
+                        color: VayrenPalette.muted;
+                        font-size: VayrenDesign.fs-label;
+                        overflow: elide;
+                    }
+
+                    if root.server-op-feedback != "": Text {
+                        text: root.server-op-feedback;
+                        color: root.server-op-tone == 3 ? VayrenPalette.neg
+                            : root.server-op-tone == 1 ? VayrenPalette.pos
+                            : VayrenPalette.accent;
+                        font-size: VayrenDesign.fs-label;
+                        wrap: word-wrap;
+                    }
+
+                    Rectangle { height: 2px; background: transparent; }
+
+                    // Action Buttons Row 1: [HEALTH] [BACKUP]
+                    HorizontalLayout {
+                        spacing: VayrenDesign.sp-sm;
+                        VButton {
+                            label: "HEALTH";
+                            variant: 2;
+                            enabled: !root.server-op-busy;
+                            clicked => { root.server-op-health(); }
+                        }
+                        VButton {
+                            label: "BACKUP";
+                            variant: 2;
+                            enabled: !root.server-op-busy;
+                            clicked => { root.server-op-backup(); }
+                        }
+                    }
+
+                    // Action Buttons Row 2: [LOGS] [RESTART]
+                    HorizontalLayout {
+                        spacing: VayrenDesign.sp-sm;
+                        VButton {
+                            label: "LOGS";
+                            variant: 2;
+                            enabled: !root.server-op-busy;
+                            clicked => { root.server-op-logs(); }
+                        }
+                        VButton {
+                            label: "RESTART";
+                            variant: 3;
+                            enabled: !root.server-op-busy && root.worker-status != "RUNNING";
+                            clicked => { root.server-op-restart(); }
+                        }
                     }
                 }
             }

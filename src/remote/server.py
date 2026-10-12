@@ -65,10 +65,12 @@ MUTATING_ACTIONS = (
     "select_symbol",
     "select_broker",
     "tick",
+    "server_op",
 )
 
 #: Event channels a client may subscribe to (snapshot sections + event stream).
 EVENT_CHANNELS = (
+    "worker",
     "broker",
     "market",
     "order_stream",
@@ -432,7 +434,7 @@ class RemoteServer:
             return
         self._register(conn)
         logger.info("remote: client connected (%s)", conn.connection_id)
-        sock.settimeout(1.0)
+        sock.settimeout(min(0.25, max(0.05, self._config.auth_timeout_s / 4)))
         deadline = time.monotonic() + self._config.auth_timeout_s
         try:
             while not self._stop.is_set():
@@ -598,6 +600,27 @@ class RemoteServer:
                 conn,
                 make_envelope("command_result", replay, request_id=message.request_id),
             )
+            return
+        if action == "server_op":
+            from remote.server_ops import execute_server_op
+
+            op_params = params if isinstance(params, dict) else {}
+            op_name = str(op_params.get("op", "") or "")
+            data_dir = getattr(self._gateway, "_data_dir", "/home/ubuntu/.vayren/data")
+            strat_dir = getattr(self._gateway, "_strategy_dir", "/home/ubuntu/.vayren/strategies")
+            res = execute_server_op(
+                op_name=op_name,
+                params=op_params,
+                data_dir=str(data_dir),
+                strategy_dir=str(strat_dir),
+                caller=f"{conn.role}:{conn.connection_id}",
+            )
+            if isinstance(res, dict):
+                res.setdefault("action", "server_op")
+                res.setdefault("op", op_name)
+            self._remember_command(message.request_id, res)
+            self._send(conn, make_envelope("command_result", res, request_id=message.request_id))
+            conn.needs_resync = True
             return
         headless_action = self._translate_command(action, params, message.request_id)
         if headless_action is None:

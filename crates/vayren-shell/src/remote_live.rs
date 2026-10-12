@@ -563,6 +563,7 @@ pub enum RemoteUiUpdate {
         action: String,
         ok: bool,
         detail: String,
+        payload: serde_json::Value,
     },
 }
 
@@ -707,6 +708,8 @@ pub fn spawn_remote_pump(
                     tx: &mpsc::Sender<RemoteUiUpdate>,
                     commands: &mpsc::Receiver<RemoteCommand>,
                     request_seq: &mut u64| {
+            let mut in_flight: std::collections::HashMap<String, String> =
+                std::collections::HashMap::new();
             let mut last_ping: Option<std::time::Instant> = None;
             loop {
                 // Drain queued commands before blocking on the socket: a START
@@ -721,7 +724,10 @@ pub fn spawn_remote_pump(
                             action: command.action.clone(),
                             ok: false,
                             detail: format!("send failed: {err}"),
+                            payload: serde_json::Value::Null,
                         });
+                    } else {
+                        in_flight.insert(request_id, command.action.clone());
                     }
                 }
                 match client.next(PUMP_IDLE_TIMEOUT) {
@@ -751,15 +757,20 @@ pub fn spawn_remote_pump(
                             timestamp: current_time_str(),
                         });
                     }
-                    Ok(ClientEvent::CommandResult { payload, .. }) => {
+                    Ok(ClientEvent::CommandResult {
+                        request_id,
+                        payload,
+                    }) => {
                         // The gateway's own verdict on a control command:
                         // `ok` false carries the refusal reasons, which is
                         // what clears the pending action honestly.
+                        let req_action = request_id.as_deref().and_then(|id| in_flight.remove(id));
                         let action = payload
                             .get("action")
                             .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
+                            .map(|s| s.to_string())
+                            .or(req_action)
+                            .unwrap_or_default();
                         let ok = payload.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
                         // The gateway's own verdict keys (`start_blockers` /
                         // `status_reason`); fall back through them in order so
@@ -791,15 +802,28 @@ pub fn spawn_remote_pump(
                                 if !reason.is_empty() {
                                     reason
                                 } else {
-                                    payload
-                                        .get("detail")
+                                    let err = payload
+                                        .get("error")
                                         .and_then(|v| v.as_str())
-                                        .unwrap_or("refused by backend")
-                                        .to_string()
+                                        .unwrap_or("");
+                                    if !err.is_empty() {
+                                        err.to_string()
+                                    } else {
+                                        payload
+                                            .get("detail")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("refused by backend")
+                                            .to_string()
+                                    }
                                 }
                             }
                         };
-                        let _ = tx.send(RemoteUiUpdate::CommandAck { action, ok, detail });
+                        let _ = tx.send(RemoteUiUpdate::CommandAck {
+                            action,
+                            ok,
+                            detail,
+                            payload,
+                        });
                     }
                     Ok(ClientEvent::GatewayError {
                         code,
@@ -809,10 +833,15 @@ pub fn spawn_remote_pump(
                         // A per-command refusal (NOT_AUTHORIZED, UNKNOWN_COMMAND,
                         // COMMAND_REJECTED…) arrives as an error correlated by
                         // id. Surface it so the control stops looking pending.
+                        let action = request_id
+                            .as_deref()
+                            .and_then(|id| in_flight.remove(id))
+                            .unwrap_or_default();
                         let _ = tx.send(RemoteUiUpdate::CommandAck {
-                            action: String::new(),
+                            action,
                             ok: false,
                             detail: format!("{code}: {detail}"),
+                            payload: serde_json::Value::Null,
                         });
                         if request_id.is_none() {
                             eprintln!("remote pump: gateway error [{code}]: {detail}");

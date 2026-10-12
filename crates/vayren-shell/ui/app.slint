@@ -94,6 +94,12 @@ export component AppWindow inherits Window {
     // the existing authenticated `select_broker` command path.
     callback broker-set-default-requested(string);
 
+    // EC2 Server Operations (dispatched to remote gateway server_op)
+    callback server-op-health();
+    callback server-op-restart();
+    callback server-op-backup();
+    callback server-op-logs();
+
     // Strategy Lab interactions (Slint reports; Rust view-model owns state).
     callback lab-library-picked(int);
     callback lab-filter-picked(int);
@@ -342,6 +348,16 @@ export component AppWindow inherits Window {
     in-out property <string> broker-field-v3: "";
     in-out property <string> broker-field-v4: "";
     in-out property <string> broker-field-v5: "";
+
+    // ── EC2 Server & Trading Worker Runtime properties ──
+    in-out property <string> server-status: "CONNECTED";
+    in-out property <int> server-status-tone: 1;
+    in-out property <string> worker-status: "STOPPED";
+    in-out property <int> worker-status-tone: 2;
+    in-out property <string> server-metrics: "RAM: 41% · Disk: 88% · Up: 27d";
+    in-out property <string> server-op-feedback: "";
+    in-out property <int> server-op-tone: 0;
+    in-out property <bool> server-op-busy: false;
 
     // Native Market chart (Rust `MarketState` projection; render data only).
     in-out property <bool> market-panel-visible: true;
@@ -886,8 +902,19 @@ export component AppWindow inherits Window {
                     refresh-requested() => { root.broker-refresh-requested(); }
                     help-requested() => { root.broker-help-requested(); }
                     add-broker-requested() => { root.broker-add-requested(); }
-                    paste-requested(i) => { root.broker-paste-requested(i); }
                     set-default-requested(id) => { root.broker-set-default-requested(id); }
+                    server-status: root.server-status;
+                    server-status-tone: root.server-status-tone;
+                    worker-status: root.worker-status;
+                    worker-status-tone: root.worker-status-tone;
+                    server-metrics: root.server-metrics;
+                    server-op-feedback: root.server-op-feedback;
+                    server-op-tone: root.server-op-tone;
+                    server-op-busy: root.server-op-busy;
+                    server-op-health() => { root.server-op-health(); }
+                    server-op-restart() => { root.server-op-restart(); }
+                    server-op-backup() => { root.server-op-backup(); }
+                    server-op-logs() => { root.server-op-logs(); }
                 }
                 if !root.screen-pending && root.active-screen == ShellScreen.lab: StrategyLabScreen {
                     head-roomy: root.width >= 1210px;

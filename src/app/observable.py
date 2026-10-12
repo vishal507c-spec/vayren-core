@@ -199,9 +199,9 @@ class IntervalTimer:
             self._fired.emit()
 
 
-def pump_events(limit: int = 4096) -> int:
-    """Deliver queued cross-thread emissions on the main thread."""
-    if not _is_main_thread():
+def pump_events(limit: int = 4096, allow_any_thread: bool = False) -> int:
+    """Deliver queued cross-thread emissions on the main thread (or any thread if allow_any_thread=True)."""
+    if not allow_any_thread and not _is_main_thread():
         return 0
     processed = 0
     while processed < limit:

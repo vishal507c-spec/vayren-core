@@ -233,6 +233,18 @@ def build_snapshot(live: dict[str, Any]) -> dict[str, Any]:
             "blocks_live": bool(recon.get("blocks_live", False)),
             "source": "session reconciliation verdict",
         },
+        "worker": {
+            "status": str(live.get("session_status", "STOPPED") or "STOPPED").upper(),
+            "running": str(live.get("session_status", "") or "").upper() == "RUNNING",
+            "uptime_seconds": int(live.get("elapsed_seconds", 0) or 0),
+            "started_at": str(live.get("started_at", "") or ""),
+            "stopped_at": str(live.get("stopped_at", "") or ""),
+            "strategy": str(strategy.get("name", "") if isinstance(strategy, dict) else ""),
+            "symbols_count": len(live.get("selected_symbols", []) or []),
+            "broker": str(broker.get("name", "") or ""),
+            "mode": str(live.get("mode", "PAPER") or "PAPER"),
+            "source": "server-side trading runtime",
+        },
         "system": {
             "execution_ready": bool(execution.get("ready", False)),
             "execution_reason": str(execution.get("reason", "") or ""),
