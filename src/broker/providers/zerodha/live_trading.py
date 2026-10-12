@@ -159,6 +159,11 @@ class ZerodhaTradingAdapter:
         self._connected = True
         self._last_error = ""
 
+    @property
+    def connected(self) -> bool:
+        """True when the adapter has an active, verified session."""
+        return self._connected
+
     def disconnect(self) -> None:
         self._connected = False
 

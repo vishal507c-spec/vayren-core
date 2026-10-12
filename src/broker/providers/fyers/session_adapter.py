@@ -119,6 +119,11 @@ class FyersSessionAdapter:
     def order_ws_state(self) -> str:
         return self._order_ws_state
 
+    @property
+    def connected(self) -> bool:
+        """True when the adapter has an active, verified session."""
+        return self._connected
+
     # ── lifecycle ──────────────────────────────────────────────────────
 
     def connect(self) -> None:

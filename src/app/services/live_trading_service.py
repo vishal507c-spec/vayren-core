@@ -375,6 +375,13 @@ class LiveTradingService:
            the account health check is not in a FAILED state.
         """
         if self._account_confirmed:
+            view = self._broker_view()
+            if isinstance(view, dict) and view.get("connected"):
+                current_acc = str(view.get("account_id", "") or "").strip()
+                if self._confirmed_account_id and current_acc and current_acc != self._confirmed_account_id:
+                    self._account_confirmed = False
+                    self._confirmed_account_id = ""
+                    return False
             return True
         view = self._broker_view()
         if isinstance(view, dict) and view.get("connected"):
@@ -1733,6 +1740,11 @@ class LiveTradingService:
                 "elapsed_seconds": elapsed_sec,
             },
             "signals_generated": self._signals_generated,
+            "brokers": (
+                [dict(b) for b in self._broker_manager.snapshot().get("brokers", []) if isinstance(b, dict)]
+                if getattr(self, "_broker_manager", None) is not None
+                else []
+            ),
             "orders_submitted": orders_submitted,
             "orders_pending": orders_pending,
             "orders_filled": orders_filled,

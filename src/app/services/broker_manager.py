@@ -379,7 +379,12 @@ class BrokerManager:
             return False
         # Authoritative session verification:
         # Never report connected based solely on saved credentials or cached status.
-        if adapter is None or not getattr(adapter, "connected", False):
+        if adapter is None:
+            return False
+        is_conn = getattr(adapter, "connected", None)
+        if is_conn is None:
+            is_conn = getattr(adapter, "_connected", False)
+        if not is_conn:
             return False
         conn_check = checks.get("connection")
         if conn_check is not None and conn_check != "READY":
