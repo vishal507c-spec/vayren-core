@@ -18,6 +18,7 @@ use std::sync::{
 use std::time::{Duration, Instant};
 use vayren_shell::broker_connection::{BrokerWorkspace, ConnectionState};
 use vayren_shell::lab;
+use vayren_shell::live;
 use vayren_shell::market;
 use vayren_shell::portfolio;
 use vayren_shell::python_bridge::{BackendCommand, BackendResponse, PythonBackend};
