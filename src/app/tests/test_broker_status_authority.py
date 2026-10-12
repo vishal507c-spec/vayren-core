@@ -6,7 +6,8 @@ Verifies the 10 required scenarios:
 3. Authentication times out: neither continues showing Connected.
 4. Old connected snapshot arrives after newer disconnect: stays Disconnected.
 5. Broker reconnects successfully: both update consistently.
-6. Credential check succeeds but execution adapter is disconnected: distinction clear, no LIVE readiness.
+6. Credential check succeeds but execution adapter is disconnected: distinction clear,
+   no LIVE readiness.
 7. Broker account ID changes: previous confirmation and stale capital invalidated.
 8. Broker status is missing or unknown: fails closed.
 9. Default broker changes: status from previous broker does not leak.
@@ -15,11 +16,8 @@ Verifies the 10 required scenarios:
 
 from __future__ import annotations
 
-import time
 from typing import Any
 from unittest.mock import MagicMock
-
-import pytest
 
 from app.services.broker_manager import BrokerManager, BrokerStatus
 from app.services.live_trading_service import LiveTradingService
@@ -30,6 +28,7 @@ from remote.snapshot import build_snapshot
 
 class FakeAdapter:
     """Mock adapter exposing the real adapter contract."""
+
     def __init__(self, connected: bool = True, account_id: str = "XV29244") -> None:
         self._connected = connected
         self._account_id = account_id
@@ -155,7 +154,10 @@ def test_scenario_3_authentication_timeout_neither_shows_connected(tmp_path: Any
     snap = service.snapshot()
     assert snap["broker"]["connected"] is False
     assert snap["broker"]["status"] == "DISCONNECTED"
-    assert "timed out" in snap["broker"]["reason"].lower() or "unreachable" in snap["broker"]["reason"].lower()
+    assert (
+        "timed out" in snap["broker"]["reason"].lower()
+        or "unreachable" in snap["broker"]["reason"].lower()
+    )
     assert service.is_account_confirmed() is False
 
     remote_snap = build_snapshot(snap)

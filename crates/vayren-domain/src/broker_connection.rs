@@ -371,9 +371,21 @@ impl BrokerWorkspace {
                 let r_lower = r.to_lowercase();
                 if r.is_empty() {
                     "Connection failed. Please retry.".to_string()
-                } else if r_lower.contains("timeout") || r_lower.contains("timed out") || r_lower.contains("unreachable") {
-                    format!("Connection timed out: {}. Check network/venue status and retry.", r)
-                } else if r_lower.contains("auth") || r_lower.contains("credential") || r_lower.contains("expired") || r_lower.contains("invalid") || r_lower.contains("401") || r_lower.contains("rejected") {
+                } else if r_lower.contains("timeout")
+                    || r_lower.contains("timed out")
+                    || r_lower.contains("unreachable")
+                {
+                    format!(
+                        "Connection timed out: {}. Check network/venue status and retry.",
+                        r
+                    )
+                } else if r_lower.contains("auth")
+                    || r_lower.contains("credential")
+                    || r_lower.contains("expired")
+                    || r_lower.contains("invalid")
+                    || r_lower.contains("401")
+                    || r_lower.contains("rejected")
+                {
                     format!(
                         "Authentication failed: {}. Check your credentials and try again.",
                         r

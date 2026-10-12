@@ -177,7 +177,11 @@ pub fn apply_remote_sections(state: &mut LiveState, sections: &serde_json::Value
             || r_lower.contains("failed")
             || r_lower.contains("rejected")
             || r_lower.contains("expired");
-        let is_conn = if has_failure || status == "DISCONNECTED" || status == "ERROR" || status == "CONNECTION FAILED" {
+        let is_conn = if has_failure
+            || status == "DISCONNECTED"
+            || status == "ERROR"
+            || status == "CONNECTION FAILED"
+        {
             false
         } else {
             sections

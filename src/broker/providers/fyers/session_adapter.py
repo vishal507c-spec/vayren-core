@@ -152,7 +152,8 @@ class FyersSessionAdapter:
         if not isinstance(body, dict) or body.get("s") != "ok":
             return False, "session check failed"
 
-        # If order WS is enabled and degraded, attempt reconnection without failing the verified REST session
+        # If order WS is enabled and degraded, attempt reconnection without failing
+        # the verified REST session
         if self._enable_order_ws and self._order_ws_state in (STATE_ERROR, STATE_DISCONNECTED):
             try:
                 self._start_order_ws()

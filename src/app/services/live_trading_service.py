@@ -31,7 +31,7 @@ import os
 import time
 from collections import deque
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -378,25 +378,31 @@ class LiveTradingService:
             view = self._broker_view()
             if isinstance(view, dict) and view.get("connected"):
                 current_acc = str(view.get("account_id", "") or "").strip()
-                if self._confirmed_account_id and current_acc and current_acc != self._confirmed_account_id:
+                if (
+                    self._confirmed_account_id
+                    and current_acc
+                    and current_acc != self._confirmed_account_id
+                ):
                     self._account_confirmed = False
                     self._confirmed_account_id = ""
                     return False
             return True
         view = self._broker_view()
-        if isinstance(view, dict) and view.get("connected"):
-            acc_id = str(view.get("account_id", "") or "").strip()
-            if acc_id:
-                manager = self._broker_manager
-                if manager is not None:
-                    name = self.broker_name()
-                    state = manager.state(name) or {}
-                    checks = state.get("checks", {})
-                    if isinstance(checks, dict):
-                        if str(checks.get("account", "") or "").startswith("FAILED"):
-                            return False
-                return True
-        return False
+        if not (isinstance(view, dict) and view.get("connected")):
+            return False
+        acc_id = str(view.get("account_id", "") or "").strip()
+        if not acc_id:
+            return False
+        manager = self._broker_manager
+        if manager is not None:
+            name = self.broker_name()
+            state = manager.state(name) or {}
+            checks = state.get("checks", {})
+            if isinstance(checks, dict) and str(checks.get("account", "") or "").startswith(
+                "FAILED"
+            ):
+                return False
+        return True
 
     def confirm_account(self, account_id: str = "") -> None:
         """Operator or system confirmation of the live trading account."""
@@ -1002,14 +1008,15 @@ class LiveTradingService:
     def _validate_uncached(self) -> tuple[str, ...]:
         blockers: list[str] = []
         record = None
-        strat_def = None
         if not self._config.strategy_name:
             blockers.append("no strategy selected")
         else:
             record = self._resolve_strategy_record(self._config.strategy_name)
             if record is None:
                 available = list(self.available_strategies())
-                avail_str = f" (available: {', '.join(available)})" if available else " (none registered)"
+                avail_str = (
+                    f" (available: {', '.join(available)})" if available else " (none registered)"
+                )
                 blockers.append(f"strategy not found: {self._config.strategy_name}{avail_str}")
             else:
                 try:
@@ -1241,10 +1248,11 @@ class LiveTradingService:
             self.state_changed.emit()
             return False, (str(exc),)
         now = time.time()
-        now_dt = datetime.now()
-        self._started_at = now_dt.strftime("%H:%M:%S")
+        tz_ist = timezone(timedelta(hours=5, minutes=30))
+        now_ist = datetime.fromtimestamp(now, tz=tz_ist)
+        self._started_at = now_ist.isoformat(timespec="seconds")  # e.g. '2026-10-13T10:25:33+05:30'
         self._stopped_at = ""
-        self._session_start_epoch = now
+        self._session_start_epoch = now  # authoritative epoch for client-side elapsed timer
         self._session_stop_epoch = None
         self._elapsed_seconds = 0
         self._signals_generated = 0
@@ -1312,14 +1320,14 @@ class LiveTradingService:
         self.invalidate_validation_cache()
         self._tick_count = 0
         now = time.time()
-        now_dt = datetime.now()
+        tz_ist = timezone(timedelta(hours=5, minutes=30))
         if self._session_start_epoch is not None:
             self._elapsed_seconds = max(0, int(now - self._session_start_epoch))
             self._session_stop_epoch = now
-            self._stopped_at = now_dt.strftime("%H:%M:%S")
+            self._stopped_at = datetime.fromtimestamp(now, tz=tz_ist).isoformat(timespec="seconds")
             self._session_start_epoch = None
         elif self._started_at and not self._stopped_at:
-            self._stopped_at = now_dt.strftime("%H:%M:%S")
+            self._stopped_at = datetime.fromtimestamp(now, tz=tz_ist).isoformat(timespec="seconds")
         self._persist()
         self._record_activity(
             self._config.strategy_name or "session",
@@ -1788,11 +1796,16 @@ class LiveTradingService:
                 "stopped_at": stopped_str,
                 "duration": duration_str,
                 "elapsed_seconds": elapsed_sec,
+                "start_epoch": self._session_start_epoch,  # float Unix epoch or None
             },
             "signals_generated": self._signals_generated,
             "brokers": (
-                [dict(b) for b in self._broker_manager.snapshot().get("brokers", []) if isinstance(b, dict)]
-                if getattr(self, "_broker_manager", None) is not None
+                [
+                    dict(b)
+                    for b in self._broker_manager.snapshot().get("brokers", [])
+                    if isinstance(b, dict)
+                ]
+                if self._broker_manager is not None
                 else []
             ),
             "orders_submitted": orders_submitted,
@@ -1842,7 +1855,9 @@ class LiveTradingService:
         record = self._resolve_strategy_record(self._config.strategy_name)
         if record is None:
             available = list(self.available_strategies())
-            avail_str = f" (available: {', '.join(available)})" if available else " (none registered)"
+            avail_str = (
+                f" (available: {', '.join(available)})" if available else " (none registered)"
+            )
             raise LiveConfigError(f"strategy not found: {self._config.strategy_name}{avail_str}")
         try:
             compiled = self._compiled(record)
@@ -2625,7 +2640,10 @@ class LiveTradingService:
                 {
                     "name": "Account Confirmed",
                     "status": "NOT READY",
-                    "reason": f"account {view['account_id']} unconfirmed (broker disconnected or health check failed)",
+                    "reason": (
+                        f"account {view['account_id']} unconfirmed "
+                        "(broker disconnected or health check failed)"
+                    ),
                 }
             )
         else:
@@ -2761,7 +2779,9 @@ class LiveTradingService:
         record = self._resolve_strategy_record(name)
         if record is None:
             available = list(self.available_strategies())
-            avail_str = f" (available: {', '.join(available)})" if available else " (none registered)"
+            avail_str = (
+                f" (available: {', '.join(available)})" if available else " (none registered)"
+            )
             return False, f"strategy not found: {name}{avail_str}"
         try:
             self._compiled(record)
@@ -2951,6 +2971,7 @@ class LiveTradingService:
             "stopped_at": self._stopped_at,
             "elapsed_seconds": self._elapsed_seconds,
             "signals_generated": self._signals_generated,
+            "start_epoch": self._session_start_epoch,  # float Unix epoch or None
         }
         try:
             self._store.save(data)

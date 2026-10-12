@@ -387,9 +387,7 @@ class BrokerManager:
         if not is_conn:
             return False
         conn_check = checks.get("connection")
-        if conn_check is not None and conn_check != "READY":
-            return False
-        return True
+        return conn_check is None or conn_check == "READY"
 
     def stop_worker(self) -> None:
         if not self._stopping:
@@ -453,8 +451,13 @@ class BrokerManager:
         ok, reason = flow.validate(config[spec.key_field], token)
         if not ok:
             r_lower = reason.lower()
-            if any(k in r_lower for k in ("unreachable", "timeout", "timed out", "oserror", "connection refused")):
-                self._set_status(spec.broker_id, BrokerStatus.DISCONNECTED, f"venue unreachable: {reason}")
+            if any(
+                k in r_lower
+                for k in ("unreachable", "timeout", "timed out", "oserror", "connection refused")
+            ):
+                self._set_status(
+                    spec.broker_id, BrokerStatus.DISCONNECTED, f"venue unreachable: {reason}"
+                )
             elif self._try_auto_auth(spec, config):
                 return
             else:
@@ -655,11 +658,22 @@ class BrokerManager:
         except Exception as exc:
             text = str(exc)
             text_lower = text.lower()
-            if any(k in text_lower for k in ("unreachable", "timeout", "timed out", "oserror", "connection refused")):
-                self._set_status(spec.broker_id, BrokerStatus.DISCONNECTED, f"venue unreachable: {text}")
-            elif "credentials" in str(getattr(exc, "code", "")).lower() or "auth" in text_lower or "401" in text_lower:
+            if any(
+                k in text_lower
+                for k in ("unreachable", "timeout", "timed out", "oserror", "connection refused")
+            ):
                 self._set_status(
-                    spec.broker_id, BrokerStatus.LOGIN_REQUIRED, f"venue rejected the session: {text}"
+                    spec.broker_id, BrokerStatus.DISCONNECTED, f"venue unreachable: {text}"
+                )
+            elif (
+                "credentials" in str(getattr(exc, "code", "")).lower()
+                or "auth" in text_lower
+                or "401" in text_lower
+            ):
+                self._set_status(
+                    spec.broker_id,
+                    BrokerStatus.LOGIN_REQUIRED,
+                    f"venue rejected the session: {text}",
                 )
             else:
                 self._set_status(spec.broker_id, BrokerStatus.ERROR, f"connection failed: {text}")

@@ -613,7 +613,9 @@ def _live_action(
     reason = _LIVE_ACTION_ERRORS.get("start")
     if reason and snapshot.get("session_status") != "RUNNING":
         snapshot["status_reason"] = reason
-    if (_ARMED[0] or getattr(service, "is_live_confirmed", lambda: False)()) and snapshot.get("session_status") != "RUNNING":
+    if (_ARMED[0] or getattr(service, "is_live_confirmed", lambda: False)()) and snapshot.get(
+        "session_status"
+    ) != "RUNNING":
         snapshot["action_note"] = note or "armed — confirm LIVE consent on START"
         # The operator has confirmed LIVE consent, so the snapshot drops exactly those lines.
         snapshot["start_blockers"] = [
@@ -2145,9 +2147,7 @@ def run_headless_backend(args: argparse.Namespace) -> int:
                                 snapshot["status_raw"] = "LOGIN_REQUIRED"
                             else:
                                 snapshot["status_raw"] = "ERROR"
-                            snapshot["reason"] = (
-                                st.get("reason") or "Connection failed"
-                            )
+                            snapshot["reason"] = st.get("reason") or "Connection failed"
                         else:
                             snapshot["status_raw"] = "CONNECTED"
                             snapshot["reason"] = st.get("reason") or "Connected and verified."

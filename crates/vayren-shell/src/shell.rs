@@ -24,13 +24,12 @@ use crate::{
     LiveFill, LiveFooter, LiveGate, LiveKv, LiveMarket, LiveMarketData, LiveOrder,
     LivePipelineStep, LivePosition, LiveRemoteGateway, LiveSelectedStock, LiveSetup, LiveStat,
     LiveSymbolRow, LiveWatchlistRow, LiveWebSocket, MarketCandle, MarketIndicator, MarketMarker,
-    MarketPlotSeg, MarketPopupRow, MarketRayLevel, MarketSettingsRow, MarketTick,
-    MarketTimeframe, MarketTradeContext, MarketWatchRow, PortfolioAlloc, PortfolioFill,
-    PortfolioGate, PortfolioKpi, PortfolioOrder, PortfolioPosition, PortfolioRisk,
-    ProgressStepView, RankWindow, ResearchCompareRow, ResearchConfigGroup, ResearchEvidenceDim,
-    ResearchEvidenceWhy, ResearchExperimentRow, ResearchField, ResearchKv, ResearchKvGroup,
-    ResearchMetric, ResearchRobustRow, ResearchSignalRow, ResearchStrategyRow, ResearchTradeRow,
-    ShellScreen,
+    MarketPlotSeg, MarketPopupRow, MarketRayLevel, MarketSettingsRow, MarketTick, MarketTimeframe,
+    MarketTradeContext, MarketWatchRow, PortfolioAlloc, PortfolioFill, PortfolioGate, PortfolioKpi,
+    PortfolioOrder, PortfolioPosition, PortfolioRisk, ProgressStepView, RankWindow,
+    ResearchCompareRow, ResearchConfigGroup, ResearchEvidenceDim, ResearchEvidenceWhy,
+    ResearchExperimentRow, ResearchField, ResearchKv, ResearchKvGroup, ResearchMetric,
+    ResearchRobustRow, ResearchSignalRow, ResearchStrategyRow, ResearchTradeRow, ShellScreen,
 };
 use slint::ComponentHandle;
 #[cfg(test)]
@@ -3866,8 +3865,14 @@ pub fn wire_live(ui: &AppWindow, state: Rc<RefCell<LiveState>>) {
     wire_unit!(on_live_arm_requested, LiveState::arm);
     wire_unit!(on_live_halt_requested, LiveState::halt);
     wire_unit!(on_live_confirm_requested, LiveState::confirm_live);
-    wire_unit!(on_live_confirm_open_requested, LiveState::open_confirm_dialog);
-    wire_unit!(on_live_confirm_cancel_requested, LiveState::close_confirm_dialog);
+    wire_unit!(
+        on_live_confirm_open_requested,
+        LiveState::open_confirm_dialog
+    );
+    wire_unit!(
+        on_live_confirm_cancel_requested,
+        LiveState::close_confirm_dialog
+    );
     wire_unit!(on_live_inspector_toggled, LiveState::toggle_inspector);
     {
         // CLEAR EVENTS is UI-hygiene only: it drops the rendered event

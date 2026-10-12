@@ -1,14 +1,15 @@
 """Regression tests for ACCOUNT_CONFIRMED live gate and operator consent lifecycle.
 
 Reproduces the exact screenshot scenario:
-- Operator confirmation is TRUE, but broker account is unconfirmed -> reports ACCOUNT_CONFIRMED, drops consent blocker.
+- Operator confirmation is TRUE, but broker account is unconfirmed ->
+  reports ACCOUNT_CONFIRMED, drops consent blocker.
 - Operator confirmation is TRUE, and broker account IS confirmed -> all gates pass.
 - Operator confirmation is FALSE, and account is unconfirmed -> reports BOTH blockers.
 """
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -33,7 +34,9 @@ def service(tmp_path) -> LiveTradingService:
     return svc
 
 
-def test_screenshot_scenario_operator_confirmed_true_account_unconfirmed(service: LiveTradingService) -> None:
+def test_screenshot_scenario_operator_confirmed_true_account_unconfirmed(
+    service: LiveTradingService,
+) -> None:
     """When operator confirms live execution but the account is unconfirmed,
 
     start must be refused with 'live gate off: ACCOUNT_CONFIRMED', and the
@@ -53,14 +56,19 @@ def test_screenshot_scenario_operator_confirmed_true_account_unconfirmed(service
         "last_sync": "",
     }
 
-    with patch.object(service, "_resolve_live_venue_id", return_value="fyers-live"), \
-         patch.object(service, "_broker_view", return_value=broker_view), \
-         patch.object(service, "broker_name", return_value="fyers"), \
-         patch.object(service, "available_symbols", return_value=("NSE:KAYNES",)), \
-         patch.object(service, "available_timeframes", return_value=("5m",)), \
-         patch.object(service, "_compiled", return_value=None), \
-         patch.object(service, "_universe_quotes", return_value=[{"symbol": "NSE:KAYNES", "status": "AVAILABLE"}]):
-
+    with (
+        patch.object(service, "_resolve_live_venue_id", return_value="fyers-live"),
+        patch.object(service, "_broker_view", return_value=broker_view),
+        patch.object(service, "broker_name", return_value="fyers"),
+        patch.object(service, "available_symbols", return_value=("NSE:KAYNES",)),
+        patch.object(service, "available_timeframes", return_value=("5m",)),
+        patch.object(service, "_compiled", return_value=None),
+        patch.object(
+            service,
+            "_universe_quotes",
+            return_value=[{"symbol": "NSE:KAYNES", "status": "AVAILABLE"}],
+        ),
+    ):
         ok, blockers = service.start(confirmed=True)
         assert not ok
         # ACCOUNT_CONFIRMED must be reported
@@ -94,16 +102,21 @@ def test_operator_confirmed_true_and_account_confirmed(service: LiveTradingServi
         "last_sync": "",
     }
 
-    with patch.object(service, "_resolve_live_venue_id", return_value="fyers-live"), \
-         patch.object(service, "_broker_view", return_value=broker_view), \
-         patch.object(service, "broker_name", return_value="fyers"), \
-         patch.object(service, "available_symbols", return_value=("NSE:KAYNES",)), \
-         patch.object(service, "available_timeframes", return_value=("5m",)), \
-         patch.object(service, "_compiled", return_value=None), \
-         patch.object(service, "_universe_quotes", return_value=[{"symbol": "NSE:KAYNES", "status": "AVAILABLE"}]), \
-         patch.object(service, "_live_available_funds", return_value=500000.0), \
-         patch.object(service, "_build_sessions"):
-
+    with (
+        patch.object(service, "_resolve_live_venue_id", return_value="fyers-live"),
+        patch.object(service, "_broker_view", return_value=broker_view),
+        patch.object(service, "broker_name", return_value="fyers"),
+        patch.object(service, "available_symbols", return_value=("NSE:KAYNES",)),
+        patch.object(service, "available_timeframes", return_value=("5m",)),
+        patch.object(service, "_compiled", return_value=None),
+        patch.object(
+            service,
+            "_universe_quotes",
+            return_value=[{"symbol": "NSE:KAYNES", "status": "AVAILABLE"}],
+        ),
+        patch.object(service, "_live_available_funds", return_value=500000.0),
+        patch.object(service, "_build_sessions"),
+    ):
         assert service.is_account_confirmed()
         ok, blockers = service.start(confirmed=True)
         assert ok
@@ -128,14 +141,19 @@ def test_operator_unconfirmed_and_account_unconfirmed(service: LiveTradingServic
         "last_sync": "",
     }
 
-    with patch.object(service, "_resolve_live_venue_id", return_value="fyers-live"), \
-         patch.object(service, "_broker_view", return_value=broker_view), \
-         patch.object(service, "broker_name", return_value="fyers"), \
-         patch.object(service, "available_symbols", return_value=("NSE:KAYNES",)), \
-         patch.object(service, "available_timeframes", return_value=("5m",)), \
-         patch.object(service, "_compiled", return_value=None), \
-         patch.object(service, "_universe_quotes", return_value=[{"symbol": "NSE:KAYNES", "status": "AVAILABLE"}]):
-
+    with (
+        patch.object(service, "_resolve_live_venue_id", return_value="fyers-live"),
+        patch.object(service, "_broker_view", return_value=broker_view),
+        patch.object(service, "broker_name", return_value="fyers"),
+        patch.object(service, "available_symbols", return_value=("NSE:KAYNES",)),
+        patch.object(service, "available_timeframes", return_value=("5m",)),
+        patch.object(service, "_compiled", return_value=None),
+        patch.object(
+            service,
+            "_universe_quotes",
+            return_value=[{"symbol": "NSE:KAYNES", "status": "AVAILABLE"}],
+        ),
+    ):
         assert not service.is_account_confirmed()
         assert not service.is_live_confirmed()
 
@@ -146,7 +164,7 @@ def test_operator_unconfirmed_and_account_unconfirmed(service: LiveTradingServic
 
 
 def test_manual_account_confirmation_workflow(service: LiveTradingService) -> None:
-    """Test explicit account-confirmation workflow (confirm_account / clear_account_confirmation)."""
+    """Test explicit account-confirmation workflow (confirm/clear)."""
     assert not service.is_account_confirmed()
 
     service.confirm_account("OPERATOR_ACC_99")
@@ -192,8 +210,10 @@ def test_account_confirmation_persists_across_service_recreation(tmp_path) -> No
     assert svc2.is_account_confirmed()
 
 
-def test_checklist_gate_honestly_reflects_account_confirmation(service: LiveTradingService) -> None:
-    """Checklist gate 'Account Confirmed' reports NOT READY when unconfirmed and READY when confirmed."""
+def test_checklist_gate_honestly_reflects_account_confirmation(
+    service: LiveTradingService,
+) -> None:
+    """Checklist gate 'Account Confirmed' reports honestly based on state."""
     # Unconfirmed broker view
     unconfirmed_view = {
         "id": "fyers",
@@ -248,15 +268,19 @@ def test_capital_unavailable_blocks_live_start(service: LiveTradingService) -> N
         "configured": True,
         "funds": {},  # No funds reported
     }
-    with patch.object(service, "_resolve_live_venue_id", return_value="fyers-live"), \
-         patch.object(service, "_broker_view", return_value=broker_view), \
-         patch.object(service, "broker_name", return_value="fyers"), \
-         patch.object(service, "available_symbols", return_value=("NSE:KAYNES",)), \
-         patch.object(service, "available_timeframes", return_value=("5m",)), \
-         patch.object(service, "_compiled", return_value=None), \
-         patch.object(service, "_universe_quotes", return_value=[{"symbol": "NSE:KAYNES", "status": "AVAILABLE"}]), \
-         patch.object(service, "_live_available_funds", return_value=None):
-
+    with (
+        patch.object(service, "_resolve_live_venue_id", return_value="fyers-live"),
+        patch.object(service, "_broker_view", return_value=broker_view),
+        patch.object(service, "broker_name", return_value="fyers"),
+        patch.object(service, "available_symbols", return_value=("NSE:KAYNES",)),
+        patch.object(service, "available_timeframes", return_value=("5m",)),
+        patch.object(service, "_compiled", return_value=None),
+        patch.object(
+            service,
+            "_universe_quotes",
+            return_value=[{"symbol": "NSE:KAYNES", "status": "AVAILABLE"}],
+        ),
+        patch.object(service, "_live_available_funds", return_value=None),
+    ):
         blockers = service.validate()
         assert any("broker capital unavailable" in b for b in blockers)
-

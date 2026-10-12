@@ -661,6 +661,10 @@ pub struct LiveState {
     pub started_at: String,
     pub stopped_at: String,
     pub session_duration: String,
+    /// Unix epoch seconds when the strategy started (authoritative backend timestamp).
+    /// `None` when never started, unavailable, or session is terminal.
+    /// Used for client-side elapsed timer computation in `project()`.
+    pub start_epoch_secs: Option<f64>,
     /// Truthful counter facts.
     pub signals_generated: usize,
     pub orders_submitted: usize,
@@ -760,6 +764,7 @@ impl Default for LiveState {
             started_at: "—".into(),
             stopped_at: "—".into(),
             session_duration: "—".into(),
+            start_epoch_secs: None,
             signals_generated: 0,
             orders_submitted: 0,
             orders_pending: 0,
@@ -949,8 +954,7 @@ impl LiveState {
     /// Check if a blocker string represents the operator confirmation / consent / ACCOUNT_CONFIRMED gate.
     pub fn is_confirmation_blocker(b: &str) -> bool {
         let lower = b.to_lowercase();
-        lower.contains("live confirmation required")
-            || lower.contains("operator consent")
+        lower.contains("live confirmation required") || lower.contains("operator consent")
     }
 
     /// Deduplicate blockers list while normalizing prefixes like "START blocked:" and whitespace.
@@ -975,7 +979,11 @@ impl LiveState {
             }
         }
         let reason_norm = normalize(status_reason);
-        if !reason_norm.is_empty() && !out.iter().any(|existing| normalize(existing) == reason_norm) {
+        if !reason_norm.is_empty()
+            && !out
+                .iter()
+                .any(|existing| normalize(existing) == reason_norm)
+        {
             let parts: Vec<&str> = status_reason.split(';').map(|s| s.trim()).collect();
             let all_present = parts.iter().all(|p| {
                 let p_norm = normalize(p);
@@ -1003,9 +1011,7 @@ impl LiveState {
         if self.host_mode {
             if let Some(blockers) = &self.backend_start_blockers {
                 return blockers.is_empty()
-                    || blockers
-                        .iter()
-                        .all(|s| Self::is_confirmation_blocker(s));
+                    || blockers.iter().all(|s| Self::is_confirmation_blocker(s));
             }
         }
         false
@@ -1463,6 +1469,19 @@ impl LiveState {
         expired
     }
 
+    /// Compute elapsed seconds since the strategy start epoch using `wall_now_secs`.
+    /// Returns `None` when no valid start epoch is held or the clock appears to
+    /// have gone backwards (protects against bogus display values).
+    /// `wall_now_secs` is passed in rather than read from `SystemTime` so that
+    /// tests can inject any clock value without side-effects.
+    pub fn elapsed_secs_since_start(&self, wall_now_secs: f64) -> Option<u64> {
+        let epoch = self.start_epoch_secs?;
+        if epoch <= 0.0 || wall_now_secs < epoch {
+            return None;
+        }
+        Some((wall_now_secs - epoch).max(0.0) as u64)
+    }
+
     pub fn stop(&mut self) {
         if !self.bridge_wired {
             self.action_note = Some(NO_BACKEND_NOTE.into());
@@ -1686,6 +1705,23 @@ impl LiveState {
             if !dur.is_empty() {
                 self.session_duration = dur;
             }
+            // Authoritative backend start epoch for client-side elapsed timer.
+            // Accept only a valid positive epoch; never invent one.
+            if let Some(epoch) = st.get("start_epoch").and_then(|e| e.as_f64()) {
+                if epoch > 0.0 {
+                    self.start_epoch_secs = Some(epoch);
+                }
+            }
+            // Clear the live epoch when the backend confirms the session is terminal
+            // (STOPPED / ERROR / HALTED).  `started_at` + `session_duration` hold
+            // the final facts for display; the elapsed counter must not keep ticking.
+            let is_terminal = matches!(
+                str_of(v, "session_status").as_str(),
+                "STOPPED" | "ERROR" | "HALTED"
+            );
+            if is_terminal && !matches!(self.session, SessionStatus::Running) {
+                self.start_epoch_secs = None;
+            }
         } else if let Some(s) = v.get("strategy") {
             let started = str_of(s, "started_at");
             if !started.is_empty() && (self.started_at.is_empty() || self.started_at == "—") {
@@ -1865,14 +1901,25 @@ impl LiveState {
             self.store_total = Some(self.symbols.len());
         }
         if let Some(list) = v.get("available_timeframes").and_then(|a| a.as_array()) {
-            let parsed: Vec<String> = list.iter().map(value_to_text).filter(|s| !s.is_empty()).collect();
+            let parsed: Vec<String> = list
+                .iter()
+                .map(value_to_text)
+                .filter(|s| !s.is_empty())
+                .collect();
             if !parsed.is_empty() {
                 self.timeframes = parsed;
             }
         }
         if self.timeframes.is_empty() {
             self.timeframes = vec![
-                "1m".into(), "3m".into(), "5m".into(), "15m".into(), "30m".into(), "45m".into(), "1h".into(), "1d".into(),
+                "1m".into(),
+                "3m".into(),
+                "5m".into(),
+                "15m".into(),
+                "30m".into(),
+                "45m".into(),
+                "1h".into(),
+                "1d".into(),
             ];
         }
         let tf_candidate = v
@@ -3142,6 +3189,157 @@ fn strategy_rows(state: &LiveState) -> Vec<KvRow> {
     rows
 }
 
+/// Build KV rows showing the live runtime timer and session timing facts.
+/// Called from `project()` and appended to `strategy_rows`.
+fn runtime_rows(state: &LiveState) -> Vec<KvRow> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let wall_now_secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0);
+
+    let status_label = match state.session {
+        SessionStatus::Starting => "STARTING",
+        SessionStatus::Running => "RUNNING",
+        SessionStatus::Stopping => "STOPPING",
+        SessionStatus::Stopped => "STOPPED",
+        SessionStatus::Halted => "HALTED",
+        SessionStatus::Error => "ERROR",
+    };
+    let status_tone = state.session.badge();
+
+    let mut rows = vec![KvRow {
+        key: "RUNTIME STATUS".into(),
+        value: status_label.into(),
+        tone: status_tone,
+    }];
+
+    // Strategy Started At (IST display)
+    let started_display = if !state.started_at.is_empty() && state.started_at != "—" {
+        if state.started_at.contains('T') {
+            format_ist_display(&state.started_at)
+        } else {
+            state.started_at.clone()
+        }
+    } else {
+        "Start time unavailable".into()
+    };
+    rows.push(KvRow {
+        key: "STRATEGY STARTED AT".into(),
+        value: started_display,
+        tone: 0,
+    });
+
+    // Running For: live elapsed counter when RUNNING, final duration when terminal
+    let running_for = match state.session {
+        SessionStatus::Running => {
+            if let Some(elapsed) = state.elapsed_secs_since_start(wall_now_secs) {
+                format_elapsed(elapsed)
+            } else if !state.started_at.is_empty() && state.started_at != "—" {
+                "Calculating…".into()
+            } else {
+                "Start time unavailable".into()
+            }
+        }
+        SessionStatus::Stopped | SessionStatus::Error | SessionStatus::Halted => {
+            if !state.session_duration.is_empty() && state.session_duration != "—" {
+                state.session_duration.clone()
+            } else {
+                "—".into()
+            }
+        }
+        _ => "—".into(),
+    };
+    rows.push(KvRow {
+        key: "RUNNING FOR".into(),
+        value: running_for,
+        tone: if matches!(state.session, SessionStatus::Running) {
+            1
+        } else {
+            0
+        },
+    });
+
+    // Last Stopped At (only when we have a value)
+    if !state.stopped_at.is_empty() && state.stopped_at != "—" {
+        let stopped_display = if state.stopped_at.contains('T') {
+            format_ist_display(&state.stopped_at)
+        } else {
+            state.stopped_at.clone()
+        };
+        rows.push(KvRow {
+            key: "LAST STOPPED AT".into(),
+            value: stopped_display,
+            tone: 0,
+        });
+    }
+
+    // Last Runtime Duration (when stopped and we have a backend-computed final duration)
+    if matches!(
+        state.session,
+        SessionStatus::Stopped | SessionStatus::Error | SessionStatus::Halted
+    ) && !state.session_duration.is_empty()
+        && state.session_duration != "—"
+    {
+        rows.push(KvRow {
+            key: "LAST RUNTIME DURATION".into(),
+            value: state.session_duration.clone(),
+            tone: 0,
+        });
+    }
+
+    rows
+}
+
+/// Format a Unix elapsed-seconds count as `00h 12m 35s`.
+fn format_elapsed(secs: u64) -> String {
+    let h = secs / 3600;
+    let m = (secs % 3600) / 60;
+    let s = secs % 60;
+    format!("{:02}h {:02}m {:02}s", h, m, s)
+}
+
+/// Parse an IST ISO-8601 string and reformat for human display (best-effort, no chrono dep).
+/// Input:  `"2026-10-13T10:25:33+05:30"`
+/// Output: `"13 Oct 2026, 10:25:33 IST"`
+/// Falls back to returning the input string unchanged on parse failure.
+fn format_ist_display(iso: &str) -> String {
+    if iso.len() < 10 {
+        return iso.to_string();
+    }
+    // Strip the timezone suffix (everything after the last '+' or '-' after position 10)
+    let date_time_part = if let Some(pos) = iso[10..].find('+') {
+        &iso[..10 + pos]
+    } else if let Some(pos) = iso[10..].rfind('-') {
+        &iso[..10 + pos]
+    } else {
+        iso
+    };
+    let parts: Vec<&str> = date_time_part.splitn(2, 'T').collect();
+    if parts.len() != 2 {
+        return iso.to_string();
+    }
+    let date_parts: Vec<&str> = parts[0].splitn(3, '-').collect();
+    let time_part = parts[1];
+    if date_parts.len() != 3 {
+        return iso.to_string();
+    }
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let month_num: usize = date_parts[1].parse().unwrap_or(0);
+    let month_name = if month_num >= 1 && month_num <= 12 {
+        MONTHS[month_num - 1]
+    } else {
+        date_parts[1]
+    };
+    format!(
+        "{} {} {}, {} IST",
+        date_parts[2], month_name, date_parts[0], time_part
+    )
+}
+
 fn position_rows(state: &LiveState) -> Vec<KvRow> {
     match &state.position_facts {
         Some(facts) => [
@@ -3447,7 +3645,10 @@ pub fn project(state: &LiveState) -> LiveView {
     } else {
         let r = state.broker.reason.trim();
         let r_lower = r.to_lowercase();
-        if r_lower.contains("timeout") || r_lower.contains("timed out") || r_lower.contains("unreachable") {
+        if r_lower.contains("timeout")
+            || r_lower.contains("timed out")
+            || r_lower.contains("unreachable")
+        {
             ("○ Timeout (Venue Unreachable)".into(), 3)
         } else if state.broker.connected == Some(false) {
             if !r.is_empty() {
@@ -4728,7 +4929,11 @@ pub fn project(state: &LiveState) -> LiveView {
         symbol_filter: state.symbol_filter.clone(),
         gates,
         arm_note,
-        strategy_rows: strategy_rows(state),
+        strategy_rows: {
+            let mut sr = strategy_rows(state);
+            sr.extend(runtime_rows(state));
+            sr
+        },
         position_rows: position_rows(state),
         risk_rows: risk_rows(state),
         broker_rows: broker_rows(state),
@@ -6836,7 +7041,8 @@ mod tests {
         st.backend_start_blockers = Some(vec![
             "live confirmation required (explicit operator consent)".to_string(),
         ]);
-        st.status_reason = "START blocked: live confirmation required (explicit operator consent)".to_string();
+        st.status_reason =
+            "START blocked: live confirmation required (explicit operator consent)".to_string();
 
         // 1. Venue gates must be ready because only confirmation remains
         assert!(st.venue_gates_ready());
@@ -6848,7 +7054,11 @@ mod tests {
         assert!(view.setup.venue_blockers.is_empty());
         // Deduplication removes redundant status_reason and normalizes
         assert_eq!(view.setup.blockers.len(), 1);
-        assert!(!view.setup.blockers.iter().any(|b| b.starts_with("START blocked:")));
+        assert!(!view
+            .setup
+            .blockers
+            .iter()
+            .any(|b| b.starts_with("START blocked:")));
 
         // 3. Confirming live satisfies operator consent and dispatches confirmed command
         st.confirm_live();
@@ -6865,9 +7075,7 @@ mod tests {
         st.live_confirmed = true;
 
         // Backend reports ACCOUNT_CONFIRMED gate off after operator gave consent
-        st.backend_start_blockers = Some(vec![
-            "live gate off: ACCOUNT_CONFIRMED".to_string(),
-        ]);
+        st.backend_start_blockers = Some(vec!["live gate off: ACCOUNT_CONFIRMED".to_string()]);
         st.status_reason = "START blocked: live gate off: ACCOUNT_CONFIRMED".to_string();
 
         // Operator confirmation is retained (banner is green)
@@ -6880,7 +7088,9 @@ mod tests {
         let blockers = st.start_blockers();
         assert_eq!(blockers.len(), 1);
         assert_eq!(blockers[0], "live gate off: ACCOUNT_CONFIRMED");
-        assert!(!blockers.iter().any(|b| b.contains("consent") || b.contains("confirmation required")));
+        assert!(!blockers
+            .iter()
+            .any(|b| b.contains("consent") || b.contains("confirmation required")));
     }
 
     #[test]
@@ -6895,5 +7105,230 @@ mod tests {
         assert_eq!(view.bar.broker_tone, 3);
         assert_eq!(view.bar.conn_label, "○ Timeout (Venue Unreachable)");
         assert_eq!(view.bar.conn_tone, 3);
+    }
+
+    // ── runtime timer tests ──────────────────────────────────────────────
+
+    #[test]
+    fn test_apply_snapshot_sets_start_epoch_from_session_timing() {
+        let mut st = LiveState::default();
+        assert!(st.start_epoch_secs.is_none());
+        st.apply_snapshot(&serde_json::json!({
+            "session_status": "RUNNING",
+            "session_timing": {
+                "started_at": "2026-10-13T10:25:33+05:30",
+                "stopped_at": "",
+                "duration": "",
+                "start_epoch": 1760415933.0_f64
+            }
+        }));
+        assert_eq!(st.start_epoch_secs, Some(1760415933.0));
+    }
+
+    #[test]
+    fn test_apply_snapshot_ignores_zero_or_negative_epoch() {
+        let mut st = LiveState::default();
+        st.apply_snapshot(&serde_json::json!({
+            "session_status": "RUNNING",
+            "session_timing": {
+                "started_at": "2026-10-13T10:25:33+05:30",
+                "start_epoch": 0.0_f64
+            }
+        }));
+        assert!(
+            st.start_epoch_secs.is_none(),
+            "zero epoch must not be accepted"
+        );
+
+        st.apply_snapshot(&serde_json::json!({
+            "session_status": "RUNNING",
+            "session_timing": {
+                "started_at": "2026-10-13T10:25:33+05:30",
+                "start_epoch": -1.0_f64
+            }
+        }));
+        assert!(
+            st.start_epoch_secs.is_none(),
+            "negative epoch must not be accepted"
+        );
+    }
+
+    #[test]
+    fn test_apply_snapshot_missing_start_epoch_does_not_invent_one() {
+        let mut st = LiveState::default();
+        st.apply_snapshot(&serde_json::json!({
+            "session_status": "RUNNING",
+            "session_timing": {
+                "started_at": "2026-10-13T10:25:33+05:30"
+                // no start_epoch key
+            }
+        }));
+        assert!(st.start_epoch_secs.is_none());
+    }
+
+    #[test]
+    fn test_apply_snapshot_clears_epoch_on_terminal_status() {
+        let mut st = LiveState::default();
+        // First, simulate RUNNING with a valid epoch
+        st.apply_snapshot(&serde_json::json!({
+            "session_status": "RUNNING",
+            "session_timing": {
+                "started_at": "2026-10-13T10:25:33+05:30",
+                "start_epoch": 1760415933.0_f64
+            }
+        }));
+        assert!(st.start_epoch_secs.is_some());
+
+        // Now simulate STOPPED — status changes to Stopped first via session_status parsing
+        st.apply_snapshot(&serde_json::json!({
+            "session_status": "STOPPED",
+            "session_timing": {
+                "started_at": "2026-10-13T10:25:33+05:30",
+                "stopped_at": "2026-10-13T11:00:00+05:30",
+                "duration": "Running for: 00:34:27",
+                "start_epoch": 1760415933.0_f64
+            }
+        }));
+        // After STOPPED is applied, start_epoch_secs should be cleared
+        assert!(
+            st.start_epoch_secs.is_none(),
+            "start_epoch_secs must be None after STOPPED confirmation"
+        );
+    }
+
+    #[test]
+    fn test_elapsed_secs_since_start_computes_correctly() {
+        let mut st = LiveState::default();
+        st.start_epoch_secs = Some(1000.0);
+
+        assert_eq!(st.elapsed_secs_since_start(1000.0), Some(0));
+        assert_eq!(st.elapsed_secs_since_start(1045.7), Some(45));
+        assert_eq!(st.elapsed_secs_since_start(4600.0), Some(3600));
+    }
+
+    #[test]
+    fn test_elapsed_secs_none_when_no_epoch() {
+        let st = LiveState::default();
+        assert!(st.start_epoch_secs.is_none());
+        assert_eq!(st.elapsed_secs_since_start(9999999.0), None);
+    }
+
+    #[test]
+    fn test_elapsed_secs_none_when_clock_goes_backwards() {
+        let mut st = LiveState::default();
+        st.start_epoch_secs = Some(5000.0);
+        // wall_now_secs < epoch → None (clock skew / stale epoch guard)
+        assert_eq!(st.elapsed_secs_since_start(4999.0), None);
+    }
+
+    #[test]
+    fn test_format_elapsed_formats_correctly() {
+        assert_eq!(format_elapsed(0), "00h 00m 00s");
+        assert_eq!(format_elapsed(45), "00h 00m 45s");
+        assert_eq!(format_elapsed(755), "00h 12m 35s");
+        assert_eq!(format_elapsed(3661), "01h 01m 01s");
+        assert_eq!(format_elapsed(36000), "10h 00m 00s");
+    }
+
+    #[test]
+    fn test_format_ist_display_parses_iso() {
+        assert_eq!(
+            format_ist_display("2026-10-13T10:25:33+05:30"),
+            "13 Oct 2026, 10:25:33 IST"
+        );
+        assert_eq!(
+            format_ist_display("2026-01-05T00:00:00+05:30"),
+            "05 Jan 2026, 00:00:00 IST"
+        );
+    }
+
+    #[test]
+    fn test_format_ist_display_falls_back_for_legacy_time_string() {
+        // Pre-feature HH:MM:SS strings should pass through unchanged
+        let legacy = "10:25:33";
+        assert_eq!(format_ist_display(legacy), legacy);
+    }
+
+    #[test]
+    fn test_runtime_rows_running_state_shows_calculated_elapsed() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let mut st = LiveState::default();
+        st.session = SessionStatus::Running;
+        let now_secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+        // Set epoch 755 seconds in the past → "00h 12m 35s" (approximately)
+        st.start_epoch_secs = Some(now_secs - 755.0);
+        st.started_at = "2026-10-13T10:25:33+05:30".into();
+
+        let rows = runtime_rows(&st);
+        let running_for = rows.iter().find(|r| r.key == "RUNNING FOR").unwrap();
+        // Value should be approximately 00h 12m 35s (within a few seconds of test execution)
+        assert!(
+            running_for.value.ends_with('s'),
+            "expected a formatted elapsed time, got: {}",
+            running_for.value
+        );
+        assert_eq!(running_for.tone, 1, "Running state should have tone=1");
+    }
+
+    #[test]
+    fn test_runtime_rows_stopped_state_shows_last_duration() {
+        let mut st = LiveState::default();
+        st.session = SessionStatus::Stopped;
+        st.session_duration = "Running for: 00:34:27".into();
+        st.started_at = "2026-10-13T10:25:33+05:30".into();
+        st.stopped_at = "2026-10-13T11:00:00+05:30".into();
+
+        let rows = runtime_rows(&st);
+        let running_for = rows.iter().find(|r| r.key == "RUNNING FOR").unwrap();
+        assert_eq!(running_for.value, "Running for: 00:34:27");
+        assert_eq!(running_for.tone, 0, "Stopped state should have tone=0");
+
+        let last_dur = rows
+            .iter()
+            .find(|r| r.key == "LAST RUNTIME DURATION")
+            .unwrap();
+        assert_eq!(last_dur.value, "Running for: 00:34:27");
+
+        let stopped_at = rows.iter().find(|r| r.key == "LAST STOPPED AT").unwrap();
+        assert_eq!(stopped_at.value, "13 Oct 2026, 11:00:00 IST");
+    }
+
+    #[test]
+    fn test_backend_restart_new_epoch_overrides_old() {
+        let mut st = LiveState::default();
+        // First run
+        st.apply_snapshot(&serde_json::json!({
+            "session_status": "RUNNING",
+            "session_timing": {
+                "started_at": "2026-10-13T09:00:00+05:30",
+                "start_epoch": 1760410200.0_f64
+            }
+        }));
+        assert_eq!(st.start_epoch_secs, Some(1760410200.0));
+
+        // Session stops
+        st.apply_snapshot(&serde_json::json!({
+            "session_status": "STOPPED",
+            "session_timing": {
+                "started_at": "2026-10-13T09:00:00+05:30",
+                "stopped_at": "2026-10-13T09:30:00+05:30",
+                "duration": "Running for: 00:30:00",
+                "start_epoch": 1760410200.0_f64
+            }
+        }));
+        assert!(st.start_epoch_secs.is_none());
+
+        // Backend restarts with new epoch — new epoch takes effect
+        st.apply_snapshot(&serde_json::json!({
+            "session_status": "RUNNING",
+            "session_timing": {
+                "started_at": "2026-10-13T10:25:33+05:30",
+                "start_epoch": 1760415933.0_f64
+            }
+        }));
+        assert_eq!(st.start_epoch_secs, Some(1760415933.0));
     }
 }

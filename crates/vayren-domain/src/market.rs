@@ -4804,7 +4804,6 @@ mod tests {
         }
     }
 
-
     fn scale_bars() -> Vec<MarketBar> {
         (0..100)
             .map(|i| {

@@ -4,21 +4,14 @@ and gateway/broker separation.
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-ROOT = Path(__file__).resolve().parents[3]
-if str(ROOT / "src") not in sys.path:
-    sys.path.insert(0, str(ROOT / "src"))
-
-import pytest
-
-from broker import BrokerStatus
+import app.headless as headless
 from app.services.broker_manager import BrokerManager
 from app.services.live_trading_service import LiveTradingService
-import app.headless as headless
+from broker import BrokerStatus
 from remote.snapshot import build_snapshot
 
 
@@ -80,8 +73,8 @@ def test_timeout_during_activation_sets_disconnected_with_unreachable_reason(tmp
         venue_id="fyers-live",
         venue_unregister=None,
     )
-    bm = BrokerManager(str(tmp_path), specs={"fyers": spec})
-    bm._activate(spec, {"api_key": "test_key"}, "test_token", "login ok")
+    bm = BrokerManager(str(tmp_path), specs={"fyers": spec})  # type: ignore[arg-type]
+    bm._activate(spec, {"api_key": "test_key"}, "test_token", "login ok")  # type: ignore[arg-type]
 
     state = bm.state("fyers")
     assert state["status"] == BrokerStatus.DISCONNECTED
@@ -98,9 +91,7 @@ def test_session_check_timeout_does_not_mask_as_expired_or_login_required(tmp_pa
     flow = SimpleNamespace(
         validate=MagicMock(return_value=(False, "unreachable: The read operation timed out."))
     )
-    session_store = SimpleNamespace(
-        load_token=MagicMock(return_value={"access_token": "token123"})
-    )
+    session_store = SimpleNamespace(load_token=MagicMock(return_value={"access_token": "token123"}))
 
     spec = SimpleNamespace(
         broker_id="fyers",
@@ -115,7 +106,7 @@ def test_session_check_timeout_does_not_mask_as_expired_or_login_required(tmp_pa
         venue_unregister=None,
         auto_authenticate=None,
     )
-    bm = BrokerManager(str(tmp_path), specs={"fyers": spec})
+    bm = BrokerManager(str(tmp_path), specs={"fyers": spec})  # type: ignore[arg-type]
     bm._states["fyers"] = {
         "status": BrokerStatus.CONNECTED,
         "adapter": DummyAdapter(connected=True),
@@ -127,7 +118,7 @@ def test_session_check_timeout_does_not_mask_as_expired_or_login_required(tmp_pa
     bm._config_values = MagicMock(return_value={"api_key": "test_key"})
     bm._session_store = MagicMock(return_value=session_store)
 
-    bm._job_session_check(spec)
+    bm._job_session_check(spec)  # type: ignore[arg-type]
 
     state = bm.state("fyers")
     assert state["status"] == BrokerStatus.DISCONNECTED
