@@ -182,7 +182,24 @@ pub struct RemoteClient {
     state: ConnectionState,
     /// Highest `seq` delivered — the resume cursor for reconnects.
     pub last_seq: Option<i64>,
+    /// Role the gateway granted in `welcome` (`trade` / `read`). The shell
+    /// reads this to decide whether a control command is even admissible, so
+    /// a `read` credential shows an honest refusal instead of a dead button.
+    pub role: String,
 }
+
+impl RemoteClient {
+    /// Whether this connection may send control commands. Mirrors the
+    /// gateway's own `RemoteRole.allows_command` (server-side check stays
+    /// authoritative — this only keeps the UI from offering what will be
+    /// refused).
+    pub fn role_allows_commands(&self) -> bool {
+        self.role == ROLE_TRADE
+    }
+}
+
+/// Role string the gateway grants a credential permitted to command.
+pub const ROLE_TRADE: &str = "trade";
 
 impl RemoteClient {
     /// Reject anything that is not a WebSocket URL before a socket opens.
@@ -211,9 +228,16 @@ impl RemoteClient {
             socket,
             state: ConnectionState::Connecting,
             last_seq: None,
+            role: String::new(),
         };
         client.send_envelope(&msg::hello(token))?;
         let welcome = client.await_type("welcome", timeout)?;
+        // Record the granted role BEFORE the socket is usable for commands:
+        // the shell gates START/STOP/HALT on it, and an unparsed welcome must
+        // fail closed (empty role ⇒ no commands).
+        if let ClientEvent::Welcome { role, .. } = &welcome {
+            client.role = role.clone();
+        }
         let snapshot = client.await_type("snapshot", timeout)?;
         client.state = ConnectionState::Connected;
         set_read_timeout(&mut client.socket, None)

@@ -18,11 +18,11 @@
 //!   never a CLI flag (process lists are world-readable), never logged, and
 //!   dropped right after the `hello` frame on the initial connect; reconnects
 //!   re-resolve it instead of retaining it.
-//! - The shell NEVER sends a command: [`RemoteClient::send_command`] has no
-//!   call site in this crate. START/LIVE/BUY/SELL/CANCEL/MODIFY cannot be
-//!   emitted from the UI. [`LiveState::bridge_wired`] stays `false`, so the
-//!   model itself keeps every trading control inert (`can_start` is false and
-//!   pressing START only records "No execution backend attached.").
+//! - Command authority comes from the gateway's own `welcome` role: a
+//!   `trade` credential makes START/STOP/HALT live (each command still
+//!   re-authorized server-side and refused with its exact reason), a `read`
+//!   credential leaves them honestly inert. The gateway authorizes every
+//!   command independently — the UI gate is presentation, never authority.
 //! - Remote sections are translated into the LOCAL live-snapshot shape and
 //!   applied through the existing [`LiveState::apply_snapshot`] — one mapping,
 //!   no second projection, no UI change. Unknown stays unknown: absent keys
@@ -305,8 +305,8 @@ pub fn apply_remote_sections(state: &mut LiveState, sections: &serde_json::Value
         );
     }
     if let Some(blockers) = sections.get("blockers").and_then(|v| v.as_array()) {
-        // The backend's own start verdict, shown verbatim; `bridge_wired`
-        // stays false so START can never enable from the remote client.
+        // The backend's own start verdict, shown verbatim — it is what
+        // decides readiness, not the link's role.
         let honest: Vec<serde_json::Value> = blockers
             .iter()
             .filter_map(|v| v.as_str())
@@ -319,9 +319,12 @@ pub fn apply_remote_sections(state: &mut LiveState, sections: &serde_json::Value
     }
 
     state.apply_snapshot(&serde_json::Value::Object(translated));
-    // Read-only by construction: the snapshot must never flip the model
-    // into a commanding state, whatever the backend reported.
-    state.bridge_wired = false;
+    // Command capability is the ROLE the gateway granted, never an optimistic
+    // guess: `bridge_wired` drives `can_start`/`can_stop`/`can_halt`, so a
+    // `read` credential must stay false (controls honestly inert) while a
+    // `trade` credential becomes true (controls live). The gateway re-checks
+    // the role on every command, so this is presentation, not authority.
+    state.bridge_wired = state.remote_commands_allowed;
     if !state.host_mode {
         state.host_mode = true;
     }
@@ -339,7 +342,8 @@ pub fn apply_remote_sections(state: &mut LiveState, sections: &serde_json::Value
     }
 
     // Order-stream fact rides as a readiness gate (extra gates never affect
-    // the five named venue gates; START stays disabled via bridge_wired).
+    // the five named venue gates; the backend's own `start_blockers` verdict
+    // is what gates readiness).
     if !section(sections, "order_stream").is_null() {
         let status = text_at(sections, "order_stream", "status");
         state.gates.retain(|g| g.name != ORDER_STREAM_GATE);
@@ -410,7 +414,8 @@ pub fn push_remote_event(state: &mut LiveState, name: &str, payload: &serde_json
 
 /// Honest pre-snapshot state: the demo defaults claim CONNECTED/STREAMING
 /// transports, which would be a fabricated link before the first server
-/// snapshot lands. `bridge_wired` stays false (read-only controls).
+/// snapshot lands. `bridge_wired` stays false until the gateway grants a
+/// command-capable role (see [`apply_role`]).
 pub fn init_remote_state() -> LiveState {
     let mut state = LiveState::default();
     state.host_mode = true;
@@ -489,15 +494,46 @@ pub fn mark_link(state: &mut LiveState, label: &str, detail: &str, reconnects: u
     if label == "CONNECTED" {
         state.gateway.connected = true;
         state.gateway.last_error.clear();
+        state.bridge_wired = state.remote_commands_allowed;
     } else {
         state.gateway.connected = false;
         state.gateway.last_error = detail.to_string();
+        // A dropped link can carry no command: fail the controls closed until
+        // the pump reconnects, so START never offers a request that would sit
+        // undelivered in the queue.
+        state.bridge_wired = false;
+        if state.pending_action.is_some() {
+            state.pending_action = None;
+            state.pending_since = None;
+            state.action_note = Some(format!("gateway link lost ({label}) — request not delivered"));
+        }
     }
+}
+
+/// Apply the role the gateway granted in `welcome`.
+///
+/// `trade` makes the trading controls live; `read` (or anything unexpected)
+/// leaves them honestly inert. The gateway authorizes every command on its own
+/// — this only decides what the UI offers, and a `read` credential still gets
+/// a visible refusal rather than a silently dead button.
+pub fn apply_role(state: &mut LiveState, role: &str) {
+    state.remote_commands_allowed = role == vayren_remote_client::ROLE_TRADE;
+    state.bridge_wired = state.remote_commands_allowed;
+    state.action_note = if state.remote_commands_allowed {
+        None
+    } else {
+        Some("read-only credential — START/STOP/HALT are disabled on this link".into())
+    };
 }
 
 /// One UI-thread arrival from the pump thread.
 #[derive(Debug)]
 pub enum RemoteUiUpdate {
+    /// The role the gateway granted (`trade` / `read`). Drives whether the
+    /// trading controls are live or honestly inert.
+    Role {
+        role: String,
+    },
     Snapshot {
         sections: serde_json::Value,
         resync: bool,
@@ -518,6 +554,22 @@ pub enum RemoteUiUpdate {
         rtt_ms: Option<f64>,
         timestamp: String,
     },
+    /// The gateway answered a control command (`command_result`): `ok` plus
+    /// the reason text when it was refused. This is what clears a pending
+    /// START/STOP/HALT and paints the real outcome.
+    CommandAck {
+        action: String,
+        ok: bool,
+        detail: String,
+    },
+}
+
+/// A control command the UI thread wants the pump thread to send. The pump
+/// owns the socket, so intents cross as messages rather than direct calls.
+#[derive(Debug, Clone)]
+pub struct RemoteCommand {
+    pub action: String,
+    pub params: serde_json::Value,
 }
 
 /// Blocking initial connect: hello → welcome → snapshot → subscribe.
@@ -552,11 +604,11 @@ pub fn initial_connect(url: &str) -> Result<(RemoteClient, String, serde_json::V
 /// Each attempt re-resolves the token (never retained, never logged) and runs
 /// the deadline-bounded [`initial_connect`]. On success the first snapshot is
 /// forwarded, the link is marked CONNECTED, and the live client is handed to
-/// [`spawn_remote_pump`] — which owns all later reconnects — before this
-/// thread exits. On failure the UI holds OFFLINE with the enrollment or
-/// transport note while the loop retries with backoff, so a credential
-/// provisioned after first launch (or a gateway restart) connects with zero
-/// restart and zero manual step. This function never sends a command.
+/// [`spawn_remote_pump`] — which owns all later reconnects and every command
+/// send — before this thread exits. On failure the UI holds OFFLINE with the
+/// enrollment or transport note while the loop retries with backoff, so a
+/// credential provisioned after first launch (or a gateway restart) connects
+/// with zero restart and zero manual step.
 fn current_time_str() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let secs = SystemTime::now()
@@ -573,6 +625,7 @@ fn current_time_str() -> String {
 pub fn spawn_remote_bootstrap(
     url: String,
     tx: mpsc::Sender<RemoteUiUpdate>,
+    commands: mpsc::Receiver<RemoteCommand>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         let mut backoff = bootstrap_backoff();
@@ -585,6 +638,7 @@ pub fn spawn_remote_bootstrap(
             });
             match initial_connect(&url) {
                 Ok((client, role, sections)) => {
+                    let _ = tx.send(RemoteUiUpdate::Role { role: role.clone() });
                     let _ = tx.send(RemoteUiUpdate::Link {
                         label: "CONNECTED".to_string(),
                         detail: format!("role {role}"),
@@ -598,7 +652,7 @@ pub fn spawn_remote_bootstrap(
                         sections,
                         resync: false,
                     });
-                    spawn_remote_pump(client, url, tx);
+                    spawn_remote_pump(client, url, tx, commands);
                     return;
                 }
                 Err(err) => {
@@ -628,17 +682,46 @@ pub fn spawn_remote_bootstrap(
 /// (the gateway replays missed events or answers `resync: true`).
 /// This function never sends a command and never reads the token store
 /// except to re-resolve for a fresh `hello` after a drop.
+/// Own the connected client on a worker thread: pump arrivals to the UI,
+/// send control commands the UI asked for, heartbeat on idle, and reconnect
+/// with `subscribe{last_seq}` on drops (the gateway replays missed events or
+/// answers `resync: true`). Command sends reuse one monotonic `request_id` per
+/// action so a gateway-side retry can never double-apply. The token is
+/// re-resolved only for a fresh `hello` after a drop.
 pub fn spawn_remote_pump(
     mut client: RemoteClient,
     url: String,
     tx: mpsc::Sender<RemoteUiUpdate>,
+    commands: mpsc::Receiver<RemoteCommand>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         let mut backoff = Backoff::new(Duration::from_secs(1), Duration::from_secs(30));
         let mut reconnects: usize = 0;
-        let pump = |client: &mut RemoteClient, tx: &mpsc::Sender<RemoteUiUpdate>| {
+        // Monotonic per-action counter: a retry reuses the SAME id (the
+        // gateway replays its cached result) while a second click gets a new
+        // one (it is a genuinely new intent).
+        let mut request_seq: u64 = 0;
+        let pump = |client: &mut RemoteClient,
+                    tx: &mpsc::Sender<RemoteUiUpdate>,
+                    commands: &mpsc::Receiver<RemoteCommand>,
+                    request_seq: &mut u64| {
             let mut last_ping: Option<std::time::Instant> = None;
             loop {
+                // Drain queued commands before blocking on the socket: a START
+                // pressed between two frames must not wait for the next one.
+                while let Ok(command) = commands.try_recv() {
+                    *request_seq += 1;
+                    let request_id = format!("ui-{}", *request_seq);
+                    if let Err(err) =
+                        client.send_command(&command.action, command.params.clone(), &request_id)
+                    {
+                        let _ = tx.send(RemoteUiUpdate::CommandAck {
+                            action: command.action.clone(),
+                            ok: false,
+                            detail: format!("send failed: {err}"),
+                        });
+                    }
+                }
                 match client.next(PUMP_IDLE_TIMEOUT) {
                     Ok(ClientEvent::Snapshot { sections, resync }) => {
                         let _ = tx.send(RemoteUiUpdate::Snapshot { sections, resync });
@@ -666,13 +749,71 @@ pub fn spawn_remote_pump(
                             timestamp: current_time_str(),
                         });
                     }
-                    Ok(ClientEvent::CommandResult { .. }) => {
-                        // The shell never sends commands; a result here
-                        // would mean a protocol violation — log, don't act.
-                        eprintln!("remote pump: unexpected command_result (none was sent)");
+                    Ok(ClientEvent::CommandResult { payload, .. }) => {
+                        // The gateway's own verdict on a control command:
+                        // `ok` false carries the refusal reasons, which is
+                        // what clears the pending action honestly.
+                        let action = payload
+                            .get("action")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let ok = payload
+                            .get("ok")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+                        // The gateway's own verdict keys (`start_blockers` /
+                        // `status_reason`); fall back through them in order so
+                        // the operator sees the service's exact reason.
+                        let detail = if ok {
+                            String::new()
+                        } else {
+                            let join = |key: &str| {
+                                payload
+                                    .get(key)
+                                    .and_then(|v| v.as_array())
+                                    .map(|list| {
+                                        list.iter()
+                                            .filter_map(|v| v.as_str())
+                                            .collect::<Vec<_>>()
+                                            .join("; ")
+                                    })
+                                    .unwrap_or_default()
+                            };
+                            let blockers = join("start_blockers");
+                            if !blockers.is_empty() {
+                                blockers
+                            } else {
+                                let reason = payload
+                                    .get("status_reason")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
+                                if !reason.is_empty() {
+                                    reason
+                                } else {
+                                    payload
+                                        .get("detail")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("refused by backend")
+                                        .to_string()
+                                }
+                            }
+                        };
+                        let _ = tx.send(RemoteUiUpdate::CommandAck { action, ok, detail });
                     }
-                    Ok(ClientEvent::GatewayError { code, detail, .. }) => {
-                        eprintln!("remote pump: gateway error [{code}]: {detail}");
+                    Ok(ClientEvent::GatewayError { code, detail, request_id }) => {
+                        // A per-command refusal (NOT_AUTHORIZED, UNKNOWN_COMMAND,
+                        // COMMAND_REJECTED…) arrives as an error correlated by
+                        // id. Surface it so the control stops looking pending.
+                        let _ = tx.send(RemoteUiUpdate::CommandAck {
+                            action: String::new(),
+                            ok: false,
+                            detail: format!("{code}: {detail}"),
+                        });
+                        if request_id.is_none() {
+                            eprintln!("remote pump: gateway error [{code}]: {detail}");
+                        }
                     }
                     Ok(ClientEvent::Closed) => break,
                     Ok(ClientEvent::Welcome { .. }) => {}
@@ -691,7 +832,7 @@ pub fn spawn_remote_pump(
                 }
             }
         };
-        pump(&mut client, &tx);
+        pump(&mut client, &tx, &commands, &mut request_seq);
         // Reconnect loop: re-resolve the token per attempt (never retained),
         // resume from the last delivered seq, honour resync when asked.
         loop {
@@ -712,13 +853,19 @@ pub fn spawn_remote_pump(
                 }
             };
             match RemoteClient::connect(&url, &token, HANDSHAKE_TIMEOUT) {
-                Ok((mut fresh, _, _)) => {
+                Ok((mut fresh, welcome, _)) => {
                     drop(token);
                     backoff.reset();
                     if fresh.subscribe(&[], last_seq).is_err() {
                         continue;
                     }
                     client = fresh;
+                    let _ = tx.send(RemoteUiUpdate::Role {
+                        role: match &welcome {
+                            ClientEvent::Welcome { role, .. } => role.clone(),
+                            _ => String::new(),
+                        },
+                    });
                     let _ = tx.send(RemoteUiUpdate::Link {
                         label: "CONNECTED".to_string(),
                         detail: "resumed".to_string(),
@@ -728,7 +875,7 @@ pub fn spawn_remote_pump(
                         rtt_ms: None,
                         timestamp: current_time_str(),
                     });
-                    pump(&mut client, &tx);
+                    pump(&mut client, &tx, &commands, &mut request_seq);
                 }
                 Err(err) => {
                     drop(token);
@@ -797,9 +944,11 @@ mod tests {
         // BLOCKED strategy ⇒ stopped session with the backend reason kept.
         assert_eq!(state.session, vayren_domain::live::SessionStatus::Stopped);
         assert_eq!(state.status_reason, "no strategy selected");
-        // Read-only: the snapshot can never arm the commanding path.
+        // No role granted yet ⇒ every control stays honestly inert.
+        assert!(!state.remote_commands_allowed);
         assert!(!state.bridge_wired);
         assert!(!state.can_start());
+        assert!(!state.start_clickable());
         assert_eq!(
             state.backend_start_blockers.as_deref(),
             Some(&["no strategy selected".to_string()][..])
@@ -824,6 +973,28 @@ mod tests {
     }
 
     #[test]
+    fn a_dropped_link_fails_the_controls_closed_and_clears_pending() {
+        let mut state = init_remote_state();
+        apply_role(&mut state, "trade");
+        apply_remote_sections(&mut state, &sections(), false);
+        assert!(state.bridge_wired);
+        state.start();
+        assert_eq!(state.pending_action.as_deref(), Some("start"));
+        // Link drops mid-request: the command cannot be delivered.
+        mark_link(&mut state, "RECONNECTING", "link lost", 1);
+        assert!(!state.bridge_wired, "a dead link must not offer START");
+        assert!(!state.start_clickable());
+        assert!(
+            state.pending_action.is_none(),
+            "an undelivered request must not strand STARTING…"
+        );
+        assert!(state.action_note.is_some());
+        // Reconnect restores command capability without a new role.
+        mark_link(&mut state, "CONNECTED", "resumed", 1);
+        assert!(state.bridge_wired);
+    }
+
+    #[test]
     fn unknown_sections_leave_state_untouched() {
         let mut state = init_remote_state();
         apply_remote_sections(&mut state, &sections(), false);
@@ -841,9 +1012,56 @@ mod tests {
         apply_remote_sections(&mut state, &live, false);
         assert_eq!(state.session, vayren_domain::live::SessionStatus::Running);
         assert_eq!(state.broker.connected, Some(true));
-        // Even RUNNING never enables local commanding from the remote UI.
+        // Without a granted role the controls stay inert even while RUNNING.
         assert!(!state.bridge_wired);
         assert!(!state.can_start());
+    }
+
+    #[test]
+    fn a_trade_role_makes_the_controls_live_and_a_read_role_does_not() {
+        // THE regression: the packaged remote client used to force
+        // `bridge_wired = false`, which made `can_start()` permanently false,
+        // which disabled the START button — so the control could never be
+        // pressed and never reported why. Authority now comes from the
+        // gateway's own granted role.
+        let mut state = init_remote_state();
+        apply_role(&mut state, "trade");
+        assert!(state.remote_commands_allowed);
+        assert!(state.bridge_wired);
+
+        let mut read_only = init_remote_state();
+        apply_role(&mut read_only, "read");
+        assert!(!read_only.remote_commands_allowed);
+        assert!(
+            !read_only.bridge_wired,
+            "a read credential must leave trading controls inert"
+        );
+        assert!(
+            read_only.action_note.is_some(),
+            "read-only must explain itself instead of looking broken"
+        );
+
+        // An unknown/absent role fails closed.
+        let mut unknown = init_remote_state();
+        apply_role(&mut unknown, "");
+        assert!(!unknown.bridge_wired);
+    }
+
+    #[test]
+    fn granted_role_survives_later_snapshots() {
+        let mut state = init_remote_state();
+        apply_role(&mut state, "trade");
+        apply_remote_sections(&mut state, &sections(), false);
+        assert!(
+            state.bridge_wired,
+            "a later snapshot must not revoke the granted role"
+        );
+        // …and readiness stays fail-closed on the backend's own verdict.
+        assert!(!state.can_start(), "backend still reports blockers");
+        assert!(
+            state.start_clickable(),
+            "the operator can press and get the exact reason"
+        );
     }
 
     #[test]
@@ -1016,11 +1234,15 @@ mod tests {
         assert!(!state.gateway.connected);
         assert!(
             !state.bridge_wired,
-            "Remote mode must never wire commanding bridge on missing token"
+            "no proven credential means no command capability"
         );
         assert!(
             !state.can_start(),
-            "START must remain blocked in remote mode"
+            "START must remain blocked without a proven credential"
+        );
+        assert!(
+            !state.start_clickable(),
+            "and must not offer a click that could never be delivered"
         );
 
         // 2. Transport down / gateway failure: held OFFLINE with retry timetable
@@ -1030,7 +1252,7 @@ mod tests {
         assert!(!state.gateway.connected);
         assert!(
             !state.bridge_wired,
-            "Remote mode must never wire commanding bridge on transport failure"
+            "a dropped link cannot deliver a command"
         );
 
         // 3. User attempts start while offline: rejected with honest notice, never executes locally

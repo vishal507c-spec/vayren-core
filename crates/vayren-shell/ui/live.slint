@@ -50,6 +50,7 @@ export struct LiveSetup {
     session-label: string,
     session-tone: int,
     can-start: bool,
+    start-clickable: bool,
     can-stop: bool,
     can-arm: bool,
     needs-live-confirm: bool,
@@ -776,6 +777,11 @@ export component LiveScreen inherits Rectangle {
     // START BLOCKED, and an unblocked stopped session reads READY TO START.
     // Never optimistic: nothing here is set by a click.
     property <string> start-verdict: root.setup.can-stop ? "● RUNNING" : (root.blockers.length > 0 ? "✕ START BLOCKED" : "✓ READY TO START");
+    // The exact reason START is unavailable, or the outcome of the last
+    // click. Rendered on the LIVE screen so a press is never silent — this
+    // is the difference between "nothing happened" and "here is why".
+    property <string> start-reason: root.blockers.length > 0 ? root.blockers[0] : (root.setup.pending-start ? "waiting for backend confirmation…" : "");
+    property <int> start-reason-tone: root.blockers.length > 0 ? 3 : 2;
 
     // Watchlist columns always preserved. Internal horizontal scrolling handles narrow viewports.
     property <bool> watchlist-columns-wide: true;
@@ -805,6 +811,26 @@ export component LiveScreen inherits Rectangle {
                     width: 100%;
                     message: "EXECUTION HALTED — kill switch engaged. Reconcile before restarting.";
                     tone: 3;
+                }
+            }
+        }
+
+        // ══ 0b. ACTION OUTCOME / BLOCKER BANNER ═════════════════════════════
+        // A press must never be silent: the backend's refusal reason (or the
+        // live action note) is printed here, so a blocked START explains
+        // itself instead of looking like a dead button.
+        if root.bar.note != "" || root.start-reason != "": Rectangle {
+            height: 24px;
+            background: VayrenPalette.bg;
+            VerticalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                alignment: center;
+                VBanner {
+                    height: 20px;
+                    width: 100%;
+                    message: root.bar.note != "" ? root.bar.note : root.start-verdict + " — " + root.start-reason;
+                    tone: root.bar.note-tone;
                 }
             }
         }
@@ -933,7 +959,7 @@ export component LiveScreen inherits Rectangle {
                     height: 34px;
                     label: root.setup.pending-start ? "⏳ STARTING…" : "▶ START";
                     variant: 0;
-                    enabled: root.setup.can-start && !root.setup.needs-live-confirm && !root.setup.pending-start;
+                    enabled: root.setup.start-clickable;
                     clicked => { root.start-requested(); }
                 }
 
@@ -1107,7 +1133,7 @@ export component LiveScreen inherits Rectangle {
                         height: 34px;
                         label: root.setup.pending-start ? "⏳ STARTING…" : "▶ START";
                         variant: 0;
-                        enabled: root.setup.can-start && !root.setup.needs-live-confirm && !root.setup.pending-start;
+                        enabled: root.setup.start-clickable;
                         clicked => { root.start-requested(); }
                     }
 

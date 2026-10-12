@@ -111,9 +111,16 @@ class BrokerSelectionService:
         return persisted
 
     def _compatibility_default(self) -> BrokerSelection:
-        """Migration default (design §9 M4): discover configured credentials,
-        or legacy history provider, recorded openly — behavior unchanged, provenance visible."""
-        chosen = DEFAULT_HISTORY_BROKER
+        """First-run default: the first CONFIGURED venue, recorded openly.
+
+        The old default hardcoded Zerodha and only looked elsewhere when
+        Zerodha had no stored config, which silently handed a Zerodha-shaped
+        session to an operator who had actually configured FYERS. Now the
+        registry is walked and the first venue with stored credentials wins;
+        with nothing configured the historical provider is used only as a
+        last resort, and the provenance stays visible in ``reason``.
+        """
+        configured: str | None = None
         try:
             store_path = getattr(self._store, "path", None)
             if store_path is not None:
@@ -122,15 +129,12 @@ class BrokerSelectionService:
 
                 cred_store = default_store(data_dir)
                 for reg_name in self._registry.names():
-                    if reg_name == chosen:
-                        continue
                     if cred_store.load(f"{reg_name}_config") or cred_store.load(reg_name):
-                        chosen = reg_name
+                        configured = reg_name
                         break
         except Exception:
-            pass
-        if chosen not in self._registry:
-            chosen = DEFAULT_HISTORY_BROKER
+            configured = None
+        chosen = configured or DEFAULT_HISTORY_BROKER
         if chosen not in self._registry:
             raise SelectionError(f"compatibility default broker {chosen!r} is not registered")
         return BrokerSelection(
@@ -142,11 +146,23 @@ class BrokerSelectionService:
 
     # ── mutation ──────────────────────────────────────────────────────────
 
-    def select(self, name: str, *, environment: Environment | None = None) -> SelectionOutcome:
+    def select(
+        self,
+        name: str,
+        *,
+        environment: Environment | None = None,
+        session_running: bool = False,
+    ) -> SelectionOutcome:
         """Make ``name`` the authoritative selection (explicit user choice).
 
         Fail-closed: unknown broker → SelectionError; the previous valid
         selection is preserved. The validated selection is persisted.
+
+        ``session_running`` is the caller's guard: a selection may NOT change
+        while a trading session is live, because the venue was resolved into
+        the session at build time — swapping the selection mid-run would
+        leave orders, capital and market data pointing at two different
+        venues at once. The refusal is explicit, never a silent switch.
         """
         if name not in self._registry:
             raise SelectionError(f"unknown broker {name!r} — registered: {self._registry.names()}")
@@ -160,6 +176,11 @@ class BrokerSelectionService:
             selected_at=datetime.now().astimezone().isoformat(timespec="seconds"),
             reason=_USER_REASON,
         )
+        if session_running:
+            raise SelectionError(
+                f"cannot switch broker to {name!r} while a trading session is running — "
+                "stop the session first (the active venue cannot change mid-run)"
+            )
         self._store.save(selection)
         self._selection = selection
         self._loaded_from_store = False

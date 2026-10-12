@@ -21,6 +21,15 @@
 
 // ── vocabularies (backend-authoritative strings) ───────────────────────────
 
+/// How long a dispatched control action may stay pending before the model
+/// clears it. Generous enough for a broker round-trip, short enough that a
+/// dropped answer does not leave the operator staring at `STARTING…`.
+pub const PENDING_ACTION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Note shown when a control is pressed with no execution backend attached.
+/// Named once so the UI, the arm panel and the tests agree on the wording.
+pub const NO_BACKEND_NOTE: &str = "No execution backend attached.";
+
 /// Execution mode — mirrors `execution.modes.ExecutionMode`. PAPER default.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ExecMode {
@@ -639,8 +648,15 @@ pub struct LiveState {
     /// embedding host via [`LiveState::take_action`] and dispatched to the
     /// Python services. The model never mutates runtime state from these.
     pub host_actions: std::collections::VecDeque<String>,
+    /// Whether the remote link granted a credential that may send control
+    /// commands (gateway role `trade`). `false` keeps every control honestly
+    /// inert; the gateway re-authorizes each command regardless.
+    pub remote_commands_allowed: bool,
     /// Currently pending action intent awaiting backend confirmation (e.g. "start", "stop", "halt").
     pub pending_action: Option<String>,
+    /// When `pending_action` was dispatched. Drives [`LiveState::expire_pending_action`]
+    /// so an unanswered request cannot pin the button in `STARTING…` forever.
+    pub pending_since: Option<std::time::Instant>,
     /// Truthful session timing facts.
     pub started_at: String,
     pub stopped_at: String,
@@ -736,7 +752,9 @@ impl Default for LiveState {
             backend_can_halt: None,
             open_order_count: None,
             host_actions: std::collections::VecDeque::new(),
+            remote_commands_allowed: false,
             pending_action: None,
+            pending_since: None,
             started_at: "—".into(),
             stopped_at: "—".into(),
             session_duration: "—".into(),
@@ -993,6 +1011,16 @@ impl LiveState {
         matches!(self.session, SessionStatus::Stopped | SessionStatus::Error)
             && self.bridge_wired
             && self.start_blockers().is_empty()
+            && self.pending_action.is_none()
+    }
+
+    /// Whether the START control accepts a click: a stopped (or errored)
+    /// session with no action in flight and an attached backend. Blockers do
+    /// NOT disable it — pressing START while blocked is how the operator gets
+    /// the exact reason, and `start()` records it instead of doing nothing.
+    pub fn start_clickable(&self) -> bool {
+        matches!(self.session, SessionStatus::Stopped | SessionStatus::Error)
+            && self.bridge_wired
             && self.pending_action.is_none()
     }
 
@@ -1293,25 +1321,30 @@ impl LiveState {
 
     pub fn start(&mut self) {
         if !self.bridge_wired {
-            self.action_note = Some("No execution backend attached.".into());
+            self.action_note = Some(NO_BACKEND_NOTE.into());
             return;
         }
-        if self.pending_action.as_deref() == Some("start") {
+        if self.pending_action.is_some() {
+            // One action in flight at a time. A second click is a no-op, NOT
+            // a second request — the backend must never see two starts.
+            return;
+        }
+        if self.host_mode {
+            // Host mode: the backend owns start/stop. Forward the request even
+            // when local facts already look blocking, so the operator gets the
+            // SERVICE's exact verdict (and its snapshot) instead of a guess
+            // rendered from stale local state. The backend re-validates every
+            // gate — nothing is bypassed by asking.
+            self.set_pending("start");
+            self.push_action(serde_json::json!({
+                "action": "start",
+                "confirmed": self.live_confirmed,
+            }));
+            self.action_note = Some("start requested — awaiting backend".into());
             return;
         }
         match self.start_blockers().first() {
             Some(reason) => self.action_note = Some(reason.clone()),
-            None if self.host_mode => {
-                // Host mode: the Python service owns start/stop — forward the
-                // request (with the operator's LIVE consent, if given) and
-                // let the next snapshot report what actually happened.
-                self.pending_action = Some("start".into());
-                self.push_action(serde_json::json!({
-                    "action": "start",
-                    "confirmed": self.live_confirmed,
-                }));
-                self.action_note = Some("start requested — awaiting backend".into());
-            }
             None => {
                 // The bridge owns the transition to RUNNING; the model only
                 // records the request.
@@ -1321,19 +1354,42 @@ impl LiveState {
         }
     }
 
+    /// Record a pending action and stamp its dispatch time so a backend that
+    /// never answers cannot strand the button in `STARTING…` forever.
+    fn set_pending(&mut self, action: &str) {
+        self.pending_action = Some(action.to_string());
+        self.pending_since = Some(std::time::Instant::now());
+    }
+
+    /// Drop a pending action whose backend never answered. Returns `true` when
+    /// something was actually cleared, so the host can repaint.
+    ///
+    /// Without this a lost/failed answer pinned `pending_action` for the life
+    /// of the process: START re-read as `STARTING…` forever and STOP/HALT
+    /// stayed disabled because `can_start`/`can_stop` both test it.
+    pub fn expire_pending_action(&mut self) -> bool {
+        let expired = match self.pending_since {
+            Some(at) => at.elapsed() >= PENDING_ACTION_TIMEOUT,
+            None => false,
+        };
+        if expired {
+            self.pending_action = None;
+            self.pending_since = None;
+            self.action_note = Some("backend did not answer — request cleared, press again".into());
+        }
+        expired
+    }
+
     pub fn stop(&mut self) {
         if !self.bridge_wired {
-            self.action_note = Some("No execution backend attached.".into());
+            self.action_note = Some(NO_BACKEND_NOTE.into());
             return;
         }
         if !self.can_stop() {
             return;
         }
-        if self.pending_action.as_deref() == Some("stop") {
-            return;
-        }
         if self.host_mode {
-            self.pending_action = Some("stop".into());
+            self.set_pending("stop");
             self.push_action(serde_json::json!({"action": "stop"}));
             self.action_note = Some("stop requested — backend halts ticks".into());
             return;
@@ -1348,7 +1404,7 @@ impl LiveState {
     /// [`LiveState::report_halt`]; without either the action is inert.
     pub fn halt(&mut self) {
         if !self.bridge_wired {
-            self.action_note = Some("No execution backend attached.".into());
+            self.action_note = Some(NO_BACKEND_NOTE.into());
             return;
         }
         if !self.can_halt() {
@@ -1358,7 +1414,7 @@ impl LiveState {
             return;
         }
         if self.host_mode {
-            self.pending_action = Some("halt".into());
+            self.set_pending("halt");
             self.push_action(serde_json::json!({"action": "halt"}));
             self.action_note = Some("halt requested — backend engaging".into());
             return;
@@ -1503,6 +1559,7 @@ impl LiveState {
                             || !status_reason.is_empty()))
                     {
                         self.pending_action = None;
+                        self.pending_since = None;
                     }
                 }
             }
@@ -2565,6 +2622,14 @@ pub struct SetupView {
     pub session_label: String,
     pub session_tone: i32,
     pub can_start: bool,
+    /// Whether START accepts a click RIGHT NOW.
+    ///
+    /// Deliberately weaker than `can_start`: it does not require the blockers
+    /// to be empty. A disabled button that never explains itself is the defect
+    /// this replaces — the operator must be able to ask, and get the exact
+    /// reason back (either the model's own note or the backend's refusal).
+    /// Readiness itself stays fail-closed in `can_start`/`start_blockers`.
+    pub start_clickable: bool,
     pub can_stop: bool,
     pub can_arm: bool,
     pub needs_live_confirm: bool,
@@ -3517,6 +3582,7 @@ pub fn project(state: &LiveState) -> LiveView {
         session_label: state.session.label().into(),
         session_tone: state.session.badge(),
         can_start: state.can_start(),
+        start_clickable: state.start_clickable(),
         can_stop: state.can_stop(),
         can_arm: state.can_arm(),
         needs_live_confirm: state.mode == ExecMode::Live
@@ -5399,8 +5465,178 @@ mod tests {
         assert_eq!(action["action"], "mode");
     }
 
-    #[test]
-    fn toggle_without_strategy_is_disabled() {
+    // ── START control: the button must be usable, must reach the backend, and
+// ── must never strand the operator in a pending state.
+
+/// A configured, host-mode, bridge-wired state whose backend reports no
+/// blockers — the exact situation the operator described (STOPPED + ready).
+fn start_ready_state() -> LiveState {
+    let mut st = configured(LiveState::default());
+    st.apply_snapshot(&serde_json::json!({
+        "mode": "PAPER",
+        "session_status": "STOPPED",
+        "start_blockers": [],
+    }));
+    st
+}
+
+#[test]
+fn stopped_session_start_is_clickable() {
+    let st = start_ready_state();
+    assert_eq!(st.session, SessionStatus::Stopped);
+    assert!(st.start_clickable(), "STOPPED + wired must accept the click");
+    assert!(st.can_start(), "no blockers reported, so readiness is true too");
+}
+
+#[test]
+fn start_clickable_while_blocked_so_the_reason_can_be_asked_for() {
+    let mut st = start_ready_state();
+    st.apply_snapshot(&serde_json::json!({
+        "session_status": "STOPPED",
+        "start_blockers": ["live confirmation required (explicit operator consent)"],
+    }));
+    // Readiness stays fail-closed...
+    assert!(!st.can_start());
+    assert_eq!(st.start_blockers().len(), 1);
+    // ...but the operator can still press, and the press explains itself.
+    assert!(
+        st.start_clickable(),
+        "a blocked-but-askable START is the whole point: no silent dead button"
+    );
+}
+
+#[test]
+fn start_click_forwards_exactly_one_request_and_duplicates_are_ignored() {
+    let mut st = start_ready_state();
+    st.start();
+    assert_eq!(st.pending_action.as_deref(), Some("start"));
+    let first: serde_json::Value =
+        serde_json::from_str(&st.drain_actions().remove(0)).unwrap();
+    assert_eq!(first["action"], "start");
+    // A second click while pending must not reach the backend: two starts
+    // would race the service.
+    st.start();
+    assert!(
+        st.drain_actions().is_empty(),
+        "duplicate click must not emit a second request"
+    );
+}
+
+#[test]
+fn pending_start_blocks_the_button_until_the_backend_answers() {
+    let mut st = start_ready_state();
+    st.start();
+    assert!(
+        !st.start_clickable(),
+        "pending action must not allow another press"
+    );
+    assert!(!st.can_start());
+    // Backend confirms RUNNING: the pending state clears and STOP becomes live.
+    st.apply_snapshot(&serde_json::json!({"session_status": "RUNNING"}));
+    assert_eq!(st.session, SessionStatus::Running);
+    assert!(st.pending_action.is_none());
+    assert!(!st.start_clickable(), "running means START is not offered");
+    assert!(st.can_stop(), "a running session must offer STOP");
+}
+
+#[test]
+fn rejected_start_clears_pending_and_shows_the_backend_reason() {
+    let mut st = start_ready_state();
+    st.start();
+    assert_eq!(st.pending_action.as_deref(), Some("start"));
+    // The backend refuses: session stays STOPPED and carries the reason.
+    st.apply_snapshot(&serde_json::json!({
+        "session_status": "STOPPED",
+        "status_reason": "START blocked: broker not connected",
+        "start_blockers": ["broker not connected"],
+    }));
+    assert_eq!(st.session, SessionStatus::Stopped);
+    assert!(
+        st.pending_action.is_none(),
+        "a refusal must not leave the button stuck on STARTING…"
+    );
+    assert!(st.start_clickable(), "the operator may retry after fixing it");
+    let view = project(&st);
+    assert_eq!(view.setup.blockers[0], "broker not connected");
+    assert!(!view.setup.can_start, "readiness is still honestly false");
+}
+
+#[test]
+fn unanswered_pending_action_expires_instead_of_stranding_the_button() {
+    let mut st = start_ready_state();
+    st.start();
+    assert_eq!(st.pending_action.as_deref(), Some("start"));
+    // Nothing has answered yet, so the timeout has not elapsed.
+    assert!(!st.expire_pending_action());
+    assert_eq!(st.pending_action.as_deref(), Some("start"));
+    // Simulate the elapsed window directly (no sleeping in tests).
+    st.pending_since = Some(std::time::Instant::now() - PENDING_ACTION_TIMEOUT);
+    assert!(st.expire_pending_action());
+    assert!(
+        st.pending_action.is_none(),
+        "an unanswered request must not pin STARTING… forever"
+    );
+    assert!(st.start_clickable());
+    assert!(
+        st.action_note.is_some(),
+        "the cleared request must say what happened"
+    );
+}
+
+#[test]
+fn stop_forwards_while_running_and_reports_the_confirmed_result() {
+    let mut st = start_ready_state();
+    st.start();
+    st.apply_snapshot(&serde_json::json!({"session_status": "RUNNING"}));
+    st.drain_actions(); // consume the start request; STOP is what we assert
+    st.stop();
+    let action: serde_json::Value =
+        serde_json::from_str(&st.drain_actions().remove(0)).unwrap();
+    assert_eq!(action["action"], "stop");
+    assert_eq!(st.pending_action.as_deref(), Some("stop"));
+    // Backend confirms the shutdown; the model never assumed it.
+    st.apply_snapshot(&serde_json::json!({"session_status": "STOPPED"}));
+    assert_eq!(st.session, SessionStatus::Stopped);
+    assert!(st.pending_action.is_none());
+    assert!(st.start_clickable(), "STOPPED after a stop may start again");
+}
+
+#[test]
+fn halt_invokes_the_emergency_stop_mechanism() {
+    let mut st = start_ready_state();
+    st.start();
+    st.apply_snapshot(&serde_json::json!({"session_status": "RUNNING"}));
+    st.drain_actions(); // consume the start request; HALT is what we assert
+    assert!(st.can_halt());
+    st.halt();
+    let action: serde_json::Value =
+        serde_json::from_str(&st.drain_actions().remove(0)).unwrap();
+    assert_eq!(action["action"], "halt", "HALT must reach the kill switch");
+    assert_eq!(st.pending_action.as_deref(), Some("halt"));
+    // Backend reports the halt landed.
+    st.apply_snapshot(&serde_json::json!({
+        "session_status": "HALTED",
+        "kill": {"halted": true},
+    }));
+    assert!(st.kill_halted);
+    assert!(st.pending_action.is_none());
+    // A halted session is not silently startable again.
+    assert!(!st.start_clickable());
+}
+
+#[test]
+fn start_without_a_backend_stays_inert_and_says_so() {
+    let mut st = LiveState::default();
+    st.host_mode = true;
+    st.bridge_wired = false;
+    st.start();
+    assert!(st.drain_actions().is_empty(), "nothing may be forwarded");
+    assert_eq!(st.action_note.as_deref(), Some(NO_BACKEND_NOTE));
+    assert!(!st.start_clickable());
+}
+
+#[test]
+fn toggle_without_strategy_is_disabled() {
         // Phase 1: no selection means no universe configuration — the
         // toggle is refused locally (no flipped check, no host action) and
         // the explicit save is a matching no-op.

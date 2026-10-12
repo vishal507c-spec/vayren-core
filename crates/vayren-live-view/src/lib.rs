@@ -176,6 +176,7 @@ fn apply_view(ui: &LiveHostWindow, state: &LiveState) {
         session_label: view.setup.session_label.into(),
         session_tone: view.setup.session_tone,
         can_start: view.setup.can_start,
+        start_clickable: view.setup.start_clickable,
         can_stop: view.setup.can_stop,
         can_arm: view.setup.can_arm,
         needs_live_confirm: view.setup.needs_live_confirm,
@@ -990,12 +991,19 @@ mod tests {
     }
 
     #[test]
-    fn blocked_start_emits_no_event_running_stop_does() {
+    fn blocked_start_reaches_the_backend_but_fakes_no_state() {
         let view = make_view();
         snapshot(view, IDLE);
+        // The backend reports blockers ("no strategy selected"). START is now
+        // PRESSED anyway and forwarded, because the service is the authority
+        // that decides — the old contract swallowed the click silently, which
+        // is exactly the dead-button defect. What must never change: the model
+        // does not fake a session transition on its own.
         with_view(view, |v| v.state.borrow_mut().start());
-        assert!(with_view(view, |v| v.state.borrow_mut().take_action()).is_none());
-        // The rejected request changed no runtime state either.
+        let action = with_view(view, |v| v.state.borrow_mut().take_action());
+        let parsed: serde_json::Value =
+            serde_json::from_str(&action.expect("blocked START must reach the backend")).unwrap();
+        assert_eq!(parsed["action"], "start");
         assert!(with_view(view, |v| {
             matches!(v.state.borrow().session, live::SessionStatus::Stopped)
         }));

@@ -309,12 +309,17 @@ def _system_snapshot(
     data_dir: str,
     selected_broker: str | None = None,
     manager: Any | None = None,
+    strategy_dir: str | None = None,
 ) -> dict:
     """Build the native System workspace snapshot from the broker manager.
 
     Mirrors the legacy bootstrap provider: authoritative selection + manager
     snapshot + read-only startup session checks. Fail-closed honest-empty
     when the broker stack cannot load.
+
+    SYSTEM is the only place a broker may be selected. The change is refused
+    while a trading session is running (the venue is bound at session build
+    time), and the refusal is reported rather than applied.
     """
     try:
         import broker.providers  # noqa: F401
@@ -325,21 +330,9 @@ def _system_snapshot(
         )
     except Exception as exc:  # noqa: BLE001
         return {"brokers": [], "error": f"system backend unavailable: {exc}"}
+    selection_error = ""
     try:
         selection_service = BrokerSelectionService(app_selection_store(data_dir))
-        if selected_broker:
-            from broker import default_registry
-
-            known = {record.name for record in default_registry().list()}
-            current_name = ""
-            try:
-                current = selection_service.current_or_none()
-                current_name = current.name if current is not None else ""
-            except Exception:  # noqa: BLE001
-                current_name = ""
-            if selected_broker in known and selected_broker != current_name:
-                with contextlib.suppress(Exception):
-                    selection_service.select(selected_broker)
         selection = selection_service.current()
     except Exception:  # noqa: BLE001
         selection = None
@@ -353,7 +346,14 @@ def _system_snapshot(
     else:
         snap = manager.snapshot()
 
-    selected_id = selected_broker or getattr(selection, "name", "") or ""
+    # `selected_id` is the AUTHORITATIVE persisted default — never the panel
+    # the operator happens to be looking at. Opening a broker's detail must
+    # never change the global default; only the explicit `select_broker`
+    # action does. `panel_id` is which detail card is open.
+    selected_id = getattr(selection, "name", "") or ""
+    if not selected_id:
+        selected_id = str(snap.get("active_broker", "") or "")
+    panel_id = selected_broker or selected_id
     brokers = []
     for entry in snap.get("brokers", []):
         if not isinstance(entry, dict):
@@ -396,6 +396,7 @@ def _system_snapshot(
     return {
         "brokers": brokers,
         "selected_id": selected_id,
+        "panel_id": panel_id,
         "display_name": record["display_name"] if record else "",
         "venue_subtitle": record["venue_subtitle"] if record else "",
         "environment": environment,
@@ -405,6 +406,10 @@ def _system_snapshot(
         "can_disconnect": bool(full.get("can_disconnect", False)),
         "reason": str(full.get("reason", "") or ""),
         "credential_fields": _credential_field_rows(full, saved_keys),
+        # A refused switch (e.g. requested mid-session) is reported here so
+        # SYSTEM can say why the requested broker is not the selected one,
+        # instead of silently keeping the old selection.
+        "selection_error": selection_error,
     }
 
 
@@ -516,6 +521,31 @@ def _live_action(
             # START rather than being a session of its own.
             _ARMED[0] = True
             service.note_armed(True)
+        elif name == "select_broker":
+            # SYSTEM's "make this the default broker" action. It lives in the
+            # ONE gated action path so the remote gateway can apply the very
+            # same change the local UI makes — the gateway's store was a
+            # separate file, so a SYSTEM change on the desktop never reached
+            # it and LIVE kept resolving its own default.
+            requested = str(action.get("broker") or "").strip().lower()
+            if not requested:
+                return _live_unavailable("select_broker requires a broker id")
+            running = str(getattr(service, "status", "") or "") in ("RUNNING", "STARTING")
+            try:
+                from app.services.broker_selection_service import (
+                    BrokerSelectionService,
+                    app_selection_store,
+                )
+
+                selection_svc = BrokerSelectionService(app_selection_store(data_dir))
+                selection_svc.select(requested, session_running=running)
+                note = f"default broker set to {requested}"
+            except Exception as exc:  # noqa: BLE001
+                # A refused switch (mid-session, unknown broker) is reported,
+                # never silently applied.
+                snapshot = _trading_service_snapshot(data_dir, strategy_dir, broker_manager)
+                snapshot["action_note"] = f"broker selection refused: {exc}"
+                return snapshot
         elif name == "select_symbol":
             sym = str(action.get("symbol") or "")
             if hasattr(service, "select_symbol"):
@@ -616,6 +646,26 @@ def _opt_bool(value: Any) -> bool | None:
     if isinstance(value, bool):
         return value
     return str(value).strip().lower() in ("1", "true", "yes")
+
+
+def _live_session_running(
+    data_dir: str,
+    strategy_dir: str | None = None,
+    manager: Any = None,
+) -> bool:
+    """True when a trading session is live (broker switch must be refused).
+
+    Fails CLOSED in the safe direction: if the running service cannot be
+    reached we cannot prove a session is stopped, so we report running and
+    block the switch rather than rebinding a possibly-active venue.
+    """
+    try:
+        service = _live_service(data_dir, strategy_dir or str(data_dir), manager)
+        if service is None:
+            return True
+        return str(getattr(service, "status", "") or "") in ("RUNNING", "STARTING")
+    except Exception:  # noqa: BLE001
+        return True
 
 
 def _live_service(data_dir: str, strategy_dir: str, broker_manager: Any = None) -> Any:
@@ -1742,7 +1792,9 @@ def run_headless_backend(args: argparse.Namespace) -> int:
                     # Broker checks already run on the manager's worker; the
                     # snapshot reports the current (possibly unsettled) state
                     # honestly, and the next poll reflects the settled one.
-                    snapshot = _system_snapshot(str(data_dir), selected_broker, broker_manager)
+                    snapshot = _system_snapshot(
+                        str(data_dir), selected_broker, broker_manager, str(strategy_dir)
+                    )
                     result = {"type": "system_snapshot", "data": snapshot}
                     if not _emit(result):
                         break

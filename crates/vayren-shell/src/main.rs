@@ -651,11 +651,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         live_state.borrow_mut().gateway.url = url.clone();
         live_state.borrow_mut().gateway.status = "CONNECTING".to_string();
         let (remote_tx, remote_rx) = mpsc::channel::<vayren_shell::remote_live::RemoteUiUpdate>();
-        vayren_shell::remote_live::spawn_remote_bootstrap(url, remote_tx);
-        Some(remote_rx)
+        // Control commands cross to the pump thread (it owns the socket) and
+        // come back as CommandAck. The gateway authorizes each one.
+        let (command_tx, command_rx) = mpsc::channel::<vayren_shell::remote_live::RemoteCommand>();
+        vayren_shell::remote_live::spawn_remote_bootstrap(url, remote_tx, command_rx);
+        Some((remote_rx, command_tx))
     } else {
         None
     };
+    // A cloneable handle for interactions that are wired BEFORE the fetch
+    // timer takes ownership of `remote_rx`. In remote mode SYSTEM's broker
+    // selection must reach the GATEWAY's own store — otherwise the desktop
+    // writes the local selection file while LIVE keeps resolving the
+    // gateway's separate one, and the two disagree.
+    let remote_command_tx: Option<mpsc::Sender<vayren_shell::remote_live::RemoteCommand>> =
+        remote_rx.as_ref().map(|(_, tx)| tx.clone());
     shell::wire(&ui);
     shell::wire_zoom(&ui, zoom.clone());
     shell::wire_lab(
@@ -806,13 +816,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // each on a worker thread — a blocking round-trip on the UI
                 // thread would freeze the window, and dropping them would make
                 // every LIVE control a silent no-op.
-                if let Some(ref rx) = remote_rx {
+                if let Some((rx, command_tx)) = remote_rx.as_ref() {
                     use vayren_shell::remote_live::{
                         apply_remote_sections, mark_link, push_remote_event, RemoteUiUpdate,
                     };
                     let mut dirty = false;
                     for update in rx.try_iter() {
                         match update {
+                            RemoteUiUpdate::Role { role } => {
+                                vayren_shell::remote_live::apply_role(
+                                    &mut live_state.borrow_mut(),
+                                    &role,
+                                );
+                                dirty = true;
+                            }
                             RemoteUiUpdate::Snapshot { sections, resync } => {
                                 if resync {
                                     println!("Remote resync: replacing state with fresh snapshot");
@@ -844,14 +861,79 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 live_state.borrow_mut().gateway.last_heartbeat = timestamp;
                                 dirty = true;
                             }
+                            RemoteUiUpdate::CommandAck { action, ok, detail } => {
+                                // The gateway's verdict on a control command.
+                                // Clear the matching pending action either way
+                                // and paint the real outcome — never leave the
+                                // button spinning, never imply a start that the
+                                // gateway refused.
+                                {
+                                    let mut state = live_state.borrow_mut();
+                                    state.pending_action = None;
+                                    state.pending_since = None;
+                                    state.action_note = Some(if ok {
+                                        format!("{action} confirmed by backend")
+                                    } else {
+                                        format!("{action} refused — {detail}")
+                                    });
+                                }
+                                dirty = true;
+                            }
                         }
                     }
                     if dirty {
                         shell::apply_live(&ui, &live_state.borrow());
                     }
+
+                    // Remote control commands: the queue the model produced is
+                    // forwarded to the gateway (it owns the authoritative
+                    // service), never to the local backend, so a click in
+                    // remote mode cannot act on the wrong process.
+                    for raw in live_state.borrow_mut().drain_actions() {
+                        let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+                            eprintln!("remote: ignoring malformed live action: {raw}");
+                            continue;
+                        };
+                        let action = value
+                            .get("action")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let mut params = serde_json::Map::new();
+                        if let Some(map) = value.as_object() {
+                            for (key, val) in map {
+                                if key != "action" {
+                                    params.insert(key.clone(), val.clone());
+                                }
+                            }
+                        }
+                        if action.is_empty() {
+                            continue;
+                        }
+                        if command_tx
+                            .send(vayren_shell::remote_live::RemoteCommand {
+                                action,
+                                params: serde_json::Value::Object(params),
+                            })
+                            .is_err()
+                        {
+                            eprintln!("remote: command channel closed — command not sent");
+                            live_state.borrow_mut().action_note =
+                                Some("gateway link closed — command not sent".into());
+                        }
+                    }
                 }
 
-                // Ordered dispatch. The drain used to spawn ONE THREAD PER
+                // A pending action whose backend never answered must not pin
+                // the button in STARTING… for the life of the process.
+                if live_state.borrow_mut().expire_pending_action() {
+                    shell::apply_live(&ui, &live_state.borrow());
+                }
+
+                // Ordered dispatch (LOCAL mode only — in remote mode the
+                // actions were already forwarded to the gateway above, and
+                // sending them here too would act on the wrong process).
+                // The drain used to spawn ONE THREAD PER
                 // action, each contending for the same backend mutex — so
                 // `service.configure()` could apply intents in an order
                 // different from the operator's. It then became visible
@@ -861,7 +943,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // state was action 1's, until the next poll corrected it.
                 // One worker, the queue in order: the last intent the
                 // operator made is the last intent the service applies.
-                if live_busy == 0 {
+                if !is_remote && live_busy == 0 {
                     let batch: Vec<serde_json::Value> = live_state
                         .borrow_mut()
                         .drain_actions()
@@ -908,7 +990,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // fills, P&L, positions, events, quotes and broker edges
                 // live while a session runs — and re-reads the broker
                 // selection, so SYSTEM connects surface within one tick.
-                if live_busy == 0 && std::time::Instant::now() >= next_live_poll {
+                // LOCAL only: in remote mode the gateway owns LIVE truth, and
+                // polling the local idle service would overwrite the screen
+                // with a second, contradictory backend.
+                if !is_remote && live_busy == 0 && std::time::Instant::now() >= next_live_poll {
                     let id = live_seq.fetch_add(1, Ordering::SeqCst) + 1;
                     live_busy += 1;
                     let backend = Arc::clone(&backend);
@@ -1033,6 +1118,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         shell::apply_connection(&ui, &workspace);
                         // Trigger immediate LIVE tab poll so broker state and capital sync at once
                         next_live_poll = std::time::Instant::now();
+                        // A fresh SYSTEM snapshot is the answer to a pending
+                        // SET AS DEFAULT: whatever it reports (confirmed or
+                        // unchanged) is the truth, so the SAVING state ends
+                        // here and never depends on an optimistic flag.
+                        if ui.get_conn_default_saving() {
+                            ui.set_conn_default_saving(false);
+                        }
                     }
                 }
 
@@ -1126,18 +1218,73 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let tx = fetch_tx.clone();
         ui.on_broker_select_requested(move |id: slint::SharedString| {
             let id_str = id.as_str().to_string();
-            println!("Broker select requested: {}", id_str);
-            // Background worker + fetch pump (same as the market refetch):
-            // the backend round-trip used to run on the UI thread here
-            // (lock_send blocks until the response arrives), freezing the
-            // window for the whole round-trip. The answer lands as
-            // FetchResult::System and applies on the 50ms pump.
+            println!("Broker detail opened: {}", id_str);
+            // Opening a broker's detail is VIEW state only. It deliberately
+            // does NOT change the authoritative default - only the explicit
+            // SET AS DEFAULT button does, through the `select_broker` path.
+            // (It used to select here too, so merely LOOKING at a broker
+            // silently replaced the global default.)
             spawn_fetch(
                 &backend,
                 &tx,
                 BackendCommand::GetSystemSnapshot {
                     selected_id: Some(id_str),
                 },
+                FetchResult::System,
+            );
+        });
+    }
+    {
+        let backend = Arc::clone(&backend);
+        let tx = fetch_tx.clone();
+        // SET AS DEFAULT — persist the open panel's broker as VAYREN's
+        // authoritative default. Reuses the EXISTING authenticated
+        // `select_broker` command; it never connects, authenticates, or
+        // changes PAPER/LIVE, and it never marks the broker default locally
+        // before the backend confirms it.
+        let handle = ui.as_weak();
+        let backend = Arc::clone(&backend);
+        let tx = fetch_tx.clone();
+        let command = remote_command_tx.clone();
+        ui.on_broker_set_default_requested(move |id: slint::SharedString| {
+            let broker_id = id.as_str().to_string();
+            if broker_id.is_empty() {
+                return;
+            }
+            println!("SET AS DEFAULT requested: {broker_id}");
+            // Guard against a double submit: the UI control is already
+            // disabled while pending, this is the belt-and-braces check.
+            if let Some(ui) = handle.upgrade() {
+                if ui.get_conn_default_saving() {
+                    return;
+                }
+                ui.set_conn_default_saving(true);
+            }
+            // Remote mode: the gateway owns the authoritative store, so the
+            // request goes over the authenticated command channel and the UI
+            // only reflects it after the snapshot comes back.
+            if let Some(ref sender) = command {
+                let params = serde_json::json!({ "broker": broker_id });
+                if sender
+                    .send(vayren_shell::remote_live::RemoteCommand {
+                        action: "select_broker".to_string(),
+                        params,
+                    })
+                    .is_err()
+                {
+                    if let Some(ui) = handle.upgrade() {
+                        ui.set_conn_default_saving(false);
+                        eprintln!("SET AS DEFAULT: gateway link closed — not saved");
+                    }
+                }
+            }
+            // Refresh the snapshot either way: in remote mode it carries the
+            // gateway's confirmed default; locally it carries the persisted
+            // store. Neither path asserts success on its own.
+            spawn_fetch(
+                &backend,
+                &tx,
+                BackendCommand::GetSystemSnapshot { selected_id: None },
                 FetchResult::System,
             );
         });
@@ -1613,16 +1760,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// token re-resolved per attempt), so provisioning the OS credential later
 /// connects with zero restart. No secret is ever painted or logged.
 ///
-/// Read-only by construction: no call site in this binary sends a command,
-/// and `bridge_wired` stays false so the model keeps START/STOP/HALT inert
-/// with honest feedback. Other workspaces (Market/Lab/Portfolio/Research,
-/// SYSTEM broker panel) render honest-empty: the remote gateway does not
-/// serve their local stores in this phase, and nothing is invented for them.
+/// Command authority: trading controls follow the gateway's granted role.
+/// A `trade` credential makes START/STOP/HALT live — each command is still
+/// authorized server-side and refused with its exact reason when a check
+/// fails — while a `read` credential leaves them honestly inert. Other
+/// workspaces (Market/Lab/Portfolio/Research, SYSTEM broker panel) render
+/// honest-empty: the remote gateway does not serve their local stores in this
+/// phase, and nothing is invented for them.
 #[allow(dead_code)]
 fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::error::Error>> {
     use vayren_shell::remote_live::{
         apply_remote_sections, init_remote_state, mark_link, push_remote_event,
-        spawn_remote_bootstrap, RemoteUiUpdate,
+        spawn_remote_bootstrap, RemoteCommand, RemoteUiUpdate,
     };
 
     println!("VAYREN starting (remote graphical client)...");
@@ -1659,9 +1808,10 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
     live_state.borrow_mut().gateway.url = url.clone();
     live_state.borrow_mut().gateway.status = "CONNECTING".to_string();
     let (remote_tx, remote_rx) = mpsc::channel::<RemoteUiUpdate>();
+    let (command_tx, command_rx) = mpsc::channel::<RemoteCommand>();
     // Bootstrap owns the first connect (with enrollment retries); on success
     // it hands the live client to the pump and exits.
-    spawn_remote_bootstrap(url, remote_tx);
+    spawn_remote_bootstrap(url, remote_tx, command_rx);
     let fetch_timer = slint::Timer::default();
     {
         let weak = ui.as_weak();
@@ -1671,21 +1821,53 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
             std::time::Duration::from_millis(50),
             move || {
                 let Some(ui) = weak.upgrade() else { return };
-                // Inert controls stay inert: the model refuses to queue when
-                // unwired, so anything here is drained and dropped with a
-                // log line — never forwarded, never sent.
-                while let Some(raw) = live_state.borrow_mut().take_action() {
-                    let name: String = serde_json::from_str::<serde_json::Value>(&raw)
-                        .ok()
-                        .and_then(|v| v.get("action").and_then(|a| a.as_str()).map(str::to_string))
-                        .unwrap_or_else(|| "unknown".to_string());
-                    eprintln!(
-                        "remote UI: control '{name}' refused (read-only client, nothing sent)"
-                    );
+                // Control intents go to the gateway, which owns the
+                // authoritative service and re-authorizes every one.
+                for raw in live_state.borrow_mut().drain_actions() {
+                    let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+                        eprintln!("remote UI: malformed live action: {raw}");
+                        continue;
+                    };
+                    let action = value
+                        .get("action")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let mut params = serde_json::Map::new();
+                    if let Some(map) = value.as_object() {
+                        for (key, val) in map {
+                            if key != "action" {
+                                params.insert(key.clone(), val.clone());
+                            }
+                        }
+                    }
+                    if action.is_empty() {
+                        continue;
+                    }
+                    if command_tx
+                        .send(RemoteCommand {
+                            action,
+                            params: serde_json::Value::Object(params),
+                        })
+                        .is_err()
+                    {
+                        live_state.borrow_mut().action_note =
+                            Some("gateway link closed — command not sent".into());
+                    }
+                }
+                if live_state.borrow_mut().expire_pending_action() {
+                    shell::apply_live(&ui, &live_state.borrow());
                 }
                 let mut dirty = false;
                 for update in remote_rx.try_iter() {
                     match update {
+                        RemoteUiUpdate::Role { role } => {
+                            vayren_shell::remote_live::apply_role(
+                                &mut live_state.borrow_mut(),
+                                &role,
+                            );
+                            dirty = true;
+                        }
                         RemoteUiUpdate::Snapshot { sections, resync } => {
                             if resync {
                                 println!("Remote resync: replacing state with fresh snapshot");
@@ -1715,6 +1897,18 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                                 live_state.borrow_mut().gateway.latency_ms = Some(ms);
                             }
                             live_state.borrow_mut().gateway.last_heartbeat = timestamp;
+                            dirty = true;
+                        }
+                        RemoteUiUpdate::CommandAck { action, ok, detail } => {
+                            let mut state = live_state.borrow_mut();
+                            state.pending_action = None;
+                            state.pending_since = None;
+                            state.action_note = Some(if ok {
+                                format!("{action} confirmed by backend")
+                            } else {
+                                format!("{action} refused — {detail}")
+                            });
+                            drop(state);
                             dirty = true;
                         }
                     }

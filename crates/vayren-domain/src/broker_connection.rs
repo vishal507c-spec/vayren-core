@@ -288,6 +288,12 @@ pub fn description_line(display_name: &str) -> String {
 #[derive(Debug, Clone, PartialEq)]
 pub struct BrokerWorkspace {
     pub brokers: Vec<BrokerListItem>,
+    /// The AUTHORITATIVE persisted default broker (the gateway's selection).
+    /// This is what SYSTEM and LIVE both consume; it is never inferred from
+    /// which broker is connected or which detail panel is open.
+    pub default_id: String,
+    /// Which broker's detail card is currently open (pure view state).
+    pub panel_id: String,
     pub selected_id: String,
     pub display_name: String,
     pub venue_subtitle: String,
@@ -306,6 +312,8 @@ impl BrokerWorkspace {
     pub fn empty() -> Self {
         Self {
             brokers: Vec::new(),
+            default_id: String::new(),
+            panel_id: String::new(),
             selected_id: String::new(),
             display_name: String::new(),
             venue_subtitle: String::new(),
@@ -596,6 +604,17 @@ impl BrokerWorkspace {
 
         Self {
             brokers,
+            // The persisted default and the open panel are SEPARATE facts.
+            // `default_id` never falls back to "whoever is connected" - a
+            // disconnected default stays the default.
+            default_id: {
+                let explicit = str_of("default_id");
+                if explicit.is_empty() { selected_id.clone() } else { explicit }
+            },
+            panel_id: {
+                let explicit = str_of("panel_id");
+                if explicit.is_empty() { selected_id.clone() } else { explicit }
+            },
             selected_id,
             display_name,
             venue_subtitle,

@@ -249,7 +249,10 @@ pub fn apply_connection(ui: &AppWindow, workspace: &BrokerWorkspace) {
         .into(),
     );
     ui.set_conn_display_name(workspace.display_name.clone().into());
-    ui.set_conn_broker_id(workspace.selected_id.clone().into());
+    // The open detail panel and the authoritative default are separate: the
+    // header shows `panel_id` while the button compares against `default_id`.
+    ui.set_conn_broker_id(workspace.panel_id.clone().into());
+    ui.set_conn_default_id(workspace.default_id.clone().into());
     ui.set_conn_mark(
         workspace
             .display_name
@@ -3405,6 +3408,7 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
         session_label: view.setup.session_label.into(),
         session_tone: view.setup.session_tone,
         can_start: view.setup.can_start,
+        start_clickable: view.setup.start_clickable,
         can_stop: view.setup.can_stop,
         can_arm: view.setup.can_arm,
         needs_live_confirm: view.setup.needs_live_confirm,
@@ -4870,6 +4874,7 @@ mod tests {
             session_label: "● STOPPED".into(),
             session_tone: 0,
             can_start: false,
+            start_clickable: false,
             can_stop: false,
             can_arm: false,
             needs_live_confirm: false,

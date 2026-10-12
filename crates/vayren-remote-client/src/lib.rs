@@ -19,7 +19,7 @@ pub mod protocol;
 pub mod summary;
 pub mod token;
 
-pub use client::{Backoff, ClientError, ClientEvent, ConnectionState, RemoteClient};
+pub use client::{Backoff, ClientError, ClientEvent, ConnectionState, RemoteClient, ROLE_TRADE};
 pub use protocol::{ServerMessage, ERROR_CODES, SCHEMA_VERSION};
 pub use summary::summarize_snapshot;
 pub use token::{

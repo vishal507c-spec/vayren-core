@@ -67,6 +67,16 @@ export component BrokerConnectionWorkspace inherits Rectangle {
     in property <bool> disconnect-enabled: false;
     in property <string> help-caption: "View setup guide.";
 
+    // ── authoritative global default broker (persisted, gateway-owned) ──
+    // `conn-default-id` is the value SYSTEM and LIVE both consume. The open
+    // detail panel is `broker-id`; the two are deliberately independent so
+    // LOOKING at a broker never silently changes the global default.
+    in property <string> default-id: "";
+    // Ephemeral save state: a pending request disables the control and shows
+    // SAVING...; it is never set optimistically to "default".
+    in-out property <bool> default-saving: false;
+    in property <string> default-error: "";
+
     // ── ephemeral field state (Slint-local; secrets cross once via connect) ──
     in-out property <string> field-v0: "";
     in-out property <string> field-v1: "";
@@ -104,6 +114,22 @@ export component BrokerConnectionWorkspace inherits Rectangle {
     callback help-requested();
     callback add-broker-requested();
     callback paste-requested(int);
+    // Explicitly persist the OPEN panel's broker as VAYREN's global default.
+    // Goes through the existing authenticated `select_broker` command path;
+    // this never connects, logs in, or changes PAPER/LIVE.
+    callback set-default-requested(string);
+
+    // Compact label for the header control, driven by confirmed persisted
+    // state (never by an optimistic local guess).
+    function default-label() -> string {
+        if (root.default-saving) { return "SAVING…"; }
+        if (root.default-id != "" && root.default-id == root.broker-id) { return "✓ DEFAULT BROKER"; }
+        return "★ SET AS DEFAULT";
+    }
+
+    function is-default-broker() -> bool {
+        return root.default-id != "" && root.default-id == root.broker-id;
+    }
 
     function field-text(i: int) -> string {
         return i == 0 ? root.field-v0 : i == 1 ? root.field-v1 : i == 2 ? root.field-v2
@@ -399,6 +425,42 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                             }
                         }
                         Rectangle { horizontal-stretch: 1; background: transparent; }
+                        // ── SET AS DEFAULT (authoritative global default) ──
+                        // Sits immediately before the Connected / PAPER
+                        // badges. Compact, outlined, teal - same design
+                        // tokens as the neighbouring pills. This only saves
+                        // WHICH broker VAYREN defaults to; it never connects,
+                        // authenticates, or changes PAPER/LIVE.
+                        Rectangle {
+                            height: 26px;
+                            horizontal-stretch: 0;
+                            border-radius: 13px;
+                            background: root.is-default-broker() ? VayrenPalette.hover : transparent;
+                            border-width: 1px;
+                            border-color: VayrenPalette.accent-dim;
+                            opacity: root.default-saving ? 0.6 : 1.0;
+                            HorizontalLayout {
+                                padding-left: VayrenDesign.sp-md;
+                                padding-right: VayrenDesign.sp-md;
+                                spacing: 6px;
+                                Text {
+                                    text: root.default-label();
+                                    color: root.is-default-broker()
+                                        ? VayrenPalette.accent
+                                        : VayrenPalette.accent-dim;
+                                    font-size: VayrenDesign.fs-label;
+                                    font-weight: 700;
+                                    vertical-alignment: center;
+                                }
+                                // Clickable only when it would actually
+                                // change something, and never while a save
+                                // is already in flight (no duplicate submits).
+                                ta := TouchArea {
+                                    enabled: !root.is-default-broker() && !root.default-saving && root.broker-id != "";
+                                    clicked => { root.set-default-requested(root.broker-id); }
+                                }
+                            }
+                        }
                         // Trailing status cluster (nested so the row has no
                         // bare rectangles to absorb free space: the cluster
                         // keeps content width, the gap stays empty).

@@ -221,7 +221,26 @@ class BrokerManager:
                     "credential_schema": [dict(row) for row in spec.credential_schema],
                 }
             )
-        active_broker = next((b["id"] for b in brokers if b.get("connected")), "")
+        # `active_broker` is the SYSTEM-selected broker, NOT "whichever venue is
+        # connected". Reporting the first connected broker here made the
+        # manager contradict the selection and pushed other surfaces onto
+        # the wrong venue. The selection is the single source of truth.
+        active_broker = ""
+        try:
+            from app.services.broker_selection_service import (
+                BrokerSelectionService,
+                app_selection_store,
+            )
+
+            selection = BrokerSelectionService(
+                app_selection_store(self._data_dir)
+            ).current_or_none()
+            if selection is not None:
+                active_broker = selection.name
+        except Exception:
+            active_broker = ""
+        if not active_broker:
+            active_broker = next((b["id"] for b in brokers if b.get("connected")), "")
         return {
             "brokers": brokers,
             "active_broker": active_broker,
@@ -652,6 +671,19 @@ class BrokerManager:
             state["status"] = BrokerStatus.CONNECTED
             state["reason"] = f"{why}; {reg_reason}" if not registered else why
         self._note(spec.broker_id, "connected")
+        self._auto_select_if_unset(spec.broker_id)
+        self.state_changed.emit(spec.broker_id)
+        self._worker.submit(_HEALTH_JOB, spec.broker_id)
+
+    def _auto_select_if_unset(self, broker_id: str) -> None:
+        """Record a first-run selection when none exists — never overwrite.
+
+        A successful connection used to call ``selection.select(broker_id)``
+        unconditionally, so connecting a second venue silently REPLACED the
+        operator's SYSTEM choice and every surface (capital, order routing,
+        market data) followed the newcomer. Selection is a user decision:
+        only seed it while no explicit choice has been recorded yet.
+        """
         try:
             from app.services.broker_selection_service import (
                 BrokerSelectionService,
@@ -659,11 +691,16 @@ class BrokerManager:
             )
 
             selection_svc = BrokerSelectionService(app_selection_store(self._data_dir))
-            selection_svc.select(spec.broker_id)
+            selection = selection_svc.current_or_none()
+            if selection is not None and selection.reason == "user-selected":
+                # An explicit SYSTEM choice is authoritative — connecting
+                # another venue must never steal it.
+                return
+            selection_svc.select(broker_id)
         except Exception:
+            # Selection bookkeeping is advisory here; never fail a connect
+            # because it could not be recorded.
             pass
-        self.state_changed.emit(spec.broker_id)
-        self._worker.submit(_HEALTH_JOB, spec.broker_id)
 
     def _config_values(self, spec: BrokerSpec) -> dict[str, str] | None:
         try:

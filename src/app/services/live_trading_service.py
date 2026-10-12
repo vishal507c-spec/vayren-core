@@ -607,8 +607,17 @@ class LiveTradingService:
                     return True
         return False
 
-    def broker_name(self) -> str:
-        """User-selected broker (display only; venue resolves inside sessions)."""
+    def _resolved_selection(self) -> tuple[str, bool]:
+        """The selected broker id and whether that choice is AUTHORITATIVE.
+
+        Returns ``(name, authoritative)``. ``authoritative`` is True only for a
+        real user/persisted choice. The compatibility default (adopted when no
+        selection file exists) is a migration placeholder, not a decision — so
+        when it is the only thing available, callers may legitimately prefer a
+        venue the manager reports as genuinely connected rather than pinning
+        the placeholder. That distinction is what stops a hardcoded broker
+        from outranking an explicit selection.
+        """
         selection = None
         if self._selection is None and hasattr(self, "_data_dir"):
             try:
@@ -631,7 +640,13 @@ class LiveTradingService:
         except Exception:
             selection = None
         name = str(getattr(selection, "name", "") or "") if selection is not None else ""
-        return name or "paper"
+        reason = str(getattr(selection, "reason", "") or "") if selection is not None else ""
+        return name or "paper", reason == "user-selected"
+
+    def broker_name(self) -> str:
+        """User-selected broker (display only; venue resolves inside sessions)."""
+        name, _authoritative = self._resolved_selection()
+        return name
 
     def attach_broker_view(self, broker_manager: Any, selection: Any) -> None:
         """Attach the SYSTEM broker stack (owned elsewhere, read-only here).
@@ -685,7 +700,7 @@ class LiveTradingService:
             "funds": {},
             "last_sync": "",
         }
-        name = self.broker_name()
+        name, authoritative = self._resolved_selection()
         manager = self._broker_manager
         snap: dict[str, Any] = {}
         brokers: list[dict[str, Any]] = []
@@ -696,50 +711,30 @@ class LiveTradingService:
             except Exception:
                 brokers = []
 
-        # Discover active broker dynamically:
-        # 1. Prefer genuinely connected broker across all venues
-        connected_entry = next(
-            (
-                e
-                for e in brokers
-                if (
-                    bool(e.get("connected"))
-                    if e.get("connected") is not None
-                    else (
-                        str(e.get("status", "") or "").upper() in ("CONNECTED", "LIVE_READY")
-                        or (
-                            manager is not None
-                            and manager.is_connected(str(e.get("id", ""))) is True
-                        )
-                    )
-                )
-            ),
-            None,
-        )
+        # ── SYSTEM is the single source of truth ──────────────────────────
+        # `authoritative` is True only for a real user/persisted choice.
+        # When it is True the selection binds HARD: we never promote another
+        # venue just because that one happens to be connected, because
+        # silently substituting a broker would route orders, capital and
+        # market data somewhere the operator never chose. A disconnected
+        # selection is reported disconnected (fail-closed).
         snap_active = str(snap.get("active_broker", "") or "")
-        if connected_entry:
-            name = str(connected_entry.get("id", "") or "")
-        elif (
-            snap_active
-            and snap_active != "paper"
-            and (
-                not name
-                or name == "paper"
-                or (brokers and not any(e.get("id") == name for e in brokers))
-            )
-        ):
-            name = snap_active
-        elif name and name != "paper":
-            # The operator explicitly selected a broker (e.g. 'fyers' in SYSTEM -> BROKERS).
-            # Respect the authoritative selection! NEVER silently overwrite it with Zerodha!
-            pass
-        elif snap_active and snap_active != "paper":
-            name = snap_active
-        elif not name or name == "paper":
-            # If no broker was selected/active, check if any broker is configured
-            configured_entry = next((e for e in brokers if e.get("configured")), None)
-            if configured_entry:
-                name = str(configured_entry.get("id", "") or "")
+        if not authoritative or name == "paper":
+            # No explicit choice on record (first run / no selection stack):
+            # prefer the manager's active venue, then the first CONNECTED
+            # venue, then the first CONFIGURED one. This is the migration
+            # path only — it never overrides a real selection.
+            name = ""
+            if snap_active and snap_active != "paper":
+                name = snap_active
+            if not name:
+                connected_entry = next((e for e in brokers if e.get("connected")), None)
+                if connected_entry:
+                    name = str(connected_entry.get("id", "") or "")
+            if not name:
+                configured_entry = next((e for e in brokers if e.get("configured")), None)
+                if configured_entry:
+                    name = str(configured_entry.get("id", "") or "")
 
         if not name or name == "paper":
             return view
@@ -836,12 +831,24 @@ class LiveTradingService:
         idle, but a re-check is only needed when the setup actually
         changes (or after a run). ``force=True`` bypasses the cache.
         """
+        # Activation must happen BEFORE the key is built: the venue id is part
+        # of the key, so resolving it first is what makes the first cached
+        # verdict honest instead of freezing a pre-activation "None".
+        self._ensure_live_venues()
         key = (
             self._config.strategy_name,
             self._config.symbols,
             self._config.timeframe,
             self._config.mode,
             self._config.quantity,
+            # Venue registration is NOT part of the config tuple, so a cached
+            # "no live trading venue" verdict outlived the activation that
+            # fixed it: the broker connects (status flips CONNECTED) and
+            # venue_register publishes the venue, but `_broker_key` sees the
+            # same connectivity triple it saw before, so the cache was never
+            # invalidated and START stayed blocked forever. Resolve the venue
+            # every call and let it ride the key.
+            self._resolve_live_venue_id(self.broker_name()),
         )
         if key == self._validate_key and self._validate_cache is not None:
             return self._validate_cache

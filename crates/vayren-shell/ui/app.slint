@@ -90,6 +90,9 @@ export component AppWindow inherits Window {
     callback broker-help-requested();
     callback broker-add-requested();
     callback broker-paste-requested(int);
+    // Persist the open panel's broker as VAYREN's authoritative default via
+    // the existing authenticated `select_broker` command path.
+    callback broker-set-default-requested(string);
 
     // Strategy Lab interactions (Slint reports; Rust view-model owns state).
     callback lab-library-picked(int);
@@ -309,6 +312,10 @@ export component AppWindow inherits Window {
     in-out property <[BrokerRowView]> conn-brokers;
     in-out property <string> conn-display-name: "";
     in-out property <string> conn-broker-id: "";
+    // The authoritative persisted default broker (gateway-owned). Distinct
+    // from conn-broker-id, which is only which detail card is open.
+    in-out property <string> conn-default-id: "";
+    in-out property <bool> conn-default-saving: false;
     in-out property <string> conn-mark: "?";
     in-out property <string> conn-venue-subtitle: "";
     in-out property <string> conn-env-label: "PAPER";
@@ -844,6 +851,8 @@ export component AppWindow inherits Window {
                     logo-mark: root.conn-mark;
                     venue-subtitle: root.conn-venue-subtitle;
                     env-label: root.conn-env-label;
+                    default-id: root.conn-default-id;
+                    default-saving: root.conn-default-saving;
                     description-line: root.conn-description;
                     status-pill-label: root.conn-pill-label;
                     status-pill-tone: root.conn-pill-tone;
@@ -878,6 +887,7 @@ export component AppWindow inherits Window {
                     help-requested() => { root.broker-help-requested(); }
                     add-broker-requested() => { root.broker-add-requested(); }
                     paste-requested(i) => { root.broker-paste-requested(i); }
+                    set-default-requested(id) => { root.broker-set-default-requested(id); }
                 }
                 if !root.screen-pending && root.active-screen == ShellScreen.lab: StrategyLabScreen {
                     head-roomy: root.width >= 1210px;

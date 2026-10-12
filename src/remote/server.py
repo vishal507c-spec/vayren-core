@@ -55,7 +55,17 @@ _FRAME_LIMIT = 1_000_000
 _LOOPBACK_HOSTS = ("127.0.0.1", "::1", "localhost")
 
 #: Remote command names accepted (each maps 1:1 to the headless action path).
-MUTATING_ACTIONS = ("setup", "mode", "start", "stop", "halt", "arm", "select_symbol", "tick")
+MUTATING_ACTIONS = (
+    "setup",
+    "mode",
+    "start",
+    "stop",
+    "halt",
+    "arm",
+    "select_symbol",
+    "select_broker",
+    "tick",
+)
 
 #: Event channels a client may subscribe to (snapshot sections + event stream).
 EVENT_CHANNELS = (
@@ -629,6 +639,16 @@ class RemoteServer:
             return {"action": "mode", "mode": args["mode"]}
         if action in ("stop", "halt", "arm", "tick"):
             return {"action": action}
+        if action == "select_broker":
+            # SYSTEM's "make this the default broker" action. Translated here
+            # so the gateway's OWN selection store is updated — without this a
+            # desktop SYSTEM change never reached the gateway and LIVE kept
+            # resolving a different broker. The backend still validates the
+            # name against the registry and refuses a mid-session switch.
+            broker = args.get("broker", "")
+            if not isinstance(broker, str) or not broker.strip():
+                return None
+            return {"action": "select_broker", "broker": broker.strip().lower()}
         if action == "select_symbol":
             symbol = args.get("symbol", "")
             if not isinstance(symbol, str) or not symbol.strip():
