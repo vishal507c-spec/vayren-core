@@ -724,7 +724,9 @@
       "from": "src/remote",
       "kind": "actual",
       "sources": [
-        "src/remote/gateway.py"
+        "src/remote/gateway.py",
+        "src/remote/runner.py",
+        "src/remote/server_ops.py"
       ],
       "to": "src/app"
     },
@@ -1247,7 +1249,7 @@
       "to": "src/core/native"
     }
   ],
-  "entity_count": 5948,
+  "entity_count": 5986,
   "files": [
     {
       "domain": "CORE",
@@ -4736,6 +4738,16 @@
       "module": "src/remote",
       "owner": "REMOTE_TRANSPORT",
       "owner_source": "policy",
+      "path": "src/remote/ops_cli.py",
+      "retention_state": null
+    },
+    {
+      "domain": "REMOTE_TRANSPORT",
+      "is_test": false,
+      "language": "PYTHON",
+      "module": "src/remote",
+      "owner": "REMOTE_TRANSPORT",
+      "owner_source": "policy",
       "path": "src/remote/protocol.py",
       "retention_state": null
     },
@@ -4757,6 +4769,16 @@
       "owner": "REMOTE_TRANSPORT",
       "owner_source": "policy",
       "path": "src/remote/server.py",
+      "retention_state": null
+    },
+    {
+      "domain": "REMOTE_TRANSPORT",
+      "is_test": false,
+      "language": "PYTHON",
+      "module": "src/remote",
+      "owner": "REMOTE_TRANSPORT",
+      "owner_source": "policy",
+      "path": "src/remote/server_ops.py",
       "retention_state": null
     },
     {
@@ -4827,6 +4849,16 @@
       "owner": "REMOTE_TRANSPORT",
       "owner_source": "policy",
       "path": "src/remote/tests/test_server.py",
+      "retention_state": null
+    },
+    {
+      "domain": "REMOTE_TRANSPORT",
+      "is_test": true,
+      "language": "PYTHON",
+      "module": "src/remote",
+      "owner": "REMOTE_TRANSPORT",
+      "owner_source": "policy",
+      "path": "src/remote/tests/test_server_ops.py",
       "retention_state": null
     },
     {
@@ -7363,9 +7395,11 @@
         "src/remote/auth.py",
         "src/remote/client.py",
         "src/remote/gateway.py",
+        "src/remote/ops_cli.py",
         "src/remote/protocol.py",
         "src/remote/runner.py",
         "src/remote/server.py",
+        "src/remote/server_ops.py",
         "src/remote/snapshot.py",
         "src/remote/tests/__init__.py",
         "src/remote/tests/test_auth.py",
@@ -7373,6 +7407,7 @@
         "src/remote/tests/test_gateway.py",
         "src/remote/tests/test_protocol.py",
         "src/remote/tests/test_server.py",
+        "src/remote/tests/test_server_ops.py",
         "src/remote/tests/test_snapshot.py"
       ],
       "id": "src/remote",
@@ -7779,7 +7814,7 @@
       "required_language": "PYTHON"
     }
   ],
-  "relationship_count": 12879,
+  "relationship_count": 12979,
   "repository": {
     "name": "vayren-core",
     "root": "."
@@ -7832,7 +7867,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 838,
+      "line": 839,
       "module": "src/app",
       "name": "_build_lab_library_rows",
       "public": false,
@@ -7901,7 +7936,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1005,
+      "line": 1006,
       "module": "src/app",
       "name": "_ensure_stdin_reader",
       "public": false,
@@ -7925,7 +7960,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1080,
+      "line": 1081,
       "module": "src/app",
       "name": "_lab_coverage",
       "public": false,
@@ -7948,7 +7983,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 825,
+      "line": 826,
       "module": "src/app",
       "name": "_lab_library_rows",
       "public": false,
@@ -7973,7 +8008,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1368,
+      "line": 1369,
       "module": "src/app",
       "name": "_lab_run",
       "public": false,
@@ -7992,7 +8027,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1313,
+      "line": 1314,
       "module": "src/app",
       "name": "_lab_saved_universe",
       "public": false,
@@ -8013,7 +8048,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1341,
+      "line": 1342,
       "module": "src/app",
       "name": "_lab_snapshot",
       "public": false,
@@ -8030,7 +8065,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 953,
+      "line": 954,
       "module": "src/app",
       "name": "_lab_universe",
       "public": false,
@@ -8050,7 +8085,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1650,
+      "line": 1651,
       "module": "src/app",
       "name": "_lab_universe_result",
       "public": false,
@@ -8074,7 +8109,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1133,
+      "line": 1134,
       "module": "src/app",
       "name": "_lab_workspace",
       "public": false,
@@ -8092,7 +8127,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 792,
+      "line": 793,
       "module": "src/app",
       "name": "_library_signature",
       "public": false,
@@ -8120,7 +8155,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 419,
+      "line": 420,
       "module": "src/app",
       "name": "_live_action",
       "public": false,
@@ -8140,7 +8175,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 701,
+      "line": 702,
       "module": "src/app",
       "name": "_live_selection",
       "public": false,
@@ -8162,7 +8197,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 671,
+      "line": 672,
       "module": "src/app",
       "name": "_live_service",
       "public": false,
@@ -8179,7 +8214,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 651,
+      "line": 652,
       "module": "src/app",
       "name": "_live_session_running",
       "public": false,
@@ -8197,7 +8232,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 753,
+      "line": 754,
       "module": "src/app",
       "name": "_live_unavailable",
       "public": false,
@@ -8275,7 +8310,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1025,
+      "line": 1026,
       "module": "src/app",
       "name": "_next_line",
       "public": false,
@@ -8292,7 +8327,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 643,
+      "line": 644,
       "module": "src/app",
       "name": "_opt_bool",
       "public": false,
@@ -8309,7 +8344,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 634,
+      "line": 635,
       "module": "src/app",
       "name": "_opt_float",
       "public": false,
@@ -8326,7 +8361,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 627,
+      "line": 628,
       "module": "src/app",
       "name": "_opt_str",
       "public": false,
@@ -8345,7 +8380,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 782,
+      "line": 783,
       "module": "src/app",
       "name": "_portfolio_snapshot",
       "public": false,
@@ -8362,7 +8397,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 982,
+      "line": 983,
       "module": "src/app",
       "name": "_progress_emitter",
       "public": false,
@@ -8381,7 +8416,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1034,
+      "line": 1035,
       "module": "src/app",
       "name": "_pump_while_running",
       "public": false,
@@ -8398,7 +8433,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1066,
+      "line": 1067,
       "module": "src/app",
       "name": "_requeue_deferred",
       "public": false,
@@ -8419,7 +8454,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1564,
+      "line": 1565,
       "module": "src/app",
       "name": "_research_snapshot",
       "public": false,
@@ -8440,7 +8475,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 934,
+      "line": 935,
       "module": "src/app",
       "name": "_strategy_names",
       "public": false,
@@ -8476,7 +8511,8 @@
         "app.headless:_live_action",
         "app.headless:_portfolio_snapshot",
         "app.headless:run_headless_backend",
-        "remote.gateway:HeadlessGateway"
+        "remote.gateway:HeadlessGateway",
+        "remote.server_ops:_get_worker_runtime_status"
       ],
       "callers_complete": true,
       "calls": [
@@ -8488,7 +8524,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 714,
+      "line": 715,
       "module": "src/app",
       "name": "_trading_service_snapshot",
       "public": false,
@@ -8503,7 +8539,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 996,
+      "line": 997,
       "module": "src/app",
       "name": "_watch_for_cancel",
       "public": false,
@@ -8521,7 +8557,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 2193,
+      "line": 2194,
       "module": "src/app",
       "name": "main_headless",
       "public": true,
@@ -8538,7 +8574,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1626,
+      "line": 1627,
       "module": "src/app",
       "name": "parse_headless_args",
       "public": true,
@@ -8581,7 +8617,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1688,
+      "line": 1689,
       "module": "src/app",
       "name": "run_headless_backend",
       "public": true,
@@ -8721,7 +8757,8 @@
     },
     {
       "called_by": [
-        "app.services.live_trading_service:LiveTradingService"
+        "app.services.live_trading_service:LiveTradingService",
+        "remote.runner:main"
       ],
       "callers_complete": true,
       "calls": [
@@ -9415,7 +9452,8 @@
         "app.tests.test_live_strategy_sync_and_watchlist:test_4_empty_universe_strategy_clears_watchlist",
         "app.tests.test_live_strategy_sync_and_watchlist:test_5_order_safety_selection_never_starts_or_submits",
         "app.tests.test_live_strategy_sync_and_watchlist:test_6_live_action_refresh_syncs_latest_saved_universe",
-        "app.tests.test_live_strategy_sync_and_watchlist:test_7_live_strategy_switch_isolates_universes_via_live_action"
+        "app.tests.test_live_strategy_sync_and_watchlist:test_7_live_strategy_switch_isolates_universes_via_live_action",
+        "app.tests.test_live_strategy_sync_and_watchlist:test_8_watchlist_selection_subset_preserves_saved_universe"
       ],
       "callers_complete": true,
       "calls": [
@@ -9548,6 +9586,8 @@
         "app.tests.test_live_strategy_sync_and_watchlist:test_3_switching_between_strategies_clears_and_restores",
         "app.tests.test_live_strategy_sync_and_watchlist:test_4_empty_universe_strategy_clears_watchlist",
         "app.tests.test_live_strategy_sync_and_watchlist:test_5_order_safety_selection_never_starts_or_submits",
+        "app.tests.test_live_strategy_sync_and_watchlist:test_8_watchlist_selection_subset_preserves_saved_universe",
+        "app.tests.test_live_strategy_sync_and_watchlist:test_9_restore_config_auto_seeds_missing_universe_store",
         "app.tests.test_strategy_universe_phase1:_service",
         "strategy.tests.test_market_data_router:test_22_shared_instrument_across_strategies",
         "strategy.tests.test_market_data_router:test_24_strategy_loads_without_provider_connection",
@@ -14234,7 +14274,9 @@
         "app.tests.test_live_strategy_sync_and_watchlist:test_4_empty_universe_strategy_clears_watchlist",
         "app.tests.test_live_strategy_sync_and_watchlist:test_5_order_safety_selection_never_starts_or_submits",
         "app.tests.test_live_strategy_sync_and_watchlist:test_6_live_action_refresh_syncs_latest_saved_universe",
-        "app.tests.test_live_strategy_sync_and_watchlist:test_7_live_strategy_switch_isolates_universes_via_live_action"
+        "app.tests.test_live_strategy_sync_and_watchlist:test_7_live_strategy_switch_isolates_universes_via_live_action",
+        "app.tests.test_live_strategy_sync_and_watchlist:test_8_watchlist_selection_subset_preserves_saved_universe",
+        "app.tests.test_live_strategy_sync_and_watchlist:test_9_restore_config_auto_seeds_missing_universe_store"
       ],
       "callers_complete": true,
       "calls": [],
@@ -14256,7 +14298,8 @@
         "app.tests.test_live_strategy_sync_and_watchlist:test_4_empty_universe_strategy_clears_watchlist",
         "app.tests.test_live_strategy_sync_and_watchlist:test_5_order_safety_selection_never_starts_or_submits",
         "app.tests.test_live_strategy_sync_and_watchlist:test_6_live_action_refresh_syncs_latest_saved_universe",
-        "app.tests.test_live_strategy_sync_and_watchlist:test_7_live_strategy_switch_isolates_universes_via_live_action"
+        "app.tests.test_live_strategy_sync_and_watchlist:test_7_live_strategy_switch_isolates_universes_via_live_action",
+        "app.tests.test_live_strategy_sync_and_watchlist:test_8_watchlist_selection_subset_preserves_saved_universe"
       ],
       "callers_complete": true,
       "calls": [
@@ -14411,6 +14454,44 @@
       "name": "test_7_live_strategy_switch_isolates_universes_via_live_action",
       "public": true,
       "qualified": "app.tests.test_live_strategy_sync_and_watchlist:test_7_live_strategy_switch_isolates_universes_via_live_action",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.lab_universe_service:LabUniverseService",
+        "app.services.live_trading_service:LiveTradingService",
+        "app.tests.test_live_strategy_sync_and_watchlist:dirs",
+        "app.tests.test_live_strategy_sync_and_watchlist:lab"
+      ],
+      "dotted": "app.tests.test_live_strategy_sync_and_watchlist.test_8_watchlist_selection_subset_preserves_saved_universe",
+      "file": "src/app/tests/test_live_strategy_sync_and_watchlist.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 267,
+      "module": "src/app",
+      "name": "test_8_watchlist_selection_subset_preserves_saved_universe",
+      "public": true,
+      "qualified": "app.tests.test_live_strategy_sync_and_watchlist:test_8_watchlist_selection_subset_preserves_saved_universe",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.live_trading_service:LiveTradingService",
+        "app.tests.test_live_strategy_sync_and_watchlist:dirs"
+      ],
+      "dotted": "app.tests.test_live_strategy_sync_and_watchlist.test_9_restore_config_auto_seeds_missing_universe_store",
+      "file": "src/app/tests/test_live_strategy_sync_and_watchlist.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 304,
+      "module": "src/app",
+      "name": "test_9_restore_config_auto_seeds_missing_universe_store",
+      "public": true,
+      "qualified": "app.tests.test_live_strategy_sync_and_watchlist:test_9_restore_config_auto_seeds_missing_universe_store",
       "tests": []
     },
     {
@@ -45442,11 +45523,26 @@
       "called_by": [],
       "callers_complete": false,
       "calls": [],
+      "dotted": "crates::vayren-shell::src::main::apply_server_op_ack",
+      "file": "crates/vayren-shell/src/main.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 1815,
+      "module": "crates/vayren-shell",
+      "name": "apply_server_op_ack",
+      "public": false,
+      "qualified": "crates::vayren-shell::src::main::apply_server_op_ack",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
       "dotted": "crates::vayren-shell::src::main::arg_value",
       "file": "crates/vayren-shell/src/main.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 27,
+      "line": 28,
       "module": "crates/vayren-shell",
       "name": "arg_value",
       "public": false,
@@ -45461,7 +45557,7 @@
       "file": "crates/vayren-shell/src/main.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 57,
+      "line": 58,
       "module": "crates/vayren-shell",
       "name": "default_data_dir",
       "public": false,
@@ -45476,7 +45572,7 @@
       "file": "crates/vayren-shell/src/main.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 74,
+      "line": 75,
       "module": "crates/vayren-shell",
       "name": "default_strategy_dir",
       "public": false,
@@ -45491,7 +45587,7 @@
       "file": "crates/vayren-shell/src/main.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 48,
+      "line": 49,
       "module": "crates/vayren-shell",
       "name": "home_dir",
       "public": false,
@@ -45506,7 +45602,7 @@
       "file": "crates/vayren-shell/src/main.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 178,
+      "line": 179,
       "module": "crates/vayren-shell",
       "name": "main",
       "public": false,
@@ -45521,7 +45617,7 @@
       "file": "crates/vayren-shell/src/main.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 100,
+      "line": 101,
       "module": "crates/vayren-shell",
       "name": "parse_limit",
       "public": false,
@@ -45536,7 +45632,7 @@
       "file": "crates/vayren-shell/src/main.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 162,
+      "line": 163,
       "module": "crates/vayren-shell",
       "name": "parse_universe_action",
       "public": false,
@@ -45551,7 +45647,7 @@
       "file": "crates/vayren-shell/src/main.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 1771,
+      "line": 2077,
       "module": "crates/vayren-shell",
       "name": "run_remote_ui",
       "public": false,
@@ -45566,7 +45662,7 @@
       "file": "crates/vayren-shell/src/main.rs",
       "kind": "mod",
       "language": "RUST_SLINT",
-      "line": 1932,
+      "line": 2314,
       "module": "crates/vayren-shell",
       "name": "tests",
       "public": false,
@@ -45581,11 +45677,26 @@
       "file": "crates/vayren-shell/src/main.rs",
       "kind": "mod",
       "language": "RUST_SLINT",
-      "line": 118,
+      "line": 119,
       "module": "crates/vayren-shell",
       "name": "universe_action_tests",
       "public": false,
       "qualified": "crates::vayren-shell::src::main::universe_action_tests",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
+      "dotted": "crates::vayren-shell::src::main::wire_server_ops",
+      "file": "crates/vayren-shell/src/main.rs",
+      "kind": "fn",
+      "language": "RUST_SLINT",
+      "line": 1949,
+      "module": "crates/vayren-shell",
+      "name": "wire_server_ops",
+      "public": false,
+      "qualified": "crates::vayren-shell::src::main::wire_server_ops",
       "tests": []
     },
     {
@@ -46316,7 +46427,7 @@
       "file": "crates/vayren-shell/src/python_bridge.rs",
       "kind": "mod",
       "language": "RUST_SLINT",
-      "line": 629,
+      "line": 638,
       "module": "crates/vayren-shell",
       "name": "tests",
       "public": false,
@@ -46406,7 +46517,7 @@
       "file": "crates/vayren-shell/src/remote_live.rs",
       "kind": "struct",
       "language": "RUST_SLINT",
-      "line": 572,
+      "line": 573,
       "module": "crates/vayren-shell",
       "name": "RemoteCommand",
       "public": true,
@@ -46481,7 +46592,7 @@
       "file": "crates/vayren-shell/src/remote_live.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 614,
+      "line": 615,
       "module": "crates/vayren-shell",
       "name": "current_time_str",
       "public": false,
@@ -46511,7 +46622,7 @@
       "file": "crates/vayren-shell/src/remote_live.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 580,
+      "line": 581,
       "module": "crates/vayren-shell",
       "name": "initial_connect",
       "public": true,
@@ -46616,7 +46727,7 @@
       "file": "crates/vayren-shell/src/remote_live.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 627,
+      "line": 628,
       "module": "crates/vayren-shell",
       "name": "spawn_remote_bootstrap",
       "public": true,
@@ -46631,7 +46742,7 @@
       "file": "crates/vayren-shell/src/remote_live.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 693,
+      "line": 694,
       "module": "crates/vayren-shell",
       "name": "spawn_remote_pump",
       "public": true,
@@ -46646,7 +46757,7 @@
       "file": "crates/vayren-shell/src/remote_live.rs",
       "kind": "mod",
       "language": "RUST_SLINT",
-      "line": 893,
+      "line": 922,
       "module": "crates/vayren-shell",
       "name": "tests",
       "public": false,
@@ -65853,6 +65964,74 @@
       ]
     },
     {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.ops_cli._bootstrap_src_path",
+      "file": "src/remote/ops_cli.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 15,
+      "module": "src/remote",
+      "name": "_bootstrap_src_path",
+      "public": false,
+      "qualified": "remote.ops_cli:_bootstrap_src_path",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "remote.ops_cli:main"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.ops_cli.default_data_dir",
+      "file": "src/remote/ops_cli.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 31,
+      "module": "src/remote",
+      "name": "default_data_dir",
+      "public": true,
+      "qualified": "remote.ops_cli:default_data_dir",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "remote.ops_cli:main"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.ops_cli.default_strategy_dir",
+      "file": "src/remote/ops_cli.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 36,
+      "module": "src/remote",
+      "name": "default_strategy_dir",
+      "public": true,
+      "qualified": "remote.ops_cli:default_strategy_dir",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.ops_cli:default_data_dir",
+        "remote.ops_cli:default_strategy_dir",
+        "remote.server_ops:execute_server_op"
+      ],
+      "dotted": "remote.ops_cli.main",
+      "file": "src/remote/ops_cli.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 41,
+      "module": "src/remote",
+      "name": "main",
+      "public": true,
+      "qualified": "remote.ops_cli:main",
+      "tests": []
+    },
+    {
       "called_by": [
         "remote.client:_client_message",
         "remote.protocol:decode_message",
@@ -66053,6 +66232,7 @@
       "called_by": [],
       "callers_complete": true,
       "calls": [
+        "app.observable:pump_events",
         "remote.auth:AuthConfigError",
         "remote.auth:load_token_map",
         "remote.gateway:HeadlessGateway",
@@ -66101,7 +66281,7 @@
       "file": "src/remote/server.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 99,
+      "line": 101,
       "module": "src/remote",
       "name": "ConfigError",
       "public": true,
@@ -66126,7 +66306,7 @@
       "file": "src/remote/server.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 104,
+      "line": 106,
       "module": "src/remote",
       "name": "RemoteConfig",
       "public": true,
@@ -66169,6 +66349,7 @@
         "remote.server:read_frame",
         "remote.server:send_text",
         "remote.server:write_frame",
+        "remote.server_ops:execute_server_op",
         "remote.snapshot:build_snapshot",
         "remote.snapshot:project_event"
       ],
@@ -66176,7 +66357,7 @@
       "file": "src/remote/server.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 309,
+      "line": 311,
       "module": "src/remote",
       "name": "RemoteServer",
       "public": true,
@@ -66197,7 +66378,7 @@
       "file": "src/remote/server.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 285,
+      "line": 287,
       "module": "src/remote",
       "name": "_Connection",
       "public": false,
@@ -66216,7 +66397,7 @@
       "file": "src/remote/server.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 304,
+      "line": 306,
       "module": "src/remote",
       "name": "_IdempotentResult",
       "public": false,
@@ -66235,7 +66416,7 @@
       "file": "src/remote/server.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 175,
+      "line": 177,
       "module": "src/remote",
       "name": "_accept_key",
       "public": false,
@@ -66254,7 +66435,7 @@
       "file": "src/remote/server.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 180,
+      "line": 182,
       "module": "src/remote",
       "name": "_recv_exact",
       "public": false,
@@ -66273,7 +66454,7 @@
       "file": "src/remote/server.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 879,
+      "line": 902,
       "module": "src/remote",
       "name": "_stable_hash",
       "public": false,
@@ -66294,7 +66475,7 @@
       "file": "src/remote/server.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 136,
+      "line": 138,
       "module": "src/remote",
       "name": "config_from_env",
       "public": true,
@@ -66313,7 +66494,7 @@
       "file": "src/remote/server.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 887,
+      "line": 910,
       "module": "src/remote",
       "name": "entry_tail_signature",
       "public": true,
@@ -66335,7 +66516,7 @@
       "file": "src/remote/server.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 236,
+      "line": 238,
       "module": "src/remote",
       "name": "perform_handshake",
       "public": true,
@@ -66357,7 +66538,7 @@
       "file": "src/remote/server.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 192,
+      "line": 194,
       "module": "src/remote",
       "name": "read_frame",
       "public": true,
@@ -66378,7 +66559,7 @@
       "file": "src/remote/server.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 232,
+      "line": 234,
       "module": "src/remote",
       "name": "send_text",
       "public": true,
@@ -66398,13 +66579,362 @@
       "file": "src/remote/server.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 219,
+      "line": 221,
       "module": "src/remote",
       "name": "write_frame",
       "public": true,
       "qualified": "remote.server:write_frame",
       "tests": [
         "src/remote/tests/test_server.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.server_ops:op_health_check"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.server_ops._get_disk_info",
+      "file": "src/remote/server_ops.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 124,
+      "module": "src/remote",
+      "name": "_get_disk_info",
+      "public": false,
+      "qualified": "remote.server_ops:_get_disk_info",
+      "tests": [
+        "src/remote/tests/test_server_ops.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.server_ops:op_health_check"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.server_ops._get_load_average",
+      "file": "src/remote/server_ops.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 111,
+      "module": "src/remote",
+      "name": "_get_load_average",
+      "public": false,
+      "qualified": "remote.server_ops:_get_load_average",
+      "tests": [
+        "src/remote/tests/test_server_ops.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.server_ops:op_health_check"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.server_ops._get_memory_info",
+      "file": "src/remote/server_ops.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 90,
+      "module": "src/remote",
+      "name": "_get_memory_info",
+      "public": false,
+      "qualified": "remote.server_ops:_get_memory_info",
+      "tests": [
+        "src/remote/tests/test_server_ops.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.server_ops:op_gateway_status",
+        "remote.server_ops:op_health_check",
+        "remote.server_ops:op_restart_gateway"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.server_ops._get_service_status",
+      "file": "src/remote/server_ops.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 137,
+      "module": "src/remote",
+      "name": "_get_service_status",
+      "public": false,
+      "qualified": "remote.server_ops:_get_service_status",
+      "tests": [
+        "src/remote/tests/test_server_ops.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.server_ops:op_health_check"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.server_ops._get_uptime_string",
+      "file": "src/remote/server_ops.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 71,
+      "module": "src/remote",
+      "name": "_get_uptime_string",
+      "public": false,
+      "qualified": "remote.server_ops:_get_uptime_string",
+      "tests": [
+        "src/remote/tests/test_server_ops.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.server_ops:op_deploy_approved",
+        "remote.server_ops:op_gateway_status",
+        "remote.server_ops:op_health_check",
+        "remote.server_ops:op_restart_gateway"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "app.headless:_trading_service_snapshot"
+      ],
+      "dotted": "remote.server_ops._get_worker_runtime_status",
+      "file": "src/remote/server_ops.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 171,
+      "module": "src/remote",
+      "name": "_get_worker_runtime_status",
+      "public": false,
+      "qualified": "remote.server_ops:_get_worker_runtime_status",
+      "tests": [
+        "src/remote/tests/test_server_ops.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.ops_cli:main",
+        "remote.server:RemoteServer",
+        "remote.tests.test_server_ops:test_execute_op_backup",
+        "remote.tests.test_server_ops:test_execute_op_deploy_requires_confirm",
+        "remote.tests.test_server_ops:test_execute_op_disallowed",
+        "remote.tests.test_server_ops:test_execute_op_health",
+        "remote.tests.test_server_ops:test_execute_op_logs",
+        "remote.tests.test_server_ops:test_execute_op_restart_requires_confirm",
+        "remote.tests.test_server_ops:test_execute_op_status"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "remote.server_ops:op_create_backup",
+        "remote.server_ops:op_deploy_approved",
+        "remote.server_ops:op_gateway_status",
+        "remote.server_ops:op_get_logs",
+        "remote.server_ops:op_health_check",
+        "remote.server_ops:op_restart_gateway",
+        "remote.server_ops:record_audit_log"
+      ],
+      "dotted": "remote.server_ops.execute_server_op",
+      "file": "src/remote/server_ops.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 497,
+      "module": "src/remote",
+      "name": "execute_server_op",
+      "public": true,
+      "qualified": "remote.server_ops:execute_server_op",
+      "tests": [
+        "src/remote/tests/test_server_ops.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.server_ops:execute_server_op",
+        "remote.server_ops:op_deploy_approved"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.server_ops.op_create_backup",
+      "file": "src/remote/server_ops.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 305,
+      "module": "src/remote",
+      "name": "op_create_backup",
+      "public": true,
+      "qualified": "remote.server_ops:op_create_backup",
+      "tests": [
+        "src/remote/tests/test_server_ops.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.server_ops:execute_server_op"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "remote.server_ops:_get_worker_runtime_status",
+        "remote.server_ops:op_create_backup",
+        "remote.server_ops:op_health_check"
+      ],
+      "dotted": "remote.server_ops.op_deploy_approved",
+      "file": "src/remote/server_ops.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 351,
+      "module": "src/remote",
+      "name": "op_deploy_approved",
+      "public": true,
+      "qualified": "remote.server_ops:op_deploy_approved",
+      "tests": [
+        "src/remote/tests/test_server_ops.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.server_ops:execute_server_op"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "remote.server_ops:_get_service_status",
+        "remote.server_ops:_get_worker_runtime_status"
+      ],
+      "dotted": "remote.server_ops.op_gateway_status",
+      "file": "src/remote/server_ops.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 252,
+      "module": "src/remote",
+      "name": "op_gateway_status",
+      "public": true,
+      "qualified": "remote.server_ops:op_gateway_status",
+      "tests": [
+        "src/remote/tests/test_server_ops.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.server_ops:execute_server_op"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "remote.server_ops:scrub_sensitive_text"
+      ],
+      "dotted": "remote.server_ops.op_get_logs",
+      "file": "src/remote/server_ops.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 278,
+      "module": "src/remote",
+      "name": "op_get_logs",
+      "public": true,
+      "qualified": "remote.server_ops:op_get_logs",
+      "tests": [
+        "src/remote/tests/test_server_ops.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.server_ops:execute_server_op",
+        "remote.server_ops:op_deploy_approved"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "remote.server_ops:_get_disk_info",
+        "remote.server_ops:_get_load_average",
+        "remote.server_ops:_get_memory_info",
+        "remote.server_ops:_get_service_status",
+        "remote.server_ops:_get_uptime_string",
+        "remote.server_ops:_get_worker_runtime_status"
+      ],
+      "dotted": "remote.server_ops.op_health_check",
+      "file": "src/remote/server_ops.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 211,
+      "module": "src/remote",
+      "name": "op_health_check",
+      "public": true,
+      "qualified": "remote.server_ops:op_health_check",
+      "tests": [
+        "src/remote/tests/test_server_ops.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.server_ops:execute_server_op"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "remote.server_ops:_get_service_status",
+        "remote.server_ops:_get_worker_runtime_status"
+      ],
+      "dotted": "remote.server_ops.op_restart_gateway",
+      "file": "src/remote/server_ops.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 447,
+      "module": "src/remote",
+      "name": "op_restart_gateway",
+      "public": true,
+      "qualified": "remote.server_ops:op_restart_gateway",
+      "tests": [
+        "src/remote/tests/test_server_ops.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.server_ops:execute_server_op"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.server_ops.record_audit_log",
+      "file": "src/remote/server_ops.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 480,
+      "module": "src/remote",
+      "name": "record_audit_log",
+      "public": true,
+      "qualified": "remote.server_ops:record_audit_log",
+      "tests": [
+        "src/remote/tests/test_server_ops.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.server_ops:op_get_logs",
+        "remote.tests.test_server_ops:test_scrub_sensitive_text"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.server_ops.scrub_sensitive_text",
+      "file": "src/remote/server_ops.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 56,
+      "module": "src/remote",
+      "name": "scrub_sensitive_text",
+      "public": true,
+      "qualified": "remote.server_ops:scrub_sensitive_text",
+      "tests": [
+        "src/remote/tests/test_server_ops.py"
+      ]
+    },
+    {
+      "called_by": [
+        "remote.tests.test_server_ops:test_validate_op"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.server_ops.validate_op",
+      "file": "src/remote/server_ops.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 43,
+      "module": "src/remote",
+      "name": "validate_op",
+      "public": true,
+      "qualified": "remote.server_ops:validate_op",
+      "tests": [
+        "src/remote/tests/test_server_ops.py"
       ]
     },
     {
@@ -66546,7 +67076,7 @@
       "file": "src/remote/snapshot.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 294,
+      "line": 306,
       "module": "src/remote",
       "name": "classify_event",
       "public": true,
@@ -66569,7 +67099,7 @@
       "file": "src/remote/snapshot.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 323,
+      "line": 335,
       "module": "src/remote",
       "name": "project_event",
       "public": true,
@@ -67935,6 +68465,174 @@
       "name": "test_unsupported_schema_version_rejected",
       "public": true,
       "qualified": "remote.tests.test_server:test_unsupported_schema_version_rejected",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "remote.tests.test_server_ops.test_allowed_operations_list",
+      "file": "src/remote/tests/test_server_ops.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 15,
+      "module": "src/remote",
+      "name": "test_allowed_operations_list",
+      "public": true,
+      "qualified": "remote.tests.test_server_ops:test_allowed_operations_list",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.server_ops:execute_server_op"
+      ],
+      "dotted": "remote.tests.test_server_ops.test_execute_op_backup",
+      "file": "src/remote/tests/test_server_ops.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 100,
+      "module": "src/remote",
+      "name": "test_execute_op_backup",
+      "public": true,
+      "qualified": "remote.tests.test_server_ops:test_execute_op_backup",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.server_ops:execute_server_op"
+      ],
+      "dotted": "remote.tests.test_server_ops.test_execute_op_deploy_requires_confirm",
+      "file": "src/remote/tests/test_server_ops.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 144,
+      "module": "src/remote",
+      "name": "test_execute_op_deploy_requires_confirm",
+      "public": true,
+      "qualified": "remote.tests.test_server_ops:test_execute_op_deploy_requires_confirm",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.server_ops:execute_server_op"
+      ],
+      "dotted": "remote.tests.test_server_ops.test_execute_op_disallowed",
+      "file": "src/remote/tests/test_server_ops.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 118,
+      "module": "src/remote",
+      "name": "test_execute_op_disallowed",
+      "public": true,
+      "qualified": "remote.tests.test_server_ops:test_execute_op_disallowed",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.server_ops:execute_server_op"
+      ],
+      "dotted": "remote.tests.test_server_ops.test_execute_op_health",
+      "file": "src/remote/tests/test_server_ops.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 56,
+      "module": "src/remote",
+      "name": "test_execute_op_health",
+      "public": true,
+      "qualified": "remote.tests.test_server_ops:test_execute_op_health",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.server_ops:execute_server_op"
+      ],
+      "dotted": "remote.tests.test_server_ops.test_execute_op_logs",
+      "file": "src/remote/tests/test_server_ops.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 87,
+      "module": "src/remote",
+      "name": "test_execute_op_logs",
+      "public": true,
+      "qualified": "remote.tests.test_server_ops:test_execute_op_logs",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.server_ops:execute_server_op"
+      ],
+      "dotted": "remote.tests.test_server_ops.test_execute_op_restart_requires_confirm",
+      "file": "src/remote/tests/test_server_ops.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 131,
+      "module": "src/remote",
+      "name": "test_execute_op_restart_requires_confirm",
+      "public": true,
+      "qualified": "remote.tests.test_server_ops:test_execute_op_restart_requires_confirm",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.server_ops:execute_server_op"
+      ],
+      "dotted": "remote.tests.test_server_ops.test_execute_op_status",
+      "file": "src/remote/tests/test_server_ops.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 73,
+      "module": "src/remote",
+      "name": "test_execute_op_status",
+      "public": true,
+      "qualified": "remote.tests.test_server_ops:test_execute_op_status",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.server_ops:scrub_sensitive_text"
+      ],
+      "dotted": "remote.tests.test_server_ops.test_scrub_sensitive_text",
+      "file": "src/remote/tests/test_server_ops.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 40,
+      "module": "src/remote",
+      "name": "test_scrub_sensitive_text",
+      "public": true,
+      "qualified": "remote.tests.test_server_ops:test_scrub_sensitive_text",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "remote.server_ops:validate_op"
+      ],
+      "dotted": "remote.tests.test_server_ops.test_validate_op",
+      "file": "src/remote/tests/test_server_ops.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 26,
+      "module": "src/remote",
+      "name": "test_validate_op",
+      "public": true,
+      "qualified": "remote.tests.test_server_ops:test_validate_op",
       "tests": []
     },
     {
@@ -104010,6 +104708,14 @@
       "path": "src/remote/tests/test_server.py",
       "targets": [
         "src/remote/server.py"
+      ]
+    },
+    {
+      "granularity": "file",
+      "module": "src/remote",
+      "path": "src/remote/tests/test_server_ops.py",
+      "targets": [
+        "src/remote/server_ops.py"
       ]
     },
     {

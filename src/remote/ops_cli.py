@@ -25,7 +25,7 @@ def _bootstrap_src_path() -> None:
 
 _bootstrap_src_path()
 
-from remote.server_ops import APPROVED_OPERATIONS, execute_server_op
+from remote.server_ops import APPROVED_OPERATIONS, execute_server_op  # noqa: E402
 
 
 def default_data_dir() -> str:
@@ -50,7 +50,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--data-dir", default=default_data_dir(), help="Data directory")
     parser.add_argument("--strategy-dir", default=default_strategy_dir(), help="Strategy directory")
-    parser.add_argument("--confirm", action="store_true", help="Confirm disruptive operation (deploy, restart)")
+    parser.add_argument(
+        "--confirm", action="store_true", help="Confirm disruptive operation (deploy, restart)"
+    )
     parser.add_argument("--lines", type=int, default=50, help="Max lines for log retrieval")
     parser.add_argument("--level", default="ERROR", help="Log level filter (ERROR, WARNING, INFO)")
     parser.add_argument("--all-days", action="store_true", help="Include logs prior to today")
@@ -82,22 +84,31 @@ def main(argv: list[str] | None = None) -> int:
     if op == "health":
         print("=== VAYREN EC2 HEALTH CHECK ===")
         print(f"Status:             {result.get('ec2_status')}")
-        print(f"Gateway Service:    {result.get('gateway_status')} (PID: {result.get('gateway_pid')})")
-        print(f"Trading Worker:     {result.get('trading_worker_status')} (Running: {result.get('trading_worker_running')})")
-        print(f"Selected Broker:    {result.get('selected_broker')} ({result.get('broker_live_status')})")
+        print(
+            f"Gateway Service:    {result.get('gateway_status')} (PID: {result.get('gateway_pid')})"
+        )
+        w_status = result.get("trading_worker_status")
+        w_running = result.get("trading_worker_running")
+        print(f"Trading Worker:     {w_status} (Running: {w_running})")
+        b_sel = result.get("selected_broker")
+        b_stat = result.get("broker_live_status")
+        print(f"Selected Broker:    {b_sel} ({b_stat})")
         print(f"System Uptime:      {result.get('uptime')}")
         print(f"Load Average:       {result.get('load_average')}")
         mem = result.get("memory", {})
-        print(f"Memory:             {mem.get('used_mb')}MB / {mem.get('total_mb')}MB ({mem.get('percent')}%)")
+        m_used, m_tot, m_pct = mem.get("used_mb"), mem.get("total_mb"), mem.get("percent")
+        print(f"Memory:             {m_used}MB / {m_tot}MB ({m_pct}%)")
         disk = result.get("disk", {})
-        print(f"Disk:               {disk.get('used_gb')}GB / {disk.get('total_gb')}GB ({disk.get('percent')}%)")
+        d_used, d_tot, d_pct = disk.get("used_gb"), disk.get("total_gb"), disk.get("percent")
+        print(f"Disk:               {d_used}GB / {d_tot}GB ({d_pct}%)")
         print(f"Active Strategy:    {result.get('active_strategy') or 'None'}")
         print(f"Symbols Count:      {result.get('configured_symbols')}")
     elif op == "status":
         print("=== VAYREN GATEWAY & WORKER STATUS ===")
         svc = result.get("service", {})
         print(f"Gateway Service:    {svc.get('status')} (PID: {svc.get('main_pid')})")
-        print(f"Port 8765 Loopback: {'LISTENING' if result.get('port_8765_listening') else 'NOT LISTENING'}")
+        port_ok = "LISTENING" if result.get("port_8765_listening") else "NOT LISTENING"
+        print(f"Port 8765 Loopback: {port_ok}")
         worker = result.get("trading_worker", {})
         print(f"Trading Worker:     {worker.get('worker_status')} (Mode: {worker.get('mode')})")
         print(f"Active Strategy:    {worker.get('strategy') or 'None'}")
@@ -105,7 +116,9 @@ def main(argv: list[str] | None = None) -> int:
         if worker.get("start_blockers"):
             print(f"Blockers:           {'; '.join(worker['start_blockers'])}")
     elif op == "logs":
-        print(f"=== RECENT LOGS ({result.get('lines_count')} lines, level: {result.get('level_filter')}) ===")
+        l_cnt = result.get("lines_count")
+        l_lvl = result.get("level_filter")
+        print(f"=== RECENT LOGS ({l_cnt} lines, level: {l_lvl}) ===")
         for line in result.get("logs", []):
             print(line)
     elif op == "backup":

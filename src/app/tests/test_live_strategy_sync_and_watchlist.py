@@ -267,7 +267,7 @@ def test_7_live_strategy_switch_isolates_universes_via_live_action(
 def test_8_watchlist_selection_subset_preserves_saved_universe(
     dirs: tuple[str, str], lab: LabUniverseService
 ) -> None:
-    """Checking a subset in Market Watchlist updates selected_symbols without modifying saved universe."""
+    """Watchlist subset selection updates selected_symbols without altering saved universe."""
     lab.save("obr-c1c4", ["RELIANCE", "TCS", "INFY"])
 
     live = LiveTradingService(dirs[0], dirs[1])
@@ -304,19 +304,22 @@ def test_8_watchlist_selection_subset_preserves_saved_universe(
 def test_9_restore_config_auto_seeds_missing_universe_store(dirs: tuple[str, str]) -> None:
     """When strategy_universes.json is absent, live_session.json seeds the universe store."""
     import json
+
     live_dir = Path(dirs[0]) / "live"
     live_dir.mkdir(parents=True, exist_ok=True)
     session_file = live_dir / "live_session.json"
     session_file.write_text(
-        json.dumps({
-            "config": {
-                "strategy_name": "OBR C1C4",
-                "symbols": ["NSE:KAYNES", "NSE:DREDGECORP"],
-                "timeframe": "30m",
-                "mode": "LIVE",
-                "quantity": 1.0,
+        json.dumps(
+            {
+                "config": {
+                    "strategy_name": "OBR C1C4",
+                    "symbols": ["NSE:KAYNES", "NSE:DREDGECORP"],
+                    "timeframe": "30m",
+                    "mode": "LIVE",
+                    "quantity": 1.0,
+                }
             }
-        }),
+        ),
         encoding="utf-8",
     )
     # Ensure strategy_universes.json does NOT exist
@@ -333,5 +336,6 @@ def test_9_restore_config_auto_seeds_missing_universe_store(dirs: tuple[str, str
     snap = live.snapshot()
     assert "NSE:KAYNES" in snap["available_symbols"]
     assert "NSE:KAYNES" in snap["selected_symbols"]
-    assert "no symbols selected (pick from Market Watchlist)" not in (snap.get("start_blockers") or [])
-
+    assert "no symbols selected (pick from Market Watchlist)" not in (
+        snap.get("start_blockers") or []
+    )

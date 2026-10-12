@@ -28,14 +28,16 @@ from typing import Any
 
 logger = logging.getLogger("remote.server_ops")
 
-APPROVED_OPERATIONS = frozenset({
-    "health",
-    "status",
-    "logs",
-    "backup",
-    "deploy",
-    "restart",
-})
+APPROVED_OPERATIONS = frozenset(
+    {
+        "health",
+        "status",
+        "logs",
+        "backup",
+        "deploy",
+        "restart",
+    }
+)
 
 
 def validate_op(op_name: str) -> bool:
@@ -69,7 +71,7 @@ def scrub_sensitive_text(text: str) -> str:
 def _get_uptime_string() -> str:
     """Read Linux system uptime."""
     try:
-        with open("/proc/uptime", "r", encoding="utf-8") as f:
+        with open("/proc/uptime", encoding="utf-8") as f:
             total_seconds = float(f.readline().split()[0])
             days = int(total_seconds // 86400)
             hours = int((total_seconds % 86400) // 3600)
@@ -89,7 +91,7 @@ def _get_memory_info() -> dict[str, Any]:
     """Read memory stats from /proc/meminfo."""
     try:
         mem: dict[str, int] = {}
-        with open("/proc/meminfo", "r", encoding="utf-8") as f:
+        with open("/proc/meminfo", encoding="utf-8") as f:
             for line in f:
                 parts = line.split(":")
                 if len(parts) == 2:
@@ -109,7 +111,12 @@ def _get_memory_info() -> dict[str, Any]:
 def _get_load_average() -> list[float]:
     """Get system load averages."""
     try:
-        return [round(x, 2) for x in os.getloadavg()]
+        fn = getattr(os, "getloadavg", None)
+        if callable(fn):
+            raw = fn()
+            if isinstance(raw, (tuple, list)):
+                return [round(float(x), 2) for x in raw]
+        return [0.0, 0.0, 0.0]
     except Exception:
         return [0.0, 0.0, 0.0]
 
@@ -215,15 +222,17 @@ def op_health_check(data_dir: str, strategy_dir: str) -> dict[str, Any]:
     try:
         sel_path = Path(data_dir) / "broker_selection.json"
         if sel_path.is_file():
-            with open(sel_path, "r", encoding="utf-8") as f:
+            with open(sel_path, encoding="utf-8") as f:
                 broker_selection = json.load(f).get("name", "unknown")
     except Exception:
         pass
 
-    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    now_iso = datetime.datetime.now(datetime.UTC).isoformat()
     return {
         "ok": True,
-        "ec2_status": "HEALTHY" if mem_info["percent"] < 95.0 and disk_info["percent"] < 95.0 else "DEGRADED",
+        "ec2_status": "HEALTHY"
+        if mem_info["percent"] < 95.0 and disk_info["percent"] < 95.0
+        else "DEGRADED",
         "gateway_status": service_info.get("status", "UNKNOWN"),
         "gateway_pid": service_info.get("main_pid", 0),
         "trading_worker_status": worker_info.get("worker_status", "STOPPED"),
@@ -249,9 +258,10 @@ def op_gateway_status(data_dir: str, strategy_dir: str) -> dict[str, Any]:
     port_listening = False
     try:
         import socket
+
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.settimeout(1.0)
-            port_listening = (s.connect_ex(("127.0.0.1", 8765)) == 0)
+            port_listening = s.connect_ex(("127.0.0.1", 8765)) == 0
     except Exception:
         pass
 
@@ -276,7 +286,9 @@ def op_get_logs(lines: int = 50, level: str = "ERROR", today_only: bool = True) 
         raw_lines = res.stdout.splitlines()
         scrubbed_lines: list[str] = []
         for line in raw_lines:
-            if level.upper() == "ERROR" and not any(k in line.upper() for k in ("ERROR", "WARNING", "FAIL", "EXCEPTION", "REJECT")):
+            if level.upper() == "ERROR" and not any(
+                k in line.upper() for k in ("ERROR", "WARNING", "FAIL", "EXCEPTION", "REJECT")
+            ):
                 continue
             scrubbed_lines.append(scrub_sensitive_text(line))
         return {
@@ -294,14 +306,18 @@ def op_create_backup(data_dir: str, strategy_dir: str) -> dict[str, Any]:
     """Create timestamped, SHA-256 verified backup of VAYREN data and strategies."""
     backup_dir = Path(data_dir).parent / "backups"
     backup_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d_%H%M%S")
+    stamp = datetime.datetime.now(datetime.UTC).strftime("%Y%m%d_%H%M%S")
     archive_name = f"vayren_backup_{stamp}.tar.gz"
     archive_path = backup_dir / archive_name
 
     try:
         with tarfile.open(archive_path, "w:gz") as tar:
             if Path(data_dir).is_dir():
-                tar.add(data_dir, arcname="data", filter=lambda ti: None if ti.name.endswith(".sock") else ti)
+                tar.add(
+                    data_dir,
+                    arcname="data",
+                    filter=lambda ti: None if ti.name.endswith(".sock") else ti,
+                )
             if Path(strategy_dir).is_dir():
                 tar.add(strategy_dir, arcname="strategies")
 
@@ -325,19 +341,24 @@ def op_create_backup(data_dir: str, strategy_dir: str) -> dict[str, Any]:
             "sha256": digest,
             "size_bytes": size_bytes,
             "status": "VERIFIED",
-            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
         }
     except Exception as exc:
         archive_path.unlink(missing_ok=True)
         return {"ok": False, "error": f"backup creation failed: {exc}"}
 
 
-def op_deploy_approved(data_dir: str, strategy_dir: str, repo_dir: str = "/home/ubuntu/vayren-core", confirmed: bool = False) -> dict[str, Any]:
-    """Execute safe deployment: check active session, create backup, check git, test, and restart."""
+def op_deploy_approved(
+    data_dir: str,
+    strategy_dir: str,
+    repo_dir: str = "/home/ubuntu/vayren-core",
+    confirmed: bool = False,
+) -> dict[str, Any]:
+    """Safe deployment: active session check, backup, git, and restart."""
     if not confirmed:
         return {
             "ok": False,
-            "error": "DEPLOY_BLOCKED: deploy operation requires confirmed=True with operator consent.",
+            "error": "DEPLOY_BLOCKED: requires confirmed=True with operator consent.",
         }
 
     # 1. Active session guard: never interrupt a live trading session without explicit confirmation
@@ -345,7 +366,7 @@ def op_deploy_approved(data_dir: str, strategy_dir: str, repo_dir: str = "/home/
     if worker_info.get("running"):
         return {
             "ok": False,
-            "error": "DEPLOY_BLOCKED: A live trading session is currently RUNNING on the server. Deployment will interrupt trading.",
+            "error": "DEPLOY_BLOCKED: live trading session is RUNNING. Stop before deploying.",
             "worker_status": worker_info,
         }
 
@@ -356,26 +377,47 @@ def op_deploy_approved(data_dir: str, strategy_dir: str, repo_dir: str = "/home/
 
     repo_path = Path(repo_dir)
     if not (repo_path / ".git").is_dir():
-        return {"ok": False, "error": f"Repository directory {repo_dir} is not a valid git repository"}
+        return {
+            "ok": False,
+            "error": f"Repository directory {repo_dir} is not a valid git repository",
+        }
 
     try:
         # Check current working tree
-        status_proc = subprocess.run(["git", "status", "--porcelain"], cwd=repo_dir, capture_output=True, text=True, check=True)
-        rev_before = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo_dir, capture_output=True, text=True, check=True).stdout.strip()
+        subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=repo_dir,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        rev_before = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=repo_dir, capture_output=True, text=True, check=True
+        ).stdout.strip()
 
         # Pull updates safely
-        pull_proc = subprocess.run(["git", "pull", "--ff-only"], cwd=repo_dir, capture_output=True, text=True, check=False)
+        pull_proc = subprocess.run(
+            ["git", "pull", "--ff-only"], cwd=repo_dir, capture_output=True, text=True, check=False
+        )
         if pull_proc.returncode != 0:
+            pull_err = pull_proc.stderr.strip() or pull_proc.stdout.strip()
             return {
                 "ok": False,
-                "error": f"git pull --ff-only failed: {pull_proc.stderr.strip() or pull_proc.stdout.strip()}",
+                "error": f"git pull --ff-only failed: {pull_err}",
                 "rollback_backup": backup_result.get("archive_path"),
             }
 
-        rev_after = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo_dir, capture_output=True, text=True, check=True).stdout.strip()
+        rev_after = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=repo_dir, capture_output=True, text=True, check=True
+        ).stdout.strip()
 
         # Restart gateway service
-        restart_proc = subprocess.run(["sudo", "systemctl", "restart", "vayren-remote"], capture_output=True, text=True, check=False)
+        restart_proc = subprocess.run(
+            ["sudo", "systemctl", "restart", "vayren-remote"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
         if restart_proc.returncode != 0:
             return {
                 "ok": False,
@@ -395,7 +437,11 @@ def op_deploy_approved(data_dir: str, strategy_dir: str, repo_dir: str = "/home/
             "status": "DEPLOYED_AND_VERIFIED",
         }
     except Exception as exc:
-        return {"ok": False, "error": f"deployment failed: {exc}", "rollback_backup": backup_result.get("archive_path")}
+        return {
+            "ok": False,
+            "error": f"deployment failed: {exc}",
+            "rollback_backup": backup_result.get("archive_path"),
+        }
 
 
 def op_restart_gateway(data_dir: str, strategy_dir: str, confirmed: bool = False) -> dict[str, Any]:
@@ -403,18 +449,24 @@ def op_restart_gateway(data_dir: str, strategy_dir: str, confirmed: bool = False
     if not confirmed:
         return {
             "ok": False,
-            "error": "RESTART_BLOCKED: restart operation requires confirmed=True with operator consent.",
+            "error": "RESTART_BLOCKED: restart requires confirmed=True with operator consent.",
         }
 
     worker_info = _get_worker_runtime_status(data_dir, strategy_dir)
     if worker_info.get("running"):
         return {
             "ok": False,
-            "error": "RESTART_BLOCKED: A live trading session is currently RUNNING on the server. Stop the trading session before restarting the service.",
+            "error": "RESTART_BLOCKED: live trading session is RUNNING. Stop before restart.",
         }
 
     try:
-        proc = subprocess.run(["sudo", "systemctl", "restart", "vayren-remote"], capture_output=True, text=True, check=False, timeout=15)
+        proc = subprocess.run(
+            ["sudo", "systemctl", "restart", "vayren-remote"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=15,
+        )
         if proc.returncode != 0:
             return {"ok": False, "error": f"systemctl restart failed: {proc.stderr.strip()}"}
 
@@ -429,7 +481,7 @@ def record_audit_log(data_dir: str, op_name: str, caller: str, outcome: dict[str
     """Record an audit trail entry for every administrative operation."""
     audit_file = Path(data_dir) / "audit_ops.log"
     entry = {
-        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
         "caller": caller,
         "operation": op_name,
         "ok": outcome.get("ok", False),
@@ -452,7 +504,11 @@ def execute_server_op(
     """Dispatcher for approved server operations. Enforces allowlist strictly."""
     op = str(op_name or "").strip().lower()
     if op not in APPROVED_OPERATIONS:
-        res = {"ok": False, "error": f"UNKNOWN_OPERATION: {op!r} is not in the approved allowlist ({sorted(APPROVED_OPERATIONS)})"}
+        allowed = sorted(APPROVED_OPERATIONS)
+        res = {
+            "ok": False,
+            "error": f"UNKNOWN_OPERATION: {op!r} is not in approved allowlist ({allowed})",
+        }
         record_audit_log(data_dir, op, caller, res)
         return res
 

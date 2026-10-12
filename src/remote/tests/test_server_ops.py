@@ -2,11 +2,7 @@
 
 from __future__ import annotations
 
-import json
-import os
-import tempfile
 from pathlib import Path
-import pytest
 
 from remote.server_ops import (
     APPROVED_OPERATIONS,
@@ -63,7 +59,9 @@ def test_execute_op_health(tmp_path):
     data_dir.mkdir(parents=True, exist_ok=True)
     strat_dir.mkdir(parents=True, exist_ok=True)
 
-    res = execute_server_op("health", params={}, data_dir=str(data_dir), strategy_dir=str(strat_dir))
+    res = execute_server_op(
+        "health", params={}, data_dir=str(data_dir), strategy_dir=str(strat_dir)
+    )
     assert res["ok"] is True
     assert "ec2_status" in res
     assert "gateway_status" in res
@@ -78,7 +76,9 @@ def test_execute_op_status(tmp_path):
     data_dir.mkdir(parents=True, exist_ok=True)
     strat_dir.mkdir(parents=True, exist_ok=True)
 
-    res = execute_server_op("status", params={}, data_dir=str(data_dir), strategy_dir=str(strat_dir))
+    res = execute_server_op(
+        "status", params={}, data_dir=str(data_dir), strategy_dir=str(strat_dir)
+    )
     assert res["ok"] is True
     assert "service" in res
     assert "trading_worker" in res
@@ -90,8 +90,10 @@ def test_execute_op_logs(tmp_path):
     data_dir.mkdir(parents=True, exist_ok=True)
     strat_dir.mkdir(parents=True, exist_ok=True)
 
-    res = execute_server_op("logs", params={"lines": 10}, data_dir=str(data_dir), strategy_dir=str(strat_dir))
-    # On Windows without systemd/journalctl, it safely catches exception and returns ok=False with error or empty logs
+    res = execute_server_op(
+        "logs", params={"lines": 10}, data_dir=str(data_dir), strategy_dir=str(strat_dir)
+    )
+    # On Windows without journalctl, it catches exception and returns ok=False or logs
     assert "logs" in res or "error" in res
 
 
@@ -102,7 +104,9 @@ def test_execute_op_backup(tmp_path):
     strat_dir.mkdir(parents=True, exist_ok=True)
     (data_dir / "test.json").write_text('{"key": "value"}', encoding="utf-8")
 
-    res = execute_server_op("backup", params={}, data_dir=str(data_dir), strategy_dir=str(strat_dir))
+    res = execute_server_op(
+        "backup", params={}, data_dir=str(data_dir), strategy_dir=str(strat_dir)
+    )
     assert res["ok"] is True
     assert "archive_path" in res
     assert "sha256" in res
@@ -117,9 +121,11 @@ def test_execute_op_disallowed(tmp_path):
     data_dir.mkdir(parents=True, exist_ok=True)
     strat_dir.mkdir(parents=True, exist_ok=True)
 
-    res = execute_server_op("drop_tables", params={}, data_dir=str(data_dir), strategy_dir=str(strat_dir))
+    res = execute_server_op(
+        "drop_tables", params={}, data_dir=str(data_dir), strategy_dir=str(strat_dir)
+    )
     assert res["ok"] is False
-    assert "not in the approved allowlist" in res["error"]
+    assert "not in approved allowlist" in res["error"]
 
 
 def test_execute_op_restart_requires_confirm(tmp_path):
@@ -128,7 +134,9 @@ def test_execute_op_restart_requires_confirm(tmp_path):
     data_dir.mkdir(parents=True, exist_ok=True)
     strat_dir.mkdir(parents=True, exist_ok=True)
 
-    res = execute_server_op("restart", params={"confirmed": False}, data_dir=str(data_dir), strategy_dir=str(strat_dir))
+    res = execute_server_op(
+        "restart", params={"confirmed": False}, data_dir=str(data_dir), strategy_dir=str(strat_dir)
+    )
     assert res["ok"] is False
     assert "requires confirmed=True" in res["error"]
 
@@ -139,6 +147,8 @@ def test_execute_op_deploy_requires_confirm(tmp_path):
     data_dir.mkdir(parents=True, exist_ok=True)
     strat_dir.mkdir(parents=True, exist_ok=True)
 
-    res = execute_server_op("deploy", params={"confirmed": False}, data_dir=str(data_dir), strategy_dir=str(strat_dir))
+    res = execute_server_op(
+        "deploy", params={"confirmed": False}, data_dir=str(data_dir), strategy_dir=str(strat_dir)
+    )
     assert res["ok"] is False
     assert "requires confirmed=True" in res["error"]

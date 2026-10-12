@@ -502,7 +502,9 @@ class LiveTradingService:
             syms_tuple = tuple(symbols)
             if syms_tuple:
                 saved_universe = self._universes.symbols_for(self._config.strategy_name)
-                matching = tuple(s for s in syms_tuple if s in saved_universe) if saved_universe else ()
+                matching = (
+                    tuple(s for s in syms_tuple if s in saved_universe) if saved_universe else ()
+                )
                 if matching:
                     # Operator selected specific symbols from the saved universe
                     self._config.symbols = matching
@@ -513,7 +515,8 @@ class LiveTradingService:
                         raise LiveConfigError(str(exc)) from exc
                     self._config.symbols = saved.symbols
             else:
-                # Empty symbol list from UI retains/defaults to saved universe if none currently selected
+                # Empty symbol list from UI retains/defaults to saved universe
+                # if none currently selected
                 if not self._config.symbols:
                     self._config.symbols = self._universes.symbols_for(self._config.strategy_name)
         elif not self._config.symbols:
