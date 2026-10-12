@@ -309,7 +309,7 @@ def _system_snapshot(
     data_dir: str,
     selected_broker: str | None = None,
     manager: Any | None = None,
-    strategy_dir: str | None = None,
+    strategy_dir: str | None = None,  # noqa: ARG001 - kept for callers; panel-open no longer selects
 ) -> dict:
     """Build the native System workspace snapshot from the broker manager.
 

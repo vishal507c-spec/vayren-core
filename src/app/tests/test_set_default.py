@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 import sys
-import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -89,13 +88,9 @@ def test_disconnected_broker_becomes_default_and_is_not_substituted(
     # No broker manager: nothing is connected anywhere.
     _select(tmp_path, "fyers")
 
-    assert _store_default(tmp_path) == "fyers", (
-        "a disconnected broker may still be the default"
-    )
+    assert _store_default(tmp_path) == "fyers", "a disconnected broker may still be the default"
     headless._TRADING_SERVICES.clear()
-    assert _store_default(tmp_path) == "fyers", (
-        "no silent substitution back to zerodha"
-    )
+    assert _store_default(tmp_path) == "fyers", "no silent substitution back to zerodha"
 
 
 # ── Test 4: failure must not fake success ─────────────────────────────────
@@ -116,9 +111,10 @@ def test_gateway_translates_only_a_well_formed_broker_id() -> None:
     assert server._translate_command("select_broker", {}, "r") is None
     assert server._translate_command("select_broker", {"broker": "   "}, "r") is None
     assert server._translate_command("select_broker", {"broker": 7}, "r") is None
-    assert server._translate_command(
-        "select_broker", {"broker": " FYERS "}, "r"
-    ) == {"action": "select_broker", "broker": "fyers"}
+    assert server._translate_command("select_broker", {"broker": " FYERS "}, "r") == {
+        "action": "select_broker",
+        "broker": "fyers",
+    }
 
 
 # ── Test 5: restart persistence ───────────────────────────────────────────
@@ -139,9 +135,7 @@ def test_default_survives_restart(tmp_path: Path, target: str) -> None:
 
 
 @pytest.mark.parametrize("default", ["fyers", "zerodha"])
-def test_opening_a_detail_panel_does_not_change_the_default(
-    tmp_path: Path, default: str
-) -> None:
+def test_opening_a_detail_panel_does_not_change_the_default(tmp_path: Path, default: str) -> None:
     """Regression: merely LOOKING at a broker used to replace the default."""
     _seed(tmp_path, default)
     manager = None

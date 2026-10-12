@@ -609,11 +609,19 @@ impl BrokerWorkspace {
             // disconnected default stays the default.
             default_id: {
                 let explicit = str_of("default_id");
-                if explicit.is_empty() { selected_id.clone() } else { explicit }
+                if explicit.is_empty() {
+                    selected_id.clone()
+                } else {
+                    explicit
+                }
             },
             panel_id: {
                 let explicit = str_of("panel_id");
-                if explicit.is_empty() { selected_id.clone() } else { explicit }
+                if explicit.is_empty() {
+                    selected_id.clone()
+                } else {
+                    explicit
+                }
             },
             selected_id,
             display_name,

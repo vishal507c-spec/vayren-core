@@ -5466,177 +5466,185 @@ mod tests {
     }
 
     // ── START control: the button must be usable, must reach the backend, and
-// ── must never strand the operator in a pending state.
+    // ── must never strand the operator in a pending state.
 
-/// A configured, host-mode, bridge-wired state whose backend reports no
-/// blockers — the exact situation the operator described (STOPPED + ready).
-fn start_ready_state() -> LiveState {
-    let mut st = configured(LiveState::default());
-    st.apply_snapshot(&serde_json::json!({
-        "mode": "PAPER",
-        "session_status": "STOPPED",
-        "start_blockers": [],
-    }));
-    st
-}
+    /// A configured, host-mode, bridge-wired state whose backend reports no
+    /// blockers — the exact situation the operator described (STOPPED + ready).
+    fn start_ready_state() -> LiveState {
+        let mut st = configured(LiveState::default());
+        st.apply_snapshot(&serde_json::json!({
+            "mode": "PAPER",
+            "session_status": "STOPPED",
+            "start_blockers": [],
+        }));
+        st
+    }
 
-#[test]
-fn stopped_session_start_is_clickable() {
-    let st = start_ready_state();
-    assert_eq!(st.session, SessionStatus::Stopped);
-    assert!(st.start_clickable(), "STOPPED + wired must accept the click");
-    assert!(st.can_start(), "no blockers reported, so readiness is true too");
-}
+    #[test]
+    fn stopped_session_start_is_clickable() {
+        let st = start_ready_state();
+        assert_eq!(st.session, SessionStatus::Stopped);
+        assert!(
+            st.start_clickable(),
+            "STOPPED + wired must accept the click"
+        );
+        assert!(
+            st.can_start(),
+            "no blockers reported, so readiness is true too"
+        );
+    }
 
-#[test]
-fn start_clickable_while_blocked_so_the_reason_can_be_asked_for() {
-    let mut st = start_ready_state();
-    st.apply_snapshot(&serde_json::json!({
-        "session_status": "STOPPED",
-        "start_blockers": ["live confirmation required (explicit operator consent)"],
-    }));
-    // Readiness stays fail-closed...
-    assert!(!st.can_start());
-    assert_eq!(st.start_blockers().len(), 1);
-    // ...but the operator can still press, and the press explains itself.
-    assert!(
-        st.start_clickable(),
-        "a blocked-but-askable START is the whole point: no silent dead button"
-    );
-}
+    #[test]
+    fn start_clickable_while_blocked_so_the_reason_can_be_asked_for() {
+        let mut st = start_ready_state();
+        st.apply_snapshot(&serde_json::json!({
+            "session_status": "STOPPED",
+            "start_blockers": ["live confirmation required (explicit operator consent)"],
+        }));
+        // Readiness stays fail-closed...
+        assert!(!st.can_start());
+        assert_eq!(st.start_blockers().len(), 1);
+        // ...but the operator can still press, and the press explains itself.
+        assert!(
+            st.start_clickable(),
+            "a blocked-but-askable START is the whole point: no silent dead button"
+        );
+    }
 
-#[test]
-fn start_click_forwards_exactly_one_request_and_duplicates_are_ignored() {
-    let mut st = start_ready_state();
-    st.start();
-    assert_eq!(st.pending_action.as_deref(), Some("start"));
-    let first: serde_json::Value =
-        serde_json::from_str(&st.drain_actions().remove(0)).unwrap();
-    assert_eq!(first["action"], "start");
-    // A second click while pending must not reach the backend: two starts
-    // would race the service.
-    st.start();
-    assert!(
-        st.drain_actions().is_empty(),
-        "duplicate click must not emit a second request"
-    );
-}
+    #[test]
+    fn start_click_forwards_exactly_one_request_and_duplicates_are_ignored() {
+        let mut st = start_ready_state();
+        st.start();
+        assert_eq!(st.pending_action.as_deref(), Some("start"));
+        let first: serde_json::Value = serde_json::from_str(&st.drain_actions().remove(0)).unwrap();
+        assert_eq!(first["action"], "start");
+        // A second click while pending must not reach the backend: two starts
+        // would race the service.
+        st.start();
+        assert!(
+            st.drain_actions().is_empty(),
+            "duplicate click must not emit a second request"
+        );
+    }
 
-#[test]
-fn pending_start_blocks_the_button_until_the_backend_answers() {
-    let mut st = start_ready_state();
-    st.start();
-    assert!(
-        !st.start_clickable(),
-        "pending action must not allow another press"
-    );
-    assert!(!st.can_start());
-    // Backend confirms RUNNING: the pending state clears and STOP becomes live.
-    st.apply_snapshot(&serde_json::json!({"session_status": "RUNNING"}));
-    assert_eq!(st.session, SessionStatus::Running);
-    assert!(st.pending_action.is_none());
-    assert!(!st.start_clickable(), "running means START is not offered");
-    assert!(st.can_stop(), "a running session must offer STOP");
-}
+    #[test]
+    fn pending_start_blocks_the_button_until_the_backend_answers() {
+        let mut st = start_ready_state();
+        st.start();
+        assert!(
+            !st.start_clickable(),
+            "pending action must not allow another press"
+        );
+        assert!(!st.can_start());
+        // Backend confirms RUNNING: the pending state clears and STOP becomes live.
+        st.apply_snapshot(&serde_json::json!({"session_status": "RUNNING"}));
+        assert_eq!(st.session, SessionStatus::Running);
+        assert!(st.pending_action.is_none());
+        assert!(!st.start_clickable(), "running means START is not offered");
+        assert!(st.can_stop(), "a running session must offer STOP");
+    }
 
-#[test]
-fn rejected_start_clears_pending_and_shows_the_backend_reason() {
-    let mut st = start_ready_state();
-    st.start();
-    assert_eq!(st.pending_action.as_deref(), Some("start"));
-    // The backend refuses: session stays STOPPED and carries the reason.
-    st.apply_snapshot(&serde_json::json!({
-        "session_status": "STOPPED",
-        "status_reason": "START blocked: broker not connected",
-        "start_blockers": ["broker not connected"],
-    }));
-    assert_eq!(st.session, SessionStatus::Stopped);
-    assert!(
-        st.pending_action.is_none(),
-        "a refusal must not leave the button stuck on STARTING…"
-    );
-    assert!(st.start_clickable(), "the operator may retry after fixing it");
-    let view = project(&st);
-    assert_eq!(view.setup.blockers[0], "broker not connected");
-    assert!(!view.setup.can_start, "readiness is still honestly false");
-}
+    #[test]
+    fn rejected_start_clears_pending_and_shows_the_backend_reason() {
+        let mut st = start_ready_state();
+        st.start();
+        assert_eq!(st.pending_action.as_deref(), Some("start"));
+        // The backend refuses: session stays STOPPED and carries the reason.
+        st.apply_snapshot(&serde_json::json!({
+            "session_status": "STOPPED",
+            "status_reason": "START blocked: broker not connected",
+            "start_blockers": ["broker not connected"],
+        }));
+        assert_eq!(st.session, SessionStatus::Stopped);
+        assert!(
+            st.pending_action.is_none(),
+            "a refusal must not leave the button stuck on STARTING…"
+        );
+        assert!(
+            st.start_clickable(),
+            "the operator may retry after fixing it"
+        );
+        let view = project(&st);
+        assert_eq!(view.setup.blockers[0], "broker not connected");
+        assert!(!view.setup.can_start, "readiness is still honestly false");
+    }
 
-#[test]
-fn unanswered_pending_action_expires_instead_of_stranding_the_button() {
-    let mut st = start_ready_state();
-    st.start();
-    assert_eq!(st.pending_action.as_deref(), Some("start"));
-    // Nothing has answered yet, so the timeout has not elapsed.
-    assert!(!st.expire_pending_action());
-    assert_eq!(st.pending_action.as_deref(), Some("start"));
-    // Simulate the elapsed window directly (no sleeping in tests).
-    st.pending_since = Some(std::time::Instant::now() - PENDING_ACTION_TIMEOUT);
-    assert!(st.expire_pending_action());
-    assert!(
-        st.pending_action.is_none(),
-        "an unanswered request must not pin STARTING… forever"
-    );
-    assert!(st.start_clickable());
-    assert!(
-        st.action_note.is_some(),
-        "the cleared request must say what happened"
-    );
-}
+    #[test]
+    fn unanswered_pending_action_expires_instead_of_stranding_the_button() {
+        let mut st = start_ready_state();
+        st.start();
+        assert_eq!(st.pending_action.as_deref(), Some("start"));
+        // Nothing has answered yet, so the timeout has not elapsed.
+        assert!(!st.expire_pending_action());
+        assert_eq!(st.pending_action.as_deref(), Some("start"));
+        // Simulate the elapsed window directly (no sleeping in tests).
+        st.pending_since = Some(std::time::Instant::now() - PENDING_ACTION_TIMEOUT);
+        assert!(st.expire_pending_action());
+        assert!(
+            st.pending_action.is_none(),
+            "an unanswered request must not pin STARTING… forever"
+        );
+        assert!(st.start_clickable());
+        assert!(
+            st.action_note.is_some(),
+            "the cleared request must say what happened"
+        );
+    }
 
-#[test]
-fn stop_forwards_while_running_and_reports_the_confirmed_result() {
-    let mut st = start_ready_state();
-    st.start();
-    st.apply_snapshot(&serde_json::json!({"session_status": "RUNNING"}));
-    st.drain_actions(); // consume the start request; STOP is what we assert
-    st.stop();
-    let action: serde_json::Value =
-        serde_json::from_str(&st.drain_actions().remove(0)).unwrap();
-    assert_eq!(action["action"], "stop");
-    assert_eq!(st.pending_action.as_deref(), Some("stop"));
-    // Backend confirms the shutdown; the model never assumed it.
-    st.apply_snapshot(&serde_json::json!({"session_status": "STOPPED"}));
-    assert_eq!(st.session, SessionStatus::Stopped);
-    assert!(st.pending_action.is_none());
-    assert!(st.start_clickable(), "STOPPED after a stop may start again");
-}
+    #[test]
+    fn stop_forwards_while_running_and_reports_the_confirmed_result() {
+        let mut st = start_ready_state();
+        st.start();
+        st.apply_snapshot(&serde_json::json!({"session_status": "RUNNING"}));
+        st.drain_actions(); // consume the start request; STOP is what we assert
+        st.stop();
+        let action: serde_json::Value =
+            serde_json::from_str(&st.drain_actions().remove(0)).unwrap();
+        assert_eq!(action["action"], "stop");
+        assert_eq!(st.pending_action.as_deref(), Some("stop"));
+        // Backend confirms the shutdown; the model never assumed it.
+        st.apply_snapshot(&serde_json::json!({"session_status": "STOPPED"}));
+        assert_eq!(st.session, SessionStatus::Stopped);
+        assert!(st.pending_action.is_none());
+        assert!(st.start_clickable(), "STOPPED after a stop may start again");
+    }
 
-#[test]
-fn halt_invokes_the_emergency_stop_mechanism() {
-    let mut st = start_ready_state();
-    st.start();
-    st.apply_snapshot(&serde_json::json!({"session_status": "RUNNING"}));
-    st.drain_actions(); // consume the start request; HALT is what we assert
-    assert!(st.can_halt());
-    st.halt();
-    let action: serde_json::Value =
-        serde_json::from_str(&st.drain_actions().remove(0)).unwrap();
-    assert_eq!(action["action"], "halt", "HALT must reach the kill switch");
-    assert_eq!(st.pending_action.as_deref(), Some("halt"));
-    // Backend reports the halt landed.
-    st.apply_snapshot(&serde_json::json!({
-        "session_status": "HALTED",
-        "kill": {"halted": true},
-    }));
-    assert!(st.kill_halted);
-    assert!(st.pending_action.is_none());
-    // A halted session is not silently startable again.
-    assert!(!st.start_clickable());
-}
+    #[test]
+    fn halt_invokes_the_emergency_stop_mechanism() {
+        let mut st = start_ready_state();
+        st.start();
+        st.apply_snapshot(&serde_json::json!({"session_status": "RUNNING"}));
+        st.drain_actions(); // consume the start request; HALT is what we assert
+        assert!(st.can_halt());
+        st.halt();
+        let action: serde_json::Value =
+            serde_json::from_str(&st.drain_actions().remove(0)).unwrap();
+        assert_eq!(action["action"], "halt", "HALT must reach the kill switch");
+        assert_eq!(st.pending_action.as_deref(), Some("halt"));
+        // Backend reports the halt landed.
+        st.apply_snapshot(&serde_json::json!({
+            "session_status": "HALTED",
+            "kill": {"halted": true},
+        }));
+        assert!(st.kill_halted);
+        assert!(st.pending_action.is_none());
+        // A halted session is not silently startable again.
+        assert!(!st.start_clickable());
+    }
 
-#[test]
-fn start_without_a_backend_stays_inert_and_says_so() {
-    let mut st = LiveState::default();
-    st.host_mode = true;
-    st.bridge_wired = false;
-    st.start();
-    assert!(st.drain_actions().is_empty(), "nothing may be forwarded");
-    assert_eq!(st.action_note.as_deref(), Some(NO_BACKEND_NOTE));
-    assert!(!st.start_clickable());
-}
+    #[test]
+    fn start_without_a_backend_stays_inert_and_says_so() {
+        let mut st = LiveState::default();
+        st.host_mode = true;
+        st.bridge_wired = false;
+        st.start();
+        assert!(st.drain_actions().is_empty(), "nothing may be forwarded");
+        assert_eq!(st.action_note.as_deref(), Some(NO_BACKEND_NOTE));
+        assert!(!st.start_clickable());
+    }
 
-#[test]
-fn toggle_without_strategy_is_disabled() {
+    #[test]
+    fn toggle_without_strategy_is_disabled() {
         // Phase 1: no selection means no universe configuration — the
         // toggle is refused locally (no flipped check, no host action) and
         // the explicit save is a matching no-op.

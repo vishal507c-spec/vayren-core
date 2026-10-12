@@ -505,7 +505,9 @@ pub fn mark_link(state: &mut LiveState, label: &str, detail: &str, reconnects: u
         if state.pending_action.is_some() {
             state.pending_action = None;
             state.pending_since = None;
-            state.action_note = Some(format!("gateway link lost ({label}) — request not delivered"));
+            state.action_note = Some(format!(
+                "gateway link lost ({label}) — request not delivered"
+            ));
         }
     }
 }
@@ -758,10 +760,7 @@ pub fn spawn_remote_pump(
                             .and_then(|v| v.as_str())
                             .unwrap_or("")
                             .to_string();
-                        let ok = payload
-                            .get("ok")
-                            .and_then(|v| v.as_bool())
-                            .unwrap_or(false);
+                        let ok = payload.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
                         // The gateway's own verdict keys (`start_blockers` /
                         // `status_reason`); fall back through them in order so
                         // the operator sees the service's exact reason.
@@ -802,7 +801,11 @@ pub fn spawn_remote_pump(
                         };
                         let _ = tx.send(RemoteUiUpdate::CommandAck { action, ok, detail });
                     }
-                    Ok(ClientEvent::GatewayError { code, detail, request_id }) => {
+                    Ok(ClientEvent::GatewayError {
+                        code,
+                        detail,
+                        request_id,
+                    }) => {
                         // A per-command refusal (NOT_AUTHORIZED, UNKNOWN_COMMAND,
                         // COMMAND_REJECTED…) arrives as an error correlated by
                         // id. Surface it so the control stops looking pending.
