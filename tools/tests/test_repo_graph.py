@@ -268,6 +268,13 @@ def test_graph_has_no_canonical_prose() -> None:
     AST diagnostics + tests: 5,846 entities, 3,378,677 B) — product code, not
     narrative. Per-entity cost stays ~577 B (budget: 700 B), so the cap moved
     instead; 3.42MB covers the observed size plus headroom.
+    Justification for the 3.42MB -> 3.56MB bump (2026-10-12): the artifact
+    crossed the old cap because the authoritative broker-selection work joined
+    the tree (selection service/store, the gateway `select_broker` command and
+    its translation tests, the SET AS DEFAULT UI projection, and the broker
+    authority/default regression suites: 5,948 entities, 3,456,789 B) — product
+    code, not narrative. Per-entity cost stays ~581 B (budget: 700 B), so the
+    cap moved instead; 3.56MB covers the observed size plus headroom.
     2. Per-entity budget + a max-string-length budget. These are what make the
        cap safe to raise: prose pasted into any field would blow the string
        budget long before it filled the entity budget, so a future dump cannot
@@ -277,7 +284,7 @@ def test_graph_has_no_canonical_prose() -> None:
     assert "INSERT OR IGNORE" not in text
     graph = json.loads(text)
     size = len(text.encode("utf-8"))
-    assert size < 3_420_000, f"graph artifact grew past the cap: {size} B"
+    assert size < 3_560_000, f"graph artifact grew past the cap: {size} B"
 
     entities = graph["entity_count"]
     assert entities > 0
