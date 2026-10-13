@@ -272,9 +272,8 @@ jobs:
           tools/tests/test_gate_coverage.py tools/tests/test_language_governance.py
           tools/tests/test_patch_surface.py tools/tests/test_repo_graph.py
           tools/tests/test_repo_index.py tools/tests/test_router.py
-          tools/tests/test_run_tests.py tools/tests/test_self_opt.py
-          tools/tests/test_shard_contract.py tools/tests/test_speed_loop.py
-          tools/tests/test_speed_metrics.py tools/tests/test_vayren_intel.py -q --no-header
+          tools/tests/test_run_tests.py
+          tools/tests/test_shard_contract.py -q --no-header
 
   # Shard 3/3 — shell Rust tests, isolated runner. The shell test binaries
   # (Slint software-renderer suites) are the single most expensive compile

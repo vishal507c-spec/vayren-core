@@ -395,7 +395,7 @@ def _system_snapshot(
             saved_keys = {k for k, v in stored.items() if isinstance(v, str) and v.strip()}
     except Exception:  # noqa: BLE001
         pass
-    return {
+    out: dict = {
         "brokers": brokers,
         "selected_id": selected_id,
         "default_id": selected_id,
@@ -417,6 +417,20 @@ def _system_snapshot(
         # instead of silently keeping the old selection.
         "selection_error": selection_error,
     }
+    # Unified authoritative session for the open panel (new consumers read
+    # `session.state`; legacy `status_raw` stays for compatibility).
+    try:
+        if manager is not None and target_id and hasattr(manager, "get_session_snapshot"):
+            session = manager.get_session_snapshot(target_id)
+            out["session"] = session
+            out["status_raw"] = str(session.get("state", out["status_raw"]))
+            out["reason"] = str(session.get("reason", out["reason"]))
+            out["connected"] = bool(session.get("auth_valid", out["connected"]))
+            out["next_action"] = str(session.get("next_action", ""))
+            out["session_version"] = int(session.get("version", 0) or 0)
+    except Exception:
+        pass
+    return out
 
 
 _LIVE_ACTION_ERRORS: dict[str, str] = {}
@@ -587,6 +601,11 @@ def _live_action(
             snapshot["action_note"] = "stocks refreshed from Strategy Lab"
             return snapshot
         elif name == "refresh_capital":
+            # Read-only funds re-read. The manager may run the venue check
+            # inline (adapter present) or queue it on its worker; either way
+            # this handler answers with what the session ACTUALLY reports
+            # afterwards — never an assumed success.
+            refresh_targets: list[str] = []
             if broker_manager is not None:
                 bview = getattr(service, "_broker_view", lambda: {})()
                 current_broker = bview.get("id") or service.broker_name()
@@ -595,12 +614,32 @@ def _live_action(
                     if active and active != "paper":
                         current_broker = active
                 if current_broker and current_broker != "paper":
-                    broker_manager.refresh_funds(current_broker)
+                    refresh_targets = [current_broker]
                 elif hasattr(broker_manager, "broker_ids"):
-                    for b_id in broker_manager.broker_ids():
+                    refresh_targets = list(broker_manager.broker_ids())
+            for b_id in refresh_targets:
+                with contextlib.suppress(Exception):
+                    if broker_manager is not None:
                         broker_manager.refresh_funds(b_id)
+            # Give an inline venue check a moment to publish its numbers
+            # before the snapshot that answers this command is taken. A
+            # partially stubbed manager has no session state to wait on.
+            if refresh_targets and hasattr(broker_manager, "_specs"):
+                _await_broker_settled(refresh_targets[0], broker_manager)
             snapshot = _trading_service_snapshot(data_dir, strategy_dir, broker_manager)
-            snapshot["action_note"] = "broker capital refreshed"
+            funds = snapshot.get("capital") or {}
+            available = funds.get("available_margin", funds.get("available"))
+            if not refresh_targets:
+                snapshot["action_note"] = "no broker configured — nothing to refresh"
+            elif available is None:
+                detail = str(funds.get("status") or "") or str(
+                    funds.get("source") or "NOT REPORTED"
+                )
+                snapshot["action_note"] = (
+                    f"broker funds unavailable ({detail}) — no verified broker response"
+                )
+            else:
+                snapshot["action_note"] = "broker capital refreshed"
             return snapshot
         else:
             return _live_unavailable(f"unknown live action {name!r}")
@@ -1695,6 +1734,120 @@ def _lab_universe_result(cmd_type: str, command: dict, data_dir: Path | str) -> 
     return {"type": "instrument_master", "data": universe_service.refresh_summary()}
 
 
+def _with_session_state(snapshot: dict, broker_id: str, broker_manager: Any) -> dict:
+    """Attach the unified session snapshot onto a system snapshot (in place)."""
+    if broker_manager is not None and hasattr(broker_manager, "get_session_snapshot"):
+        with contextlib.suppress(Exception):
+            session = broker_manager.get_session_snapshot(broker_id)
+            snapshot["session"] = session
+            snapshot["status_raw"] = session.get("state", snapshot.get("status_raw"))
+            snapshot["reason"] = session.get("reason", snapshot.get("reason"))
+            snapshot["next_action"] = session.get("next_action", "")
+            snapshot["session_version"] = session.get("version", 0)
+    return snapshot
+
+
+def _handle_connect_broker(command: dict, data_dir: str, broker_manager: Any) -> dict:
+    """Run one CONNECT through the authoritative manager; return the snapshot."""
+    broker_id = str(command.get("broker_id") or "fyers").strip()
+    credentials = command.get("credentials") or {}
+    request_id = str(command.get("request_id", "") or "")
+    logger.info("connect_broker received for broker=%s", broker_id)
+    if broker_manager is not None:
+        creds = dict(credentials) if isinstance(credentials, dict) else {}
+        if broker_id == "fyers" and creds:
+            creds = _ensure_fyers_redirect(broker_id, creds, broker_manager)
+        ok, msg, _session = broker_manager.connect_broker(broker_id, creds, request_id=request_id)
+        logger.info("Broker connect for %s: ok=%s, msg=%s", broker_id, ok, msg)
+        if not ok and "configuration" in msg.lower():
+            snapshot = _system_snapshot(data_dir, broker_id, broker_manager)
+            snapshot["status_raw"] = "ERROR"
+            snapshot["reason"] = msg
+            return snapshot
+        _await_broker_settled(broker_id, broker_manager)
+    snapshot = _system_snapshot(data_dir, broker_id, broker_manager)
+    return _with_session_state(snapshot, broker_id, broker_manager)
+
+
+def _ensure_fyers_redirect(broker_id: str, creds: dict, broker_manager: Any) -> dict:
+    """Default the FYERS redirect URI when the submitted one is unusable."""
+    from broker.providers.fyers.live_auth import DEFAULT_REDIRECT_URL
+
+    r_uri = str(creds.get("redirect_uri") or "").strip()
+    if (
+        r_uri
+        and (r_uri.startswith("http://") or r_uri.startswith("https://"))
+        and "\n" not in r_uri
+        and "\r" not in r_uri
+        and " " not in r_uri
+    ):
+        return creds
+    try:
+        stored = broker_manager._store.load(broker_manager._specs[broker_id].config_service)
+        base = dict(stored) if isinstance(stored, dict) else {}
+    except Exception:
+        base = {}
+    base.update({k: v for k, v in creds.items() if str(v).strip()})
+    base["redirect_uri"] = DEFAULT_REDIRECT_URL
+    return base
+
+
+def _await_broker_settled(broker_id: str, broker_manager: Any) -> None:
+    """Wait for the worker to settle (up to 15s); manager owns idempotency."""
+    import time
+
+    deadline = time.monotonic() + 15.0
+    time.sleep(0.3)
+    while time.monotonic() < deadline:
+        st = broker_manager.state(broker_id)
+        status = st.get("status")
+        if status not in (BrokerStatus.AUTHENTICATING, BrokerStatus.CONFIGURING):
+            spec = broker_manager._specs.get(broker_id)
+            # Zerodha path without auto_auth: start interactive login.
+            if (
+                status == BrokerStatus.LOGIN_REQUIRED
+                and spec is not None
+                and spec.auto_authenticate is None
+                and spec.interactive_login is not None
+                and not broker_manager.is_connected(broker_id)
+            ):
+                ok_login, msg_login = broker_manager.start_login(broker_id)
+                logger.info(
+                    "start_login triggered for %s: ok=%s, msg=%s",
+                    broker_id,
+                    ok_login,
+                    msg_login,
+                )
+                if ok_login:
+                    time.sleep(0.5)
+                    continue
+            break
+        time.sleep(0.3)
+
+
+def _handle_disconnect_broker(
+    command: dict, data_dir: str, strategy_dir: str, broker_manager: Any
+) -> dict:
+    """Run one DISCONNECT (intent persisted, LIVE disarmed); return snapshot."""
+    broker_id = str(command.get("broker_id") or "fyers").strip()
+    request_id = str(command.get("request_id", "") or "")
+    revoke = bool(command.get("revoke", False))
+    logger.info("disconnect_broker received for broker=%s", broker_id)
+    if broker_manager is not None:
+        if revoke:
+            broker_manager.revoke_session(broker_id, request_id=request_id)
+        else:
+            broker_manager.disconnect_broker(broker_id, request_id=request_id)
+        # Safety: disconnect disarms LIVE consent immediately.
+        _ARMED[0] = False
+        with contextlib.suppress(Exception):
+            svc = _live_service(data_dir, strategy_dir, broker_manager)
+            if svc is not None:
+                svc.note_armed(False)
+    snapshot = _system_snapshot(data_dir, broker_id, broker_manager)
+    return _with_session_state(snapshot, broker_id, broker_manager)
+
+
 def run_headless_backend(args: argparse.Namespace) -> int:
     """Run the headless backend service.
 
@@ -1737,15 +1890,15 @@ def run_headless_backend(args: argparse.Namespace) -> int:
     else:
         logger.error("Market source unavailable for data_dir=%s", data_dir)
 
-    # Initialize broker manager for system workspace
+    # Initialize broker manager for system workspace (shared singleton: the
+    # EC2 gateway uses the same instance, so there is one authoritative
+    # session, one worker and one snapshot source).
     broker_manager = None
     try:
         import broker.providers  # noqa: F401
-        from app.services.broker_manager import BrokerManager
+        from app.services.broker_manager import shared_manager
 
-        broker_manager = BrokerManager(data_dir=str(data_dir))
-        for b_id in broker_manager.broker_ids():
-            broker_manager.submit_check(b_id)
+        broker_manager = shared_manager(str(data_dir))
     except Exception as exc:  # noqa: BLE001
         logger.warning("Broker manager startup check failed: %s", exc)
 
@@ -2054,113 +2207,15 @@ def run_headless_backend(args: argparse.Namespace) -> int:
                     logger.info("cancel_backtest received while idle; ignoring")
 
                 elif cmd_type == "connect_broker":
-                    broker_id = str(command.get("broker_id") or "fyers").strip()
-                    credentials = command.get("credentials") or {}
-                    logger.info("connect_broker received for broker=%s", broker_id)
-
-                    if broker_manager is not None:
-                        spec = broker_manager._specs.get(broker_id)
-                        if spec is not None:
-                            try:
-                                stored = broker_manager._store.load(spec.config_service) or {}
-                            except Exception:
-                                stored = {}
-                            merged = dict(stored) if isinstance(stored, dict) else {}
-                            for k, v in credentials.items():
-                                val = str(v).strip()
-                                if val and "\u2022" not in val:
-                                    merged[str(k)] = val
-
-                            if broker_id == "fyers":
-                                from broker.providers.fyers.live_auth import DEFAULT_REDIRECT_URL
-
-                                r_uri = str(merged.get("redirect_uri") or "").strip()
-                                if (
-                                    not r_uri
-                                    or not (
-                                        r_uri.startswith("http://") or r_uri.startswith("https://")
-                                    )
-                                    or "\n" in r_uri
-                                    or "\r" in r_uri
-                                    or " " in r_uri
-                                ):
-                                    merged["redirect_uri"] = DEFAULT_REDIRECT_URL
-
-                            broker_manager._set_status(
-                                broker_id, BrokerStatus.AUTHENTICATING, "connecting to venue…"
-                            )
-                            ok, msg = broker_manager.configure(broker_id, merged)
-                            logger.info(
-                                "Broker configure for %s: ok=%s, msg=%s", broker_id, ok, msg
-                            )
-                            if not ok:
-                                snapshot = _system_snapshot(
-                                    str(data_dir), broker_id, broker_manager
-                                )
-                                snapshot["status_raw"] = "ERROR"
-                                snapshot["reason"] = msg
-                                result = {"type": "system_snapshot", "data": snapshot}
-                                if not _emit(result):
-                                    break
-                                continue
-
-                            # Wait for worker thread to complete authentication (up to 15s)
-                            import time
-
-                            deadline = time.monotonic() + 15.0
-                            time.sleep(0.3)
-                            while time.monotonic() < deadline:
-                                st = broker_manager.state(broker_id)
-                                status = st.get("status")
-                                if status not in (
-                                    BrokerStatus.AUTHENTICATING,
-                                    BrokerStatus.CONFIGURING,
-                                ):
-                                    # Zerodha path without auto_auth: start interactive login
-                                    if (
-                                        status == BrokerStatus.LOGIN_REQUIRED
-                                        and spec.auto_authenticate is None
-                                        and spec.interactive_login is not None
-                                        and not broker_manager.is_connected(broker_id)
-                                    ):
-                                        ok_login, msg_login = broker_manager.start_login(broker_id)
-                                        logger.info(
-                                            "start_login triggered for %s: ok=%s, msg=%s",
-                                            broker_id,
-                                            ok_login,
-                                            msg_login,
-                                        )
-                                        if ok_login:
-                                            time.sleep(0.5)
-                                            continue
-                                    break
-                                time.sleep(0.3)
-
-                    snapshot = _system_snapshot(str(data_dir), broker_id, broker_manager)
-                    if broker_manager is not None:
-                        st = broker_manager.state(broker_id)
-                        status = st.get("status")
-                        if status not in (BrokerStatus.CONNECTED, BrokerStatus.LIVE_READY):
-                            if status == BrokerStatus.DISCONNECTED:
-                                snapshot["status_raw"] = "DISCONNECTED"
-                            elif status == BrokerStatus.LOGIN_REQUIRED:
-                                snapshot["status_raw"] = "LOGIN_REQUIRED"
-                            else:
-                                snapshot["status_raw"] = "ERROR"
-                            snapshot["reason"] = st.get("reason") or "Connection failed"
-                        else:
-                            snapshot["status_raw"] = "CONNECTED"
-                            snapshot["reason"] = st.get("reason") or "Connected and verified."
+                    snapshot = _handle_connect_broker(command, str(data_dir), broker_manager)
                     result = {"type": "system_snapshot", "data": snapshot}
                     if not _emit(result):
                         break
 
                 elif cmd_type == "disconnect_broker":
-                    broker_id = str(command.get("broker_id") or "fyers").strip()
-                    logger.info("disconnect_broker received for broker=%s", broker_id)
-                    if broker_manager is not None:
-                        broker_manager.disconnect_broker(broker_id)
-                    snapshot = _system_snapshot(str(data_dir), broker_id, broker_manager)
+                    snapshot = _handle_disconnect_broker(
+                        command, str(data_dir), str(strategy_dir), broker_manager
+                    )
                     result = {"type": "system_snapshot", "data": snapshot}
                     if not _emit(result):
                         break

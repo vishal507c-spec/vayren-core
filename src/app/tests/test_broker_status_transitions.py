@@ -74,6 +74,7 @@ def test_timeout_during_activation_sets_disconnected_with_unreachable_reason(tmp
         venue_unregister=None,
     )
     bm = BrokerManager(str(tmp_path), specs={"fyers": spec})  # type: ignore[arg-type]
+    bm._desired["fyers"] = "CONNECTED"
     bm._activate(spec, {"api_key": "test_key"}, "test_token", "login ok")  # type: ignore[arg-type]
 
     state = bm.state("fyers")
@@ -117,6 +118,7 @@ def test_session_check_timeout_does_not_mask_as_expired_or_login_required(tmp_pa
     }
     bm._config_values = MagicMock(return_value={"api_key": "test_key"})
     bm._session_store = MagicMock(return_value=session_store)
+    bm._desired["fyers"] = "CONNECTED"
 
     bm._job_session_check(spec)  # type: ignore[arg-type]
 

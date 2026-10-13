@@ -169,6 +169,37 @@ def test_scrub_drops_credential_like_keys() -> None:
     assert clean == {"name": "FYERS", "nested": {"ok": 1}, "items": [{"qty": 2}]}
 
 
+def test_scrub_keeps_bool_secret_render_flags() -> None:
+    """Schema ``secret: bool`` flags are form metadata, never secret values."""
+    row = {"key": "pin", "label": "PIN", "secret": True, "required": False}
+    assert scrub(row) == row
+
+
+def test_scrub_still_drops_string_valued_secrets() -> None:
+    clean = scrub({"secret": "shh", "nested": {"totp": "shh", "ok": 1}})
+    assert clean == {"nested": {"ok": 1}}
+
+
+def test_brokers_rows_keep_schema_flags_and_session() -> None:
+    live = make_live(
+        brokers=[
+            {
+                "id": "fyers",
+                "credential_schema": [
+                    {"key": "pin", "label": "PIN", "secret": True, "required": False}
+                ],
+                "session": {"state": "CONNECTED", "version": 3},
+            }
+        ]
+    )
+    snap = build_snapshot(live)
+    row = snap["brokers"][0]
+    assert row["credential_schema"] == [
+        {"key": "pin", "label": "PIN", "secret": True, "required": False}
+    ]
+    assert row["session"]["state"] == "CONNECTED"
+
+
 def test_no_vendor_or_secret_markers_on_wire() -> None:
     snap = build_snapshot(make_live())
     raw = json.dumps(snap).lower()

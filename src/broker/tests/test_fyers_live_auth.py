@@ -25,6 +25,7 @@ from broker.providers.fyers.live_auth import (
     AuthError,
     FyersAuthFlow,
     FyersSessionStore,
+    _UrllibTransport,
     app_id_hash,
     default_redirect_url,
     fyers_interactive_login,
@@ -355,3 +356,32 @@ def test_login_requires_configuration(tmp_path) -> None:
     ok, message = fyers_interactive_login(flow, "", "", store, port=_free_port())
     assert not ok
     assert "configured" in message
+
+
+def test_http_429_maps_to_rate_limited_with_retry_after() -> None:
+    """HTTP 429 surfaces RATE_LIMITED (never expiry) with the Retry-After delay."""
+    from unittest.mock import patch
+
+    from broker.error_taxonomy import parse_retry_after
+
+    assert parse_retry_after({"Retry-After": "12"}) == 12.0
+    assert parse_retry_after({}) == 5.0
+    assert parse_retry_after({"retry-after": "9999"}) == 300.0
+
+    transport = _UrllibTransport()
+    from email.message import Message
+
+    headers = Message()
+    headers.add_header("Retry-After", "7")
+
+    def _raise(request, timeout=None):  # noqa: ARG001 (urlopen signature)
+        raise urllib.error.HTTPError(request.full_url, 429, "Too Many Requests", headers, None)
+
+    with patch.object(urllib.request, "urlopen", side_effect=_raise):
+        try:
+            transport.get_json("https://api-t1.fyers.in/api/v3/profile")
+            raise AssertionError("expected AuthError")
+        except AuthError as exc:
+            assert exc.code == "RATE_LIMITED"
+            assert "429" in str(exc)
+            assert "SECRET" not in str(exc)

@@ -107,6 +107,341 @@ fn num_at(sections: &serde_json::Value, section_name: &str, key: &str) -> Option
         .filter(|v| v.is_finite())
 }
 
+/// One authoritative broker-session reading shared by the SYSTEM panel and
+/// the LIVE screen. The gateway ships the unified EC2 session both as the
+/// top-level `broker_session` section (every snapshot, not only after
+/// commands) and inside each `brokers[]` row (`session`); both come from the
+/// same manager snapshot, so either is the same truth. The legacy `broker`
+/// section (a coarse connected flag + reason) is only a fallback for older
+/// gateways. Reading two different sections is what once painted SYSTEM
+/// "Connected" while LIVE read "expired" from the same snapshot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BrokerAuthority {
+    pub broker_id: String,
+    pub display_name: String,
+    pub session: serde_json::Value,
+    pub field_keys: Vec<String>,
+    pub field_labels: Vec<String>,
+    pub field_secret: Vec<bool>,
+    pub field_required: Vec<bool>,
+    pub fields_configured: bool,
+}
+
+/// Pending CONNECT input: which EC2 venue the form targets plus the
+/// schema key order its values map onto. Values travel only inside the
+/// authenticated `connect_broker` command; nothing is stored client-side.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RemoteBrokerForm {
+    pub broker_id: String,
+    pub keys: Vec<String>,
+}
+
+fn session_text(session: &serde_json::Value, key: &str) -> String {
+    session
+        .get(key)
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string()
+}
+
+fn schema_rows(row: &serde_json::Value) -> Vec<serde_json::Value> {
+    row.get("credential_schema")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// Resolve the authoritative session from a gateway snapshot. Prefers the
+/// top-level `broker_session` (present on every snapshot from a current
+/// gateway), then the matching `brokers[]` row `session`. Returns `None`
+/// when neither exists so callers fall back to the legacy section.
+pub fn authoritative_broker(sections: &serde_json::Value) -> Option<BrokerAuthority> {
+    let empty = serde_json::Value::Null;
+    let top = sections.get("broker_session").unwrap_or(&empty);
+    let top_obj = top.as_object();
+    let top_state = top_obj
+        .and_then(|o| o.get("state"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let legacy_name = sections
+        .get("broker")
+        .and_then(|b| b.get("name"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let rows: Vec<serde_json::Value> = sections
+        .get("brokers")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    // Candidate session: top-level first, then the row matching the active
+    // broker name, then a lone row (single-venue snapshots need no match).
+    let mut candidate: Option<serde_json::Value> = None;
+    let mut candidate_row: Option<serde_json::Value> = None;
+    if top_obj.is_some() && (!top_state.is_empty() || session_text(top, "broker_id") != "") {
+        candidate = Some(top.clone());
+        let id = session_text(top, "broker_id").to_lowercase();
+        candidate_row = rows
+            .iter()
+            .find(|r| {
+                r.get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_lowercase()
+                    == id
+            })
+            .cloned();
+    }
+    if candidate.is_none() && !rows.is_empty() {
+        let lname = legacy_name.to_lowercase();
+        candidate_row = rows
+            .iter()
+            .find(|r| {
+                let id = r
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_lowercase();
+                let nm = r
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_lowercase();
+                (!lname.is_empty() && (id == lname || nm == lname))
+                    || (lname.is_empty() && rows.len() == 1)
+            })
+            .cloned();
+        // Single-row snapshots carry the only venue even without a name.
+        if candidate_row.is_none() && rows.len() == 1 {
+            candidate_row = rows.first().cloned();
+        }
+        if let Some(row) = candidate_row.clone() {
+            if let Some(sess) = row.get("session").and_then(|v| v.as_object()) {
+                if !sess.is_empty() {
+                    candidate = Some(serde_json::Value::Object(sess.clone()));
+                }
+            }
+        }
+    }
+    let session = candidate?;
+    let row = candidate_row.unwrap_or(serde_json::Value::Null);
+    let mut broker_id = session_text(&session, "broker_id").to_lowercase();
+    if broker_id.is_empty() {
+        broker_id = row
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_lowercase();
+    }
+    if broker_id.is_empty() {
+        broker_id = legacy_name.to_lowercase();
+    }
+    if broker_id.is_empty() {
+        broker_id = "fyers".to_string();
+    }
+    let display_name = row
+        .get("display_name")
+        .or_else(|| row.get("name"))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| {
+            if legacy_name.is_empty() {
+                broker_id.to_uppercase()
+            } else {
+                legacy_name.to_string()
+            }
+        });
+    let mut field_keys = Vec::new();
+    let mut field_labels = Vec::new();
+    let mut field_secret = Vec::new();
+    let mut field_required = Vec::new();
+    for field in schema_rows(&row) {
+        let key = field.get("key").and_then(|v| v.as_str()).unwrap_or("");
+        if key.is_empty() {
+            continue;
+        }
+        field_keys.push(key.to_string());
+        field_labels.push(
+            field
+                .get("label")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .unwrap_or(key)
+                .to_string(),
+        );
+        field_secret.push(
+            field
+                .get("secret")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+        );
+        field_required.push(
+            field
+                .get("required")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+        );
+    }
+    let fields_configured = row
+        .get("configured")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    Some(BrokerAuthority {
+        broker_id,
+        display_name,
+        session,
+        field_keys,
+        field_labels,
+        field_secret,
+        field_required,
+        fields_configured,
+    })
+}
+
+/// One shared verdict from a unified session state, so SYSTEM and LIVE can
+/// never disagree: the same state maps to the same words, pill, and flags
+/// on both screens.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BrokerVerdict {
+    pub connected: bool,
+    pub failed: bool,
+    /// In-progress states (checking/connecting/verifying/…) paint activity
+    /// without claiming success or failure.
+    pub in_progress: bool,
+    pub pill_label: String,
+    pub pill_tone: i32,
+    pub status_message: String,
+    pub description: String,
+}
+
+pub fn session_verdict(authority: &BrokerAuthority) -> BrokerVerdict {
+    let session = &authority.session;
+    let state = session_text(session, "state").to_uppercase();
+    let reason = session_text(session, "reason");
+    let next_action = session_text(session, "next_action");
+    let account_id = session_text(session, "account_id");
+    let venue = if authority.display_name.is_empty() {
+        authority.broker_id.to_uppercase()
+    } else {
+        authority.display_name.clone()
+    };
+    let status_or = |fallback: &str| {
+        if !reason.is_empty() {
+            reason.clone()
+        } else if !next_action.is_empty() {
+            next_action.clone()
+        } else {
+            fallback.to_string()
+        }
+    };
+    match state.as_str() {
+        "CONNECTED" => BrokerVerdict {
+            connected: true,
+            failed: false,
+            in_progress: false,
+            pill_label: "Connected".to_string(),
+            pill_tone: 1,
+            status_message: if reason.is_empty() {
+                "Connection verified.".to_string()
+            } else {
+                format!("Connection verified: {reason}")
+            },
+            description: if account_id.is_empty() {
+                "Account connected and verified. Ready to trade.".to_string()
+            } else {
+                format!("Connected: authenticated as {account_id}")
+            },
+        },
+        "DEGRADED" => BrokerVerdict {
+            connected: true,
+            failed: false,
+            in_progress: false,
+            pill_label: "Connected (Degraded)".to_string(),
+            pill_tone: 1,
+            status_message: status_or("Connected with a degraded leg."),
+            description: if next_action.is_empty() {
+                format!("{venue} is connected; one connection leg needs attention.")
+            } else {
+                next_action.clone()
+            },
+        },
+        "CHECKING" | "CONNECTING" | "VERIFYING" | "RECONNECTING" | "RATE_LIMITED"
+        | "AUTHENTICATING" | "CONFIGURING" | "CHECKING SESSION" | "RATE LIMITED" => BrokerVerdict {
+            connected: false,
+            failed: false,
+            in_progress: true,
+            pill_label: "Connecting…".to_string(),
+            pill_tone: 2,
+            status_message: status_or("Authentication in progress…"),
+            description: if next_action.is_empty() {
+                format!("Waiting on {venue}…")
+            } else {
+                next_action.clone()
+            },
+        },
+        "LOGIN_REQUIRED" => BrokerVerdict {
+            connected: false,
+            failed: false,
+            in_progress: false,
+            pill_label: "Login Required".to_string(),
+            pill_tone: 2,
+            status_message: if next_action.is_empty() {
+                status_or("Broker login required.")
+            } else {
+                next_action.clone()
+            },
+            description: if reason.is_empty() {
+                format!("{venue} saved session is missing or expired.")
+            } else {
+                reason.clone()
+            },
+        },
+        "DISCONNECTED" => BrokerVerdict {
+            connected: false,
+            failed: false,
+            in_progress: false,
+            pill_label: "Not Connected".to_string(),
+            pill_tone: 3,
+            status_message: status_or("Not connected."),
+            description: if next_action.is_empty() {
+                format!("Connect {venue} from SYSTEM → BROKERS.")
+            } else {
+                next_action.clone()
+            },
+        },
+        _ => BrokerVerdict {
+            connected: false,
+            failed: true,
+            in_progress: false,
+            pill_label: "Connection Failed".to_string(),
+            pill_tone: 3,
+            status_message: status_or("Connection failed."),
+            description: if next_action.is_empty() {
+                "Connection failed. Review the details and retry.".to_string()
+            } else {
+                next_action.clone()
+            },
+        },
+    }
+}
+
+/// Zip form values onto schema keys for `connect_broker`. Empty inputs and
+/// saved-value sentinels (•••) are dropped so untouched fields keep the
+/// gateway's stored values — a blank retype can never wipe saved secrets.
+pub fn zip_broker_credentials(keys: &[String], values: &[String]) -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+    for (index, key) in keys.iter().enumerate() {
+        let raw = values.get(index).map(|s| s.as_str()).unwrap_or("");
+        let clean = raw.replace('•', "").trim().to_string();
+        if key.is_empty() || clean.is_empty() {
+            continue;
+        }
+        map.insert(key.clone(), serde_json::Value::String(clean));
+    }
+    serde_json::Value::Object(map)
+}
+
 /// Translate gateway sections into the LOCAL live-snapshot shape, then apply
 /// through the existing [`LiveState::apply_snapshot`].
 ///
@@ -161,7 +496,29 @@ pub fn apply_remote_sections(state: &mut LiveState, sections: &serde_json::Value
         );
     }
 
-    if !section(sections, "broker").is_null() {
+    if let Some(auth) = authoritative_broker(sections) {
+        // Authoritative EC2 session first: the same snapshot SYSTEM reads.
+        // Legacy `broker` stays as the fallback below for older gateways.
+        let verdict = session_verdict(&auth);
+        let state = session_text(&auth.session, "state");
+        let reason = session_text(&auth.session, "reason");
+        let reason = if reason.is_empty() {
+            verdict.status_message.clone()
+        } else {
+            reason
+        };
+        translated.insert(
+            "broker".to_string(),
+            serde_json::json!({
+                "name": auth.display_name,
+                "account_id": session_text(&auth.session, "account_id"),
+                "status": if state.is_empty() { "UNKNOWN".to_string() } else { state },
+                "reason": reason,
+                "connected": verdict.connected,
+                "last_heartbeat": text_at(sections, "broker", "last_sync"),
+            }),
+        );
+    } else if !section(sections, "broker").is_null() {
         let status = text_at(sections, "broker", "status");
         let name = text_at(sections, "broker", "name");
         let bname = if name.is_empty() {
@@ -1349,6 +1706,162 @@ mod tests {
         assert_eq!(
             state.action_note.as_deref(),
             Some("No execution backend attached.")
+        );
+    }
+
+    fn authoritative_sections() -> serde_json::Value {
+        json!({
+            "broker": {"status": "CONNECTED", "name": "Fyers",
+                "reason": "session expired — invalid token", "connected": true,
+                "account_id": "", "last_sync": ""},
+            "broker_session": {"broker_id": "fyers", "state": "LOGIN_REQUIRED",
+                "reason": "session expired — invalid token",
+                "next_action": "Complete FYERS login from SYSTEM → BROKERS",
+                "account_id": "", "version": 7},
+            "brokers": [{"id": "fyers", "name": "Fyers", "display_name": "FYERS",
+                "configured": true,
+                "credential_schema": [
+                    {"key": "app_id", "label": "App ID", "secret": false, "required": true},
+                    {"key": "secret", "label": "Secret", "secret": true, "required": true}
+                ],
+                "session": {"broker_id": "fyers", "state": "LOGIN_REQUIRED", "version": 7}}],
+        })
+    }
+
+    #[test]
+    fn authority_prefers_top_level_session_over_legacy_flag() {
+        // The reported split: legacy says connected=true while the unified
+        // session says expired. Both screens must read the session.
+        let auth = authoritative_broker(&authoritative_sections()).expect("authority");
+        assert_eq!(auth.broker_id, "fyers");
+        assert_eq!(auth.display_name, "FYERS");
+        let verdict = session_verdict(&auth);
+        assert!(!verdict.connected);
+        assert!(!verdict.failed);
+        assert_eq!(verdict.pill_label, "Login Required");
+        assert_eq!(
+            verdict.status_message,
+            "Complete FYERS login from SYSTEM → BROKERS"
+        );
+    }
+
+    #[test]
+    fn authority_falls_back_to_matching_row_session() {
+        let mut sections = authoritative_sections();
+        sections.as_object_mut().unwrap().remove("broker_session");
+        let auth = authoritative_broker(&sections).expect("row authority");
+        assert_eq!(auth.broker_id, "fyers");
+        assert_eq!(
+            auth.field_keys,
+            vec!["app_id".to_string(), "secret".to_string()]
+        );
+        assert_eq!(auth.field_secret, vec![false, true]);
+        assert!(auth.fields_configured);
+        assert_eq!(session_verdict(&auth).pill_label, "Login Required");
+    }
+
+    #[test]
+    fn authority_absent_without_any_session() {
+        assert!(authoritative_broker(&sections()).is_none());
+    }
+
+    #[test]
+    fn verdict_covers_the_session_vocabulary() {
+        let base = authoritative_broker(&authoritative_sections()).expect("authority");
+        let with_state = |state: &str| {
+            let mut auth = base.clone();
+            auth.session["state"] = serde_json::Value::String(state.to_string());
+            session_verdict(&auth)
+        };
+        let connected = with_state("CONNECTED");
+        assert!(connected.connected && !connected.failed);
+        assert_eq!(connected.pill_label, "Connected");
+        let degraded = with_state("DEGRADED");
+        assert!(degraded.connected && !degraded.failed);
+        for s in [
+            "CHECKING",
+            "CONNECTING",
+            "VERIFYING",
+            "RECONNECTING",
+            "RATE_LIMITED",
+        ] {
+            let v = with_state(s);
+            assert!(!v.connected && !v.failed && v.in_progress, "{s}");
+            assert_eq!(v.pill_label, "Connecting…");
+        }
+        let expired = with_state("LOGIN_REQUIRED");
+        assert!(!expired.connected && !expired.failed);
+        let down = with_state("DISCONNECTED");
+        assert!(!down.connected && !down.failed);
+        assert_eq!(down.pill_label, "Not Connected");
+        let broken = with_state("ERROR");
+        assert!(!broken.connected && broken.failed);
+        assert_eq!(broken.pill_label, "Connection Failed");
+        let unknown = with_state("UNKNOWN");
+        assert!(!unknown.connected && unknown.failed);
+    }
+
+    #[test]
+    fn live_translation_follows_the_authoritative_session() {
+        let mut state = init_remote_state();
+        apply_remote_sections(&mut state, &authoritative_sections(), false);
+        // Legacy flag claims connected=true; the session overrules it.
+        assert_eq!(state.broker.connected, Some(false));
+        assert_eq!(state.broker.status, "LOGIN_REQUIRED");
+        assert!(state.broker.reason.contains("session expired"));
+    }
+
+    #[test]
+    fn zip_credentials_skips_blanks_and_vault_sentinels() {
+        let keys = [
+            "app_id".to_string(),
+            "secret".to_string(),
+            "pin".to_string(),
+        ];
+        let values = vec!["APP1".to_string(), "••••••••".to_string(), "".to_string()];
+        let zipped = zip_broker_credentials(&keys, &values);
+        assert_eq!(zipped, json!({"app_id": "APP1"}));
+        let empty =
+            zip_broker_credentials(&keys, &["".to_string(), "".to_string(), "".to_string()]);
+        assert_eq!(empty, json!({}));
+    }
+
+    #[test]
+    fn system_and_live_agree_on_the_reported_mismatch_shape() {
+        // Exact shape from the field report: the legacy section claims
+        // connected/CONNECTED while the unified session says the saved
+        // token is expired. Both screens must refuse success AND agree
+        // with each other — never SYSTEM green beside LIVE red.
+        let sections = json!({
+            "broker": {"status": "CONNECTED", "name": "Fyers",
+                "reason": "session expired — invalid token", "connected": true,
+                "account_id": "AB12", "last_sync": ""},
+            "broker_session": {"broker_id": "fyers", "state": "LOGIN_REQUIRED",
+                "auth_valid": false,
+                "reason": "session expired — invalid token",
+                "next_action": "Complete FYERS login from SYSTEM → BROKERS",
+                "account_id": "", "version": 7},
+            "brokers": [{"id": "fyers", "name": "Fyers", "display_name": "FYERS",
+                "connected": true, "configured": true, "credential_schema": [],
+                "session": {"broker_id": "fyers", "state": "LOGIN_REQUIRED",
+                    "auth_valid": false, "version": 7}}],
+        });
+        let auth = authoritative_broker(&sections).expect("authority");
+        let verdict = session_verdict(&auth);
+        assert!(!verdict.connected, "SYSTEM must not show success");
+        assert_eq!(verdict.pill_label, "Login Required");
+        let mut state = init_remote_state();
+        apply_remote_sections(&mut state, &sections, false);
+        assert_eq!(
+            state.broker.connected,
+            Some(false),
+            "LIVE must not show success"
+        );
+        assert_eq!(state.broker.status, "LOGIN_REQUIRED");
+        assert_eq!(
+            state.broker.connected,
+            Some(verdict.connected),
+            "SYSTEM and LIVE must agree with each other"
         );
     }
 }

@@ -174,10 +174,6 @@ class ControlPlaneAuth:
         # Constant-time comparison across active tokens to prevent timing attacks
         return any(hmac.compare_digest(clean, valid) for valid in self._valid_tokens)
 
-    @staticmethod
-    def redact_token(token: str) -> str:
-        return "***REDACTED***" if token else ""
-
 
 # ── Idempotency Manager (§3) ────────────────────────────────────────────────
 

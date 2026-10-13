@@ -150,3 +150,4 @@ def default_registry() -> BrokerRegistry:
                 _default_registry = BrokerRegistry()
     assert _default_registry is not None
     return _default_registry
+

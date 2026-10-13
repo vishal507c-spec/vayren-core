@@ -68,6 +68,10 @@ MUTATING_ACTIONS = (
     "server_op",
     "confirm_account",
     "confirm_live",
+    "connect_broker",
+    "disconnect_broker",
+    "revoke_session",
+    "refresh_capital",
 )
 
 #: Event channels a client may subscribe to (snapshot sections + event stream).
@@ -682,6 +686,25 @@ class RemoteServer:
             if not isinstance(symbol, str) or not symbol.strip():
                 return None
             return {"action": "select_symbol", "symbol": symbol.strip()}
+        if action in ("connect_broker", "disconnect_broker", "revoke_session"):
+            broker = args.get("broker_id", args.get("broker", "fyers"))
+            if not isinstance(broker, str) or not broker.strip():
+                return None
+            out: dict[str, Any] = {
+                "action": action,
+                "broker_id": broker.strip().lower(),
+                "request_id": request_id,
+            }
+            if isinstance(args.get("credentials"), dict):
+                out["credentials"] = dict(args["credentials"])
+            if isinstance(args.get("revoke"), bool):
+                out["revoke"] = bool(args["revoke"])
+            return out
+        if action == "refresh_capital":
+            # Read-only funds re-read. The backend resolves the venue itself
+            # from the authoritative selection, so no broker id is needed
+            # (and none is invented here).
+            return {"action": "refresh_capital"}
         return None
 
     def _command_result(self, action: str, fresh: dict[str, Any]) -> dict[str, Any]:
@@ -690,8 +713,18 @@ class RemoteServer:
             return {"ok": False, "action": action, "detail": "backend gave no snapshot"}
         blockers = list(fresh.get("start_blockers", []) or [])
         running = str(fresh.get("session_status", "") or "").upper() == "RUNNING"
-        ok = running if action == "start" else True
-        return {
+        if action == "start":
+            ok = running
+        elif action == "refresh_capital":
+            # `action_ok` is False when the backend refused the read (see
+            # headless `_live_unavailable`); its `action_note` carries the
+            # real reason, so a failed funds read never reports success.
+            ok = bool(fresh.get("action_ok", True))
+        elif action in ("connect_broker", "disconnect_broker", "revoke_session"):
+            ok = bool(fresh.get("action_ok", True))
+        else:
+            ok = True
+        out: dict[str, Any] = {
             "ok": ok,
             "action": action,
             "cached": False,
@@ -700,6 +733,11 @@ class RemoteServer:
             "start_blockers": blockers,
             "snapshot": build_snapshot(fresh),
         }
+        if isinstance(fresh.get("broker_session"), dict):
+            out["broker_session"] = dict(fresh["broker_session"])
+        if isinstance(fresh.get("action_note"), str):
+            out["detail"] = fresh["action_note"]
+        return out
 
     # ── idempotency store (bounded) ──
 

@@ -66,6 +66,11 @@ export component BrokerConnectionWorkspace inherits Rectangle {
     in property <bool> disconnect-visible: false;
     in property <bool> disconnect-enabled: false;
     in property <string> help-caption: "View setup guide.";
+    // Which backend owns the verdict on this panel: the EC2 gateway session
+    // (remote) or this PC's local session (host). Set once per launch mode —
+    // two live sessions exist, and the panel must never let one pose as the
+    // other.
+    in property <string> session-origin: "";
 
     // ── authoritative global default broker (persisted, gateway-owned) ──
     // `conn-default-id` is the value SYSTEM and LIVE both consume. The open
@@ -1135,6 +1140,12 @@ field-input := TextInput {
                                             color: root.is-connected ? VayrenPalette.pos : root.is-failed ? VayrenPalette.neg : !root.form-enabled ? VayrenPalette.accent : VayrenPalette.text;
                                             font-size: VayrenDesign.fs-small;
                                             font-weight: 700;
+                                            vertical-alignment: center;
+                                        }
+                                        if root.session-origin != "": Text {
+                                            text: root.session-origin;
+                                            color: VayrenPalette.faint;
+                                            font-size: VayrenDesign.fs-label;
                                             vertical-alignment: center;
                                         }
                                     }

@@ -43,7 +43,6 @@ DOMAIN_STRUCTURE: dict[str, list[str]] = {
     "data": [
         "__init__.py",
         "settings.py",
-        "throttle.py",
         "native_download.py",
         "provider/__init__.py",
         "provider/contract.py",

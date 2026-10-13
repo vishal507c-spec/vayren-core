@@ -92,12 +92,6 @@
       "migration_target": "crates/vayren-core/src/data/",
       "migration_condition": "When the DATA_PROCESSING slice containing this file is touched by feature work, migrate per AI_ENTRY.md Â§1 (smallest useful slice)."
     },
-    "src/data/throttle.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "reason": "Download-engine IO/threading orchestration (worker threads, locks, auth flows) around the provider boundary. Numeric detectors already migrated. File role: orchestration glue (no migrated authority)",
-      "migration_target": "crates/vayren-core/src/data/",
-      "migration_condition": "When the DATA_PROCESSING slice containing this file is touched by feature work, migrate per AI_ENTRY.md Â§1 (smallest useful slice)."
-    },
     "src/execution/__init__.py": {
       "state": "TEMPORARILY_RETAINED",
       "reason": "Session/planner/broker-venue orchestration: event-driven glue with persistence (checkpoints, journals). Order-state authority already migrated to Rust. File role: package re-export surface (no logic)",

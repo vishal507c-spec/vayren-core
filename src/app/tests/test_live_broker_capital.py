@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT / "src") not in sys.path:
@@ -163,3 +163,59 @@ def test_refresh_capital_live_action_triggers_broker_manager(dirs: tuple[str, st
     mock_mgr.refresh_funds.assert_called_with("fyers")
     assert snap["capital"]["broker_name"] == "FYERS"
     assert snap["capital"]["available_margin"] == 100000.0
+    # A verified broker response may say refreshed…
+    assert snap["action_note"] == "broker capital refreshed"
+
+
+def test_refresh_capital_never_claims_funds_it_could_not_read(
+    dirs: tuple[str, str],
+) -> None:
+    """No broker number in the answer => the note says so, never success."""
+    mock_mgr = MagicMock(spec=BrokerManager)
+    mock_mgr.broker_ids.return_value = ["fyers"]
+    mock_mgr.snapshot.return_value = {
+        "active_broker": "fyers",
+        "brokers": [{"id": "fyers", "display_name": "Fyers", "connected": False}],
+    }
+
+    snap = headless._live_action(
+        dirs[0],
+        dirs[1],
+        {"action": "refresh_capital"},
+        broker_manager=mock_mgr,
+    )
+
+    assert snap["capital"]["available_margin"] is None
+    assert "unavailable" in snap["action_note"]
+    assert "no verified broker response" in snap["action_note"]
+
+
+def test_refresh_capital_without_a_broker_says_so(dirs: tuple[str, str]) -> None:
+    mock_mgr = MagicMock(spec=BrokerManager)
+    mock_mgr.broker_ids.return_value = []
+    mock_mgr.snapshot.return_value = {"active_broker": ""}
+    # No venue resolvable at all: the service still reports a paper broker,
+    # so the handler must take the registry path (which is empty here).
+    service = MagicMock()
+    service._broker_view.return_value = {}
+    service.broker_name.return_value = "paper"
+    service.snapshot.return_value = {"capital": {"source": "configured", "available_margin": None}}
+    service.is_live_confirmed.return_value = False
+
+    with (
+        patch.object(headless, "_live_service", return_value=service),
+        patch.object(
+            headless,
+            "_trading_service_snapshot",
+            return_value={"capital": {"source": "configured", "available_margin": None}},
+        ),
+    ):
+        snap = headless._live_action(
+            dirs[0],
+            dirs[1],
+            {"action": "refresh_capital"},
+            broker_manager=mock_mgr,
+        )
+
+    mock_mgr.refresh_funds.assert_not_called()
+    assert snap["action_note"] == "no broker configured — nothing to refresh"

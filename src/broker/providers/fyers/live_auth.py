@@ -33,6 +33,7 @@ SYSTEM → BROKERS (INTEGRATION DETAILS) as the app's redirect URL.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import secrets
@@ -199,6 +200,17 @@ class _UrllibTransport:
         except urllib.error.HTTPError as exc:
             if exc.code == 401:
                 return {"s": "error", "code": -8, "message": "unauthorized"}
+            if exc.code == 429:
+                from broker.error_taxonomy import parse_retry_after
+
+                headers: dict[str, Any] = {}
+                with contextlib.suppress(Exception):
+                    headers = dict(exc.headers.items()) if exc.headers else {}
+                delay = parse_retry_after(headers, default_s=5.0)
+                raise AuthError(
+                    f"rate limited by venue (HTTP 429, retry in {delay:.0f}s)",
+                    code="RATE_LIMITED",
+                ) from None
             # FYERS POST /api/v3/token returns HTTP 308 with the auth_code
             # inside the response body's ``Url`` field — not a real redirect.
             # Read the body and hand it back so ``fetch_auth_code`` can extract

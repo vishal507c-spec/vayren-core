@@ -309,6 +309,58 @@ def test_command_passthrough_and_duplicate_cached(live_server: Any) -> None:
         client.close()
 
 
+def test_refresh_capital_reaches_the_backend(live_server: Any) -> None:
+    """The LIVE capital-refresh button must not be an UNKNOWN_COMMAND."""
+    server, gateway = live_server
+    client, _welcome, _snapshot = authed_client(server)
+    try:
+        client.send_obj(
+            {
+                "type": "command",
+                "v": 1,
+                "request_id": "cap-1",
+                "payload": {"action": "refresh_capital"},
+            }
+        )
+        result = client.recv_obj()
+        assert result is not None and result["type"] == "command_result", result
+        assert result["request_id"] == "cap-1"
+        assert gateway.commands == [{"action": "refresh_capital"}]
+        assert result["payload"]["ok"] is True
+    finally:
+        client.close()
+
+
+def test_refresh_capital_reports_the_real_failure(live_server: Any) -> None:
+    """A refused funds read must answer ok=False, never a false success."""
+    server, gateway = live_server
+    client, _welcome, _snapshot = authed_client(server)
+
+    def _refuse(action: dict[str, Any]) -> dict[str, Any]:
+        gateway.commands.append(dict(action))
+        live = dict(gateway.live)
+        live["action_ok"] = False
+        live["action_note"] = "broker funds unavailable (LOGIN REQUIRED)"
+        return live
+
+    gateway.apply_command = _refuse  # type: ignore[method-assign]
+    try:
+        client.send_obj(
+            {
+                "type": "command",
+                "v": 1,
+                "request_id": "cap-2",
+                "payload": {"action": "refresh_capital"},
+            }
+        )
+        result = client.recv_obj()
+        assert result is not None and result["type"] == "command_result"
+        assert result["payload"]["ok"] is False
+        assert "unavailable" in result["payload"]["detail"]
+    finally:
+        client.close()
+
+
 def test_read_token_cannot_send_commands(live_server: Any) -> None:
     server, gateway = live_server
     client, welcome, _snapshot = authed_client(server, token=READ_TOKEN)
