@@ -155,7 +155,6 @@ fn apply_authoritative_broker_ui(
     // DISCONNECT is only offered when there is a session to end.
     ui.set_conn_disconnect_visible(verdict.connected);
     ui.set_conn_disconnect_enabled(verdict.connected);
-    ui.set_conn_help_caption(format!("View setup guide for {}.", auth.display_name.trim()).into());
     // Sidebar rows: same row facts as the legacy list, but the authoritative
     // row carries the verdict so the list can never contradict the panel.
     let brokers_list: Vec<vayren_shell::BrokerRowView> =
@@ -2214,9 +2213,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             });
         });
     }
-    ui.on_broker_help_requested(move || {
-        println!("Broker help requested");
-    });
     ui.on_broker_add_requested(move || {
         println!("Add broker requested");
     });

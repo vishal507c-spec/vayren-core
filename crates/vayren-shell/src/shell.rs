@@ -319,11 +319,6 @@ pub fn apply_connection(ui: &AppWindow, workspace: &BrokerWorkspace) {
     });
     ui.set_conn_disconnect_visible(workspace.can_disconnect);
     ui.set_conn_disconnect_enabled(workspace.can_disconnect);
-    ui.set_conn_help_caption(if workspace.display_name.trim().is_empty() {
-        "View setup guide.".into()
-    } else {
-        format!("View setup guide for {}.", workspace.display_name.trim()).into()
-    });
     ui.set_conn_saved_sentinel(SAVED_CREDENTIAL_SENTINEL.into());
     // Pre-fill saved-credential sentinel so the user sees which fields already
     // have stored values and does not need to re-enter them on reconnect.

@@ -65,7 +65,6 @@ export component BrokerConnectionWorkspace inherits Rectangle {
     in property <string> error-message: "";
     in property <bool> disconnect-visible: false;
     in property <bool> disconnect-enabled: false;
-    in property <string> help-caption: "View setup guide.";
     // Which backend owns the verdict on this panel: the EC2 gateway session
     // (remote) or this PC's local session (host). Set once per launch mode —
     // two live sessions exist, and the panel must never let one pose as the
@@ -116,7 +115,6 @@ export component BrokerConnectionWorkspace inherits Rectangle {
     callback config-saved(string, string);
     callback copy-callback();
     callback refresh-requested();
-    callback help-requested();
     callback add-broker-requested();
     callback paste-requested(int);
     callback set-default-requested(string);
@@ -1299,53 +1297,8 @@ field-input := TextInput {
                                 }
                             }
 
-                            Rectangle {
-                                background: help-ta.pressed ? VayrenPalette.pressed : help-ta.has-hover ? VayrenPalette.row-hover : VayrenPalette.bg1;
-                                border-width: 1px;
-                                border-color: help-ta.has-hover ? VayrenPalette.accent-dim : VayrenPalette.hairline;
-                                border-radius: VayrenDesign.radius;
-                                animate background { duration: 120ms; easing: ease-out; }
-                                animate border-color { duration: 120ms; easing: ease-out; }
-                                VerticalLayout {
-                                    padding: VayrenDesign.sp-md;
-                                    spacing: 2px;
-                                    HorizontalLayout {
-                                        spacing: VayrenDesign.sp-sm;
-                                        Text {
-                                            text: "ⓘ";
-                                            color: help-ta.has-hover ? VayrenPalette.accent : VayrenPalette.muted;
-                                            font-size: VayrenDesign.fs-small;
-                                            vertical-alignment: center;
-                                            animate color { duration: 120ms; easing: ease-out; }
-                                        }
-                                        Text {
-                                            text: "Need help?";
-                                            color: VayrenPalette.text;
-                                            font-size: VayrenDesign.fs-small;
-                                            font-weight: 700;
-                                            vertical-alignment: center;
-                                        }
-                                        Rectangle { horizontal-stretch: 1; background: transparent; }
-                                        Text {
-                                            text: "↗";
-                                            color: help-ta.has-hover ? VayrenPalette.accent : VayrenPalette.faint;
-                                            font-size: VayrenDesign.fs-small;
-                                            vertical-alignment: center;
-                                            animate color { duration: 120ms; easing: ease-out; }
-                                        }
-                                    }
-                                    Text {
-                                        text: root.help-caption;
-                                        color: VayrenPalette.muted;
-                                        font-size: VayrenDesign.fs-label;
-                                        wrap: word-wrap;
-                                    }
-                                }
-                                help-ta := TouchArea {
-                                    mouse-cursor: pointer;
-                                    clicked => { root.help-requested(); }
-                                }
-                            }
+                            // "Need help? / View setup guide" panel removed by request — it
+                            // duplicated the copy/remove footer with no action.
                         }
                     }
                 }

@@ -1967,14 +1967,9 @@ export component StrategyLabScreen inherits Rectangle {
                                         // state matrix, unchanged.
                                         HorizontalLayout {
                                             spacing: 16px; alignment: center;
-                                            Text {
-                                                text: root.lab.state-label;
-                                                font-size: 10.5px;
-                                                color: root.lab.state-tone == 2 ? LabPalette.lab-amber
-                                                    : root.lab.state-tone == 3 ? LabPalette.lab-red
-                                                    : root.lab.state-tone == 1 ? LabPalette.green : LabPalette.dim;
-                                                vertical-alignment: center;
-                                            }
+                                            // "● READY" status text removed by request.
+                                            // The run button keeps its own state matrix,
+                                            // so no run feedback is lost.
 Rectangle {
                                                 width: 170px;
                                                 height: 36px;

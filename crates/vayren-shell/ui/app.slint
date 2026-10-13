@@ -87,7 +87,6 @@ export component AppWindow inherits Window {
     // the login intent, Manage reuses refresh, Disconnect is shared).
     callback broker-select-requested(string);
     callback broker-connect-requested(string, string, string, string, string, string);
-    callback broker-help-requested();
     callback broker-add-requested();
     callback broker-paste-requested(int);
     // Persist the open panel's broker as VAYREN's authoritative default via
@@ -341,7 +340,7 @@ export component AppWindow inherits Window {
     in-out property <string> conn-error-message: "";
     in-out property <bool> conn-disconnect-visible: false;
     in-out property <bool> conn-disconnect-enabled: false;
-    in-out property <string> conn-help-caption: "View setup guide.";
+    
     in-out property <string> conn-saved-sentinel: "";
     in-out property <string> conn-session-origin: "";
     in-out property <string> broker-field-v0: "";
@@ -880,7 +879,6 @@ export component AppWindow inherits Window {
                     error-message: root.conn-error-message;
                     disconnect-visible: root.conn-disconnect-visible;
                     disconnect-enabled: root.conn-disconnect-enabled;
-                    help-caption: root.conn-help-caption;
                     saved-sentinel: root.conn-saved-sentinel;
                     session-origin: root.conn-session-origin;
                     field-v0 <=> root.broker-field-v0;
@@ -897,7 +895,6 @@ export component AppWindow inherits Window {
                     config-saved(key, value) => { root.broker-config-saved(key, value); }
                     copy-callback() => { root.broker-copy-callback(); }
                     refresh-requested() => { root.broker-refresh-requested(); }
-                    help-requested() => { root.broker-help-requested(); }
                     add-broker-requested() => { root.broker-add-requested(); }
                     set-default-requested(id) => { root.broker-set-default-requested(id); }
                     server-status: root.server-status;
