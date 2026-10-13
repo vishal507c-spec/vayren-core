@@ -641,6 +641,40 @@ def _live_action(
             else:
                 snapshot["action_note"] = "broker capital refreshed"
             return snapshot
+        elif name == "sync_candles":
+            # Fill the candle store from the venue's own history. Refused while
+            # a session is live: rewriting the bars under a running strategy
+            # would move the ground an in-flight decision stands on.
+            from app.services.candle_sync_service import sync_candles
+
+            live_view = service.snapshot()
+            if str(live_view.get("session_status") or "") == "RUNNING":
+                snapshot = _trading_service_snapshot(data_dir, strategy_dir, broker_manager)
+                snapshot["action_note"] = (
+                    "candle sync refused — strategy is RUNNING (stop it first)"
+                )
+                return snapshot
+            universe = [
+                str(s) for s in (service.config.symbols or live_view.get("selected_symbols") or [])
+            ]
+            report = sync_candles(
+                data_dir,
+                universe,
+                broker_manager,
+                timeframe=str(action.get("timeframe") or service.config.timeframe or "30m"),
+                days=int(action.get("days") or 60),
+            )
+            # The store changed on disk, so the quote cache must be re-read or
+            # the next snapshot keeps reporting the pre-sync emptiness.
+            with contextlib.suppress(Exception):
+                from app.services.market_data_service import MarketDataService
+
+                service._quotes_reader = MarketDataService(data_dir)
+                service._quotes_reader.refresh()
+            snapshot = _trading_service_snapshot(data_dir, strategy_dir, broker_manager)
+            snapshot["action_note"] = report["detail"]
+            snapshot["candle_sync"] = report
+            return snapshot
         else:
             return _live_unavailable(f"unknown live action {name!r}")
     except Exception as exc:  # noqa: BLE001

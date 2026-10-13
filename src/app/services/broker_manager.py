@@ -1279,6 +1279,32 @@ class BrokerManager:
             uni["retry_after_s"] = 0.0
             uni["retry_until"] = 0.0
 
+    def read_only_adapter(self, broker_id: str) -> Any | None:
+        """A fresh adapter for READ-ONLY venue reads, or None if unavailable.
+
+        The manager's own adapter carries the order WebSocket, and two
+        adapters on one stream means two reconnect drivers — the exact
+        thrash the order socket's flap breaker exists to prevent. Data reads
+        (quotes, historical candles) never need the order socket, so this
+        builds one with it disabled and leaves the live one alone.
+        """
+        spec = self._specs.get(broker_id)
+        if spec is None or spec.build_adapter is None:
+            return None
+        config = self._config_values(spec)
+        stored = self._session_store(spec).load_token() or {}
+        token = str(stored.get("access_token", "") or "")
+        key = str(config.get(spec.key_field, "") or "")
+        if not token or not key:
+            return None
+        try:
+            adapter = spec.build_adapter(key, token, enable_order_ws=False)
+        except TypeError:
+            # Specs that do not accept the flag still work; the caller must
+            # treat the result as read-only by contract, not by construction.
+            adapter = spec.build_adapter(key, token)
+        return adapter
+
     def _adapter_verified(self, broker_id: str) -> bool:
         with self._lock:
             state = self._states.get(broker_id, {})

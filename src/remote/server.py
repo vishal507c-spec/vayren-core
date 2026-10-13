@@ -72,6 +72,7 @@ MUTATING_ACTIONS = (
     "disconnect_broker",
     "revoke_session",
     "refresh_capital",
+    "sync_candles",
 )
 
 #: Event channels a client may subscribe to (snapshot sections + event stream).
@@ -712,6 +713,17 @@ class RemoteServer:
             # from the authoritative selection, so no broker id is needed
             # (and none is invented here).
             return {"action": "refresh_capital"}
+        if action == "sync_candles":
+            # Populates the local candle store from the venue's own history.
+            # Operator-triggered on purpose: it is network work against a live
+            # account, and it rewrites the bars the readiness gate reads. Only
+            # the window may be overridden — the instrument list is the
+            # backend's own configured universe, never a client's.
+            allowed = ("days", "timeframe")
+            return {
+                "action": "sync_candles",
+                **{k: v for k, v in args.items() if k in allowed},
+            }
         return None
 
     def _command_result(self, action: str, fresh: dict[str, Any]) -> dict[str, Any]:
