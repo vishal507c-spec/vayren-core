@@ -211,8 +211,11 @@ jobs:
           workspaces: ". -> target"
           shared-key: "vayren-rust"
           cache-all-crates: "true"
+      # The kernel cdylib is REQUIRED by the scope-bench pytest partitions
+      # below (they execute real module suites needing load_vayren_core),
+      # so it is always built: skipping it on Python-only pushes starves
+      # the bench and fails the test_validate_scope bench tests.
       - run: cargo build --release -p vayren-core --manifest-path Cargo.toml
-        if: github.ref == 'refs/heads/main' || steps.native.outputs.changed == 'true'
       # Core-only warmup: the shell test binaries are compiled + run in
       # test-shard-rust-shell (same coverage, no duplication); the shard's
       # pytest files drive any cargo invocation they need through the
