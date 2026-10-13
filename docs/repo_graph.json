@@ -1249,7 +1249,7 @@
       "to": "src/core/native"
     }
   ],
-  "entity_count": 6028,
+  "entity_count": 6029,
   "files": [
     {
       "domain": "CORE",
@@ -5348,6 +5348,16 @@
       "module": "src/strategy",
       "owner": "PYTHON_STRATEGY",
       "owner_source": "policy",
+      "path": "src/strategy/obr_source.py",
+      "retention_state": null
+    },
+    {
+      "domain": "STRATEGY",
+      "is_test": false,
+      "language": "PYTHON",
+      "module": "src/strategy",
+      "owner": "PYTHON_STRATEGY",
+      "owner_source": "policy",
       "path": "src/strategy/provider_adapters.py",
       "retention_state": null
     },
@@ -7547,6 +7557,7 @@
         "src/strategy/models/signal.py",
         "src/strategy/models/state.py",
         "src/strategy/models/universe.py",
+        "src/strategy/obr_source.py",
         "src/strategy/provider_adapters.py",
         "src/strategy/provider_mapping.py",
         "src/strategy/registry.py",
@@ -73685,7 +73696,7 @@
       "file": "src/strategy/registry.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 487,
+      "line": 492,
       "module": "src/strategy",
       "name": "create_obr_c1c4_definition",
       "public": true,
@@ -73735,7 +73746,7 @@
       "file": "src/strategy/registry.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 514,
+      "line": 519,
       "module": "src/strategy",
       "name": "get_strategy_registry",
       "public": true,
@@ -73754,7 +73765,7 @@
       "file": "src/strategy/registry.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 536,
+      "line": 541,
       "module": "src/strategy",
       "name": "reset_strategy_registry",
       "public": true,

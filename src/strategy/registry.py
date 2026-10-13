@@ -481,7 +481,12 @@ def get_authoritative_obr_source() -> str:
                 return text
         except Exception:
             continue
-    return ""
+    try:
+        from strategy.obr_source import OBR_C1C4_SOURCE
+
+        return OBR_C1C4_SOURCE
+    except Exception:
+        return ""
 
 
 def create_obr_c1c4_definition() -> StrategyDefinition:
