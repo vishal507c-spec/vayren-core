@@ -58,13 +58,18 @@ def test_invalid_bars_are_rejected_never_repaired(tmp_path: Path) -> None:
     inverted_high = (good[0], 100.0, 90.0, 95.0, 100.0, 10)  # high < low
     zero_close = (good[0], 1.0, 2.0, 0.5, 0.0, 10)
     negative_open = (good[0], -1.0, 2.0, 0.5, 1.0, 10)
-    short_row = (good[0], 1.0, 2.0)
+
+    # A malformed (short) row is deliberately typed as a row here: the writer
+    # must tolerate and reject it, since the venue is the source of these
+    # shapes and this test proves it does not crash on one.
+    malformed = [(good[0], 1.0, 2.0)]
 
     report = write_candles(
-        tmp_path, "KAYNES", [good, inverted_high, zero_close, negative_open, short_row]
+        tmp_path, "KAYNES", [good, inverted_high, zero_close, negative_open, *malformed]
     )
 
     assert report.written == 1
+    assert report.rejected == 4
     assert report.rejected == 4
     latest = latest_candle(tmp_path, "KAYNES")
     assert latest is not None

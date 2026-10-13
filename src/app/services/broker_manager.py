@@ -1291,19 +1291,21 @@ class BrokerManager:
         spec = self._specs.get(broker_id)
         if spec is None or spec.build_adapter is None:
             return None
-        config = self._config_values(spec)
+        config: dict[str, str] = self._config_values(spec) or {}
         stored = self._session_store(spec).load_token() or {}
         token = str(stored.get("access_token", "") or "")
         key = str(config.get(spec.key_field, "") or "")
         if not token or not key:
             return None
+        # The build hook is a provider-owned callable whose signature differs
+        # per venue, so it is invoked through a widened type rather than a
+        # guessed parameter list: the flag is offered, and a hook that does
+        # not take it still gets a working read-only adapter.
+        build: Any = spec.build_adapter
         try:
-            adapter = spec.build_adapter(key, token, enable_order_ws=False)
+            return build(key, token, enable_order_ws=False)
         except TypeError:
-            # Specs that do not accept the flag still work; the caller must
-            # treat the result as read-only by contract, not by construction.
-            adapter = spec.build_adapter(key, token)
-        return adapter
+            return build(key, token)
 
     def _adapter_verified(self, broker_id: str) -> bool:
         with self._lock:

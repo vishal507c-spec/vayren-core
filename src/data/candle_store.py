@@ -26,6 +26,7 @@ from __future__ import annotations
 import logging
 import math
 import sqlite3
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -81,6 +82,30 @@ def store_path(data_dir: str | Path, symbol: str) -> Path:
     return Path(data_dir) / f"{safe}.db"
 
 
+def _as_float(value: object) -> float | None:
+    """A finite float, or None when the venue sent something unusable."""
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _as_int(value: object) -> int | None:
+    """An integer, or None when the venue sent something unusable."""
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number) or number != int(number):
+        return None
+    return int(number)
+
+
 def _is_valid(o: float, h: float, low: float, c: float) -> bool:
     """A bar is storable only if it is internally consistent."""
     for value in (o, h, low, c):
@@ -92,13 +117,17 @@ def _is_valid(o: float, h: float, low: float, c: float) -> bool:
 def write_candles(
     data_dir: str | Path,
     symbol: str,
-    rows: list[tuple[int, float, float, float, float, int]],
+    rows: Sequence[Sequence[object]],
 ) -> WriteReport:
     """Persist venue candles for one symbol; returns what really happened.
 
     ``rows`` are ``(epoch_seconds, open, high, low, close, volume)`` exactly as
     the provider reported them. Invalid bars are counted and skipped; repeated
     bars keep the venue's latest statement and are counted. Neither is hidden.
+
+    The row type is deliberately permissive: the provider is the source of
+    these shapes, so a malformed row is an input case the writer must tolerate
+    and reject rather than a type violation to trust out of existence.
     """
     path = store_path(data_dir, symbol)
     by_key: dict[str, tuple[float, float, float, float, int]] = {}
@@ -108,11 +137,13 @@ def write_candles(
         if not isinstance(row, (list, tuple)) or len(row) < 6:
             rejected += 1
             continue
-        try:
-            epoch = int(row[0])
-            o, h, low, c = float(row[1]), float(row[2]), float(row[3]), float(row[4])
-            volume = int(row[5])
-        except (TypeError, ValueError):
+        epoch = _as_int(row[0])
+        if epoch is None:
+            rejected += 1
+            continue
+        o, h, low, c = (_as_float(row[1]), _as_float(row[2]), _as_float(row[3]), _as_float(row[4]))
+        volume = _as_int(row[5])
+        if o is None or h is None or low is None or c is None or volume is None:
             rejected += 1
             continue
         if epoch <= 0 or not _is_valid(o, h, low, c):
