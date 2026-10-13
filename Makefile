@@ -96,7 +96,13 @@ rust:
 # Every gate command lives here exactly once: the CI `validators`
 # job mirrors this list, and `make check` is the local superset.
 
-check: rust lint typecheck test validate-structure validate-imports validate-language validate-architecture validate-authority validate-routes validate-repo-graph validate-scope context-check
+# Validators run BEFORE the pytest suites on purpose. Several suites mutate the
+# live tree (scope benchmarks append probes to real files, then restore them),
+# so a validator that runs afterwards can be left checking a tree the tests
+# have already dirtied — the repo graph in particular is regenerated from
+# canonical inputs and was reporting "stale" purely because it was hashed while
+# a probe was in flight. Static checks see the clean tree; the suites run last.
+check: rust lint typecheck validate-structure validate-imports validate-language validate-architecture validate-authority validate-routes validate-repo-graph validate-scope context-check test
 
 # ── Release (mechanics only; run `make check` first, CI validates on push) ─
 
