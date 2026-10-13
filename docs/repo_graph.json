@@ -1249,7 +1249,7 @@
       "to": "src/core/native"
     }
   ],
-  "entity_count": 6019,
+  "entity_count": 6029,
   "files": [
     {
       "domain": "CORE",
@@ -2709,6 +2709,16 @@
       "owner": "route:app-composition",
       "owner_source": "route",
       "path": "src/app/tests/test_live_risk_sizing.py",
+      "retention_state": null
+    },
+    {
+      "domain": "APP_COMPOSITION",
+      "is_test": true,
+      "language": "PYTHON",
+      "module": "src/app",
+      "owner": "route:app-composition",
+      "owner_source": "route",
+      "path": "src/app/tests/test_live_runtime_timer.py",
       "retention_state": null
     },
     {
@@ -6821,6 +6831,7 @@
         "src/app/tests/test_live_actions.py",
         "src/app/tests/test_live_broker_capital.py",
         "src/app/tests/test_live_risk_sizing.py",
+        "src/app/tests/test_live_runtime_timer.py",
         "src/app/tests/test_live_strategy_resolution.py",
         "src/app/tests/test_live_strategy_sync_and_watchlist.py",
         "src/app/tests/test_market_data_service.py",
@@ -7847,7 +7858,7 @@
       "required_language": "PYTHON"
     }
   ],
-  "relationship_count": 13113,
+  "relationship_count": 13157,
   "repository": {
     "name": "vayren-core",
     "root": "."
@@ -9636,6 +9647,14 @@
         "app.tests.test_live_broker_capital:test_live_capital_block_with_zerodha_zero_margin",
         "app.tests.test_live_risk_sizing:_service",
         "app.tests.test_live_risk_sizing:test_live_blocker_names_missing_capital",
+        "app.tests.test_live_runtime_timer:_setup_mock_strategy",
+        "app.tests.test_live_runtime_timer:service",
+        "app.tests.test_live_runtime_timer:test_backend_restart_new_epoch_overrides_old",
+        "app.tests.test_live_runtime_timer:test_elapsed_time_calculation",
+        "app.tests.test_live_runtime_timer:test_error_state_halts_running_timer",
+        "app.tests.test_live_runtime_timer:test_initial_start_records_authoritative_epoch_and_ist",
+        "app.tests.test_live_runtime_timer:test_reconnect_persistence",
+        "app.tests.test_live_runtime_timer:test_stop_halts_running_timer_and_records_last_duration",
         "app.tests.test_live_strategy_resolution:test_broker_connection_remains_independent_of_strategy_resolution",
         "app.tests.test_live_strategy_resolution:test_build_sessions_resolves_obr_c1c4_without_strategy_not_found",
         "app.tests.test_live_strategy_resolution:test_missing_strategy_detected_before_start",
@@ -14826,6 +14845,171 @@
       "name": "test_paper_uses_simulated_basis",
       "public": true,
       "qualified": "app.tests.test_live_risk_sizing:test_paper_uses_simulated_basis",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.tests.test_live_runtime_timer:test_backend_restart_new_epoch_overrides_old",
+        "app.tests.test_live_runtime_timer:test_elapsed_time_calculation",
+        "app.tests.test_live_runtime_timer:test_error_state_halts_running_timer",
+        "app.tests.test_live_runtime_timer:test_initial_start_records_authoritative_epoch_and_ist",
+        "app.tests.test_live_runtime_timer:test_reconnect_persistence",
+        "app.tests.test_live_runtime_timer:test_stop_halts_running_timer_and_records_last_duration"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "app.services.live_trading_service:LiveTradingService",
+        "app.tests.test_live_runtime_timer:service",
+        "strategy.language.storage:StrategyRecord"
+      ],
+      "dotted": "app.tests.test_live_runtime_timer._setup_mock_strategy",
+      "file": "src/app/tests/test_live_runtime_timer.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 38,
+      "module": "src/app",
+      "name": "_setup_mock_strategy",
+      "public": false,
+      "qualified": "app.tests.test_live_runtime_timer:_setup_mock_strategy",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.tests.test_live_runtime_timer:_setup_mock_strategy",
+        "app.tests.test_live_runtime_timer:test_backend_restart_new_epoch_overrides_old",
+        "app.tests.test_live_runtime_timer:test_elapsed_time_calculation",
+        "app.tests.test_live_runtime_timer:test_error_state_halts_running_timer",
+        "app.tests.test_live_runtime_timer:test_initial_start_records_authoritative_epoch_and_ist",
+        "app.tests.test_live_runtime_timer:test_reconnect_persistence",
+        "app.tests.test_live_runtime_timer:test_stop_halts_running_timer_and_records_last_duration"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "app.services.live_trading_service:LiveTradingService"
+      ],
+      "dotted": "app.tests.test_live_runtime_timer.service",
+      "file": "src/app/tests/test_live_runtime_timer.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 29,
+      "module": "src/app",
+      "name": "service",
+      "public": true,
+      "qualified": "app.tests.test_live_runtime_timer:service",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.live_trading_service:LiveTradingService",
+        "app.tests.test_live_runtime_timer:_setup_mock_strategy",
+        "app.tests.test_live_runtime_timer:service"
+      ],
+      "dotted": "app.tests.test_live_runtime_timer.test_backend_restart_new_epoch_overrides_old",
+      "file": "src/app/tests/test_live_runtime_timer.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 187,
+      "module": "src/app",
+      "name": "test_backend_restart_new_epoch_overrides_old",
+      "public": true,
+      "qualified": "app.tests.test_live_runtime_timer:test_backend_restart_new_epoch_overrides_old",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.live_trading_service:LiveTradingService",
+        "app.tests.test_live_runtime_timer:_setup_mock_strategy",
+        "app.tests.test_live_runtime_timer:service"
+      ],
+      "dotted": "app.tests.test_live_runtime_timer.test_elapsed_time_calculation",
+      "file": "src/app/tests/test_live_runtime_timer.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 107,
+      "module": "src/app",
+      "name": "test_elapsed_time_calculation",
+      "public": true,
+      "qualified": "app.tests.test_live_runtime_timer:test_elapsed_time_calculation",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.live_trading_service:LiveTradingService",
+        "app.tests.test_live_runtime_timer:_setup_mock_strategy",
+        "app.tests.test_live_runtime_timer:service"
+      ],
+      "dotted": "app.tests.test_live_runtime_timer.test_error_state_halts_running_timer",
+      "file": "src/app/tests/test_live_runtime_timer.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 171,
+      "module": "src/app",
+      "name": "test_error_state_halts_running_timer",
+      "public": true,
+      "qualified": "app.tests.test_live_runtime_timer:test_error_state_halts_running_timer",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.live_trading_service:LiveTradingService",
+        "app.tests.test_live_runtime_timer:_setup_mock_strategy",
+        "app.tests.test_live_runtime_timer:service"
+      ],
+      "dotted": "app.tests.test_live_runtime_timer.test_initial_start_records_authoritative_epoch_and_ist",
+      "file": "src/app/tests/test_live_runtime_timer.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 79,
+      "module": "src/app",
+      "name": "test_initial_start_records_authoritative_epoch_and_ist",
+      "public": true,
+      "qualified": "app.tests.test_live_runtime_timer:test_initial_start_records_authoritative_epoch_and_ist",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.live_trading_service:LiveTradingService",
+        "app.tests.test_live_runtime_timer:_setup_mock_strategy",
+        "app.tests.test_live_runtime_timer:service"
+      ],
+      "dotted": "app.tests.test_live_runtime_timer.test_reconnect_persistence",
+      "file": "src/app/tests/test_live_runtime_timer.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 122,
+      "module": "src/app",
+      "name": "test_reconnect_persistence",
+      "public": true,
+      "qualified": "app.tests.test_live_runtime_timer:test_reconnect_persistence",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.live_trading_service:LiveTradingService",
+        "app.tests.test_live_runtime_timer:_setup_mock_strategy",
+        "app.tests.test_live_runtime_timer:service"
+      ],
+      "dotted": "app.tests.test_live_runtime_timer.test_stop_halts_running_timer_and_records_last_duration",
+      "file": "src/app/tests/test_live_runtime_timer.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 145,
+      "module": "src/app",
+      "name": "test_stop_halts_running_timer_and_records_last_duration",
+      "public": true,
+      "qualified": "app.tests.test_live_runtime_timer:test_stop_halts_running_timer_and_records_last_duration",
       "tests": []
     },
     {
@@ -39860,7 +40044,7 @@
       "file": "crates/vayren-domain/src/live.rs",
       "kind": "mod",
       "language": "RUST",
-      "line": 4974,
+      "line": 5004,
       "module": "crates/vayren-domain",
       "name": "tests",
       "public": false,
@@ -51485,7 +51669,7 @@
       "file": "crates/vayren-shell/ui/palette.slint",
       "kind": "slint-global",
       "language": "RUST_SLINT",
-      "line": 154,
+      "line": 155,
       "module": "crates/vayren-shell",
       "name": "LabPalette",
       "public": true,
@@ -51500,7 +51684,7 @@
       "file": "crates/vayren-shell/ui/palette.slint",
       "kind": "slint-global",
       "language": "RUST_SLINT",
-      "line": 78,
+      "line": 79,
       "module": "crates/vayren-shell",
       "name": "VayrenDesign",
       "public": true,
@@ -71762,6 +71946,7 @@
     {
       "called_by": [
         "app.services.live_trading_service:LiveTradingService",
+        "app.tests.test_live_runtime_timer:_setup_mock_strategy",
         "strategy.language.storage:_read_record",
         "strategy.language.storage:_write_record",
         "strategy.language.storage:create_strategy",
@@ -104908,6 +105093,12 @@
       "granularity": "module",
       "module": "src/app",
       "path": "src/app/tests/test_live_risk_sizing.py",
+      "targets": []
+    },
+    {
+      "granularity": "module",
+      "module": "src/app",
+      "path": "src/app/tests/test_live_runtime_timer.py",
       "targets": []
     },
     {

@@ -675,7 +675,7 @@ component LiveConfirmModal inherits Rectangle {
     callback confirm();
     callback cancel();
 
-    background: VayrenPalette.scrim;
+    background: VayrenPalette.live-scrim;
 
     TouchArea {
         // Backdrop click absorber
@@ -1913,15 +1913,26 @@ export component LiveScreen inherits Rectangle {
                                 }
 
                                 if root.active-strat.started-at != "" && root.active-strat.started-at != "—": Text {
-                                    text: root.active-strat.stopped-at != "" && root.active-strat.stopped-at != "—"
-                                        ? "Started at: " + root.active-strat.started-at + "  ·  Stopped at: " + root.active-strat.stopped-at
-                                        : "Started at: " + root.active-strat.started-at;
+                                    text: "Strategy Started At: " + root.active-strat.started-at;
                                     color: VayrenPalette.live-ink;
                                     font-size: 10px;
                                 }
 
-                                if root.active-strat.duration != "" && root.active-strat.duration != "—": Text {
-                                    text: root.active-strat.duration;
+                                if root.active-strat.status == "RUNNING" && root.active-strat.duration != "" && root.active-strat.duration != "—": Text {
+                                    text: "Running For: " + root.active-strat.duration;
+                                    color: VayrenPalette.live-teal;
+                                    font-size: 10px;
+                                    font-weight: 700;
+                                }
+
+                                if root.active-strat.stopped-at != "" && root.active-strat.stopped-at != "—": Text {
+                                    text: "Last Stopped At: " + root.active-strat.stopped-at;
+                                    color: VayrenPalette.live-ink;
+                                    font-size: 10px;
+                                }
+
+                                if root.active-strat.status != "RUNNING" && root.active-strat.duration != "" && root.active-strat.duration != "—": Text {
+                                    text: "Last Runtime Duration: " + root.active-strat.duration;
                                     color: VayrenPalette.live-ink;
                                     font-size: 10px;
                                     font-weight: 600;

@@ -4267,9 +4267,39 @@ pub fn project(state: &LiveState) -> LiveView {
             "PAPER" => 4,
             _ => 2,
         },
-        started_at: state.started_at.clone(),
-        stopped_at: state.stopped_at.clone(),
-        duration: state.session_duration.clone(),
+        started_at: if !state.started_at.is_empty() && state.started_at != "—" {
+            format_ist_display(&state.started_at)
+        } else {
+            "Start time unavailable".into()
+        },
+        stopped_at: if !state.stopped_at.is_empty() && state.stopped_at != "—" {
+            format_ist_display(&state.stopped_at)
+        } else {
+            "—".into()
+        },
+        duration: match state.session {
+            SessionStatus::Running => {
+                let wall_now_secs = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs_f64())
+                    .unwrap_or(0.0);
+                if let Some(elapsed) = state.elapsed_secs_since_start(wall_now_secs) {
+                    format_elapsed(elapsed)
+                } else if !state.session_duration.is_empty() && state.session_duration != "—" {
+                    state.session_duration.clone()
+                } else {
+                    "—".into()
+                }
+            }
+            SessionStatus::Stopped | SessionStatus::Error | SessionStatus::Halted => {
+                if !state.session_duration.is_empty() && state.session_duration != "—" {
+                    state.session_duration.clone()
+                } else {
+                    "—".into()
+                }
+            }
+            _ => "—".into(),
+        },
         symbols_count: state
             .strategy_facts
             .as_ref()
