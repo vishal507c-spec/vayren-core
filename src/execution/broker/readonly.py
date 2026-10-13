@@ -46,6 +46,32 @@ class ReadOnlyBroker:
     def account(self) -> dict[str, Any]:
         return self._venue.account()
 
+    def funds(self) -> dict[str, float]:
+        """Pass verified broker funds straight through to the risk engine.
+
+        Sizing MUST run on the venue's own reported capital — without this
+        the risk engine sees no capital at all and fails every LIVE order
+        closed at ``RISK_DENIED``. This is a pure read of the wrapped
+        adapter's own response: no value is computed, defaulted or invented
+        here, and an adapter that cannot report funds still raises.
+        """
+        getter = getattr(self._venue, "funds", None)
+        if not callable(getter):
+            raise BrokerError("read-only connection: venue does not report funds", code="NO_FUNDS")
+        try:
+            funds = getter()
+        except BrokerError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - normalized, never swallowed
+            raise BrokerError(
+                f"read-only connection: venue funds read failed: {exc}", code="NO_FUNDS"
+            ) from None
+        if not isinstance(funds, dict) or "available" not in funds:
+            raise BrokerError(
+                "read-only connection: venue funds response unusable", code="NO_FUNDS"
+            )
+        return funds
+
     def positions(self) -> list[dict[str, Any]]:
         return self._venue.positions()
 

@@ -34,7 +34,12 @@ from broker.providers.fyers.live_market_data import (
     STATE_ERROR,
     FyersLiveMarketData,
 )
-from broker.providers.fyers.session_adapter import ORDER_WS_SUBSCRIPTION, FyersSessionAdapter
+from broker.providers.fyers.session_adapter import (
+    ORDER_WS_FLAP_LIMIT,
+    ORDER_WS_STABLE_SECONDS,
+    ORDER_WS_SUBSCRIPTION,
+    FyersSessionAdapter,
+)
 
 
 class MockDataSocket:
@@ -97,6 +102,7 @@ class MockOrderSocket:
         self.on_close = on_close
         self.connected = False
         self.subscribed_type = ""
+        self.subscribe_calls = 0
 
     def connect(self) -> None:
         self.connected = True
@@ -104,6 +110,7 @@ class MockOrderSocket:
             self.on_connect()
 
     def subscribe(self, data_type: str) -> None:
+        self.subscribe_calls += 1
         self.subscribed_type = data_type
 
     def close_connection(self) -> None:
@@ -400,6 +407,171 @@ def test_order_ws_resubscribe_on_connect_uses_vendor_keys() -> None:
     adapter._on_ws_connect()
     assert created[0].subscribed_type == first == "OnOrders,OnTrades"
     adapter.disconnect()
+
+
+def test_order_ws_health_never_restarts_a_live_socket() -> None:
+    """health() must not fight the SDK's own reconnect loop.
+
+    Regression: health() used to call _start_order_ws() on every ERROR
+    state while the SDK was already reconnecting, and _start_order_ws
+    replaced the socket without closing the previous one. Two reconnect
+    drivers plus leaked sockets produced the observed storm (10 connects
+    in 600ms, "Connection to remote host was lost" on each).
+    """
+    created_sockets: list[MockOrderSocket] = []
+
+    def order_socket_factory(**kwargs: Any) -> MockOrderSocket:
+        sock = MockOrderSocket(**kwargs)
+        created_sockets.append(sock)
+        return sock
+
+    transport = MockTransport()
+    adapter = FyersSessionAdapter(
+        app_id="APP123",
+        access_token="TOKEN456",
+        transport=transport,
+        order_socket_factory=order_socket_factory,
+        enable_order_ws=True,
+    )
+    adapter.connect()
+    assert len(created_sockets) == 1
+
+    # A transient error arrives; the SDK still owns the reconnect. Two
+    # errors stay below the flap limit, so the socket must survive and no
+    # new one may be created.
+    for _ in range(ORDER_WS_FLAP_LIMIT - 1):
+        adapter._on_ws_error("Connection to remote host was lost.")
+        adapter.health()
+
+    assert len(created_sockets) == 1, "a transient error must not spawn new sockets"
+    assert adapter.order_ws_state == STATE_ERROR
+
+    # Health reports RECOVERING while the socket object still exists.
+    healthy, reason = adapter.order_stream_health()
+    assert not healthy
+    assert reason == "reconnecting"
+
+    # The SDK's own reconnect (on_connect callback) heals it.
+    adapter._on_ws_connect()
+    healthy, reason = adapter.order_stream_health()
+    assert healthy and reason == "connected"
+    assert len(created_sockets) == 1
+
+
+def test_order_ws_repeated_errors_do_not_flood_the_log(caplog: Any) -> None:
+    """First error is ERROR, repeats are warnings (818 lines in 6h before)."""
+    import logging
+
+    adapter, _created = _vendor_adapter(None)
+    adapter.connect()
+    with caplog.at_level(logging.ERROR, logger="broker.providers.fyers.session_adapter"):
+        for _ in range(60):
+            adapter._on_ws_error("Connection to remote host was lost.")
+    errors = [
+        rec
+        for rec in caplog.records
+        if rec.levelno >= logging.ERROR and "ORDER_WS_ERROR" in rec.getMessage()
+    ]
+    assert len(errors) == 1, f"expected one ERROR line, got {len(errors)}"
+    adapter.disconnect()
+
+
+def test_order_ws_cold_start_after_disconnect_is_allowed() -> None:
+    """A genuinely absent socket must still be (re)started by health()."""
+    created_sockets: list[MockOrderSocket] = []
+
+    def order_socket_factory(**kwargs: Any) -> MockOrderSocket:
+        sock = MockOrderSocket(**kwargs)
+        created_sockets.append(sock)
+        return sock
+
+    transport = MockTransport()
+    adapter = FyersSessionAdapter(
+        app_id="APP123",
+        access_token="TOKEN456",
+        transport=transport,
+        order_socket_factory=order_socket_factory,
+        enable_order_ws=True,
+    )
+    adapter.connect()
+    assert len(created_sockets) == 1
+    adapter.disconnect()  # SDK abandoned: socket is None again
+    assert adapter._order_ws is None
+    adapter.health()
+    assert len(created_sockets) == 2, "a cold start must still reconnect"
+
+
+def test_order_ws_subscription_sent_exactly_once_per_connection() -> None:
+    """No duplicate SUB_ORD frame: subscribe lives only in _on_ws_connect."""
+    created_sockets: list[MockOrderSocket] = []
+
+    def order_socket_factory(**kwargs: Any) -> MockOrderSocket:
+        sock = MockOrderSocket(**kwargs)
+        created_sockets.append(sock)
+        return sock
+
+    transport = MockTransport()
+    adapter = FyersSessionAdapter(
+        app_id="APP123",
+        access_token="TOKEN456",
+        transport=transport,
+        order_socket_factory=order_socket_factory,
+        enable_order_ws=True,
+    )
+    adapter.connect()
+    assert created_sockets[0].subscribe_calls == 1
+    adapter.disconnect()
+
+
+def test_order_ws_abandons_a_socket_the_venue_keeps_closing() -> None:
+    """A venue that never keeps the socket open must not spin forever.
+
+    The vendor client reconnects on every close. With the market closed
+    FYERS closes it within ~2s, which produced 700+ CONNECTED/ERROR pairs
+    per minute. After ORDER_WS_FLAP_LIMIT short-lived connections the
+    adapter stops the loop and reports honestly, keeping REST polling.
+    """
+    adapter, created = _vendor_adapter(None)
+    adapter.connect()
+    assert adapter.order_ws_state == STATE_CONNECTED
+
+    for _ in range(ORDER_WS_FLAP_LIMIT):
+        adapter._on_ws_close({"code": 1006})
+        if adapter._order_ws is None:
+            break
+        adapter._on_ws_connect()  # vendor reconnects immediately
+
+    assert adapter.order_ws_state == STATE_DISCONNECTED, "the loop must be broken"
+    assert adapter._order_ws is None
+    healthy, reason = adapter.order_stream_health()
+    assert not healthy
+    assert "not connected" in reason or "disconnected" in reason
+    # The REST path still answers after the socket is abandoned.
+    assert adapter.open_orders() == []
+    assert created, "the socket was started before being abandoned"
+
+    # And the cooldown keeps health() from immediately recreating it —
+    # that second-order loop was the original 2-second churn.
+    for _ in range(20):
+        adapter.health()
+    assert len(created) == 1, "no restart during the cooldown"
+
+    # An explicit reconnect is the operator asking to try again.
+    adapter.connect()
+    assert len(created) == 2, "connect() clears the suspension"
+
+
+def test_order_ws_stable_connection_resets_the_flap_counter() -> None:
+    adapter, _created = _vendor_adapter(None)
+    adapter.connect()
+    adapter._on_ws_close({"code": 1006})
+    adapter._on_ws_connect()
+    assert adapter._order_ws_flaps == 1
+    # This connection stays up past the stability window.
+    adapter._order_ws_connected_at = time.monotonic() - (ORDER_WS_STABLE_SECONDS + 1)
+    adapter._on_ws_close({"code": 1006})
+    assert adapter._order_ws_flaps == 0, "a stable connection must reset the breaker"
+    assert adapter.order_ws_state == STATE_DISCONNECTED
 
 
 def test_order_ws_reconnect_fallback_intact() -> None:

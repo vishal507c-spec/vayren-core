@@ -979,10 +979,22 @@ class BrokerManager:
         rate_msg = ""
         rest_ok = True
 
-        def _note_failure(text: str) -> tuple[bool, bool]:
+        def _note_failure(text: str, *, session_level: bool = False) -> tuple[bool, bool]:
+            """Record a failed read.
+
+            ``session_level`` marks the checks that PROVE the session
+            (``health``'s profile call, ``account``'s profile call). Only
+            those may invalidate the session. A sub-read that fails while
+            the session has just proved itself — positions, order book,
+            funds — marks its check and leg degraded but must NOT report
+            LOGIN_REQUIRED: the token is demonstrably valid (the venue just
+            served the profile), so downgrading the whole session on a
+            single flaky read is exactly the "reads work, state says
+            expired" bug this guard removes.
+            """
             nonlocal is_auth_error, auth_error_msg, is_rate_limited, rate_msg
             kind, safe = classify_exception(Exception(text))
-            if kind in ("AUTH_EXPIRED", "AUTH_INVALID"):
+            if kind in ("AUTH_EXPIRED", "AUTH_INVALID") and session_level:
                 is_auth_error = True
                 auth_error_msg = safe
             if kind == "RATE_LIMITED":
@@ -995,12 +1007,12 @@ class BrokerManager:
             checks: dict[str, str] = {"connection": "READY" if healthy else f"FAILED: {reason}"}
             if not healthy:
                 rest_ok = False
-                _note_failure(str(reason))
+                _note_failure(str(reason), session_level=True)
         except Exception as exc:
             kind, safe = classify_exception(exc)
             checks = {"connection": f"FAILED: {type(exc).__name__}"}
             rest_ok = False
-            _note_failure(str(exc))
+            _note_failure(str(exc), session_level=True)
         if rest_ok:
             self._set_leg(spec.broker_id, "rest", "READY", success=True)
         else:
@@ -1011,7 +1023,9 @@ class BrokerManager:
             details["account_id"] = self._account_id_of(account)
         except Exception as exc:
             checks["account"] = f"FAILED: {type(exc).__name__}"
-            _note_failure(str(exc))
+            # Identity comes from the same profile call as health(), so a
+            # failure here is a session-level proof failure.
+            _note_failure(str(exc), session_level=not rest_ok)
         try:
             funds = adapter.funds()
             checks["funds"] = "READY"

@@ -5383,7 +5383,9 @@ mod tests {
         // The "Data available x/y" row was removed by request; the remaining
         // passing rows (timeframe + capital) must still be all-green.
         assert!(
-            !v.cfg_checks.iter().any(|c| c.label.contains("Data available")),
+            !v.cfg_checks
+                .iter()
+                .any(|c| c.label.contains("Data available")),
             "removed row must stay gone: {:?}",
             v.cfg_checks
         );

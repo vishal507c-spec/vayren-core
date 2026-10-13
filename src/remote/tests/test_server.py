@@ -309,6 +309,41 @@ def test_command_passthrough_and_duplicate_cached(live_server: Any) -> None:
         client.close()
 
 
+def test_snapshot_carries_the_authoritative_broker_session(live_server: Any) -> None:
+    """broker_session/brokers must survive the section filter.
+
+    Regression: both were missing from EVENT_CHANNELS, so `_send_snapshot`
+    filtered them out and every remote client received only the coarse
+    legacy `broker` flag — the reason the packaged UI could never show the
+    real EC2 session.
+    """
+    server, gateway = live_server
+    gateway.live = make_live(
+        broker_session={"broker_id": "fyers", "state": "LOGIN_REQUIRED", "version": 3},
+        brokers=[
+            {
+                "id": "fyers",
+                "display_name": "FYERS",
+                "connected": False,
+                "credential_schema": [
+                    {"key": "app_id", "label": "App ID", "secret": False, "required": True}
+                ],
+            }
+        ],
+    )
+    client, _welcome, snapshot = authed_client(server)
+    try:
+        sections = snapshot["payload"]["snapshot"]
+        assert "broker_session" in sections, sorted(sections)
+        assert sections["broker_session"]["state"] == "LOGIN_REQUIRED"
+        rows = sections["brokers"]
+        assert rows and rows[0]["id"] == "fyers"
+        # The form schema flags survive so the client can build the form.
+        assert rows[0]["credential_schema"][0]["key"] == "app_id"
+    finally:
+        client.close()
+
+
 def test_refresh_capital_reaches_the_backend(live_server: Any) -> None:
     """The LIVE capital-refresh button must not be an UNKNOWN_COMMAND."""
     server, gateway = live_server

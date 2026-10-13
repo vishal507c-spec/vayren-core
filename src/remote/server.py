@@ -78,6 +78,13 @@ MUTATING_ACTIONS = (
 EVENT_CHANNELS = (
     "worker",
     "broker",
+    # The authoritative unified broker session and the per-venue rows
+    # (status, credential schema). These are the facts SYSTEM and LIVE both
+    # render from; without them in this allowlist the section filter at
+    # `_send_snapshot` silently dropped them, so a remote client could only
+    # ever see the coarse legacy `broker` flag.
+    "broker_session",
+    "brokers",
     "market",
     "order_stream",
     "strategy",

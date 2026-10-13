@@ -55,6 +55,15 @@ _TERMINAL_STATUSES = frozenset({2, 5, 6})  # 2: Filled, 5: Cancelled, 6: Rejecte
 #: the REST snapshot path.
 ORDER_WS_SUBSCRIPTION = "OnOrders,OnTrades"
 
+#: A connection shorter than this never carried an order update.
+ORDER_WS_STABLE_SECONDS = 30.0
+#: Consecutive short-lived connections before the socket is abandoned.
+ORDER_WS_FLAP_LIMIT = 3
+#: After abandoning the socket, wait this long before a cold start again.
+#: Without it, health() would immediately recreate the socket and the cycle
+#: would simply repeat at a slower cadence.
+ORDER_WS_COOLDOWN_SECONDS = 900.0
+
 
 STATE_DISCONNECTED = "DISCONNECTED"
 STATE_CONNECTING = "CONNECTING"
@@ -94,6 +103,22 @@ class FyersSessionAdapter:
         self._order_ws: Any = None
         self._order_ws_state = STATE_DISCONNECTED
         self._order_ws_error = ""
+        # Consecutive repeats of the SAME socket error, so a retrying
+        # socket logs once instead of flooding (818 identical lines in 6h).
+        self._order_ws_error_count = 0
+        # Rate-limiting key kept separately from the DISPLAYED reason: the
+        # displayed reason is overwritten when the socket is abandoned, which
+        # would otherwise re-open the log flood every cycle.
+        self._order_ws_last_error = ""
+        # Flap breaker: when the venue never keeps the order socket open
+        # (typically outside market hours) the vendor client reconnects
+        # forever. These track short-lived connections so the adapter can
+        # stop that loop instead of spinning for hours.
+        self._order_ws_connected_at: float | None = None
+        self._order_ws_flaps = 0
+        # Epoch until which the order socket stays abandoned (venue not
+        # serving the stream). Cleared by an explicit connect().
+        self._order_ws_suspended_until = 0.0
         self._order_event_queue: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=10_000)
         self._seen_fills: set[str] = set()  # Dedup key: f"{order_id}:{trade_no or fill_qty}"
         self._order_cum_filled: dict[
@@ -133,6 +158,9 @@ class FyersSessionAdapter:
         if not ok:
             raise AuthError(f"FYERS session rejected: {reason}", code="AUTH")
         self._connected = True
+        # An explicit (re)connect is the operator saying "try again".
+        self._order_ws_suspended_until = 0.0
+        self._order_ws_flaps = 0
 
         if self._enable_order_ws:
             self._start_order_ws()
@@ -154,7 +182,10 @@ class FyersSessionAdapter:
 
         # If order WS is enabled and degraded, attempt reconnection without failing
         # the verified REST session
-        if self._enable_order_ws and self._order_ws_state in (STATE_ERROR, STATE_DISCONNECTED):
+        if self._enable_order_ws and self._order_ws is None:
+            # Only a COLD start belongs to us. While a socket exists the
+            # SDK is reconnecting on its own, so calling _start_order_ws
+            # here would race it and multiply the connection attempts.
             try:
                 self._start_order_ws()
             except Exception as exc:
@@ -162,22 +193,44 @@ class FyersSessionAdapter:
         return True, "ok"
 
     def order_stream_health(self) -> tuple[bool, str]:
-        """Dedicated health check for the order WebSocket stream."""
+        """Dedicated health check for the order WebSocket stream.
+
+        A socket that exists but is not yet connected is RECOVERING, not
+        broken: the SDK reconnects on its own, so the honest word is
+        "reconnecting" (the manager shows a degraded leg) instead of a hard
+        error that would make the leg look permanently failed.
+        """
         if not self._enable_order_ws:
             return True, "order socket disabled (rest polling fallback active)"
         if self._order_ws_state == STATE_CONNECTED:
             return True, "connected"
-        if self._order_ws_state == STATE_CONNECTING:
-            return False, "connecting"
-        if self._order_ws_state == STATE_RECONNECTING:
+        if self._order_ws is not None:
             return False, "reconnecting"
         if self._order_ws_state == STATE_ERROR:
             return False, f"error: {self._order_ws_error}"
         return False, "disconnected"
 
     def _start_order_ws(self) -> None:
-        """Initialize and connect FyersOrderSocket."""
-        if self._order_ws_state == STATE_CONNECTED and self._order_ws is not None:
+        """Initialize and connect FyersOrderSocket.
+
+        Reconnects are OWNED BY THE SDK (its ``On_close`` calls ``connect()``
+        again). This method is only the cold start, so it must never fight
+        that loop: a socket that already exists is left alone, and any
+        socket we replace is closed first. Skipping the close leaked a live
+        socket per attempt, and two competing reconnect drivers produced a
+        storm (10 connects in 600ms, each erroring "Connection to remote
+        host was lost").
+        """
+        if self._order_ws is not None:
+            # The SDK is already (re)connecting on its own; a second driver
+            # is what caused the thrash.
+            return
+        if self._order_ws_state == STATE_CONNECTED:
+            return
+        if time.monotonic() < self._order_ws_suspended_until:
+            # Recently abandoned: the venue is not serving this stream, so
+            # stay down until the cooldown expires (REST fallback covers
+            # order state) instead of restarting the loop.
             return
 
         self._order_ws_state = STATE_CONNECTING
@@ -216,11 +269,13 @@ class FyersSessionAdapter:
 
             if hasattr(self._order_ws, "connect"):
                 self._order_ws.connect()
-            if hasattr(self._order_ws, "subscribe"):
-                self._order_ws.subscribe(data_type=ORDER_WS_SUBSCRIPTION)
+            # Subscription happens exactly once, in _on_ws_connect: the
+            # socket is not usable before that callback, and subscribing
+            # here as well sent a duplicate subscription on every attempt.
         except Exception as exc:
             self._order_ws_state = STATE_ERROR
             self._order_ws_error = str(exc)
+            self._order_ws = None
             logger.error("ORDER_WS_INIT_FAILED broker=FYERS reason=%s", exc)
 
     def _stop_order_ws(self) -> None:
@@ -233,11 +288,15 @@ class FyersSessionAdapter:
                 logger.warning("ORDER_WS_CLOSE_WARN broker=FYERS reason=%s", exc)
         self._order_ws = None
         self._order_ws_state = STATE_DISCONNECTED
+        self._order_ws_connected_at = None
         logger.info("ORDER_WS_DISCONNECTED broker=FYERS")
 
     def _on_ws_connect(self) -> None:
         self._order_ws_state = STATE_CONNECTED
         self._order_ws_error = ""
+        self._order_ws_error_count = 0
+        self._order_ws_last_error = ""
+        self._order_ws_connected_at = time.monotonic()
         logger.info("ORDER_WS_CONNECTED broker=FYERS")
         if self._order_ws is not None and hasattr(self._order_ws, "subscribe"):
             try:
@@ -249,11 +308,70 @@ class FyersSessionAdapter:
         if self._connected:
             self._order_ws_state = STATE_DISCONNECTED
         logger.info("ORDER_WS_CLOSED broker=FYERS args=%s", args)
+        self._note_ws_flap()
+
+    def _note_ws_flap(self) -> None:
+        """Break the SDK's infinite reconnect loop on a socket that never stays.
+
+        The vendor socket reconnects forever on its own (``On_close`` →
+        ``connect``). When the venue refuses/closes the stream — the order
+        socket is not served outside market hours — that produced an
+        unbroken 2-second CONNECTED/ERROR cycle (700+ pairs in a minute),
+        burning CPU and burying real logs. After a few connections that
+        never survived ``ORDER_WS_STABLE_SECONDS`` the socket is stopped for
+        good and the leg reports honestly DISCONNECTED; REST polling still
+        covers order state, and the manager keeps the leg degraded.
+        """
+        connected_at = self._order_ws_connected_at
+        if connected_at is not None and (
+            time.monotonic() - connected_at >= ORDER_WS_STABLE_SECONDS
+        ):
+            self._order_ws_flaps = 0
+            return
+        if connected_at is None:
+            return  # never actually connected: not a flap, just a failure
+        self._order_ws_flaps += 1
+        if self._order_ws_flaps < ORDER_WS_FLAP_LIMIT:
+            return
+        logger.warning(
+            "ORDER_WS_ABANDONED broker=FYERS flaps=%d — venue is not keeping the "
+            "order stream open (market closed?); REST polling remains active",
+            self._order_ws_flaps,
+        )
+        self._order_ws_flaps = 0
+        self._stop_order_ws()
+        self._order_ws_suspended_until = time.monotonic() + ORDER_WS_COOLDOWN_SECONDS
+        self._order_ws_error = (
+            "order stream unavailable — venue closes the socket (REST fallback active)"
+        )
 
     def _on_ws_error(self, message: Any) -> None:
+        """Record a socket error WITHOUT flooding the log.
+
+        A dropped order socket retries, so the same error arrives many
+        times per minute; logging each one at ERROR buried every other
+        diagnostic (800+ identical lines in 6h). The FIRST error is an
+        error, repeats are warnings, and the state/health still report the
+        degraded leg.
+        """
         self._order_ws_state = STATE_ERROR
-        self._order_ws_error = str(message)
-        logger.error("ORDER_WS_ERROR broker=FYERS error=%s", message)
+        text = str(message)
+        if text != self._order_ws_last_error:
+            self._order_ws_last_error = text
+            self._order_ws_error_count = 1
+            self._order_ws_error = text
+            logger.error("ORDER_WS_ERROR broker=FYERS error=%s", text)
+            return
+        self._order_ws_error_count += 1
+        if self._order_ws_error_count <= 3:
+            logger.warning("ORDER_WS_ERROR broker=FYERS error=%s (repeat)", text)
+        elif self._order_ws_error_count % 50 == 0:
+            logger.warning(
+                "ORDER_WS_ERROR broker=FYERS error=%s (x%d, still reconnecting)",
+                text,
+                self._order_ws_error_count,
+            )
+        self._note_ws_flap()
 
     def _on_ws_orders(self, msg: Any) -> None:
         """Handle normalized order update from FyersOrderSocket."""
