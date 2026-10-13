@@ -46,6 +46,11 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any, Protocol, runtime_checkable
 
 API_BASE = "https://api-t1.fyers.in/api/v3"
+#: Market data lives on a DIFFERENT base. ``/api/v3/quotes`` answers HTTP 404
+#: — quotes, depth and market status are served from ``/data`` by the
+#: vendor SDK (``fyers_apiv3.Config.DATA_API``). Mixing the two bases is the
+#: difference between a real quote and a 404.
+MARKET_DATA_BASE = "https://api-t1.fyers.in/data"
 VAGATOR_BASE = "https://api-t2.fyers.in/vagator/v2"
 DEFAULT_CALLBACK_HOST = "127.0.0.1"
 DEFAULT_CALLBACK_PORT = 9475
@@ -520,6 +525,7 @@ def fyers_interactive_login(
 
 __all__ = [
     "API_BASE",
+    "MARKET_DATA_BASE",
     "CALLBACK_PATH",
     "CONFIG_SERVICE",
     "DEFAULT_CALLBACK_HOST",

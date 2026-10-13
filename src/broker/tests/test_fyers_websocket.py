@@ -28,7 +28,10 @@ from __future__ import annotations
 import time
 from typing import Any
 
+import pytest
+
 from broker.providers.fyers.live_market_data import (
+    MARKET_DATA_STALE_SECONDS,
     STATE_CONNECTED,
     STATE_DISCONNECTED,
     STATE_ERROR,
@@ -37,9 +40,11 @@ from broker.providers.fyers.live_market_data import (
 from broker.providers.fyers.session_adapter import (
     ORDER_WS_FLAP_LIMIT,
     ORDER_WS_STABLE_SECONDS,
+    ORDER_WS_STALE_SECONDS,
     ORDER_WS_SUBSCRIPTION,
     FyersSessionAdapter,
 )
+from broker.vocab import BrokerError
 
 
 class MockDataSocket:
@@ -158,6 +163,141 @@ class MockTransport:
 # ── 1. MARKET DATA WEBSOCKET TESTS ──────────────────────────────────────────
 
 
+def test_market_ws_reports_streaming_only_after_a_real_tick() -> None:
+    """Delivery evidence is separate from transport state."""
+    created_sockets: list[MockDataSocket] = []
+
+    def socket_factory(**kwargs: Any) -> MockDataSocket:
+        sock = MockDataSocket(**kwargs)
+        created_sockets.append(sock)
+        return sock
+
+    md = FyersLiveMarketData(
+        app_id="APP123", access_token="TOKEN456", socket_factory=socket_factory
+    )
+    md.connect()
+    md.subscribe(("NSE:SBIN-EQ",))
+
+    # A real vendor tick arrives.
+    md._on_message(
+        {
+            "symbol": "NSE:SBIN-EQ",
+            "ltp": 957.0,
+            "vol_traded_today": 15420,
+            "last_traded_time": 1700000000,
+        }
+    )
+    assert md.messages_received >= 1
+    healthy, reason = md.health()
+    assert healthy
+    assert "streaming" in reason
+
+    # The stream goes quiet: that is a REAL degradation, not "connected".
+    md._last_message_at = time.monotonic() - (MARKET_DATA_STALE_SECONDS + 5)
+    healthy, reason = md.health()
+    assert not healthy
+    assert "stale" in reason
+    md.close()
+
+
+def test_quotes_use_the_data_base_not_the_trading_base() -> None:
+    """Regression: /api/v3/quotes answers 404; quotes live on /data."""
+    calls: list[str] = []
+
+    class _MD(MockTransport):
+        def get_json(self, url: str, headers: Any = None) -> dict[str, Any]:  # noqa: ARG002
+            calls.append(url)
+            if "/data/quotes" in url:
+                return {
+                    "code": 200,
+                    "d": [
+                        {
+                            "n": "NSE:KAYNES-EQ",
+                            "v": {
+                                "lp": 3290,
+                                "prev_close_price": 3222.1,
+                                "symbol": "NSE:KAYNES-EQ",
+                            },
+                        }
+                    ],
+                }
+            return {"s": "ok"}
+
+    adapter = FyersSessionAdapter(
+        app_id="APP123", access_token="TOKEN456", transport=_MD(), enable_order_ws=False
+    )
+    quotes = adapter.quotes(["NSE:KAYNES-EQ"])
+    assert quotes["NSE:KAYNES-EQ"]["lp"] == 3290
+    assert adapter.last_price("NSE:KAYNES-EQ") == 3290.0
+    assert all("/data/" in url for url in calls), calls
+    assert not any("/api/v3/quotes" in url for url in calls)
+
+
+def test_quotes_canonicalise_symbols_to_the_venue_form() -> None:
+    """A registry symbol must reach the venue in its tradable form.
+
+    `NSE:KAYNES` is not a tradable FYERS symbol; the venue answers it with a
+    zero price instead of an error. Normalisation happens at the provider
+    boundary, and results come back under the key the caller asked for.
+    """
+    seen: list[str] = []
+
+    class _Map(MockTransport):
+        def get_json(self, url: str, headers: Any = None) -> dict[str, Any]:  # noqa: ARG002
+            seen.append(url)
+            return {"code": 200, "d": [{"n": "NSE:KAYNES-EQ", "v": {"lp": 3290}}]}
+
+    adapter = FyersSessionAdapter(
+        app_id="APP123", access_token="TOKEN456", transport=_Map(), enable_order_ws=False
+    )
+    quotes = adapter.quotes(["NSE:KAYNES"])
+    assert "NSE%3AKAYNES-EQ" in seen[0]
+    assert quotes["NSE:KAYNES"]["lp"] == 3290
+    assert adapter.last_price("NSE:KAYNES") == 3290.0
+
+    # An already-canonical symbol is passed through untouched.
+    assert adapter.to_venue_symbol("NSE:KAYNES-EQ") == "NSE:KAYNES-EQ"
+    assert adapter.to_venue_symbol("KAYNES") == "NSE:KAYNES-EQ"
+
+
+def test_last_price_reports_none_when_the_venue_sends_no_price() -> None:
+    class _NoPrice(MockTransport):
+        def get_json(self, url: str, headers: Any = None) -> dict[str, Any]:  # noqa: ARG002
+            return {"code": 200, "d": [{"n": "NSE:KAYNES-EQ", "v": {"lp": 0}}]}
+
+    adapter = FyersSessionAdapter(
+        app_id="APP123", access_token="TOKEN456", transport=_NoPrice(), enable_order_ws=False
+    )
+    # Zero is "not reported", never a tradable price.
+    assert adapter.last_price("NSE:KAYNES") is None
+
+
+def test_market_data_404_is_raised_not_suppressed() -> None:
+    """A missing entitlement must fail loudly, never look like 'no data'."""
+
+    class _NotFound(MockTransport):
+        def get_json(self, url: str, headers: Any = None) -> dict[str, Any]:  # noqa: ARG002
+            raise OSError("HTTP Error 404: Not Found")
+
+    adapter = FyersSessionAdapter(
+        app_id="APP123", access_token="TOKEN456", transport=_NotFound(), enable_order_ws=False
+    )
+    with pytest.raises(BrokerError):
+        adapter.quotes(["NSE:KAYNES-EQ"])
+
+
+def test_market_data_rejects_a_venue_error_payload() -> None:
+    class _Denied(MockTransport):
+        def get_json(self, url: str, headers: Any = None) -> dict[str, Any]:  # noqa: ARG002
+            return {"code": 400, "message": "insufficient entitlement"}
+
+    adapter = FyersSessionAdapter(
+        app_id="APP123", access_token="TOKEN456", transport=_Denied(), enable_order_ws=False
+    )
+    with pytest.raises(BrokerError):
+        adapter.quotes(["NSE:KAYNES-EQ"])
+
+
 def test_market_ws_connection_lifecycle() -> None:
     created_sockets: list[MockDataSocket] = []
 
@@ -182,7 +322,10 @@ def test_market_ws_connection_lifecycle() -> None:
     assert md.state == STATE_CONNECTED
     healthy, reason = md.health()
     assert healthy
-    assert reason == "connected"
+    # Connected is NOT streaming: no tick has arrived yet, and health must
+    # say so rather than imply data is flowing.
+    assert "no market data received yet" in reason
+    assert md.messages_received == 0
     assert len(created_sockets) == 1
     assert created_sockets[0].connected
 
@@ -293,6 +436,58 @@ def test_market_ws_error_handling() -> None:
 # ── 2. ORDER/TRADE WEBSOCKET TESTS ──────────────────────────────────────────
 
 
+def test_order_stream_reports_streaming_only_after_a_real_update() -> None:
+    """A connected order socket that delivered nothing must not claim to stream."""
+
+    def order_socket_factory(**kwargs: Any) -> MockOrderSocket:
+        return MockOrderSocket(**kwargs)
+
+    adapter = FyersSessionAdapter(
+        app_id="APP123",
+        access_token="TOKEN456",
+        transport=MockTransport(),
+        order_socket_factory=order_socket_factory,
+        enable_order_ws=True,
+    )
+    adapter.connect()
+    healthy, reason = adapter.order_stream_health()
+    assert healthy
+    assert "no order updates received yet" in reason
+    assert adapter.order_stream_messages_received == 0
+    assert adapter.order_stream_age_s is None
+
+    # A genuine venue order update arrives.
+    adapter._on_ws_orders(
+        {
+            "orders": {
+                "orderNumber": "26101300000001",
+                "orderStatus": "CLOSED",
+                "orderTag": "OBR C1C4:1:1:1:o1",
+            }
+        }
+    )
+    assert adapter.order_stream_messages_received == 1
+    healthy, reason = adapter.order_stream_health()
+    assert healthy
+    assert "streaming" in reason
+
+    # Updates stop arriving: a real degradation, not "connected".
+    adapter._order_ws_last_message_at = time.monotonic() - (ORDER_WS_STALE_SECONDS + 5)
+    healthy, reason = adapter.order_stream_health()
+    assert not healthy
+    assert "stale" in reason
+    adapter.disconnect()
+
+
+def test_order_stream_counts_a_trade_update_as_delivery() -> None:
+    adapter = FyersSessionAdapter(
+        app_id="APP123", access_token="TOKEN456", transport=MockTransport(), enable_order_ws=False
+    )
+    adapter._on_ws_trades({"trades": {"symbol": "NSE:KAYNES-EQ", "side": 1, "qty": 1}})
+    assert adapter.order_stream_messages_received == 1
+    assert adapter.order_stream_age_s is not None
+
+
 def test_order_ws_connection_and_health() -> None:
     created_sockets: list[MockOrderSocket] = []
 
@@ -314,7 +509,9 @@ def test_order_ws_connection_and_health() -> None:
     assert adapter.order_ws_state == STATE_CONNECTED
     healthy, reason = adapter.order_stream_health()
     assert healthy
-    assert reason == "connected"
+    # Connected is NOT streaming: no order update has arrived yet.
+    assert "no order updates received yet" in reason
+    assert adapter.order_stream_messages_received == 0
     assert len(created_sockets) == 1
     assert created_sockets[0].connected
     assert created_sockets[0].subscribed_type == ORDER_WS_SUBSCRIPTION
@@ -454,7 +651,7 @@ def test_order_ws_health_never_restarts_a_live_socket() -> None:
     # The SDK's own reconnect (on_connect callback) heals it.
     adapter._on_ws_connect()
     healthy, reason = adapter.order_stream_health()
-    assert healthy and reason == "connected"
+    assert healthy and reason.startswith("connected")
     assert len(created_sockets) == 1
 
 

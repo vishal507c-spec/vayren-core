@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import queue
 import time
+import urllib.parse
 from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any
@@ -18,6 +19,7 @@ from typing import Any
 from broker.capabilities import CapabilitySet, Caps, Domain, capability_set
 from broker.providers.fyers.live_auth import (
     API_BASE,
+    MARKET_DATA_BASE,
     AuthError,
     FyersAuthFlow,
     HttpTransport,
@@ -63,6 +65,10 @@ ORDER_WS_FLAP_LIMIT = 3
 #: Without it, health() would immediately recreate the socket and the cycle
 #: would simply repeat at a slower cadence.
 ORDER_WS_COOLDOWN_SECONDS = 900.0
+#: A stream that WAS delivering updates and then goes quiet this long is
+#: stale. A socket that never delivered (no orders in flight) is not stale —
+#: that is a different, honest state.
+ORDER_WS_STALE_SECONDS = 300.0
 
 
 STATE_DISCONNECTED = "DISCONNECTED"
@@ -116,6 +122,9 @@ class FyersSessionAdapter:
         # stop that loop instead of spinning for hours.
         self._order_ws_connected_at: float | None = None
         self._order_ws_flaps = 0
+        # Order-update delivery evidence, tracked apart from socket state.
+        self._order_ws_messages_received = 0
+        self._order_ws_last_message_at: float | None = None
         # Epoch until which the order socket stays abandoned (venue not
         # serving the stream). Cleared by an explicit connect().
         self._order_ws_suspended_until = 0.0
@@ -199,16 +208,40 @@ class FyersSessionAdapter:
         broken: the SDK reconnects on its own, so the honest word is
         "reconnecting" (the manager shows a degraded leg) instead of a hard
         error that would make the leg look permanently failed.
+
+        Connected and silent is reported as connected-but-awaiting, NOT as
+        streaming: an open socket that has never carried an order update is
+        not evidence that order updates work. A stream that WAS delivering
+        and then goes quiet is reported STALE, which is a real degradation.
         """
         if not self._enable_order_ws:
             return True, "order socket disabled (rest polling fallback active)"
         if self._order_ws_state == STATE_CONNECTED:
-            return True, "connected"
+            if self._order_ws_messages_received == 0:
+                return True, "connected — no order updates received yet (none in flight)"
+            age = self.order_stream_age_s
+            if age is not None and age > ORDER_WS_STALE_SECONDS:
+                return False, f"stale — no order update for {int(age)}s"
+            return True, (
+                f"streaming — {self._order_ws_messages_received} updates, last {int(age or 0)}s ago"
+            )
         if self._order_ws is not None:
             return False, "reconnecting"
         if self._order_ws_state == STATE_ERROR:
             return False, f"error: {self._order_ws_error}"
         return False, "disconnected"
+
+    @property
+    def order_stream_messages_received(self) -> int:
+        """Order/trade updates actually delivered (not a connect claim)."""
+        return self._order_ws_messages_received
+
+    @property
+    def order_stream_age_s(self) -> float | None:
+        """Seconds since the last real order update, or None if never."""
+        if self._order_ws_last_message_at is None:
+            return None
+        return max(0.0, time.monotonic() - self._order_ws_last_message_at)
 
     def _start_order_ws(self) -> None:
         """Initialize and connect FyersOrderSocket.
@@ -382,6 +415,10 @@ class FyersSessionAdapter:
             return
 
         events = self._parse_ws_order_event(order_dict)
+        # Delivery evidence: a connected order socket that has never
+        # delivered an update proves nothing about order-update flow.
+        self._order_ws_messages_received += 1
+        self._order_ws_last_message_at = time.monotonic()
         for ev in events:
             try:
                 self._order_event_queue.put_nowait(ev)
@@ -397,6 +434,8 @@ class FyersSessionAdapter:
             return
 
         ev = self._parse_ws_trade_event(trade_dict)
+        self._order_ws_messages_received += 1
+        self._order_ws_last_message_at = time.monotonic()
         if ev is not None:
             try:
                 self._order_event_queue.put_nowait(ev)
@@ -634,6 +673,132 @@ class FyersSessionAdapter:
             return []
         return [row for row in rows if isinstance(row, dict)]
 
+    # ── market data (read-only, /data base) ───────────────────────────
+
+    def quotes(self, symbols: list[str]) -> dict[str, dict[str, Any]]:
+        """Live quotes for authorized instruments (read-only).
+
+        Served from the vendor's ``/data`` base, NOT ``/api/v3`` (which
+        answers 404 for quotes). Rows are returned exactly as the venue
+        reports them — nothing is defaulted or synthesised, so an absent
+        price stays absent.
+        """
+        if not symbols:
+            return {}
+        # Request each symbol in the form the venue quotes, and hand the rows
+        # back keyed by what the CALLER asked for, so a registry that stores
+        # ``NSE:KAYNES`` still receives its own key back.
+        requested = [str(s) for s in symbols]
+        venue_for = {req: self.to_venue_symbol(req) for req in requested}
+        query = urllib.parse.urlencode({"symbols": ",".join(venue_for[req] for req in requested)})
+        body = self._get_data(f"quotes?{query}")
+        rows = body.get("d") or body.get("data") or []
+        back = {venue: req for req, venue in venue_for.items()}
+        out: dict[str, dict[str, Any]] = {}
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict):
+                continue
+            symbol = str(row.get("n") or row.get("symbol") or "")
+            values = row.get("v")
+            if symbol and isinstance(values, dict):
+                out[back.get(symbol, symbol)] = dict(values)
+        return out
+
+    def last_price(self, symbol: str) -> float | None:
+        """Venue last price for one symbol, or None when not reported."""
+        quote = self.quotes([symbol]).get(symbol, {})
+        value = quote.get("lp")
+        if value is None:
+            return None
+        try:
+            price = float(value)
+        except (TypeError, ValueError):
+            return None
+        return price if price > 0 else None
+
+    def history(
+        self,
+        symbol: str,
+        resolution: str,
+        range_from_epoch: int,
+        range_to_epoch: int,
+    ) -> list[tuple[int, float, float, float, float, int]]:
+        """Historical candles for one symbol (read-only, `/data/history`).
+
+        Rows come back exactly as the venue reports them, as
+        ``(epoch, open, high, low, close, volume)``. Nothing is interpolated,
+        forward-filled or re-stamped: a gap in the venue's data stays a gap.
+        """
+        venue = self.to_venue_symbol(symbol)
+        if not venue:
+            raise BrokerError("history symbol required", code=ErrorCode.INVALID_SYMBOL)
+        query = urllib.parse.urlencode(
+            {
+                "symbol": venue,
+                "resolution": str(resolution),
+                "date_format": "0",
+                "range_from": int(range_from_epoch),
+                "range_to": int(range_to_epoch),
+                "cont_flag": "1",
+            }
+        )
+        body = self._get_data(f"history?{query}")
+        if body.get("s") not in (None, "ok"):
+            raise BrokerError(
+                f"history rejected by venue: {body.get('message', '')}",
+                code=ErrorCode.NETWORK_ERROR,
+            )
+        rows = body.get("candles") or []
+        out: list[tuple[int, float, float, float, float, int]] = []
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, (list, tuple)) or len(row) < 6:
+                continue
+            try:
+                out.append(
+                    (
+                        int(row[0]),
+                        float(row[1]),
+                        float(row[2]),
+                        float(row[3]),
+                        float(row[4]),
+                        int(row[5]),
+                    )
+                )
+            except (TypeError, ValueError):
+                continue
+        return out
+
+    def market_status(self) -> dict[str, str]:
+        """Provider market status per exchange segment (authoritative)."""
+        body = self._get_data("marketStatus")
+        rows = body.get("marketStatus") or []
+        out: dict[str, str] = {}
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict):
+                continue
+            key = f"{row.get('segment')}:{row.get('market_type')}"
+            out[key] = str(row.get("status") or "")
+        return out
+
+    def _get_data(self, path: str) -> dict[str, Any]:
+        """GET under the market-data base; a 404 is surfaced, never hidden."""
+        url = f"{MARKET_DATA_BASE}/{path}"
+        try:
+            body = self._http.get_json(url, headers=self._headers())
+        except Exception as exc:
+            raise BrokerError(
+                f"market data request failed: {exc}", code=ErrorCode.NETWORK_ERROR
+            ) from None
+        if not isinstance(body, dict):
+            raise BrokerError("market data response unreadable", code=ErrorCode.NETWORK_ERROR)
+        code = body.get("code")
+        if isinstance(code, int) and code >= 400:
+            raise BrokerError(
+                f"market data rejected by venue (code {code}): {body.get('message', '')}",
+                code=ErrorCode.NETWORK_ERROR,
+            )
+        return body
+
     # ── trading surface ────────────────────────────────────────────────
 
     def place_order(
@@ -840,13 +1005,26 @@ class FyersSessionAdapter:
         sym = str(getattr(plan, "symbol", "") or "").strip()
         if not sym:
             raise BrokerError("order symbol required", code=ErrorCode.INVALID_SYMBOL)
+        return self.to_venue_symbol(sym)
+
+    @staticmethod
+    def to_venue_symbol(symbol: str) -> str:
+        """Canonical instrument → the form the venue actually quotes/trades.
+
+        The venue distinguishes ``NSE:KAYNES`` (no series suffix, resolves to
+        nothing) from ``NSE:KAYNES-EQ``. Callers hold whichever form their
+        registry uses, so every outbound symbol is normalised HERE, at the
+        provider boundary — a bare or unsuffixed symbol otherwise silently
+        yields a zero price instead of an error.
+        """
+        sym = str(symbol or "").strip()
+        if not sym:
+            return sym
         if ":" not in sym:
             return f"NSE:{sym}-EQ"
-        parts = sym.split(":", 1)
-        exchange = parts[0].upper()
-        ticker = parts[1]
+        exchange, ticker = sym.split(":", 1)
         if not ticker.endswith("-EQ") and "-" not in ticker:
-            return f"{exchange}:{ticker}-EQ"
+            return f"{exchange.upper()}:{ticker}-EQ"
         return sym
 
     def _venue_side(self, plan: Any) -> tuple[int, str]:
