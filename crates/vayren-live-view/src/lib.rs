@@ -181,6 +181,7 @@ fn apply_view(ui: &LiveHostWindow, state: &LiveState) {
         can_arm: view.setup.can_arm,
         needs_live_confirm: view.setup.needs_live_confirm,
         confirmed_live: view.setup.confirmed_live,
+        confirm_dialog_open: view.setup.confirm_dialog_open,
         symbol_total: view.setup.symbol_total.into(),
         stock_universe: strings(view.setup.stock_universe),
         universe_exchange: view.setup.universe_exchange.into(),
