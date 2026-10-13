@@ -127,9 +127,16 @@ class WsClient:
 
     def send_raw(self, payload: bytes) -> None:
         mask = os.urandom(4)
-        header = bytes([0x81, 0x80 | (len(payload) & 0x7F)])
-        if len(payload) >= 126:
-            raise ValueError("test payload too large")
+        size = len(payload)
+        if size < 126:
+            header = bytes([0x81, 0x80 | size])
+        elif size < (1 << 16):
+            # Extended 16-bit length. Without this the harness silently could
+            # not send a realistic command payload (any nested params dict
+            # crosses 125 bytes), which made larger commands untestable.
+            header = bytes([0x81, 0x80 | 126]) + struct.pack("!H", size)
+        else:
+            header = bytes([0x81, 0x80 | 127]) + struct.pack("!Q", size)
         masked = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
         self.sock.sendall(header + mask + masked)
 
@@ -305,6 +312,142 @@ def test_command_passthrough_and_duplicate_cached(live_server: Any) -> None:
         assert second is not None and second["type"] == "command_result"
         assert second["payload"]["cached"] is True
         assert len(gateway.commands) == 1
+    finally:
+        client.close()
+
+
+def test_snapshot_carries_the_authoritative_broker_session(live_server: Any) -> None:
+    """broker_session/brokers must survive the section filter.
+
+    Regression: both were missing from EVENT_CHANNELS, so `_send_snapshot`
+    filtered them out and every remote client received only the coarse
+    legacy `broker` flag — the reason the packaged UI could never show the
+    real EC2 session.
+    """
+    server, gateway = live_server
+    gateway.live = make_live(
+        broker_session={"broker_id": "fyers", "state": "LOGIN_REQUIRED", "version": 3},
+        brokers=[
+            {
+                "id": "fyers",
+                "display_name": "FYERS",
+                "connected": False,
+                "credential_schema": [
+                    {"key": "app_id", "label": "App ID", "secret": False, "required": True}
+                ],
+            }
+        ],
+    )
+    client, _welcome, snapshot = authed_client(server)
+    try:
+        sections = snapshot["payload"]["snapshot"]
+        assert "broker_session" in sections, sorted(sections)
+        assert sections["broker_session"]["state"] == "LOGIN_REQUIRED"
+        rows = sections["brokers"]
+        assert rows and rows[0]["id"] == "fyers"
+        # The form schema flags survive so the client can build the form.
+        assert rows[0]["credential_schema"][0]["key"] == "app_id"
+    finally:
+        client.close()
+
+
+def test_sync_candles_reaches_the_backend(live_server: Any) -> None:
+    """The candle-store backfill must not be an UNKNOWN_COMMAND."""
+    server, gateway = live_server
+    client, _welcome, _snapshot = authed_client(server)
+    try:
+        client.send_obj(
+            {
+                "type": "command",
+                "v": 1,
+                "request_id": "sync-1",
+                "payload": {
+                    "action": "sync_candles",
+                    "params": {"days": 30, "timeframe": "30m"},
+                },
+            }
+        )
+        result = client.recv_obj()
+        assert result is not None and result["type"] == "command_result", result
+        assert result["request_id"] == "sync-1"
+        assert gateway.commands == [{"action": "sync_candles", "days": 30, "timeframe": "30m"}]
+        assert result["payload"]["ok"] is True
+    finally:
+        client.close()
+
+
+def test_sync_candles_ignores_a_client_supplied_universe(live_server: Any) -> None:
+    """A client may set the window, never the instrument list."""
+    server, gateway = live_server
+    client, _welcome, _snapshot = authed_client(server)
+    try:
+        client.send_obj(
+            {
+                "type": "command",
+                "v": 1,
+                "request_id": "sync-2",
+                "payload": {
+                    "action": "sync_candles",
+                    "params": {"symbols": ["NSE:ADHOC-EQ"], "days": 5},
+                },
+            }
+        )
+        client.recv_obj()
+        command = gateway.commands[0]
+        assert "symbols" not in command
+        assert command == {"action": "sync_candles", "days": 5}
+    finally:
+        client.close()
+
+
+def test_refresh_capital_reaches_the_backend(live_server: Any) -> None:
+    """The LIVE capital-refresh button must not be an UNKNOWN_COMMAND."""
+    server, gateway = live_server
+    client, _welcome, _snapshot = authed_client(server)
+    try:
+        client.send_obj(
+            {
+                "type": "command",
+                "v": 1,
+                "request_id": "cap-1",
+                "payload": {"action": "refresh_capital"},
+            }
+        )
+        result = client.recv_obj()
+        assert result is not None and result["type"] == "command_result", result
+        assert result["request_id"] == "cap-1"
+        assert gateway.commands == [{"action": "refresh_capital"}]
+        assert result["payload"]["ok"] is True
+    finally:
+        client.close()
+
+
+def test_refresh_capital_reports_the_real_failure(live_server: Any) -> None:
+    """A refused funds read must answer ok=False, never a false success."""
+    server, gateway = live_server
+    client, _welcome, _snapshot = authed_client(server)
+
+    def _refuse(action: dict[str, Any]) -> dict[str, Any]:
+        gateway.commands.append(dict(action))
+        live = dict(gateway.live)
+        live["action_ok"] = False
+        live["action_note"] = "broker funds unavailable (LOGIN REQUIRED)"
+        return live
+
+    gateway.apply_command = _refuse  # type: ignore[method-assign]
+    try:
+        client.send_obj(
+            {
+                "type": "command",
+                "v": 1,
+                "request_id": "cap-2",
+                "payload": {"action": "refresh_capital"},
+            }
+        )
+        result = client.recv_obj()
+        assert result is not None and result["type"] == "command_result"
+        assert result["payload"]["ok"] is False
+        assert "unavailable" in result["payload"]["detail"]
     finally:
         client.close()
 

@@ -421,7 +421,12 @@ def op_deploy_approved(
         if restart_proc.returncode != 0:
             return {
                 "ok": False,
-                "error": f"Failed to restart vayren-remote service: {restart_proc.stderr.strip()}",
+                "error": (
+                    "RESTART_UNAVAILABLE: the gateway cannot restart itself from "
+                    "inside its sandbox (NoNewPrivileges); restart from an "
+                    "operator SSH session: sudo systemctl restart "
+                    "vayren-remote.service"
+                ),
                 "rollback_backup": backup_result.get("archive_path"),
             }
 
@@ -468,7 +473,19 @@ def op_restart_gateway(data_dir: str, strategy_dir: str, confirmed: bool = False
             timeout=15,
         )
         if proc.returncode != 0:
-            return {"ok": False, "error": f"systemctl restart failed: {proc.stderr.strip()}"}
+            # The gateway service runs sandboxed (NoNewPrivileges=true), so a
+            # restart issued from inside the service can never sudo — by
+            # design, not by misconfiguration. Restarts stay an operator-SSH
+            # action; no privilege is granted or weakened here.
+            return {
+                "ok": False,
+                "error": (
+                    "RESTART_UNAVAILABLE: the gateway cannot restart itself from "
+                    "inside its sandbox (NoNewPrivileges); restart from an "
+                    "operator SSH session: sudo systemctl restart "
+                    "vayren-remote.service"
+                ),
+            }
 
         # Verify active
         verify = _get_service_status("vayren-remote")

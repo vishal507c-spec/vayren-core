@@ -33,6 +33,7 @@ SYSTEM → BROKERS (INTEGRATION DETAILS) as the app's redirect URL.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import secrets
@@ -45,6 +46,11 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any, Protocol, runtime_checkable
 
 API_BASE = "https://api-t1.fyers.in/api/v3"
+#: Market data lives on a DIFFERENT base. ``/api/v3/quotes`` answers HTTP 404
+#: — quotes, depth and market status are served from ``/data`` by the
+#: vendor SDK (``fyers_apiv3.Config.DATA_API``). Mixing the two bases is the
+#: difference between a real quote and a 404.
+MARKET_DATA_BASE = "https://api-t1.fyers.in/data"
 VAGATOR_BASE = "https://api-t2.fyers.in/vagator/v2"
 DEFAULT_CALLBACK_HOST = "127.0.0.1"
 DEFAULT_CALLBACK_PORT = 9475
@@ -199,6 +205,17 @@ class _UrllibTransport:
         except urllib.error.HTTPError as exc:
             if exc.code == 401:
                 return {"s": "error", "code": -8, "message": "unauthorized"}
+            if exc.code == 429:
+                from broker.error_taxonomy import parse_retry_after
+
+                headers: dict[str, Any] = {}
+                with contextlib.suppress(Exception):
+                    headers = dict(exc.headers.items()) if exc.headers else {}
+                delay = parse_retry_after(headers, default_s=5.0)
+                raise AuthError(
+                    f"rate limited by venue (HTTP 429, retry in {delay:.0f}s)",
+                    code="RATE_LIMITED",
+                ) from None
             # FYERS POST /api/v3/token returns HTTP 308 with the auth_code
             # inside the response body's ``Url`` field — not a real redirect.
             # Read the body and hand it back so ``fetch_auth_code`` can extract
@@ -508,6 +525,7 @@ def fyers_interactive_login(
 
 __all__ = [
     "API_BASE",
+    "MARKET_DATA_BASE",
     "CALLBACK_PATH",
     "CONFIG_SERVICE",
     "DEFAULT_CALLBACK_HOST",

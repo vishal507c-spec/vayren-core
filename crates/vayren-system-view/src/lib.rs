@@ -269,11 +269,6 @@ fn apply_connection_view(ui: &SystemHostWindow, workspace: &BrokerWorkspace) -> 
     });
     ui.set_conn_disconnect_visible(workspace.can_disconnect);
     ui.set_conn_disconnect_enabled(workspace.can_disconnect);
-    ui.set_conn_help_caption(if workspace.display_name.trim().is_empty() {
-        "View setup guide.".into()
-    } else {
-        format!("View setup guide for {}.", workspace.display_name.trim()).into()
-    });
     workspace.fields.iter().map(|f| f.key.clone()).collect()
 }
 
@@ -375,9 +370,6 @@ fn wire_view(
         on_disconnect_requested,
         serde_json::json!({"action": "disconnect"})
     );
-    wire_action!(on_remove_requested, serde_json::json!({"action": "remove"}));
-    wire_action!(on_copy_callback, serde_json::json!({"action": "copy_url"}));
-    wire_action!(on_help_requested, serde_json::json!({"action": "help"}));
     wire_action!(on_add_requested, serde_json::json!({"action": "add"}));
     {
         let queue = actions.clone();
@@ -1039,8 +1031,6 @@ mod tests {
                 slint::SharedString::from("KEY123"),
                 slint::SharedString::from("SECRET456"),
             );
-            ui.invoke_remove_requested();
-            ui.invoke_copy_callback();
             drop(ui);
         });
         assert_eq!(vayren_system_view_refresh_requested(view), 1);
@@ -1053,10 +1043,7 @@ mod tests {
             let parsed: serde_json::Value = serde_json::from_slice(&buf[..len as usize]).unwrap();
             seen.push(parsed["action"].as_str().unwrap().to_string());
         }
-        assert_eq!(
-            seen,
-            vec!["login", "refresh", "configure", "remove", "copy_url"]
-        );
+        assert_eq!(seen, vec!["login", "refresh", "configure"]);
         // The configure event carries the secret once, as the legacy contract did.
         with_view(view, |v| {
             v.actions.borrow_mut().clear();
@@ -1180,7 +1167,6 @@ mod tests {
                 slint::SharedString::from(""),
                 slint::SharedString::from(""),
             );
-            ui.invoke_help_requested();
             ui.invoke_add_requested();
             drop(ui);
         });
@@ -1194,15 +1180,15 @@ mod tests {
             let parsed: serde_json::Value = serde_json::from_slice(&buf[..len as usize]).unwrap();
             seen.push(parsed.clone());
         }
-        assert_eq!(seen.len(), 4);
+        assert_eq!(seen.len(), 3);
         assert_eq!(seen[0]["action"], "select");
         assert_eq!(seen[0]["broker_id"], "zerodha");
         assert_eq!(seen[1]["action"], "connect");
         // Values zip back onto schema keys (never bare positional strings).
         assert_eq!(seen[1]["values"]["app_id"], "MYAPP");
         assert_eq!(seen[1]["values"]["secret"], "S3CR3T");
-        assert_eq!(seen[2]["action"], "help");
-        assert_eq!(seen[3]["action"], "add");
+        // The "help" action was removed with its panel; select/connect/add stay.
+        assert_eq!(seen[2]["action"], "add");
         vayren_system_view_destroy(view);
     }
 

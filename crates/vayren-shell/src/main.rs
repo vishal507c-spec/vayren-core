@@ -25,7 +25,243 @@ use vayren_shell::python_bridge::{BackendCommand, BackendResponse, PythonBackend
 use vayren_shell::research_state;
 use vayren_shell::shell;
 
-fn sync_broker_ui(ui: &vayren_shell::AppWindow, sections: &serde_json::Value) {
+/// Paint the SYSTEM broker panel from the authoritative EC2 session — the
+/// same unified snapshot LIVE reads, so the two screens cannot disagree.
+///
+/// The credential form is rebuilt from the venue schema (labels + secrecy,
+/// values never cross: saved fields stay blank and untouched inputs keep
+/// the gateway's stored values). The (broker, key order) the CONNECT button
+/// submits is stashed in `form`; secrets travel only inside the
+/// authenticated `connect_broker` command.
+/// Whether a LOCAL backend system snapshot may paint the broker panel.
+///
+/// With a gateway link the EC2 session is authoritative, so a local answer
+/// (this PC's own vault token) must never repaint the panel: it reintroduced
+/// exactly the bug where the panel showed the LOCAL session's
+/// "Manage Connection" while the EC2 session said LOGIN_REQUIRED, so the
+/// CONNECT button looked live but could never do anything. Without a link
+/// the local backend IS the authority and must keep painting.
+fn local_system_paints_panel(has_gateway_link: bool) -> bool {
+    !has_gateway_link
+}
+
+/// Paint the SYSTEM broker panel from the authoritative EC2 session.
+///
+/// Writes the WHOLE field set — including the CTA label and environment —
+/// so no value from an earlier local paint can survive: every displayed
+/// fact belongs to the session that owns the panel.
+fn apply_authoritative_broker_ui(
+    ui: &vayren_shell::AppWindow,
+    sections: &serde_json::Value,
+    auth: &vayren_shell::remote_live::BrokerAuthority,
+    form: &Rc<RefCell<vayren_shell::remote_live::RemoteBrokerForm>>,
+) {
+    use vayren_domain::broker_connection::{connection_state, progress_steps};
+    use vayren_shell::remote_live::session_verdict;
+    let verdict = session_verdict(auth);
+    ui.set_conn_pill_label(verdict.pill_label.clone().into());
+    ui.set_conn_pill_tone(verdict.pill_tone);
+    ui.set_conn_is_connected(verdict.connected);
+    ui.set_conn_is_failed(verdict.failed);
+    ui.set_conn_error_message(
+        if verdict.failed {
+            verdict.status_message.clone()
+        } else {
+            String::new()
+        }
+        .into(),
+    );
+    ui.set_conn_status_message(verdict.status_message.clone().into());
+    ui.set_conn_description(verdict.description.clone().into());
+    let state = connection_state(
+        auth.session
+            .get("state")
+            .and_then(|v| v.as_str())
+            .unwrap_or(""),
+        auth.fields_configured,
+    );
+    ui.set_conn_progress(
+        Rc::new(slint::VecModel::from(
+            progress_steps(state)
+                .into_iter()
+                .map(|s| vayren_shell::ProgressStepView {
+                    index: s.index,
+                    title: s.title.into(),
+                    subtitle: s.subtitle.into(),
+                    state: s.state,
+                })
+                .collect::<Vec<_>>(),
+        ))
+        .into(),
+    );
+    ui.set_conn_broker_id(auth.broker_id.clone().into());
+    ui.set_conn_display_name(auth.display_name.clone().into());
+    ui.set_conn_mark(
+        auth.display_name
+            .chars()
+            .next()
+            .map(|c| c.to_uppercase().to_string())
+            .unwrap_or_default()
+            .into(),
+    );
+    ui.set_conn_venue_subtitle(
+        sections
+            .get("brokers")
+            .and_then(|v| v.as_array())
+            .and_then(|rows| {
+                rows.iter().find(|row| {
+                    row.get("id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .eq_ignore_ascii_case(&auth.broker_id)
+                })
+            })
+            .and_then(|row| row.get("venue_subtitle"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .into(),
+    );
+    // The EC2 session owns its environment label; a stale "PAPER" left from
+    // the local store is exactly the kind of lie this panel must not show.
+    ui.set_conn_env_label("EC2 LIVE".into());
+    ui.set_conn_fields(
+        Rc::new(slint::VecModel::from(
+            auth.field_keys
+                .iter()
+                .enumerate()
+                .map(|(i, key)| vayren_shell::CredentialFieldView {
+                    key: key.clone().into(),
+                    label: auth.field_labels.get(i).cloned().unwrap_or_default().into(),
+                    placeholder: "".into(),
+                    secret: auth.field_secret.get(i).copied().unwrap_or(false),
+                    required: auth.field_required.get(i).copied().unwrap_or(false),
+                    saved: auth.fields_configured,
+                })
+                .collect::<Vec<_>>(),
+        ))
+        .into(),
+    );
+    // CTA: the ONE next action for THIS session. DISCONNECTED and
+    // LOGIN_REQUIRED must offer a working "Connect to <venue>" control —
+    // never the CONNECTED-only "Manage Connection", which cannot act.
+    ui.set_conn_cta_label(
+        vayren_domain::broker_connection::cta_label(state, &auth.display_name).into(),
+    );
+    ui.set_conn_cta_arrow(!verdict.in_progress && !verdict.failed);
+    // Every disconnected, not-yet-failed state can be retried: the click
+    // reaches EC2 through the gateway and reports loading, then the truth.
+    ui.set_conn_cta_enabled(!verdict.in_progress);
+    ui.set_conn_form_enabled(!verdict.in_progress);
+    // DISCONNECT is only offered when there is a session to end.
+    ui.set_conn_disconnect_visible(verdict.connected);
+    ui.set_conn_disconnect_enabled(verdict.connected);
+    // Sidebar rows: same row facts as the legacy list, but the authoritative
+    // row carries the verdict so the list can never contradict the panel.
+    let brokers_list: Vec<vayren_shell::BrokerRowView> =
+        if let Some(arr) = sections.get("brokers").and_then(|v| v.as_array()) {
+            arr.iter()
+                .map(|item| {
+                    let id = item
+                        .get("id")
+                        .and_then(|s| s.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let dname = item
+                        .get("display_name")
+                        .or_else(|| item.get("name"))
+                        .and_then(|s| s.as_str())
+                        .unwrap_or(&id)
+                        .to_string();
+                    if id == auth.broker_id {
+                        return vayren_shell::BrokerRowView {
+                            id: id.clone().into(),
+                            display_name: dname.clone().into(),
+                            mark: dname
+                                .chars()
+                                .next()
+                                .map(|c| c.to_uppercase().to_string())
+                                .unwrap_or_else(|| "?".into())
+                                .into(),
+                            venue_subtitle: item
+                                .get("venue_subtitle")
+                                .and_then(|s| s.as_str())
+                                .unwrap_or("")
+                                .into(),
+                            status_label: verdict.pill_label.clone().into(),
+                            status_tone: verdict.pill_tone,
+                            selected: true,
+                            connected: verdict.connected,
+                        };
+                    }
+                    let is_conn = item
+                        .get("connected")
+                        .and_then(|c| c.as_bool())
+                        .unwrap_or(false);
+                    vayren_shell::BrokerRowView {
+                        id: id.clone().into(),
+                        display_name: dname.clone().into(),
+                        mark: dname
+                            .chars()
+                            .next()
+                            .map(|c| c.to_uppercase().to_string())
+                            .unwrap_or_else(|| "?".into())
+                            .into(),
+                        venue_subtitle: item
+                            .get("venue_subtitle")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or("")
+                            .into(),
+                        status_label: (if is_conn {
+                            "Connected"
+                        } else {
+                            "Not Connected"
+                        })
+                        .into(),
+                        status_tone: if is_conn { 1 } else { 0 },
+                        selected: false,
+                        connected: is_conn,
+                    }
+                })
+                .collect()
+        } else {
+            vec![vayren_shell::BrokerRowView {
+                id: auth.broker_id.clone().into(),
+                display_name: auth.display_name.clone().into(),
+                mark: auth
+                    .display_name
+                    .chars()
+                    .next()
+                    .map(|c| c.to_uppercase().to_string())
+                    .unwrap_or_else(|| "?".into())
+                    .into(),
+                venue_subtitle: "".into(),
+                status_label: verdict.pill_label.clone().into(),
+                status_tone: verdict.pill_tone,
+                selected: true,
+                connected: verdict.connected,
+            }]
+        };
+    ui.set_conn_brokers(Rc::new(slint::VecModel::from(brokers_list)).into());
+    if let Ok(mut slot) = form.try_borrow_mut() {
+        *slot = vayren_shell::remote_live::RemoteBrokerForm {
+            broker_id: auth.broker_id.clone(),
+            keys: auth.field_keys.clone(),
+        };
+    }
+}
+
+fn sync_broker_ui(
+    ui: &vayren_shell::AppWindow,
+    sections: &serde_json::Value,
+    form: &Rc<RefCell<vayren_shell::remote_live::RemoteBrokerForm>>,
+) {
+    // Authoritative EC2 session first: SYSTEM reads the same unified
+    // snapshot LIVE reads, so the two screens cannot disagree. Legacy
+    // `broker` below is only for older gateways without the section.
+    if let Some(auth) = vayren_shell::remote_live::authoritative_broker(sections) {
+        apply_authoritative_broker_ui(ui, sections, &auth, form);
+        return;
+    }
     if let Some(b) = sections.get("broker").and_then(|v| v.as_object()) {
         let status = b.get("status").and_then(|s| s.as_str()).unwrap_or("");
         let reason = b.get("reason").and_then(|r| r.as_str()).unwrap_or("");
@@ -74,7 +310,7 @@ fn sync_broker_ui(ui: &vayren_shell::AppWindow, sections: &serde_json::Value) {
                 ))
                 .into(),
             );
-        } else if connected && status == "CONNECTED" {
+        } else if connected && status == "CONNECTED" && !is_auth_fail {
             ui.set_conn_pill_label("Connected".into());
             ui.set_conn_pill_tone(1);
             ui.set_conn_is_connected(true);
@@ -1089,7 +1325,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     ui.set_server_status_tone(1);
                                 }
                                 apply_remote_sections(&mut live_state.borrow_mut(), &sections, resync);
-                                sync_broker_ui(&ui, &sections);
+                                sync_broker_ui(
+                                    &ui,
+                                    &sections,
+                                    &Rc::new(RefCell::new(
+                                        vayren_shell::remote_live::RemoteBrokerForm::default(),
+                                    )),
+                                );
                                 dirty = true;
                             }
                             RemoteUiUpdate::StateUpdate { sections } => {
@@ -1102,7 +1344,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     ui.set_server_status_tone(1);
                                 }
                                 apply_remote_sections(&mut live_state.borrow_mut(), &sections, false);
-                                sync_broker_ui(&ui, &sections);
+                                sync_broker_ui(
+                                    &ui,
+                                    &sections,
+                                    &Rc::new(RefCell::new(
+                                        vayren_shell::remote_live::RemoteBrokerForm::default(),
+                                    )),
+                                );
                                 dirty = true;
                             }
                             RemoteUiUpdate::StreamEvent { name, payload } => {
@@ -1153,6 +1401,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                                 if action == "select_broker" {
                                     ui.set_conn_default_saving(false);
+                                }
+                                if action == "connect_broker" || action == "disconnect_broker" {
+                                    // The gateway forces a resync snapshot that
+                                    // repaints the panel from the authoritative
+                                    // session; failures also paint here so a
+                                    // refused request can never look pending.
+                                    ui.set_conn_status_message(detail.clone().into());
+                                    if !ok {
+                                        ui.set_conn_is_failed(true);
+                                        ui.set_conn_error_message(detail.clone().into());
+                                        ui.set_conn_pill_label("Connection Failed".into());
+                                        ui.set_conn_pill_tone(3);
+                                        ui.set_conn_cta_enabled(true);
+                                        ui.set_conn_form_enabled(true);
+                                    }
                                 }
                                 {
                                     let mut state = live_state.borrow_mut();
@@ -1312,6 +1575,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // one is a distinct save outcome for its own strategy).
                 let mut lab_universe_results: Vec<(String, bool, String)> = Vec::new();
                 let mut latest_system: Option<Option<serde_json::Value>> = None;
+                // The gateway link, if any, owns the broker panel's facts.
+                let has_gateway_link = remote_rx.is_some();
                 // Latest-wins coalesce: one tick applies at most ONE progress
                 // event (the newest in this batch) instead of repainting per
                 // arrival, so a burst never floods the UI thread.
@@ -1402,7 +1667,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if let Some(data) = data {
                         let workspace = BrokerWorkspace::from_json(&data);
                         *current_workspace.borrow_mut() = workspace.clone();
-                        shell::apply_connection(&ui, &workspace);
+                        // With a gateway link the EC2 session owns this panel;
+                        // a local answer may only refresh the view cache, or
+                        // it would overwrite the authoritative paint with
+                        // this PC's own session facts.
+                        if local_system_paints_panel(has_gateway_link) {
+                            shell::apply_connection(&ui, &workspace);
+                        }
                         // Trigger immediate LIVE tab poll so broker state and capital sync at once
                         next_live_poll = std::time::Instant::now();
                         let is_conn = workspace.state == ConnectionState::Connected;
@@ -1520,6 +1791,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
     shell::apply_connection(&ui, &current_workspace.borrow());
+    // Name the verdict's owner: with a gateway link the panel renders the
+    // EC2 session, otherwise this PC's local session. A local green must
+    // never be mistaken for the production session again.
+    if remote_command_tx.is_some() {
+        ui.set_conn_session_origin("EC2 gateway · authoritative session".into());
+    } else {
+        ui.set_conn_session_origin("This PC · local session".into());
+    }
 
     // Wire broker connection interactions
     {
@@ -1627,6 +1906,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let handle = ui.as_weak();
         let backend = Arc::clone(&backend);
         let cur_ws = current_workspace.clone();
+        let remote_cmd = remote_command_tx.clone();
         ui.on_broker_connect_requested(move |v0, v1, v2, v3, v4, v5| {
             let broker_id = cur_ws.borrow().selected_id.clone();
             let fields = cur_ws.borrow().fields.clone();
@@ -1650,6 +1930,50 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 broker_id,
                 credentials.len()
             );
+
+            // Remote mode: the EC2 gateway owns the authoritative broker
+            // session. A local CONNECT would verify this PC's vault token
+            // and paint a green that has nothing to do with production, so
+            // the request goes over the authenticated command channel and
+            // the panel repaints only from the gateway's resync snapshot —
+            // never from a local verdict.
+            if let Some(ref sender) = remote_cmd {
+                let mut params = serde_json::Map::new();
+                params.insert(
+                    "broker_id".to_string(),
+                    serde_json::Value::String(broker_id.clone()),
+                );
+                let creds = serde_json::to_value(&credentials)
+                    .ok()
+                    .and_then(|v| v.as_object().cloned())
+                    .map(serde_json::Value::Object)
+                    .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+                params.insert("credentials".to_string(), creds);
+                if sender
+                    .send(vayren_shell::remote_live::RemoteCommand {
+                        action: "connect_broker".to_string(),
+                        params: serde_json::Value::Object(params),
+                    })
+                    .is_err()
+                {
+                    eprintln!("Broker connect: gateway link closed — request not sent");
+                    if let Some(ui) = handle.upgrade() {
+                        ui.set_conn_status_message(
+                            "Gateway link closed — request not sent.".into(),
+                        );
+                    }
+                    return;
+                }
+                if let Some(ui) = handle.upgrade() {
+                    ui.set_conn_pill_label("Connecting…".into());
+                    ui.set_conn_pill_tone(2);
+                    ui.set_conn_is_failed(false);
+                    ui.set_conn_status_message(
+                        "Authenticating with the EC2 broker session…".into(),
+                    );
+                }
+                return;
+            }
 
             // Update UI immediately to Authenticating state so user sees progress instantly
             if let Some(ui) = handle.upgrade() {
@@ -1723,9 +2047,47 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let handle = ui.as_weak();
         let backend = Arc::clone(&backend);
         let cur_ws = current_workspace.clone();
+        let remote_cmd = remote_command_tx.clone();
         ui.on_broker_login_requested(move || {
             let broker_id = cur_ws.borrow().selected_id.clone();
             println!("Broker retry requested for '{}'", broker_id);
+            // Remote mode: retry against the EC2 session with the
+            // gateway's stored config — no credential values cross at all.
+            if let Some(ref sender) = remote_cmd {
+                let mut params = serde_json::Map::new();
+                params.insert(
+                    "broker_id".to_string(),
+                    serde_json::Value::String(broker_id.clone()),
+                );
+                params.insert(
+                    "credentials".to_string(),
+                    serde_json::Value::Object(serde_json::Map::new()),
+                );
+                if sender
+                    .send(vayren_shell::remote_live::RemoteCommand {
+                        action: "connect_broker".to_string(),
+                        params: serde_json::Value::Object(params),
+                    })
+                    .is_err()
+                {
+                    eprintln!("Broker retry: gateway link closed — request not sent");
+                    if let Some(ui) = handle.upgrade() {
+                        ui.set_conn_status_message(
+                            "Gateway link closed — request not sent.".into(),
+                        );
+                    }
+                    return;
+                }
+                if let Some(ui) = handle.upgrade() {
+                    ui.set_conn_pill_label("Connecting…".into());
+                    ui.set_conn_pill_tone(2);
+                    ui.set_conn_is_failed(false);
+                    ui.set_conn_status_message(
+                        "Authenticating with the EC2 broker session…".into(),
+                    );
+                }
+                return;
+            }
             if let Some(ui) = handle.upgrade() {
                 let mut auth_ws = cur_ws.borrow().clone();
                 auth_ws.state = vayren_shell::broker_connection::ConnectionState::Authenticating;
@@ -1791,9 +2153,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let handle = ui.as_weak();
         let backend = Arc::clone(&backend);
         let cur_ws = current_workspace.clone();
+        let remote_cmd = remote_command_tx.clone();
         ui.on_broker_disconnect_requested(move || {
             let broker_id = cur_ws.borrow().selected_id.clone();
             println!("Broker disconnect requested for '{}'", broker_id);
+            // Remote mode: disconnect the EC2 session, never just the
+            // local one — otherwise the panel and LIVE disagree again.
+            if let Some(ref sender) = remote_cmd {
+                let mut params = serde_json::Map::new();
+                params.insert(
+                    "broker_id".to_string(),
+                    serde_json::Value::String(broker_id.clone()),
+                );
+                if sender
+                    .send(vayren_shell::remote_live::RemoteCommand {
+                        action: "disconnect_broker".to_string(),
+                        params: serde_json::Value::Object(params),
+                    })
+                    .is_err()
+                {
+                    eprintln!("Broker disconnect: gateway link closed — request not sent");
+                    if let Some(ui) = handle.upgrade() {
+                        ui.set_conn_status_message(
+                            "Gateway link closed — request not sent.".into(),
+                        );
+                    }
+                    return;
+                }
+                if let Some(ui) = handle.upgrade() {
+                    ui.set_conn_pill_label("Disconnecting…".into());
+                    ui.set_conn_pill_tone(2);
+                    ui.set_conn_is_failed(false);
+                    ui.set_conn_status_message("Disconnecting the EC2 broker session…".into());
+                }
+                return;
+            }
             let handle_bg = handle.clone();
             let backend_bg = Arc::clone(&backend);
             std::thread::spawn(move || {
@@ -1819,64 +2213,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             });
         });
     }
-    ui.on_broker_help_requested(move || {
-        println!("Broker help requested");
-    });
     ui.on_broker_add_requested(move || {
         println!("Add broker requested");
     });
-    {
-        // REMOVE. The backend protocol has exactly ONE destructive broker
-        // command — `disconnect_broker` — and no remove/delete verb. Rather
-        // than inventing a wire message the Python side does not understand
-        // (which would answer "Unknown command" and leave the user with a
-        // button that looks broken), REMOVE performs the real destructive
-        // action that DOES exist: it disconnects the session — then states
-        // plainly that the stored broker configuration was NOT removed,
-        // because no backend command does that. Silently pretending the
-        // profile was deleted while the credentials are still on disk would
-        // be the worse lie.
-        let handle = ui.as_weak();
-        let backend = Arc::clone(&backend);
-        let cur_ws = current_workspace.clone();
-        ui.on_broker_remove_requested(move || {
-            let broker_id = cur_ws.borrow().selected_id.clone();
-            println!("Broker remove requested for '{}'", broker_id);
-            let handle_bg = handle.clone();
-            let backend_bg = Arc::clone(&backend);
-            std::thread::spawn(move || {
-                let result = PythonBackend::lock_send(
-                    &backend_bg,
-                    BackendCommand::DisconnectBroker {
-                        broker_id: broker_id.clone(),
-                    },
-                );
-                match result {
-                    Ok(BackendResponse::SystemSnapshot { data }) => {
-                        let workspace = BrokerWorkspace::from_json(&data);
-                        let _ = slint::invoke_from_event_loop(move || {
-                            if let Some(ui) = handle_bg.upgrade() {
-                                shell::apply_connection(&ui, &workspace);
-                                ui.set_conn_error_message(
-                                    format!(
-                                        "Removed '{broker_id}' is not supported: the session was \
-                                         disconnected, but the stored credentials are still on disk."
-                                    )
-                                    .into(),
-                                );
-                            }
-                        });
-                    }
-                    Ok(other) => {
-                        eprintln!("Broker remove: unexpected response ({other:?})");
-                    }
-                    Err(err) => {
-                        eprintln!("Broker remove failed: {err}");
-                    }
-                }
-            });
-        });
-    }
+    // REMOVE wiring removed with the footer (no backend remove verb exists).
     {
         // CONFIG SAVE. The backend exposes no standalone "save one field"
         // command either: credentials are persisted as part of `connect_broker`
@@ -1937,39 +2277,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 });
             },
         );
-    }
-    {
-        // COPY CALLBACK URL. A real clipboard write through the same
-        // `clipboard-win` crate the PASTE path already uses (Windows-only, so
-        // other platforms report unavailable rather than silently doing
-        // nothing). The text is the selected broker's identity + environment —
-        // the only facts the workspace actually holds; no URL is invented.
-        let handle = ui.as_weak();
-        let cur_ws = current_workspace.clone();
-        ui.on_broker_copy_callback(move || {
-            let ws = cur_ws.borrow();
-            if ws.selected_id.is_empty() {
-                eprintln!("Broker copy: no broker selected — nothing to copy");
-                return;
-            }
-            let text = format!(
-                "{} [{}] — {}",
-                ws.display_name, ws.selected_id, ws.env_label
-            );
-            #[cfg(windows)]
-            let copied = clipboard_win::set_clipboard_string(text.as_str()).is_ok();
-            #[cfg(not(windows))]
-            let copied: bool = {
-                eprintln!("Broker copy: clipboard unavailable on this platform");
-                false
-            };
-            if copied {
-                println!("Broker callback details copied to clipboard");
-            }
-            if let Some(ui) = handle.upgrade() {
-                ui.set_conn_status_message(format!("Copied to clipboard: {text}").into());
-            }
-        });
     }
     {
         let handle = ui.as_weak();
@@ -2331,6 +2638,58 @@ fn wire_server_ops(
     });
 }
 
+/// Send one broker-session command to the EC2 gateway with fail-closed
+/// gating: an unknown venue, a read-only/down link, or a closed channel
+/// paints an honest note and sends nothing. Credential values only leave
+/// inside the authenticated command envelope — never into logs, notes, or
+/// the panel. The optimistic paint claims activity only; the gateway's
+/// resync snapshot repaints the real outcome.
+fn send_remote_broker_command(
+    handle: &slint::Weak<vayren_shell::AppWindow>,
+    cmd: &mpsc::Sender<vayren_shell::remote_live::RemoteCommand>,
+    gate: &Rc<RefCell<vayren_shell::live::LiveState>>,
+    action: &str,
+    broker_id: &str,
+    credentials: Option<serde_json::Value>,
+    progress_note: &str,
+) {
+    let Some(ui) = handle.upgrade() else {
+        return;
+    };
+    if broker_id.trim().is_empty() {
+        ui.set_conn_status_message("No broker selected — pick a venue first.".into());
+        return;
+    }
+    if !gate.borrow().bridge_wired {
+        ui.set_conn_status_message(
+            "Gateway link closed or read-only credential — request not sent.".into(),
+        );
+        return;
+    }
+    let mut params = serde_json::Map::new();
+    params.insert(
+        "broker_id".to_string(),
+        serde_json::Value::String(broker_id.to_string()),
+    );
+    if let Some(creds) = credentials {
+        params.insert("credentials".to_string(), creds);
+    }
+    if cmd
+        .send(vayren_shell::remote_live::RemoteCommand {
+            action: action.to_string(),
+            params: serde_json::Value::Object(params),
+        })
+        .is_err()
+    {
+        ui.set_conn_status_message("Gateway link closed — request not sent.".into());
+        return;
+    }
+    ui.set_conn_pill_label("Connecting…".into());
+    ui.set_conn_pill_tone(2);
+    ui.set_conn_is_failed(false);
+    ui.set_conn_status_message(progress_note.into());
+}
+
 /// Remote graphical client (read-only; also the packaged default).
 ///
 /// Startup order: paint CONNECTING immediately → bootstrap thread proves the
@@ -2383,6 +2742,9 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
     );
     shell::apply(&ui, &shell::demo_snapshot());
     shell::apply_connection(&ui, &BrokerWorkspace::empty());
+    // Remote mode renders the EC2 gateway's authoritative session — label it
+    // so a gateway verdict can never be mistaken for this PC's session.
+    ui.set_conn_session_origin("EC2 gateway · authoritative session".into());
     shell::apply_market(&ui, &market::MarketState::default());
     shell::apply_lab(&ui, &shell::demo_lab_state());
     shell::apply_portfolio(&ui, &portfolio::PortfolioState::default());
@@ -2394,6 +2756,12 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
     live_state.borrow_mut().gateway.status = "CONNECTING".to_string();
     let (remote_tx, remote_rx) = mpsc::channel::<RemoteUiUpdate>();
     let (command_tx, command_rx) = mpsc::channel::<RemoteCommand>();
+    // SYSTEM → BROKERS form state: which EC2 venue CONNECT targets plus the
+    // schema key order its values map onto. Rebuilt from every snapshot so
+    // the panel can never submit values against a stale venue or order.
+    let broker_form = Rc::new(RefCell::new(
+        vayren_shell::remote_live::RemoteBrokerForm::default(),
+    ));
     // Bootstrap owns the first connect (with enrollment retries); on success
     // it hands the live client to the pump and exits.
     spawn_remote_bootstrap(url, remote_tx, command_rx);
@@ -2418,6 +2786,89 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                 action: "select_broker".to_string(),
                 params: serde_json::json!({ "broker": broker_id }),
             });
+        });
+    }
+
+    // SYSTEM → BROKERS CONNECT/RETRY/DISCONNECT against the EC2-owned
+    // session. The packaged client has no local backend, so these intents
+    // travel as authenticated gateway commands (the server re-authorizes
+    // every one and answers with a resync snapshot). Credentials are the
+    // user's fresh form input only — saved vault/sentinel values are never
+    // re-sent, and nothing is sent on a read-only or down link.
+    {
+        let handle = ui.as_weak();
+        let cmd = command_tx.clone();
+        let form_state = broker_form.clone();
+        let gate = live_state.clone();
+        ui.on_broker_connect_requested(
+            move |v0: slint::SharedString,
+                  v1: slint::SharedString,
+                  v2: slint::SharedString,
+                  v3: slint::SharedString,
+                  v4: slint::SharedString,
+                  v5: slint::SharedString| {
+                let (broker_id, keys) = match form_state.borrow().clone() {
+                    f if f.broker_id.is_empty() => (String::new(), Vec::new()),
+                    f => (f.broker_id, f.keys),
+                };
+                let values = [
+                    v0.as_str().to_string(),
+                    v1.as_str().to_string(),
+                    v2.as_str().to_string(),
+                    v3.as_str().to_string(),
+                    v4.as_str().to_string(),
+                    v5.as_str().to_string(),
+                ];
+                send_remote_broker_command(
+                    &handle,
+                    &cmd,
+                    &gate,
+                    "connect_broker",
+                    &broker_id,
+                    Some(vayren_shell::remote_live::zip_broker_credentials(
+                        &keys, &values,
+                    )),
+                    "Authenticating with the EC2 broker session…",
+                );
+            },
+        );
+    }
+    {
+        let handle = ui.as_weak();
+        let cmd = command_tx.clone();
+        let form_state = broker_form.clone();
+        let gate = live_state.clone();
+        ui.on_broker_login_requested(move || {
+            // Retry with the gateway's stored config (token reuse path):
+            // no credential values cross at all.
+            let broker_id = form_state.borrow().broker_id.clone();
+            send_remote_broker_command(
+                &handle,
+                &cmd,
+                &gate,
+                "connect_broker",
+                &broker_id,
+                Some(serde_json::Value::Object(serde_json::Map::new())),
+                "Authenticating with the EC2 broker session…",
+            );
+        });
+    }
+    {
+        let handle = ui.as_weak();
+        let cmd = command_tx.clone();
+        let form_state = broker_form.clone();
+        let gate = live_state.clone();
+        ui.on_broker_disconnect_requested(move || {
+            let broker_id = form_state.borrow().broker_id.clone();
+            send_remote_broker_command(
+                &handle,
+                &cmd,
+                &gate,
+                "disconnect_broker",
+                &broker_id,
+                None,
+                "Disconnecting the EC2 broker session…",
+            );
         });
     }
 
@@ -2518,7 +2969,7 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                                 ui.set_server_status_tone(1);
                             }
                             apply_remote_sections(&mut live_state.borrow_mut(), &sections, resync);
-                            sync_broker_ui(&ui, &sections);
+                            sync_broker_ui(&ui, &sections, &broker_form);
                             dirty = true;
                         }
                         RemoteUiUpdate::StateUpdate { sections } => {
@@ -2544,7 +2995,7 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                                 ui.set_server_status_tone(1);
                             }
                             apply_remote_sections(&mut live_state.borrow_mut(), &sections, false);
-                            sync_broker_ui(&ui, &sections);
+                            sync_broker_ui(&ui, &sections, &broker_form);
                             dirty = true;
                         }
                         RemoteUiUpdate::StreamEvent { name, payload } => {
@@ -2591,6 +3042,21 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
                             if action == "select_broker" {
                                 ui.set_conn_default_saving(false);
                             }
+                            if action == "connect_broker" || action == "disconnect_broker" {
+                                // The gateway forces a resync snapshot that
+                                // repaints the panel from the authoritative
+                                // session; failures also paint here so a
+                                // refused request can never look pending.
+                                ui.set_conn_status_message(detail.clone().into());
+                                if !ok {
+                                    ui.set_conn_is_failed(true);
+                                    ui.set_conn_error_message(detail.clone().into());
+                                    ui.set_conn_pill_label("Connection Failed".into());
+                                    ui.set_conn_pill_tone(3);
+                                    ui.set_conn_cta_enabled(true);
+                                    ui.set_conn_form_enabled(true);
+                                }
+                            }
                             let mut state = live_state.borrow_mut();
                             state.pending_action = None;
                             state.pending_since = None;
@@ -2629,6 +3095,142 @@ fn run_remote_ui(argv: Vec<String>, url: String) -> Result<(), Box<dyn std::erro
 #[cfg(test)]
 mod tests {
     use super::*;
+    use slint::Model;
+
+    fn test_ui() -> vayren_shell::AppWindow {
+        i_slint_backend_testing::init_no_event_loop();
+        vayren_shell::AppWindow::new().expect("window")
+    }
+
+    fn authority_for(state: &str) -> vayren_shell::remote_live::BrokerAuthority {
+        let sections = serde_json::json!({
+            "brokers": [{"id": "fyers", "display_name": "FYERS",
+                "venue_subtitle": "FYERS API v3", "configured": true,
+                "credential_schema": [
+                    {"key": "app_id", "label": "App ID", "secret": false, "required": true},
+                    {"key": "secret", "label": "Secret", "secret": true, "required": true}
+                ],
+                "session": {"broker_id": "fyers", "state": state, "auth_valid": false}}],
+            "broker_session": {"broker_id": "fyers", "state": state, "auth_valid": false},
+        });
+        vayren_shell::remote_live::authoritative_broker(&sections).expect("authority")
+    }
+
+    /// The reported bug: a LOCAL "connected" paint leaves the CTA reading
+    /// "Manage Connection" while the EC2 session says otherwise, and the
+    /// button then does nothing. The authoritative paint must own the CTA.
+    #[test]
+    fn authoritative_paint_replaces_a_stale_local_cta_label() {
+        let ui = test_ui();
+        let form = Rc::new(RefCell::new(
+            vayren_shell::remote_live::RemoteBrokerForm::default(),
+        ));
+        // A local workspace that verified this PC's own token.
+        let mut local = BrokerWorkspace::empty();
+        local.display_name = "FYERS".to_string();
+        local.state = ConnectionState::Connected;
+        local.can_connect = false;
+        vayren_shell::shell::apply_connection(&ui, &local);
+        assert_eq!(ui.get_conn_cta_label(), "Manage Connection");
+
+        apply_authoritative_broker_ui(
+            &ui,
+            &serde_json::json!({}),
+            &authority_for("LOGIN_REQUIRED"),
+            &form,
+        );
+
+        assert_eq!(
+            ui.get_conn_cta_label(),
+            "Connect to Fyers",
+            "the EC2 session owns the CTA, not the local paint"
+        );
+        assert!(
+            ui.get_conn_cta_enabled(),
+            "an expired session must stay retryable"
+        );
+        assert!(!ui.get_conn_is_connected());
+        assert!(!ui.get_conn_disconnect_visible());
+        assert_eq!(ui.get_conn_pill_label(), "Login Required");
+    }
+
+    /// EC2 DISCONNECTED: still an actionable, enabled control — never inert.
+    #[test]
+    fn disconnected_ec2_session_offers_an_enabled_connect_action() {
+        let ui = test_ui();
+        let form = Rc::new(RefCell::new(
+            vayren_shell::remote_live::RemoteBrokerForm::default(),
+        ));
+        apply_authoritative_broker_ui(
+            &ui,
+            &serde_json::json!({}),
+            &authority_for("DISCONNECTED"),
+            &form,
+        );
+        assert_eq!(ui.get_conn_cta_label(), "Connect to Fyers");
+        assert!(ui.get_conn_cta_enabled());
+        assert!(ui.get_conn_form_enabled());
+        assert_eq!(ui.get_conn_pill_label(), "Not Connected");
+    }
+
+    /// An in-flight authentication disables the CTA instead of pretending to
+    /// offer a second one.
+    #[test]
+    fn in_progress_ec2_session_disables_the_cta() {
+        let ui = test_ui();
+        let form = Rc::new(RefCell::new(
+            vayren_shell::remote_live::RemoteBrokerForm::default(),
+        ));
+        apply_authoritative_broker_ui(
+            &ui,
+            &serde_json::json!({}),
+            &authority_for("VERIFYING"),
+            &form,
+        );
+        assert!(!ui.get_conn_cta_enabled());
+        assert!(!ui.get_conn_is_connected());
+        assert!(!ui.get_conn_disconnect_visible());
+    }
+
+    /// A local snapshot may only paint the panel when no gateway owns it.
+    #[test]
+    fn a_local_snapshot_never_repaints_the_panel_with_a_gateway_link() {
+        assert!(
+            !local_system_paints_panel(true),
+            "with a gateway link the local answer must not paint"
+        );
+        assert!(
+            local_system_paints_panel(false),
+            "without a gateway the local backend is the authority"
+        );
+    }
+
+    /// The credential form must follow the EC2 schema, not the local one.
+    #[test]
+    fn authoritative_paint_builds_the_form_from_the_ec2_schema() {
+        let ui = test_ui();
+        let form = Rc::new(RefCell::new(
+            vayren_shell::remote_live::RemoteBrokerForm::default(),
+        ));
+        apply_authoritative_broker_ui(
+            &ui,
+            &serde_json::json!({}),
+            &authority_for("LOGIN_REQUIRED"),
+            &form,
+        );
+        let keys: Vec<String> = ui
+            .get_conn_fields()
+            .iter()
+            .map(|f| f.key.to_string())
+            .collect();
+        assert_eq!(keys, vec!["app_id".to_string(), "secret".to_string()]);
+        let bound = form.borrow().clone();
+        assert_eq!(bound.broker_id, "fyers");
+        assert_eq!(
+            bound.keys, keys,
+            "the CONNECT click maps values onto these keys"
+        );
+    }
 
     #[test]
     fn a_garbage_limit_is_rejected_not_treated_as_no_limit() {

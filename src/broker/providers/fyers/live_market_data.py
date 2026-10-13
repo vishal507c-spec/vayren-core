@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import queue
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -21,6 +22,11 @@ from broker.capabilities import CapabilitySet, Caps, Domain, capability_set
 from broker.vocab import BrokerError, ErrorCode
 
 logger = logging.getLogger(__name__)
+
+#: A stream that WAS delivering and then goes quiet this long is stale.
+#: A socket that never delivered (market closed) is not stale — that is a
+#: different, honest state.
+MARKET_DATA_STALE_SECONDS = 120.0
 
 MARKET_DATA_CAPABILITIES: CapabilitySet = capability_set(
     {
@@ -64,6 +70,12 @@ class FyersLiveMarketData:
         self._last_error_reason: str = ""
         self._ws_client: Any = None
         self._is_closed = False
+        # Data-flow evidence, tracked separately from transport state: a
+        # connected socket proves nothing about delivery. These count the
+        # messages actually received and when the last one arrived, so a
+        # silent stream can never be reported as streaming.
+        self._messages_received = 0
+        self._last_message_at: float | None = None
 
     @property
     def capabilities(self) -> CapabilitySet:
@@ -176,13 +188,28 @@ class FyersLiveMarketData:
         return tuple(quotes)
 
     def health(self) -> tuple[bool, str]:
-        """(healthy, reason) — reports WebSocket transport and connection health."""
+        """(healthy, reason) — transport health AND genuine data flow.
+
+        Transport and delivery are different facts. A connected socket
+        that has never delivered a tick (outside market hours, or not
+        subscribed) is reported as awaiting data, NOT as streaming, and a
+        stream that was live and then went quiet is reported STALE — which
+        is a real degradation, unlike the closed-market case.
+        """
         if self._is_closed:
             return False, "closed"
         if not self._app_id or not self._token:
             return False, "CREDENTIALS not ready"
         if self._state == STATE_CONNECTED:
-            return True, "connected"
+            age = self.data_age_s
+            if self._messages_received == 0:
+                return (
+                    True,
+                    "connected — no market data received yet (market closed or unsubscribed)",
+                )
+            if age is not None and age > MARKET_DATA_STALE_SECONDS:
+                return False, f"stale — no market data for {int(age)}s"
+            return True, f"streaming — {self._messages_received} msgs, last {int(age or 0)}s ago"
         if self._state == STATE_CONNECTING:
             return False, "connecting"
         if self._state == STATE_RECONNECTING:
@@ -190,6 +217,18 @@ class FyersLiveMarketData:
         if self._state == STATE_ERROR:
             return False, f"error: {self._last_error_reason}"
         return False, "disconnected"
+
+    @property
+    def messages_received(self) -> int:
+        """Messages actually delivered by the stream (not a connect claim)."""
+        return self._messages_received
+
+    @property
+    def data_age_s(self) -> float | None:
+        """Seconds since the last real message, or None if never received."""
+        if self._last_message_at is None:
+            return None
+        return max(0.0, time.monotonic() - self._last_message_at)
 
     def disconnect(self) -> None:
         """Drop transport while keeping subscription memory for reconnect."""
@@ -264,6 +303,11 @@ class FyersLiveMarketData:
             return
 
         normalized_events = self.normalize_tick(message)
+        if normalized_events:
+            # Delivery evidence: count what actually reached us, so health
+            # can distinguish "streaming" from "socket open but silent".
+            self._messages_received += len(normalized_events)
+            self._last_message_at = time.monotonic()
         for ev in normalized_events:
             try:
                 self._queue.put_nowait(ev)

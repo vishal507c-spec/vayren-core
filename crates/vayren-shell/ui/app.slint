@@ -79,15 +79,13 @@ export component AppWindow inherits Window {
     callback broker-login-requested();
     callback broker-refresh-requested();
     callback broker-disconnect-requested();
-    callback broker-remove-requested();
+    
     callback broker-config-saved(string, string);
-    callback broker-copy-callback();
     // Broker CONNECTION workspace actions (Slint reports intent only; the
     // embed host dispatches to BrokerManager/selection service. Retry reuses
     // the login intent, Manage reuses refresh, Disconnect is shared).
     callback broker-select-requested(string);
     callback broker-connect-requested(string, string, string, string, string, string);
-    callback broker-help-requested();
     callback broker-add-requested();
     callback broker-paste-requested(int);
     // Persist the open panel's broker as VAYREN's authoritative default via
@@ -341,8 +339,9 @@ export component AppWindow inherits Window {
     in-out property <string> conn-error-message: "";
     in-out property <bool> conn-disconnect-visible: false;
     in-out property <bool> conn-disconnect-enabled: false;
-    in-out property <string> conn-help-caption: "View setup guide.";
+    
     in-out property <string> conn-saved-sentinel: "";
+    in-out property <string> conn-session-origin: "";
     in-out property <string> broker-field-v0: "";
     in-out property <string> broker-field-v1: "";
     in-out property <string> broker-field-v2: "";
@@ -879,8 +878,8 @@ export component AppWindow inherits Window {
                     error-message: root.conn-error-message;
                     disconnect-visible: root.conn-disconnect-visible;
                     disconnect-enabled: root.conn-disconnect-enabled;
-                    help-caption: root.conn-help-caption;
                     saved-sentinel: root.conn-saved-sentinel;
+                    session-origin: root.conn-session-origin;
                     field-v0 <=> root.broker-field-v0;
                     field-v1 <=> root.broker-field-v1;
                     field-v2 <=> root.broker-field-v2;
@@ -891,11 +890,9 @@ export component AppWindow inherits Window {
                     connect-requested(v0, v1, v2, v3, v4, v5) => { root.broker-connect-requested(v0, v1, v2, v3, v4, v5); }
                     retry-requested() => { root.broker-login-requested(); }
                     disconnect-requested() => { root.broker-disconnect-requested(); }
-                    remove-requested() => { root.broker-remove-requested(); }
+                    
                     config-saved(key, value) => { root.broker-config-saved(key, value); }
-                    copy-callback() => { root.broker-copy-callback(); }
                     refresh-requested() => { root.broker-refresh-requested(); }
-                    help-requested() => { root.broker-help-requested(); }
                     add-broker-requested() => { root.broker-add-requested(); }
                     set-default-requested(id) => { root.broker-set-default-requested(id); }
                     server-status: root.server-status;

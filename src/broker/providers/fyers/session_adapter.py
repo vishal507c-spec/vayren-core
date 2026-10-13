@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import queue
 import time
+import urllib.parse
 from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any
@@ -18,6 +19,7 @@ from typing import Any
 from broker.capabilities import CapabilitySet, Caps, Domain, capability_set
 from broker.providers.fyers.live_auth import (
     API_BASE,
+    MARKET_DATA_BASE,
     AuthError,
     FyersAuthFlow,
     HttpTransport,
@@ -54,6 +56,19 @@ _TERMINAL_STATUSES = frozenset({2, 5, 6})  # 2: Filled, 5: Cancelled, 6: Rejecte
 #: the subscription was never sent. Orders + trades only — positions stay on
 #: the REST snapshot path.
 ORDER_WS_SUBSCRIPTION = "OnOrders,OnTrades"
+
+#: A connection shorter than this never carried an order update.
+ORDER_WS_STABLE_SECONDS = 30.0
+#: Consecutive short-lived connections before the socket is abandoned.
+ORDER_WS_FLAP_LIMIT = 3
+#: After abandoning the socket, wait this long before a cold start again.
+#: Without it, health() would immediately recreate the socket and the cycle
+#: would simply repeat at a slower cadence.
+ORDER_WS_COOLDOWN_SECONDS = 900.0
+#: A stream that WAS delivering updates and then goes quiet this long is
+#: stale. A socket that never delivered (no orders in flight) is not stale —
+#: that is a different, honest state.
+ORDER_WS_STALE_SECONDS = 300.0
 
 
 STATE_DISCONNECTED = "DISCONNECTED"
@@ -94,6 +109,25 @@ class FyersSessionAdapter:
         self._order_ws: Any = None
         self._order_ws_state = STATE_DISCONNECTED
         self._order_ws_error = ""
+        # Consecutive repeats of the SAME socket error, so a retrying
+        # socket logs once instead of flooding (818 identical lines in 6h).
+        self._order_ws_error_count = 0
+        # Rate-limiting key kept separately from the DISPLAYED reason: the
+        # displayed reason is overwritten when the socket is abandoned, which
+        # would otherwise re-open the log flood every cycle.
+        self._order_ws_last_error = ""
+        # Flap breaker: when the venue never keeps the order socket open
+        # (typically outside market hours) the vendor client reconnects
+        # forever. These track short-lived connections so the adapter can
+        # stop that loop instead of spinning for hours.
+        self._order_ws_connected_at: float | None = None
+        self._order_ws_flaps = 0
+        # Order-update delivery evidence, tracked apart from socket state.
+        self._order_ws_messages_received = 0
+        self._order_ws_last_message_at: float | None = None
+        # Epoch until which the order socket stays abandoned (venue not
+        # serving the stream). Cleared by an explicit connect().
+        self._order_ws_suspended_until = 0.0
         self._order_event_queue: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=10_000)
         self._seen_fills: set[str] = set()  # Dedup key: f"{order_id}:{trade_no or fill_qty}"
         self._order_cum_filled: dict[
@@ -133,6 +167,9 @@ class FyersSessionAdapter:
         if not ok:
             raise AuthError(f"FYERS session rejected: {reason}", code="AUTH")
         self._connected = True
+        # An explicit (re)connect is the operator saying "try again".
+        self._order_ws_suspended_until = 0.0
+        self._order_ws_flaps = 0
 
         if self._enable_order_ws:
             self._start_order_ws()
@@ -154,7 +191,10 @@ class FyersSessionAdapter:
 
         # If order WS is enabled and degraded, attempt reconnection without failing
         # the verified REST session
-        if self._enable_order_ws and self._order_ws_state in (STATE_ERROR, STATE_DISCONNECTED):
+        if self._enable_order_ws and self._order_ws is None:
+            # Only a COLD start belongs to us. While a socket exists the
+            # SDK is reconnecting on its own, so calling _start_order_ws
+            # here would race it and multiply the connection attempts.
             try:
                 self._start_order_ws()
             except Exception as exc:
@@ -162,22 +202,68 @@ class FyersSessionAdapter:
         return True, "ok"
 
     def order_stream_health(self) -> tuple[bool, str]:
-        """Dedicated health check for the order WebSocket stream."""
+        """Dedicated health check for the order WebSocket stream.
+
+        A socket that exists but is not yet connected is RECOVERING, not
+        broken: the SDK reconnects on its own, so the honest word is
+        "reconnecting" (the manager shows a degraded leg) instead of a hard
+        error that would make the leg look permanently failed.
+
+        Connected and silent is reported as connected-but-awaiting, NOT as
+        streaming: an open socket that has never carried an order update is
+        not evidence that order updates work. A stream that WAS delivering
+        and then goes quiet is reported STALE, which is a real degradation.
+        """
         if not self._enable_order_ws:
             return True, "order socket disabled (rest polling fallback active)"
         if self._order_ws_state == STATE_CONNECTED:
-            return True, "connected"
-        if self._order_ws_state == STATE_CONNECTING:
-            return False, "connecting"
-        if self._order_ws_state == STATE_RECONNECTING:
+            if self._order_ws_messages_received == 0:
+                return True, "connected — no order updates received yet (none in flight)"
+            age = self.order_stream_age_s
+            if age is not None and age > ORDER_WS_STALE_SECONDS:
+                return False, f"stale — no order update for {int(age)}s"
+            return True, (
+                f"streaming — {self._order_ws_messages_received} updates, last {int(age or 0)}s ago"
+            )
+        if self._order_ws is not None:
             return False, "reconnecting"
         if self._order_ws_state == STATE_ERROR:
             return False, f"error: {self._order_ws_error}"
         return False, "disconnected"
 
+    @property
+    def order_stream_messages_received(self) -> int:
+        """Order/trade updates actually delivered (not a connect claim)."""
+        return self._order_ws_messages_received
+
+    @property
+    def order_stream_age_s(self) -> float | None:
+        """Seconds since the last real order update, or None if never."""
+        if self._order_ws_last_message_at is None:
+            return None
+        return max(0.0, time.monotonic() - self._order_ws_last_message_at)
+
     def _start_order_ws(self) -> None:
-        """Initialize and connect FyersOrderSocket."""
-        if self._order_ws_state == STATE_CONNECTED and self._order_ws is not None:
+        """Initialize and connect FyersOrderSocket.
+
+        Reconnects are OWNED BY THE SDK (its ``On_close`` calls ``connect()``
+        again). This method is only the cold start, so it must never fight
+        that loop: a socket that already exists is left alone, and any
+        socket we replace is closed first. Skipping the close leaked a live
+        socket per attempt, and two competing reconnect drivers produced a
+        storm (10 connects in 600ms, each erroring "Connection to remote
+        host was lost").
+        """
+        if self._order_ws is not None:
+            # The SDK is already (re)connecting on its own; a second driver
+            # is what caused the thrash.
+            return
+        if self._order_ws_state == STATE_CONNECTED:
+            return
+        if time.monotonic() < self._order_ws_suspended_until:
+            # Recently abandoned: the venue is not serving this stream, so
+            # stay down until the cooldown expires (REST fallback covers
+            # order state) instead of restarting the loop.
             return
 
         self._order_ws_state = STATE_CONNECTING
@@ -216,11 +302,13 @@ class FyersSessionAdapter:
 
             if hasattr(self._order_ws, "connect"):
                 self._order_ws.connect()
-            if hasattr(self._order_ws, "subscribe"):
-                self._order_ws.subscribe(data_type=ORDER_WS_SUBSCRIPTION)
+            # Subscription happens exactly once, in _on_ws_connect: the
+            # socket is not usable before that callback, and subscribing
+            # here as well sent a duplicate subscription on every attempt.
         except Exception as exc:
             self._order_ws_state = STATE_ERROR
             self._order_ws_error = str(exc)
+            self._order_ws = None
             logger.error("ORDER_WS_INIT_FAILED broker=FYERS reason=%s", exc)
 
     def _stop_order_ws(self) -> None:
@@ -233,11 +321,15 @@ class FyersSessionAdapter:
                 logger.warning("ORDER_WS_CLOSE_WARN broker=FYERS reason=%s", exc)
         self._order_ws = None
         self._order_ws_state = STATE_DISCONNECTED
+        self._order_ws_connected_at = None
         logger.info("ORDER_WS_DISCONNECTED broker=FYERS")
 
     def _on_ws_connect(self) -> None:
         self._order_ws_state = STATE_CONNECTED
         self._order_ws_error = ""
+        self._order_ws_error_count = 0
+        self._order_ws_last_error = ""
+        self._order_ws_connected_at = time.monotonic()
         logger.info("ORDER_WS_CONNECTED broker=FYERS")
         if self._order_ws is not None and hasattr(self._order_ws, "subscribe"):
             try:
@@ -249,11 +341,70 @@ class FyersSessionAdapter:
         if self._connected:
             self._order_ws_state = STATE_DISCONNECTED
         logger.info("ORDER_WS_CLOSED broker=FYERS args=%s", args)
+        self._note_ws_flap()
+
+    def _note_ws_flap(self) -> None:
+        """Break the SDK's infinite reconnect loop on a socket that never stays.
+
+        The vendor socket reconnects forever on its own (``On_close`` →
+        ``connect``). When the venue refuses/closes the stream — the order
+        socket is not served outside market hours — that produced an
+        unbroken 2-second CONNECTED/ERROR cycle (700+ pairs in a minute),
+        burning CPU and burying real logs. After a few connections that
+        never survived ``ORDER_WS_STABLE_SECONDS`` the socket is stopped for
+        good and the leg reports honestly DISCONNECTED; REST polling still
+        covers order state, and the manager keeps the leg degraded.
+        """
+        connected_at = self._order_ws_connected_at
+        if connected_at is not None and (
+            time.monotonic() - connected_at >= ORDER_WS_STABLE_SECONDS
+        ):
+            self._order_ws_flaps = 0
+            return
+        if connected_at is None:
+            return  # never actually connected: not a flap, just a failure
+        self._order_ws_flaps += 1
+        if self._order_ws_flaps < ORDER_WS_FLAP_LIMIT:
+            return
+        logger.warning(
+            "ORDER_WS_ABANDONED broker=FYERS flaps=%d — venue is not keeping the "
+            "order stream open (market closed?); REST polling remains active",
+            self._order_ws_flaps,
+        )
+        self._order_ws_flaps = 0
+        self._stop_order_ws()
+        self._order_ws_suspended_until = time.monotonic() + ORDER_WS_COOLDOWN_SECONDS
+        self._order_ws_error = (
+            "order stream unavailable — venue closes the socket (REST fallback active)"
+        )
 
     def _on_ws_error(self, message: Any) -> None:
+        """Record a socket error WITHOUT flooding the log.
+
+        A dropped order socket retries, so the same error arrives many
+        times per minute; logging each one at ERROR buried every other
+        diagnostic (800+ identical lines in 6h). The FIRST error is an
+        error, repeats are warnings, and the state/health still report the
+        degraded leg.
+        """
         self._order_ws_state = STATE_ERROR
-        self._order_ws_error = str(message)
-        logger.error("ORDER_WS_ERROR broker=FYERS error=%s", message)
+        text = str(message)
+        if text != self._order_ws_last_error:
+            self._order_ws_last_error = text
+            self._order_ws_error_count = 1
+            self._order_ws_error = text
+            logger.error("ORDER_WS_ERROR broker=FYERS error=%s", text)
+            return
+        self._order_ws_error_count += 1
+        if self._order_ws_error_count <= 3:
+            logger.warning("ORDER_WS_ERROR broker=FYERS error=%s (repeat)", text)
+        elif self._order_ws_error_count % 50 == 0:
+            logger.warning(
+                "ORDER_WS_ERROR broker=FYERS error=%s (x%d, still reconnecting)",
+                text,
+                self._order_ws_error_count,
+            )
+        self._note_ws_flap()
 
     def _on_ws_orders(self, msg: Any) -> None:
         """Handle normalized order update from FyersOrderSocket."""
@@ -264,6 +415,10 @@ class FyersSessionAdapter:
             return
 
         events = self._parse_ws_order_event(order_dict)
+        # Delivery evidence: a connected order socket that has never
+        # delivered an update proves nothing about order-update flow.
+        self._order_ws_messages_received += 1
+        self._order_ws_last_message_at = time.monotonic()
         for ev in events:
             try:
                 self._order_event_queue.put_nowait(ev)
@@ -279,6 +434,8 @@ class FyersSessionAdapter:
             return
 
         ev = self._parse_ws_trade_event(trade_dict)
+        self._order_ws_messages_received += 1
+        self._order_ws_last_message_at = time.monotonic()
         if ev is not None:
             try:
                 self._order_event_queue.put_nowait(ev)
@@ -516,6 +673,132 @@ class FyersSessionAdapter:
             return []
         return [row for row in rows if isinstance(row, dict)]
 
+    # ── market data (read-only, /data base) ───────────────────────────
+
+    def quotes(self, symbols: list[str]) -> dict[str, dict[str, Any]]:
+        """Live quotes for authorized instruments (read-only).
+
+        Served from the vendor's ``/data`` base, NOT ``/api/v3`` (which
+        answers 404 for quotes). Rows are returned exactly as the venue
+        reports them — nothing is defaulted or synthesised, so an absent
+        price stays absent.
+        """
+        if not symbols:
+            return {}
+        # Request each symbol in the form the venue quotes, and hand the rows
+        # back keyed by what the CALLER asked for, so a registry that stores
+        # ``NSE:KAYNES`` still receives its own key back.
+        requested = [str(s) for s in symbols]
+        venue_for = {req: self.to_venue_symbol(req) for req in requested}
+        query = urllib.parse.urlencode({"symbols": ",".join(venue_for[req] for req in requested)})
+        body = self._get_data(f"quotes?{query}")
+        rows = body.get("d") or body.get("data") or []
+        back = {venue: req for req, venue in venue_for.items()}
+        out: dict[str, dict[str, Any]] = {}
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict):
+                continue
+            symbol = str(row.get("n") or row.get("symbol") or "")
+            values = row.get("v")
+            if symbol and isinstance(values, dict):
+                out[back.get(symbol, symbol)] = dict(values)
+        return out
+
+    def last_price(self, symbol: str) -> float | None:
+        """Venue last price for one symbol, or None when not reported."""
+        quote = self.quotes([symbol]).get(symbol, {})
+        value = quote.get("lp")
+        if value is None:
+            return None
+        try:
+            price = float(value)
+        except (TypeError, ValueError):
+            return None
+        return price if price > 0 else None
+
+    def history(
+        self,
+        symbol: str,
+        resolution: str,
+        range_from_epoch: int,
+        range_to_epoch: int,
+    ) -> list[tuple[int, float, float, float, float, int]]:
+        """Historical candles for one symbol (read-only, `/data/history`).
+
+        Rows come back exactly as the venue reports them, as
+        ``(epoch, open, high, low, close, volume)``. Nothing is interpolated,
+        forward-filled or re-stamped: a gap in the venue's data stays a gap.
+        """
+        venue = self.to_venue_symbol(symbol)
+        if not venue:
+            raise BrokerError("history symbol required", code=ErrorCode.INVALID_SYMBOL)
+        query = urllib.parse.urlencode(
+            {
+                "symbol": venue,
+                "resolution": str(resolution),
+                "date_format": "0",
+                "range_from": int(range_from_epoch),
+                "range_to": int(range_to_epoch),
+                "cont_flag": "1",
+            }
+        )
+        body = self._get_data(f"history?{query}")
+        if body.get("s") not in (None, "ok"):
+            raise BrokerError(
+                f"history rejected by venue: {body.get('message', '')}",
+                code=ErrorCode.NETWORK_ERROR,
+            )
+        rows = body.get("candles") or []
+        out: list[tuple[int, float, float, float, float, int]] = []
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, (list, tuple)) or len(row) < 6:
+                continue
+            try:
+                out.append(
+                    (
+                        int(row[0]),
+                        float(row[1]),
+                        float(row[2]),
+                        float(row[3]),
+                        float(row[4]),
+                        int(row[5]),
+                    )
+                )
+            except (TypeError, ValueError):
+                continue
+        return out
+
+    def market_status(self) -> dict[str, str]:
+        """Provider market status per exchange segment (authoritative)."""
+        body = self._get_data("marketStatus")
+        rows = body.get("marketStatus") or []
+        out: dict[str, str] = {}
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict):
+                continue
+            key = f"{row.get('segment')}:{row.get('market_type')}"
+            out[key] = str(row.get("status") or "")
+        return out
+
+    def _get_data(self, path: str) -> dict[str, Any]:
+        """GET under the market-data base; a 404 is surfaced, never hidden."""
+        url = f"{MARKET_DATA_BASE}/{path}"
+        try:
+            body = self._http.get_json(url, headers=self._headers())
+        except Exception as exc:
+            raise BrokerError(
+                f"market data request failed: {exc}", code=ErrorCode.NETWORK_ERROR
+            ) from None
+        if not isinstance(body, dict):
+            raise BrokerError("market data response unreadable", code=ErrorCode.NETWORK_ERROR)
+        code = body.get("code")
+        if isinstance(code, int) and code >= 400:
+            raise BrokerError(
+                f"market data rejected by venue (code {code}): {body.get('message', '')}",
+                code=ErrorCode.NETWORK_ERROR,
+            )
+        return body
+
     # ── trading surface ────────────────────────────────────────────────
 
     def place_order(
@@ -722,13 +1005,26 @@ class FyersSessionAdapter:
         sym = str(getattr(plan, "symbol", "") or "").strip()
         if not sym:
             raise BrokerError("order symbol required", code=ErrorCode.INVALID_SYMBOL)
+        return self.to_venue_symbol(sym)
+
+    @staticmethod
+    def to_venue_symbol(symbol: str) -> str:
+        """Canonical instrument → the form the venue actually quotes/trades.
+
+        The venue distinguishes ``NSE:KAYNES`` (no series suffix, resolves to
+        nothing) from ``NSE:KAYNES-EQ``. Callers hold whichever form their
+        registry uses, so every outbound symbol is normalised HERE, at the
+        provider boundary — a bare or unsuffixed symbol otherwise silently
+        yields a zero price instead of an error.
+        """
+        sym = str(symbol or "").strip()
+        if not sym:
+            return sym
         if ":" not in sym:
             return f"NSE:{sym}-EQ"
-        parts = sym.split(":", 1)
-        exchange = parts[0].upper()
-        ticker = parts[1]
+        exchange, ticker = sym.split(":", 1)
         if not ticker.endswith("-EQ") and "-" not in ticker:
-            return f"{exchange}:{ticker}-EQ"
+            return f"{exchange.upper()}:{ticker}-EQ"
         return sym
 
     def _venue_side(self, plan: Any) -> tuple[int, str]:

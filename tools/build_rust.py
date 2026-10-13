@@ -168,21 +168,33 @@ def _build_shell_package() -> int:
 
 
 def _sync_desktop_shortcut(release_bin: Path) -> None:
-    """Ensure desktop shortcut points to the production binary with no --local flag."""
+    """Ensure desktop shortcut points to the production binary with no --local flag.
+
+    Existing arguments are preserved (minus ``--local``); a fresh shortcut
+    gets the canonical launch arguments so it satisfies the desktop smoke
+    test (Rust binary direct, ``--data-dir`` + ``--strategy-dir`` present).
+    """
     if sys.platform != "win32":
         return
     lnk = Path("C:/Users/visha/Desktop/VAYREN.lnk")
     if not lnk.parent.is_dir():
         return
+    try:
+        from launch_native import default_data_dir, default_strategy_dir
+
+        canonical = f"--data-dir {default_data_dir()} --strategy-dir {default_strategy_dir()}"
+    except Exception:
+        canonical = ""
     icon = ROOT / "tools" / "assets" / "vayren_desktop.ico"
     script = (
         f"$sh = New-Object -ComObject WScript.Shell; "
         f"$lnk = $sh.CreateShortcut('{lnk}'); "
         f"$args = $lnk.Arguments; "
         f"if ($args) {{ $args = $args -replace '--local', '' }}; "
+        f"if (-not $args) {{ $args = '{canonical}' }}; "
         f"$lnk.TargetPath = '{release_bin}'; "
         f"$lnk.WorkingDirectory = '{ROOT}'; "
-        f"if ($args) {{ $lnk.Arguments = $args.Trim() }}; "
+        f"$lnk.Arguments = $args.Trim(); "
         f"if (Test-Path '{icon}') {{ $lnk.IconLocation = '{icon},0' }}; "
         f"$lnk.Save()"
     )

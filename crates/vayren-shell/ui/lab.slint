@@ -362,6 +362,10 @@ component LabFieldDivider inherits Rectangle {
 component LabSegmented inherits Rectangle {
     in property <[string]> items;
     in property <int> selected-idx: -1;
+    // When false the selected cell still WORKS (it still receives the pick)
+    // but stops painting the filled block + inverted label; used by the
+    // timeframe ladder, which reads better as a plain row.
+    in property <bool> show-selection: true;
     in property <length> cell-h: LabPalette.cfg-sub-h;
     // The ladder keeps going past the visible cells; the overflow is one
     // explicit cell, never a silently truncated list.
@@ -379,7 +383,7 @@ component LabSegmented inherits Rectangle {
         for seglbl[segidx] in root.items: Rectangle {
             horizontal-stretch: 1;
             height: root.cell-h;
-            background: segidx == root.selected-idx ? LabPalette.seg-on-bg
+            background: root.show-selection && segidx == root.selected-idx ? LabPalette.seg-on-bg
                 : sgta.has-hover ? LabPalette.white-04 : transparent;
             sgta := TouchArea {
                 mouse-cursor: pointer;
@@ -389,8 +393,9 @@ component LabSegmented inherits Rectangle {
                 text: seglbl;
                 font-size: 10.5px;
                 letter-spacing: 0.4px;
-                font-weight: segidx == root.selected-idx ? 650 : 400;
-                color: segidx == root.selected-idx ? LabPalette.chip-bg : LabPalette.dim;
+                font-weight: root.show-selection && segidx == root.selected-idx ? 650 : 400;
+                color: root.show-selection && segidx == root.selected-idx ? LabPalette.chip-bg
+                    : segidx == root.selected-idx ? LabPalette.lab-text : LabPalette.dim;
                 horizontal-alignment: center;
                 vertical-alignment: center;
                 x: 3px;
@@ -1493,6 +1498,7 @@ export component StrategyLabScreen inherits Rectangle {
                                             LabSegmented {
                                                 items: root.tf-short;
                                                 selected-idx: root.lab.tf-short-idx;
+                                                show-selection: false;
                                                 more-cell: root.timeframes.length > root.tf-short.length;
                                                 picked(i) => {
                                                     if (i >= 0 && i < root.tf-short.length) {
@@ -1967,14 +1973,9 @@ export component StrategyLabScreen inherits Rectangle {
                                         // state matrix, unchanged.
                                         HorizontalLayout {
                                             spacing: 16px; alignment: center;
-                                            Text {
-                                                text: root.lab.state-label;
-                                                font-size: 10.5px;
-                                                color: root.lab.state-tone == 2 ? LabPalette.lab-amber
-                                                    : root.lab.state-tone == 3 ? LabPalette.lab-red
-                                                    : root.lab.state-tone == 1 ? LabPalette.green : LabPalette.dim;
-                                                vertical-alignment: center;
-                                            }
+                                            // "● READY" status text removed by request.
+                                            // The run button keeps its own state matrix,
+                                            // so no run feedback is lost.
 Rectangle {
                                                 width: 170px;
                                                 height: 36px;
@@ -2056,40 +2057,7 @@ Rectangle {
                                         padding-left: 18px;
                                         padding-right: 18px;
                                         spacing: 14px;
-                                        Rectangle {
-                                            height: 24px;
-                                            width: flagtx.width + 40px;
-                                            border-radius: 99px;
-                                            background: transparent;
-                                            border-width: 1px;
-                                            // Reference 1:1 flag priority: CHECK > RUNNING > STALE > CURRENT.
-                                            border-color: root.lab.config-error != "" ? LabPalette.red-35
-                                                : root.lab.run-stop ? LabPalette.amber-30
-                                                : root.lab.outdated ? LabPalette.amber-30 : LabPalette.green-30;
-                                            Rectangle {
-                                                x: 11px;
-                                                y: (parent.height - self.height) / 2;
-                                                width: 6px;
-                                                height: 6px;
-                                                border-radius: 3px;
-                                                background: root.lab.config-error != "" ? LabPalette.lab-red
-                                                    : root.lab.run-stop ? LabPalette.lab-amber
-                                                    : root.lab.outdated ? LabPalette.lab-amber : LabPalette.green;
-                                            }
-                                            flagtx := Text {
-                                                x: 24px;
-                                                text: root.lab.config-error != "" ? "CHECK INPUTS"
-                                                    : root.lab.run-stop ? "RUNNING"
-                                                    : root.lab.outdated ? "STALE — PREVIOUS CONFIG" : "CURRENT";
-                                                color: root.lab.config-error != "" ? LabPalette.lab-red
-                                                    : root.lab.run-stop ? LabPalette.lab-amber
-                                                    : root.lab.outdated ? LabPalette.lab-amber : LabPalette.green;
-                                                font-size: 10px;
-                                                letter-spacing: 1px;
-                                                vertical-alignment: center;
-                                                height: parent.height;
-                                            }
-                                        }
+                                        // "CURRENT" status pill removed by request.
                                     }
                                     Rectangle { y: parent.height - 1px; height: 1px; width: 100%; background: LabPalette.line; }
                                 }

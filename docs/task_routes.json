@@ -168,7 +168,6 @@
       "key": "download-config",
       "aliases": [
         "download settings",
-        "throttle",
         "intervals",
         "holidays"
       ],
@@ -176,8 +175,7 @@
       "owner_module": "src/data",
       "language": "PYTHON",
       "primary_files": [
-        "src/data/settings.py",
-        "src/data/throttle.py"
+        "src/data/settings.py"
       ],
       "secondary_files": [
         "src/data/native_download.py"

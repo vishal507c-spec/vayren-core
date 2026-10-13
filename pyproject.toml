@@ -25,7 +25,6 @@ dev = [
     "ruff==0.15.20",
     "pyright>=1.1",
     "pre-commit>=3.0",
-    "pillow>=10.0",  # icon asset generation (tools/assets/)
 ]
 
 # ── Data Domain Extras (historical downloader) ─────────────────
@@ -94,7 +93,6 @@ include = [
 extraPaths = [
     "src",
     "tools/forensics",
-    "tools/speed",
     "tools",
 ]
 

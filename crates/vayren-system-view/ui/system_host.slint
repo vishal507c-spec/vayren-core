@@ -82,14 +82,12 @@ export component SystemHostWindow inherits Window {
     callback login-requested();
     callback refresh-requested();
     callback disconnect-requested();
-    callback remove-requested();
+    
     callback config-saved(string, string);
-    callback copy-callback();
     // Connection workspace intents (retry reuses login, manage reuses
     // refresh, disconnect is shared — same manager methods as before).
     callback select-requested(string);
     callback connect-requested(string, string, string, string, string, string);
-    callback help-requested();
     callback add-requested();
 
     // Connection workspace facts (Rust `BrokerWorkspace` projection).
@@ -113,7 +111,6 @@ export component SystemHostWindow inherits Window {
     in-out property <string> conn-error-message: "";
     in-out property <bool> conn-disconnect-visible: false;
     in-out property <bool> conn-disconnect-enabled: false;
-    in-out property <string> conn-help-caption: "View setup guide.";
     in-out property <string> conn-saved-sentinel: "";
 
     VerticalLayout {
@@ -237,14 +234,12 @@ export component SystemHostWindow inherits Window {
                 error-message: root.conn-error-message;
                 disconnect-visible: root.conn-disconnect-visible;
                 disconnect-enabled: root.conn-disconnect-enabled;
-                help-caption: root.conn-help-caption;
                 saved-sentinel: root.conn-saved-sentinel;
                 broker-selected(id) => { root.select-requested(id); }
                 connect-requested(v0, v1, v2, v3, v4, v5) => { root.connect-requested(v0, v1, v2, v3, v4, v5); }
                 retry-requested() => { root.login-requested(); }
                 disconnect-requested() => { root.disconnect-requested(); }
                 refresh-requested() => { root.refresh-requested(); }
-                help-requested() => { root.help-requested(); }
                 add-broker-requested() => { root.add-requested(); }
             }
         }

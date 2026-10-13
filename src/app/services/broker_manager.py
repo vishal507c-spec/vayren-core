@@ -43,7 +43,11 @@ from typing import Any
 
 from app.observable import Signal, WorkerThread
 from broker import BrokerStatus
+from broker.audit import SessionAudit
+from broker.error_taxonomy import backoff_with_jitter, classify_exception, redact
 from broker.management import BrokerSpec
+from broker.session_state import build_snapshot as build_unified_snapshot
+from broker.session_state import map_broker_status, next_action_for
 
 CALLBACK_PORT = 9474
 _SESSION_JOB = "session-check"
@@ -133,10 +137,52 @@ class BrokerManager:
         self._states: dict[str, dict[str, Any]] = {}
         for broker_id, spec in self._specs.items():
             self._states[broker_id] = self._fresh_state(spec)
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._worker = _Worker(self._run_job)
         self._worker.start()
         self._stopping = False
+        # ── unified EC2 session lifecycle (one authoritative manager) ──
+        # desired: operator intent (CONNECT vs DISCONNECT), persisted.
+        # generation: monotonic per-broker epoch; a late auth completion from
+        # an older generation must never reconnect after DISCONNECT.
+        # ops: idempotency cache for duplicate CONNECT/DISCONNECT requests.
+        self._audit = SessionAudit()
+        self._ops: dict[str, dict[str, Any]] = {}
+        self._op_lock = threading.Lock()
+        self._generations: dict[str, int] = dict.fromkeys(self._specs, 0)
+        self._desired: dict[str, str] = dict.fromkeys(self._specs, "DISCONNECTED")
+        self._unified: dict[str, dict[str, Any]] = {}
+        for broker_id in self._specs:
+            self._unified[broker_id] = {
+                "legs": {
+                    "rest": {
+                        "status": "UNKNOWN",
+                        "last_success": "",
+                        "last_error": "",
+                        "consecutive_failures": 0,
+                    },
+                    "market_ws": {
+                        "status": "UNKNOWN",
+                        "last_success": "",
+                        "last_error": "",
+                        "consecutive_failures": 0,
+                    },
+                    "order_ws": {
+                        "status": "UNKNOWN",
+                        "last_success": "",
+                        "last_error": "",
+                        "consecutive_failures": 0,
+                    },
+                },
+                "last_verified": "",
+                "last_error": "",
+                "last_error_kind": "",
+                "retry_after_s": 0.0,
+                "retry_until": 0.0,
+                "version": 0,
+                "token_reused": False,
+            }
+        self._load_intents()
 
     @staticmethod
     def _default_specs() -> dict[str, BrokerSpec]:
@@ -219,6 +265,9 @@ class BrokerManager:
                     # Venue credential shapes (plain render data from the
                     # spec — the form renders these, values never cross).
                     "credential_schema": [dict(row) for row in spec.credential_schema],
+                    # Unified authoritative session (new consumers read this;
+                    # legacy keys above are unchanged for compatibility).
+                    "session": self.get_session_snapshot(broker_id),
                 }
             )
         # `active_broker` is the SYSTEM-selected broker, NOT "whichever venue is
@@ -326,27 +375,194 @@ class BrokerManager:
             except Exception:
                 self._worker.submit(_SESSION_JOB, broker_id)
 
-    def disconnect_broker(self, broker_id: str) -> tuple[bool, str]:
-        """Clear the session, keep the configuration, stop the venue.
+    def disconnect_broker(
+        self, broker_id: str, request_id: str = "", *, revoke: bool = False
+    ) -> tuple[bool, str]:
+        """Disconnect the VAYREN session safely (idempotent, intent persisted).
 
-        Named ``disconnect_broker`` (not ``disconnect``) because this manager
-        already owns a signal-disconnect method with another signature.
+        - Persists DISCONNECT intent BEFORE reporting completion.
+        - Bumps the generation so a late auth completion cannot reconnect.
+        - Retains the encrypted token by default for later reuse; pass
+          ``revoke=True`` for the explicit logout/revoke operation.
+        - Never closes exchange positions; open counts are kept in details.
+        Duplicate ``request_id`` values replay the cached result.
         """
         spec = self._specs.get(broker_id)
         if spec is None:
             return False, f"unknown broker: {broker_id}"
+        request_id = str(request_id or "").strip()
+        if request_id:
+            with self._op_lock:
+                cached = self._ops.get(f"disconnect:{broker_id}:{request_id}")
+            if cached is not None:
+                return bool(cached["ok"]), str(cached["message"])
+        with self._lock:
+            generation = int(self._generations.get(broker_id, 0)) + 1
+            self._generations[broker_id] = generation
+            self._desired[broker_id] = "DISCONNECTED"
+        self._save_intents()
+        self._audit.record(
+            request_id=request_id,
+            broker_id=broker_id,
+            action="DISCONNECT requested",
+            result="accepted",
+            reason=f"generation {generation}",
+        )
+        # Stop reconnect-relevant resources; keep token unless revoked.
         with contextlib.suppress(Exception):
-            self._session_store(spec).clear()
+            state = self._states.get(broker_id, {})
+            adapter = state.get("adapter")
+            if adapter is not None and hasattr(adapter, "disconnect"):
+                adapter.disconnect()
+            md = state.get("market_data")
+            if md is not None and hasattr(md, "disconnect"):
+                md.disconnect()
+        if revoke:
+            with contextlib.suppress(Exception):
+                self._session_store(spec).clear()
         with contextlib.suppress(Exception):
             if spec.venue_unregister is not None:
                 spec.venue_unregister()
-        self._set_status(broker_id, BrokerStatus.LOGIN_REQUIRED, "disconnected — login required")
+        # Keep last-verified open counts for the disconnect explanation.
+        prior_details: dict[str, Any] = {}
+        with contextlib.suppress(Exception):
+            prior = self._states.get(broker_id, {}).get("details")
+            if isinstance(prior, dict):
+                prior_details = dict(prior)
+        self._set_status(broker_id, BrokerStatus.DISCONNECTED, "disconnected by operator")
         with contextlib.suppress(Exception):
             cleared = self._states.get(broker_id)
             if isinstance(cleared, dict):
-                cleared["details"] = self._empty_details()
+                details = self._empty_details()
+                # Preserve open counts so the UI can explain remaining
+                # broker-side positions/orders per risk policy.
+                for key in ("positions_open", "orders_open", "account_id"):
+                    if prior_details.get(key) is not None:
+                        details[key] = prior_details.get(key)
+                cleared["details"] = details
+                cleared["adapter"] = None
+                cleared["market_data"] = None
+        self._bump_version(broker_id)
+        self._touch_error(broker_id, "OPERATOR", "disconnected by operator")
+        self._audit.record(
+            request_id=request_id,
+            broker_id=broker_id,
+            action="state changed",
+            result="DISCONNECTED",
+            reason="operator disconnect",
+        )
         self._note(broker_id, "disconnected (configuration kept)")
+        if request_id:
+            with self._op_lock:
+                self._ops[f"disconnect:{broker_id}:{request_id}"] = {
+                    "ok": True,
+                    "message": "disconnected",
+                }
+                while len(self._ops) > 512:
+                    self._ops.pop(next(iter(self._ops)))
         return True, "disconnected"
+
+    def revoke_session(self, broker_id: str, request_id: str = "") -> tuple[bool, str]:
+        """Explicit logout/revoke: disconnect AND erase the stored token."""
+        ok, message = self.disconnect_broker(broker_id, request_id=request_id, revoke=True)
+        if ok:
+            self._audit.record(
+                request_id=str(request_id or ""),
+                broker_id=broker_id,
+                action="SESSION revoked",
+                result="ok",
+                reason="explicit logout",
+            )
+            return True, "session revoked — login required for next connect"
+        return ok, message
+
+    def connect_broker(
+        self,
+        broker_id: str,
+        credentials: dict[str, str] | None = None,
+        request_id: str = "",
+    ) -> tuple[bool, str, dict[str, Any]]:
+        """One-click smart connect (idempotent, generation-guarded).
+
+        Step A: if a connect is already in progress, return its status.
+        Step B: a valid saved token is reused (verified, not just present).
+        Step C: expired tokens move to LOGIN_REQUIRED via the supported flow.
+        Step D: CONNECTED only after verification (account identity + funds).
+        """
+        spec = self._specs.get(broker_id)
+        if spec is None:
+            return False, f"unknown broker: {broker_id}", self.get_session_snapshot(broker_id)
+        request_id = str(request_id or "").strip()
+        if request_id:
+            with self._op_lock:
+                cached = self._ops.get(f"connect:{broker_id}:{request_id}")
+            if cached is not None:
+                return (
+                    bool(cached["ok"]),
+                    str(cached["message"]),
+                    self.get_session_snapshot(broker_id),
+                )
+        with self._lock:
+            current_status = self._states.get(broker_id, {}).get("status")
+        if current_status in (BrokerStatus.AUTHENTICATING, BrokerStatus.CONFIGURING):
+            self._audit.record(
+                request_id=request_id,
+                broker_id=broker_id,
+                action="CONNECT requested",
+                result="in-progress",
+                reason="connect already running",
+            )
+            return True, "connection already in progress", self.get_session_snapshot(broker_id)
+        # Rate-limited: refuse a retry storm while backoff is armed.
+        if self._retry_armed(broker_id):
+            snap = self.get_session_snapshot(broker_id)
+            return False, "rate limited — retrying automatically", snap
+        credentials = credentials or {}
+        clean = {str(k): str(v or "").strip() for k, v in credentials.items()}
+        # Merge with stored config (sentinel •••• means "keep saved value").
+        try:
+            stored_cfg = self._store.load(spec.config_service)
+            merged = dict(stored_cfg) if isinstance(stored_cfg, dict) else {}
+        except Exception:
+            merged = {}
+        for key, value in clean.items():
+            if value and "•" not in value:
+                merged[str(key)] = value
+        if merged:
+            ok_cfg, msg_cfg = self.configure(broker_id, merged)
+            if not ok_cfg:
+                self._audit.record(
+                    request_id=request_id,
+                    broker_id=broker_id,
+                    action="CONNECT requested",
+                    result="refused",
+                    reason=msg_cfg,
+                )
+                return False, msg_cfg, self.get_session_snapshot(broker_id)
+        with self._lock:
+            self._generations[broker_id] = int(self._generations.get(broker_id, 0)) + 1
+            generation = int(self._generations[broker_id])
+            self._desired[broker_id] = "CONNECTED"
+        self._save_intents()
+        self._audit.record(
+            request_id=request_id,
+            broker_id=broker_id,
+            action="CONNECT requested",
+            result="accepted",
+            reason=f"generation {generation}",
+        )
+        self._set_status(broker_id, BrokerStatus.AUTHENTICATING, "checking saved session…")
+        self._bump_version(broker_id)
+        self._worker.submit(_SESSION_JOB, broker_id)
+        if request_id:
+            with self._op_lock:
+                self._ops[f"connect:{broker_id}:{request_id}"] = {
+                    "ok": True,
+                    "message": "connection started",
+                }
+                while len(self._ops) > 512:
+                    self._ops.pop(next(iter(self._ops)))
+        return True, "connection started", self.get_session_snapshot(broker_id)
 
     def remove(self, broker_id: str) -> tuple[bool, str]:
         """Erase config + session + venue (explicit user action only)."""
@@ -361,9 +577,120 @@ class BrokerManager:
             if spec.venue_unregister is not None:
                 spec.venue_unregister()
         self._states[broker_id] = self._fresh_state(spec)
+        with self._lock:
+            self._desired[broker_id] = "DISCONNECTED"
+            self._generations[broker_id] = int(self._generations.get(broker_id, 0)) + 1
+        self._save_intents()
         self._note(broker_id, "removed")
         self.state_changed.emit(broker_id)
         return True, "broker removed"
+
+    # ── unified authoritative session snapshot ───────────────────
+
+    def get_session_snapshot(self, broker_id: str) -> dict[str, Any]:
+        """One authoritative backend snapshot for SYSTEM/LIVE/dashboard/health."""
+        with self._lock:
+            state = dict(self._states.get(broker_id, {}))
+            uni = self._unified.get(broker_id, {})
+            legs = {k: dict(v) for k, v in dict(uni.get("legs", {})).items()}
+            desired = str(self._desired.get(broker_id, "DISCONNECTED"))
+            version = int(uni.get("version", 0) or 0)
+            last_verified = str(uni.get("last_verified", "") or "")
+            last_error = str(uni.get("last_error", "") or "")
+            last_error_kind = str(uni.get("last_error_kind", "") or "")
+            retry_after_s = float(uni.get("retry_after_s", 0.0) or 0.0)
+            token_reused = bool(uni.get("token_reused", False))
+        raw_details = state.get("details")
+        details: dict[str, Any] = raw_details if isinstance(raw_details, dict) else {}
+        raw_status = state.get("status")
+        if isinstance(raw_status, BrokerStatus):
+            status_raw = raw_status.value
+        else:
+            status_raw = str(raw_status or "UNKNOWN")
+        configured = bool(state.get("configured", False))
+        unified_state = map_broker_status(status_raw, configured)
+        # Partial-leg failures degrade; rate-limit backoff wins over CONNECTED.
+        if unified_state == "CONNECTED" and any(
+            legs.get(leg, {}).get("status") not in ("READY", "CONNECTED", "UNKNOWN", "")
+            and legs.get(leg, {}).get("status") not in (None,)
+            for leg in ("market_ws", "order_ws")
+            if str(legs.get(leg, {}).get("status", "")).startswith("FAILED")
+        ):
+            unified_state = "DEGRADED"
+        if self._retry_armed(broker_id):
+            unified_state = "RATE_LIMITED"
+        if unified_state == "CONNECTED" and not self._adapter_verified(broker_id):
+            unified_state = "VERIFYING"
+        funds = {
+            "available": details.get("funds_available"),
+            "used": details.get("funds_used"),
+            "total": details.get("funds_total"),
+        }
+        leg_list = [
+            {
+                "name": "rest",
+                "status": str(legs.get("rest", {}).get("status", "UNKNOWN")),
+                "last_success": str(legs.get("rest", {}).get("last_success", "") or ""),
+                "last_error": redact(str(legs.get("rest", {}).get("last_error", "") or "")),
+                "consecutive_failures": int(
+                    legs.get("rest", {}).get("consecutive_failures", 0) or 0
+                ),
+            },
+            {
+                "name": "market_ws",
+                "status": str(legs.get("market_ws", {}).get("status", "UNKNOWN")),
+                "last_success": str(legs.get("market_ws", {}).get("last_success", "") or ""),
+                "last_error": redact(str(legs.get("market_ws", {}).get("last_error", "") or "")),
+                "consecutive_failures": int(
+                    legs.get("market_ws", {}).get("consecutive_failures", 0) or 0
+                ),
+            },
+            {
+                "name": "order_ws",
+                "status": str(legs.get("order_ws", {}).get("status", "UNKNOWN")),
+                "last_success": str(legs.get("order_ws", {}).get("last_success", "") or ""),
+                "last_error": redact(str(legs.get("order_ws", {}).get("last_error", "") or "")),
+                "consecutive_failures": int(
+                    legs.get("order_ws", {}).get("consecutive_failures", 0) or 0
+                ),
+            },
+        ]
+        snap = build_unified_snapshot(
+            broker_id=broker_id,
+            desired=desired,
+            state=unified_state,
+            auth_valid=unified_state in ("CONNECTED", "DEGRADED"),
+            account_id=str(details.get("account_id", "") or ""),
+            funds=funds,
+            legs=leg_list,
+            last_verified=last_verified,
+            last_error=redact(last_error),
+            last_error_kind=str(last_error_kind or ""),
+            retry_after_s=retry_after_s,
+            version=version,
+            live_armed=False,
+            strategy_running=False,
+            reason=redact(str(state.get("reason", "") or "")),
+        )
+        snap["configured"] = configured
+        snap["status_raw"] = status_raw
+        snap["token_reused"] = token_reused
+        snap["can_connect"] = bool(
+            state.get("configured")
+            and raw_status
+            in (BrokerStatus.LOGIN_REQUIRED, BrokerStatus.DISCONNECTED, BrokerStatus.ERROR)
+            or (not configured)
+        )
+        snap["can_disconnect"] = self.is_connected(broker_id) or raw_status in (
+            BrokerStatus.CONNECTED,
+            BrokerStatus.LIVE_READY,
+        )
+        snap["next_action"] = next_action_for(unified_state)
+        return snap
+
+    def audit_tail(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Recent secret-free session operations (diagnostics only)."""
+        return self._audit.tail(limit)
 
     def is_connected(self, broker_id: str) -> bool:
         with self._lock:
@@ -428,46 +755,107 @@ class BrokerManager:
             self._set_status(broker_id, BrokerStatus.ERROR, "background operation failed")
 
     def _job_session_check(self, spec: BrokerSpec) -> None:
+        generation = self._generation(spec.broker_id)
+        if self._desired_state(spec.broker_id) != "CONNECTED":
+            return
+        if self._retry_armed(spec.broker_id):
+            return
         config = self._config_values(spec)
         if not config:
             self._set_status(spec.broker_id, BrokerStatus.NOT_CONFIGURED, "no configuration saved")
+            self._bump_version(spec.broker_id)
             return
         stored = self._session_store(spec).load_token()
         if stored is None:
-            if self._try_auto_auth(spec, config):
+            if self._try_auto_auth(spec, config, generation=generation):
                 return
             self._set_status(spec.broker_id, BrokerStatus.LOGIN_REQUIRED, "no active session")
+            self._touch_error(spec.broker_id, "AUTH", "no active session")
+            self._audit.record(
+                broker_id=spec.broker_id,
+                action="authorization required",
+                result="LOGIN_REQUIRED",
+                reason="no saved token",
+            )
+            self._bump_version(spec.broker_id)
             return
         flow = spec.build_flow() if spec.build_flow is not None else None
         if flow is None:
             self._set_status(spec.broker_id, BrokerStatus.ERROR, "auth flow not wired")
+            self._bump_version(spec.broker_id)
             return
         token = stored.get("access_token", "") if isinstance(stored, dict) else ""
         if not token:
             self._set_status(
                 spec.broker_id, BrokerStatus.LOGIN_REQUIRED, "saved session has no token"
             )
+            self._bump_version(spec.broker_id)
             return
+        self._set_status(spec.broker_id, BrokerStatus.CONFIGURING, "checking saved session…")
         ok, reason = flow.validate(config[spec.key_field], token)
         if not ok:
-            r_lower = reason.lower()
-            if any(
-                k in r_lower
-                for k in ("unreachable", "timeout", "timed out", "oserror", "connection refused")
-            ):
-                self._set_status(
-                    spec.broker_id, BrokerStatus.DISCONNECTED, f"venue unreachable: {reason}"
+            kind, safe = self._classify_validate_reason(reason)
+            if kind in ("NETWORK", "TIMEOUT"):
+                text = (
+                    safe
+                    if safe.lower().startswith("venue unreachable")
+                    else (f"venue unreachable: {safe}")
                 )
-            elif self._try_auto_auth(spec, config):
+                self._set_status(spec.broker_id, BrokerStatus.DISCONNECTED, text)
+                self._touch_error(spec.broker_id, kind, text)
+                self._set_leg(spec.broker_id, "rest", "FAILED", text)
+            elif kind == "RATE_LIMITED":
+                delay = backoff_with_jitter(1, base_s=5.0)
+                self._arm_retry(spec.broker_id, delay)
+                self._set_status(
+                    spec.broker_id, BrokerStatus.ERROR, f"rate limited — retry in {delay:.0f}s"
+                )
+                self._touch_error(spec.broker_id, kind, safe)
+            elif self._try_auto_auth(spec, config, generation=generation):
                 return
             else:
                 self._set_status(
-                    spec.broker_id, BrokerStatus.LOGIN_REQUIRED, f"session expired — {reason}"
+                    spec.broker_id, BrokerStatus.LOGIN_REQUIRED, f"session expired — {safe}"
                 )
+                self._touch_error(spec.broker_id, "AUTH_EXPIRED", safe)
+                self._audit.record(
+                    broker_id=spec.broker_id,
+                    action="verification failed",
+                    result="LOGIN_REQUIRED",
+                    reason=safe,
+                )
+            self._bump_version(spec.broker_id)
             return
-        self._activate(spec, config, token, reason)
+        # Valid saved token: reuse, no new login, verify expected account.
+        self._activate(spec, config, token, reason, generation=generation, token_reused=True)
 
-    def _try_auto_auth(self, spec: BrokerSpec, config: dict[str, str]) -> bool:
+    @staticmethod
+    def _classify_validate_reason(reason: str) -> tuple[str, str]:
+        """Classify a validate() reason without treating every 400 as expiry."""
+        from broker.error_taxonomy import classify_http_error
+
+        text = redact(str(reason or ""))
+        lowered = text.lower()
+        if "429" in lowered or "rate limit" in lowered:
+            return "RATE_LIMITED", text
+        if any(
+            k in lowered
+            for k in ("unreachable", "timeout", "timed out", "oserror", "connection refused")
+        ):
+            kind = "TIMEOUT" if "timeout" in lowered or "timed out" in lowered else "NETWORK"
+            return kind, text
+        if "http 400" in lowered:
+            return classify_http_error(400, text)
+        if "http 401" in lowered or "http 403" in lowered:
+            code = 401 if "401" in lowered else 403
+            return classify_http_error(code, text)
+        if any(k in lowered for k in ("expired", "invalid", "unauthorized", "session")):
+            return "AUTH_EXPIRED", text
+        return "UNKNOWN", text
+
+    def _try_auto_auth(
+        self, spec: BrokerSpec, config: dict[str, str], generation: int | None = None
+    ) -> bool:
         """Run the venue's automatic authentication when wired.
 
         Returns True when the hook handled the outcome (the status is
@@ -478,21 +866,43 @@ class BrokerManager:
         """
         if spec.auto_authenticate is None:
             return False
+        if generation is None:
+            generation = self._generation(spec.broker_id)
         self._set_status(
             spec.broker_id, BrokerStatus.AUTHENTICATING, "authenticating automatically…"
         )
+        self._bump_version(spec.broker_id)
         try:
             ok, message = spec.auto_authenticate(config, self._session_store(spec))
         except Exception as exc:
-            self._set_status(
-                spec.broker_id,
-                BrokerStatus.LOGIN_REQUIRED,
-                f"automatic authentication failed: {type(exc).__name__}",
-            )
+            kind, safe = classify_exception(exc)
+            if kind == "RATE_LIMITED":
+                delay = backoff_with_jitter(1, base_s=5.0)
+                self._arm_retry(spec.broker_id, delay)
+                self._set_status(
+                    spec.broker_id, BrokerStatus.ERROR, f"rate limited — retry in {delay:.0f}s"
+                )
+            else:
+                self._set_status(
+                    spec.broker_id,
+                    BrokerStatus.LOGIN_REQUIRED,
+                    f"automatic authentication failed: {redact(safe)}",
+                )
+            self._touch_error(spec.broker_id, kind, safe)
+            self._bump_version(spec.broker_id)
             return True
         self._note(spec.broker_id, message)
         if not ok:
-            self._set_status(spec.broker_id, BrokerStatus.LOGIN_REQUIRED, message)
+            kind, safe = self._classify_validate_reason(message)
+            self._set_status(spec.broker_id, BrokerStatus.LOGIN_REQUIRED, redact(safe))
+            self._touch_error(spec.broker_id, kind, safe)
+            self._audit.record(
+                broker_id=spec.broker_id,
+                action="authorization required",
+                result="LOGIN_REQUIRED",
+                reason=safe,
+            )
+            self._bump_version(spec.broker_id)
             return True
         stored = self._session_store(spec).load_token() or {}
         token = str(stored.get("access_token", "") or "")
@@ -502,8 +912,9 @@ class BrokerManager:
                 BrokerStatus.LOGIN_REQUIRED,
                 "automatic authentication did not store a session",
             )
+            self._bump_version(spec.broker_id)
             return True
-        self._activate(spec, config, token, message)
+        self._activate(spec, config, token, message, generation=generation)
         return True
 
     def _job_login(self, spec: BrokerSpec) -> None:
@@ -550,7 +961,13 @@ class BrokerManager:
         Return values are reduced to safe UI scalars (account id, fund
         floats, open counts) the moment they are read — the full adapter
         payloads never enter manager state, snapshots, logs or signals.
+        Each leg (REST / market WS / order WS) is tracked independently so a
+        partial failure reports DEGRADED instead of CONNECTED.
         """
+        if self._desired_state(spec.broker_id) != "CONNECTED":
+            return
+        if self._retry_armed(spec.broker_id):
+            return
         state = self._states.get(spec.broker_id, {})
         adapter = state.get("adapter")
         if adapter is None:
@@ -558,28 +975,57 @@ class BrokerManager:
         details = self._empty_details()
         is_auth_error = False
         auth_error_msg = ""
+        is_rate_limited = False
+        rate_msg = ""
+        rest_ok = True
+
+        def _note_failure(text: str, *, session_level: bool = False) -> tuple[bool, bool]:
+            """Record a failed read.
+
+            ``session_level`` marks the checks that PROVE the session
+            (``health``'s profile call, ``account``'s profile call). Only
+            those may invalidate the session. A sub-read that fails while
+            the session has just proved itself — positions, order book,
+            funds — marks its check and leg degraded but must NOT report
+            LOGIN_REQUIRED: the token is demonstrably valid (the venue just
+            served the profile), so downgrading the whole session on a
+            single flaky read is exactly the "reads work, state says
+            expired" bug this guard removes.
+            """
+            nonlocal is_auth_error, auth_error_msg, is_rate_limited, rate_msg
+            kind, safe = classify_exception(Exception(text))
+            if kind in ("AUTH_EXPIRED", "AUTH_INVALID") and session_level:
+                is_auth_error = True
+                auth_error_msg = safe
+            if kind == "RATE_LIMITED":
+                is_rate_limited = True
+                rate_msg = safe
+            return is_auth_error, is_rate_limited
+
         try:
             healthy, reason = adapter.health()
             checks: dict[str, str] = {"connection": "READY" if healthy else f"FAILED: {reason}"}
-            if not healthy and any(
-                k in reason.lower() for k in ("unauthorized", "expired", "token", "401")
-            ):
-                is_auth_error = True
-                auth_error_msg = reason
+            if not healthy:
+                rest_ok = False
+                _note_failure(str(reason), session_level=True)
         except Exception as exc:
+            kind, safe = classify_exception(exc)
             checks = {"connection": f"FAILED: {type(exc).__name__}"}
-            if any(k in str(exc).lower() for k in ("unauthorized", "expired", "token", "401")):
-                is_auth_error = True
-                auth_error_msg = str(exc)
+            rest_ok = False
+            _note_failure(str(exc), session_level=True)
+        if rest_ok:
+            self._set_leg(spec.broker_id, "rest", "READY", success=True)
+        else:
+            self._set_leg(spec.broker_id, "rest", "FAILED", checks.get("connection", "failed"))
         try:
             account = adapter.account()
             checks["account"] = "READY"
             details["account_id"] = self._account_id_of(account)
         except Exception as exc:
             checks["account"] = f"FAILED: {type(exc).__name__}"
-            if any(k in str(exc).lower() for k in ("unauthorized", "expired", "token", "401")):
-                is_auth_error = True
-                auth_error_msg = str(exc)
+            # Identity comes from the same profile call as health(), so a
+            # failure here is a session-level proof failure.
+            _note_failure(str(exc), session_level=not rest_ok)
         try:
             funds = adapter.funds()
             checks["funds"] = "READY"
@@ -590,9 +1036,7 @@ class BrokerManager:
                 details["funds_total"] = self._safe_float(total)
         except Exception as exc:
             checks["funds"] = f"FAILED: {type(exc).__name__}"
-            if any(k in str(exc).lower() for k in ("unauthorized", "expired", "token", "401")):
-                is_auth_error = True
-                auth_error_msg = str(exc)
+            _note_failure(str(exc))
         for key, fn in (
             ("positions", "positions"),
             ("orders", "open_orders"),
@@ -605,17 +1049,41 @@ class BrokerManager:
                 )
             except Exception as exc:
                 checks[key] = f"FAILED: {type(exc).__name__}"
+                _note_failure(str(exc))
+        # Order-update WS leg (independent of REST).
+        order_ws_status = "UNKNOWN"
+        try:
+            get_order_health: Any = getattr(adapter, "order_stream_health", None)
+            if callable(get_order_health):
+                ws_pair: Any = get_order_health()
+                ws_ok = bool(ws_pair[0])
+                ws_reason = str(ws_pair[1] if len(ws_pair) > 1 else "")
+                order_ws_status = "READY" if ws_ok else f"FAILED: {ws_reason}"
+                checks["order_stream"] = order_ws_status
+                if ws_ok:
+                    self._set_leg(spec.broker_id, "order_ws", "READY", success=True)
+                else:
+                    self._set_leg(spec.broker_id, "order_ws", "FAILED", str(ws_reason))
+        except Exception as exc:
+            checks["order_stream"] = f"FAILED: {type(exc).__name__}"
+            self._set_leg(spec.broker_id, "order_ws", "FAILED", str(exc))
         md = state.get("market_data")
         if md is not None:
             try:
                 md_ok, md_reason = md.health()
+                # Reconnect ONLY the failed market leg (bounded, one attempt).
                 if not md_ok and hasattr(md, "connect"):
                     with contextlib.suppress(Exception):
                         md.connect()
                     md_ok, md_reason = md.health()
                 checks["market_data"] = "READY" if md_ok else f"FAILED: {md_reason}"
+                if md_ok:
+                    self._set_leg(spec.broker_id, "market_ws", "READY", success=True)
+                else:
+                    self._set_leg(spec.broker_id, "market_ws", "FAILED", str(md_reason))
             except Exception as exc:
                 checks["market_data"] = f"FAILED: {type(exc).__name__}"
+                self._set_leg(spec.broker_id, "market_ws", "FAILED", str(exc))
 
         with self._lock:
             live = self._states.get(spec.broker_id)
@@ -624,59 +1092,329 @@ class BrokerManager:
             live["checks"] = checks
             live["details"] = details
             live["last_sync"] = self._now_stamp()
-            if is_auth_error:
+            if is_rate_limited:
+                failures = 0
+                with contextlib.suppress(Exception):
+                    failures = int(
+                        self._unified.get(spec.broker_id, {})
+                        .get("legs", {})
+                        .get("rest", {})
+                        .get("consecutive_failures", 0)
+                        or 0
+                    )
+                delay = backoff_with_jitter(min(failures, 5), base_s=5.0)
+                self._arm_retry(spec.broker_id, delay)
+                live["status"] = BrokerStatus.ERROR
+                live["reason"] = redact(f"rate limited — retry in {delay:.0f}s")
+                self._touch_error(spec.broker_id, "RATE_LIMITED", rate_msg or "HTTP 429")
+            elif is_auth_error:
                 live["status"] = BrokerStatus.LOGIN_REQUIRED
-                live["reason"] = f"session expired — {auth_error_msg or 'login required'}"
+                live["reason"] = f"session expired — {redact(auth_error_msg) or 'login required'}"
+                self._touch_error(spec.broker_id, "AUTH_EXPIRED", auth_error_msg)
+                self._audit.record(
+                    broker_id=spec.broker_id,
+                    action="verification failed",
+                    result="LOGIN_REQUIRED",
+                    reason=auth_error_msg,
+                )
                 if adapter is not None:
                     with contextlib.suppress(Exception):
                         adapter._connected = False
             elif checks.get("connection") != "READY":
                 live["status"] = BrokerStatus.DISCONNECTED
-                live["reason"] = checks.get("connection", "connection check failed")
+                live["reason"] = redact(checks.get("connection", "connection check failed"))
+                self._touch_error(spec.broker_id, "NETWORK", live["reason"])
                 if adapter is not None:
                     with contextlib.suppress(Exception):
                         adapter._connected = False
             elif checks.get("account") != "READY":
                 live["status"] = BrokerStatus.ACCOUNT_NOT_READY
-                live["reason"] = checks.get("account", "account check failed")
+                live["reason"] = redact(checks.get("account", "account check failed"))
+                self._touch_error(spec.broker_id, "VERIFY", live["reason"])
             else:
-                live["status"] = BrokerStatus.CONNECTED
-                if checks.get("market_data") not in ("READY", None):
-                    live["reason"] = f"account verified; market data: {checks.get('market_data')}"
+                market_bad = str(checks.get("market_data", "READY")).startswith("FAILED")
+                order_bad = str(checks.get("order_stream", "READY")).startswith("FAILED")
+                if market_bad or order_bad:
+                    live["status"] = BrokerStatus.MARKET_DATA_NOT_READY
+                    failed = [
+                        k
+                        for k in ("market_data", "order_stream")
+                        if str(checks.get(k, "")).startswith("FAILED")
+                    ]
+                    live["reason"] = (
+                        f"account verified; degraded leg(s): {', '.join(failed)} — "
+                        + redact(str(checks.get(failed[0], "")))
+                    )
+                    self._touch_verified(spec.broker_id)
                 else:
+                    live["status"] = BrokerStatus.CONNECTED
                     live["reason"] = "all checks passed"
+                    self._clear_retry(spec.broker_id)
+                    self._touch_verified(spec.broker_id)
+            self._bump_version(spec.broker_id)
         self.state_changed.emit(spec.broker_id)
 
     # ── internals ────────────────────────────────────────────────
 
-    def _activate(self, spec: BrokerSpec, config: dict[str, str], token: str, why: str) -> None:
+    def _intent_path(self) -> Path:
+        return Path(self._data_dir) / "broker" / "session_intent.json"
+
+    def _load_intents(self) -> None:
+        try:
+            import json
+
+            path = self._intent_path()
+            if not path.is_file():
+                return
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                return
+            with self._lock:
+                for broker_id, row in data.items():
+                    if broker_id not in self._specs or not isinstance(row, dict):
+                        continue
+                    desired = str(row.get("desired", "") or "").upper()
+                    if desired in ("CONNECTED", "DISCONNECTED"):
+                        self._desired[broker_id] = desired
+                    with contextlib.suppress(TypeError, ValueError):
+                        self._generations[broker_id] = max(
+                            int(self._generations.get(broker_id, 0)),
+                            int(row.get("generation", 0) or 0),
+                        )
+        except Exception:
+            pass
+
+    def _save_intents(self) -> None:
+        try:
+            import json
+
+            path = self._intent_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with self._lock:
+                data = {
+                    bid: {
+                        "desired": self._desired.get(bid, "DISCONNECTED"),
+                        "generation": int(self._generations.get(bid, 0)),
+                    }
+                    for bid in self._specs
+                }
+            path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
+    def _bump_version(self, broker_id: str) -> int:
+        with self._lock:
+            uni = self._unified.setdefault(broker_id, {})
+            uni["version"] = int(uni.get("version", 0) or 0) + 1
+            return int(uni["version"])
+
+    def _generation(self, broker_id: str) -> int:
+        with self._lock:
+            return int(self._generations.get(broker_id, 0))
+
+    def _desired_state(self, broker_id: str) -> str:
+        with self._lock:
+            return str(self._desired.get(broker_id, "DISCONNECTED"))
+
+    def _set_leg(
+        self, broker_id: str, leg: str, status: str, error: str = "", *, success: bool = False
+    ) -> None:
+        with self._lock:
+            uni = self._unified.setdefault(broker_id, {})
+            legs = uni.setdefault("legs", {})
+            row = legs.setdefault(
+                leg,
+                {
+                    "status": "UNKNOWN",
+                    "last_success": "",
+                    "last_error": "",
+                    "consecutive_failures": 0,
+                },
+            )
+            row["status"] = str(status or "UNKNOWN")
+            if success:
+                row["last_success"] = self._now_stamp()
+                row["consecutive_failures"] = 0
+                if not error:
+                    row["last_error"] = ""
+            elif error:
+                row["last_error"] = redact(str(error))[:300]
+                try:
+                    row["consecutive_failures"] = int(row.get("consecutive_failures", 0) or 0) + 1
+                except (TypeError, ValueError):
+                    row["consecutive_failures"] = 1
+
+    def _touch_verified(self, broker_id: str) -> None:
+        with self._lock:
+            uni = self._unified.setdefault(broker_id, {})
+            uni["last_verified"] = self._now_stamp()
+            uni["last_error"] = ""
+            uni["last_error_kind"] = ""
+            uni["token_reused"] = bool(uni.get("token_reused", False))
+
+    def _touch_error(self, broker_id: str, kind: str, reason: str) -> None:
+        with self._lock:
+            uni = self._unified.setdefault(broker_id, {})
+            uni["last_error"] = redact(str(reason or ""))[:500]
+            uni["last_error_kind"] = str(kind or "UNKNOWN")
+
+    def _retry_armed(self, broker_id: str) -> bool:
+        import time as _time
+
+        with self._lock:
+            uni = self._unified.get(broker_id, {})
+            return float(uni.get("retry_until", 0.0) or 0.0) > _time.monotonic()
+
+    def _arm_retry(self, broker_id: str, delay_s: float) -> None:
+        import time as _time
+
+        with self._lock:
+            uni = self._unified.setdefault(broker_id, {})
+            uni["retry_after_s"] = max(0.0, float(delay_s))
+            uni["retry_until"] = _time.monotonic() + max(0.0, float(delay_s))
+
+    def _clear_retry(self, broker_id: str) -> None:
+        with self._lock:
+            uni = self._unified.setdefault(broker_id, {})
+            uni["retry_after_s"] = 0.0
+            uni["retry_until"] = 0.0
+
+    def read_only_adapter(self, broker_id: str) -> Any | None:
+        """A fresh adapter for READ-ONLY venue reads, or None if unavailable.
+
+        The manager's own adapter carries the order WebSocket, and two
+        adapters on one stream means two reconnect drivers — the exact
+        thrash the order socket's flap breaker exists to prevent. Data reads
+        (quotes, historical candles) never need the order socket, so this
+        builds one with it disabled and leaves the live one alone.
+        """
+        spec = self._specs.get(broker_id)
+        if spec is None or spec.build_adapter is None:
+            return None
+        config: dict[str, str] = self._config_values(spec) or {}
+        stored = self._session_store(spec).load_token() or {}
+        token = str(stored.get("access_token", "") or "")
+        key = str(config.get(spec.key_field, "") or "")
+        if not token or not key:
+            return None
+        # The build hook is a provider-owned callable whose signature differs
+        # per venue, so it is invoked through a widened type rather than a
+        # guessed parameter list: the flag is offered, and a hook that does
+        # not take it still gets a working read-only adapter.
+        build: Any = spec.build_adapter
+        try:
+            return build(key, token, enable_order_ws=False)
+        except TypeError:
+            return build(key, token)
+
+    def _adapter_verified(self, broker_id: str) -> bool:
+        with self._lock:
+            state = self._states.get(broker_id, {})
+            adapter = state.get("adapter")
+        if adapter is None:
+            return False
+        is_conn = getattr(adapter, "connected", None)
+        if is_conn is None:
+            is_conn = getattr(adapter, "_connected", False)
+        return bool(is_conn)
+
+    def _activate(
+        self,
+        spec: BrokerSpec,
+        config: dict[str, str],
+        token: str,
+        why: str,
+        generation: int | None = None,
+        token_reused: bool = False,
+    ) -> None:
         """Build the authenticated adapter, register the venue, health-check."""
+        if generation is None:
+            generation = self._generation(spec.broker_id)
+        # Latest-intent-wins: a DISCONNECT issued while auth ran must win.
+        if (
+            generation != self._generation(spec.broker_id)
+            or self._desired_state(spec.broker_id) != "CONNECTED"
+        ):
+            self._audit.record(
+                broker_id=spec.broker_id,
+                action="ACTIVATE refused",
+                result="stale-generation",
+                reason=f"gen {generation} vs current {self._generation(spec.broker_id)}",
+            )
+            return
         assert spec.build_adapter is not None
+        self._set_status(spec.broker_id, BrokerStatus.CONFIGURING, "verifying account…")
         try:
             adapter = spec.build_adapter(config[spec.key_field], token)
             adapter.connect()
         except Exception as exc:
-            text = str(exc)
-            text_lower = text.lower()
-            if any(
-                k in text_lower
-                for k in ("unreachable", "timeout", "timed out", "oserror", "connection refused")
-            ):
+            kind, safe = classify_exception(exc)
+            safe = redact(safe)
+            if kind == "RATE_LIMITED":
+                delay = backoff_with_jitter(1, base_s=5.0)
+                self._arm_retry(spec.broker_id, delay)
                 self._set_status(
-                    spec.broker_id, BrokerStatus.DISCONNECTED, f"venue unreachable: {text}"
+                    spec.broker_id, BrokerStatus.ERROR, f"rate limited — retry in {delay:.0f}s"
                 )
-            elif (
-                "credentials" in str(getattr(exc, "code", "")).lower()
-                or "auth" in text_lower
-                or "401" in text_lower
-            ):
+            elif kind in ("AUTH_EXPIRED", "AUTH_INVALID"):
                 self._set_status(
-                    spec.broker_id,
-                    BrokerStatus.LOGIN_REQUIRED,
-                    f"venue rejected the session: {text}",
+                    spec.broker_id, BrokerStatus.LOGIN_REQUIRED, f"login required — {safe}"
                 )
+                self._audit.record(
+                    broker_id=spec.broker_id,
+                    action="authorization required",
+                    result="LOGIN_REQUIRED",
+                    reason=safe,
+                )
+            elif kind in ("NETWORK", "TIMEOUT"):
+                self._set_status(spec.broker_id, BrokerStatus.DISCONNECTED, safe)
+            elif kind == "BAD_REQUEST":
+                self._set_status(spec.broker_id, BrokerStatus.ERROR, safe)
             else:
-                self._set_status(spec.broker_id, BrokerStatus.ERROR, f"connection failed: {text}")
+                text_lower = safe.lower()
+                if any(
+                    k in text_lower
+                    for k in (
+                        "unreachable",
+                        "timeout",
+                        "timed out",
+                        "oserror",
+                        "connection refused",
+                    )
+                ):
+                    self._set_status(spec.broker_id, BrokerStatus.DISCONNECTED, safe)
+                elif (
+                    "credentials" in str(getattr(exc, "code", "")).lower()
+                    or "auth" in text_lower
+                    or "401" in text_lower
+                ):
+                    self._set_status(
+                        spec.broker_id,
+                        BrokerStatus.LOGIN_REQUIRED,
+                        f"venue rejected the session: {safe}",
+                    )
+                else:
+                    self._set_status(
+                        spec.broker_id, BrokerStatus.ERROR, f"connection failed: {safe}"
+                    )
+            self._touch_error(spec.broker_id, kind, safe)
+            self._set_leg(spec.broker_id, "rest", "FAILED", safe)
+            self._bump_version(spec.broker_id)
+            return
+        # Re-check intent after network I/O: DISCONNECT during auth wins.
+        if (
+            generation != self._generation(spec.broker_id)
+            or self._desired_state(spec.broker_id) != "CONNECTED"
+        ):
+            with contextlib.suppress(Exception):
+                if hasattr(adapter, "disconnect"):
+                    adapter.disconnect()
+            self._audit.record(
+                broker_id=spec.broker_id,
+                action="ACTIVATE discarded",
+                result="stale-generation",
+                reason="disconnect won during auth",
+            )
             return
         md = None
         with contextlib.suppress(Exception):
@@ -694,13 +1432,36 @@ class BrokerManager:
             state["market_data"] = md
             state["checks"] = {"connection": "READY", "account": "READY"}
         details = self._empty_details()
+        account_id = ""
         with contextlib.suppress(Exception):
-            details["account_id"] = self._account_id_of(adapter.account())
+            account_id = self._account_id_of(adapter.account())
+            details["account_id"] = account_id
+        if not account_id:
+            self._set_status(
+                spec.broker_id,
+                BrokerStatus.ACCOUNT_NOT_READY,
+                "connected but account identity not verified",
+            )
+            self._touch_error(spec.broker_id, "VERIFY", "account identity missing")
+            self._bump_version(spec.broker_id)
+            return
         with self._lock:
             state["details"] = details
             state["last_sync"] = self._now_stamp()
             state["status"] = BrokerStatus.CONNECTED
             state["reason"] = f"{why}; {reg_reason}" if not registered else why
+            uni = self._unified.setdefault(spec.broker_id, {})
+            uni["token_reused"] = bool(token_reused)
+        self._clear_retry(spec.broker_id)
+        self._set_leg(spec.broker_id, "rest", "READY", success=True)
+        self._touch_verified(spec.broker_id)
+        self._bump_version(spec.broker_id)
+        self._audit.record(
+            broker_id=spec.broker_id,
+            action="token reused" if token_reused else "token verified",
+            result="CONNECTED",
+            reason=f"account {account_id}",
+        )
         self._note(spec.broker_id, "connected")
         self._auto_select_if_unset(spec.broker_id)
         self.state_changed.emit(spec.broker_id)
@@ -835,4 +1596,25 @@ class BrokerManager:
         return spec.callback_url if spec else ""
 
 
-__all__ = ["CALLBACK_PORT", "BrokerManager"]
+_SHARED_MANAGERS: dict[str, BrokerManager] = {}
+_SHARED_LOCK = threading.Lock()
+
+
+def shared_manager(data_dir: str | Path) -> BrokerManager:
+    """One authoritative BrokerManager per data_dir (fixes dual-manager drift).
+
+    Headless IPC and the EC2 remote gateway share this instance so there is a
+    single worker, a single venue registration and a single snapshot source.
+    """
+    key = str(Path(data_dir).resolve() if Path(data_dir).is_absolute() else Path(data_dir))
+    with _SHARED_LOCK:
+        manager = _SHARED_MANAGERS.get(key)
+        if manager is None:
+            manager = BrokerManager(data_dir=data_dir)
+            for broker_id in manager.broker_ids():
+                manager.submit_check(broker_id)
+            _SHARED_MANAGERS[key] = manager
+        return manager
+
+
+__all__ = ["CALLBACK_PORT", "BrokerManager", "shared_manager"]

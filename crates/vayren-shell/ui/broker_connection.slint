@@ -65,7 +65,11 @@ export component BrokerConnectionWorkspace inherits Rectangle {
     in property <string> error-message: "";
     in property <bool> disconnect-visible: false;
     in property <bool> disconnect-enabled: false;
-    in property <string> help-caption: "View setup guide.";
+    // Which backend owns the verdict on this panel: the EC2 gateway session
+    // (remote) or this PC's local session (host). Set once per launch mode —
+    // two live sessions exist, and the panel must never let one pose as the
+    // other.
+    in property <string> session-origin: "";
 
     // ── authoritative global default broker (persisted, gateway-owned) ──
     // `conn-default-id` is the value SYSTEM and LIVE both consume. The open
@@ -97,21 +101,15 @@ export component BrokerConnectionWorkspace inherits Rectangle {
     // hosts that leave saved fields blank.
     in property <string> saved-sentinel: "";
 
-    // Ephemeral interaction state: arm-before-destroy on the destructive
-    // action, and a transient receipt after the clipboard write.
-    in-out property <bool> remove-armed: false;
-    in-out property <bool> copied: false;
+    // Ephemeral interaction state (the arm/copy pair went with the footer).
     in-out property <bool> pulse: false;
 
     callback broker-selected(string);
     callback connect-requested(string, string, string, string, string, string);
     callback retry-requested();
     callback disconnect-requested();
-    callback remove-requested();
     callback config-saved(string, string);
-    callback copy-callback();
     callback refresh-requested();
-    callback help-requested();
     callback add-broker-requested();
     callback paste-requested(int);
     callback set-default-requested(string);
@@ -196,18 +194,13 @@ export component BrokerConnectionWorkspace inherits Rectangle {
     // The ONE submission path: click and Ctrl+Enter share it, so the keyboard
     // can never trigger a different action than the button.
     function submit() {
-        root.remove-armed = false;
         if root.is-failed {
             root.retry-requested();
         } else {
             root.connect-requested(root.field-v0, root.field-v1, root.field-v2, root.field-v3, root.field-v4, root.field-v5);
         }
     }
-    copy-timer := Timer {
-        interval: 1500ms;
-        running: root.copied;
-        triggered() => { root.copied = false; }
-    }
+    // copy-timer removed with the COPY DETAILS footer.
     // Runs only while the backend reports an authentication round-trip, so an
     // idle screen never spins a timer.
     pulse-timer := Timer {
@@ -258,7 +251,6 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                     mouse-cursor: pointer;
                     clicked => {
                         root.clear-fields();
-                        root.remove-armed = false;
                         root.broker-selected(row.id);
                     }
                 }
@@ -811,7 +803,6 @@ field-input := TextInput {
                                                     return accept;
                                                 }
                                                 if (event.text == "\u{1B}") {
-                                                    root.remove-armed = false;
                                                     return reject;
                                                 }
                                                 if (self.text == root.saved-sentinel && event.text != "") {
@@ -1010,7 +1001,6 @@ field-input := TextInput {
                                         enabled: root.disconnect-enabled;
                                         mouse-cursor: pointer;
                                         clicked => {
-                                            root.remove-armed = false;
                                             root.disconnect-requested();
                                         }
                                     }
@@ -1137,6 +1127,12 @@ field-input := TextInput {
                                             font-weight: 700;
                                             vertical-alignment: center;
                                         }
+                                        if root.session-origin != "": Text {
+                                            text: root.session-origin;
+                                            color: VayrenPalette.faint;
+                                            font-size: VayrenDesign.fs-label;
+                                            vertical-alignment: center;
+                                        }
                                     }
                                     Text {
                                         text: root.is-connected ? (root.status-message != "" ? root.status-message : "Session active & verified. Ready to trade.")
@@ -1157,184 +1153,7 @@ field-input := TextInput {
                             // (progress → state) and ends on one aligned edge.
                             Rectangle { vertical-stretch: 1; background: transparent; }
 
-                            // Destructive + copy actions. REMOVE arms a confirm step first — it deletes
-                            // persisted credentials, so one stray click must never be
-                            // enough. COPY writes the broker identity and confirms it.
-                            if root.remove-armed: Rectangle {
-                                border-radius: VayrenDesign.radius;
-                                background: VayrenPalette.neg-dim;
-                                border-width: 1px;
-                                border-color: VayrenPalette.neg;
-                                VerticalLayout {
-                                    padding: VayrenDesign.sp-md;
-                                    spacing: 2px;
-                                    Text {
-                                        text: "Remove " + (root.broker-display-name != "" ? root.broker-display-name : "this broker") + "?";
-                                        color: VayrenPalette.text;
-                                        font-size: VayrenDesign.fs-small;
-                                        font-weight: 700;
-                                        vertical-alignment: center;
-                                    }
-                                    Text {
-                                        text: "Saved credentials for this venue are deleted from the OS vault. Orders, positions and history are untouched.";
-                                        color: VayrenPalette.muted;
-                                        font-size: VayrenDesign.fs-label;
-                                        wrap: word-wrap;
-                                    }
-                                }
-                            }
-
-                            HorizontalLayout {
-                                spacing: VayrenDesign.sp-sm;
-                                if !root.remove-armed: Rectangle {
-                                    height: 32px;
-                                    horizontal-stretch: 1;
-                                    border-radius: VayrenDesign.radius;
-                                    background: copy-ta.pressed ? VayrenPalette.selected : copy-ta.has-hover ? VayrenPalette.hover : VayrenPalette.bg1;
-                                    border-width: 1px;
-                                    border-color: copy-ta.has-hover ? VayrenPalette.accent : VayrenPalette.hairline;
-                                    animate background { duration: 120ms; easing: ease-out; }
-                                    HorizontalLayout {
-                                        alignment: center;
-                                        spacing: VayrenDesign.sp-sm;
-                                        Text {
-                                            text: root.copied ? "✓ COPIED" : "COPY DETAILS";
-                                            color: root.copied ? VayrenPalette.pos : copy-ta.has-hover ? VayrenPalette.accent : VayrenPalette.muted;
-                                            font-size: VayrenDesign.fs-label;
-                                            font-weight: 700;
-                                            vertical-alignment: center;
-                                            animate color { duration: 150ms; easing: ease-out; }
-                                        }
-                                    }
-                                    copy-ta := TouchArea {
-                                        mouse-cursor: pointer;
-                                        clicked => {
-                                            root.copy-callback();
-                                            root.copied = true;
-                                        }
-                                    }
-                                }
-                                if !root.remove-armed: Rectangle {
-                                    height: 32px;
-                                    horizontal-stretch: 1;
-                                    border-radius: VayrenDesign.radius;
-                                    background: rm-ta.pressed ? VayrenPalette.neg : rm-ta.has-hover ? VayrenPalette.neg-dim : VayrenPalette.bg1;
-                                    border-width: 1px;
-                                    border-color: rm-ta.has-hover ? VayrenPalette.neg : VayrenPalette.hairline;
-                                    animate background { duration: 120ms; easing: ease-out; }
-                                    HorizontalLayout {
-                                        alignment: center;
-                                        spacing: VayrenDesign.sp-sm;
-                                        Text {
-                                            text: "REMOVE BROKER";
-                                            color: rm-ta.has-hover ? VayrenPalette.neg : VayrenPalette.muted;
-                                            font-size: VayrenDesign.fs-label;
-                                            font-weight: 700;
-                                            vertical-alignment: center;
-                                        }
-                                    }
-                                    rm-ta := TouchArea {
-                                        enabled: root.broker-id != "";
-                                        mouse-cursor: pointer;
-                                        clicked => { root.remove-armed = true; }
-                                    }
-                                }
-                                if root.remove-armed: Rectangle {
-                                    height: 32px;
-                                    horizontal-stretch: 1;
-                                    border-radius: VayrenDesign.radius;
-                                    background: yes-ta.pressed ? VayrenPalette.neg : yes-ta.has-hover ? VayrenPalette.neg-dim : VayrenPalette.bg1;
-                                    border-width: 1px;
-                                    border-color: VayrenPalette.neg;
-                                    HorizontalLayout {
-                                        alignment: center;
-                                        Text {
-                                            text: "YES, REMOVE";
-                                            color: VayrenPalette.neg;
-                                            font-size: VayrenDesign.fs-label;
-                                            font-weight: 700;
-                                            vertical-alignment: center;
-                                        }
-                                    }
-                                    yes-ta := TouchArea {
-                                        mouse-cursor: pointer;
-                                        clicked => {
-                                            root.remove-armed = false;
-                                            root.remove-requested();
-                                        }
-                                    }
-                                }
-                                if root.remove-armed: Rectangle {
-                                    height: 32px;
-                                    horizontal-stretch: 1;
-                                    border-radius: VayrenDesign.radius;
-                                    background: no-ta.pressed ? VayrenPalette.pressed : no-ta.has-hover ? VayrenPalette.hover : VayrenPalette.bg1;
-                                    border-width: 1px;
-                                    border-color: no-ta.has-hover ? VayrenPalette.accent : VayrenPalette.hairline;
-                                    HorizontalLayout {
-                                        alignment: center;
-                                        Text {
-                                            text: "KEEP";
-                                            color: no-ta.has-hover ? VayrenPalette.accent : VayrenPalette.muted;
-                                            font-size: VayrenDesign.fs-label;
-                                            font-weight: 700;
-                                            vertical-alignment: center;
-                                        }
-                                    }
-                                    no-ta := TouchArea {
-                                        mouse-cursor: pointer;
-                                        clicked => { root.remove-armed = false; }
-                                    }
-                                }
-                            }
-
-                            Rectangle {
-                                background: help-ta.pressed ? VayrenPalette.pressed : help-ta.has-hover ? VayrenPalette.row-hover : VayrenPalette.bg1;
-                                border-width: 1px;
-                                border-color: help-ta.has-hover ? VayrenPalette.accent-dim : VayrenPalette.hairline;
-                                border-radius: VayrenDesign.radius;
-                                animate background { duration: 120ms; easing: ease-out; }
-                                animate border-color { duration: 120ms; easing: ease-out; }
-                                VerticalLayout {
-                                    padding: VayrenDesign.sp-md;
-                                    spacing: 2px;
-                                    HorizontalLayout {
-                                        spacing: VayrenDesign.sp-sm;
-                                        Text {
-                                            text: "ⓘ";
-                                            color: help-ta.has-hover ? VayrenPalette.accent : VayrenPalette.muted;
-                                            font-size: VayrenDesign.fs-small;
-                                            vertical-alignment: center;
-                                            animate color { duration: 120ms; easing: ease-out; }
-                                        }
-                                        Text {
-                                            text: "Need help?";
-                                            color: VayrenPalette.text;
-                                            font-size: VayrenDesign.fs-small;
-                                            font-weight: 700;
-                                            vertical-alignment: center;
-                                        }
-                                        Rectangle { horizontal-stretch: 1; background: transparent; }
-                                        Text {
-                                            text: "↗";
-                                            color: help-ta.has-hover ? VayrenPalette.accent : VayrenPalette.faint;
-                                            font-size: VayrenDesign.fs-small;
-                                            vertical-alignment: center;
-                                            animate color { duration: 120ms; easing: ease-out; }
-                                        }
-                                    }
-                                    Text {
-                                        text: root.help-caption;
-                                        color: VayrenPalette.muted;
-                                        font-size: VayrenDesign.fs-label;
-                                        wrap: word-wrap;
-                                    }
-                                }
-                                help-ta := TouchArea {
-                                    mouse-cursor: pointer;
-                                    clicked => { root.help-requested(); }
-                                }
-                            }
+                            // COPY DETAILS + REMOVE BROKER footer removed by request.
                         }
                     }
                 }

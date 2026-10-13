@@ -50,10 +50,24 @@ def _is_forbidden_key(key: str) -> bool:
     return any(mark in lowered for mark in FORBIDDEN_KEY_SUBSTRINGS)
 
 
+def _is_render_flag(key: str, item: Any) -> bool:
+    """Exact ``secret: bool`` entries are form render metadata, never values.
+
+    Credential schemas mark password fields with a boolean flag. A boolean
+    cannot carry a secret, so the flag survives scrubbing while any
+    string-valued ``secret*`` key is still dropped unconditionally.
+    """
+    return str(key).lower() == "secret" and isinstance(item, bool)
+
+
 def scrub(value: Any) -> Any:
     """Deep-copy plain data while dropping credential-like keys."""
     if isinstance(value, dict):
-        return {str(key): scrub(item) for key, item in value.items() if not _is_forbidden_key(key)}
+        return {
+            str(key): scrub(item)
+            for key, item in value.items()
+            if not _is_forbidden_key(key) or _is_render_flag(key, item)
+        }
     if isinstance(value, (list, tuple)):
         return [scrub(item) for item in value]
     if isinstance(value, (str, int, float, bool)) or value is None:
@@ -161,6 +175,9 @@ def build_snapshot(live: dict[str, Any]) -> dict[str, Any]:
     kill = live.get("kill") or {}
 
     broker_connected = bool(broker.get("connected", False))
+    broker_session = (
+        live.get("broker_session") if isinstance(live.get("broker_session"), dict) else {}
+    )
     feed = str(live.get("feed", "none") or "none")
     if broker_connected and feed == "live":
         order_stream = {"status": "CONNECTED", "detail": "broker order stream"}
@@ -287,6 +304,7 @@ def build_snapshot(live: dict[str, Any]) -> dict[str, Any]:
         "risk_engine": scrub(risk_engine),
         "brokers": scrub(live.get("brokers", [])),
         "as_of": str(live.get("as_of", "") or ""),
+        "broker_session": scrub(broker_session),
     }
     return scrub(snapshot)
 

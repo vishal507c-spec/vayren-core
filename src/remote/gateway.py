@@ -85,42 +85,117 @@ class HeadlessGateway(BackendGateway):
         self._manager_started = False
 
     def _ensure_manager(self) -> Any | None:
-        """The SYSTEM broker manager (same bootstrap as headless)."""
+        """The SYSTEM broker manager — shared singleton, not a second instance.
+
+        Headless IPC and the EC2 gateway use the same authoritative manager
+        (same worker, same venue registration, same snapshot source), so local
+        and remote views can never drift.
+        """
         if self._manager_started:
             return self._broker_manager
         self._manager_started = True
         try:
             import broker.providers  # noqa: F401
-            from app.services.broker_manager import BrokerManager
+            from app.services.broker_manager import shared_manager
 
-            manager = BrokerManager(data_dir=self._data_dir)
-            for broker_id in manager.broker_ids():
-                manager.submit_check(broker_id)
-            self._broker_manager = manager
+            self._broker_manager = shared_manager(self._data_dir)
         except Exception:
             self._broker_manager = None
         return self._broker_manager
 
     def get_snapshot(self) -> dict[str, Any]:
-        """Fresh live-service snapshot (same source as the native UI)."""
+        """Fresh live-service snapshot (same source as the native UI).
+
+        The authoritative unified broker session rides on EVERY snapshot —
+        not only after broker commands — so the remote SYSTEM panel and
+        LIVE always read the same EC2-owned session state and can never
+        render opposite verdicts from different sections.
+        """
         from app.headless import _trading_service_snapshot
 
-        return _trading_service_snapshot(self._data_dir, self._strategy_dir, self._ensure_manager())
+        live = _trading_service_snapshot(self._data_dir, self._strategy_dir, self._ensure_manager())
+        with contextlib.suppress(Exception):
+            manager = self._ensure_manager()
+            if manager is not None and isinstance(live, dict):
+                active = str((manager.snapshot() or {}).get("active_broker", "") or "")
+                if active:
+                    live["broker_session"] = manager.get_session_snapshot(active)
+        return live
 
     def apply_command(self, action: dict[str, Any]) -> dict[str, Any]:
         """One control action through the existing gated action path."""
         from app.headless import _live_action
 
+        act = dict(action)
+        name = str(act.get("action", "") or "").strip().lower()
+        # Broker session commands go straight to the authoritative manager
+        # (same path the local SYSTEM screen uses) — never a parallel flow.
+        if name in ("connect_broker", "disconnect_broker", "revoke_session", "broker_status"):
+            return self._apply_broker_command(act)
         return _live_action(
             self._data_dir,
             self._strategy_dir,
-            dict(action),
+            act,
             self._ensure_manager(),
         )
 
-    def close(self) -> None:
-        """Stop the broker manager worker (never touches trading state)."""
-        manager, self._broker_manager = self._broker_manager, None
-        if manager is not None:
+    def _apply_broker_command(self, action: dict[str, Any]) -> dict[str, Any]:
+        """Broker connect/disconnect/status via the shared manager."""
+        from app.headless import _trading_service_snapshot
+
+        name = str(action.get("action", "") or "").strip().lower()
+        broker_id = str(action.get("broker_id") or action.get("broker") or "fyers").strip()
+        request_id = str(action.get("request_id", "") or "")
+        manager = self._ensure_manager()
+        if manager is None:
+            return {"error": "broker backend unavailable", "session_status": "STOPPED"}
+        if name == "connect_broker":
+            credentials = action.get("credentials")
+            creds = dict(credentials) if isinstance(credentials, dict) else {}
+            ok, message, session = manager.connect_broker(broker_id, creds, request_id=request_id)
+            snapshot = _trading_service_snapshot(self._data_dir, self._strategy_dir, manager)
+            snapshot["broker_session"] = session
+            snapshot["action_note"] = message
+            snapshot["action_ok"] = ok
+            return snapshot
+        if name == "disconnect_broker":
+            ok, message = manager.disconnect_broker(broker_id, request_id=request_id)
             with contextlib.suppress(Exception):
-                manager.stop_worker()
+                from app import headless as _headless
+
+                _headless._ARMED[0] = False
+                svc = _headless._live_service(self._data_dir, self._strategy_dir, manager)
+                if svc is not None:
+                    svc.note_armed(False)
+            snapshot = _trading_service_snapshot(self._data_dir, self._strategy_dir, manager)
+            snapshot["broker_session"] = manager.get_session_snapshot(broker_id)
+            snapshot["action_note"] = message
+            snapshot["action_ok"] = ok
+            return snapshot
+        if name == "revoke_session":
+            ok, message = manager.revoke_session(broker_id, request_id=request_id)
+            with contextlib.suppress(Exception):
+                from app import headless as _headless
+
+                _headless._ARMED[0] = False
+                svc = _headless._live_service(self._data_dir, self._strategy_dir, manager)
+                if svc is not None:
+                    svc.note_armed(False)
+            snapshot = _trading_service_snapshot(self._data_dir, self._strategy_dir, manager)
+            snapshot["broker_session"] = manager.get_session_snapshot(broker_id)
+            snapshot["action_note"] = message
+            snapshot["action_ok"] = ok
+            return snapshot
+        # broker_status: read-only unified snapshot, no mutation.
+        snapshot = _trading_service_snapshot(self._data_dir, self._strategy_dir, manager)
+        snapshot["broker_session"] = manager.get_session_snapshot(broker_id)
+        return snapshot
+
+    def close(self) -> None:
+        """Release the gateway handle (shared manager stays alive).
+
+        The manager is shared with headless IPC; stopping its worker here
+        would kill the desktop session's broker checks. Ownership stays with
+        the process, so close only drops our reference.
+        """
+        self._broker_manager = None

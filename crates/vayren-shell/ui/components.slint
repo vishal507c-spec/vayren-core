@@ -24,6 +24,7 @@ export component VButton inherits Rectangle {
             : ta.pressed ? VayrenPalette.pressed
             : root.variant == 0 ? VayrenPalette.accent
             : root.variant == 3 ? VayrenPalette.neg
+            : ta.has-hover ? VayrenPalette.hover
             : transparent;
     }
     function frame() -> color {

@@ -141,6 +141,33 @@ def test_execute_op_restart_requires_confirm(tmp_path):
     assert "requires confirmed=True" in res["error"]
 
 
+def test_restart_failure_points_to_ssh_without_new_privilege(tmp_path, monkeypatch):
+    """Sandboxed gateway can never sudo-restart itself: the error must say
+    so and direct the operator to SSH instead of echoing sudo stderr."""
+    import subprocess
+
+    from remote import server_ops
+
+    data_dir = tmp_path / "data"
+    strat_dir = tmp_path / "strategies"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    strat_dir.mkdir(parents=True, exist_ok=True)
+
+    class _Proc:
+        returncode = 1
+        stderr = "sudo: The 'no new privileges' flag is set"
+
+    monkeypatch.setattr(server_ops, "_get_worker_runtime_status", lambda *_args: {"running": False})
+    monkeypatch.setattr(subprocess, "run", lambda *_args, **_kwargs: _Proc())
+    res = execute_server_op(
+        "restart", params={"confirmed": True}, data_dir=str(data_dir), strategy_dir=str(strat_dir)
+    )
+    assert res["ok"] is False
+    assert "RESTART_UNAVAILABLE" in res["error"]
+    assert "sudo systemctl restart vayren-remote.service" in res["error"]
+    assert "no new privileges" not in res["error"]
+
+
 def test_execute_op_deploy_requires_confirm(tmp_path):
     data_dir = tmp_path / "data"
     strat_dir = tmp_path / "strategies"

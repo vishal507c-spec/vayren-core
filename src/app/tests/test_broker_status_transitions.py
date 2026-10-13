@@ -24,6 +24,110 @@ class DummyAdapter:
         return self._connected
 
 
+class _HealthyButUnreadableSubReads:
+    """The exact EC2 failure: session proves valid, sub-reads blow up.
+
+    Reproduces the reported bug — FYERS serves profile/account/funds, but
+    positions and the order book raise an AuthError. The session must stay
+    CONNECTED (degraded at worst), never flip to LOGIN_REQUIRED.
+    """
+
+    connected = True
+
+    def health(self):
+        return True, "ok"
+
+    def account(self):
+        return {"account_id": "XV29244"}
+
+    def funds(self):
+        return {"available": 100.18, "used": 0.0, "total": 100.18}
+
+    def positions(self):
+        raise RuntimeError("venue returned an unreadable positions response")
+
+    def open_orders(self):
+        raise RuntimeError("venue returned an unreadable orders response")
+
+    def order_stream_health(self):
+        return True, "connected"
+
+
+def test_subread_failure_never_downgrades_a_proven_session(tmp_path: Path):
+    """A flaky positions/orders read must not report an expired session."""
+    bm = BrokerManager(str(tmp_path), specs={})
+    spec = SimpleNamespace(broker_id="fyers")
+    bm._states["fyers"] = {
+        "adapter": _HealthyButUnreadableSubReads(),
+        "market_data": None,
+        "details": bm._empty_details(),
+        "checks": {},
+        "status": BrokerStatus.CONNECTED,
+        "reason": "authenticated as XV29244",
+        "configured": True,
+        "api_key_masked": "AB",
+        "last_sync": "",
+    }
+    bm._desired["fyers"] = "CONNECTED"
+    bm._unified["fyers"] = {"legs": {}, "version": 0}
+
+    bm._job_health(spec)  # type: ignore[arg-type]
+
+    state = bm.state("fyers")
+    assert state["status"] is not BrokerStatus.LOGIN_REQUIRED, (
+        "a failing sub-read must not invalidate a proven session"
+    )
+    assert state["status"] is BrokerStatus.CONNECTED
+    assert state["details"]["account_id"] == "XV29244"
+    assert state["details"]["funds_available"] == 100.18
+    assert "positions" in state["checks"] and "orders" in state["checks"]
+
+
+def test_a_failing_profile_still_invalidates_the_session(tmp_path: Path):
+    """The inverse guard: real auth failure must NOT be masked."""
+
+    class _DeadSession:
+        connected = True
+
+        def health(self):
+            return False, "session expired or invalid: HTTP 401"
+
+        def account(self):
+            return {"account_id": "XV29244"}
+
+        def funds(self):
+            return {"available": 100.18, "used": 0.0, "total": 100.18}
+
+        def positions(self):
+            return []
+
+        def open_orders(self):
+            return []
+
+        def order_stream_health(self):
+            return True, "connected"
+
+    bm = BrokerManager(str(tmp_path), specs={})
+    spec = SimpleNamespace(broker_id="fyers")
+    bm._states["fyers"] = {
+        "adapter": _DeadSession(),
+        "market_data": None,
+        "details": bm._empty_details(),
+        "checks": {},
+        "status": BrokerStatus.CONNECTED,
+        "reason": "ok",
+        "configured": True,
+        "api_key_masked": "AB",
+        "last_sync": "",
+    }
+    bm._desired["fyers"] = "CONNECTED"
+    bm._unified["fyers"] = {"legs": {}, "version": 0}
+
+    bm._job_health(spec)  # type: ignore[arg-type]
+
+    assert bm.state("fyers")["status"] is BrokerStatus.LOGIN_REQUIRED
+
+
 def test_is_connected_requires_adapter_and_ready_check(tmp_path: Path):
     """Cached or saved state with status=CONNECTED must not report is_connected=True
     without an active adapter and READY connection check."""
@@ -74,6 +178,7 @@ def test_timeout_during_activation_sets_disconnected_with_unreachable_reason(tmp
         venue_unregister=None,
     )
     bm = BrokerManager(str(tmp_path), specs={"fyers": spec})  # type: ignore[arg-type]
+    bm._desired["fyers"] = "CONNECTED"
     bm._activate(spec, {"api_key": "test_key"}, "test_token", "login ok")  # type: ignore[arg-type]
 
     state = bm.state("fyers")
@@ -117,6 +222,7 @@ def test_session_check_timeout_does_not_mask_as_expired_or_login_required(tmp_pa
     }
     bm._config_values = MagicMock(return_value={"api_key": "test_key"})
     bm._session_store = MagicMock(return_value=session_store)
+    bm._desired["fyers"] = "CONNECTED"
 
     bm._job_session_check(spec)  # type: ignore[arg-type]
 

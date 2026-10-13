@@ -80,6 +80,12 @@
       "migration_target": "crates/vayren-core/src/data/",
       "migration_condition": "When the DATA_PROCESSING slice containing this file is touched by feature work, migrate per AI_ENTRY.md Â§1 (smallest useful slice)."
     },
+    "src/data/candle_store.py": {
+      "state": "TEMPORARILY_RETAINED",
+      "reason": "SQLite write half of the download kernel (2026-10-13): persists venue candles into the per-symbol <SYMBOL>.db files that app.services.market_data_service.MarketDataService already discovers and reads. Holds no rule of its own - the stored candle_time key is produced by the Rust kernel through data.native_download.candle_time_for, so the on-disk key shape is the kernel's; this file only performs the file write, and it rejects invalid bars, resolves repeated bars to the venue's latest statement and counts both rather than repairing or hiding them. Tracked as the storage-IO layer of the Rust-owned DATA domain (same pattern as src/data/settings.py), not a new authority. File role: storage IO (no migrated authority)",
+      "migration_target": "crates/vayren-core/src/download.rs",
+      "migration_condition": "When the DATA_PROCESSING/STORAGE slice is migrated, move the SQLite write into the Rust kernel (would require a SQLite dependency for the std-only vayren-core crate); until then this remains the terminal IO layer beneath the Rust kernel."
+    },
     "src/data/native_download.py": {
       "state": "TEMPORARILY_RETAINED",
       "reason": "Rust-backed ctypes bridge for the whole download kernel (vy_cal_*, vy_dl_*, vy_sym_filename, vy_ts_*): converts naive wall-clock datetimes to the seconds the kernel expects, crosses a holiday set as one NUL-joined blob, and reads the kernel's one-line verdict documents back. Since 2026-09-20 it also carries validate_range (end-of-day window plus both failure reasons) and job_rank (queue priority). Holds no rule of its own - trading-day vocabulary, market-hours window, target window, coverage verdict, stored candle-key shape, on-disk filename token, chunk plan, queued job ranges and date bounds all live in crates/vayren-core/src/download.rs. File role: bridge (no authority)",
@@ -87,12 +93,6 @@
       "migration_condition": "Terminal bridge state: retained as the FFI projection (same pattern as native_aggregate/native_timeframe)."
     },
     "src/data/settings.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "reason": "Download-engine IO/threading orchestration (worker threads, locks, auth flows) around the provider boundary. Numeric detectors already migrated. File role: orchestration glue (no migrated authority)",
-      "migration_target": "crates/vayren-core/src/data/",
-      "migration_condition": "When the DATA_PROCESSING slice containing this file is touched by feature work, migrate per AI_ENTRY.md Â§1 (smallest useful slice)."
-    },
-    "src/data/throttle.py": {
       "state": "TEMPORARILY_RETAINED",
       "reason": "Download-engine IO/threading orchestration (worker threads, locks, auth flows) around the provider boundary. Numeric detectors already migrated. File role: orchestration glue (no migrated authority)",
       "migration_target": "crates/vayren-core/src/data/",

@@ -98,23 +98,38 @@ impl fmt::Display for ConnectionState {
 /// workspace connection state. Unknown strings degrade to `Failed` when a
 /// configuration exists (attention, never a ready-looking state) and to
 /// `NotConfigured` otherwise.
+///
+/// The unified EC2 session vocabulary (DISCONNECTED / CHECKING / CONNECTING /
+/// LOGIN_REQUIRED / VERIFYING / CONNECTED / DEGRADED / RATE_LIMITED /
+/// RECONNECTING / ERROR / UNKNOWN) maps onto the same coarse states:
+/// in-progress states stay `Authenticating` (duplicate CONNECT disabled),
+/// DEGRADED stays `Connected` with the degraded legs in the reason text,
+/// and UNKNOWN degrades to `Failed` (attention, never healthy).
 pub fn connection_state(status_raw: &str, configured: bool) -> ConnectionState {
     match status_raw {
         "NOT_CONFIGURED" => ConnectionState::NotConfigured,
         "CONNECTED" | "LIVE_READY" => ConnectionState::Connected,
-        "AUTHENTICATING" | "CONFIGURING" => ConnectionState::Authenticating,
-        "LOGIN_REQUIRED" => {
+        "DEGRADED" => ConnectionState::Connected,
+        "AUTHENTICATING" | "CONFIGURING" | "CONNECTING" | "CHECKING" | "CHECKING SESSION"
+        | "RECONNECTING" | "RATE LIMITED" | "RATE_LIMITED" => ConnectionState::Authenticating,
+        "VERIFYING" | "VERIFY" => ConnectionState::Verifying,
+        "LOGIN_REQUIRED" | "LOGIN REQUIRED" | "DISCONNECTED" => {
             if configured {
                 ConnectionState::Ready
             } else {
                 ConnectionState::NotConfigured
             }
         }
-        "DISCONNECTED"
-        | "ERROR"
-        | "ACCOUNT_NOT_READY"
-        | "MARKET_DATA_NOT_READY"
-        | "EXECUTION_NOT_READY" => ConnectionState::Failed,
+        "ERROR" | "ACCOUNT_NOT_READY" | "MARKET_DATA_NOT_READY" | "EXECUTION_NOT_READY" => {
+            ConnectionState::Failed
+        }
+        "UNKNOWN" | "" => {
+            if configured {
+                ConnectionState::Failed
+            } else {
+                ConnectionState::NotConfigured
+            }
+        }
         _ => {
             if configured {
                 ConnectionState::Failed
@@ -127,7 +142,10 @@ pub fn connection_state(status_raw: &str, configured: bool) -> ConnectionState {
 
 /// True when the backend status string means an authenticated session exists.
 pub fn is_connected_status(status_raw: &str) -> bool {
-    matches!(status_raw, "CONNECTED" | "LIVE_READY")
+    matches!(
+        status_raw,
+        "CONNECTED" | "LIVE_READY" | "DEGRADED" | "VERIFYING" | "VERIFY"
+    )
 }
 
 /// One sidebar row (a venue, never its secrets).
@@ -703,13 +721,46 @@ mod tests {
             connection_state("LIVE_READY", true),
             ConnectionState::Connected
         );
-        for degraded in ["DISCONNECTED", "ERROR", "ACCOUNT_NOT_READY"] {
+        // Unified session vocabulary: in-progress states stay Authenticating,
+        // DEGRADED stays Connected (partial legs ride in the reason text),
+        // DISCONNECTED/LOGIN_REQUIRED are Ready (CONNECT, not Retry).
+        for working in [
+            "CHECKING",
+            "CONNECTING",
+            "RECONNECTING",
+            "RATE_LIMITED",
+            "RATE LIMITED",
+        ] {
+            assert_eq!(
+                connection_state(working, true),
+                ConnectionState::Authenticating,
+                "{working}"
+            );
+        }
+        assert_eq!(
+            connection_state("VERIFYING", true),
+            ConnectionState::Verifying
+        );
+        assert_eq!(
+            connection_state("DEGRADED", true),
+            ConnectionState::Connected
+        );
+        for ready in ["DISCONNECTED", "LOGIN_REQUIRED", "LOGIN REQUIRED"] {
+            assert_eq!(
+                connection_state(ready, true),
+                ConnectionState::Ready,
+                "{ready}"
+            );
+        }
+        for degraded in ["ERROR", "ACCOUNT_NOT_READY"] {
             assert_eq!(
                 connection_state(degraded, true),
                 ConnectionState::Failed,
                 "{degraded}"
             );
         }
+        // UNKNOWN never looks healthy.
+        assert_eq!(connection_state("UNKNOWN", true), ConnectionState::Failed);
         // Unknown strings never look ready.
         assert_eq!(
             connection_state("SOMETHING_NEW", true),

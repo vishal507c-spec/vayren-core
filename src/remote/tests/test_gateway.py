@@ -104,3 +104,60 @@ def test_headless_gateway_delegates_to_headless(monkeypatch) -> None:  # noqa: A
 def test_headless_gateway_close_is_safe_without_manager() -> None:
     gateway = HeadlessGateway("/data", "/strategies")
     gateway.close()
+
+
+class _SessionManager:
+    """Fake authoritative manager: selection + unified session snapshot."""
+
+    def __init__(self, active: str = "fyers") -> None:
+        self._active = active
+
+    def snapshot(self) -> dict[str, Any]:
+        return {"active_broker": self._active, "brokers": []}
+
+    def get_session_snapshot(self, broker_id: str) -> dict[str, Any]:
+        assert broker_id == self._active
+        return {"broker_id": broker_id, "state": "LOGIN_REQUIRED", "version": 4}
+
+
+def test_get_snapshot_carries_authoritative_session(monkeypatch) -> None:  # noqa: ANN001
+    """Every streaming snapshot carries broker_session for the active broker.
+
+    SYSTEM and LIVE must read the same EC2-owned session — the section
+    cannot appear only after broker commands.
+    """
+    import app.headless
+
+    monkeypatch.setattr(
+        app.headless,
+        "_trading_service_snapshot",
+        lambda _d, _s, _m: {"session_status": "STOPPED"},
+    )
+    monkeypatch.setattr(HeadlessGateway, "_ensure_manager", lambda _self: _SessionManager())
+    gateway = HeadlessGateway("/data", "/strategies")
+    try:
+        live = gateway.get_snapshot()
+    finally:
+        gateway.close()
+    assert live["broker_session"] == {
+        "broker_id": "fyers",
+        "state": "LOGIN_REQUIRED",
+        "version": 4,
+    }
+
+
+def test_get_snapshot_without_manager_stays_minimal(monkeypatch) -> None:  # noqa: ANN001
+    import app.headless
+
+    monkeypatch.setattr(
+        app.headless,
+        "_trading_service_snapshot",
+        lambda _d, _s, _m: {"session_status": "STOPPED"},
+    )
+    monkeypatch.setattr(HeadlessGateway, "_ensure_manager", lambda _self: None)
+    gateway = HeadlessGateway("/data", "/strategies")
+    try:
+        live = gateway.get_snapshot()
+    finally:
+        gateway.close()
+    assert live == {"session_status": "STOPPED"}
