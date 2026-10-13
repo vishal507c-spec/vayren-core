@@ -2216,58 +2216,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ui.on_broker_add_requested(move || {
         println!("Add broker requested");
     });
-    {
-        // REMOVE. The backend protocol has exactly ONE destructive broker
-        // command — `disconnect_broker` — and no remove/delete verb. Rather
-        // than inventing a wire message the Python side does not understand
-        // (which would answer "Unknown command" and leave the user with a
-        // button that looks broken), REMOVE performs the real destructive
-        // action that DOES exist: it disconnects the session — then states
-        // plainly that the stored broker configuration was NOT removed,
-        // because no backend command does that. Silently pretending the
-        // profile was deleted while the credentials are still on disk would
-        // be the worse lie.
-        let handle = ui.as_weak();
-        let backend = Arc::clone(&backend);
-        let cur_ws = current_workspace.clone();
-        ui.on_broker_remove_requested(move || {
-            let broker_id = cur_ws.borrow().selected_id.clone();
-            println!("Broker remove requested for '{}'", broker_id);
-            let handle_bg = handle.clone();
-            let backend_bg = Arc::clone(&backend);
-            std::thread::spawn(move || {
-                let result = PythonBackend::lock_send(
-                    &backend_bg,
-                    BackendCommand::DisconnectBroker {
-                        broker_id: broker_id.clone(),
-                    },
-                );
-                match result {
-                    Ok(BackendResponse::SystemSnapshot { data }) => {
-                        let workspace = BrokerWorkspace::from_json(&data);
-                        let _ = slint::invoke_from_event_loop(move || {
-                            if let Some(ui) = handle_bg.upgrade() {
-                                shell::apply_connection(&ui, &workspace);
-                                ui.set_conn_error_message(
-                                    format!(
-                                        "Removed '{broker_id}' is not supported: the session was \
-                                         disconnected, but the stored credentials are still on disk."
-                                    )
-                                    .into(),
-                                );
-                            }
-                        });
-                    }
-                    Ok(other) => {
-                        eprintln!("Broker remove: unexpected response ({other:?})");
-                    }
-                    Err(err) => {
-                        eprintln!("Broker remove failed: {err}");
-                    }
-                }
-            });
-        });
-    }
+    // REMOVE wiring removed with the footer (no backend remove verb exists).
     {
         // CONFIG SAVE. The backend exposes no standalone "save one field"
         // command either: credentials are persisted as part of `connect_broker`
@@ -2328,39 +2277,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 });
             },
         );
-    }
-    {
-        // COPY CALLBACK URL. A real clipboard write through the same
-        // `clipboard-win` crate the PASTE path already uses (Windows-only, so
-        // other platforms report unavailable rather than silently doing
-        // nothing). The text is the selected broker's identity + environment —
-        // the only facts the workspace actually holds; no URL is invented.
-        let handle = ui.as_weak();
-        let cur_ws = current_workspace.clone();
-        ui.on_broker_copy_callback(move || {
-            let ws = cur_ws.borrow();
-            if ws.selected_id.is_empty() {
-                eprintln!("Broker copy: no broker selected — nothing to copy");
-                return;
-            }
-            let text = format!(
-                "{} [{}] — {}",
-                ws.display_name, ws.selected_id, ws.env_label
-            );
-            #[cfg(windows)]
-            let copied = clipboard_win::set_clipboard_string(text.as_str()).is_ok();
-            #[cfg(not(windows))]
-            let copied: bool = {
-                eprintln!("Broker copy: clipboard unavailable on this platform");
-                false
-            };
-            if copied {
-                println!("Broker callback details copied to clipboard");
-            }
-            if let Some(ui) = handle.upgrade() {
-                ui.set_conn_status_message(format!("Copied to clipboard: {text}").into());
-            }
-        });
     }
     {
         let handle = ui.as_weak();

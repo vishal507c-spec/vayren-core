@@ -228,11 +228,7 @@ component RailButton inherits Rectangle {
         horizontal-alignment: center;
         vertical-alignment: center;
     }
-    if root.active: Rectangle {
-        width: 2px;
-        height: 100%;
-        background: VayrenPalette.accent;
-    }
+    // Active-state vertical accent line removed by request.
 }
 
 component MTimeButton inherits Rectangle {

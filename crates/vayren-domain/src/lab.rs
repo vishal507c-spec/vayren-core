@@ -3241,14 +3241,6 @@ pub fn project(state: &LabState) -> LabView {
         });
     }
     cfg_checks.push(LabCheckData {
-        label: if bits & (1 << 2) == 0 {
-            "Timeframe selected".to_string()
-        } else {
-            validation::MESSAGES[2].to_string()
-        },
-        kind: if bits & (1 << 2) == 0 { 0 } else { 2 },
-    });
-    cfg_checks.push(LabCheckData {
         label: if bits & (1 << 4) == 0 {
             "Capital positive".to_string()
         } else {
@@ -5380,16 +5372,15 @@ mod tests {
             "{:?}",
             v.cfg_checks
         );
-        // The "Data available x/y" row was removed by request; the remaining
-        // passing rows (timeframe + capital) must still be all-green.
+        // The "Data available x/y" and "Timeframe selected" rows were removed
+        // by request; the remaining passing rows must still be all-green.
         assert!(
             !v.cfg_checks
                 .iter()
-                .any(|c| c.label.contains("Data available")),
-            "removed row must stay gone: {:?}",
+                .any(|c| c.label.contains("Data available") || c.label.contains("Timeframe")),
+            "removed rows must stay gone: {:?}",
             v.cfg_checks
         );
-        assert!(v.cfg_checks.iter().any(|c| c.label == "Timeframe selected"));
         assert!(v.cfg_checks.iter().any(|c| c.label == "Capital positive"));
     }
 

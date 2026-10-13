@@ -82,9 +82,8 @@ export component SystemHostWindow inherits Window {
     callback login-requested();
     callback refresh-requested();
     callback disconnect-requested();
-    callback remove-requested();
+    
     callback config-saved(string, string);
-    callback copy-callback();
     // Connection workspace intents (retry reuses login, manage reuses
     // refresh, disconnect is shared — same manager methods as before).
     callback select-requested(string);

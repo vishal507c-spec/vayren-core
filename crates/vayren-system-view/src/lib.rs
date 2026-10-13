@@ -370,8 +370,6 @@ fn wire_view(
         on_disconnect_requested,
         serde_json::json!({"action": "disconnect"})
     );
-    wire_action!(on_remove_requested, serde_json::json!({"action": "remove"}));
-    wire_action!(on_copy_callback, serde_json::json!({"action": "copy_url"}));
     wire_action!(on_add_requested, serde_json::json!({"action": "add"}));
     {
         let queue = actions.clone();
@@ -1033,8 +1031,6 @@ mod tests {
                 slint::SharedString::from("KEY123"),
                 slint::SharedString::from("SECRET456"),
             );
-            ui.invoke_remove_requested();
-            ui.invoke_copy_callback();
             drop(ui);
         });
         assert_eq!(vayren_system_view_refresh_requested(view), 1);
@@ -1047,10 +1043,7 @@ mod tests {
             let parsed: serde_json::Value = serde_json::from_slice(&buf[..len as usize]).unwrap();
             seen.push(parsed["action"].as_str().unwrap().to_string());
         }
-        assert_eq!(
-            seen,
-            vec!["login", "refresh", "configure", "remove", "copy_url"]
-        );
+        assert_eq!(seen, vec!["login", "refresh", "configure"]);
         // The configure event carries the secret once, as the legacy contract did.
         with_view(view, |v| {
             v.actions.borrow_mut().clear();
