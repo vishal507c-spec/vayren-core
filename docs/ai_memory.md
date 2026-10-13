@@ -7,6 +7,8 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
+**Latest update (probe-cleanup-20261013):** Removed stray `phase6_probe_api` probe left in `src/broker/registry.py` (injected by bench scope test residue) and rebuilt `docs/repo_graph.json`; repo_graph tests pass. Two bench scope tests remain environmental/pre-existing per AGENTS flake note.
+
 **Latest update (manage-connection-inert-20261013):** `Manage Connection →` BUTTON WAS INERT — ROOT CAUSE WAS A STALE LOCAL REPAINT, NOT A MISSING HANDLER.
 Root cause (traced in the executed EXE path): the click handler existed and ran all along (`submit()` → `connect-requested`/`retry-requested` → host flow → gateway command); no overlay/modal/hit-test issue (`app.slint:857` renders the workspace directly when `!screen-pending`). The button looked dead because the CTA label came from the LOCAL workspace paint while its ENABLED flag came from the EC2 verdict: local FYERS verified this PC's vault token → `cta_label="Manage Connection"` (the CONNECTED-only label, a button that cannot act), while the EC2 authority said LOGIN_REQUIRED → button rendered but any click could only be answered with a refusal, so it "opened nothing".
 Two compounding defects: (1) `main.rs` System fetch arm repainted the panel from the LOCAL workspace on every poll, overwriting the authoritative paint; (2) `apply_authoritative_broker_ui` never set the full field set, so `cta_label`/`cta_arrow`/`env_label`/`disconnect_*`/`display_name` survived from the last local paint.

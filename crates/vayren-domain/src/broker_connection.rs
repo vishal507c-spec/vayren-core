@@ -120,10 +120,9 @@ pub fn connection_state(status_raw: &str, configured: bool) -> ConnectionState {
                 ConnectionState::NotConfigured
             }
         }
-        "ERROR"
-        | "ACCOUNT_NOT_READY"
-        | "MARKET_DATA_NOT_READY"
-        | "EXECUTION_NOT_READY" => ConnectionState::Failed,
+        "ERROR" | "ACCOUNT_NOT_READY" | "MARKET_DATA_NOT_READY" | "EXECUTION_NOT_READY" => {
+            ConnectionState::Failed
+        }
         "UNKNOWN" | "" => {
             if configured {
                 ConnectionState::Failed
@@ -761,10 +760,7 @@ mod tests {
             );
         }
         // UNKNOWN never looks healthy.
-        assert_eq!(
-            connection_state("UNKNOWN", true),
-            ConnectionState::Failed
-        );
+        assert_eq!(connection_state("UNKNOWN", true), ConnectionState::Failed);
         // Unknown strings never look ready.
         assert_eq!(
             connection_state("SOMETHING_NEW", true),
