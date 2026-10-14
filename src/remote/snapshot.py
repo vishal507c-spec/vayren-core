@@ -189,6 +189,9 @@ def build_snapshot(live: dict[str, Any]) -> dict[str, Any]:
     strategy = _strategy_status(live)
     strategy["mode"] = str(live.get("mode", "PAPER") or "PAPER")
     strategy["source"] = "live session lifecycle + start blockers"
+    # Authoritative session timing (nested). Used for worker uptime/started_at.
+    raw_timing = live.get("session_timing")
+    timing: dict[str, Any] = raw_timing if isinstance(raw_timing, dict) else {}
     live_strat = live.get("strategy") or {}
     live_strat_id = str(
         live_strat.get("id") or live_strat.get("name") or live.get("selected_strategy") or ""
@@ -275,9 +278,12 @@ def build_snapshot(live: dict[str, Any]) -> dict[str, Any]:
         "worker": {
             "status": str(live.get("session_status", "STOPPED") or "STOPPED").upper(),
             "running": str(live.get("session_status", "") or "").upper() == "RUNNING",
-            "uptime_seconds": int(live.get("elapsed_seconds", 0) or 0),
-            "started_at": str(live.get("started_at", "") or ""),
-            "stopped_at": str(live.get("stopped_at", "") or ""),
+            # These live under `session_timing`, not at the top level. Read
+            # from the wrong level they were ALWAYS blank/0, which hid how
+            # long a LIVE session had actually been armed.
+            "uptime_seconds": int(timing.get("elapsed_seconds", 0) or 0),
+            "started_at": str(timing.get("started_at", "") or ""),
+            "stopped_at": str(timing.get("stopped_at", "") or ""),
             "strategy": str(strategy.get("name", "") if isinstance(strategy, dict) else ""),
             "symbols_count": len(live.get("selected_symbols", []) or []),
             "broker": str(broker.get("name", "") or ""),

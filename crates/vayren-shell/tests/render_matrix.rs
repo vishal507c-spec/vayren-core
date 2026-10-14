@@ -37,7 +37,20 @@ impl TargetPixel for Rgb8Pixel {
         Rgb8Pixel::from_rgb(0, 0, 0)
     }
 }
-use vayren_shell::research_harness_ui::{
+// The responsive harness used to live in `vayren_shell::research_harness_ui`,
+// but that made every non-test build of the library compile ~8.5 MB of
+// generated Slint Rust for a Window no production path instantiates. It is now
+// `#[cfg(test)]` in the lib, and integration tests carry the same generated
+// module locally (`OUT_DIR` is set for every target of a package that has a
+// build script, so `render_matrix` compiles the harness into its own binary
+// instead of into the shipped rlib).
+#[allow(dead_code)]
+mod research_harness_ui {
+    #![allow(dead_code)]
+    include!(concat!(env!("OUT_DIR"), "/research_harness.rs"));
+}
+
+use research_harness_ui::{
     ResearchConfigGroup, ResearchEvidenceDim, ResearchEvidenceWhy, ResearchField, ResearchHarness,
     ResearchKvGroup, ResearchMetric, ResearchSignalRow, ResearchTradeRow,
 };
@@ -228,8 +241,8 @@ fn research_row(
     name: &str,
     description: &str,
     selected: bool,
-) -> vayren_shell::research_harness_ui::ResearchStrategyRow {
-    vayren_shell::research_harness_ui::ResearchStrategyRow {
+) -> research_harness_ui::ResearchStrategyRow {
+    research_harness_ui::ResearchStrategyRow {
         name: name.into(),
         description: description.into(),
         version: "1.0".into(),
@@ -237,12 +250,8 @@ fn research_row(
     }
 }
 
-fn research_field(
-    key: &str,
-    label: &str,
-    value: &str,
-) -> vayren_shell::research_harness_ui::ResearchField {
-    vayren_shell::research_harness_ui::ResearchField {
+fn research_field(key: &str, label: &str, value: &str) -> research_harness_ui::ResearchField {
+    research_harness_ui::ResearchField {
         key: key.into(),
         label: label.into(),
         value: value.into(),
@@ -299,8 +308,8 @@ fn research_trade(no: &str, entry: &str, exit: &str, pnl: &str, hold: &str) -> R
     }
 }
 
-fn research_robust() -> vayren_shell::research_harness_ui::ResearchRobustRow {
-    vayren_shell::research_harness_ui::ResearchRobustRow {
+fn research_robust() -> research_harness_ui::ResearchRobustRow {
+    research_harness_ui::ResearchRobustRow {
         test: "parameter_sensitivity".into(),
         input: "refIndex=3.0".into(),
         stability: "WARNING".into(),
@@ -373,7 +382,7 @@ fn populate_chrome(harness: &ResearchHarness) {
     harness.set_strategy_count("2 total".into());
     harness.set_experiments(
         Rc::new(slint::VecModel::from(vec![
-            vayren_shell::research_harness_ui::ResearchExperimentRow {
+            research_harness_ui::ResearchExperimentRow {
                 id: "EXP-03774B".into(),
                 strategy: "OBR".into(),
                 status: "✓ COMPLETED".into(),
@@ -488,7 +497,7 @@ fn populate_chrome(harness: &ResearchHarness) {
     );
     harness.set_compare_rows(
         Rc::new(slint::VecModel::from(vec![
-            vayren_shell::research_harness_ui::ResearchCompareRow {
+            research_harness_ui::ResearchCompareRow {
                 exp: "EXP-03774B".into(),
                 strategy: "OBR".into(),
                 status: "COMPLETED".into(),
@@ -500,8 +509,8 @@ fn populate_chrome(harness: &ResearchHarness) {
     harness.set_compare_verdict("Only one experiment — save another to compare.".into());
 }
 
-fn research_kv(label: &str, value: &str) -> vayren_shell::research_harness_ui::ResearchKv {
-    vayren_shell::research_harness_ui::ResearchKv {
+fn research_kv(label: &str, value: &str) -> research_harness_ui::ResearchKv {
+    research_harness_ui::ResearchKv {
         label: label.into(),
         value: value.into(),
     }

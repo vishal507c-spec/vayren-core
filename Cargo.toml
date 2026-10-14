@@ -48,4 +48,12 @@ codegen-units = 16
 # reuses prior codegen. First build after this pays full price once.
 incremental = true
 
+# Build scripts (including the Slint compiler driver in vayren-shell/build.rs)
+# run unoptimized by default, so every .slint regen pays debug-speed
+# compilation for zero shipped-binary effect. This override optimizes ONLY
+# build scripts, proc macros and their dependencies; the shipped
+# lib/bin units keep [profile.release] above byte-for-byte.
+[profile.release.build-override]
+opt-level = 2
+
 

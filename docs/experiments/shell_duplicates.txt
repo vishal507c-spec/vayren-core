@@ -1,0 +1,682 @@
+﻿arrayvec v0.7.8
+Γö£ΓöÇΓöÇ kurbo v0.13.1
+Γöé   Γö£ΓöÇΓöÇ svgtypes v0.16.1
+Γöé   Γöé   Γö£ΓöÇΓöÇ resvg v0.47.0
+Γöé   Γöé   Γöé   Γö£ΓöÇΓöÇ i-slint-common v1.17.1
+Γöé   Γöé   Γöé   Γöé   Γö£ΓöÇΓöÇ i-slint-backend-testing v1.17.1
+Γöé   Γöé   Γöé   Γöé   Γöé   [dev-dependencies]
+Γöé   Γöé   Γöé   Γöé   Γöé   ΓööΓöÇΓöÇ vayren-shell v0.1.0 (C:\Users\visha\Desktop\vayren-core\crates\vayren-shell)
+Γöé   Γöé   Γöé   Γöé   Γö£ΓöÇΓöÇ i-slint-backend-winit v1.17.1
+Γöé   Γöé   Γöé   Γöé   Γöé   ΓööΓöÇΓöÇ i-slint-backend-selector v1.17.1
+Γöé   Γöé   Γöé   Γöé   Γöé       ΓööΓöÇΓöÇ slint v1.17.1
+Γöé   Γöé   Γöé   Γöé   Γöé           ΓööΓöÇΓöÇ vayren-shell v0.1.0 (C:\Users\visha\Desktop\vayren-core\crates\vayren-shell)
+Γöé   Γöé   Γöé   Γöé   Γöé           [dev-dependencies]
+Γöé   Γöé   Γöé   Γöé   Γöé           ΓööΓöÇΓöÇ vayren-shell v0.1.0 (C:\Users\visha\Desktop\vayren-core\crates\vayren-shell)
+Γöé   Γöé   Γöé   Γöé   Γö£ΓöÇΓöÇ i-slint-core v1.17.1
+Γöé   Γöé   Γöé   Γöé   Γöé   Γö£ΓöÇΓöÇ i-slint-backend-selector v1.17.1 (*)
+Γöé   Γöé   Γöé   Γöé   Γöé   Γö£ΓöÇΓöÇ i-slint-backend-testing v1.17.1 (*)
+Γöé   Γöé   Γöé   Γöé   Γöé   Γö£ΓöÇΓöÇ i-slint-backend-winit v1.17.1 (*)
+Γöé   Γöé   Γöé   Γöé   Γöé   Γö£ΓöÇΓöÇ i-slint-renderer-femtovg v1.17.1
+Γöé   Γöé   Γöé   Γöé   Γöé   Γöé   Γö£ΓöÇΓöÇ i-slint-backend-selector v1.17.1 (*)
+Γöé   Γöé   Γöé   Γöé   Γöé   Γöé   Γö£ΓöÇΓöÇ i-slint-backend-winit v1.17.1 (*)
+Γöé   Γöé   Γöé   Γöé   Γöé   Γöé   ΓööΓöÇΓöÇ slint v1.17.1 (*)
+Γöé   Γöé   Γöé   Γöé   Γöé   Γö£ΓöÇΓöÇ i-slint-renderer-software v1.17.1
+Γöé   Γöé   Γöé   Γöé   Γöé   Γöé   Γö£ΓöÇΓöÇ i-slint-backend-winit v1.17.1 (*)
+Γöé   Γöé   Γöé   Γöé   Γöé   Γöé   ΓööΓöÇΓöÇ slint v1.17.1 (*)
+Γöé   Γöé   Γöé   Γöé   Γöé   ΓööΓöÇΓöÇ slint v1.17.1 (*)
+Γöé   Γöé   Γöé   Γöé   Γö£ΓöÇΓöÇ i-slint-renderer-femtovg v1.17.1 (*)
+Γöé   Γöé   Γöé   Γöé   Γö£ΓöÇΓöÇ i-slint-renderer-software v1.17.1 (*)
+Γöé   Γöé   Γöé   Γöé   ΓööΓöÇΓöÇ slint v1.17.1 (*)
+Γöé   Γöé   Γöé   ΓööΓöÇΓöÇ i-slint-core v1.17.1 (*)
+Γöé   Γöé   ΓööΓöÇΓöÇ usvg v0.47.0
+Γöé   Γöé       ΓööΓöÇΓöÇ resvg v0.47.0 (*)
+Γöé   ΓööΓöÇΓöÇ usvg v0.47.0 (*)
+Γö£ΓöÇΓöÇ lyon_geom v1.0.19
+Γöé   Γö£ΓöÇΓöÇ i-slint-core v1.17.1 (*)
+Γöé   ΓööΓöÇΓöÇ lyon_path v1.0.19
+Γöé       Γö£ΓöÇΓöÇ i-slint-backend-winit v1.17.1 (*)
+Γöé       Γö£ΓöÇΓöÇ i-slint-core v1.17.1 (*)
+Γöé       Γö£ΓöÇΓöÇ i-slint-renderer-femtovg v1.17.1 (*)
+Γöé       Γö£ΓöÇΓöÇ i-slint-renderer-software v1.17.1 (*)
+Γöé       Γö£ΓöÇΓöÇ lyon_algorithms v1.0.21
+Γöé       Γöé   ΓööΓöÇΓöÇ i-slint-core v1.17.1 (*)
+Γöé       ΓööΓöÇΓöÇ lyon_extra v1.1.0
+Γöé           ΓööΓöÇΓöÇ i-slint-core v1.17.1 (*)
+Γö£ΓöÇΓöÇ polycool v0.4.0
+Γöé   ΓööΓöÇΓöÇ kurbo v0.13.1 (*)
+Γö£ΓöÇΓöÇ taffy v0.10.1
+Γöé   ΓööΓöÇΓöÇ i-slint-core v1.17.1 (*)
+ΓööΓöÇΓöÇ tiny-skia v0.12.0
+    ΓööΓöÇΓöÇ resvg v0.47.0 (*)
+
+arrayvec v0.7.8
+Γö£ΓöÇΓöÇ av-scenechange v0.14.1
+Γöé   ΓööΓöÇΓöÇ rav1e v0.8.1
+Γöé       ΓööΓöÇΓöÇ ravif v0.13.0
+Γöé           ΓööΓöÇΓöÇ image v0.25.10
+Γöé               ΓööΓöÇΓöÇ i-slint-compiler v1.17.1
+Γöé                   Γö£ΓöÇΓöÇ slint-build v1.17.1
+Γöé                   Γöé   [build-dependencies]
+Γöé                   Γöé   ΓööΓöÇΓöÇ vayren-shell v0.1.0 (C:\Users\visha\Desktop\vayren-core\crates\vayren-shell)
+Γöé                   ΓööΓöÇΓöÇ slint-macros v1.17.1 (proc-macro)
+Γöé                       ΓööΓöÇΓöÇ slint v1.17.1 (*)
+Γö£ΓöÇΓöÇ av1-grain v0.2.5
+Γöé   ΓööΓöÇΓöÇ rav1e v0.8.1 (*)
+Γö£ΓöÇΓöÇ avif-serialize v0.8.9
+Γöé   ΓööΓöÇΓöÇ ravif v0.13.0 (*)
+Γö£ΓöÇΓöÇ kurbo v0.13.1
+Γöé   Γö£ΓöÇΓöÇ svgtypes v0.16.1
+Γöé   Γöé   Γö£ΓöÇΓöÇ resvg v0.47.0
+Γöé   Γöé   Γöé   Γö£ΓöÇΓöÇ i-slint-common v1.17.1
+Γöé   Γöé   Γöé   Γöé   ΓööΓöÇΓöÇ i-slint-compiler v1.17.1 (*)
+Γöé   Γöé   Γöé   Γöé   [build-dependencies]
+Γöé   Γöé   Γöé   Γöé   ΓööΓöÇΓöÇ i-slint-backend-selector v1.17.1 (*)
+Γöé   Γöé   Γöé   ΓööΓöÇΓöÇ i-slint-compiler v1.17.1 (*)
+Γöé   Γöé   ΓööΓöÇΓöÇ usvg v0.47.0
+Γöé   Γöé       ΓööΓöÇΓöÇ resvg v0.47.0 (*)
+Γöé   ΓööΓöÇΓöÇ usvg v0.47.0 (*)
+Γö£ΓöÇΓöÇ lyon_geom v1.0.19
+Γöé   ΓööΓöÇΓöÇ lyon_path v1.0.19
+Γöé       Γö£ΓöÇΓöÇ i-slint-compiler v1.17.1 (*)
+Γöé       ΓööΓöÇΓöÇ lyon_extra v1.1.0
+Γöé           ΓööΓöÇΓöÇ i-slint-compiler v1.17.1 (*)
+Γö£ΓöÇΓöÇ polycool v0.4.0
+Γöé   ΓööΓöÇΓöÇ kurbo v0.13.1 (*)
+Γö£ΓöÇΓöÇ rav1e v0.8.1 (*)
+ΓööΓöÇΓöÇ tiny-skia v0.12.0
+    ΓööΓöÇΓöÇ resvg v0.47.0 (*)
+
+bitflags v2.13.1
+Γö£ΓöÇΓöÇ png v0.18.1
+Γöé   Γö£ΓöÇΓöÇ image v0.25.10 (*)
+Γöé   ΓööΓöÇΓöÇ tiny-skia v0.12.0 (*)
+Γö£ΓöÇΓöÇ pulldown-cmark v0.13.4
+Γöé   ΓööΓöÇΓöÇ i-slint-common v1.17.1 (*)
+Γö£ΓöÇΓöÇ raw-cpuid v11.6.0
+Γöé   ΓööΓöÇΓöÇ pulp v0.22.3
+Γöé       ΓööΓöÇΓöÇ exr v1.74.2
+Γöé           ΓööΓöÇΓöÇ image v0.25.10 (*)
+ΓööΓöÇΓöÇ rustybuzz v0.20.1
+    ΓööΓöÇΓöÇ usvg v0.47.0 (*)
+
+bitflags v2.13.1
+Γö£ΓöÇΓöÇ femtovg v0.25.1
+Γöé   ΓööΓöÇΓöÇ i-slint-renderer-femtovg v1.17.1 (*)
+Γö£ΓöÇΓöÇ glutin v0.32.3
+Γöé   Γö£ΓöÇΓöÇ glutin-winit v0.5.0
+Γöé   Γöé   ΓööΓöÇΓöÇ i-slint-backend-winit v1.17.1 (*)
+Γöé   ΓööΓöÇΓöÇ i-slint-backend-winit v1.17.1 (*)
+Γö£ΓöÇΓöÇ harfrust v0.8.4
+Γöé   ΓööΓöÇΓöÇ parley v0.10.0
+Γöé       ΓööΓöÇΓöÇ i-slint-core v1.17.1 (*)
+Γö£ΓöÇΓöÇ i-slint-core v1.17.1 (*)
+Γö£ΓöÇΓöÇ keyboard-types v0.7.0
+Γöé   ΓööΓöÇΓöÇ muda v0.19.3
+Γöé       ΓööΓöÇΓöÇ i-slint-backend-winit v1.17.1 (*)
+Γö£ΓöÇΓöÇ png v0.18.1
+Γöé   Γö£ΓöÇΓöÇ image v0.25.10
+Γöé   Γöé   ΓööΓöÇΓöÇ i-slint-core v1.17.1 (*)
+Γöé   ΓööΓöÇΓöÇ tiny-skia v0.12.0 (*)
+Γö£ΓöÇΓöÇ pulldown-cmark v0.13.4
+Γöé   ΓööΓöÇΓöÇ i-slint-common v1.17.1 (*)
+Γö£ΓöÇΓöÇ rustybuzz v0.20.1
+Γöé   ΓööΓöÇΓöÇ usvg v0.47.0 (*)
+ΓööΓöÇΓöÇ winit v0.30.13
+    Γö£ΓöÇΓöÇ accesskit_winit v0.33.2
+    Γöé   ΓööΓöÇΓöÇ i-slint-backend-winit v1.17.1 (*)
+    Γö£ΓöÇΓöÇ glutin-winit v0.5.0 (*)
+    ΓööΓöÇΓöÇ i-slint-backend-winit v1.17.1 (*)
+
+bytemuck v1.25.2
+Γö£ΓöÇΓöÇ femtovg v0.25.1 (*)
+Γö£ΓöÇΓöÇ font-types v0.11.3
+Γöé   ΓööΓöÇΓöÇ read-fonts v0.39.2
+Γöé       Γö£ΓöÇΓöÇ fontique v0.10.0
+Γöé       Γöé   Γö£ΓöÇΓöÇ i-slint-common v1.17.1 (*)
+Γöé       Γöé   ΓööΓöÇΓöÇ parley v0.10.0 (*)
+Γöé       Γö£ΓöÇΓöÇ harfrust v0.8.4 (*)
+Γöé       ΓööΓöÇΓöÇ skrifa v0.42.1
+Γöé           Γö£ΓöÇΓöÇ i-slint-common v1.17.1 (*)
+Γöé           Γö£ΓöÇΓöÇ i-slint-core v1.17.1 (*)
+Γöé           Γö£ΓöÇΓöÇ i-slint-renderer-software v1.17.1 (*)
+Γöé           ΓööΓöÇΓöÇ parley v0.10.0 (*)
+Γö£ΓöÇΓöÇ font-types v0.12.5
+Γöé   ΓööΓöÇΓöÇ read-fonts v0.41.0
+Γöé       ΓööΓöÇΓöÇ skrifa v0.44.0
+Γöé           ΓööΓöÇΓöÇ swash v0.2.10
+Γöé               Γö£ΓöÇΓöÇ femtovg v0.25.1 (*)
+Γöé               Γö£ΓöÇΓöÇ i-slint-core v1.17.1 (*)
+Γöé               ΓööΓöÇΓöÇ i-slint-renderer-software v1.17.1 (*)
+Γö£ΓöÇΓöÇ harfrust v0.8.4 (*)
+Γö£ΓöÇΓöÇ i-slint-backend-winit v1.17.1 (*)
+Γö£ΓöÇΓöÇ i-slint-renderer-software v1.17.1 (*)
+Γö£ΓöÇΓöÇ image v0.25.10 (*)
+Γö£ΓöÇΓöÇ read-fonts v0.39.2 (*)
+Γö£ΓöÇΓöÇ read-fonts v0.41.0 (*)
+Γö£ΓöÇΓöÇ rgb v0.8.53
+Γöé   Γö£ΓöÇΓöÇ femtovg v0.25.1 (*)
+Γöé   Γö£ΓöÇΓöÇ i-slint-backend-winit v1.17.1 (*)
+Γöé   Γö£ΓöÇΓöÇ i-slint-core v1.17.1 (*)
+Γöé   Γö£ΓöÇΓöÇ i-slint-renderer-femtovg v1.17.1 (*)
+Γöé   ΓööΓöÇΓöÇ resvg v0.47.0 (*)
+Γö£ΓöÇΓöÇ rustybuzz v0.20.1 (*)
+Γö£ΓöÇΓöÇ skrifa v0.42.1 (*)
+Γö£ΓöÇΓöÇ skrifa v0.44.0 (*)
+Γö£ΓöÇΓöÇ tiny-skia v0.12.0 (*)
+ΓööΓöÇΓöÇ tiny-skia-path v0.12.0
+    Γö£ΓöÇΓöÇ tiny-skia v0.12.0 (*)
+    ΓööΓöÇΓöÇ usvg v0.47.0 (*)
+
+bytemuck v1.25.2
+Γö£ΓöÇΓöÇ font-types v0.11.3
+Γöé   ΓööΓöÇΓöÇ read-fonts v0.39.2
+Γöé       Γö£ΓöÇΓöÇ fontique v0.10.0
+Γöé       Γöé   ΓööΓöÇΓöÇ i-slint-common v1.17.1 (*)
+Γöé       ΓööΓöÇΓöÇ skrifa v0.42.1
+Γöé           Γö£ΓöÇΓöÇ i-slint-common v1.17.1 (*)
+Γöé           ΓööΓöÇΓöÇ i-slint-compiler v1.17.1 (*)
+Γö£ΓöÇΓöÇ font-types v0.12.5
+Γöé   ΓööΓöÇΓöÇ read-fonts v0.41.0
+Γöé       ΓööΓöÇΓöÇ skrifa v0.44.0
+Γöé           ΓööΓöÇΓöÇ swash v0.2.10
+Γöé               ΓööΓöÇΓöÇ i-slint-compiler v1.17.1 (*)
+Γö£ΓöÇΓöÇ image v0.25.10 (*)
+Γö£ΓöÇΓöÇ num-complex v0.4.6
+Γöé   Γö£ΓöÇΓöÇ exr v1.74.2 (*)
+Γöé   ΓööΓöÇΓöÇ pulp v0.22.3 (*)
+Γö£ΓöÇΓöÇ pulp v0.22.3 (*)
+Γö£ΓöÇΓöÇ qoi v0.4.1
+Γöé   ΓööΓöÇΓöÇ image v0.25.10 (*)
+Γö£ΓöÇΓöÇ read-fonts v0.39.2 (*)
+Γö£ΓöÇΓöÇ read-fonts v0.41.0 (*)
+Γö£ΓöÇΓöÇ rgb v0.8.53
+Γöé   Γö£ΓöÇΓöÇ image v0.25.10 (*)
+Γöé   Γö£ΓöÇΓöÇ ravif v0.13.0 (*)
+Γöé   ΓööΓöÇΓöÇ resvg v0.47.0 (*)
+Γö£ΓöÇΓöÇ rustybuzz v0.20.1 (*)
+Γö£ΓöÇΓöÇ skrifa v0.42.1 (*)
+Γö£ΓöÇΓöÇ skrifa v0.44.0 (*)
+Γö£ΓöÇΓöÇ tiny-skia v0.12.0 (*)
+ΓööΓöÇΓöÇ tiny-skia-path v0.12.0
+    Γö£ΓöÇΓöÇ tiny-skia v0.12.0 (*)
+    ΓööΓöÇΓöÇ usvg v0.47.0 (*)
+
+crossbeam-utils v0.8.23
+Γö£ΓöÇΓöÇ crossbeam-deque v0.8.8
+Γöé   ΓööΓöÇΓöÇ rayon-core v1.13.0
+Γöé       Γö£ΓöÇΓöÇ exr v1.74.2 (*)
+Γöé       ΓööΓöÇΓöÇ rayon v1.12.0
+Γöé           Γö£ΓöÇΓöÇ av-scenechange v0.14.1 (*)
+Γöé           Γö£ΓöÇΓöÇ i-slint-compiler v1.17.1 (*)
+Γöé           Γö£ΓöÇΓöÇ image v0.25.10 (*)
+Γöé           Γö£ΓöÇΓöÇ maybe-rayon v0.1.1
+Γöé           Γöé   ΓööΓöÇΓöÇ rav1e v0.8.1 (*)
+Γöé           ΓööΓöÇΓöÇ ravif v0.13.0 (*)
+Γö£ΓöÇΓöÇ crossbeam-epoch v0.9.21
+Γöé   ΓööΓöÇΓöÇ crossbeam-deque v0.8.8 (*)
+ΓööΓöÇΓöÇ rayon-core v1.13.0 (*)
+
+crossbeam-utils v0.8.23
+ΓööΓöÇΓöÇ crossbeam-channel v0.5.17
+    ΓööΓöÇΓöÇ muda v0.19.3 (*)
+
+derive_more v2.1.1
+Γö£ΓöÇΓöÇ i-slint-backend-winit v1.17.1 (*)
+Γö£ΓöÇΓöÇ i-slint-common v1.17.1 (*)
+Γö£ΓöÇΓöÇ i-slint-core v1.17.1 (*)
+Γö£ΓöÇΓöÇ i-slint-renderer-femtovg v1.17.1 (*)
+ΓööΓöÇΓöÇ i-slint-renderer-software v1.17.1 (*)
+
+derive_more v2.1.1
+Γö£ΓöÇΓöÇ i-slint-common v1.17.1 (*)
+Γö£ΓöÇΓöÇ i-slint-compiler v1.17.1 (*)
+ΓööΓöÇΓöÇ slint-build v1.17.1 (*)
+
+font-types v0.11.3 (*)
+
+font-types v0.11.3 (*)
+
+font-types v0.12.5 (*)
+
+font-types v0.12.5 (*)
+
+getrandom v0.2.17
+ΓööΓöÇΓöÇ ring v0.17.14
+    Γö£ΓöÇΓöÇ rustls v0.23.45
+    Γöé   Γö£ΓöÇΓöÇ tungstenite v0.30.0
+    Γöé   Γöé   ΓööΓöÇΓöÇ vayren-remote-client v0.1.0 (C:\Users\visha\Desktop\vayren-core\crates\vayren-remote-client)
+    Γöé   Γöé       ΓööΓöÇΓöÇ vayren-shell v0.1.0 (C:\Users\visha\Desktop\vayren-core\crates\vayren-shell)
+    Γöé   ΓööΓöÇΓöÇ vayren-remote-client v0.1.0 (C:\Users\visha\Desktop\vayren-core\crates\vayren-remote-client) (*)
+    ΓööΓöÇΓöÇ rustls-webpki v0.103.15
+        ΓööΓöÇΓöÇ rustls v0.23.45 (*)
+
+getrandom v0.4.3
+ΓööΓöÇΓöÇ rand v0.10.3
+    ΓööΓöÇΓöÇ tungstenite v0.30.0 (*)
+
+hashbrown v0.14.5
+ΓööΓöÇΓöÇ rowan v0.16.1
+    ΓööΓöÇΓöÇ i-slint-compiler v1.17.1 (*)
+
+hashbrown v0.16.1
+Γö£ΓöÇΓöÇ accesskit_consumer v0.38.0
+Γöé   ΓööΓöÇΓöÇ accesskit_windows v0.34.0
+Γöé       ΓööΓöÇΓöÇ accesskit_winit v0.33.2 (*)
+Γö£ΓöÇΓöÇ accesskit_windows v0.34.0 (*)
+ΓööΓöÇΓöÇ clru v0.6.3
+    Γö£ΓöÇΓöÇ i-slint-core v1.17.1 (*)
+    ΓööΓöÇΓöÇ i-slint-renderer-software v1.17.1 (*)
+
+hashbrown v0.17.1
+Γö£ΓöÇΓöÇ fontique v0.10.0 (*)
+ΓööΓöÇΓöÇ indexmap v2.14.2
+    ΓööΓöÇΓöÇ toml_edit v0.25.13+spec-1.1.0
+        Γö£ΓöÇΓöÇ proc-macro-crate v3.5.0
+        Γöé   ΓööΓöÇΓöÇ num_enum_derive v0.7.6 (proc-macro)
+        Γöé       ΓööΓöÇΓöÇ num_enum v0.7.6
+        Γöé           ΓööΓöÇΓöÇ i-slint-compiler v1.17.1 (*)
+        ΓööΓöÇΓöÇ slint-build v1.17.1 (*)
+
+hashbrown v0.17.1
+Γö£ΓöÇΓöÇ fontique v0.10.0 (*)
+ΓööΓöÇΓöÇ parley v0.10.0 (*)
+
+image v0.25.10 (*)
+
+image v0.25.10 (*)
+
+lyon_extra v1.1.0 (*)
+
+lyon_extra v1.1.0 (*)
+
+lyon_geom v1.0.19 (*)
+
+lyon_geom v1.0.19 (*)
+
+lyon_path v1.0.19 (*)
+
+lyon_path v1.0.19 (*)
+
+miniz_oxide v0.8.9
+Γö£ΓöÇΓöÇ exr v1.74.2 (*)
+ΓööΓöÇΓöÇ png v0.18.1 (*)
+
+miniz_oxide v0.8.9
+ΓööΓöÇΓöÇ png v0.18.1 (*)
+
+miniz_oxide v0.9.1
+ΓööΓöÇΓöÇ flate2 v1.1.10
+    Γö£ΓöÇΓöÇ png v0.18.1 (*)
+    Γö£ΓöÇΓöÇ tiff v0.11.3
+    Γöé   ΓööΓöÇΓöÇ image v0.25.10 (*)
+    ΓööΓöÇΓöÇ usvg v0.47.0 (*)
+
+miniz_oxide v0.9.1
+ΓööΓöÇΓöÇ flate2 v1.1.10
+    Γö£ΓöÇΓöÇ png v0.18.1 (*)
+    ΓööΓöÇΓöÇ usvg v0.47.0 (*)
+
+num-traits v0.2.19
+Γö£ΓöÇΓöÇ av-scenechange v0.14.1 (*)
+Γö£ΓöÇΓöÇ euclid v0.22.14
+Γöé   ΓööΓöÇΓöÇ lyon_geom v1.0.19 (*)
+Γö£ΓöÇΓöÇ image v0.25.10 (*)
+Γö£ΓöÇΓöÇ lyon_geom v1.0.19 (*)
+Γö£ΓöÇΓöÇ lyon_path v1.0.19 (*)
+Γö£ΓöÇΓöÇ moxcms v0.8.1
+Γöé   ΓööΓöÇΓöÇ image v0.25.10 (*)
+Γö£ΓöÇΓöÇ num-bigint v0.4.8
+Γöé   ΓööΓöÇΓöÇ num-rational v0.4.2
+Γöé       Γö£ΓöÇΓöÇ av-scenechange v0.14.1 (*)
+Γöé       ΓööΓöÇΓöÇ av1-grain v0.2.5 (*)
+Γö£ΓöÇΓöÇ num-complex v0.4.6 (*)
+Γö£ΓöÇΓöÇ num-integer v0.1.47
+Γöé   Γö£ΓöÇΓöÇ num-bigint v0.4.8 (*)
+Γöé   ΓööΓöÇΓöÇ num-rational v0.4.2 (*)
+Γö£ΓöÇΓöÇ num-rational v0.4.2 (*)
+Γö£ΓöÇΓöÇ rav1e v0.8.1 (*)
+ΓööΓöÇΓöÇ v_frame v0.3.9
+    Γö£ΓöÇΓöÇ av-scenechange v0.14.1 (*)
+    Γö£ΓöÇΓöÇ av1-grain v0.2.5 (*)
+    ΓööΓöÇΓöÇ rav1e v0.8.1 (*)
+
+num-traits v0.2.19
+Γö£ΓöÇΓöÇ chrono v0.4.45
+Γöé   ΓööΓöÇΓöÇ i-slint-core v1.17.1 (*)
+Γö£ΓöÇΓöÇ euclid v0.22.14
+Γöé   Γö£ΓöÇΓöÇ i-slint-core v1.17.1 (*)
+Γöé   Γö£ΓöÇΓöÇ i-slint-renderer-software v1.17.1 (*)
+Γöé   ΓööΓöÇΓöÇ lyon_geom v1.0.19 (*)
+Γö£ΓöÇΓöÇ i-slint-core v1.17.1 (*)
+Γö£ΓöÇΓöÇ i-slint-renderer-software v1.17.1 (*)
+Γö£ΓöÇΓöÇ image v0.25.10 (*)
+Γö£ΓöÇΓöÇ integer-sqrt v0.1.5
+Γöé   ΓööΓöÇΓöÇ i-slint-renderer-software v1.17.1 (*)
+Γö£ΓöÇΓöÇ lyon_algorithms v1.0.21 (*)
+Γö£ΓöÇΓöÇ lyon_geom v1.0.19 (*)
+Γö£ΓöÇΓöÇ lyon_path v1.0.19 (*)
+Γö£ΓöÇΓöÇ moxcms v0.8.1
+Γöé   ΓööΓöÇΓöÇ image v0.25.10 (*)
+ΓööΓöÇΓöÇ slint v1.17.1 (*)
+
+once_cell v1.21.4
+Γö£ΓöÇΓöÇ glutin v0.32.3 (*)
+Γö£ΓöÇΓöÇ i-slint-core v1.17.1 (*)
+Γö£ΓöÇΓöÇ muda v0.19.3 (*)
+Γö£ΓöÇΓöÇ read-fonts v0.41.0 (*)
+Γö£ΓöÇΓöÇ rustls v0.23.45 (*)
+ΓööΓöÇΓöÇ slint v1.17.1 (*)
+
+once_cell v1.21.4
+ΓööΓöÇΓöÇ read-fonts v0.41.0 (*)
+
+read-fonts v0.39.2 (*)
+
+read-fonts v0.39.2 (*)
+
+read-fonts v0.41.0 (*)
+
+read-fonts v0.41.0 (*)
+
+serde_core v1.0.229
+Γö£ΓöÇΓöÇ bitflags v2.13.1 (*)
+Γö£ΓöÇΓöÇ serde v1.0.229
+Γöé   Γö£ΓöÇΓöÇ keyboard-types v0.7.0 (*)
+Γöé   Γö£ΓöÇΓöÇ vayren-domain v0.1.0 (C:\Users\visha\Desktop\vayren-core\crates\vayren-domain)
+Γöé   Γöé   ΓööΓöÇΓöÇ vayren-shell v0.1.0 (C:\Users\visha\Desktop\vayren-core\crates\vayren-shell)
+Γöé   Γö£ΓöÇΓöÇ vayren-remote-client v0.1.0 (C:\Users\visha\Desktop\vayren-core\crates\vayren-remote-client) (*)
+Γöé   ΓööΓöÇΓöÇ vayren-shell v0.1.0 (C:\Users\visha\Desktop\vayren-core\crates\vayren-shell)
+ΓööΓöÇΓöÇ serde_json v1.0.151
+    Γö£ΓöÇΓöÇ vayren-domain v0.1.0 (C:\Users\visha\Desktop\vayren-core\crates\vayren-domain) (*)
+    Γö£ΓöÇΓöÇ vayren-remote-client v0.1.0 (C:\Users\visha\Desktop\vayren-core\crates\vayren-remote-client) (*)
+    ΓööΓöÇΓöÇ vayren-shell v0.1.0 (C:\Users\visha\Desktop\vayren-core\crates\vayren-shell)
+
+serde_core v1.0.229
+ΓööΓöÇΓöÇ serde_json v1.0.151
+    ΓööΓöÇΓöÇ i-slint-core-macros v1.17.1 (proc-macro)
+        Γö£ΓöÇΓöÇ i-slint-backend-selector v1.17.1 (*)
+        Γö£ΓöÇΓöÇ i-slint-backend-winit v1.17.1 (*)
+        Γö£ΓöÇΓöÇ i-slint-core v1.17.1 (*)
+        Γö£ΓöÇΓöÇ i-slint-renderer-femtovg v1.17.1 (*)
+        ΓööΓöÇΓöÇ slint v1.17.1 (*)
+
+skrifa v0.42.1 (*)
+
+skrifa v0.42.1 (*)
+
+skrifa v0.44.0 (*)
+
+skrifa v0.44.0 (*)
+
+slotmap v1.1.1
+ΓööΓöÇΓöÇ fontdb v0.23.0
+    ΓööΓöÇΓöÇ usvg v0.47.0 (*)
+
+slotmap v1.1.1
+Γö£ΓöÇΓöÇ femtovg v0.25.1 (*)
+Γö£ΓöÇΓöÇ fontdb v0.23.0
+Γöé   ΓööΓöÇΓöÇ usvg v0.47.0 (*)
+ΓööΓöÇΓöÇ taffy v0.10.1 (*)
+
+smol_str v0.2.2
+ΓööΓöÇΓöÇ winit v0.30.13 (*)
+
+smol_str v0.3.6
+ΓööΓöÇΓöÇ i-slint-compiler v1.17.1 (*)
+
+swash v0.2.10 (*)
+
+swash v0.2.10 (*)
+
+syn v2.0.119
+Γö£ΓöÇΓöÇ arg_enum_proc_macro v0.3.4 (proc-macro)
+Γöé   Γö£ΓöÇΓöÇ av-scenechange v0.14.1 (*)
+Γöé   ΓööΓöÇΓöÇ rav1e v0.8.1 (*)
+Γö£ΓöÇΓöÇ derive_more-impl v2.1.1 (proc-macro)
+Γöé   Γö£ΓöÇΓöÇ derive_more v2.1.1 (*)
+Γöé   ΓööΓöÇΓöÇ derive_more v2.1.1 (*)
+Γö£ΓöÇΓöÇ equator-macro v0.4.2 (proc-macro)
+Γöé   ΓööΓöÇΓöÇ equator v0.4.2
+Γöé       ΓööΓöÇΓöÇ aligned-vec v0.6.4
+Γöé           Γö£ΓöÇΓöÇ rav1e v0.8.1 (*)
+Γöé           ΓööΓöÇΓöÇ v_frame v0.3.9 (*)
+Γö£ΓöÇΓöÇ i-slint-core-macros v1.17.1 (proc-macro) (*)
+Γö£ΓöÇΓöÇ num-derive v0.4.2 (proc-macro)
+Γöé   ΓööΓöÇΓöÇ rav1e v0.8.1 (*)
+Γö£ΓöÇΓöÇ num_enum_derive v0.7.6 (proc-macro) (*)
+Γö£ΓöÇΓöÇ pin-project-internal v1.1.13 (proc-macro)
+Γöé   ΓööΓöÇΓöÇ pin-project v1.1.13
+Γöé       ΓööΓöÇΓöÇ i-slint-core v1.17.1 (*)
+Γö£ΓöÇΓöÇ profiling-procmacros v1.0.18 (proc-macro)
+Γöé   ΓööΓöÇΓöÇ profiling v1.0.18
+Γöé       ΓööΓöÇΓöÇ rav1e v0.8.1 (*)
+Γö£ΓöÇΓöÇ snafu-derive v0.8.9 (proc-macro)
+Γöé   ΓööΓöÇΓöÇ snafu v0.8.9
+Γöé       ΓööΓöÇΓöÇ rspolib v0.1.2
+Γöé           ΓööΓöÇΓöÇ i-slint-compiler v1.17.1 (*)
+Γö£ΓöÇΓöÇ strum_macros v0.28.0 (proc-macro)
+Γöé   Γö£ΓöÇΓöÇ strum v0.28.0
+Γöé   Γöé   ΓööΓöÇΓöÇ i-slint-compiler v1.17.1 (*)
+Γöé   ΓööΓöÇΓöÇ strum v0.28.0
+Γöé       Γö£ΓöÇΓöÇ i-slint-backend-winit v1.17.1 (*)
+Γöé       ΓööΓöÇΓöÇ i-slint-core v1.17.1 (*)
+Γö£ΓöÇΓöÇ synstructure v0.13.2
+Γöé   Γö£ΓöÇΓöÇ yoke-derive v0.8.2 (proc-macro)
+Γöé   Γöé   Γö£ΓöÇΓöÇ yoke v0.8.3
+Γöé   Γöé   Γöé   Γö£ΓöÇΓöÇ icu_collections v2.3.0
+Γöé   Γöé   Γöé   Γöé   Γö£ΓöÇΓöÇ icu_normalizer v2.3.0
+Γöé   Γöé   Γöé   Γöé   Γöé   Γö£ΓöÇΓöÇ i-slint-compiler v1.17.1 (*)
+Γöé   Γöé   Γöé   Γöé   Γöé   ΓööΓöÇΓöÇ idna_adapter v1.2.2
+Γöé   Γöé   Γöé   Γöé   Γöé       ΓööΓöÇΓöÇ idna v1.1.0
+Γöé   Γöé   Γöé   Γöé   Γöé           ΓööΓöÇΓöÇ url v2.5.8
+Γöé   Γöé   Γöé   Γöé   Γöé               ΓööΓöÇΓöÇ i-slint-compiler v1.17.1 (*)
+Γöé   Γöé   Γöé   Γöé   ΓööΓöÇΓöÇ icu_properties v2.3.0
+Γöé   Γöé   Γöé   Γöé       ΓööΓöÇΓöÇ idna_adapter v1.2.2 (*)
+Γöé   Γöé   Γöé   Γö£ΓöÇΓöÇ icu_provider v2.3.1
+Γöé   Γöé   Γöé   Γöé   Γö£ΓöÇΓöÇ i-slint-common v1.17.1 (*)
+Γöé   Γöé   Γöé   Γöé   Γö£ΓöÇΓöÇ icu_decimal v2.3.0
+Γöé   Γöé   Γöé   Γöé   Γöé   ΓööΓöÇΓöÇ i-slint-common v1.17.1 (*)
+Γöé   Γöé   Γöé   Γöé   Γö£ΓöÇΓöÇ icu_locale_fallback v2.3.0
+Γöé   Γöé   Γöé   Γöé   Γöé   ΓööΓöÇΓöÇ icu_decimal v2.3.0 (*)
+Γöé   Γöé   Γöé   Γöé   Γö£ΓöÇΓöÇ icu_normalizer v2.3.0 (*)
+Γöé   Γöé   Γöé   Γöé   ΓööΓöÇΓöÇ icu_properties v2.3.0 (*)
+Γöé   Γöé   Γöé   Γö£ΓöÇΓöÇ zerotrie v0.2.5
+Γöé   Γöé   Γöé   Γöé   Γö£ΓöÇΓöÇ icu_properties v2.3.0 (*)
+Γöé   Γöé   Γöé   Γöé   ΓööΓöÇΓöÇ icu_provider v2.3.1 (*)
+Γöé   Γöé   Γöé   ΓööΓöÇΓöÇ zerovec v0.11.8
+Γöé   Γöé   Γöé       Γö£ΓöÇΓöÇ icu_collections v2.3.0 (*)
+Γöé   Γöé   Γöé       Γö£ΓöÇΓöÇ icu_decimal v2.3.0 (*)
+Γöé   Γöé   Γöé       Γö£ΓöÇΓöÇ icu_locale_core v2.3.0
+Γöé   Γöé   Γöé       Γöé   Γö£ΓöÇΓöÇ i-slint-common v1.17.1 (*)
+Γöé   Γöé   Γöé       Γöé   Γö£ΓöÇΓöÇ icu_decimal v2.3.0 (*)
+Γöé   Γöé   Γöé       Γöé   Γö£ΓöÇΓöÇ icu_locale_fallback v2.3.0 (*)
+Γöé   Γöé   Γöé       Γöé   Γö£ΓöÇΓöÇ icu_properties v2.3.0 (*)
+Γöé   Γöé   Γöé       Γöé   ΓööΓöÇΓöÇ icu_provider v2.3.1 (*)
+Γöé   Γöé   Γöé       Γö£ΓöÇΓöÇ icu_locale_fallback v2.3.0 (*)
+Γöé   Γöé   Γöé       Γö£ΓöÇΓöÇ icu_normalizer v2.3.0 (*)
+Γöé   Γöé   Γöé       Γö£ΓöÇΓöÇ icu_properties v2.3.0 (*)
+Γöé   Γöé   Γöé       Γö£ΓöÇΓöÇ icu_provider v2.3.1 (*)
+Γöé   Γöé   Γöé       Γö£ΓöÇΓöÇ potential_utf v0.1.6
+Γöé   Γöé   Γöé       Γöé   Γö£ΓöÇΓöÇ icu_collections v2.3.0 (*)
+Γöé   Γöé   Γöé       Γöé   ΓööΓöÇΓöÇ icu_locale_fallback v2.3.0 (*)
+Γöé   Γöé   Γöé       ΓööΓöÇΓöÇ tinystr v0.8.4
+Γöé   Γöé   Γöé           Γö£ΓöÇΓöÇ icu_locale_core v2.3.0 (*)
+Γöé   Γöé   Γöé           ΓööΓöÇΓöÇ icu_locale_fallback v2.3.0 (*)
+Γöé   Γöé   ΓööΓöÇΓöÇ yoke v0.8.3
+Γöé   Γöé       Γö£ΓöÇΓöÇ icu_collections v2.3.0
+Γöé   Γöé       Γöé   Γö£ΓöÇΓöÇ icu_normalizer v2.3.0
+Γöé   Γöé       Γöé   Γöé   Γö£ΓöÇΓöÇ i-slint-core v1.17.1 (*)
+Γöé   Γöé       Γöé   Γöé   Γö£ΓöÇΓöÇ idna_adapter v1.2.2
+Γöé   Γöé       Γöé   Γöé   Γöé   ΓööΓöÇΓöÇ idna v1.1.0
+Γöé   Γöé       Γöé   Γöé   Γöé       ΓööΓöÇΓöÇ url v2.5.8
+Γöé   Γöé       Γöé   Γöé   Γöé           Γö£ΓöÇΓöÇ tungstenite v0.30.0 (*)
+Γöé   Γöé       Γöé   Γöé   Γöé           ΓööΓöÇΓöÇ webbrowser v1.2.4
+Γöé   Γöé       Γöé   Γöé   Γöé               ΓööΓöÇΓöÇ i-slint-backend-winit v1.17.1 (*)
+Γöé   Γöé       Γöé   Γöé   ΓööΓöÇΓöÇ parley v0.10.0 (*)
+Γöé   Γöé       Γöé   Γö£ΓöÇΓöÇ icu_properties v2.3.0
+Γöé   Γöé       Γöé   Γöé   Γö£ΓöÇΓöÇ idna_adapter v1.2.2 (*)
+Γöé   Γöé       Γöé   Γöé   Γö£ΓöÇΓöÇ parley v0.10.0 (*)
+Γöé   Γöé       Γöé   Γöé   ΓööΓöÇΓöÇ parley_data v0.10.0
+Γöé   Γöé       Γöé   Γöé       ΓööΓöÇΓöÇ parley v0.10.0 (*)
+Γöé   Γöé       Γöé   ΓööΓöÇΓöÇ icu_segmenter v2.3.0
+Γöé   Γöé       Γöé       ΓööΓöÇΓöÇ parley v0.10.0 (*)
+Γöé   Γöé       Γö£ΓöÇΓöÇ icu_provider v2.3.1
+Γöé   Γöé       Γöé   Γö£ΓöÇΓöÇ i-slint-common v1.17.1 (*)
+Γöé   Γöé       Γöé   Γö£ΓöÇΓöÇ icu_decimal v2.3.0
+Γöé   Γöé       Γöé   Γöé   ΓööΓöÇΓöÇ i-slint-common v1.17.1 (*)
+Γöé   Γöé       Γöé   Γö£ΓöÇΓöÇ icu_locale_fallback v2.3.0
+Γöé   Γöé       Γöé   Γöé   Γö£ΓöÇΓöÇ icu_decimal v2.3.0 (*)
+Γöé   Γöé       Γöé   Γöé   ΓööΓöÇΓöÇ icu_segmenter v2.3.0 (*)
+Γöé   Γöé       Γöé   Γö£ΓöÇΓöÇ icu_normalizer v2.3.0 (*)
+Γöé   Γöé       Γöé   Γö£ΓöÇΓöÇ icu_properties v2.3.0 (*)
+Γöé   Γöé       Γöé   ΓööΓöÇΓöÇ icu_segmenter v2.3.0 (*)
+Γöé   Γöé       Γö£ΓöÇΓöÇ zerotrie v0.2.5
+Γöé   Γöé       Γöé   Γö£ΓöÇΓöÇ icu_properties v2.3.0 (*)
+Γöé   Γöé       Γöé   ΓööΓöÇΓöÇ icu_provider v2.3.1 (*)
+Γöé   Γöé       ΓööΓöÇΓöÇ zerovec v0.11.8
+Γöé   Γöé           Γö£ΓöÇΓöÇ icu_collections v2.3.0 (*)
+Γöé   Γöé           Γö£ΓöÇΓöÇ icu_decimal v2.3.0 (*)
+Γöé   Γöé           Γö£ΓöÇΓöÇ icu_locale_core v2.3.0
+Γöé   Γöé           Γöé   Γö£ΓöÇΓöÇ i-slint-common v1.17.1 (*)
+Γöé   Γöé           Γöé   Γö£ΓöÇΓöÇ icu_decimal v2.3.0 (*)
+Γöé   Γöé           Γöé   Γö£ΓöÇΓöÇ icu_locale_fallback v2.3.0 (*)
+Γöé   Γöé           Γöé   Γö£ΓöÇΓöÇ icu_properties v2.3.0 (*)
+Γöé   Γöé           Γöé   ΓööΓöÇΓöÇ icu_provider v2.3.1 (*)
+Γöé   Γöé           Γö£ΓöÇΓöÇ icu_locale_fallback v2.3.0 (*)
+Γöé   Γöé           Γö£ΓöÇΓöÇ icu_normalizer v2.3.0 (*)
+Γöé   Γöé           Γö£ΓöÇΓöÇ icu_properties v2.3.0 (*)
+Γöé   Γöé           Γö£ΓöÇΓöÇ icu_provider v2.3.1 (*)
+Γöé   Γöé           Γö£ΓöÇΓöÇ icu_segmenter v2.3.0 (*)
+Γöé   Γöé           Γö£ΓöÇΓöÇ potential_utf v0.1.6
+Γöé   Γöé           Γöé   Γö£ΓöÇΓöÇ icu_collections v2.3.0 (*)
+Γöé   Γöé           Γöé   Γö£ΓöÇΓöÇ icu_locale_fallback v2.3.0 (*)
+Γöé   Γöé           Γöé   ΓööΓöÇΓöÇ icu_segmenter v2.3.0 (*)
+Γöé   Γöé           ΓööΓöÇΓöÇ tinystr v0.8.4
+Γöé   Γöé               Γö£ΓöÇΓöÇ icu_locale_core v2.3.0 (*)
+Γöé   Γöé               ΓööΓöÇΓöÇ icu_locale_fallback v2.3.0 (*)
+Γöé   ΓööΓöÇΓöÇ zerofrom-derive v0.1.7 (proc-macro)
+Γöé       Γö£ΓöÇΓöÇ zerofrom v0.1.8
+Γöé       Γöé   Γö£ΓöÇΓöÇ icu_collections v2.3.0 (*)
+Γöé       Γöé   Γö£ΓöÇΓöÇ icu_provider v2.3.1 (*)
+Γöé       Γöé   Γö£ΓöÇΓöÇ yoke v0.8.3 (*)
+Γöé       Γöé   Γö£ΓöÇΓöÇ zerotrie v0.2.5 (*)
+Γöé       Γöé   ΓööΓöÇΓöÇ zerovec v0.11.8 (*)
+Γöé       ΓööΓöÇΓöÇ zerofrom v0.1.8
+Γöé           Γö£ΓöÇΓöÇ icu_collections v2.3.0 (*)
+Γöé           Γö£ΓöÇΓöÇ icu_provider v2.3.1 (*)
+Γöé           Γö£ΓöÇΓöÇ yoke v0.8.3 (*)
+Γöé           Γö£ΓöÇΓöÇ zerotrie v0.2.5 (*)
+Γöé           ΓööΓöÇΓöÇ zerovec v0.11.8 (*)
+Γö£ΓöÇΓöÇ vtable-macro v0.4.0 (proc-macro)
+Γöé   ΓööΓöÇΓöÇ vtable v0.4.0
+Γöé       Γö£ΓöÇΓöÇ i-slint-backend-testing v1.17.1 (*)
+Γöé       Γö£ΓöÇΓöÇ i-slint-backend-winit v1.17.1 (*)
+Γöé       Γö£ΓöÇΓöÇ i-slint-core v1.17.1 (*)
+Γöé       ΓööΓöÇΓöÇ slint v1.17.1 (*)
+Γö£ΓöÇΓöÇ windows-implement v0.60.2 (proc-macro)
+Γöé   Γö£ΓöÇΓöÇ windows-core v0.62.2
+Γöé   Γöé   Γö£ΓöÇΓöÇ fontique v0.10.0 (*)
+Γöé   Γöé   Γö£ΓöÇΓöÇ windows v0.62.2
+Γöé   Γöé   Γöé   ΓööΓöÇΓöÇ fontique v0.10.0 (*)
+Γöé   Γöé   Γö£ΓöÇΓöÇ windows-collections v0.3.2
+Γöé   Γöé   Γöé   ΓööΓöÇΓöÇ windows v0.62.2 (*)
+Γöé   Γöé   Γö£ΓöÇΓöÇ windows-future v0.3.2
+Γöé   Γöé   Γöé   ΓööΓöÇΓöÇ windows v0.62.2 (*)
+Γöé   Γöé   ΓööΓöÇΓöÇ windows-numerics v0.3.1
+Γöé   Γöé       ΓööΓöÇΓöÇ windows v0.62.2 (*)
+Γöé   ΓööΓöÇΓöÇ windows-core v0.62.2
+Γöé       Γö£ΓöÇΓöÇ accesskit_windows v0.34.0 (*)
+Γöé       Γö£ΓöÇΓöÇ fontique v0.10.0 (*)
+Γöé       Γö£ΓöÇΓöÇ windows v0.62.2
+Γöé       Γöé   Γö£ΓöÇΓöÇ accesskit_windows v0.34.0 (*)
+Γöé       Γöé   Γö£ΓöÇΓöÇ fontique v0.10.0 (*)
+Γöé       Γöé   Γö£ΓöÇΓöÇ i-slint-backend-winit v1.17.1 (*)
+Γöé       Γöé   ΓööΓöÇΓöÇ i-slint-core v1.17.1 (*)
+Γöé       Γö£ΓöÇΓöÇ windows-collections v0.3.2
+Γöé       Γöé   ΓööΓöÇΓöÇ windows v0.62.2 (*)
+Γöé       Γö£ΓöÇΓöÇ windows-future v0.3.2
+Γöé       Γöé   ΓööΓöÇΓöÇ windows v0.62.2 (*)
+Γöé       ΓööΓöÇΓöÇ windows-numerics v0.3.1
+Γöé           ΓööΓöÇΓöÇ windows v0.62.2 (*)
+Γö£ΓöÇΓöÇ windows-interface v0.59.3 (proc-macro)
+Γöé   Γö£ΓöÇΓöÇ windows-core v0.62.2 (*)
+Γöé   ΓööΓöÇΓöÇ windows-core v0.62.2 (*)
+Γö£ΓöÇΓöÇ yoke-derive v0.8.2 (proc-macro) (*)
+Γö£ΓöÇΓöÇ zerocopy-derive v0.8.56 (proc-macro)
+Γöé   ΓööΓöÇΓöÇ zerocopy v0.8.56
+Γöé       ΓööΓöÇΓöÇ half v2.7.1
+Γöé           Γö£ΓöÇΓöÇ exr v1.74.2 (*)
+Γöé           ΓööΓöÇΓöÇ tiff v0.11.3 (*)
+ΓööΓöÇΓöÇ zerofrom-derive v0.1.7 (proc-macro) (*)
+
+syn v3.0.5
+Γö£ΓöÇΓöÇ auto_enums v0.8.10 (proc-macro)
+Γöé   ΓööΓöÇΓöÇ i-slint-core v1.17.1 (*)
+Γö£ΓöÇΓöÇ bytemuck_derive v1.12.0 (proc-macro)
+Γöé   Γö£ΓöÇΓöÇ bytemuck v1.25.2 (*)
+Γöé   ΓööΓöÇΓöÇ bytemuck v1.25.2 (*)
+Γö£ΓöÇΓöÇ const-field-offset-macro v0.2.1 (proc-macro)
+Γöé   ΓööΓöÇΓöÇ const-field-offset v0.2.1
+Γöé       Γö£ΓöÇΓöÇ i-slint-core v1.17.1 (*)
+Γöé       Γö£ΓöÇΓöÇ i-slint-renderer-femtovg v1.17.1 (*)
+Γöé       Γö£ΓöÇΓöÇ slint v1.17.1 (*)
+Γöé       ΓööΓöÇΓöÇ vtable v0.4.0 (*)
+Γö£ΓöÇΓöÇ derive_utils v0.16.0
+Γöé   ΓööΓöÇΓöÇ auto_enums v0.8.10 (proc-macro) (*)
+Γö£ΓöÇΓöÇ displaydoc v0.2.7 (proc-macro)
+Γöé   Γö£ΓöÇΓöÇ fixed_decimal v0.7.2
+Γöé   Γöé   ΓööΓöÇΓöÇ icu_decimal v2.3.0 (*)
+Γöé   Γö£ΓöÇΓöÇ fixed_decimal v0.7.2
+Γöé   Γöé   ΓööΓöÇΓöÇ icu_decimal v2.3.0 (*)
+Γöé   Γö£ΓöÇΓöÇ icu_collections v2.3.0 (*)
+Γöé   Γö£ΓöÇΓöÇ icu_collections v2.3.0 (*)
+Γöé   Γö£ΓöÇΓöÇ icu_decimal v2.3.0 (*)
+Γöé   Γö£ΓöÇΓöÇ icu_decimal v2.3.0 (*)
+Γöé   Γö£ΓöÇΓöÇ icu_locale_core v2.3.0 (*)
+Γöé   Γö£ΓöÇΓöÇ icu_locale_core v2.3.0 (*)
+Γöé   Γö£ΓöÇΓöÇ icu_properties v2.3.0 (*)
+Γöé   Γö£ΓöÇΓöÇ icu_properties v2.3.0 (*)
+Γöé   Γö£ΓöÇΓöÇ icu_provider v2.3.1 (*)
+Γöé   Γö£ΓöÇΓöÇ icu_provider v2.3.1 (*)
+Γöé   Γö£ΓöÇΓöÇ tinystr v0.8.4 (*)
+Γöé   Γö£ΓöÇΓöÇ tinystr v0.8.4 (*)
+Γöé   Γö£ΓöÇΓöÇ zerotrie v0.2.5 (*)
+Γöé   ΓööΓöÇΓöÇ zerotrie v0.2.5 (*)
+Γö£ΓöÇΓöÇ serde_derive v1.0.229 (proc-macro)
+Γöé   ΓööΓöÇΓöÇ serde v1.0.229 (*)
+Γö£ΓöÇΓöÇ thiserror-impl v2.0.20 (proc-macro)
+Γöé   Γö£ΓöÇΓöÇ thiserror v2.0.20
+Γöé   Γöé   Γö£ΓöÇΓöÇ av-scenechange v0.14.1 (*)
+Γöé   Γöé   Γö£ΓöÇΓöÇ lyon_extra v1.1.0 (*)
+Γöé   Γöé   ΓööΓöÇΓöÇ rav1e v0.8.1 (*)
+Γöé   ΓööΓöÇΓöÇ thiserror v2.0.20
+Γöé       Γö£ΓöÇΓöÇ lyon_extra v1.1.0 (*)
+Γöé       Γö£ΓöÇΓöÇ muda v0.19.3 (*)
+Γöé       ΓööΓöÇΓöÇ tungstenite v0.30.0 (*)
+ΓööΓöÇΓöÇ zerovec-derive v0.11.6 (proc-macro)
+    Γö£ΓöÇΓöÇ zerovec v0.11.8 (*)
+    ΓööΓöÇΓöÇ zerovec v0.11.8 (*)
+
+webpki-roots v0.26.11
+ΓööΓöÇΓöÇ tungstenite v0.30.0 (*)
+
+webpki-roots v1.0.9
+ΓööΓöÇΓöÇ webpki-roots v0.26.11 (*)
+
+windows v0.62.2 (*)
+
+windows v0.62.2 (*)
+
+windows-sys v0.52.0
+Γö£ΓöÇΓöÇ glutin v0.32.3 (*)
+Γö£ΓöÇΓöÇ glutin_egl_sys v0.7.1
+Γöé   ΓööΓöÇΓöÇ glutin v0.32.3 (*)
+ΓööΓöÇΓöÇ winit v0.30.13 (*)
+
+windows-sys v0.61.2
+Γö£ΓöÇΓöÇ muda v0.19.3 (*)
+Γö£ΓöÇΓöÇ softbuffer v0.4.8
+Γöé   ΓööΓöÇΓöÇ i-slint-backend-winit v1.17.1 (*)
+ΓööΓöÇΓöÇ windows-native-keyring-store v1.1.0
+    ΓööΓöÇΓöÇ keyring v4.2.0
+        ΓööΓöÇΓöÇ vayren-remote-client v0.1.0 (C:\Users\visha\Desktop\vayren-core\crates\vayren-remote-client) (*)

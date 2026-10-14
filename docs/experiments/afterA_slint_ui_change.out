@@ -1,0 +1,10 @@
+﻿cargo :    Compiling vayren-shell v0.1.0 (C:\Users\visha\Desktop\vayren-core\crates\vayren-shell)
+At line:1 char:1
++ cargo build --release -p vayren-shell --features packaged-remote --ti ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling va...s\vayren-shell):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+      Timing report saved to 
+C:\Users\visha\Desktop\vayren-core\target\cargo-timings\cargo-timing-20261013T230225143Z-dea4fd45c5a13300.html
+    Finished `release` profile [optimized] target(s) in 57.54s

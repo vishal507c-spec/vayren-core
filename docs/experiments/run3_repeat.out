@@ -1,0 +1,7 @@
+﻿cargo :     Finished `release` profile [optimized] target(s) in 1.44s
+At line:1 char:1
++ cargo build --release -p vayren-shell --features packaged-remote *>&1 ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (    Finished `r...get(s) in 1.44s:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 

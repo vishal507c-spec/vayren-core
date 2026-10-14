@@ -437,6 +437,29 @@ class LiveTradingService:
         """Whether explicit operator consent has been given."""
         return bool(self._confirmed_live_at)
 
+    def _bind_runtime_provider(self) -> None:
+        """Publish LIVE runtime facts to the broker manager (read-only).
+
+        The manager used to report `live_armed=False, strategy_running=False`
+        as hardcoded literals, so an armed, running LIVE session rendered as
+        disarmed. It must never INFER either fact: consent comes only from
+        `is_live_confirmed()` and the session state only from `_status`.
+        """
+        if self._broker_manager is None:
+            return
+        setter = getattr(self._broker_manager, "set_runtime_provider", None)
+        if callable(setter):
+            setter(self._runtime_state)
+
+    def _runtime_state(self) -> dict[str, Any]:
+        """Authoritative LIVE arming + session facts for status projections."""
+        return {
+            "live_armed": bool(self.is_live_confirmed()),
+            "strategy_running": self._status == "RUNNING",
+            "session_status": self._status,
+            "consent_confirmed_at": str(self._confirmed_live_at or ""),
+        }
+
     # ── catalog (Strategy Lab store + watchlist universe, never copied) ──
 
     def available_strategies(self) -> tuple[str, ...]:
@@ -803,6 +826,7 @@ class LiveTradingService:
         """
         self._broker_manager = broker_manager
         self._selection = selection
+        self._bind_runtime_provider()
         key = self._broker_key()
         if key != self._last_broker_key:
             self._last_broker_key = key
@@ -1690,6 +1714,12 @@ class LiveTradingService:
                 else ("NO DATA" if not quotes else "STOPPED")
             )
         )
+        # A live tick stamp exists only when the venue feed actually
+        # delivered one. Nothing in this layer observes a tick clock, so the
+        # honest answer is "not observed" - never the current time, never a
+        # constant.
+        md_last_tick = ""
+        md_freshness_s: float | None = None
 
         snap = {
             "mode": self._config.mode,
@@ -1712,8 +1742,13 @@ class LiveTradingService:
                 "exchange": "NSE Cash",
                 "timeframe": self._config.timeframe or "15s",
                 "subscribed_symbols": len(universe),
-                "last_tick_time": now_time,
-                "freshness_age_s": 0.4 if running else None,
+                # Real venue-tick facts only. These used to be
+                # `now_time` / a hardcoded `0.4`, which reported a live
+                # freshness the feed had not proven; with no tick timestamp
+                # observed they stay empty rather than invented.
+                "last_tick_time": md_last_tick,
+                "freshness_age_s": md_freshness_s,
+                "price_source": "candle_store",
             },
             "risk_engine": {
                 "raw_capital": self._risk_engine.raw_capital,
@@ -2277,7 +2312,6 @@ class LiveTradingService:
                 with contextlib.suppress(Exception):
                     reader.refresh()
         out: list[dict[str, Any]] = []
-        now_time = _utcnow_iso().split("T")[1][:8] if "T" in _utcnow_iso() else ""
         for symbol in listed:
             clean = _clean_symbol(symbol)
             row = quotes.get(clean)
@@ -2308,7 +2342,16 @@ class LiveTradingService:
             planned_risk = None
             risk_util = None
             signal = "--"
-            last_update = now_time if price is not None else ""
+            # `last_update` is the CANDLE'S OWN stamp, never the current
+            # clock. These prices come from the local `<SYMBOL>.db` tail, so
+            # a row can be hours old; stamping it with `now_time` labelled a
+            # previous-session close as a live tick. `stale`/`price_source`
+            # keep that explicit for the UI instead of implied by a clock.
+            source_stamp = str(getattr(row, "as_of", "") or "") if row is not None else ""
+            last_update = source_stamp
+            price_source = "none"
+            stale = True
+            price_age_s: float | None = None
 
             # Reference levels, entry and stop come from REAL state only.
             #
@@ -2387,6 +2430,21 @@ class LiveTradingService:
                 if symbol in stop_levels:
                     stop_price = round(float(stop_levels[symbol]), 2)
 
+            if price is not None:
+                price_source = "candle_store"
+                stale = True
+                # Same parser the store uses, so the age is measured against
+                # the store's own format instead of a second guess at it.
+                with contextlib.suppress(Exception):
+                    from app.services.market_data_service import _parse_stamp
+
+                    moment = _parse_stamp(source_stamp)
+                    if moment is not None:
+                        # The store stamp is naive exchange time; compare it as
+                        # wall-clock age so a day-old close cannot read "fresh".
+                        age = (datetime.now() - moment).total_seconds()
+                        price_age_s = round(age, 1) if age >= 0 else None
+
             out.append(
                 {
                     "symbol": symbol,
@@ -2395,6 +2453,9 @@ class LiveTradingService:
                     "change_pct": change,
                     "status": status,
                     "watchlist_status": watchlist_status,
+                    "price_source": price_source,
+                    "stale": stale,
+                    "price_age_s": price_age_s,
                     "ref_high": ref_high,
                     "ref_low": ref_low,
                     "break_low": break_low,
@@ -2666,12 +2727,27 @@ class LiveTradingService:
             available = sum(1 for q in quotes if q.get("status") == "AVAILABLE")
             missing = sum(1 for q in quotes if q.get("status") == "NOT FOUND")
             nodata = len(quotes) - available - missing
+            # These counts are LOCAL CANDLE-STORE coverage (a `<SYMBOL>.db`
+            # tail read), NOT venue WebSocket delivery. Say so, and report the
+            # live feed separately, so "1 available" can never be mistaken for
+            # one streaming symbol.
+            store_reason = (
+                f"candle store {available}/{len(quotes)}"
+                + (f", {missing} not found" if missing else "")
+                + (f", {nodata} without data" if nodata else "")
+            )
+            live_feed = str(snap.get("feed", "none") or "none")
+            feed_label = {
+                "live": "venue feed connected (no tick stamp observed)",
+                "local": "local tail only",
+            }.get(live_feed, "no live feed")
+            reason = f"{store_reason}; {feed_label}"
             if not missing and not nodata:
                 gates.append(
                     {
                         "name": "Market Data Streaming",
                         "status": "READY",
-                        "reason": f"{available} symbols with quotes",
+                        "reason": reason,
                     }
                 )
             else:
@@ -2679,9 +2755,7 @@ class LiveTradingService:
                     {
                         "name": "Market Data Streaming",
                         "status": "NOT READY",
-                        "reason": (
-                            f"{available} available, {missing} not found, {nodata} without data"
-                        ),
+                        "reason": reason,
                     }
                 )
         strategy_state = snap.get("strategy") or {}

@@ -671,9 +671,97 @@ def _live_action(
 
                 service._quotes_reader = MarketDataService(data_dir)
                 service._quotes_reader.refresh()
+            # The same staleness had a second cache behind it: validate() keys
+            # its verdict on the config tuple, which carries no candle-store
+            # state, so a "no market data for <symbol>" blocker outlived the
+            # very sync that satisfied it and START showed it as current. Only
+            # bars the venue actually stored may retire that verdict - a FAILED
+            # or empty sync leaves every blocker exactly as it found them, so a
+            # sync can never imply data it did not fetch.
+            if int(report.get("written_total") or 0) > 0:
+                service.invalidate_validation_cache()
             snapshot = _trading_service_snapshot(data_dir, strategy_dir, broker_manager)
             snapshot["action_note"] = report["detail"]
             snapshot["candle_sync"] = report
+            return snapshot
+        elif name == "order_test":
+            # Operator-authorized verification of the LIVE order path. This is
+            # deliberately NOT the strategy: it never starts, arms or consults
+            # the session, so it cannot emit a strategy signal. It is still a
+            # real-money action and therefore refuses unless LIVE consent has
+            # already been granted through the ordinary ceremony - the test
+            # path never grants its own consent and never bypasses it.
+            from app.services.order_path_test_service import submit_buy, submit_exit
+
+            configured = tuple(service.config.symbols or ())
+            side = str(action.get("side") or "buy").strip().lower()
+            symbol = str(action.get("symbol") or (configured[0] if configured else "")).strip()
+            ledger = Path(data_dir) / "live" / "order_path_test.json"
+
+            def _refuse(note: str) -> dict[str, Any]:
+                snap = _trading_service_snapshot(data_dir, strategy_dir, broker_manager)
+                snap["action_note"] = note
+                return snap
+
+            if side not in ("buy", "exit"):
+                return _refuse(f"order test side must be 'buy' or 'exit', got {side!r}")
+            if symbol not in configured:
+                return _refuse(
+                    f"symbol {symbol or '(none)'} is not the configured universe {list(configured)}"
+                )
+            if str(getattr(service, "status", "")).upper() == "RUNNING":
+                return _refuse("order test refused - a strategy session is RUNNING; stop it first")
+
+            service._ensure_live_venues()
+            state = (broker_manager.state(service.broker_name()) or {}) if broker_manager else {}
+            adapter = state.get("adapter")
+            if adapter is None or not hasattr(adapter, "place_order"):
+                return _refuse("no trading-capable broker adapter; connect the broker first")
+
+            if side == "buy":
+                # Consent is NOT bypassed: it must already exist from the
+                # operator's own confirm_live ceremony.
+                if not service.is_live_confirmed():
+                    return _refuse("order test refused - LIVE consent has not been granted")
+                quantity = _opt_float(action.get("quantity"))
+                wanted = service.config.quantity if quantity is None else quantity
+                if float(wanted) != float(service.config.quantity):
+                    return _refuse(
+                        f"order test uses the configured quantity {service.config.quantity}"
+                    )
+                stop = _opt_float(action.get("stop_price"))
+                if stop is None:
+                    return _refuse("order test requires an explicit stop_price")
+                result = submit_buy(
+                    adapter=adapter,
+                    symbol=symbol,
+                    quantity=float(wanted),
+                    stop_price=float(stop),
+                    ledger_path=ledger,
+                    authorize=bool(action.get("authorize")),
+                )
+            else:
+                result = submit_exit(
+                    adapter=adapter,
+                    symbol=symbol,
+                    ledger_path=ledger,
+                )
+
+            snapshot = _trading_service_snapshot(data_dir, strategy_dir, broker_manager)
+            snapshot["action_note"] = result.detail
+            snapshot["order_test"] = {
+                "outcome": result.outcome,
+                "detail": result.detail,
+                "symbol": result.symbol,
+                "side": result.side,
+                "quantity": result.quantity,
+                "client_order_id": result.client_order_id,
+                "broker_order_id": result.broker_order_id,
+                "broker_status": result.broker_status,
+                "position_qty": result.position_qty,
+                "verified_closed": result.verified_closed,
+                "retryable": result.retryable,
+            }
             return snapshot
         else:
             return _live_unavailable(f"unknown live action {name!r}")

@@ -34,6 +34,15 @@ pub use research_state::{ResearchRun, ResearchState};
 /// Headless responsive harness (separate Slint compilation unit so the
 /// harness Window gets Rust bindings). Used by tests/render_matrix.rs for
 /// pixel renders; never instantiated in production.
+///
+/// `cfg(test)` is mandatory, not cosmetic: this module `include!`s the
+/// generated `research_harness.rs`, which is ~8.5 MB of Rust (~90k lines) on
+/// top of the ~19 MB `app.rs` that `slint::include_modules!()` already pulls
+/// in. Compiling it into the production lib added ~30% to the crate's
+/// frontend and codegen for something nothing but tests ever instantiates.
+/// Integration tests get the same module locally (they cannot see
+/// `cfg(test)` items across the rlib boundary).
+#[cfg(test)]
 pub mod research_harness_ui {
     #![allow(dead_code)]
     include!(concat!(env!("OUT_DIR"), "/research_harness.rs"));

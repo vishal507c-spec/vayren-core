@@ -73,6 +73,11 @@ MUTATING_ACTIONS = (
     "revoke_session",
     "refresh_capital",
     "sync_candles",
+    # Operator-authorized verification of the LIVE order path. Mutating by
+    # definition: it can place a real order. The backend additionally refuses
+    # it without prior LIVE consent and without an explicit authorize flag, so
+    # the transport exposes the action without ever granting the permission.
+    "order_test",
 )
 
 #: Event channels a client may subscribe to (snapshot sections + event stream).
@@ -722,6 +727,16 @@ class RemoteServer:
             allowed = ("days", "timeframe")
             return {
                 "action": "sync_candles",
+                **{k: v for k, v in args.items() if k in allowed},
+            }
+        if action == "order_test":
+            # Only the four inputs the backend acts on are forwarded. The
+            # instrument must already be the configured universe and the
+            # quantity must equal the configured one, so a client cannot widen
+            # the test beyond what the operator configured.
+            allowed = ("side", "symbol", "quantity", "stop_price", "authorize")
+            return {
+                "action": "order_test",
                 **{k: v for k, v in args.items() if k in allowed},
             }
         return None

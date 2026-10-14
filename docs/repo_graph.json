@@ -231,7 +231,8 @@
       "sources": [
         "src/app/services/broker_manager.py",
         "src/app/services/broker_selection_service.py",
-        "src/app/services/live_trading_service.py"
+        "src/app/services/live_trading_service.py",
+        "src/app/services/order_path_test_service.py"
       ],
       "to": "src/broker"
     },
@@ -283,7 +284,8 @@
       "kind": "actual",
       "sources": [
         "src/app/services/control_plane_bridge.py",
-        "src/app/services/live_trading_service.py"
+        "src/app/services/live_trading_service.py",
+        "src/app/services/order_path_test_service.py"
       ],
       "to": "src/execution"
     },
@@ -309,7 +311,8 @@
       "from": "src/app/services",
       "kind": "actual",
       "sources": [
-        "src/app/services/live_trading_service.py"
+        "src/app/services/live_trading_service.py",
+        "src/app/services/order_path_test_service.py"
       ],
       "to": "src/risk"
     },
@@ -1251,7 +1254,7 @@
       "to": "src/core/native"
     }
   ],
-  "entity_count": 5858,
+  "entity_count": 5945,
   "files": [
     {
       "domain": "CORE",
@@ -2524,6 +2527,16 @@
       "retention_state": null
     },
     {
+      "domain": "APP_COMPOSITION",
+      "is_test": false,
+      "language": "PYTHON",
+      "module": "src/app/services",
+      "owner": "PYTHON_APP",
+      "owner_source": "policy",
+      "path": "src/app/services/order_path_test_service.py",
+      "retention_state": null
+    },
+    {
       "domain": "RESEARCH",
       "is_test": false,
       "language": "PYTHON",
@@ -2780,6 +2793,16 @@
       "module": "src/app",
       "owner": "route:app-composition",
       "owner_source": "route",
+      "path": "src/app/tests/test_order_path_test.py",
+      "retention_state": null
+    },
+    {
+      "domain": "APP_COMPOSITION",
+      "is_test": true,
+      "language": "PYTHON",
+      "module": "src/app",
+      "owner": "route:app-composition",
+      "owner_source": "route",
       "path": "src/app/tests/test_phase4_dashboard.py",
       "retention_state": null
     },
@@ -2800,6 +2823,16 @@
       "module": "src/app",
       "owner": "route:app-composition",
       "owner_source": "route",
+      "path": "src/app/tests/test_safety_reporting.py",
+      "retention_state": null
+    },
+    {
+      "domain": "APP_COMPOSITION",
+      "is_test": true,
+      "language": "PYTHON",
+      "module": "src/app",
+      "owner": "route:app-composition",
+      "owner_source": "route",
       "path": "src/app/tests/test_set_default.py",
       "retention_state": null
     },
@@ -2811,6 +2844,16 @@
       "owner": "route:app-composition",
       "owner_source": "route",
       "path": "src/app/tests/test_strategy_universe_phase1.py",
+      "retention_state": null
+    },
+    {
+      "domain": "APP_COMPOSITION",
+      "is_test": true,
+      "language": "PYTHON",
+      "module": "src/app",
+      "owner": "route:app-composition",
+      "owner_source": "route",
+      "path": "src/app/tests/test_sync_candles_validation_cache.py",
       "retention_state": null
     },
     {
@@ -6090,6 +6133,16 @@
       "module": "tools",
       "owner": "tools",
       "owner_source": "synthetic",
+      "path": "tools/parse_timings.py",
+      "retention_state": null
+    },
+    {
+      "domain": "TOOLING",
+      "is_test": false,
+      "language": "PYTHON",
+      "module": "tools",
+      "owner": "tools",
+      "owner_source": "synthetic",
       "path": "tools/patch_surface.py",
       "retention_state": null
     },
@@ -6384,7 +6437,7 @@
       "retention_state": null
     }
   ],
-  "inputs_hash": "e3d56ca9d968d18455a3029db1046e74e6ef52229a328b578adcd852ce68f652",
+  "inputs_hash": "1b519b49309484445be656cc6eee7084772c71f624c4b72939372330f2d2d8ea",
   "languages": [
     {
       "id": "RUST"
@@ -6748,10 +6801,13 @@
         "src/app/tests/test_live_strategy_resolution.py",
         "src/app/tests/test_live_strategy_sync_and_watchlist.py",
         "src/app/tests/test_market_data_service.py",
+        "src/app/tests/test_order_path_test.py",
         "src/app/tests/test_phase4_dashboard.py",
         "src/app/tests/test_progress.py",
+        "src/app/tests/test_safety_reporting.py",
         "src/app/tests/test_set_default.py",
-        "src/app/tests/test_strategy_universe_phase1.py"
+        "src/app/tests/test_strategy_universe_phase1.py",
+        "src/app/tests/test_sync_candles_validation_cache.py"
       ],
       "id": "src/app",
       "language": "PYTHON",
@@ -6798,6 +6854,7 @@
         "src/app/services/lab_universe_service.py",
         "src/app/services/live_trading_service.py",
         "src/app/services/market_data_service.py",
+        "src/app/services/order_path_test_service.py",
         "src/app/services/research_service.py",
         "src/app/services/trading_dashboard.py"
       ],
@@ -7551,6 +7608,7 @@
         "tools/forensics/tests/test_forensics.py",
         "tools/forensics/watcher.py",
         "tools/launch_native.py",
+        "tools/parse_timings.py",
         "tools/patch_surface.py",
         "tools/release.py",
         "tools/repo_graph.py",
@@ -7761,7 +7819,7 @@
       "required_language": "PYTHON"
     }
   ],
-  "relationship_count": 12981,
+  "relationship_count": 13367,
   "repository": {
     "name": "vayren-core",
     "root": "."
@@ -7779,7 +7837,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1829,
+      "line": 1917,
       "module": "src/app",
       "name": "_await_broker_settled",
       "public": false,
@@ -7832,7 +7890,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 921,
+      "line": 1009,
       "module": "src/app",
       "name": "_build_lab_library_rows",
       "public": false,
@@ -7901,7 +7959,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1806,
+      "line": 1894,
       "module": "src/app",
       "name": "_ensure_fyers_redirect",
       "public": false,
@@ -7918,7 +7976,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1088,
+      "line": 1176,
       "module": "src/app",
       "name": "_ensure_stdin_reader",
       "public": false,
@@ -7940,7 +7998,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1784,
+      "line": 1872,
       "module": "src/app",
       "name": "_handle_connect_broker",
       "public": false,
@@ -7961,7 +8019,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1862,
+      "line": 1950,
       "module": "src/app",
       "name": "_handle_disconnect_broker",
       "public": false,
@@ -7985,7 +8043,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1163,
+      "line": 1251,
       "module": "src/app",
       "name": "_lab_coverage",
       "public": false,
@@ -8008,7 +8066,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 908,
+      "line": 996,
       "module": "src/app",
       "name": "_lab_library_rows",
       "public": false,
@@ -8033,7 +8091,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1451,
+      "line": 1539,
       "module": "src/app",
       "name": "_lab_run",
       "public": false,
@@ -8052,7 +8110,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1396,
+      "line": 1484,
       "module": "src/app",
       "name": "_lab_saved_universe",
       "public": false,
@@ -8073,7 +8131,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1424,
+      "line": 1512,
       "module": "src/app",
       "name": "_lab_snapshot",
       "public": false,
@@ -8090,7 +8148,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1036,
+      "line": 1124,
       "module": "src/app",
       "name": "_lab_universe",
       "public": false,
@@ -8110,7 +8168,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1733,
+      "line": 1821,
       "module": "src/app",
       "name": "_lab_universe_result",
       "public": false,
@@ -8134,7 +8192,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1216,
+      "line": 1304,
       "module": "src/app",
       "name": "_lab_workspace",
       "public": false,
@@ -8152,7 +8210,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 875,
+      "line": 963,
       "module": "src/app",
       "name": "_library_signature",
       "public": false,
@@ -8177,7 +8235,9 @@
         "app.services.broker_selection_service:app_selection_store",
         "app.services.candle_sync_service:sync_candles",
         "app.services.live_trading_service:LiveConfigError",
-        "app.services.market_data_service:MarketDataService"
+        "app.services.market_data_service:MarketDataService",
+        "app.services.order_path_test_service:submit_buy",
+        "app.services.order_path_test_service:submit_exit"
       ],
       "dotted": "app.headless._live_action",
       "file": "src/app/headless.py",
@@ -8203,7 +8263,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 784,
+      "line": 872,
       "module": "src/app",
       "name": "_live_selection",
       "public": false,
@@ -8226,7 +8286,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 754,
+      "line": 842,
       "module": "src/app",
       "name": "_live_service",
       "public": false,
@@ -8243,7 +8303,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 734,
+      "line": 822,
       "module": "src/app",
       "name": "_live_session_running",
       "public": false,
@@ -8261,7 +8321,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 836,
+      "line": 924,
       "module": "src/app",
       "name": "_live_unavailable",
       "public": false,
@@ -8339,7 +8399,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1108,
+      "line": 1196,
       "module": "src/app",
       "name": "_next_line",
       "public": false,
@@ -8356,7 +8416,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 726,
+      "line": 814,
       "module": "src/app",
       "name": "_opt_bool",
       "public": false,
@@ -8373,7 +8433,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 717,
+      "line": 805,
       "module": "src/app",
       "name": "_opt_float",
       "public": false,
@@ -8390,7 +8450,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 710,
+      "line": 798,
       "module": "src/app",
       "name": "_opt_str",
       "public": false,
@@ -8409,7 +8469,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 865,
+      "line": 953,
       "module": "src/app",
       "name": "_portfolio_snapshot",
       "public": false,
@@ -8426,7 +8486,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1065,
+      "line": 1153,
       "module": "src/app",
       "name": "_progress_emitter",
       "public": false,
@@ -8445,7 +8505,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1117,
+      "line": 1205,
       "module": "src/app",
       "name": "_pump_while_running",
       "public": false,
@@ -8462,7 +8522,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1149,
+      "line": 1237,
       "module": "src/app",
       "name": "_requeue_deferred",
       "public": false,
@@ -8483,7 +8543,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1647,
+      "line": 1735,
       "module": "src/app",
       "name": "_research_snapshot",
       "public": false,
@@ -8504,7 +8564,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1017,
+      "line": 1105,
       "module": "src/app",
       "name": "_strategy_names",
       "public": false,
@@ -8555,7 +8615,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 797,
+      "line": 885,
       "module": "src/app",
       "name": "_trading_service_snapshot",
       "public": false,
@@ -8570,7 +8630,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1079,
+      "line": 1167,
       "module": "src/app",
       "name": "_watch_for_cancel",
       "public": false,
@@ -8588,7 +8648,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1771,
+      "line": 1859,
       "module": "src/app",
       "name": "_with_session_state",
       "public": false,
@@ -8606,7 +8666,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 2295,
+      "line": 2383,
       "module": "src/app",
       "name": "main_headless",
       "public": true,
@@ -8623,7 +8683,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1709,
+      "line": 1797,
       "module": "src/app",
       "name": "parse_headless_args",
       "public": true,
@@ -8668,7 +8728,7 @@
       "file": "src/app/headless.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1885,
+      "line": 1973,
       "module": "src/app",
       "name": "run_headless_backend",
       "public": true,
@@ -9138,6 +9198,9 @@
         "app.tests.test_live_broker_capital:test_refresh_capital_live_action_triggers_broker_manager",
         "app.tests.test_live_broker_capital:test_refresh_capital_never_claims_funds_it_could_not_read",
         "app.tests.test_live_broker_capital:test_refresh_capital_without_a_broker_says_so",
+        "app.tests.test_safety_reporting:test_runtime_state_defaults_to_false_without_a_provider",
+        "app.tests.test_safety_reporting:test_runtime_state_reads_a_registered_provider",
+        "app.tests.test_safety_reporting:test_runtime_state_swallows_provider_failures",
         "broker.tests.test_unified_session:_FakeBundle",
         "broker.tests.test_unified_session:_manager"
       ],
@@ -9219,7 +9282,7 @@
       "file": "src/app/services/broker_manager.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 1603,
+      "line": 1629,
       "module": "src/app/services",
       "name": "shared_manager",
       "public": true,
@@ -9362,7 +9425,8 @@
         "app.tests.test_candle_sync_service:test_stores_real_venue_rows",
         "app.tests.test_candle_sync_service:test_unsupported_timeframe_is_refused",
         "app.tests.test_candle_sync_service:test_window_is_the_requested_number_of_days",
-        "app.tests.test_candle_sync_service:test_without_a_session_nothing_is_stored"
+        "app.tests.test_candle_sync_service:test_without_a_session_nothing_is_stored",
+        "app.tests.test_sync_candles_validation_cache:_prime_store"
       ],
       "callers_complete": true,
       "calls": [
@@ -9754,6 +9818,10 @@
         "app.tests.test_live_strategy_sync_and_watchlist:test_5_order_safety_selection_never_starts_or_submits",
         "app.tests.test_live_strategy_sync_and_watchlist:test_8_watchlist_selection_subset_preserves_saved_universe",
         "app.tests.test_live_strategy_sync_and_watchlist:test_9_restore_config_auto_seeds_missing_universe_store",
+        "app.tests.test_safety_reporting:_market_data_gate",
+        "app.tests.test_safety_reporting:test_market_data_never_claims_a_fresh_tick_stamp",
+        "app.tests.test_safety_reporting:test_runtime_state_reads_consent_and_session_status",
+        "app.tests.test_safety_reporting:test_runtime_state_without_consent_never_fabricates_arming",
         "app.tests.test_strategy_universe_phase1:_service",
         "broker.tests.test_unified_session:test_14_failed_gate_prevents_live_arm",
         "broker.tests.test_unified_session:test_7_recovery_never_restores_live_consent",
@@ -9784,6 +9852,7 @@
         "app.services.live_trading_service:_utcnow_iso",
         "app.services.live_trading_service:format_duration",
         "app.services.market_data_service:MarketDataService",
+        "app.services.market_data_service:_parse_stamp",
         "broker.providers:ensure_live_venues",
         "broker.registry:default_registry",
         "broker.vocab:Domain",
@@ -9923,7 +9992,7 @@
       "file": "src/app/services/market_data_service.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 58,
+      "line": 65,
       "module": "src/app/services",
       "name": "DiscoveryReport",
       "public": true,
@@ -9979,7 +10048,11 @@
         "app.tests.test_market_data_service:test_quotes_and_ranges",
         "app.tests.test_market_data_service:test_timeframe_aggregation_uses_kernel",
         "app.tests.test_market_data_service:test_unknown_symbol_is_actionable",
-        "app.tests.test_market_data_service:test_unsupported_timeframe_is_actionable"
+        "app.tests.test_market_data_service:test_unsupported_timeframe_is_actionable",
+        "app.tests.test_safety_reporting:test_quote_change_pct_is_between_the_two_store_closes",
+        "app.tests.test_safety_reporting:test_quote_reports_the_store_candle_stamp_not_now",
+        "app.tests.test_safety_reporting:test_quote_without_a_store_reports_no_price_and_no_stamp",
+        "app.tests.test_safety_reporting:test_stale_candle_age_is_reported_not_hidden"
       ],
       "callers_complete": true,
       "calls": [
@@ -9996,7 +10069,7 @@
       "file": "src/app/services/market_data_service.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 168,
+      "line": 175,
       "module": "src/app/services",
       "name": "MarketDataService",
       "public": true,
@@ -10029,7 +10102,7 @@
       "file": "src/app/services/market_data_service.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 146,
+      "line": 153,
       "module": "src/app/services",
       "name": "_epoch",
       "public": false,
@@ -10046,7 +10119,7 @@
       "file": "src/app/services/market_data_service.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 133,
+      "line": 140,
       "module": "src/app/services",
       "name": "_format_stamp",
       "public": false,
@@ -10055,6 +10128,7 @@
     },
     {
       "called_by": [
+        "app.services.live_trading_service:LiveTradingService",
         "app.services.market_data_service:MarketDataService"
       ],
       "callers_complete": true,
@@ -10063,7 +10137,7 @@
       "file": "src/app/services/market_data_service.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 100,
+      "line": 107,
       "module": "src/app/services",
       "name": "_parse_stamp",
       "public": false,
@@ -10080,7 +10154,7 @@
       "file": "src/app/services/market_data_service.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 150,
+      "line": 157,
       "module": "src/app/services",
       "name": "_valid_ohlcv",
       "public": false,
@@ -10100,11 +10174,202 @@
       "file": "src/app/services/market_data_service.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 67,
+      "line": 74,
       "module": "src/app/services",
       "name": "resolve_data_dir",
       "public": true,
       "qualified": "app.services.market_data_service:resolve_data_dir",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.services.order_path_test_service:submit_buy",
+        "app.services.order_path_test_service:submit_exit"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "app.services.order_path_test_service.OrderTestResult",
+      "file": "src/app/services/order_path_test_service.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 82,
+      "module": "src/app/services",
+      "name": "OrderTestResult",
+      "public": true,
+      "qualified": "app.services.order_path_test_service:OrderTestResult",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.services.order_path_test_service:submit_buy",
+        "app.services.order_path_test_service:submit_exit"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "app.services.order_path_test_service._Ledger",
+      "file": "src/app/services/order_path_test_service.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 128,
+      "module": "src/app/services",
+      "name": "_Ledger",
+      "public": false,
+      "qualified": "app.services.order_path_test_service:_Ledger",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.services.order_path_test_service:submit_buy",
+        "app.services.order_path_test_service:submit_exit"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "app.services.order_path_test_service._order_by_tag",
+      "file": "src/app/services/order_path_test_service.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 202,
+      "module": "src/app/services",
+      "name": "_order_by_tag",
+      "public": false,
+      "qualified": "app.services.order_path_test_service:_order_by_tag",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.services.order_path_test_service:submit_buy"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "risk.engine:RiskEngine",
+        "risk.models:RiskPolicy",
+        "risk.models:RiskRequest",
+        "risk.sizing:BrokerCapital",
+        "risk.sizing:size_position"
+      ],
+      "dotted": "app.services.order_path_test_service._risk_approves",
+      "file": "src/app/services/order_path_test_service.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 213,
+      "module": "src/app/services",
+      "name": "_risk_approves",
+      "public": false,
+      "qualified": "app.services.order_path_test_service:_risk_approves",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.services.order_path_test_service:net_position_qty"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "app.services.order_path_test_service._venue_symbol",
+      "file": "src/app/services/order_path_test_service.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 173,
+      "module": "src/app/services",
+      "name": "_venue_symbol",
+      "public": false,
+      "qualified": "app.services.order_path_test_service:_venue_symbol",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.services.order_path_test_service:submit_buy",
+        "app.services.order_path_test_service:submit_exit",
+        "app.tests.test_order_path_test:test_authorized_buy_reaches_the_venue_exactly_once",
+        "app.tests.test_order_path_test:test_client_order_id_is_deterministic_within_an_ist_day",
+        "app.tests.test_order_path_test:test_second_buy_is_refused_before_any_venue_call",
+        "app.tests.test_order_path_test:test_unfilled_acceptance_is_not_reported_as_filled"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "app.services.order_path_test_service.client_order_id",
+      "file": "src/app/services/order_path_test_service.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 109,
+      "module": "src/app/services",
+      "name": "client_order_id",
+      "public": true,
+      "qualified": "app.services.order_path_test_service:client_order_id",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.services.order_path_test_service:submit_buy",
+        "app.services.order_path_test_service:submit_exit",
+        "app.tests.test_order_path_test:test_net_position_reads_alternate_quantity_keys",
+        "app.tests.test_order_path_test:test_net_position_reads_only_the_requested_symbol"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "app.services.order_path_test_service:_venue_symbol"
+      ],
+      "dotted": "app.services.order_path_test_service.net_position_qty",
+      "file": "src/app/services/order_path_test_service.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 178,
+      "module": "src/app/services",
+      "name": "net_position_qty",
+      "public": true,
+      "qualified": "app.services.order_path_test_service:net_position_qty",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.headless:_live_action",
+        "app.tests.test_order_path_test:_buy"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "app.services.order_path_test_service:OrderTestResult",
+        "app.services.order_path_test_service:_Ledger",
+        "app.services.order_path_test_service:_order_by_tag",
+        "app.services.order_path_test_service:_risk_approves",
+        "app.services.order_path_test_service:client_order_id",
+        "app.services.order_path_test_service:net_position_qty",
+        "broker.vocab:BrokerError",
+        "broker.vocab:ErrorCode",
+        "execution.models.order:OrderPlan"
+      ],
+      "dotted": "app.services.order_path_test_service.submit_buy",
+      "file": "src/app/services/order_path_test_service.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 277,
+      "module": "src/app/services",
+      "name": "submit_buy",
+      "public": true,
+      "qualified": "app.services.order_path_test_service:submit_buy",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.headless:_live_action",
+        "app.tests.test_order_path_test:_exit"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "app.services.order_path_test_service:OrderTestResult",
+        "app.services.order_path_test_service:_Ledger",
+        "app.services.order_path_test_service:_order_by_tag",
+        "app.services.order_path_test_service:client_order_id",
+        "app.services.order_path_test_service:net_position_qty",
+        "execution.models.order:OrderPlan"
+      ],
+      "dotted": "app.services.order_path_test_service.submit_exit",
+      "file": "src/app/services/order_path_test_service.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 432,
+      "module": "src/app/services",
+      "name": "submit_exit",
+      "public": true,
+      "qualified": "app.services.order_path_test_service:submit_exit",
       "tests": []
     },
     {
@@ -16071,6 +16336,772 @@
     },
     {
       "called_by": [
+        "app.tests.test_order_path_test:_buy",
+        "app.tests.test_order_path_test:_exit",
+        "app.tests.test_order_path_test:test_accepted_sell_with_open_position_is_not_called_closed",
+        "app.tests.test_order_path_test:test_allowance_is_consumed_even_when_submission_never_lands",
+        "app.tests.test_order_path_test:test_authorized_buy_reaches_the_venue_exactly_once",
+        "app.tests.test_order_path_test:test_exit_on_a_flat_position_sends_nothing",
+        "app.tests.test_order_path_test:test_exit_sell_that_fails_reports_the_open_position",
+        "app.tests.test_order_path_test:test_exit_verified_flat_from_the_broker_position_book",
+        "app.tests.test_order_path_test:test_missing_authorization_sends_nothing",
+        "app.tests.test_order_path_test:test_missing_live_price_blocks_the_order",
+        "app.tests.test_order_path_test:test_missing_stop_sends_nothing",
+        "app.tests.test_order_path_test:test_net_position_reads_alternate_quantity_keys",
+        "app.tests.test_order_path_test:test_net_position_reads_only_the_requested_symbol",
+        "app.tests.test_order_path_test:test_order_test_refused_for_a_symbol_outside_the_configured_universe",
+        "app.tests.test_order_path_test:test_order_test_refused_when_quantity_differs_from_configured",
+        "app.tests.test_order_path_test:test_order_test_refused_without_an_explicit_stop",
+        "app.tests.test_order_path_test:test_order_test_refused_without_explicit_authorize",
+        "app.tests.test_order_path_test:test_order_test_refused_without_live_consent",
+        "app.tests.test_order_path_test:test_order_test_refuses_an_unknown_side",
+        "app.tests.test_order_path_test:test_order_test_reports_its_result_shape",
+        "app.tests.test_order_path_test:test_second_buy_is_refused_before_any_venue_call",
+        "app.tests.test_order_path_test:test_transport_fault_is_uncertain_and_never_retried",
+        "app.tests.test_order_path_test:test_undersized_risk_budget_blocks_the_order",
+        "app.tests.test_order_path_test:test_unfilled_acceptance_is_not_reported_as_filled",
+        "app.tests.test_order_path_test:test_unknown_expiry_is_uncertain_not_rejected",
+        "app.tests.test_order_path_test:test_unreachable_position_book_never_claims_a_close",
+        "app.tests.test_order_path_test:test_venue_refusal_is_a_definite_rejection",
+        "app.tests.test_order_path_test:test_zero_funds_blocks_the_order"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "app.tests.test_order_path_test.FakeAdapter",
+      "file": "src/app/tests/test_order_path_test.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 57,
+      "module": "src/app",
+      "name": "FakeAdapter",
+      "public": true,
+      "qualified": "app.tests.test_order_path_test:FakeAdapter",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.tests.test_order_path_test:_order_test"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "app.tests.test_order_path_test.FakeManager",
+      "file": "src/app/tests/test_order_path_test.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 403,
+      "module": "src/app",
+      "name": "FakeManager",
+      "public": true,
+      "qualified": "app.tests.test_order_path_test:FakeManager",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.tests.test_order_path_test:test_allowance_is_consumed_even_when_submission_never_lands",
+        "app.tests.test_order_path_test:test_authorized_buy_reaches_the_venue_exactly_once",
+        "app.tests.test_order_path_test:test_missing_authorization_sends_nothing",
+        "app.tests.test_order_path_test:test_missing_live_price_blocks_the_order",
+        "app.tests.test_order_path_test:test_missing_stop_sends_nothing",
+        "app.tests.test_order_path_test:test_second_buy_is_refused_before_any_venue_call",
+        "app.tests.test_order_path_test:test_transport_fault_is_uncertain_and_never_retried",
+        "app.tests.test_order_path_test:test_undersized_risk_budget_blocks_the_order",
+        "app.tests.test_order_path_test:test_unfilled_acceptance_is_not_reported_as_filled",
+        "app.tests.test_order_path_test:test_unknown_expiry_is_uncertain_not_rejected",
+        "app.tests.test_order_path_test:test_venue_refusal_is_a_definite_rejection",
+        "app.tests.test_order_path_test:test_zero_funds_blocks_the_order"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "app.services.order_path_test_service:submit_buy",
+        "app.tests.test_order_path_test:FakeAdapter",
+        "app.tests.test_order_path_test:ledger"
+      ],
+      "dotted": "app.tests.test_order_path_test._buy",
+      "file": "src/app/tests/test_order_path_test.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 117,
+      "module": "src/app",
+      "name": "_buy",
+      "public": false,
+      "qualified": "app.tests.test_order_path_test:_buy",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.tests.test_order_path_test:test_order_test_refused_for_a_symbol_outside_the_configured_universe",
+        "app.tests.test_order_path_test:test_order_test_refused_when_quantity_differs_from_configured",
+        "app.tests.test_order_path_test:test_order_test_refused_without_an_explicit_stop",
+        "app.tests.test_order_path_test:test_order_test_refused_without_explicit_authorize",
+        "app.tests.test_order_path_test:test_order_test_refused_without_live_consent",
+        "app.tests.test_order_path_test:test_order_test_refuses_an_unknown_side",
+        "app.tests.test_order_path_test:test_order_test_reports_its_result_shape"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "app.tests.test_order_path_test._configured",
+      "file": "src/app/tests/test_order_path_test.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 427,
+      "module": "src/app",
+      "name": "_configured",
+      "public": false,
+      "qualified": "app.tests.test_order_path_test:_configured",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.tests.test_order_path_test:test_accepted_sell_with_open_position_is_not_called_closed",
+        "app.tests.test_order_path_test:test_exit_on_a_flat_position_sends_nothing",
+        "app.tests.test_order_path_test:test_exit_sell_that_fails_reports_the_open_position",
+        "app.tests.test_order_path_test:test_exit_verified_flat_from_the_broker_position_book",
+        "app.tests.test_order_path_test:test_unreachable_position_book_never_claims_a_close"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "app.services.order_path_test_service:submit_exit",
+        "app.tests.test_order_path_test:FakeAdapter",
+        "app.tests.test_order_path_test:ledger"
+      ],
+      "dotted": "app.tests.test_order_path_test._exit",
+      "file": "src/app/tests/test_order_path_test.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 261,
+      "module": "src/app",
+      "name": "_exit",
+      "public": false,
+      "qualified": "app.tests.test_order_path_test:_exit",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.tests.test_order_path_test:test_order_test_refused_for_a_symbol_outside_the_configured_universe",
+        "app.tests.test_order_path_test:test_order_test_refused_when_quantity_differs_from_configured",
+        "app.tests.test_order_path_test:test_order_test_refused_without_an_explicit_stop",
+        "app.tests.test_order_path_test:test_order_test_refused_without_explicit_authorize",
+        "app.tests.test_order_path_test:test_order_test_refused_without_live_consent",
+        "app.tests.test_order_path_test:test_order_test_refuses_an_unknown_side",
+        "app.tests.test_order_path_test:test_order_test_reports_its_result_shape"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "app.tests.test_order_path_test:FakeManager"
+      ],
+      "dotted": "app.tests.test_order_path_test._order_test",
+      "file": "src/app/tests/test_order_path_test.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 446,
+      "module": "src/app",
+      "name": "_order_test",
+      "public": false,
+      "qualified": "app.tests.test_order_path_test:_order_test",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.tests.test_order_path_test:_buy",
+        "app.tests.test_order_path_test:_exit",
+        "app.tests.test_order_path_test:test_accepted_sell_with_open_position_is_not_called_closed",
+        "app.tests.test_order_path_test:test_allowance_is_consumed_even_when_submission_never_lands",
+        "app.tests.test_order_path_test:test_authorized_buy_reaches_the_venue_exactly_once",
+        "app.tests.test_order_path_test:test_exit_on_a_flat_position_sends_nothing",
+        "app.tests.test_order_path_test:test_exit_sell_that_fails_reports_the_open_position",
+        "app.tests.test_order_path_test:test_exit_verified_flat_from_the_broker_position_book",
+        "app.tests.test_order_path_test:test_missing_authorization_sends_nothing",
+        "app.tests.test_order_path_test:test_missing_live_price_blocks_the_order",
+        "app.tests.test_order_path_test:test_missing_stop_sends_nothing",
+        "app.tests.test_order_path_test:test_second_buy_is_refused_before_any_venue_call",
+        "app.tests.test_order_path_test:test_transport_fault_is_uncertain_and_never_retried",
+        "app.tests.test_order_path_test:test_undersized_risk_budget_blocks_the_order",
+        "app.tests.test_order_path_test:test_unfilled_acceptance_is_not_reported_as_filled",
+        "app.tests.test_order_path_test:test_unknown_expiry_is_uncertain_not_rejected",
+        "app.tests.test_order_path_test:test_unreachable_position_book_never_claims_a_close",
+        "app.tests.test_order_path_test:test_venue_refusal_is_a_definite_rejection",
+        "app.tests.test_order_path_test:test_zero_funds_blocks_the_order"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "app.tests.test_order_path_test.ledger",
+      "file": "src/app/tests/test_order_path_test.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 113,
+      "module": "src/app",
+      "name": "ledger",
+      "public": true,
+      "qualified": "app.tests.test_order_path_test:ledger",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.tests.test_order_path_test:test_order_test_refused_for_a_symbol_outside_the_configured_universe",
+        "app.tests.test_order_path_test:test_order_test_refused_when_quantity_differs_from_configured",
+        "app.tests.test_order_path_test:test_order_test_refused_without_an_explicit_stop",
+        "app.tests.test_order_path_test:test_order_test_refused_without_explicit_authorize",
+        "app.tests.test_order_path_test:test_order_test_refused_without_live_consent",
+        "app.tests.test_order_path_test:test_order_test_refuses_an_unknown_side",
+        "app.tests.test_order_path_test:test_order_test_reports_its_result_shape"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "strategy.universe_store:StrategyUniverseStore"
+      ],
+      "dotted": "app.tests.test_order_path_test.live_dirs",
+      "file": "src/app/tests/test_order_path_test.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 420,
+      "module": "src/app",
+      "name": "live_dirs",
+      "public": true,
+      "qualified": "app.tests.test_order_path_test:live_dirs",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.tests.test_order_path_test:FakeAdapter",
+        "app.tests.test_order_path_test:_exit",
+        "app.tests.test_order_path_test:ledger"
+      ],
+      "dotted": "app.tests.test_order_path_test.test_accepted_sell_with_open_position_is_not_called_closed",
+      "file": "src/app/tests/test_order_path_test.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 275,
+      "module": "src/app",
+      "name": "test_accepted_sell_with_open_position_is_not_called_closed",
+      "public": true,
+      "qualified": "app.tests.test_order_path_test:test_accepted_sell_with_open_position_is_not_called_closed",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.tests.test_order_path_test:FakeAdapter",
+        "app.tests.test_order_path_test:_buy",
+        "app.tests.test_order_path_test:ledger"
+      ],
+      "dotted": "app.tests.test_order_path_test.test_allowance_is_consumed_even_when_submission_never_lands",
+      "file": "src/app/tests/test_order_path_test.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 211,
+      "module": "src/app",
+      "name": "test_allowance_is_consumed_even_when_submission_never_lands",
+      "public": true,
+      "qualified": "app.tests.test_order_path_test:test_allowance_is_consumed_even_when_submission_never_lands",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.order_path_test_service:client_order_id",
+        "app.tests.test_order_path_test:FakeAdapter",
+        "app.tests.test_order_path_test:_buy",
+        "app.tests.test_order_path_test:ledger"
+      ],
+      "dotted": "app.tests.test_order_path_test.test_authorized_buy_reaches_the_venue_exactly_once",
+      "file": "src/app/tests/test_order_path_test.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 134,
+      "module": "src/app",
+      "name": "test_authorized_buy_reaches_the_venue_exactly_once",
+      "public": true,
+      "qualified": "app.tests.test_order_path_test:test_authorized_buy_reaches_the_venue_exactly_once",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.order_path_test_service:client_order_id"
+      ],
+      "dotted": "app.tests.test_order_path_test.test_client_order_id_is_deterministic_within_an_ist_day",
+      "file": "src/app/tests/test_order_path_test.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 200,
+      "module": "src/app",
+      "name": "test_client_order_id_is_deterministic_within_an_ist_day",
+      "public": true,
+      "qualified": "app.tests.test_order_path_test:test_client_order_id_is_deterministic_within_an_ist_day",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.tests.test_order_path_test:FakeAdapter",
+        "app.tests.test_order_path_test:_exit",
+        "app.tests.test_order_path_test:ledger"
+      ],
+      "dotted": "app.tests.test_order_path_test.test_exit_on_a_flat_position_sends_nothing",
+      "file": "src/app/tests/test_order_path_test.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 306,
+      "module": "src/app",
+      "name": "test_exit_on_a_flat_position_sends_nothing",
+      "public": true,
+      "qualified": "app.tests.test_order_path_test:test_exit_on_a_flat_position_sends_nothing",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.tests.test_order_path_test:FakeAdapter",
+        "app.tests.test_order_path_test:_exit",
+        "app.tests.test_order_path_test:ledger",
+        "broker.vocab:BrokerError",
+        "broker.vocab:ErrorCode"
+      ],
+      "dotted": "app.tests.test_order_path_test.test_exit_sell_that_fails_reports_the_open_position",
+      "file": "src/app/tests/test_order_path_test.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 328,
+      "module": "src/app",
+      "name": "test_exit_sell_that_fails_reports_the_open_position",
+      "public": true,
+      "qualified": "app.tests.test_order_path_test:test_exit_sell_that_fails_reports_the_open_position",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.tests.test_order_path_test:FakeAdapter",
+        "app.tests.test_order_path_test:_exit",
+        "app.tests.test_order_path_test:ledger"
+      ],
+      "dotted": "app.tests.test_order_path_test.test_exit_verified_flat_from_the_broker_position_book",
+      "file": "src/app/tests/test_order_path_test.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 288,
+      "module": "src/app",
+      "name": "test_exit_verified_flat_from_the_broker_position_book",
+      "public": true,
+      "qualified": "app.tests.test_order_path_test:test_exit_verified_flat_from_the_broker_position_book",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.tests.test_order_path_test:FakeAdapter",
+        "app.tests.test_order_path_test:_buy",
+        "app.tests.test_order_path_test:ledger"
+      ],
+      "dotted": "app.tests.test_order_path_test.test_missing_authorization_sends_nothing",
+      "file": "src/app/tests/test_order_path_test.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 163,
+      "module": "src/app",
+      "name": "test_missing_authorization_sends_nothing",
+      "public": true,
+      "qualified": "app.tests.test_order_path_test:test_missing_authorization_sends_nothing",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.tests.test_order_path_test:FakeAdapter",
+        "app.tests.test_order_path_test:_buy",
+        "app.tests.test_order_path_test:ledger"
+      ],
+      "dotted": "app.tests.test_order_path_test.test_missing_live_price_blocks_the_order",
+      "file": "src/app/tests/test_order_path_test.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 385,
+      "module": "src/app",
+      "name": "test_missing_live_price_blocks_the_order",
+      "public": true,
+      "qualified": "app.tests.test_order_path_test:test_missing_live_price_blocks_the_order",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.tests.test_order_path_test:FakeAdapter",
+        "app.tests.test_order_path_test:_buy",
+        "app.tests.test_order_path_test:ledger"
+      ],
+      "dotted": "app.tests.test_order_path_test.test_missing_stop_sends_nothing",
+      "file": "src/app/tests/test_order_path_test.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 172,
+      "module": "src/app",
+      "name": "test_missing_stop_sends_nothing",
+      "public": true,
+      "qualified": "app.tests.test_order_path_test:test_missing_stop_sends_nothing",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.order_path_test_service:net_position_qty",
+        "app.tests.test_order_path_test:FakeAdapter"
+      ],
+      "dotted": "app.tests.test_order_path_test.test_net_position_reads_alternate_quantity_keys",
+      "file": "src/app/tests/test_order_path_test.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 356,
+      "module": "src/app",
+      "name": "test_net_position_reads_alternate_quantity_keys",
+      "public": true,
+      "qualified": "app.tests.test_order_path_test:test_net_position_reads_alternate_quantity_keys",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.order_path_test_service:net_position_qty",
+        "app.tests.test_order_path_test:FakeAdapter"
+      ],
+      "dotted": "app.tests.test_order_path_test.test_net_position_reads_only_the_requested_symbol",
+      "file": "src/app/tests/test_order_path_test.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 345,
+      "module": "src/app",
+      "name": "test_net_position_reads_only_the_requested_symbol",
+      "public": true,
+      "qualified": "app.tests.test_order_path_test:test_net_position_reads_only_the_requested_symbol",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.tests.test_order_path_test:FakeAdapter",
+        "app.tests.test_order_path_test:_configured",
+        "app.tests.test_order_path_test:_order_test",
+        "app.tests.test_order_path_test:live_dirs"
+      ],
+      "dotted": "app.tests.test_order_path_test.test_order_test_refused_for_a_symbol_outside_the_configured_universe",
+      "file": "src/app/tests/test_order_path_test.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 464,
+      "module": "src/app",
+      "name": "test_order_test_refused_for_a_symbol_outside_the_configured_universe",
+      "public": true,
+      "qualified": "app.tests.test_order_path_test:test_order_test_refused_for_a_symbol_outside_the_configured_universe",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.tests.test_order_path_test:FakeAdapter",
+        "app.tests.test_order_path_test:_configured",
+        "app.tests.test_order_path_test:_order_test",
+        "app.tests.test_order_path_test:live_dirs"
+      ],
+      "dotted": "app.tests.test_order_path_test.test_order_test_refused_when_quantity_differs_from_configured",
+      "file": "src/app/tests/test_order_path_test.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 478,
+      "module": "src/app",
+      "name": "test_order_test_refused_when_quantity_differs_from_configured",
+      "public": true,
+      "qualified": "app.tests.test_order_path_test:test_order_test_refused_when_quantity_differs_from_configured",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.tests.test_order_path_test:FakeAdapter",
+        "app.tests.test_order_path_test:_configured",
+        "app.tests.test_order_path_test:_order_test",
+        "app.tests.test_order_path_test:live_dirs"
+      ],
+      "dotted": "app.tests.test_order_path_test.test_order_test_refused_without_an_explicit_stop",
+      "file": "src/app/tests/test_order_path_test.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 493,
+      "module": "src/app",
+      "name": "test_order_test_refused_without_an_explicit_stop",
+      "public": true,
+      "qualified": "app.tests.test_order_path_test:test_order_test_refused_without_an_explicit_stop",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.tests.test_order_path_test:FakeAdapter",
+        "app.tests.test_order_path_test:_configured",
+        "app.tests.test_order_path_test:_order_test",
+        "app.tests.test_order_path_test:live_dirs"
+      ],
+      "dotted": "app.tests.test_order_path_test.test_order_test_refused_without_explicit_authorize",
+      "file": "src/app/tests/test_order_path_test.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 504,
+      "module": "src/app",
+      "name": "test_order_test_refused_without_explicit_authorize",
+      "public": true,
+      "qualified": "app.tests.test_order_path_test:test_order_test_refused_without_explicit_authorize",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.tests.test_order_path_test:FakeAdapter",
+        "app.tests.test_order_path_test:_configured",
+        "app.tests.test_order_path_test:_order_test",
+        "app.tests.test_order_path_test:live_dirs"
+      ],
+      "dotted": "app.tests.test_order_path_test.test_order_test_refused_without_live_consent",
+      "file": "src/app/tests/test_order_path_test.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 452,
+      "module": "src/app",
+      "name": "test_order_test_refused_without_live_consent",
+      "public": true,
+      "qualified": "app.tests.test_order_path_test:test_order_test_refused_without_live_consent",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.tests.test_order_path_test:FakeAdapter",
+        "app.tests.test_order_path_test:_configured",
+        "app.tests.test_order_path_test:_order_test",
+        "app.tests.test_order_path_test:live_dirs"
+      ],
+      "dotted": "app.tests.test_order_path_test.test_order_test_refuses_an_unknown_side",
+      "file": "src/app/tests/test_order_path_test.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 516,
+      "module": "src/app",
+      "name": "test_order_test_refuses_an_unknown_side",
+      "public": true,
+      "qualified": "app.tests.test_order_path_test:test_order_test_refuses_an_unknown_side",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.tests.test_order_path_test:FakeAdapter",
+        "app.tests.test_order_path_test:_configured",
+        "app.tests.test_order_path_test:_order_test",
+        "app.tests.test_order_path_test:live_dirs"
+      ],
+      "dotted": "app.tests.test_order_path_test.test_order_test_reports_its_result_shape",
+      "file": "src/app/tests/test_order_path_test.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 526,
+      "module": "src/app",
+      "name": "test_order_test_reports_its_result_shape",
+      "public": true,
+      "qualified": "app.tests.test_order_path_test:test_order_test_reports_its_result_shape",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.order_path_test_service:client_order_id",
+        "app.tests.test_order_path_test:FakeAdapter",
+        "app.tests.test_order_path_test:_buy",
+        "app.tests.test_order_path_test:ledger"
+      ],
+      "dotted": "app.tests.test_order_path_test.test_second_buy_is_refused_before_any_venue_call",
+      "file": "src/app/tests/test_order_path_test.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 184,
+      "module": "src/app",
+      "name": "test_second_buy_is_refused_before_any_venue_call",
+      "public": true,
+      "qualified": "app.tests.test_order_path_test:test_second_buy_is_refused_before_any_venue_call",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "app.tests.test_order_path_test.test_skip_outcome_is_exported_for_callers",
+      "file": "src/app/tests/test_order_path_test.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 395,
+      "module": "src/app",
+      "name": "test_skip_outcome_is_exported_for_callers",
+      "public": true,
+      "qualified": "app.tests.test_order_path_test:test_skip_outcome_is_exported_for_callers",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.tests.test_order_path_test:FakeAdapter",
+        "app.tests.test_order_path_test:_buy",
+        "app.tests.test_order_path_test:ledger",
+        "broker.vocab:BrokerError",
+        "broker.vocab:ErrorCode"
+      ],
+      "dotted": "app.tests.test_order_path_test.test_transport_fault_is_uncertain_and_never_retried",
+      "file": "src/app/tests/test_order_path_test.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 227,
+      "module": "src/app",
+      "name": "test_transport_fault_is_uncertain_and_never_retried",
+      "public": true,
+      "qualified": "app.tests.test_order_path_test:test_transport_fault_is_uncertain_and_never_retried",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.tests.test_order_path_test:FakeAdapter",
+        "app.tests.test_order_path_test:_buy",
+        "app.tests.test_order_path_test:ledger"
+      ],
+      "dotted": "app.tests.test_order_path_test.test_undersized_risk_budget_blocks_the_order",
+      "file": "src/app/tests/test_order_path_test.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 364,
+      "module": "src/app",
+      "name": "test_undersized_risk_budget_blocks_the_order",
+      "public": true,
+      "qualified": "app.tests.test_order_path_test:test_undersized_risk_budget_blocks_the_order",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.order_path_test_service:client_order_id",
+        "app.tests.test_order_path_test:FakeAdapter",
+        "app.tests.test_order_path_test:_buy",
+        "app.tests.test_order_path_test:ledger"
+      ],
+      "dotted": "app.tests.test_order_path_test.test_unfilled_acceptance_is_not_reported_as_filled",
+      "file": "src/app/tests/test_order_path_test.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 152,
+      "module": "src/app",
+      "name": "test_unfilled_acceptance_is_not_reported_as_filled",
+      "public": true,
+      "qualified": "app.tests.test_order_path_test:test_unfilled_acceptance_is_not_reported_as_filled",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.tests.test_order_path_test:FakeAdapter",
+        "app.tests.test_order_path_test:_buy",
+        "app.tests.test_order_path_test:ledger"
+      ],
+      "dotted": "app.tests.test_order_path_test.test_unknown_expiry_is_uncertain_not_rejected",
+      "file": "src/app/tests/test_order_path_test.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 249,
+      "module": "src/app",
+      "name": "test_unknown_expiry_is_uncertain_not_rejected",
+      "public": true,
+      "qualified": "app.tests.test_order_path_test:test_unknown_expiry_is_uncertain_not_rejected",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.tests.test_order_path_test:FakeAdapter",
+        "app.tests.test_order_path_test:_exit",
+        "app.tests.test_order_path_test:ledger"
+      ],
+      "dotted": "app.tests.test_order_path_test.test_unreachable_position_book_never_claims_a_close",
+      "file": "src/app/tests/test_order_path_test.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 317,
+      "module": "src/app",
+      "name": "test_unreachable_position_book_never_claims_a_close",
+      "public": true,
+      "qualified": "app.tests.test_order_path_test:test_unreachable_position_book_never_claims_a_close",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.tests.test_order_path_test:FakeAdapter",
+        "app.tests.test_order_path_test:_buy",
+        "app.tests.test_order_path_test:ledger",
+        "broker.vocab:BrokerError",
+        "broker.vocab:ErrorCode"
+      ],
+      "dotted": "app.tests.test_order_path_test.test_venue_refusal_is_a_definite_rejection",
+      "file": "src/app/tests/test_order_path_test.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 238,
+      "module": "src/app",
+      "name": "test_venue_refusal_is_a_definite_rejection",
+      "public": true,
+      "qualified": "app.tests.test_order_path_test:test_venue_refusal_is_a_definite_rejection",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.tests.test_order_path_test:FakeAdapter",
+        "app.tests.test_order_path_test:_buy",
+        "app.tests.test_order_path_test:ledger"
+      ],
+      "dotted": "app.tests.test_order_path_test.test_zero_funds_blocks_the_order",
+      "file": "src/app/tests/test_order_path_test.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 376,
+      "module": "src/app",
+      "name": "test_zero_funds_blocks_the_order",
+      "public": true,
+      "qualified": "app.tests.test_order_path_test:test_zero_funds_blocks_the_order",
+      "tests": []
+    },
+    {
+      "called_by": [
         "app.tests.test_phase4_dashboard:test_bridge_command_dispatches",
         "app.tests.test_phase4_dashboard:test_bridge_event_ingest_and_deduplication",
         "app.tests.test_phase4_dashboard:test_bridge_snapshot_and_signals",
@@ -16570,6 +17601,324 @@
     },
     {
       "called_by": [
+        "app.tests.test_safety_reporting:test_worker_reads_started_at_and_uptime_from_session_timing",
+        "app.tests.test_safety_reporting:test_worker_timing_is_zero_when_session_timing_is_absent",
+        "app.tests.test_safety_reporting:test_worker_uptime_survives_a_shape_that_looks_like_the_old_bug"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "remote.snapshot:build_snapshot"
+      ],
+      "dotted": "app.tests.test_safety_reporting._live_snapshot",
+      "file": "src/app/tests/test_safety_reporting.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 75,
+      "module": "src/app",
+      "name": "_live_snapshot",
+      "public": false,
+      "qualified": "app.tests.test_safety_reporting:_live_snapshot",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.tests.test_safety_reporting:test_market_data_gate_names_the_candle_store_not_live_delivery",
+        "app.tests.test_safety_reporting:test_market_data_gate_says_no_live_feed_when_there_is_none"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "app.services.live_trading_service:LiveTradingService"
+      ],
+      "dotted": "app.tests.test_safety_reporting._market_data_gate",
+      "file": "src/app/tests/test_safety_reporting.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 99,
+      "module": "src/app",
+      "name": "_market_data_gate",
+      "public": false,
+      "qualified": "app.tests.test_safety_reporting:_market_data_gate",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.tests.test_safety_reporting:test_quote_change_pct_is_between_the_two_store_closes",
+        "app.tests.test_safety_reporting:test_quote_reports_the_store_candle_stamp_not_now",
+        "app.tests.test_safety_reporting:test_stale_candle_age_is_reported_not_hidden"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "app.tests.test_safety_reporting._write_store",
+      "file": "src/app/tests/test_safety_reporting.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 28,
+      "module": "src/app",
+      "name": "_write_store",
+      "public": false,
+      "qualified": "app.tests.test_safety_reporting:_write_store",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.tests.test_safety_reporting:_market_data_gate"
+      ],
+      "dotted": "app.tests.test_safety_reporting.test_market_data_gate_names_the_candle_store_not_live_delivery",
+      "file": "src/app/tests/test_safety_reporting.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 115,
+      "module": "src/app",
+      "name": "test_market_data_gate_names_the_candle_store_not_live_delivery",
+      "public": true,
+      "qualified": "app.tests.test_safety_reporting:test_market_data_gate_names_the_candle_store_not_live_delivery",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.tests.test_safety_reporting:_market_data_gate"
+      ],
+      "dotted": "app.tests.test_safety_reporting.test_market_data_gate_says_no_live_feed_when_there_is_none",
+      "file": "src/app/tests/test_safety_reporting.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 131,
+      "module": "src/app",
+      "name": "test_market_data_gate_says_no_live_feed_when_there_is_none",
+      "public": true,
+      "qualified": "app.tests.test_safety_reporting:test_market_data_gate_says_no_live_feed_when_there_is_none",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.live_trading_service:LiveTradingService"
+      ],
+      "dotted": "app.tests.test_safety_reporting.test_market_data_never_claims_a_fresh_tick_stamp",
+      "file": "src/app/tests/test_safety_reporting.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 80,
+      "module": "src/app",
+      "name": "test_market_data_never_claims_a_fresh_tick_stamp",
+      "public": true,
+      "qualified": "app.tests.test_safety_reporting:test_market_data_never_claims_a_fresh_tick_stamp",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.market_data_service:MarketDataService",
+        "app.tests.test_safety_reporting:_write_store"
+      ],
+      "dotted": "app.tests.test_safety_reporting.test_quote_change_pct_is_between_the_two_store_closes",
+      "file": "src/app/tests/test_safety_reporting.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 66,
+      "module": "src/app",
+      "name": "test_quote_change_pct_is_between_the_two_store_closes",
+      "public": true,
+      "qualified": "app.tests.test_safety_reporting:test_quote_change_pct_is_between_the_two_store_closes",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.market_data_service:MarketDataService",
+        "app.tests.test_safety_reporting:_write_store"
+      ],
+      "dotted": "app.tests.test_safety_reporting.test_quote_reports_the_store_candle_stamp_not_now",
+      "file": "src/app/tests/test_safety_reporting.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 47,
+      "module": "src/app",
+      "name": "test_quote_reports_the_store_candle_stamp_not_now",
+      "public": true,
+      "qualified": "app.tests.test_safety_reporting:test_quote_reports_the_store_candle_stamp_not_now",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.market_data_service:MarketDataService"
+      ],
+      "dotted": "app.tests.test_safety_reporting.test_quote_without_a_store_reports_no_price_and_no_stamp",
+      "file": "src/app/tests/test_safety_reporting.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 60,
+      "module": "src/app",
+      "name": "test_quote_without_a_store_reports_no_price_and_no_stamp",
+      "public": true,
+      "qualified": "app.tests.test_safety_reporting:test_quote_without_a_store_reports_no_price_and_no_stamp",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.broker_manager:BrokerManager"
+      ],
+      "dotted": "app.tests.test_safety_reporting.test_runtime_state_defaults_to_false_without_a_provider",
+      "file": "src/app/tests/test_safety_reporting.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 227,
+      "module": "src/app",
+      "name": "test_runtime_state_defaults_to_false_without_a_provider",
+      "public": true,
+      "qualified": "app.tests.test_safety_reporting:test_runtime_state_defaults_to_false_without_a_provider",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.broker_manager:BrokerManager"
+      ],
+      "dotted": "app.tests.test_safety_reporting.test_runtime_state_reads_a_registered_provider",
+      "file": "src/app/tests/test_safety_reporting.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 212,
+      "module": "src/app",
+      "name": "test_runtime_state_reads_a_registered_provider",
+      "public": true,
+      "qualified": "app.tests.test_safety_reporting:test_runtime_state_reads_a_registered_provider",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.live_trading_service:LiveTradingService"
+      ],
+      "dotted": "app.tests.test_safety_reporting.test_runtime_state_reads_consent_and_session_status",
+      "file": "src/app/tests/test_safety_reporting.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 183,
+      "module": "src/app",
+      "name": "test_runtime_state_reads_consent_and_session_status",
+      "public": true,
+      "qualified": "app.tests.test_safety_reporting:test_runtime_state_reads_consent_and_session_status",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.broker_manager:BrokerManager"
+      ],
+      "dotted": "app.tests.test_safety_reporting.test_runtime_state_swallows_provider_failures",
+      "file": "src/app/tests/test_safety_reporting.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 235,
+      "module": "src/app",
+      "name": "test_runtime_state_swallows_provider_failures",
+      "public": true,
+      "qualified": "app.tests.test_safety_reporting:test_runtime_state_swallows_provider_failures",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.live_trading_service:LiveTradingService"
+      ],
+      "dotted": "app.tests.test_safety_reporting.test_runtime_state_without_consent_never_fabricates_arming",
+      "file": "src/app/tests/test_safety_reporting.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 197,
+      "module": "src/app",
+      "name": "test_runtime_state_without_consent_never_fabricates_arming",
+      "public": true,
+      "qualified": "app.tests.test_safety_reporting:test_runtime_state_without_consent_never_fabricates_arming",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.services.market_data_service:MarketDataService",
+        "app.tests.test_safety_reporting:_write_store"
+      ],
+      "dotted": "app.tests.test_safety_reporting.test_stale_candle_age_is_reported_not_hidden",
+      "file": "src/app/tests/test_safety_reporting.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 247,
+      "module": "src/app",
+      "name": "test_stale_candle_age_is_reported_not_hidden",
+      "public": true,
+      "qualified": "app.tests.test_safety_reporting:test_stale_candle_age_is_reported_not_hidden",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.tests.test_safety_reporting:_live_snapshot"
+      ],
+      "dotted": "app.tests.test_safety_reporting.test_worker_reads_started_at_and_uptime_from_session_timing",
+      "file": "src/app/tests/test_safety_reporting.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 141,
+      "module": "src/app",
+      "name": "test_worker_reads_started_at_and_uptime_from_session_timing",
+      "public": true,
+      "qualified": "app.tests.test_safety_reporting:test_worker_reads_started_at_and_uptime_from_session_timing",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.tests.test_safety_reporting:_live_snapshot"
+      ],
+      "dotted": "app.tests.test_safety_reporting.test_worker_timing_is_zero_when_session_timing_is_absent",
+      "file": "src/app/tests/test_safety_reporting.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 160,
+      "module": "src/app",
+      "name": "test_worker_timing_is_zero_when_session_timing_is_absent",
+      "public": true,
+      "qualified": "app.tests.test_safety_reporting:test_worker_timing_is_zero_when_session_timing_is_absent",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.tests.test_safety_reporting:_live_snapshot"
+      ],
+      "dotted": "app.tests.test_safety_reporting.test_worker_uptime_survives_a_shape_that_looks_like_the_old_bug",
+      "file": "src/app/tests/test_safety_reporting.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 167,
+      "module": "src/app",
+      "name": "test_worker_uptime_survives_a_shape_that_looks_like_the_old_bug",
+      "public": true,
+      "qualified": "app.tests.test_safety_reporting:test_worker_uptime_survives_a_shape_that_looks_like_the_old_bug",
+      "tests": []
+    },
+    {
+      "called_by": [
         "app.tests.test_set_default:test_disconnected_broker_becomes_default_and_is_not_substituted",
         "app.tests.test_set_default:test_opening_a_detail_panel_does_not_change_the_default",
         "app.tests.test_set_default:test_set_fyers_as_default",
@@ -17019,6 +18368,311 @@
       "name": "test_9_only_nse_symbols_accepted",
       "public": true,
       "qualified": "app.tests.test_strategy_universe_phase1:test_9_only_nse_symbols_accepted",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.tests.test_sync_candles_validation_cache:_prime_store",
+        "app.tests.test_sync_candles_validation_cache:test_empty_venue_response_does_not_imply_data_became_available",
+        "app.tests.test_sync_candles_validation_cache:test_failed_sync_does_not_imply_data_became_available",
+        "app.tests.test_sync_candles_validation_cache:test_successful_sync_retires_the_cached_missing_data_verdict",
+        "app.tests.test_sync_candles_validation_cache:test_sync_is_still_refused_while_the_strategy_runs",
+        "app.tests.test_sync_candles_validation_cache:test_sync_keeps_every_unrelated_blocker_intact"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "app.tests.test_sync_candles_validation_cache.FakeAdapter",
+      "file": "src/app/tests/test_sync_candles_validation_cache.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 39,
+      "module": "src/app",
+      "name": "FakeAdapter",
+      "public": true,
+      "qualified": "app.tests.test_sync_candles_validation_cache:FakeAdapter",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.tests.test_sync_candles_validation_cache:_prime_store",
+        "app.tests.test_sync_candles_validation_cache:_sync",
+        "app.tests.test_sync_candles_validation_cache:test_empty_venue_response_does_not_imply_data_became_available",
+        "app.tests.test_sync_candles_validation_cache:test_failed_sync_does_not_imply_data_became_available",
+        "app.tests.test_sync_candles_validation_cache:test_successful_sync_retires_the_cached_missing_data_verdict",
+        "app.tests.test_sync_candles_validation_cache:test_sync_is_still_refused_while_the_strategy_runs",
+        "app.tests.test_sync_candles_validation_cache:test_sync_keeps_every_unrelated_blocker_intact"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "app.tests.test_sync_candles_validation_cache.FakeManager",
+      "file": "src/app/tests/test_sync_candles_validation_cache.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 52,
+      "module": "src/app",
+      "name": "FakeManager",
+      "public": true,
+      "qualified": "app.tests.test_sync_candles_validation_cache:FakeManager",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.tests.test_sync_candles_validation_cache:test_empty_venue_response_does_not_imply_data_became_available",
+        "app.tests.test_sync_candles_validation_cache:test_failed_sync_does_not_imply_data_became_available",
+        "app.tests.test_sync_candles_validation_cache:test_successful_sync_retires_the_cached_missing_data_verdict",
+        "app.tests.test_sync_candles_validation_cache:test_sync_is_still_refused_while_the_strategy_runs",
+        "app.tests.test_sync_candles_validation_cache:test_sync_keeps_every_unrelated_blocker_intact"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "app.tests.test_sync_candles_validation_cache:_service",
+        "app.tests.test_sync_candles_validation_cache:dirs"
+      ],
+      "dotted": "app.tests.test_sync_candles_validation_cache._configure_zeel",
+      "file": "src/app/tests/test_sync_candles_validation_cache.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 104,
+      "module": "src/app",
+      "name": "_configure_zeel",
+      "public": false,
+      "qualified": "app.tests.test_sync_candles_validation_cache:_configure_zeel",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.tests.test_sync_candles_validation_cache:test_empty_venue_response_does_not_imply_data_became_available",
+        "app.tests.test_sync_candles_validation_cache:test_failed_sync_does_not_imply_data_became_available",
+        "app.tests.test_sync_candles_validation_cache:test_successful_sync_retires_the_cached_missing_data_verdict",
+        "app.tests.test_sync_candles_validation_cache:test_sync_is_still_refused_while_the_strategy_runs",
+        "app.tests.test_sync_candles_validation_cache:test_sync_keeps_every_unrelated_blocker_intact"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "app.services.candle_sync_service:sync_candles",
+        "app.tests.test_sync_candles_validation_cache:FakeAdapter",
+        "app.tests.test_sync_candles_validation_cache:FakeManager",
+        "app.tests.test_sync_candles_validation_cache:_service",
+        "app.tests.test_sync_candles_validation_cache:dirs"
+      ],
+      "dotted": "app.tests.test_sync_candles_validation_cache._prime_store",
+      "file": "src/app/tests/test_sync_candles_validation_cache.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 92,
+      "module": "src/app",
+      "name": "_prime_store",
+      "public": false,
+      "qualified": "app.tests.test_sync_candles_validation_cache:_prime_store",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.tests.test_sync_candles_validation_cache:test_empty_venue_response_does_not_imply_data_became_available",
+        "app.tests.test_sync_candles_validation_cache:test_failed_sync_does_not_imply_data_became_available",
+        "app.tests.test_sync_candles_validation_cache:test_successful_sync_retires_the_cached_missing_data_verdict",
+        "app.tests.test_sync_candles_validation_cache:test_sync_is_still_refused_while_the_strategy_runs",
+        "app.tests.test_sync_candles_validation_cache:test_sync_keeps_every_unrelated_blocker_intact"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "app.tests.test_sync_candles_validation_cache._rows",
+      "file": "src/app/tests/test_sync_candles_validation_cache.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 67,
+      "module": "src/app",
+      "name": "_rows",
+      "public": false,
+      "qualified": "app.tests.test_sync_candles_validation_cache:_rows",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.tests.test_sync_candles_validation_cache:_configure_zeel",
+        "app.tests.test_sync_candles_validation_cache:_prime_store",
+        "app.tests.test_sync_candles_validation_cache:test_sync_is_still_refused_while_the_strategy_runs",
+        "app.tests.test_sync_candles_validation_cache:test_sync_keeps_every_unrelated_blocker_intact"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "app.tests.test_sync_candles_validation_cache:dirs"
+      ],
+      "dotted": "app.tests.test_sync_candles_validation_cache._service",
+      "file": "src/app/tests/test_sync_candles_validation_cache.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 86,
+      "module": "src/app",
+      "name": "_service",
+      "public": false,
+      "qualified": "app.tests.test_sync_candles_validation_cache:_service",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.tests.test_sync_candles_validation_cache:test_empty_venue_response_does_not_imply_data_became_available",
+        "app.tests.test_sync_candles_validation_cache:test_failed_sync_does_not_imply_data_became_available",
+        "app.tests.test_sync_candles_validation_cache:test_successful_sync_retires_the_cached_missing_data_verdict",
+        "app.tests.test_sync_candles_validation_cache:test_sync_keeps_every_unrelated_blocker_intact"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "app.tests.test_sync_candles_validation_cache:FakeManager",
+        "app.tests.test_sync_candles_validation_cache:dirs"
+      ],
+      "dotted": "app.tests.test_sync_candles_validation_cache._sync",
+      "file": "src/app/tests/test_sync_candles_validation_cache.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 128,
+      "module": "src/app",
+      "name": "_sync",
+      "public": false,
+      "qualified": "app.tests.test_sync_candles_validation_cache:_sync",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "app.tests.test_sync_candles_validation_cache:_configure_zeel",
+        "app.tests.test_sync_candles_validation_cache:_prime_store",
+        "app.tests.test_sync_candles_validation_cache:_service",
+        "app.tests.test_sync_candles_validation_cache:_sync",
+        "app.tests.test_sync_candles_validation_cache:test_empty_venue_response_does_not_imply_data_became_available",
+        "app.tests.test_sync_candles_validation_cache:test_failed_sync_does_not_imply_data_became_available",
+        "app.tests.test_sync_candles_validation_cache:test_successful_sync_retires_the_cached_missing_data_verdict",
+        "app.tests.test_sync_candles_validation_cache:test_sync_is_still_refused_while_the_strategy_runs",
+        "app.tests.test_sync_candles_validation_cache:test_sync_keeps_every_unrelated_blocker_intact"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "strategy.universe_store:StrategyUniverseStore"
+      ],
+      "dotted": "app.tests.test_sync_candles_validation_cache.dirs",
+      "file": "src/app/tests/test_sync_candles_validation_cache.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 76,
+      "module": "src/app",
+      "name": "dirs",
+      "public": true,
+      "qualified": "app.tests.test_sync_candles_validation_cache:dirs",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.tests.test_sync_candles_validation_cache:FakeAdapter",
+        "app.tests.test_sync_candles_validation_cache:FakeManager",
+        "app.tests.test_sync_candles_validation_cache:_configure_zeel",
+        "app.tests.test_sync_candles_validation_cache:_prime_store",
+        "app.tests.test_sync_candles_validation_cache:_rows",
+        "app.tests.test_sync_candles_validation_cache:_sync",
+        "app.tests.test_sync_candles_validation_cache:dirs"
+      ],
+      "dotted": "app.tests.test_sync_candles_validation_cache.test_empty_venue_response_does_not_imply_data_became_available",
+      "file": "src/app/tests/test_sync_candles_validation_cache.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 179,
+      "module": "src/app",
+      "name": "test_empty_venue_response_does_not_imply_data_became_available",
+      "public": true,
+      "qualified": "app.tests.test_sync_candles_validation_cache:test_empty_venue_response_does_not_imply_data_became_available",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.tests.test_sync_candles_validation_cache:FakeAdapter",
+        "app.tests.test_sync_candles_validation_cache:FakeManager",
+        "app.tests.test_sync_candles_validation_cache:_configure_zeel",
+        "app.tests.test_sync_candles_validation_cache:_prime_store",
+        "app.tests.test_sync_candles_validation_cache:_rows",
+        "app.tests.test_sync_candles_validation_cache:_sync",
+        "app.tests.test_sync_candles_validation_cache:dirs"
+      ],
+      "dotted": "app.tests.test_sync_candles_validation_cache.test_failed_sync_does_not_imply_data_became_available",
+      "file": "src/app/tests/test_sync_candles_validation_cache.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 161,
+      "module": "src/app",
+      "name": "test_failed_sync_does_not_imply_data_became_available",
+      "public": true,
+      "qualified": "app.tests.test_sync_candles_validation_cache:test_failed_sync_does_not_imply_data_became_available",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.tests.test_sync_candles_validation_cache:FakeAdapter",
+        "app.tests.test_sync_candles_validation_cache:FakeManager",
+        "app.tests.test_sync_candles_validation_cache:_configure_zeel",
+        "app.tests.test_sync_candles_validation_cache:_prime_store",
+        "app.tests.test_sync_candles_validation_cache:_rows",
+        "app.tests.test_sync_candles_validation_cache:_sync",
+        "app.tests.test_sync_candles_validation_cache:dirs"
+      ],
+      "dotted": "app.tests.test_sync_candles_validation_cache.test_successful_sync_retires_the_cached_missing_data_verdict",
+      "file": "src/app/tests/test_sync_candles_validation_cache.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 136,
+      "module": "src/app",
+      "name": "test_successful_sync_retires_the_cached_missing_data_verdict",
+      "public": true,
+      "qualified": "app.tests.test_sync_candles_validation_cache:test_successful_sync_retires_the_cached_missing_data_verdict",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.tests.test_sync_candles_validation_cache:FakeAdapter",
+        "app.tests.test_sync_candles_validation_cache:FakeManager",
+        "app.tests.test_sync_candles_validation_cache:_configure_zeel",
+        "app.tests.test_sync_candles_validation_cache:_prime_store",
+        "app.tests.test_sync_candles_validation_cache:_rows",
+        "app.tests.test_sync_candles_validation_cache:_service",
+        "app.tests.test_sync_candles_validation_cache:dirs"
+      ],
+      "dotted": "app.tests.test_sync_candles_validation_cache.test_sync_is_still_refused_while_the_strategy_runs",
+      "file": "src/app/tests/test_sync_candles_validation_cache.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 233,
+      "module": "src/app",
+      "name": "test_sync_is_still_refused_while_the_strategy_runs",
+      "public": true,
+      "qualified": "app.tests.test_sync_candles_validation_cache:test_sync_is_still_refused_while_the_strategy_runs",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "app.tests.test_sync_candles_validation_cache:FakeAdapter",
+        "app.tests.test_sync_candles_validation_cache:FakeManager",
+        "app.tests.test_sync_candles_validation_cache:_configure_zeel",
+        "app.tests.test_sync_candles_validation_cache:_prime_store",
+        "app.tests.test_sync_candles_validation_cache:_rows",
+        "app.tests.test_sync_candles_validation_cache:_service",
+        "app.tests.test_sync_candles_validation_cache:_sync",
+        "app.tests.test_sync_candles_validation_cache:dirs"
+      ],
+      "dotted": "app.tests.test_sync_candles_validation_cache.test_sync_keeps_every_unrelated_blocker_intact",
+      "file": "src/app/tests/test_sync_candles_validation_cache.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 198,
+      "module": "src/app",
+      "name": "test_sync_keeps_every_unrelated_blocker_intact",
+      "public": true,
+      "qualified": "app.tests.test_sync_candles_validation_cache:test_sync_keeps_every_unrelated_blocker_intact",
       "tests": []
     },
     {
@@ -27382,6 +29036,10 @@
     },
     {
       "called_by": [
+        "app.services.order_path_test_service:submit_buy",
+        "app.tests.test_order_path_test:test_exit_sell_that_fails_reports_the_open_position",
+        "app.tests.test_order_path_test:test_transport_fault_is_uncertain_and_never_retried",
+        "app.tests.test_order_path_test:test_venue_refusal_is_a_definite_rejection",
         "broker.providers.fyers.live_market_data:FyersLiveMarketData",
         "broker.providers.fyers.session_adapter:FyersSessionAdapter",
         "broker.providers.skeleton:_no_transport",
@@ -27532,6 +29190,10 @@
     },
     {
       "called_by": [
+        "app.services.order_path_test_service:submit_buy",
+        "app.tests.test_order_path_test:test_exit_sell_that_fails_reports_the_open_position",
+        "app.tests.test_order_path_test:test_transport_fault_is_uncertain_and_never_retried",
+        "app.tests.test_order_path_test:test_venue_refusal_is_a_definite_rejection",
         "broker.providers.fyers.live_market_data:FyersLiveMarketData",
         "broker.providers.fyers.session_adapter:FyersSessionAdapter",
         "broker.providers.skeleton:_no_transport",
@@ -47661,7 +49323,7 @@
       "file": "crates/vayren-shell/src/lib.rs",
       "kind": "mod",
       "language": "RUST_SLINT",
-      "line": 45,
+      "line": 54,
       "module": "crates/vayren-shell",
       "name": "live_harness_ui",
       "public": true,
@@ -47766,7 +49428,7 @@
       "file": "crates/vayren-shell/src/lib.rs",
       "kind": "mod",
       "language": "RUST_SLINT",
-      "line": 37,
+      "line": 46,
       "module": "crates/vayren-shell",
       "name": "research_harness_ui",
       "public": true,
@@ -51111,7 +52773,7 @@
       "file": "crates/vayren-shell/tests/render_matrix.rs",
       "kind": "struct",
       "language": "RUST_SLINT",
-      "line": 45,
+      "line": 58,
       "module": "crates/vayren-shell",
       "name": "SoftwarePlatform",
       "public": false,
@@ -51126,7 +52788,7 @@
       "file": "crates/vayren-shell/tests/render_matrix.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 365,
+      "line": 374,
       "module": "crates/vayren-shell",
       "name": "populate_chrome",
       "public": false,
@@ -51141,7 +52803,7 @@
       "file": "crates/vayren-shell/tests/render_matrix.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 88,
+      "line": 101,
       "module": "crates/vayren-shell",
       "name": "populate_completed",
       "public": false,
@@ -51156,7 +52818,7 @@
       "file": "crates/vayren-shell/tests/render_matrix.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 512,
+      "line": 521,
       "module": "crates/vayren-shell",
       "name": "render",
       "public": false,
@@ -51171,7 +52833,7 @@
       "file": "crates/vayren-shell/tests/render_matrix.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 548,
+      "line": 557,
       "module": "crates/vayren-shell",
       "name": "render_research_matrix",
       "public": false,
@@ -51186,7 +52848,7 @@
       "file": "crates/vayren-shell/tests/render_matrix.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 344,
+      "line": 353,
       "module": "crates/vayren-shell",
       "name": "research_dim",
       "public": false,
@@ -51201,7 +52863,7 @@
       "file": "crates/vayren-shell/tests/render_matrix.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 240,
+      "line": 253,
       "module": "crates/vayren-shell",
       "name": "research_field",
       "public": false,
@@ -51216,7 +52878,7 @@
       "file": "crates/vayren-shell/tests/render_matrix.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 329,
+      "line": 338,
       "module": "crates/vayren-shell",
       "name": "research_group",
       "public": false,
@@ -51231,7 +52893,7 @@
       "file": "crates/vayren-shell/tests/render_matrix.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 353,
+      "line": 362,
       "module": "crates/vayren-shell",
       "name": "research_group_kv",
       "public": false,
@@ -51242,11 +52904,26 @@
       "called_by": [],
       "callers_complete": false,
       "calls": [],
+      "dotted": "crates::vayren-shell::tests::render_matrix::research_harness_ui",
+      "file": "crates/vayren-shell/tests/render_matrix.rs",
+      "kind": "mod",
+      "language": "RUST_SLINT",
+      "line": 48,
+      "module": "crates/vayren-shell",
+      "name": "research_harness_ui",
+      "public": false,
+      "qualified": "crates::vayren-shell::tests::render_matrix::research_harness_ui",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": false,
+      "calls": [],
       "dotted": "crates::vayren-shell::tests::render_matrix::research_kv",
       "file": "crates/vayren-shell/tests/render_matrix.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 503,
+      "line": 512,
       "module": "crates/vayren-shell",
       "name": "research_kv",
       "public": false,
@@ -51261,7 +52938,7 @@
       "file": "crates/vayren-shell/tests/render_matrix.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 255,
+      "line": 264,
       "module": "crates/vayren-shell",
       "name": "research_metric",
       "public": false,
@@ -51276,7 +52953,7 @@
       "file": "crates/vayren-shell/tests/render_matrix.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 302,
+      "line": 311,
       "module": "crates/vayren-shell",
       "name": "research_robust",
       "public": false,
@@ -51291,7 +52968,7 @@
       "file": "crates/vayren-shell/tests/render_matrix.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 227,
+      "line": 240,
       "module": "crates/vayren-shell",
       "name": "research_row",
       "public": false,
@@ -51306,7 +52983,7 @@
       "file": "crates/vayren-shell/tests/render_matrix.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 312,
+      "line": 321,
       "module": "crates/vayren-shell",
       "name": "research_select",
       "public": false,
@@ -51321,7 +52998,7 @@
       "file": "crates/vayren-shell/tests/render_matrix.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 265,
+      "line": 274,
       "module": "crates/vayren-shell",
       "name": "research_signal",
       "public": false,
@@ -51336,7 +53013,7 @@
       "file": "crates/vayren-shell/tests/render_matrix.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 284,
+      "line": 293,
       "module": "crates/vayren-shell",
       "name": "research_trade",
       "public": false,
@@ -51351,7 +53028,7 @@
       "file": "crates/vayren-shell/tests/render_matrix.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 337,
+      "line": 346,
       "module": "crates/vayren-shell",
       "name": "research_why",
       "public": false,
@@ -51366,7 +53043,7 @@
       "file": "crates/vayren-shell/tests/render_matrix.rs",
       "kind": "fn",
       "language": "RUST_SLINT",
-      "line": 59,
+      "line": 72,
       "module": "crates/vayren-shell",
       "name": "save_bmp",
       "public": false,
@@ -59594,6 +61271,8 @@
     },
     {
       "called_by": [
+        "app.services.order_path_test_service:submit_buy",
+        "app.services.order_path_test_service:submit_exit",
         "app.tests.test_eligibility_lifecycle_phase7:_plan",
         "broker.tests.test_fyers_live_trading:test_paper_cannot_call_live_endpoint",
         "broker.tests.test_fyers_live_trading:test_sandbox_cannot_call_live_endpoint",
@@ -69074,7 +70753,7 @@
       "file": "src/remote/server.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 116,
+      "line": 121,
       "module": "src/remote",
       "name": "ConfigError",
       "public": true,
@@ -69099,7 +70778,7 @@
       "file": "src/remote/server.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 121,
+      "line": 126,
       "module": "src/remote",
       "name": "RemoteConfig",
       "public": true,
@@ -69151,7 +70830,7 @@
       "file": "src/remote/server.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 326,
+      "line": 331,
       "module": "src/remote",
       "name": "RemoteServer",
       "public": true,
@@ -69172,7 +70851,7 @@
       "file": "src/remote/server.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 302,
+      "line": 307,
       "module": "src/remote",
       "name": "_Connection",
       "public": false,
@@ -69191,7 +70870,7 @@
       "file": "src/remote/server.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 321,
+      "line": 326,
       "module": "src/remote",
       "name": "_IdempotentResult",
       "public": false,
@@ -69210,7 +70889,7 @@
       "file": "src/remote/server.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 192,
+      "line": 197,
       "module": "src/remote",
       "name": "_accept_key",
       "public": false,
@@ -69229,7 +70908,7 @@
       "file": "src/remote/server.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 197,
+      "line": 202,
       "module": "src/remote",
       "name": "_recv_exact",
       "public": false,
@@ -69248,7 +70927,7 @@
       "file": "src/remote/server.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 964,
+      "line": 979,
       "module": "src/remote",
       "name": "_stable_hash",
       "public": false,
@@ -69270,7 +70949,7 @@
       "file": "src/remote/server.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 153,
+      "line": 158,
       "module": "src/remote",
       "name": "config_from_env",
       "public": true,
@@ -69289,7 +70968,7 @@
       "file": "src/remote/server.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 972,
+      "line": 987,
       "module": "src/remote",
       "name": "entry_tail_signature",
       "public": true,
@@ -69311,7 +70990,7 @@
       "file": "src/remote/server.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 253,
+      "line": 258,
       "module": "src/remote",
       "name": "perform_handshake",
       "public": true,
@@ -69333,7 +71012,7 @@
       "file": "src/remote/server.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 209,
+      "line": 214,
       "module": "src/remote",
       "name": "read_frame",
       "public": true,
@@ -69354,7 +71033,7 @@
       "file": "src/remote/server.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 249,
+      "line": 254,
       "module": "src/remote",
       "name": "send_text",
       "public": true,
@@ -69374,7 +71053,7 @@
       "file": "src/remote/server.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 236,
+      "line": 241,
       "module": "src/remote",
       "name": "write_frame",
       "public": true,
@@ -69855,6 +71534,7 @@
         "app.tests.test_broker_status_authority:test_scenario_3_authentication_timeout_neither_shows_connected",
         "app.tests.test_broker_status_transitions:test_gateway_connected_broker_disconnected_snapshot_separation",
         "app.tests.test_live_strategy_resolution:test_strategy_id_survives_snapshot_and_remote_round_trip",
+        "app.tests.test_safety_reporting:_live_snapshot",
         "broker.tests.test_unified_session:test_remote_carries_broker_session",
         "remote.server:RemoteServer",
         "remote.tests.test_snapshot:test_brokers_rows_keep_schema_flags_and_session",
@@ -69899,7 +71579,7 @@
       "file": "src/remote/snapshot.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 348,
+      "line": 354,
       "module": "src/remote",
       "name": "classify_event",
       "public": true,
@@ -69922,7 +71602,7 @@
       "file": "src/remote/snapshot.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 377,
+      "line": 383,
       "module": "src/remote",
       "name": "project_event",
       "public": true,
@@ -71901,7 +73581,9 @@
       "tests": []
     },
     {
-      "called_by": [],
+      "called_by": [
+        "app.services.order_path_test_service:_risk_approves"
+      ],
       "callers_complete": true,
       "calls": [
         "risk.kill_switch:KillSwitch",
@@ -72001,6 +73683,7 @@
     },
     {
       "called_by": [
+        "app.services.order_path_test_service:_risk_approves",
         "execution.tests.test_phase1_safety:_paper_session",
         "execution.tests.test_phase1_safety:test_duplicate_intent_id_blocked_by_risk_engine",
         "execution.tests.test_phase1_safety:test_kill_switch_on_blocks_session_start",
@@ -72031,6 +73714,7 @@
     },
     {
       "called_by": [
+        "app.services.order_path_test_service:_risk_approves",
         "execution.tests.test_phase1_safety:test_duplicate_intent_id_blocked_by_risk_engine",
         "execution.tests.test_phase1_safety:test_negative_capital_blocks_order",
         "execution.tests.test_phase1_safety:test_oversized_quantity_blocked_by_max_order_qty",
@@ -72388,6 +74072,7 @@
     {
       "called_by": [
         "app.services.live_trading_service:LiveTradingService",
+        "app.services.order_path_test_service:_risk_approves",
         "execution.runtime.session:LiveSession",
         "risk.sizing:_size_position",
         "risk.sizing:size_position",
@@ -72502,6 +74187,7 @@
     },
     {
       "called_by": [
+        "app.services.order_path_test_service:_risk_approves",
         "execution.runtime.session:LiveSession",
         "risk.tests.test_sizing:_size",
         "risk.tests.test_sizing:test_live_rejects_non_broker_capital_source",
@@ -84064,6 +85750,8 @@
         "app.services.lab_universe_service:LabUniverseService",
         "app.services.live_trading_service:LiveTradingService",
         "app.tests.test_instrument_migration_phase2:_store",
+        "app.tests.test_order_path_test:live_dirs",
+        "app.tests.test_sync_candles_validation_cache:dirs",
         "strategy.tests.test_universe:_store"
       ],
       "callers_complete": true,
@@ -90319,6 +92007,40 @@
       "name": "parse_args",
       "public": true,
       "qualified": "tools.launch_native:parse_args",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "tools.parse_timings:main"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "tools.parse_timings.extract",
+      "file": "tools/parse_timings.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 14,
+      "module": "tools",
+      "name": "extract",
+      "public": true,
+      "qualified": "tools.parse_timings:extract",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "tools.parse_timings:extract"
+      ],
+      "dotted": "tools.parse_timings.main",
+      "file": "tools/parse_timings.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 38,
+      "module": "tools",
+      "name": "main",
+      "public": true,
+      "qualified": "tools.parse_timings:main",
       "tests": []
     },
     {
@@ -102235,6 +103957,12 @@
     {
       "granularity": "module",
       "module": "src/app",
+      "path": "src/app/tests/test_order_path_test.py",
+      "targets": []
+    },
+    {
+      "granularity": "module",
+      "module": "src/app",
       "path": "src/app/tests/test_phase4_dashboard.py",
       "targets": []
     },
@@ -102249,6 +103977,12 @@
     {
       "granularity": "module",
       "module": "src/app",
+      "path": "src/app/tests/test_safety_reporting.py",
+      "targets": []
+    },
+    {
+      "granularity": "module",
+      "module": "src/app",
       "path": "src/app/tests/test_set_default.py",
       "targets": []
     },
@@ -102256,6 +103990,12 @@
       "granularity": "module",
       "module": "src/app",
       "path": "src/app/tests/test_strategy_universe_phase1.py",
+      "targets": []
+    },
+    {
+      "granularity": "module",
+      "module": "src/app",
+      "path": "src/app/tests/test_sync_candles_validation_cache.py",
       "targets": []
     },
     {

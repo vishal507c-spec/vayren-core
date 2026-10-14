@@ -148,6 +148,11 @@ class BrokerManager:
         # ops: idempotency cache for duplicate CONNECT/DISCONNECT requests.
         self._audit = SessionAudit()
         self._ops: dict[str, dict[str, Any]] = {}
+        # LIVE runtime facts (arming consent + whether a strategy is actually
+        # running) live in the trading service, not here. The manager only
+        # READS them through this provider; it never sets arming state, and
+        # with no provider registered both report False (unchanged default).
+        self._runtime_provider: Callable[[], dict[str, Any]] | None = None
         self._op_lock = threading.Lock()
         self._generations: dict[str, int] = dict.fromkeys(self._specs, 0)
         self._desired: dict[str, str] = dict.fromkeys(self._specs, "DISCONNECTED")
@@ -587,6 +592,26 @@ class BrokerManager:
 
     # ── unified authoritative session snapshot ───────────────────
 
+    def set_runtime_provider(self, provider: Callable[[], dict[str, Any]] | None) -> None:
+        """Register a read-only LIVE runtime state provider (consent + session).
+
+        The trading service owns consent and the session lifecycle; the broker
+        manager must not infer either. Registration is optional: with no
+        provider every session still reports ``live_armed``/``strategy_running``
+        as False, exactly as before.
+        """
+        self._runtime_provider = provider
+
+    def _runtime_state(self) -> dict[str, Any]:
+        """Runtime facts from the provider, never from this module's state."""
+        if self._runtime_provider is None:
+            return {}
+        try:
+            facts = self._runtime_provider()
+        except Exception:  # noqa: BLE001 - reporting must never raise
+            return {}
+        return dict(facts) if isinstance(facts, dict) else {}
+
     def get_session_snapshot(self, broker_id: str) -> dict[str, Any]:
         """One authoritative backend snapshot for SYSTEM/LIVE/dashboard/health."""
         with self._lock:
@@ -600,6 +625,7 @@ class BrokerManager:
             last_error_kind = str(uni.get("last_error_kind", "") or "")
             retry_after_s = float(uni.get("retry_after_s", 0.0) or 0.0)
             token_reused = bool(uni.get("token_reused", False))
+        runtime = self._runtime_state()
         raw_details = state.get("details")
         details: dict[str, Any] = raw_details if isinstance(raw_details, dict) else {}
         raw_status = state.get("status")
@@ -668,8 +694,8 @@ class BrokerManager:
             last_error_kind=str(last_error_kind or ""),
             retry_after_s=retry_after_s,
             version=version,
-            live_armed=False,
-            strategy_running=False,
+            live_armed=bool(runtime.get("live_armed", False)),
+            strategy_running=bool(runtime.get("strategy_running", False)),
             reason=redact(str(state.get("reason", "") or "")),
         )
         snap["configured"] = configured

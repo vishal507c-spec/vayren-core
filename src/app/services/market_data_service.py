@@ -47,11 +47,18 @@ class MarketDataError(Exception):
 
 @dataclass(frozen=True)
 class Quote:
-    """Latest quote fact for one symbol (absent quote = N/A downstream)."""
+    """Latest quote fact for one symbol (absent quote = N/A downstream).
+
+    ``as_of`` is the SOURCE stamp of the candle the price came from (the
+    store's own ``candle_time``), never the current clock. A caller that
+    renders this must label the price with this stamp; stamping it with
+    "now" is how a 19-hour-old close ends up looking like a live tick.
+    """
 
     symbol: str
     price: float | None
     change_pct: float | None
+    as_of: str = ""
 
 
 @dataclass(frozen=True)
@@ -731,11 +738,13 @@ class MarketDataService:
             return None
         if not tail:
             return Quote(symbol=symbol, price=None, change_pct=None)
-        last = tail[-1][1]
+        last_stamp, last = tail[-1][0], tail[-1][1]
         change = None
         if len(tail) >= 2 and tail[-2][1]:
             change = 100.0 * (last - tail[-2][1]) / abs(tail[-2][1])
-        quote = Quote(symbol=symbol, price=last, change_pct=change)
+        # as_of is the store's own candle stamp: the ONLY honest label for
+        # this price. It is a candle close, not a live venue tick.
+        quote = Quote(symbol=symbol, price=last, change_pct=change, as_of=last_stamp)
         self._quote_cache[symbol] = (mtime, quote)
         if len(self._quote_cache) > 2048:
             self._quote_cache.pop(next(iter(self._quote_cache)))
