@@ -16,9 +16,32 @@ import logging
 import uuid
 from collections import deque
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from PySide6.QtCore import QObject, Signal
+if TYPE_CHECKING:
+    from PySide6.QtCore import QObject, Signal
+else:
+    try:
+        from PySide6.QtCore import QObject, Signal
+    except (ImportError, OSError):
+
+        class QObject:
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                pass
+
+        class Signal:
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                pass
+
+            def emit(self, *args: Any, **kwargs: Any) -> None:
+                pass
+
+            def connect(self, *args: Any, **kwargs: Any) -> None:
+                pass
+
+            def disconnect(self, *args: Any, **kwargs: Any) -> None:
+                pass
+
 
 from execution.control_plane import (
     CommandRequest,

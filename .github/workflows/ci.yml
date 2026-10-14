@@ -45,7 +45,7 @@ jobs:
       - run: pip install -e ".[dev,data,ui]"
       - run: ruff check .
       - run: ruff format --check .
-      - run: pyright
+      - run: pyright --threads
 
   validators:
     runs-on: ubuntu-latest
@@ -109,7 +109,7 @@ jobs:
       # pkg-config; without the dev package yeslogic-fontconfig-sys fails).
       # lld linker provides 4x faster Rust linking on multi-crate workspaces.
       - name: Install Linux build dependencies
-        run: sudo apt-get update && sudo apt-get install -y pkg-config libfontconfig1-dev lld
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends pkg-config libfontconfig1-dev lld
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -198,7 +198,7 @@ jobs:
       # without the dev packages — Day-6 CI proof).
       - name: Install Linux build dependencies
       # lld linker provides 4x faster Rust linking on multi-crate workspaces.
-        run: sudo apt-get update && sudo apt-get install -y pkg-config libfontconfig1-dev lld
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends pkg-config libfontconfig1-dev lld
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -309,7 +309,7 @@ jobs:
       # links fontconfig/freetype at final link time (linker fails
       # without the dev packages — Day-6 CI proof).
       - name: Install Linux build dependencies
-        run: sudo apt-get update && sudo apt-get install -y pkg-config libfontconfig1-dev lld
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends pkg-config libfontconfig1-dev lld
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:

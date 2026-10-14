@@ -26,11 +26,10 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from app.services.control_plane_bridge import ControlPlaneBridge
-
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QApplication
 
+    from app.services.control_plane_bridge import ControlPlaneBridge
     from app.services.trading_dashboard import (
         LiveWorkspaceView,
         MarketWorkspaceView,
@@ -47,6 +46,7 @@ else:
     try:
         from PySide6.QtWidgets import QApplication
 
+        from app.services.control_plane_bridge import ControlPlaneBridge
         from app.services.trading_dashboard import (
             LiveWorkspaceView,
             MarketWorkspaceView,
@@ -61,6 +61,7 @@ else:
         _QT_AVAILABLE = True
     except (ImportError, OSError):
         _QT_AVAILABLE = False
+        ControlPlaneBridge = None  # type: ignore
         QApplication = None
         LiveWorkspaceView = None
         MarketWorkspaceView = None

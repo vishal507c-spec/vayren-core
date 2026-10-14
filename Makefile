@@ -56,7 +56,7 @@ format:
 	python tools/repo_graph.py --build
 
 typecheck:
-	pyright
+	pyright --threads
 
 # ── Validation ─────────────────────────────────────────────────
 

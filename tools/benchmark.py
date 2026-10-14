@@ -47,7 +47,7 @@ GATE_STEPS: tuple[tuple[str, list[str]], ...] = (
     ("ruff-check", ["ruff", "check", "."]),
     ("ruff-format-check", ["ruff", "format", "--check", "."]),
     # make typecheck
-    ("pyright", ["pyright"]),
+    ("pyright", ["pyright", "--threads"]),
     # make test
     ("pytest", [sys.executable, "-m", "pytest", "-q", "--no-header", "-p", "no:cacheprovider"]),
     # make validate-*
