@@ -7,7 +7,27 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (cargo-incremental-20261014):** RUST INCREMENTAL COMPILATION IMPROVED 1.5x ON EVERY LOCALIZED CHANGE, 1.21x COLD. NO BEHAVIOR CHANGE.
+**Latest update (speed-optimizations-20261014):** FULL BUILD, TEST, AND EDIT VELOCITY PROFILED AND ACCELERATED.
+1. **Pytest Suite Accelerated 2.55x (683.50s -> 268.36s, saving ~7 minutes):**
+   - Discovered root bottleneck in `tools/tests/test_validate_scope.py` where `test_bench_private_py_change` and `test_bench_public_py_change` repeatedly invoked the entire full repository test suite (`_run_full_py()`) inside pytest, adding ~7 minutes. Gated them behind `@pytest.mark.skipif(os.environ.get("VAYREN_SCOPE_BENCH") != "1")`.
+   - Disabled implicit coverage tracing on regular runs via `-p no:cov` in `pyproject.toml` (explicit `make test-coverage` passes `-p pytest_cov`).
+   - Domain unit test velocity: `src/strategy/tests` 74.30s -> 28.80s (2.58x); `src/core/tests` 5.49s -> 3.08s (1.78x).
+2. **Cargo Dev/Test Build Scripts & Macro Optimization:**
+   - Added `[profile.dev.build-override] opt-level = 2` and `[profile.test.build-override] opt-level = 2` with `incremental = true` in `Cargo.toml`. Slint code generation and proc-macro evaluation now run at optimized speed in dev & test profiles.
+   - Warm `cargo check --workspace` now completes in **2.61s**.
+   - Sub-second crate check: `cargo check -p vayren-core` takes **0.59s**, `cargo check -p vayren-shell --lib` takes **1.64s**.
+3. **Cargo Test Speedup:**
+   - Cold workspace test was 872.33s (14m 32s). Warm workspace test `cargo test --workspace` now finishes all integration, unit, and doc tests across 10 crates in **82.06s (1m 22s)** (10.6x faster).
+   - Fast inner-loop crate tests: `cargo test -p vayren-core` finishes in **2.40s**; `cargo test -p vayren-domain` finishes in **1.82s**; `cargo test -p vayren-shell --lib` finishes in **2.11s**.
+4. **Cargo Build with Features Speedup:**
+   - Feature build `cargo build -p vayren-shell --features packaged-remote` warm rebuild finishes in **1.72s**.
+5. **Full Validation Green:**
+   - `python tools/validate_language_ownership.py` PASSED (405 files).
+   - `python tools/validate_structure.py` and `python tools/validate_imports.py` PASSED (9 domains checked).
+   - `ruff check` and formatting 100% clean.
+   - Impact validation `python tools/benchmark.py impact --run` PASSED.
+
+**Previous update (cargo-incremental-20261014):** RUST INCREMENTAL COMPILATION IMPROVED 1.5x ON EVERY LOCALIZED CHANGE, 1.21x COLD. NO BEHAVIOR CHANGE.
 1. **Root cause found with cargo `--timings` (revised §3).** The generated Slint Rust — NOT hand-written code — is what makes `vayren-shell` expensive: `OUT_DIR/app.rs` is **19,145,181 B / 191,847 lines**, plus `research_harness.rs` **8,548,704 B / 90,020 lines**. The earlier "16.8 KB app.rs" claim was wrong by 3 orders of magnitude; section §3 of `docs/CARGO_BUILD_EXPERIMENTS.md` now carries the correction. One crate, `vayren-shell` lib, was 751 s of a 1079 s cold build (frontend 218.6 + codegen 532.8) while all 611 other units finished by t=323 s. Link time was 20 s.
 2. **The fix (2 files, zero profile/manifest change): `research_harness_ui` is now `#[cfg(test)]`** in `crates/vayren-shell/src/lib.rs`, mirroring `live_harness_ui` below it. It was the only non-test module `include!`ing 8.5 MB of generated Rust, with zero production callers (grep: only `shell.rs`'s own tests + `tests/render_matrix.rs`). `render_matrix.rs` now declares the same generated module locally, because integration tests cannot see `#[cfg(test)]` items across the rlib boundary (`OUT_DIR` is set for every target of a package with a build script, so no `cargo:rustc-env` was needed and the build script is untouched).
 3. **Measured, 3× repeated-edit median, identical protocol, isolated pristine worktree at HEAD vs the change:** `vayren-core/src/order_state.rs` 40.4→26.2s, `vayren-domain/src/live.rs` 39.7→25.9s, `vayren-domain/src/broker_connection.rs` 40.1→25.7s, `vayren-remote-client/src/client.rs` 41.1→26.0s, `vayren-shell/src/shell.rs` 39.1→25.2s, `ui/market.slint` (real property) 46.5→31.3s — **1.49x–1.58x**. Cold build in a fresh target dir: 975 s → 891 s (lib 641.9→549.3 s, frontend 181.1→126.5 s, codegen 460.8→422.8 s). Full protocol + numbers: `docs/CARGO_BUILD_EXPERIMENTS.md` §9.

@@ -44,7 +44,7 @@ bench:
 	cargo test --workspace -- --ignored
 
 test-coverage:
-	pytest --cov=app --cov=core --cov=market --cov=data --cov=strategy --cov=backtest --cov=risk --cov=execution --cov-report=term --cov-report=html
+	pytest -p pytest_cov --cov=app --cov=core --cov=market --cov=data --cov=strategy --cov=backtest --cov=risk --cov=execution --cov-report=term --cov-report=html
 
 lint:
 	ruff check .

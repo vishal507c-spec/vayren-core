@@ -113,7 +113,7 @@ testpaths = [
     "tools/forensics/tests",
     "tools/tests",
 ]
-addopts = "-v --tb=short"
+addopts = "-q --tb=short -p no:cov"
 
 # ── Coverage (Test Coverage) ──────────────────────────────────
 [tool.coverage.run]

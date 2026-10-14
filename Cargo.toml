@@ -35,14 +35,26 @@ i-slint-backend-testing = "~1.17.0"
 
 [profile.dev]
 debug = 0
+incremental = true
+
+# Build scripts (including Slint compiler) and proc macros run optimized in dev
+[profile.dev.build-override]
+opt-level = 2
 
 [profile.test]
 debug = 0
+incremental = true
+
+# Build scripts (including Slint compiler) and proc macros run optimized in test
+[profile.test.build-override]
+opt-level = 2
 
 [profile.release]
 opt-level = 3
 lto = false
 codegen-units = 16
+debug = 0
+strip = "debuginfo"
 # Incremental release builds: only changed units recompile on rebuilds.
 # Zero effect on the shipped binary (same opt/LTO/codegen) — it purely
 # reuses prior codegen. First build after this pays full price once.
@@ -55,5 +67,6 @@ incremental = true
 # lib/bin units keep [profile.release] above byte-for-byte.
 [profile.release.build-override]
 opt-level = 2
+
 
 

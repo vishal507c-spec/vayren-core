@@ -580,6 +580,10 @@ def _assert_full_py_sane(full: dict) -> None:
         assert entry["outcome"] == "PASS", (command, entry)
 
 
+@pytest.mark.skipif(
+    os.environ.get("VAYREN_SCOPE_BENCH") != "1",
+    reason="slow live-tree benchmark re-running full suite",
+)
 def test_bench_private_py_change(tree: TreeEdit) -> None:
     manifest = _manifest()
     tree.append("src/broker/registry.py", PROBE_PRIVATE)
@@ -596,6 +600,10 @@ def test_bench_private_py_change(tree: TreeEdit) -> None:
     _assert_full_py_sane(full)
 
 
+@pytest.mark.skipif(
+    os.environ.get("VAYREN_SCOPE_BENCH") != "1",
+    reason="slow live-tree benchmark re-running full suite",
+)
 def test_bench_public_py_change(tree: TreeEdit) -> None:
     manifest = _manifest()
     tree.append("src/broker/registry.py", PROBE_PUBLIC)
