@@ -202,6 +202,8 @@ fn apply_connection_view(ui: &SystemHostWindow, workspace: &BrokerWorkspace) -> 
         .into(),
     );
     ui.set_conn_display_name(workspace.display_name.clone().into());
+    ui.set_conn_broker_id(workspace.panel_id.clone().into());
+    ui.set_conn_default_id(workspace.default_id.clone().into());
     ui.set_conn_mark(
         workspace
             .display_name
@@ -377,6 +379,20 @@ fn wire_view(
         ui.on_select_requested(move |id: slint::SharedString| {
             let payload = serde_json::json!({
                 "action": "select",
+                "broker_id": id.as_str(),
+            });
+            if let Ok(text) = serde_json::to_string(&payload) {
+                queue.borrow_mut().push_back(text);
+            }
+            refresh_flag.set(true);
+        });
+    }
+    {
+        let queue = actions.clone();
+        let refresh_flag = refresh.clone();
+        ui.on_set_default_requested(move |id: slint::SharedString| {
+            let payload = serde_json::json!({
+                "action": "set_default",
                 "broker_id": id.as_str(),
             });
             if let Ok(text) = serde_json::to_string(&payload) {

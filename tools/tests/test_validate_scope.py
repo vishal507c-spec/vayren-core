@@ -625,6 +625,10 @@ def test_bench_strategy_change(tree: TreeEdit) -> None:
     assert result["commands"]
 
 
+@pytest.mark.skipif(
+    os.environ.get("VAYREN_SCOPE_BENCH") != "1",
+    reason="slow live-tree benchmark re-running cargo suites",
+)
 def test_bench_market_rust_change(tree: TreeEdit) -> None:
     manifest, _ = execute_surface.build_manifest("add timeframe")
     tree.append("crates/vayren-core/src/aggregate.rs", "\n// phase6 benchmark probe\n")
@@ -677,6 +681,10 @@ def test_bench_unchanged_clean() -> None:
     assert result["scope"] == "L0" and result["commands"] == []
 
 
+@pytest.mark.skipif(
+    os.environ.get("VAYREN_SCOPE_BENCH") != "1",
+    reason="slow live-tree benchmark re-running full validation cycles",
+)
 def test_bench_stale_cache_miss(tree: TreeEdit) -> None:
     validate_scope.purge_cache()
     manifest = _manifest()

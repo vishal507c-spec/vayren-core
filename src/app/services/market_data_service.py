@@ -19,6 +19,7 @@ does SQL IO, timestamp parsing/formatting and row validation only.
 
 from __future__ import annotations
 
+import json
 import logging
 import math
 import os
@@ -180,6 +181,7 @@ class MarketDataService:
         self._discovery: DiscoveryReport | None = None
         self._row_cache: dict[str, tuple[float, _CachedRows]] = {}
         self._quote_cache: dict[str, tuple[float, Quote]] = {}
+        self._load_persisted_quote_cache()
         self._base_seconds_cache: dict[str, int] = {}
         self._bars_cache: dict[tuple, tuple] = {}
         self._bars_cache_rows = 0
@@ -711,6 +713,48 @@ class MarketDataService:
             closes.append((moment.strftime(_STAMP_FORMAT), fc))
         return closes
 
+    def _quote_cache_path(self) -> Path:
+        return self._data_dir / ".quotes_cache.json"
+
+    def _load_persisted_quote_cache(self) -> None:
+        cache_file = self._quote_cache_path()
+        try:
+            if not cache_file.is_file():
+                return
+            data = json.loads(cache_file.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                return
+            for sym, item in data.items():
+                if isinstance(item, dict):
+                    mtime = item.get("mtime")
+                    price = item.get("price")
+                    change_pct = item.get("change_pct")
+                    as_of = item.get("as_of")
+                    if isinstance(mtime, (int, float)):
+                        self._quote_cache[sym] = (
+                            float(mtime),
+                            Quote(symbol=sym, price=price, change_pct=change_pct, as_of=as_of),
+                        )
+        except Exception:
+            pass
+
+    def _save_persisted_quote_cache(self) -> None:
+        cache_file = self._quote_cache_path()
+        try:
+            to_save = {}
+            for sym, (mtime, q) in self._quote_cache.items():
+                to_save[sym] = {
+                    "mtime": mtime,
+                    "price": q.price,
+                    "change_pct": q.change_pct,
+                    "as_of": q.as_of,
+                }
+            tmp = cache_file.with_suffix(".tmp")
+            tmp.write_text(json.dumps(to_save), encoding="utf-8")
+            tmp.replace(cache_file)
+        except Exception:
+            pass
+
     def get_quotes(self, symbols: list[str]) -> list[Quote]:
         """Latest close + session change for each symbol (honest N/A on gaps).
 
@@ -718,9 +762,15 @@ class MarketDataService:
         repeated snapshots (symbol switches) stay instant.
         """
         quotes: list[Quote] = []
+        dirty = False
         for symbol in symbols:
+            had = symbol in self._quote_cache
             quote = self._cached_quote(symbol)
+            if not had and symbol in self._quote_cache:
+                dirty = True
             quotes.append(quote if quote is not None else Quote(symbol, None, None))
+        if dirty:
+            self._save_persisted_quote_cache()
         return quotes
 
     def _cached_quote(self, symbol: str) -> Quote | None:

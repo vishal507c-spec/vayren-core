@@ -311,6 +311,7 @@ def build_snapshot(live: dict[str, Any]) -> dict[str, Any]:
         "brokers": scrub(live.get("brokers", [])),
         "as_of": str(live.get("as_of", "") or ""),
         "broker_session": scrub(broker_session),
+        "websocket": scrub(websocket),
     }
     return scrub(snapshot)
 

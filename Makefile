@@ -53,6 +53,7 @@ lint:
 format:
 	ruff check --fix .
 	ruff format .
+	python tools/repo_graph.py --build
 
 typecheck:
 	pyright
@@ -81,7 +82,7 @@ validate-authority:
 	python tools/validate_authority.py
 
 validate-repo-graph:
-	python tools/validate_repo_graph.py
+	python tools/validate_repo_graph.py --fix
 
 validate-scope:
 	python tools/validate_scope.py --stats

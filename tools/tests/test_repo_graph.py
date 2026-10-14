@@ -212,8 +212,14 @@ def test_committed_artifact_matches_fresh_build() -> None:
         pytest.skip("nested scope benchmark mutates tree during run")
     committed = load_graph()
     fresh, _ = build_graph()
-    assert committed["inputs_hash"] == fresh["inputs_hash"]
-    assert _digest(committed) == _digest(fresh)
+    assert committed["inputs_hash"] == fresh["inputs_hash"], (
+        "docs/repo_graph.json inputs_hash is stale. "
+        "Run 'python tools/repo_graph.py --build' (or 'make format') to synchronize."
+    )
+    assert _digest(committed) == _digest(fresh), (
+        "docs/repo_graph.json is out of date with code changes. "
+        "Run 'python tools/repo_graph.py --build' (or 'make format') to synchronize."
+    )
 
 
 def test_graph_has_no_canonical_prose() -> None:

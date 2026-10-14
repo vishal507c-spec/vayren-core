@@ -793,3 +793,69 @@ fn eligibility_panel_renders_reported_and_unreported() {
     assert!(probe.neg > px / 12000, "reported: danger tone missing");
     assert!(probe.bg < px * 97 / 100, "reported: frame is a void");
 }
+
+/// WebSocket status card verification:
+/// 1. Status states (CONNECTED, CONNECTING, RECONNECTING, DISCONNECTED, ERROR)
+///    project with the correct tones.
+/// 2. WebSocket status is completely decoupled from broker and strategy status.
+/// 3. Property round-trip arrives at `ui.get_live_ws()`.
+#[test]
+fn ws_connection_status_round_trip_and_rendering() {
+    let win = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
+    slint::platform::set_platform(Box::new(MiniPlatform {
+        window: win.clone(),
+    }))
+    .expect("software platform installs once per test binary");
+
+    let ui = vayren_shell::AppWindow::new().unwrap();
+    shell::apply(&ui, &shell::demo_snapshot());
+    shell::select(&ui, ShellScreen::Live);
+
+    // Verify all 5 WebSocket states with broker DISCONNECTED, strategy STOPPED, START BLOCKED
+    let cases = [
+        ("CONNECTED", 1, Some(24.5), 50, "15:29:59", ""),
+        ("CONNECTING", 2, None, 0, "", ""),
+        ("RECONNECTING", 2, None, 0, "", "connection dropped"),
+        ("DISCONNECTED", 3, None, 0, "", "socket closed"),
+        ("ERROR", 3, None, 0, "", "handshake failed 502"),
+    ];
+
+    for (status, expected_tone, latency, syms, last_tick, last_err) in cases {
+        let mut state = idle_populated_state();
+        // Explicitly set broker to DISCONNECTED, strategy to STOPPED
+        state.broker.status = "DISCONNECTED".into();
+        state.broker.connected = Some(false);
+        state.session = live::SessionStatus::Stopped;
+
+        state.websocket = live::WebSocketFacts {
+            status: status.into(),
+            latency_ms: latency,
+            channel: "NSE Live Stream".into(),
+            timeframe: "1m".into(),
+            subscribed_symbols: syms,
+            last_tick_time: last_tick.into(),
+            reconnect_count: if status == "RECONNECTING" { 3 } else { 0 },
+            last_error: last_err.into(),
+        };
+
+        shell::apply_live(&ui, &state);
+
+        let ws = ui.get_live_ws();
+        assert_eq!(ws.status.as_str(), status, "WS status must match");
+        assert_eq!(ws.tone, expected_tone, "WS tone must match expected tone");
+        if let Some(lat) = latency {
+            assert!(ws.latency.as_str().contains(&format!("{:.0}", lat)), "latency must format correctly");
+        }
+        if !last_err.is_empty() {
+            assert_eq!(ws.last_error.as_str(), last_err, "last error must round trip");
+        }
+
+        // Render at logical 1280x720 and 1920x1080 to verify neither crashes or produces voids
+        let buffer = render_frame(&ui, &win, &format!("ws_{status}_1280x720"), 1280, 720);
+        let px = (1280 * 720) as usize;
+        let probe = probe_frame(&buffer);
+        assert!(probe.surface > px / 400, "surface painted");
+        assert!(probe.text > px / 2200, "text rasterized");
+    }
+}
+

@@ -89,9 +89,14 @@ export component SystemHostWindow inherits Window {
     callback select-requested(string);
     callback connect-requested(string, string, string, string, string, string);
     callback add-requested();
+    callback set-default-requested(string);
 
     // Connection workspace facts (Rust `BrokerWorkspace` projection).
     in-out property <[BrokerRowView]> conn-brokers;
+    in-out property <string> conn-broker-id: "";
+    in-out property <string> conn-default-id: "";
+    in-out property <bool> conn-default-saving: false;
+    in-out property <string> conn-default-error: "";
     in-out property <string> conn-display-name: "";
     in-out property <string> conn-mark: "?";
     in-out property <string> conn-venue-subtitle: "";
@@ -215,6 +220,10 @@ export component SystemHostWindow inherits Window {
                 width: root.width;
                 height: max(self.preferred-height, root.height);
                 brokers: root.conn-brokers;
+                broker-id: root.conn-broker-id;
+                default-id: root.conn-default-id;
+                default-saving: root.conn-default-saving;
+                default-error: root.conn-default-error;
                 broker-display-name: root.conn-display-name;
                 logo-mark: root.conn-mark;
                 venue-subtitle: root.conn-venue-subtitle;
@@ -241,6 +250,7 @@ export component SystemHostWindow inherits Window {
                 disconnect-requested() => { root.disconnect-requested(); }
                 refresh-requested() => { root.refresh-requested(); }
                 add-broker-requested() => { root.add-requested(); }
+                set-default-requested(id) => { root.set-default-requested(id); }
             }
         }
     }

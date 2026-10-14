@@ -3616,6 +3616,7 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
         latency: view.ws.latency.into(),
         sub: view.ws.sub.into(),
         last_tick: view.ws.last_tick.into(),
+        last_error: view.ws.last_error.into(),
     });
     ui.set_live_md(LiveMarketData {
         status: view.md.status.into(),
@@ -4807,6 +4808,34 @@ mod tests {
         assert_eq!(live_state.borrow().event_category, "ORDERS");
         ui.invoke_live_clear_events();
         assert!(live_state.borrow().events.is_empty());
+
+        // WS CONNECTION status indicator reflects true WebSocket facts
+        let mut ws_live = demo_live_state();
+        ws_live.websocket.status = "CONNECTED".into();
+        ws_live.websocket.latency_ms = Some(24.0);
+        ws_live.websocket.last_tick_time = "14:22:10".into();
+        apply_live(&ui, &ws_live);
+        let ws_card = ui.get_live_ws();
+        assert_eq!(ws_card.status, "CONNECTED");
+        assert_eq!(ws_card.tone, 1);
+        assert_eq!(ws_card.latency, "24 ms");
+        assert_eq!(ws_card.last_tick, "14:22:10");
+
+        // Reconnecting state with error message
+        ws_live.websocket.status = "RECONNECTING".into();
+        ws_live.websocket.last_error = "link lost - retrying in 2s".into();
+        apply_live(&ui, &ws_live);
+        let ws_card = ui.get_live_ws();
+        assert_eq!(ws_card.status, "RECONNECTING");
+        assert_eq!(ws_card.tone, 2);
+        assert_eq!(ws_card.last_error, "link lost - retrying in 2s");
+
+        // Disconnected state
+        ws_live.websocket.status = "DISCONNECTED".into();
+        apply_live(&ui, &ws_live);
+        let ws_card = ui.get_live_ws();
+        assert_eq!(ws_card.status, "DISCONNECTED");
+        assert_eq!(ws_card.tone, 3);
 
         // LIVE mode intent is fail-closed while venue gates block (non-host
         // path says so outright; the host path asks the backend instead).

@@ -2842,6 +2842,7 @@ pub struct WebSocketView {
     pub latency: String,
     pub sub: String,
     pub last_tick: String,
+    pub last_error: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -4056,29 +4057,30 @@ pub fn project(state: &LiveState) -> LiveView {
 
     let total = match (state.pnl.realized, state.pnl.unrealized) {
         (Some(r), Some(u)) => Some(r + u),
+        (Some(r), None) => Some(r),
+        (None, Some(u)) => Some(u),
         _ => None,
+    };
+    let pnl_tone_val = |val: Option<f64>| match val {
+        Some(v) if v > 0.0 => 1,
+        Some(v) if v < 0.0 => 3,
+        _ => 0,
     };
     let stats = vec![
         Stat {
             label: "REALIZED".into(),
             value: money_opt(state.pnl.realized),
-            tone: state
-                .pnl
-                .realized
-                .map_or(0, |v| if v < 0.0 { 3 } else { 1 }),
+            tone: pnl_tone_val(state.pnl.realized),
         },
         Stat {
             label: "UNREALIZED".into(),
             value: money_opt(state.pnl.unrealized),
-            tone: state
-                .pnl
-                .unrealized
-                .map_or(0, |v| if v < 0.0 { 3 } else { 1 }),
+            tone: pnl_tone_val(state.pnl.unrealized),
         },
         Stat {
             label: "TOTAL".into(),
             value: money_opt(total),
-            tone: total.map_or(0, |v| if v < 0.0 { 3 } else { 1 }),
+            tone: pnl_tone_val(total),
         },
         Stat {
             label: "EXPOSURE".into(),
@@ -4167,28 +4169,34 @@ pub fn project(state: &LiveState) -> LiveView {
         .collect();
 
     // ── WebSocket facts view ──
+    let ws_status_upper = state.websocket.status.trim().to_uppercase();
+    let (ws_status, ws_tone) = match ws_status_upper.as_str() {
+        "CONNECTED" => ("CONNECTED".to_string(), 1),
+        "CONNECTING" => ("CONNECTING".to_string(), 2),
+        "RECONNECTING" => ("RECONNECTING".to_string(), 2),
+        "DISCONNECTED" => ("DISCONNECTED".to_string(), 3),
+        "ERROR" | "OFFLINE" => (ws_status_upper.clone(), 3),
+        "" => ("DISCONNECTED".to_string(), 3),
+        other => (other.to_string(), 0),
+    };
     let ws = WebSocketView {
-        status: if state.websocket.status.is_empty() {
-            "CONNECTED".into()
-        } else {
-            state.websocket.status.clone()
-        },
-        tone: match state.websocket.status.as_str() {
-            "CONNECTED" => 1,
-            "CONNECTING" | "RECONNECTING" => 2,
-            "DISCONNECTED" | "ERROR" => 3,
-            _ => 1,
-        },
+        status: ws_status,
+        tone: ws_tone,
         latency: state
             .websocket
             .latency_ms
             .map_or("—".into(), |ms| format!("{:.0} ms", ms)),
-        sub: format!("{} symbols", state.websocket.subscribed_symbols),
+        sub: if state.websocket.subscribed_symbols > 0 {
+            format!("{} symbols", state.websocket.subscribed_symbols)
+        } else {
+            "—".into()
+        },
         last_tick: if state.websocket.last_tick_time.is_empty() {
             "—".into()
         } else {
             state.websocket.last_tick_time.clone()
         },
+        last_error: state.websocket.last_error.clone(),
     };
 
     // ── Market Data facts view ──

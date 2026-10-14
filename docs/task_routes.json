@@ -1275,6 +1275,258 @@
       "owner_paths": [
         "crates/vayren-remote-client"
       ]
+    },
+    {
+      "key": "live-dashboard",
+      "aliases": [
+        "live",
+        "live dashboard",
+        "live trading",
+        "websocket",
+        "ws connection",
+        "status bar",
+        "status card"
+      ],
+      "domain": "NATIVE_UI",
+      "owner_module": "crates/vayren-shell",
+      "language": "RUST+SLINT",
+      "language_boundary": "Rust owns view-model + interaction state; Slint renders bound properties only; Python never touches UI.",
+      "primary_files": [
+        "crates/vayren-shell/ui/live.slint",
+        "crates/vayren-domain/src/live.rs"
+      ],
+      "secondary_files": [
+        "crates/vayren-shell/src/shell.rs",
+        "crates/vayren-domain/src/view_model.rs"
+      ],
+      "depends_on": [],
+      "depended_on_by": [],
+      "tests": {
+        "files": [
+          "crates/vayren-shell/tests"
+        ],
+        "command": "cargo test -p vayren-shell"
+      },
+      "validation": [
+        "cargo test -p vayren-shell",
+        "cargo fmt -p vayren-shell -- --check"
+      ],
+      "forbidden": [
+        "src/app/*",
+        "src/data/*",
+        "src/strategy/*",
+        "crates/vayren-core/src/*"
+      ],
+      "symbols": {
+        "crates/vayren-domain/src/live.rs": [
+          "LiveState",
+          "LiveView",
+          "WebSocketView"
+        ]
+      },
+      "contract": "crates/vayren-shell/ui/live.slint",
+      "change_surface": {
+        "likely_changed": [
+          "crates/vayren-shell/ui/live.slint",
+          "crates/vayren-domain/src/live.rs"
+        ],
+        "affected_interfaces": [
+          "Slint property bindings"
+        ],
+        "affected_modules": [
+          "crates/vayren-shell"
+        ],
+        "required_tests": "cargo test -p vayren-shell"
+      },
+      "owner_paths": [
+        "crates/vayren-domain/src",
+        "crates/vayren-shell/src",
+        "crates/vayren-shell/ui"
+      ]
+    },
+    {
+      "key": "portfolio-view",
+      "aliases": [
+        "portfolio",
+        "blotter",
+        "positions",
+        "portfolio view"
+      ],
+      "domain": "NATIVE_UI",
+      "owner_module": "crates/vayren-portfolio-view",
+      "language": "RUST+SLINT",
+      "language_boundary": "Rust owns view-model + interaction state; Slint renders bound properties only; Python never touches UI.",
+      "primary_files": [
+        "crates/vayren-domain/src/portfolio.rs",
+        "crates/vayren-portfolio-view/ui/portfolio_host.slint"
+      ],
+      "secondary_files": [
+        "crates/vayren-portfolio-view/src/lib.rs",
+        "crates/vayren-domain/src/view_model.rs"
+      ],
+      "depends_on": [],
+      "depended_on_by": [],
+      "tests": {
+        "files": [],
+        "note": "cargo test -p vayren-portfolio-view",
+        "command": "cargo test -p vayren-portfolio-view"
+      },
+      "validation": [
+        "cargo test -p vayren-portfolio-view"
+      ],
+      "forbidden": [
+        "src/app/*",
+        "src/data/*",
+        "src/strategy/*",
+        "crates/vayren-core/src/*"
+      ],
+      "symbols": {
+        "crates/vayren-portfolio-view/src/lib.rs": [
+          "PortfolioView"
+        ]
+      },
+      "contract": "crates/vayren-portfolio-view/ui/portfolio_host.slint",
+      "change_surface": {
+        "likely_changed": [
+          "crates/vayren-domain/src/portfolio.rs",
+          "crates/vayren-portfolio-view/ui/portfolio_host.slint"
+        ],
+        "affected_interfaces": [
+          "Slint property bindings"
+        ],
+        "affected_modules": [
+          "crates/vayren-portfolio-view"
+        ],
+        "required_tests": "cargo test -p vayren-portfolio-view"
+      },
+      "owner_paths": [
+        "crates/vayren-domain/src",
+        "crates/vayren-portfolio-view/src",
+        "crates/vayren-portfolio-view/ui"
+      ]
+    },
+    {
+      "key": "strategy-lab-view",
+      "aliases": [
+        "strategy lab",
+        "lab",
+        "strategy view",
+        "strategy lab view"
+      ],
+      "domain": "NATIVE_UI",
+      "owner_module": "crates/vayren-strategy-lab-view",
+      "language": "RUST+SLINT",
+      "language_boundary": "Rust owns view-model + interaction state; Slint renders bound properties only; Python never touches UI.",
+      "primary_files": [
+        "crates/vayren-domain/src/lab.rs",
+        "crates/vayren-strategy-lab-view/ui/lab_host.slint"
+      ],
+      "secondary_files": [
+        "crates/vayren-strategy-lab-view/src/lib.rs",
+        "crates/vayren-domain/src/view_model.rs"
+      ],
+      "depends_on": [],
+      "depended_on_by": [],
+      "tests": {
+        "files": [],
+        "note": "cargo test -p vayren-strategy-lab-view",
+        "command": "cargo test -p vayren-strategy-lab-view"
+      },
+      "validation": [
+        "cargo test -p vayren-strategy-lab-view"
+      ],
+      "forbidden": [
+        "src/app/*",
+        "src/data/*",
+        "src/strategy/*",
+        "crates/vayren-core/src/*"
+      ],
+      "symbols": {
+        "crates/vayren-strategy-lab-view/src/lib.rs": [
+          "LabView"
+        ]
+      },
+      "contract": "crates/vayren-strategy-lab-view/ui/lab_host.slint",
+      "change_surface": {
+        "likely_changed": [
+          "crates/vayren-domain/src/lab.rs",
+          "crates/vayren-strategy-lab-view/ui/lab_host.slint"
+        ],
+        "affected_interfaces": [
+          "Slint property bindings"
+        ],
+        "affected_modules": [
+          "crates/vayren-strategy-lab-view"
+        ],
+        "required_tests": "cargo test -p vayren-strategy-lab-view"
+      },
+      "owner_paths": [
+        "crates/vayren-domain/src",
+        "crates/vayren-strategy-lab-view/src",
+        "crates/vayren-strategy-lab-view/ui"
+      ]
+    },
+    {
+      "key": "system-view",
+      "aliases": [
+        "system",
+        "broker connection",
+        "default broker",
+        "system view"
+      ],
+      "domain": "NATIVE_UI",
+      "owner_module": "crates/vayren-system-view",
+      "language": "RUST+SLINT",
+      "language_boundary": "Rust owns view-model + interaction state; Slint renders bound properties only; Python never touches UI.",
+      "primary_files": [
+        "crates/vayren-domain/src/broker_connection.rs",
+        "crates/vayren-system-view/ui/system_host.slint"
+      ],
+      "secondary_files": [
+        "crates/vayren-system-view/src/lib.rs",
+        "crates/vayren-domain/src/view_model.rs"
+      ],
+      "depends_on": [],
+      "depended_on_by": [],
+      "tests": {
+        "files": [
+          "crates/vayren-system-view/tests"
+        ],
+        "command": "cargo test -p vayren-system-view"
+      },
+      "validation": [
+        "cargo test -p vayren-system-view"
+      ],
+      "forbidden": [
+        "src/app/*",
+        "src/data/*",
+        "src/strategy/*",
+        "crates/vayren-core/src/*"
+      ],
+      "symbols": {
+        "crates/vayren-system-view/src/lib.rs": [
+          "SystemView"
+        ]
+      },
+      "contract": "crates/vayren-system-view/ui/system_host.slint",
+      "change_surface": {
+        "likely_changed": [
+          "crates/vayren-domain/src/broker_connection.rs",
+          "crates/vayren-system-view/ui/system_host.slint"
+        ],
+        "affected_interfaces": [
+          "Slint property bindings"
+        ],
+        "affected_modules": [
+          "crates/vayren-system-view"
+        ],
+        "required_tests": "cargo test -p vayren-system-view"
+      },
+      "owner_paths": [
+        "crates/vayren-domain/src",
+        "crates/vayren-system-view/src",
+        "crates/vayren-system-view/ui"
+      ]
     }
   ]
 }

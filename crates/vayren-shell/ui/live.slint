@@ -163,6 +163,7 @@ export struct LiveWebSocket {
     latency: string,
     sub: string,
     last-tick: string,
+    last-error: string,
 }
 
 export struct LiveMarketData {
@@ -429,27 +430,26 @@ component LiveTopCard inherits Rectangle {
     in property <string> sub-text;
     in property <int> sub-tone: 0;
     in property <bool> show-icon: true;
-    in property <string> source-text: "";
 
     background: VayrenPalette.live-panel;
     border-radius: 8px;
     border-width: 1px;
     border-color: VayrenPalette.live-line-soft;
-    min-width: 120px;
-    max-width: 175px;
+    min-width: 110px;
+    max-width: 160px;
     height: 48px;
     clip: true;
 
     HorizontalLayout {
         padding-left: 8px;
         padding-right: 8px;
-        spacing: 7px;
+        spacing: 6px;
         alignment: center;
 
         if root.show-icon: Rectangle {
-            width: 26px;
-            height: 26px;
-            border-radius: 13px;
+            width: 24px;
+            height: 24px;
+            border-radius: 12px;
             background: LiveTone.chip(root.tone);
             border-width: 1px;
             border-color: LiveTone.ink(root.tone);
@@ -457,14 +457,14 @@ component LiveTopCard inherits Rectangle {
             Text {
                 text: root.icon-char;
                 color: LiveTone.ink(root.tone);
-                font-size: 9.5px;
+                font-size: 9px;
                 font-weight: 800;
                 horizontal-alignment: center;
                 vertical-alignment: center;
             }
         }
 
-        // Text stack: label / value / sub / source on their own lines
+        // Text stack: label / value / sub on their own lines
         VerticalLayout {
             alignment: center;
             spacing: 1px;
@@ -492,14 +492,6 @@ component LiveTopCard inherits Rectangle {
                 font-weight: 500;
                 overflow: elide;
             }
-
-            if root.source-text != "": Text {
-                text: "SRC: " + root.source-text;
-                color: VayrenPalette.live-ink-dim;
-                font-size: 9px;
-                font-weight: 600;
-                overflow: elide;
-            }
         }
     }
 }
@@ -517,8 +509,8 @@ component LiveBrokerCapitalCard inherits Rectangle {
     border-radius: 6px;
     border-width: 1px;
     border-color: root.tone == 1 ? VayrenPalette.live-teal-deep : VayrenPalette.live-line-soft;
-    min-width: 170px;
-    max-width: 215px;
+    min-width: 150px;
+    max-width: 195px;
     height: 48px;
     clip: true;
 
@@ -1037,7 +1029,7 @@ export component LiveScreen inherits Rectangle {
 
     // Watchlist columns always preserved. Internal horizontal scrolling handles narrow viewports.
     property <bool> watchlist-columns-wide: true;
-    property <bool> is-narrow-bar: root.width < 1160px;
+    property <bool> is-narrow-bar: root.width < 1320px;
 
     init => { root.qty-text = root.setup.quantity; }
     changed setup => { if (!root.qty-dirty) { root.qty-text = root.setup.quantity; } }
@@ -1148,7 +1140,6 @@ export component LiveScreen inherits Rectangle {
                     tone: root.bar.broker-tone;
                     sub-text: root.bar.conn-label != "" ? root.bar.conn-label : "DISCONNECTED";
                     sub-tone: root.bar.conn-tone;
-                    source-text: "FYERS API";
                 }
 
                 LiveBrokerCapitalCard {
@@ -1170,7 +1161,19 @@ export component LiveScreen inherits Rectangle {
                     sub-text: (root.gateway.last-heartbeat != "" ? ("HB: " + root.gateway.last-heartbeat) : "HB: N/A")
                         + " · " + (root.gateway.rtt != "" ? ("RTT: " + root.gateway.rtt) : "RTT: N/A");
                     sub-tone: root.gateway.tone != 0 ? root.gateway.tone : 3;
-                    source-text: root.gateway.conn-state != "" ? ("EC2 (" + root.gateway.conn-state + ")") : (root.gateway.detail != "" ? root.gateway.detail : "EC2 WSS");
+                }
+
+                LiveTopCard {
+                    icon-char: "WS";
+                    show-icon: true;
+                    label: "WS CONNECTION";
+                    value-text: root.ws.status != "" ? root.ws.status : "DISCONNECTED";
+                    tone: root.ws.tone != 0 ? root.ws.tone : (root.ws.status == "CONNECTED" ? 1 : (root.ws.status == "CONNECTING" || root.ws.status == "RECONNECTING" ? 2 : 3));
+                    sub-text: root.ws.last-error != "" ? root.ws.last-error
+                        : (root.ws.latency != "" && root.ws.latency != "—" ? ("RTT: " + root.ws.latency)
+                        : (root.ws.last-tick != "" && root.ws.last-tick != "—" ? ("Last: " + root.ws.last-tick)
+                        : (root.ws.sub != "" && root.ws.sub != "—" ? root.ws.sub : "Live Stream")));
+                    sub-tone: root.ws.last-error != "" ? 3 : (root.ws.tone != 0 ? root.ws.tone : 0);
                 }
 
                 Rectangle { horizontal-stretch: 1; min-width: 6px; background: transparent; }
@@ -1204,7 +1207,6 @@ export component LiveScreen inherits Rectangle {
                             height: 26px;
                             enabled: !root.setup.can-stop && root.strategy-names.length > 0;
                             model: root.strategy-names;
-                            current-value: root.selected-strategy;
                             current-index: root.strategy-selected;
                             selected(v) => { root.strategy-picked(v); }
                         }
@@ -1278,13 +1280,12 @@ export component LiveScreen inherits Rectangle {
 
                     LiveTopCard {
                         icon-char: "B";
-                        show-icon: false;
+                        show-icon: true;
                         label: "BROKER";
                         value-text: root.bar.broker-label != "" ? root.bar.broker-label : "NOT CONFIGURED";
                         tone: root.bar.broker-tone;
                         sub-text: root.bar.conn-label != "" ? root.bar.conn-label : "DISCONNECTED";
                         sub-tone: root.bar.conn-tone;
-                        source-text: "";
                     }
 
                     LiveBrokerCapitalCard {
@@ -1299,13 +1300,25 @@ export component LiveScreen inherits Rectangle {
 
                     LiveTopCard {
                         icon-char: "EC2";
-                        show-icon: false;
+                        show-icon: true;
                         label: "EC2 / GATEWAY";
                         value-text: root.gateway.status != "" ? root.gateway.status : "DISCONNECTED";
                         tone: root.gateway.tone != 0 ? root.gateway.tone : 3;
                         sub-text: (root.gateway.rtt != "" ? ("RTT: " + root.gateway.rtt) : "RTT: N/A");
                         sub-tone: root.gateway.tone != 0 ? root.gateway.tone : 3;
-                        source-text: "";
+                    }
+
+                    LiveTopCard {
+                        icon-char: "WS";
+                        show-icon: true;
+                        label: "WS CONNECTION";
+                        value-text: root.ws.status != "" ? root.ws.status : "DISCONNECTED";
+                        tone: root.ws.tone != 0 ? root.ws.tone : (root.ws.status == "CONNECTED" ? 1 : (root.ws.status == "CONNECTING" || root.ws.status == "RECONNECTING" ? 2 : 3));
+                        sub-text: root.ws.last-error != "" ? root.ws.last-error
+                            : (root.ws.latency != "" && root.ws.latency != "—" ? ("RTT: " + root.ws.latency)
+                            : (root.ws.last-tick != "" && root.ws.last-tick != "—" ? ("Last: " + root.ws.last-tick)
+                            : (root.ws.sub != "" && root.ws.sub != "—" ? root.ws.sub : "Live Stream")));
+                        sub-tone: root.ws.last-error != "" ? 3 : (root.ws.tone != 0 ? root.ws.tone : 0);
                     }
 
                     Rectangle { horizontal-stretch: 1; background: transparent; }
@@ -1346,7 +1359,6 @@ export component LiveScreen inherits Rectangle {
                                 height: 26px;
                                 enabled: !root.setup.can-stop && root.strategy-names.length > 0;
                                 model: root.strategy-names;
-                                current-value: root.selected-strategy;
                                 current-index: root.strategy-selected;
                                 selected(v) => { root.strategy-picked(v); }
                             }

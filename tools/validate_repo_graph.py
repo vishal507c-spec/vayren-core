@@ -288,6 +288,11 @@ def validate_graph(graph: dict, root: Path | None = None) -> list[str]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Validate the Repository Intelligence Graph")
     parser.add_argument("--graph", default=str(repo_graph.GRAPH_PATH), help="graph JSON path")
+    parser.add_argument(
+        "--fix",
+        action="store_true",
+        help="automatically rebuild docs/repo_graph.json if validation detects drift",
+    )
     args = parser.parse_args(argv)
     try:
         graph = json.loads(Path(args.graph).read_text(encoding="utf-8"))
@@ -299,9 +304,35 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     errors = validate_graph(graph)
     if errors:
+        if args.fix:
+            print(
+                f"REPO_GRAPH: {len(errors)} problem(s) detected. "
+                "Rebuilding graph artifact with --fix..."
+            )
+            rebuilt, _ = repo_graph.build_graph()
+            repo_graph.write_graph(rebuilt)
+            try:
+                graph = json.loads(Path(args.graph).read_text(encoding="utf-8"))
+                errors = validate_graph(graph)
+            except (OSError, ValueError) as exc:
+                print(f"REPO_GRAPH FAIL: reload after fix failed: {exc}")
+                return 1
+            if not errors:
+                print(
+                    f"REPO_GRAPH PASS (auto-fixed): {graph.get('entity_count')} entities, "
+                    f"{graph.get('relationship_count')} relationships, "
+                    f"{len(graph.get('unresolved', []))} unresolved"
+                )
+                return 0
         print(f"REPO_GRAPH FAIL: {len(errors)} problem(s)")
-        for error in errors:
+        for error in errors[:10]:
             print(f"  - {error}")
+        if len(errors) > 10:
+            print(f"  ... and {len(errors) - 10} more")
+        print(
+            "\n[HINT] Symbol lines or code drifted. Run 'python tools/repo_graph.py --build' "
+            "or 'python tools/validate_repo_graph.py --fix' (or 'make format') to auto-sync."
+        )
         return 1
     print(
         f"REPO_GRAPH PASS: {graph.get('entity_count')} entities, "

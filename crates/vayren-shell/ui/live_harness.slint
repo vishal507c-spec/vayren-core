@@ -7,7 +7,7 @@
 // cfg(test). Layout decisions are read back from LiveScreen's own
 // out-properties — one decision source for screen and tests.
 
-import { LiveScreen, LiveBar, LiveSetup, LiveMarket, LiveSymbolRow, LiveGate, LiveKv, LiveStat, LivePosition, LiveOrder, LiveFill, LiveEventRow, LiveWatchlistRow, LiveTiers } from "live.slint";
+import { LiveScreen, LiveBar, LiveSetup, LiveMarket, LiveSymbolRow, LiveGate, LiveKv, LiveStat, LivePosition, LiveOrder, LiveFill, LiveEventRow, LiveWatchlistRow, LiveTiers, LiveWebSocket } from "live.slint";
 import { VayrenPalette } from "palette.slint";
 
 export component LiveHarness inherits Window {
@@ -22,6 +22,7 @@ export component LiveHarness inherits Window {
     preferred-height: 800px;
 
     in-out property <LiveBar> bar;
+    in property <LiveWebSocket> ws;
     in-out property <bool> inspector-open: true;
     in property <LiveSetup> setup;
     in property <LiveMarket> market;
@@ -145,6 +146,7 @@ export component LiveHarness inherits Window {
         event-types: root.event-types;
         event-type-index: root.event-type-index;
         event-filter: root.event-filter;
+        ws: root.ws;
         mode-picked(k) => { root.mode-picked(k); }
         strategy-picked(i) => { root.strategy-picked(i); }
         symbol-toggled(i) => { root.symbol-toggled(i); }

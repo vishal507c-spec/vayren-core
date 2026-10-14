@@ -1363,7 +1363,7 @@ component DownloadDock inherits Rectangle {
                     ComboBox {
                         enabled: !root.busy;
                         model: root.interval-items;
-                        current-value: root.interval-label;
+                        current-index: root.interval-index;
                         selected(v) => { root.interval-picked(v); }
                     }
                 }

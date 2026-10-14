@@ -634,11 +634,15 @@ pub fn apply_remote_sections(state: &mut LiveState, sections: &serde_json::Value
             translated.insert("feed".to_string(), serde_json::Value::String(feed));
         }
     }
-    if !section(sections, "system").is_null() {
+    if let Some(ws_val) = sections.get("websocket").filter(|v| v.is_object()) {
+        translated.insert("websocket".to_string(), ws_val.clone());
+    } else if !section(sections, "system").is_null() {
         let ws = text_at(sections, "system", "websocket");
         if !ws.is_empty() {
             translated.insert("websocket".to_string(), serde_json::json!({"status": ws}));
         }
+    }
+    if !section(sections, "system").is_null() {
         if let Some(halted) = section(sections, "system")
             .get("kill_halted")
             .and_then(|v| v.as_bool())
