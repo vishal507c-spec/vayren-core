@@ -729,11 +729,18 @@ class MarketDataService:
                     mtime = item.get("mtime")
                     price = item.get("price")
                     change_pct = item.get("change_pct")
-                    as_of = item.get("as_of")
+                    as_of = str(item.get("as_of") or "")
                     if isinstance(mtime, (int, float)):
                         self._quote_cache[sym] = (
                             float(mtime),
-                            Quote(symbol=sym, price=price, change_pct=change_pct, as_of=as_of),
+                            Quote(
+                                symbol=sym,
+                                price=float(price) if isinstance(price, (int, float)) else None,
+                                change_pct=float(change_pct)
+                                if isinstance(change_pct, (int, float))
+                                else None,
+                                as_of=as_of,
+                            ),
                         )
         except Exception:
             pass

@@ -1,3 +1,4 @@
+# pyright: reportMissingImports=false
 """Institutional Excel-like Trading Control Dashboard for VAYREN Phase 4.
 
 Provides the comprehensive 6-workspace desktop trading interface:

@@ -1,3 +1,4 @@
+# pyright: reportMissingImports=false
 """TopNavBar — the VAYREN command-center navigation strip."""
 
 from PySide6.QtCore import Signal

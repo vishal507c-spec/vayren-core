@@ -13,9 +13,8 @@ readme = "README.md"
 
 # ── Runtime Dependencies ──────────────────────────────────────
 # Native-only: the UI shell is a Rust binary; the headless Python backend
-dependencies = [
-    "PySide6>=6.7",
-]
+# has zero required runtime GUI dependencies.
+dependencies = []
 
 # ── Development Dependencies ───────────────────────────────────
 [project.optional-dependencies]
@@ -25,6 +24,11 @@ dev = [
     "ruff==0.15.20",
     "pyright>=1.1",
     "pre-commit>=3.0",
+]
+
+# ── Legacy UI Extras (Phase 4 PySide6 dashboard) ───────────────
+ui = [
+    "PySide6>=6.7",
 ]
 
 # ── Data Domain Extras (historical downloader) ─────────────────

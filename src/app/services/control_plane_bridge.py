@@ -1,3 +1,4 @@
+# pyright: reportMissingImports=false
 """ControlPlaneBridge — connects the VAYREN UI to the EC2 Control Plane.
 
 Maintains bidirectional communication between the desktop UI and the EC2 execution runtime:

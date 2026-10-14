@@ -844,10 +844,17 @@ fn ws_connection_status_round_trip_and_rendering() {
         assert_eq!(ws.status.as_str(), status, "WS status must match");
         assert_eq!(ws.tone, expected_tone, "WS tone must match expected tone");
         if let Some(lat) = latency {
-            assert!(ws.latency.as_str().contains(&format!("{:.0}", lat)), "latency must format correctly");
+            assert!(
+                ws.latency.as_str().contains(&format!("{:.0}", lat)),
+                "latency must format correctly"
+            );
         }
         if !last_err.is_empty() {
-            assert_eq!(ws.last_error.as_str(), last_err, "last error must round trip");
+            assert_eq!(
+                ws.last_error.as_str(),
+                last_err,
+                "last error must round trip"
+            );
         }
 
         // Render at logical 1280x720 and 1920x1080 to verify neither crashes or produces voids
@@ -858,4 +865,3 @@ fn ws_connection_status_round_trip_and_rendering() {
         assert!(probe.text > px / 2200, "text rasterized");
     }
 }
-
