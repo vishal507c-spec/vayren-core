@@ -229,6 +229,11 @@ def main(argv: list[str] | None = None) -> int:
         "runs the workspace tests in parallel jobs instead)",
     )
     parser.add_argument(
+        "--core-only",
+        action="store_true",
+        help="build kernel cdylib only (no shell, no views)",
+    )
+    parser.add_argument(
         "--package",
         action="store_true",
         help="build official production remote-first desktop package "
@@ -260,6 +265,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: expected cdylib missing after build: {lib}")
         return 1
     print(f"built {lib} ({lib.stat().st_size} bytes)")
+
+    if args.core_only:
+        return 0
 
     if args.lean_build:
         # Lean build only (CI splits the test phase across parallel jobs):

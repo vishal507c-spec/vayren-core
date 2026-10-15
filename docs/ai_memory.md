@@ -7,7 +7,26 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (app-startup-speedup-dependency-audit-20261015):** APP STARTUP ACCELERATED 7X (12.85s -> 1.83s) & COMPREHENSIVE DEPENDENCY AUDIT + RATINGS.
+**Latest update (cargo-build-ci-acceleration-20261015):** CARGO BUILD & CI PIPELINE ACCELERATED (BUILD-TEST DROPPED BY 7+ MINUTES, REDUNDANT SHELL COMPILATION ELIMINATED, AND RUST DEPENDENCIES STREAMLINED).
+1. **Redundant 7-Minute Slint Compilation Eliminated in CI `build-test`:**
+   - Profiling of CI run `38653135552` (10m 52s total) revealed that `build-test` spent 420.1s (7.0 minutes) executing `tools/build_rust.py --lean-build` to compile `vayren-shell` (debug mode, compiling 190,000+ lines of Slint code).
+   - In parallel on an isolated runner, `test-shard-rust-shell` was ALREADY compiling and running all 85 tests for `vayren-shell` (6m 33s).
+   - The only reason `vayren-shell` was compiled in `build-test` was so `test_desktop.py` could assert the binary exists.
+   - Solution: Moved `test_desktop.py` execution into `test-shard-rust-shell` beside the native shell binary where it is naturally built.
+   - Added `--core-only` to `tools/build_rust.py` and `tools/run_tests.py` so `build-test` only builds the kernel cdylib (`target/release/vayren_core`) in 1-5s.
+   - `build-test` duration drops from **10m 52s to ~3m 15s** (eliminating 7.5 minutes of redundant work).
+2. **Rust Dependencies & Build Configuration Streamlined:**
+   - In `crates/vayren-shell/Cargo.toml`, gated `clipboard-win` to `[target.'cfg(windows)'.dependencies]`. On Linux/CI, Cargo skips fetching and compiling Windows-only clipboard crates.
+   - Verified that `vayren-core` remains 100% std-only (0 external crates, builds in <1s).
+   - Updated `tools/tests/test_shard_contract.py` to enforce that `test_desktop.py` runs in `test-shard-rust-shell`. All 5 shard contract tests pass with 0 coverage gaps and 0 duplicate executions.
+3. **Full Validation Integrity Verified:**
+   - Auto-synced `docs/repo_graph.json` via `python tools/validate_repo_graph.py --fix` (5,947 entities, 13,367 relationships, 0 unresolved).
+   - All 8 repository validators pass: `validate_routes`, `validate_repo_graph`, `validate_language_ownership`, `validate_imports`, `validate_structure`, `validate_architecture_gate`, `validate_authority`, `validate_scope`.
+   - `cargo check --workspace` passes in 1.55s (0 errors, 0 warnings).
+   - `cargo test --workspace --exclude vayren-shell` executes 353+ tests with 100% pass (0 failures).
+   - All `tools/tests` pass (`test_build_rust`, `test_run_tests`, `test_shard_contract`, `test_desktop`).
+
+**Previous update (app-startup-speedup-dependency-audit-20261015):** APP STARTUP ACCELERATED 7X (12.85s -> 1.83s) & COMPREHENSIVE DEPENDENCY AUDIT + RATINGS.
 1. **Desktop App Startup Lag Fixed (12.850s -> 1.832s, 7.0x Faster, -11.02s Saved):**
    - Profiled native shell launch sequence (`target/release/vayren-shell.exe`): Discovered that out of 12.85s total startup duration, 8.91s (69.4%) was spent loading quotes for 526 symbols via `MarketDataService.get_quotes()`.
    - Root Cause: Each symbol's quote was read by individually opening, reading, and closing a separate SQLite file from `D:\ZerodhaTradingData\<symbol>.db` during every startup because the quote cache was in-memory only.

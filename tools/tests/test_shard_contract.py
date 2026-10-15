@@ -133,7 +133,7 @@ def test_mutators_share_one_serial_shard() -> None:
 
 def test_desktop_runs_beside_its_binary() -> None:
     covered = _ci_pytest_files()
-    assert covered.get("build-test") == ["test_desktop.py"]
+    assert covered.get("test-shard-rust-shell") == ["test_desktop.py"]
 
 
 def test_local_serial_path_intact() -> None:

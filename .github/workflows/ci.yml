@@ -143,19 +143,18 @@ jobs:
       # fail-closed freshness gate proves them newer than every Rust source
       # (otherwise it rebuilds) — hence one job, no duplicate full chain.
       # tools/tests runs in the shard jobs below (--exclude here);
-      # test_desktop.py stays here beside its shell binary.
+      # test_desktop.py runs in test-shard-rust-shell beside its shell binary.
       # Skipped on Python-only branch pushes (see filter above); the pytest
       # steps below still run and rebuild via the freshness gate when stale.
       # Workspace tests run split: everything except the shell here, shell
       # tests in test-shard-rust-shell (same coverage, parallel wall-clock).
-      - name: Build Rust workspace (lean, no tests)
+      - name: Build Rust kernel
         if: github.ref == 'refs/heads/main' || steps.native.outputs.changed == 'true'
-        run: time python tools/build_rust.py --lean-build
+        run: time python tools/build_rust.py --core-only
       - name: Test workspace except shell
         if: github.ref == 'refs/heads/main' || steps.native.outputs.changed == 'true'
         run: time cargo test --workspace --exclude vayren-shell --manifest-path Cargo.toml
-      - run: time python tools/run_tests.py --skip-build --lean --exclude tools/tests
-      - run: python -m pytest tools/tests/test_desktop.py -q --no-header
+      - run: time python tools/run_tests.py --skip-build --core-only --exclude tools/tests
       - name: Report disk usage
         run: |
           date -u +%FT%TZ
@@ -318,7 +317,10 @@ jobs:
           cache-all-crates: "true"
       - name: Test shell crate
         if: github.ref == 'refs/heads/main' || steps.native.outputs.changed == 'true'
-        run: time cargo test -p vayren-shell --manifest-path Cargo.toml
+        run: time cargo test -p vayren-shell --all-targets --manifest-path Cargo.toml
+      - name: Install pytest for desktop test
+        run: pip install --no-cache-dir pytest
+      - run: python -m pytest tools/tests/test_desktop.py -q --no-header
 
   gate:
     name: CI gate

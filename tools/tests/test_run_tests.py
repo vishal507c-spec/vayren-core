@@ -57,6 +57,12 @@ def test_lean_artifacts_cover_kernel_and_shell_only() -> None:
     assert any("shell" in name for name in names)
 
 
+def test_core_only_artifacts_cover_kernel_only() -> None:
+    names = [p.name for p in run_tests._expected_artifacts(core_only=True)]
+    assert len(names) == 1  # kernel cdylib only
+    assert any("vayren_core" in name for name in names)
+
+
 def test_lean_fresh_ignores_missing_view_dlls(_fake_root: Path) -> None:
     base = 1_700_000_000_000_000_000
     for artifact in run_tests._expected_artifacts(lean=True):

@@ -48,15 +48,19 @@ PARTS = (
 )
 
 
-def _expected_artifacts(*, lean: bool = False) -> list[Path]:
+def _expected_artifacts(*, lean: bool = False, core_only: bool = False) -> list[Path]:
     """Native artifacts the test path requires.
 
     Full path: everything build_rust.py guarantees. Lean path (mirrors
     `build_rust.py --lean-test`): only the shipped kernel cdylib + the
     debug shell binary — the six view release DLLs have no consumer here.
+    Core-only path: shipped kernel cdylib only.
     """
     system = platform.system().lower()
     ext = "dll" if system.startswith("win") else ("dylib" if system == "darwin" else "so")
+    prefix = "" if system.startswith("win") else "lib"
+    if core_only:
+        return [ROOT / "target" / "release" / f"{prefix}vayren_core.{ext}"]
     libs = (
         "vayren_core",
         "vayren_portfolio_view",
@@ -68,20 +72,19 @@ def _expected_artifacts(*, lean: bool = False) -> list[Path]:
     )
     if lean:
         libs = ("vayren_core",)
-    prefix = "" if system.startswith("win") else "lib"
     artifacts = [ROOT / "target" / "release" / f"{prefix}{name}.{ext}" for name in libs]
     shell = "vayren-shell.exe" if system.startswith("win") else "vayren-shell"
     artifacts.append(ROOT / "target" / "debug" / shell)
     return artifacts
 
 
-def native_fresh(*, lean: bool = False) -> bool:
+def native_fresh(*, lean: bool = False, core_only: bool = False) -> bool:
     """True only if every artifact exists and postdates every Rust source.
 
     Fail-closed: any missing/older/unreadable path returns False (build).
     """
     try:
-        artifacts = _expected_artifacts(lean=lean)
+        artifacts = _expected_artifacts(lean=lean, core_only=core_only)
         if any(not path.is_file() for path in artifacts):
             return False
         oldest_artifact = min(path.stat().st_mtime for path in artifacts)
@@ -99,20 +102,24 @@ def native_fresh(*, lean: bool = False) -> bool:
         return False
 
 
-def ensure_native(env: dict[str, str], skip_build: bool, lean: bool = False) -> int:
+def ensure_native(
+    env: dict[str, str], skip_build: bool, lean: bool = False, core_only: bool = False
+) -> int:
     """Build the workspace unless --skip-build proves artifacts fresh.
 
     Lean mode mirrors `build_rust.py --lean-test` in both the freshness
     gate and the fallback build, so the six view release DLLs are never
     required (or built) on this path.
     """
-    if skip_build and native_fresh(lean=lean):
+    if skip_build and native_fresh(lean=lean, core_only=core_only):
         print("[        SKIP] rust build  (native artifacts fresh)", flush=True)
         return 0
     # The Rust kernels back execution/backtest/market tests: ensure the
     # cdylib exists before any partition imports the bridge (fail-closed).
     cmd = [sys.executable, "tools/build_rust.py"]
-    if lean:
+    if core_only:
+        cmd.append("--core-only")
+    elif lean:
         cmd.append("--lean-test")
     build = subprocess.run(
         cmd,
@@ -143,6 +150,11 @@ def main(argv: list[str] | None = None) -> int:
         "(mirrors build_rust.py --lean-test; never needs the view DLLs)",
     )
     parser.add_argument(
+        "--core-only",
+        action="store_true",
+        help="require only the kernel cdylib (for headless python tests that do not touch UI)",
+    )
+    parser.add_argument(
         "--exclude",
         nargs="*",
         default=[],
@@ -153,7 +165,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     env = os.environ.copy()
 
-    if ensure_native(env, args.skip_build, args.lean) != 0:
+    if ensure_native(env, args.skip_build, args.lean, args.core_only) != 0:
         return 1
 
     parts = [part for part in PARTS if part not in args.exclude]
