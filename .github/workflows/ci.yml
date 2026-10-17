@@ -149,10 +149,10 @@ jobs:
       # Workspace tests run split: everything except the shell here, shell
       # tests in test-shard-rust-shell (same coverage, parallel wall-clock).
       - name: Build Rust kernel
-        if: github.ref == 'refs/heads/main' || steps.native.outputs.changed == 'true'
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') || steps.native.outputs.changed == 'true'
         run: time python tools/build_rust.py --core-only
       - name: Test workspace except shell
-        if: github.ref == 'refs/heads/main' || steps.native.outputs.changed == 'true'
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') || steps.native.outputs.changed == 'true'
         run: time cargo test --workspace --exclude vayren-shell --manifest-path Cargo.toml
       - run: time python tools/run_tests.py --skip-build --core-only --exclude tools/tests
       - name: Report disk usage
@@ -263,7 +263,7 @@ jobs:
               - 'crates/**'
               - 'tools/build_rust.py'
       - run: cargo build --release -p vayren-core --manifest-path Cargo.toml
-        if: github.ref == 'refs/heads/main' || steps.native.outputs.changed == 'true'
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') || steps.native.outputs.changed == 'true'
       - run: >-
           python -m pytest tools/tests/test_authority.py
           tools/tests/test_build_rust.py tools/tests/test_context.py
@@ -316,7 +316,7 @@ jobs:
           shared-key: "vayren-rust"
           cache-all-crates: "true"
       - name: Test shell crate
-        if: github.ref == 'refs/heads/main' || steps.native.outputs.changed == 'true'
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') || steps.native.outputs.changed == 'true'
         run: time cargo test -p vayren-shell --all-targets --manifest-path Cargo.toml
       - name: Install pytest for desktop test
         run: pip install --no-cache-dir pytest
