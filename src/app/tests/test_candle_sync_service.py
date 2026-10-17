@@ -139,7 +139,11 @@ def test_rate_limit_retry_succeeds(tmp_path: Path, monkeypatch: pytest.MonkeyPat
             self.attempts = 0
 
         def history(
-            self, symbol: str, resolution: str, start: int, end: int  # noqa: ARG002
+            self,
+            _symbol: str,
+            _resolution: str,
+            _start: int,
+            _end: int,
         ) -> list[tuple]:
             self.attempts += 1
             if self.attempts == 1:
@@ -160,9 +164,7 @@ def test_rate_limit_retry_succeeds(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     assert slept == [2.0]  # parsed "retry in 2s"
 
 
-def test_rate_limit_retry_exhausted_fails(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_rate_limit_retry_exhausted_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     slept: list[float] = []
     monkeypatch.setattr("time.sleep", slept.append)
 
@@ -171,7 +173,11 @@ def test_rate_limit_retry_exhausted_fails(
             self.attempts = 0
 
         def history(
-            self, symbol: str, resolution: str, start: int, end: int  # noqa: ARG002
+            self,
+            _symbol: str,
+            _resolution: str,
+            _start: int,
+            _end: int,
         ) -> list[tuple]:
             self.attempts += 1
             raise RuntimeError("HTTP 429: rate limit exceeded, retry in 3s")
@@ -204,4 +210,3 @@ def test_pacing_between_symbols(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     )
     assert report["written_total"] == 4
     assert slept == [0.35]  # Slept once between 1st and 2nd symbol
-

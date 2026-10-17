@@ -503,7 +503,7 @@ def _live_action(
                 try:
                     configured_symbols = list(service.config.symbols or ())
                     timeframe = str(service.config.timeframe or "30m")
-                    missing = [
+                    missing: list[str] = [
                         s
                         for s in configured_symbols
                         if not service._repository.get_candles_timeframe(

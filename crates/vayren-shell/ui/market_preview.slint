@@ -1,0 +1,196 @@
+// VAYREN Market â€” development preview harness (slint-viewer only).
+//
+// Fast loop for the market surface, including the timeframe ladder's overflow
+// menu (the hidden 1D / 1W entries):
+//
+//     slint-viewer --auto-reload crates/vayren-shell/ui/market_preview.slint
+//
+// This file is NOT compiled into the shell (build.rs compiles ui/app.slint
+// only) and never ships: it instantiates the REAL MarketScreen with
+// representative demo bindings so every state â€” hover, the open overflow menu,
+// a hidden timeframe selected â€” can be seen and clicked exactly like
+// production. Tokens only, like every surface.
+
+import { VayrenPalette } from "palette.slint";
+import { MarketScreen } from "market.slint";
+
+export component MarketPreview inherits Window {
+    preferred-width: 1440px;
+    preferred-height: 810px;
+    title: "VAYREN â€” MARKET PREVIEW";
+    background: VayrenPalette.bg;
+
+    // Active chart timeframe. Picking any cell (visible or in the overflow
+    // menu) moves this, and the row re-binds from it â€” the same single
+    // selection authority the Rust state uses.
+    in-out property <string> frame: "1D";
+    // Start with the overflow menu open so the preview shows it immediately;
+    // the first real interaction (chevron / scrim / Esc) takes the property
+    // over exactly like production.
+    in-out property <string> open-sheet: "overflow";
+
+    MarketScreen {
+        width: 100%;
+        height: 100%;
+        panel-visible: true;
+        symbol-title: "360ONE";
+        timeframe-label: root.frame;
+        exchange-label: "NSE";
+        status-message: "";
+        has-data: true;
+        header-ohlc: "O 1,155.87  H 1,157.81  L 1,154.20  C 1,155.05";
+        watch-rows: [
+            { symbol: "360ONE", price: "1,155.05", change: "+1.24%", tone: 1, selected: true },
+            { symbol: "RELIANCE", price: "2,451.10", change: "-0.42%", tone: 3, selected: false },
+            { symbol: "TCS", price: "3,802.55", change: "+0.61%", tone: 1, selected: false },
+            { symbol: "HDFCBANK", price: "1,689.30", change: "+0.18%", tone: 1, selected: false },
+            { symbol: "ICICIBANK", price: "1,124.75", change: "-0.35%", tone: 3, selected: false },
+            { symbol: "INFY", price: "1,516.40", change: "+0.92%", tone: 1, selected: false },
+            { symbol: "SBIN", price: "812.65", change: "+2.05%", tone: 1, selected: false },
+            { symbol: "LT", price: "3,641.20", change: "-0.74%", tone: 3, selected: false },
+            { symbol: "ITC", price: "438.90", change: "+0.11%", tone: 1, selected: false },
+            { symbol: "AXISBANK", price: "1,178.55", change: "-1.12%", tone: 3, selected: false },
+        ];
+        watchlists: ["All Stocks", "F&O", "Watchlist 1"];
+        watchlist-name: "All Stocks";
+        filter: "";
+        sort-ascending: true;
+        timeframes-visible: [
+            { label: "15m", selected: root.frame == "15m" },
+            { label: "30m", selected: root.frame == "30m" },
+            { label: "45m", selected: root.frame == "45m" },
+            { label: "1h", selected: root.frame == "1h" },
+            { label: "2h", selected: root.frame == "2h" },
+            { label: "4h", selected: root.frame == "4h" },
+        ];
+        timeframes-overflow: [
+            { label: "1D", selected: root.frame == "1D" },
+            { label: "1W", selected: root.frame == "1W" },
+        ];
+        plot-slots: 100;
+        candles: [
+            { x: 0.006, o: 0.6411, h: 0.5697, l: 0.6814, c: 0.6100, vol: 0, top: 0.6100, body: 0.0311, tone: 1 },
+            { x: 0.0179, o: 0.6100, h: 0.4958, l: 0.6451, c: 0.5283, vol: 0, top: 0.5283, body: 0.0817, tone: 1 },
+            { x: 0.0299, o: 0.5283, h: 0.4304, l: 0.5584, c: 0.4559, vol: 0, top: 0.4559, body: 0.0725, tone: 1 },
+            { x: 0.0418, o: 0.4559, h: 0.3802, l: 0.4814, c: 0.4001, vol: 0, top: 0.4001, body: 0.0558, tone: 1 },
+            { x: 0.0537, o: 0.4001, h: 0.3485, l: 0.4217, c: 0.3650, vol: 0, top: 0.3650, body: 0.0351, tone: 1 },
+            { x: 0.0657, o: 0.3650, h: 0.3351, l: 0.3836, c: 0.3507, vol: 0, top: 0.3507, body: 0.0143, tone: 1 },
+            { x: 0.0776, o: 0.3507, h: 0.3335, l: 0.3699, c: 0.3533, vol: 0, top: 0.3507, body: 0.0060, tone: 3 },
+            { x: 0.0896, o: 0.3533, h: 0.3322, l: 0.3819, c: 0.3663, vol: 0, top: 0.3533, body: 0.0130, tone: 3 },
+            { x: 0.1015, o: 0.3663, h: 0.3391, l: 0.3974, c: 0.3817, vol: 0, top: 0.3663, body: 0.0154, tone: 3 },
+            { x: 0.1135, o: 0.3817, h: 0.3472, l: 0.4091, c: 0.3921, vol: 0, top: 0.3817, body: 0.0105, tone: 3 },
+            { x: 0.1254, o: 0.3921, h: 0.3497, l: 0.4120, c: 0.3927, vol: 0, top: 0.3921, body: 0.0060, tone: 3 },
+            { x: 0.1374, o: 0.3927, h: 0.3318, l: 0.4152, c: 0.3820, vol: 0, top: 0.3820, body: 0.0108, tone: 1 },
+            { x: 0.1493, o: 0.3820, h: 0.3053, l: 0.4085, c: 0.3622, vol: 0, top: 0.3622, body: 0.0197, tone: 1 },
+            { x: 0.1613, o: 0.3622, h: 0.2772, l: 0.3935, c: 0.3392, vol: 0, top: 0.3392, body: 0.0231, tone: 1 },
+            { x: 0.1732, o: 0.3392, h: 0.2557, l: 0.3755, c: 0.3204, vol: 0, top: 0.3204, body: 0.0187, tone: 1 },
+            { x: 0.1851, o: 0.3204, h: 0.2489, l: 0.3620, c: 0.3139, vol: 0, top: 0.3139, body: 0.0065, tone: 1 },
+            { x: 0.1971, o: 0.3139, h: 0.2512, l: 0.3728, c: 0.3260, vol: 0, top: 0.3139, body: 0.0120, tone: 3 },
+            { x: 0.209, o: 0.3260, h: 0.2678, l: 0.4113, c: 0.3596, vol: 0, top: 0.3260, body: 0.0336, tone: 3 },
+            { x: 0.221, o: 0.3596, h: 0.3078, l: 0.4701, c: 0.4140, vol: 0, top: 0.3596, body: 0.0544, tone: 3 },
+            { x: 0.2329, o: 0.4140, h: 0.3698, l: 0.5442, c: 0.4843, vol: 0, top: 0.4140, body: 0.0703, tone: 3 },
+            { x: 0.2449, o: 0.4843, h: 0.4481, l: 0.6253, c: 0.5627, vol: 0, top: 0.4843, body: 0.0784, tone: 3 },
+            { x: 0.2568, o: 0.5627, h: 0.5340, l: 0.7042, c: 0.6397, vol: 0, top: 0.5627, body: 0.0770, tone: 3 },
+            { x: 0.2687, o: 0.6397, h: 0.6174, l: 0.7716, c: 0.7064, vol: 0, top: 0.6397, body: 0.0667, tone: 3 },
+            { x: 0.2807, o: 0.7064, h: 0.6885, l: 0.8207, c: 0.7559, vol: 0, top: 0.7064, body: 0.0495, tone: 3 },
+            { x: 0.2926, o: 0.7559, h: 0.7402, l: 0.8481, c: 0.7848, vol: 0, top: 0.7559, body: 0.0290, tone: 3 },
+            { x: 0.3046, o: 0.7848, h: 0.7688, l: 0.8548, c: 0.7941, vol: 0, top: 0.7848, body: 0.0092, tone: 3 },
+            { x: 0.3165, o: 0.7941, h: 0.7690, l: 0.8514, c: 0.7880, vol: 0, top: 0.7880, body: 0.0061, tone: 1 },
+            { x: 0.3285, o: 0.7880, h: 0.7495, l: 0.8411, c: 0.7736, vol: 0, top: 0.7736, body: 0.0144, tone: 1 },
+            { x: 0.3404, o: 0.7736, h: 0.7279, l: 0.8219, c: 0.7587, vol: 0, top: 0.7587, body: 0.0148, tone: 1 },
+            { x: 0.3524, o: 0.7587, h: 0.7116, l: 0.8019, c: 0.7503, vol: 0, top: 0.7503, body: 0.0084, tone: 1 },
+            { x: 0.3643, o: 0.7503, h: 0.7037, l: 0.7903, c: 0.7524, vol: 0, top: 0.7503, body: 0.0060, tone: 3 },
+            { x: 0.3762, o: 0.7524, h: 0.6986, l: 0.7985, c: 0.7658, vol: 0, top: 0.7524, body: 0.0134, tone: 3 },
+            { x: 0.3882, o: 0.7658, h: 0.7060, l: 0.8151, c: 0.7871, vol: 0, top: 0.7658, body: 0.0213, tone: 3 },
+            { x: 0.4001, o: 0.7871, h: 0.7234, l: 0.8338, c: 0.8102, vol: 0, top: 0.7871, body: 0.0230, tone: 3 },
+            { x: 0.4121, o: 0.8102, h: 0.7450, l: 0.8470, c: 0.8269, vol: 0, top: 0.8102, body: 0.0167, tone: 3 },
+            { x: 0.424, o: 0.8269, h: 0.7628, l: 0.8471, c: 0.8296, vol: 0, top: 0.8269, body: 0.0060, tone: 3 },
+            { x: 0.436, o: 0.8296, h: 0.7517, l: 0.8456, c: 0.8124, vol: 0, top: 0.8124, body: 0.0172, tone: 1 },
+            { x: 0.4479, o: 0.8124, h: 0.7179, l: 0.8279, c: 0.7729, vol: 0, top: 0.7729, body: 0.0395, tone: 1 },
+            { x: 0.4599, o: 0.7729, h: 0.6649, l: 0.7891, c: 0.7128, vol: 0, top: 0.7128, body: 0.0601, tone: 1 },
+            { x: 0.4718, o: 0.7128, h: 0.5976, l: 0.7307, c: 0.6376, vol: 0, top: 0.6376, body: 0.0752, tone: 1 },
+            { x: 0.4838, o: 0.6376, h: 0.5235, l: 0.6583, c: 0.5557, vol: 0, top: 0.5557, body: 0.0820, tone: 1 },
+            { x: 0.4957, o: 0.5557, h: 0.4512, l: 0.5800, c: 0.4764, vol: 0, top: 0.4764, body: 0.0793, tone: 1 },
+            { x: 0.5076, o: 0.4764, h: 0.3888, l: 0.5051, c: 0.4085, vol: 0, top: 0.4085, body: 0.0679, tone: 1 },
+            { x: 0.5196, o: 0.4085, h: 0.3418, l: 0.4421, c: 0.3582, vol: 0, top: 0.3582, body: 0.0503, tone: 1 },
+            { x: 0.5315, o: 0.3582, h: 0.3124, l: 0.3970, c: 0.3279, vol: 0, top: 0.3279, body: 0.0302, tone: 1 },
+            { x: 0.5435, o: 0.3279, h: 0.2990, l: 0.3720, c: 0.3162, vol: 0, top: 0.3162, body: 0.0117, tone: 1 },
+            { x: 0.5554, o: 0.3162, h: 0.2949, l: 0.3673, c: 0.3181, vol: 0, top: 0.3162, body: 0.0060, tone: 3 },
+            { x: 0.5674, o: 0.3181, h: 0.2906, l: 0.3801, c: 0.3262, vol: 0, top: 0.3181, body: 0.0081, tone: 3 },
+            { x: 0.5793, o: 0.3262, h: 0.2914, l: 0.3908, c: 0.3328, vol: 0, top: 0.3262, body: 0.0066, tone: 3 },
+            { x: 0.5912, o: 0.3328, h: 0.2889, l: 0.3941, c: 0.3317, vol: 0, top: 0.3317, body: 0.0060, tone: 1 },
+            { x: 0.6032, o: 0.3317, h: 0.2688, l: 0.3953, c: 0.3193, vol: 0, top: 0.3193, body: 0.0124, tone: 1 },
+            { x: 0.6151, o: 0.3193, h: 0.2389, l: 0.3843, c: 0.2960, vol: 0, top: 0.2960, body: 0.0233, tone: 1 },
+            { x: 0.6271, o: 0.2960, h: 0.2038, l: 0.3612, c: 0.2659, vol: 0, top: 0.2659, body: 0.0301, tone: 1 },
+            { x: 0.639, o: 0.2659, h: 0.1710, l: 0.3301, c: 0.2358, vol: 0, top: 0.2358, body: 0.0301, tone: 1 },
+            { x: 0.651, o: 0.2358, h: 0.1489, l: 0.2980, c: 0.2139, vol: 0, top: 0.2139, body: 0.0219, tone: 1 },
+            { x: 0.6629, o: 0.2139, h: 0.1452, l: 0.2731, c: 0.2078, vol: 0, top: 0.2078, body: 0.0061, tone: 1 },
+            { x: 0.6749, o: 0.2078, h: 0.1498, l: 0.2781, c: 0.2227, vol: 0, top: 0.2078, body: 0.0150, tone: 3 },
+            { x: 0.6868, o: 0.2227, h: 0.1713, l: 0.3113, c: 0.2604, vol: 0, top: 0.2227, body: 0.0377, tone: 3 },
+            { x: 0.6987, o: 0.2604, h: 0.2166, l: 0.3643, c: 0.3184, vol: 0, top: 0.2604, body: 0.0580, tone: 3 },
+            { x: 0.7107, o: 0.3184, h: 0.2825, l: 0.4311, c: 0.3905, vol: 0, top: 0.3184, body: 0.0721, tone: 3 },
+            { x: 0.7226, o: 0.3905, h: 0.3621, l: 0.5034, c: 0.4680, vol: 0, top: 0.3905, body: 0.0775, tone: 3 },
+            { x: 0.7346, o: 0.4680, h: 0.4459, l: 0.5720, c: 0.5415, vol: 0, top: 0.4680, body: 0.0736, tone: 3 },
+            { x: 0.7465, o: 0.5415, h: 0.5239, l: 0.6286, c: 0.6028, vol: 0, top: 0.5415, body: 0.0613, tone: 3 },
+            { x: 0.7585, o: 0.6028, h: 0.5872, l: 0.6682, c: 0.6463, vol: 0, top: 0.6028, body: 0.0435, tone: 3 },
+            { x: 0.7704, o: 0.6463, h: 0.6301, l: 0.6891, c: 0.6703, vol: 0, top: 0.6463, body: 0.0240, tone: 3 },
+            { x: 0.7824, o: 0.6703, h: 0.6511, l: 0.6937, c: 0.6771, vol: 0, top: 0.6703, body: 0.0068, tone: 3 },
+            { x: 0.7943, o: 0.6771, h: 0.6479, l: 0.6927, c: 0.6722, vol: 0, top: 0.6722, body: 0.0060, tone: 1 },
+            { x: 0.8063, o: 0.6722, h: 0.6320, l: 0.6879, c: 0.6632, vol: 0, top: 0.6632, body: 0.0090, tone: 1 },
+            { x: 0.8182, o: 0.6632, h: 0.6185, l: 0.6801, c: 0.6575, vol: 0, top: 0.6575, body: 0.0060, tone: 1 },
+            { x: 0.8301, o: 0.6575, h: 0.6106, l: 0.6800, c: 0.6609, vol: 0, top: 0.6575, body: 0.0060, tone: 3 },
+            { x: 0.8421, o: 0.6609, h: 0.6067, l: 0.6983, c: 0.6760, vol: 0, top: 0.6609, body: 0.0151, tone: 3 },
+            { x: 0.854, o: 0.6760, h: 0.6160, l: 0.7279, c: 0.7016, vol: 0, top: 0.6760, body: 0.0256, tone: 3 },
+        ];
+        price-ticks: [
+            { pos: 0.1132, label: "1,174.00" },
+            { pos: 0.2995, label: "1,168.00" },
+            { pos: 0.4858, label: "1,162.00" },
+            { pos: 0.6721, label: "1,156.00" },
+            { pos: 0.8584, label: "1,150.00" },
+        ];
+        time-ticks: [
+            { pos: 0.09, label: "09:15" },
+            { pos: 0.30, label: "10:45" },
+            { pos: 0.52, label: "12:15" },
+            { pos: 0.74, label: "13:45" },
+            { pos: 0.90, label: "15:00" },
+        ];
+        ray-levels: [];
+        plot-segments: [];
+        markers: [];
+        hover-x: 0.5;
+        hover-y: 0.5;
+        hover-price: "";
+        hover-time: "";
+        hover-volume: "";
+        has-hover: false;
+        last-price: "1,155.05";
+        last-price-pos: 0.7016;
+        last-price-up: false;
+        has-last-price: true;
+        volume-max-label: "1.4M";
+        last-volume: "";
+        last-volume-pos: 0.0;
+        last-volume-up: true;
+        has-last-volume: false;
+        scale-mode: 0;
+        cross-visible: true;
+        indicator-rows: [
+            { name: "OBR", visible: true },
+        ];
+        popup-open: false;
+        settings-open: false;
+        settings-rows: [];
+        active-label: "";
+        open-menu: root.open-sheet;
+        // The overflow cell only reports its absolute position on a real
+        // click; the preview opens the sheet without one, so the card is
+        // anchored where that click would have put it (measured off the row).
+        menu-x: 496px;
+        menu-y: 34px;
+        wide: root.width >= 1180px;
+        medium: root.width >= 820px;
+        timeframe-picked(s) => { root.frame = s; }
+    }
+}

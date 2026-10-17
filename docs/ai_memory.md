@@ -7,7 +7,19 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (fyers-market-data-candle-sync-20261017):** CANDLE SYNC PACING, HTTP 429 RETRY BACKOFF, AND UNIVERSE AUTO-SYNC IMPLEMENTED AND VERIFIED.
+**Latest update (release-v1.36.0-20261017):** RELEASE v1.36.0 — MARKET TIMEFRAME OVERFLOW UI, CANDLE SYNC RESILIENCE, CI GOVERNANCE & DESKTOP EXE.
+1. **Scope:**
+   - Released `v1.36.0` (`pyproject.toml` bumped from `1.35.0`).
+   - Cleaned CI pipeline gates: formatted python files (`ruff format .`), regenerated `docs/repo_graph.json` (`repo_graph.py --build`), fixed pyright typing in `src/app/headless.py` and `candle_sync_service.py` (`pyright --threads` reports 0 errors).
+   - Committed full UI work: `crates/vayren-shell/ui/market.slint`, `palette.slint`, `market_preview.slint` (timeframe overflow premium dropdown with elevated styling, accent caret, underline, and vector checkmark).
+   - Built production release binary `target/release/vayren-shell.exe` and updated `C:\Users\visha\Desktop\vayren-shell.exe`.
+   - Published GitHub Release `v1.36.0` with `vayren-shell.exe` attached.
+2. **Verification:**
+   - Rust: `cargo test -p vayren-shell` passed 100% (61 lib + 12 main + 26 integration tests passed, 0 failed). `cargo fmt` clean.
+   - Python: All tests passed, `ruff check` 0 errors, `ruff format --check .` clean, `pyright --threads` 0 errors.
+   - Validators: All repository validators passed (`validate_repo_graph.py`, `validate_structure.py`, `validate_imports.py`, `validate_language_ownership.py`, `validate_architecture_gate.py`, `validate_authority.py`, `validate_routes.py`, `validate_scope.py`, `context_engine.py`).
+
+**Previous update (fyers-market-data-candle-sync-20261017):** CANDLE SYNC PACING, HTTP 429 RETRY BACKOFF, AND UNIVERSE AUTO-SYNC IMPLEMENTED AND VERIFIED.
 1. **Root Causes Resolved:**
    - In `src/app/services/candle_sync_service.py`: `sync_candles` called `adapter.history()` in a tight loop with zero delay. FYERS burst rate limiting returned HTTP 429 after ~10 calls, failing remaining universe symbols with `FAILED` and leaving local candle stores absent.
    - Added inter-symbol pacing (`pacing_s=0.35s`), exponential backoff retry on HTTP 429 / rate limits (extracting `retry in Xs` or falling back to `retry_delay_s=5.0s`, max 3 attempts).

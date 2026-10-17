@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+from collections.abc import Sequence
 from typing import Any
 
 from data.candle_store import write_candles
@@ -51,7 +52,7 @@ def _bare(symbol: str) -> str:
 
 def sync_candles(
     data_dir: str,
-    symbols: list[str],
+    symbols: Sequence[str],
     broker_manager: Any,
     *,
     timeframe: str = "30m",
@@ -112,9 +113,7 @@ def sync_candles(
                 last_exc = exc
                 exc_str = str(exc).lower()
                 is_rate_limit = (
-                    "429" in exc_str
-                    or "rate limit" in exc_str
-                    or "too many requests" in exc_str
+                    "429" in exc_str or "rate limit" in exc_str or "too many requests" in exc_str
                 )
                 if is_rate_limit and attempt + 1 < max_retries:
                     delay = retry_delay_s

@@ -328,4 +328,3 @@ def test_zero_broker_capital_reports_insufficient_capital_blocker(
         assert cap.get("source") == "broker"
         assert cap.get("available_margin") == 0.0
         assert cap.get("broker_capital") == 0.0
-

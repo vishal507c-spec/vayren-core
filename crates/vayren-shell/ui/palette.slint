@@ -19,6 +19,9 @@ export global VayrenPalette {
     out property <color> focus-ring: #00C7B740;
     out property <color> elevated: #121A24;
     out property <color> row-hover: #151E29;
+    // Elevation shadow under floating cards (§3.1): the one role that must be
+    // translucent black, no surface hue — depth, never a color change.
+    out property <color> popup-shadow: #000000a6;
     // Accent + text.
     out property <color> accent: #00C7B7;
     out property <color> accent-dim: #00A99D;

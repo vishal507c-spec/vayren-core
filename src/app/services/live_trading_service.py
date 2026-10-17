@@ -1170,10 +1170,7 @@ class LiveTradingService:
             connected_view = self._broker_view()
         except Exception:
             connected_view = {}
-        if (
-            isinstance(connected_view, dict)
-            and connected_view.get("connected")
-        ):
+        if isinstance(connected_view, dict) and connected_view.get("connected"):
             funds_val = self._live_available_funds(connected_view)
             if funds_val is None:
                 blockers.append(
