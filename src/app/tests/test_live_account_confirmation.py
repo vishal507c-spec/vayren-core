@@ -284,3 +284,48 @@ def test_capital_unavailable_blocks_live_start(service: LiveTradingService) -> N
     ):
         blockers = service.validate()
         assert any("broker capital unavailable" in b for b in blockers)
+
+
+def test_zero_broker_capital_reports_insufficient_capital_blocker(
+    service: LiveTradingService,
+) -> None:
+    """When broker capital is reported as 0.0, live start is blocked with an honest message."""
+    service.confirm_account("XV29244")
+    service.confirm_live_execution()
+
+    broker_view = {
+        "id": "fyers",
+        "display": "FYERS",
+        "connected": True,
+        "status": "CONNECTED",
+        "reason": "",
+        "account_id": "XV29244",
+        "configured": True,
+        "funds": {"available": 0.0, "used": 0.0, "total": 0.0},
+    }
+    with (
+        patch.object(service, "_resolve_live_venue_id", return_value="fyers-live"),
+        patch.object(service, "_broker_view", return_value=broker_view),
+        patch.object(service, "broker_name", return_value="fyers"),
+        patch.object(service, "available_symbols", return_value=("NSE:KAYNES",)),
+        patch.object(service, "available_timeframes", return_value=("5m",)),
+        patch.object(service, "_compiled", return_value=None),
+        patch.object(
+            service,
+            "_universe_quotes",
+            return_value=[{"symbol": "NSE:KAYNES", "status": "AVAILABLE"}],
+        ),
+    ):
+        assert service._live_available_funds(broker_view) == 0.0
+        blockers = service.validate()
+        assert any("insufficient broker capital (₹0.00 reported)" in b for b in blockers)
+        # Sizing gate must block live execution
+        assert len(blockers) > 0
+
+        # Snapshot capital block must report source=broker and available_margin=0.0
+        snap = service.snapshot()
+        cap = snap.get("capital", {})
+        assert cap.get("source") == "broker"
+        assert cap.get("available_margin") == 0.0
+        assert cap.get("broker_capital") == 0.0
+

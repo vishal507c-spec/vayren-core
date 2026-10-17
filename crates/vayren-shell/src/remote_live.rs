@@ -390,48 +390,23 @@ pub fn session_verdict(authority: &BrokerAuthority) -> BrokerVerdict {
                 },
             }
         }
-        "LOGIN_REQUIRED" => {
-            let r_lower = reason.to_lowercase();
-            let is_fail = r_lower.contains("mismatch")
-                || r_lower.contains("failed")
-                || r_lower.contains("invalid")
-                || r_lower.contains("unauthorized")
-                || r_lower.contains("rejected")
-                || r_lower.contains("error");
-            if is_fail {
-                BrokerVerdict {
-                    connected: false,
-                    failed: true,
-                    in_progress: false,
-                    pill_label: "Connection Failed".to_string(),
-                    pill_tone: 3,
-                    status_message: format!("Authentication failed: {reason}"),
-                    description: if !next_action.is_empty() {
-                        next_action.clone()
-                    } else {
-                        "Review credential details below and retry.".to_string()
-                    },
-                }
+        "LOGIN_REQUIRED" => BrokerVerdict {
+            connected: false,
+            failed: false,
+            in_progress: false,
+            pill_label: "Login Required".to_string(),
+            pill_tone: 2,
+            status_message: if !next_action.is_empty() {
+                next_action.clone()
             } else {
-                BrokerVerdict {
-                    connected: false,
-                    failed: false,
-                    in_progress: false,
-                    pill_label: "Login Required".to_string(),
-                    pill_tone: 2,
-                    status_message: if next_action.is_empty() {
-                        status_or("Broker login required.")
-                    } else {
-                        next_action.clone()
-                    },
-                    description: if reason.is_empty() {
-                        format!("{venue} saved session is missing or expired.")
-                    } else {
-                        reason.clone()
-                    },
-                }
-            }
-        }
+                status_or("Broker login required.")
+            },
+            description: if reason.is_empty() {
+                format!("{venue} saved session is missing or expired.")
+            } else {
+                reason.clone()
+            },
+        },
         "DISCONNECTED" => BrokerVerdict {
             connected: false,
             failed: false,
@@ -607,7 +582,10 @@ pub fn apply_remote_sections(state: &mut LiveState, sections: &serde_json::Value
         // REPORTED) with no funds is mapped onto the broker source with no
         // numbers, so `has_valid_capital` is false and the UI reads NOT
         // READY instead of assuming the default sizing basis.
-        let source = text_at(sections, "capital", "capital_source");
+        let mut source = text_at(sections, "capital", "capital_source");
+        if source.is_empty() {
+            source = text_at(sections, "capital", "source");
+        }
         let unknown_source = source.is_empty() || source == "NOT REPORTED";
         let mut capital = serde_json::Map::new();
         capital.insert(
@@ -622,8 +600,18 @@ pub fn apply_remote_sections(state: &mut LiveState, sections: &serde_json::Value
             if let Some(v) = num_at(sections, "capital", "broker_capital") {
                 capital.insert("broker_capital".to_string(), v.into());
             }
-            if let Some(v) = num_at(sections, "capital", "available") {
+            let avail = num_at(sections, "capital", "available_margin")
+                .or_else(|| num_at(sections, "capital", "available"));
+            if let Some(v) = avail {
                 capital.insert("available_margin".to_string(), v.into());
+            }
+            let used = num_at(sections, "capital", "used_margin")
+                .or_else(|| num_at(sections, "capital", "used"));
+            if let Some(v) = used {
+                capital.insert("used_margin".to_string(), v.into());
+            }
+            if let Some(v) = num_at(sections, "capital", "configured_capital") {
+                capital.insert("configured_capital".to_string(), v.into());
             }
             let bname = text_at(sections, "capital", "broker_name");
             if !bname.is_empty() {
@@ -640,6 +628,10 @@ pub fn apply_remote_sections(state: &mut LiveState, sections: &serde_json::Value
             let clast = text_at(sections, "capital", "last_updated");
             if !clast.is_empty() {
                 capital.insert("last_updated".to_string(), serde_json::Value::String(clast));
+            }
+            let ccurr = text_at(sections, "capital", "currency");
+            if !ccurr.is_empty() {
+                capital.insert("currency".to_string(), serde_json::Value::String(ccurr));
             }
         }
         translated.insert("capital".to_string(), serde_json::Value::Object(capital));
@@ -1902,5 +1894,33 @@ mod tests {
             Some(verdict.connected),
             "SYSTEM and LIVE must agree with each other"
         );
+    }
+
+    #[test]
+    fn capital_mapping_preserves_zero_available_margin_and_broker_source() {
+        let mut sections = sections();
+        sections.as_object_mut().unwrap().insert(
+            "capital".to_string(),
+            json!({
+                "source": "broker",
+                "broker_name": "FYERS",
+                "broker_capital": 0.0,
+                "available_margin": 0.0,
+                "used_margin": 0.0,
+                "status": "CONNECTED",
+                "label": "Available margin",
+                "last_updated": "21:00:00",
+            }),
+        );
+        let mut state = init_remote_state();
+        apply_remote_sections(&mut state, &sections, false);
+        assert_eq!(state.capital.source, "broker");
+        assert_eq!(state.capital.available_margin, Some(0.0));
+        assert_eq!(state.capital.broker_capital, Some(0.0));
+        assert_eq!(state.capital.used_margin, Some(0.0));
+        assert_eq!(state.capital.status, "CONNECTED");
+        assert_eq!(state.capital.label, "Available margin");
+        // Sizing gate must stay blocked when broker balance is zero
+        assert!(!state.has_valid_capital());
     }
 }

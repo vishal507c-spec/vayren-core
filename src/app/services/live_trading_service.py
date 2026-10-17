@@ -1173,12 +1173,18 @@ class LiveTradingService:
         if (
             isinstance(connected_view, dict)
             and connected_view.get("connected")
-            and self._live_available_funds(connected_view) is None
         ):
-            blockers.append(
-                "broker capital unavailable (funds not reported) — "
-                "live sizing needs real broker available capital"
-            )
+            funds_val = self._live_available_funds(connected_view)
+            if funds_val is None:
+                blockers.append(
+                    "broker capital unavailable (funds not reported) — "
+                    "live sizing needs real broker available capital"
+                )
+            elif funds_val <= 0.0:
+                blockers.append(
+                    "insufficient broker capital (₹0.00 reported) — "
+                    "live sizing requires positive available funds"
+                )
         return blockers
 
     def _ensure_live_venues(self) -> None:
@@ -2487,13 +2493,17 @@ class LiveTradingService:
             raw = account.get("funds")
             if isinstance(raw, dict):
                 available = _as_float(raw.get("available"))
-                if available is not None and available > 0:
+                if available is None:
+                    available = _as_float(raw.get("available_margin"))
+                if available is not None and available >= 0.0:
                     return available
         if view is not None and view.get("connected"):
             venue_funds = view.get("funds")
             if isinstance(venue_funds, dict):
                 available = _as_float(venue_funds.get("available"))
-                if available is not None and available > 0:
+                if available is None:
+                    available = _as_float(venue_funds.get("available_margin"))
+                if available is not None and available >= 0.0:
                     return available
         return None
 

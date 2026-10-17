@@ -773,6 +773,7 @@ class BrokerManager:
             BrokerStatus.CONNECTED,
             BrokerStatus.LIVE_READY,
             BrokerStatus.MARKET_DATA_NOT_READY,
+            BrokerStatus.EXECUTION_NOT_READY,
         ):
             return False
         # Authoritative session verification:
