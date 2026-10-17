@@ -21,7 +21,6 @@ from broker.providers.fyers.live_auth import (
     API_BASE,
     MARKET_DATA_BASE,
     AuthError,
-    FyersAuthFlow,
     HttpTransport,
     _UrllibTransport,
 )
@@ -103,6 +102,10 @@ class FyersSessionAdapter:
         self._seen_client_ids: dict[str, str] = {}
         self._cached_snapshot: tuple[dict[str, Any], ...] = ()
 
+        # Short-lived profile cache to avoid duplicate burst requests to /profile
+        self._profile_cache: tuple[float, dict[str, Any]] | None = None
+        self._profile_cache_ttl_s: float = 5.0
+
         # Order WebSocket and stream state
         self._order_socket_factory = order_socket_factory
         self._enable_order_ws = enable_order_ws
@@ -160,12 +163,29 @@ class FyersSessionAdapter:
 
     # ── lifecycle ──────────────────────────────────────────────────────
 
+    def _get_profile(self, force: bool = False) -> dict[str, Any]:
+        """Fetch profile from venue or use short-lived cache (prevents duplicate bursts)."""
+        now = time.monotonic()
+        if not force and self._profile_cache is not None:
+            cached_at, cached_body = self._profile_cache
+            if now - cached_at < self._profile_cache_ttl_s:
+                return cached_body
+        body = self._get("profile")
+        if isinstance(body, dict) and body.get("s") == "ok":
+            self._profile_cache = (now, body)
+        return body
+
     def connect(self) -> None:
         """Verify the session with one read-only profile call and start order WS if enabled."""
-        flow = FyersAuthFlow(self._http)
-        ok, reason = flow.validate(self._app_id, self._token)
-        if not ok:
-            raise AuthError(f"FYERS session rejected: {reason}", code="AUTH")
+        try:
+            body = self._get_profile(force=True)
+            if not isinstance(body, dict) or body.get("s") != "ok":
+                msg = body.get("message") if isinstance(body, dict) else "session check failed"
+                raise AuthError(f"FYERS session rejected: {msg}", code="AUTH")
+        except AuthError:
+            raise
+        except Exception as exc:
+            raise AuthError(f"FYERS session rejected: {exc}", code="AUTH") from None
         self._connected = True
         # An explicit (re)connect is the operator saying "try again".
         self._order_ws_suspended_until = 0.0
@@ -175,6 +195,7 @@ class FyersSessionAdapter:
             self._start_order_ws()
 
     def disconnect(self) -> None:
+        self._profile_cache = None
         self._stop_order_ws()
         self._connected = False
 
@@ -183,7 +204,7 @@ class FyersSessionAdapter:
         if not self._app_id or not self._token:
             return False, "CREDENTIALS not ready"
         try:
-            body = self._get("profile")
+            body = self._get_profile()
         except AuthError as exc:
             return False, str(exc)
         except Exception as exc:
@@ -595,7 +616,7 @@ class FyersSessionAdapter:
 
     def account(self) -> dict[str, Any]:
         """Minimal identity dict (``account_id``/``user_id``/``client_id``)."""
-        body = self._get("profile")
+        body = self._get_profile()
         data = body.get("data", {}) if isinstance(body, dict) else {}
         if not isinstance(data, dict):
             raise AuthError("venue returned an unreadable profile", code="AUTH")

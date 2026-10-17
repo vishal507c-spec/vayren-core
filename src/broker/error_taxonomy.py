@@ -70,16 +70,43 @@ def classify_http_error(status: int, message: str = "") -> tuple[str, str]:
     return "UNKNOWN", redact(msg or f"HTTP {status}")
 
 
-def parse_retry_after(headers: Any, default_s: float = 5.0) -> float:
-    """Parse Retry-After (seconds) with a bounded default; never negative."""
+def parse_retry_after(
+    headers: Any,
+    default_s: float = 5.0,
+    min_s: float = 5.0,
+    max_s: float = 300.0,
+    attempt: int = 0,
+    add_jitter: bool = False,
+) -> float:
+    """Parse Retry-After (seconds) with a bounded positive floor; never zero or negative.
+
+    Guarantees a safe positive floor (min_s, default 5.0s) so 'Retry-After: 0' or
+    missing headers cannot trigger immediate retries. Applies bounded exponential
+    backoff across attempts and optional jitter.
+    """
+    delay = None
     try:
         if isinstance(headers, dict):
             raw = headers.get("Retry-After", headers.get("retry-after", ""))
-            delay = float(str(raw).strip())
-            return max(0.0, min(delay, 300.0))
+            if str(raw).strip():
+                delay = float(str(raw).strip())
     except (TypeError, ValueError):
-        pass
-    return max(0.0, float(default_s))
+        delay = None
+
+    floor = max(1.0, float(min_s))
+    if delay is None or delay < floor:
+        base = max(floor, float(default_s))
+    else:
+        base = min(delay, float(max_s))
+
+    if attempt > 0:
+        base = min(base * (2.0 ** min(attempt, 6)), float(max_s))
+
+    if add_jitter:
+        jitter = random.uniform(0.0, min(base * 0.25, 5.0))
+        base += jitter
+
+    return round(max(floor, min(base, float(max_s))), 2)
 
 
 def backoff_with_jitter(attempt: int, base_s: float = 1.0, cap_s: float = 60.0) -> float:

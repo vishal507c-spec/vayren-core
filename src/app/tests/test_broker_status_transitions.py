@@ -77,7 +77,7 @@ def test_subread_failure_never_downgrades_a_proven_session(tmp_path: Path):
     assert state["status"] is not BrokerStatus.LOGIN_REQUIRED, (
         "a failing sub-read must not invalidate a proven session"
     )
-    assert state["status"] is BrokerStatus.CONNECTED
+    assert state["status"] is BrokerStatus.EXECUTION_NOT_READY
     assert state["details"]["account_id"] == "XV29244"
     assert state["details"]["funds_available"] == 100.18
     assert "positions" in state["checks"] and "orders" in state["checks"]

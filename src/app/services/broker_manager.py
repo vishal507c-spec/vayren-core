@@ -37,6 +37,7 @@ import contextlib
 import logging
 import secrets
 import threading
+import time
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -1066,6 +1067,7 @@ class BrokerManager:
         is_auth_error = False
         auth_error_msg = ""
         is_rate_limited = False
+        is_session_rate_limited = False
         rate_msg = ""
         rest_ok = True
 
@@ -1082,7 +1084,8 @@ class BrokerManager:
             single flaky read is exactly the "reads work, state says
             expired" bug this guard removes.
             """
-            nonlocal is_auth_error, auth_error_msg, is_rate_limited, rate_msg
+            nonlocal is_auth_error, auth_error_msg
+            nonlocal is_rate_limited, is_session_rate_limited, rate_msg
             kind, safe = classify_exception(Exception(text))
             if kind in ("AUTH_EXPIRED", "AUTH_INVALID") and session_level:
                 is_auth_error = True
@@ -1090,6 +1093,8 @@ class BrokerManager:
             if kind == "RATE_LIMITED":
                 is_rate_limited = True
                 rate_msg = safe
+                if session_level:
+                    is_session_rate_limited = True
             return is_auth_error, is_rate_limited
 
         try:
@@ -1107,6 +1112,8 @@ class BrokerManager:
             self._set_leg(spec.broker_id, "rest", "READY", success=True)
         else:
             self._set_leg(spec.broker_id, "rest", "FAILED", checks.get("connection", "failed"))
+
+        time.sleep(0.05)
         try:
             account = adapter.account()
             checks["account"] = "READY"
@@ -1115,7 +1122,9 @@ class BrokerManager:
             checks["account"] = f"FAILED: {type(exc).__name__}"
             # Identity comes from the same profile call as health(), so a
             # failure here is a session-level proof failure.
-            _note_failure(str(exc), session_level=not rest_ok)
+            _note_failure(str(exc), session_level=True)
+
+        time.sleep(0.05)
         try:
             funds = adapter.funds()
             checks["funds"] = "READY"
@@ -1125,12 +1134,18 @@ class BrokerManager:
                 total = funds.get("total", funds.get("equity"))
                 details["funds_total"] = self._safe_float(total)
         except Exception as exc:
-            checks["funds"] = f"FAILED: {type(exc).__name__}"
-            _note_failure(str(exc))
+            kind, safe = classify_exception(exc)
+            if kind == "RATE_LIMITED":
+                checks["funds"] = "FAILED: rate limited (HTTP 429)"
+            else:
+                checks["funds"] = f"FAILED: {type(exc).__name__}"
+            _note_failure(str(exc), session_level=False)
+
         for key, fn in (
             ("positions", "positions"),
             ("orders", "open_orders"),
         ):
+            time.sleep(0.05)
             try:
                 rows = getattr(adapter, fn)()
                 checks[key] = "READY"
@@ -1138,8 +1153,13 @@ class BrokerManager:
                     len(rows) if isinstance(rows, (list, tuple)) else None
                 )
             except Exception as exc:
-                checks[key] = f"FAILED: {type(exc).__name__}"
-                _note_failure(str(exc))
+                kind, safe = classify_exception(exc)
+                if kind == "RATE_LIMITED":
+                    checks[key] = "FAILED: rate limited (HTTP 429)"
+                else:
+                    checks[key] = f"FAILED: {type(exc).__name__}"
+                _note_failure(str(exc), session_level=False)
+
         # Order-update WS leg (independent of REST).
         order_ws_status = "UNKNOWN"
         try:
@@ -1182,7 +1202,11 @@ class BrokerManager:
             live["checks"] = checks
             live["details"] = details
             live["last_sync"] = self._now_stamp()
-            if is_rate_limited:
+            if is_rate_limited and (
+                is_session_rate_limited
+                or checks.get("connection") != "READY"
+                or checks.get("account") != "READY"
+            ):
                 failures = 0
                 with contextlib.suppress(Exception):
                     failures = int(
@@ -1235,18 +1259,38 @@ class BrokerManager:
                 live["reason"] = redact(checks.get("account", "account check failed"))
                 self._touch_error(spec.broker_id, "VERIFY", live["reason"])
             else:
-                market_bad = str(checks.get("market_data", "READY")).startswith("FAILED")
-                order_bad = str(checks.get("order_stream", "READY")).startswith("FAILED")
-                if market_bad or order_bad:
-                    live["status"] = BrokerStatus.MARKET_DATA_NOT_READY
-                    failed = [
-                        k
-                        for k in ("market_data", "order_stream")
-                        if str(checks.get(k, "")).startswith("FAILED")
-                    ]
+                failed_checks = [k for k, v in checks.items() if str(v).startswith("FAILED")]
+                if is_rate_limited:
+                    failures = 0
+                    with contextlib.suppress(Exception):
+                        failures = int(
+                            self._unified.get(spec.broker_id, {})
+                            .get("legs", {})
+                            .get("rest", {})
+                            .get("consecutive_failures", 0)
+                            or 0
+                        )
+                    delay = backoff_with_jitter(min(failures, 5), base_s=5.0)
+                    self._arm_retry(spec.broker_id, delay)
+                    if "orders" in failed_checks or "positions" in failed_checks:
+                        live["status"] = BrokerStatus.EXECUTION_NOT_READY
+                    else:
+                        live["status"] = BrokerStatus.MARKET_DATA_NOT_READY
                     live["reason"] = (
-                        f"account verified; degraded leg(s): {', '.join(failed)} — "
-                        + redact(str(checks.get(failed[0], "")))
+                        f"account verified; degraded: {', '.join(failed_checks)} "
+                        f"(venue rate limited — cooldown {delay:.0f}s)"
+                    )
+                    self._touch_verified(spec.broker_id)
+                elif failed_checks:
+                    if "orders" in failed_checks or "positions" in failed_checks:
+                        live["status"] = BrokerStatus.EXECUTION_NOT_READY
+                    elif "market_data" in failed_checks or "order_stream" in failed_checks:
+                        live["status"] = BrokerStatus.MARKET_DATA_NOT_READY
+                    else:
+                        live["status"] = BrokerStatus.EXECUTION_NOT_READY
+                    live["reason"] = (
+                        f"account verified; degraded leg(s): {', '.join(failed_checks)} — "
+                        + redact(str(checks.get(failed_checks[0], "")))
                     )
                     self._touch_verified(spec.broker_id)
                 else:

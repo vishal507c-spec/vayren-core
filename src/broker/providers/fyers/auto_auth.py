@@ -313,8 +313,22 @@ class FyersAutoAuthEngine:
             except Exception as exc:
                 last_err = str(exc)
                 log.warning(f"[FyersAutoAuth] Attempt {attempt} failed: {exc}")
+                from broker.error_taxonomy import classify_exception
+
+                kind, _ = classify_exception(exc)
+                if (
+                    kind == "RATE_LIMITED"
+                    or "429" in last_err
+                    or "rate limit" in last_err.lower()
+                    or "too many requests" in last_err.lower()
+                ):
+                    log.warning(
+                        "[FyersAutoAuth] Venue rate limited (HTTP 429) — "
+                        "stopping auto-auth retries immediately to protect IP quota."
+                    )
+                    break
                 if attempt < 2:
-                    time.sleep(1)
+                    time.sleep(2)
         log.warning("[FyersAutoAuth] Automatic login failed: %s", last_err)
         return False, last_err
 

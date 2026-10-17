@@ -7,7 +7,38 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (fyers-permanent-auth-reliability-fix-20261017):** PERMANENT FYERS AUTHENTICATION RELIABILITY FIX & COMPREHENSIVE FAILURE-INJECTION SUITE COMPLETE.
+**Latest update (fyers-rate-limit-fixes-20261017):** IMPLEMENTED FYERS HTTP 429 RATE-LIMIT FIXES, BURST MITIGATION, AND RESILIENCE SUITE.
+1. **EC2 Obsolete Process Cleanup (Task 1):**
+   - Verified 5 obsolete abandoned scripts on EC2 (`245854`, `245928`, `250895`, `265389`, `271319` from Oct 12 SSH sessions) looping reconnects and exhausting FYERS socket connection budgets.
+   - Terminated gracefully using `SIGTERM` (zero blind `kill -9`); verified all 5 stopped completely (`pgrep -fa` returns code 1).
+   - Preserved log files (`fyersOrderSocket.log`, `fyersDataSocket.log`) intact.
+2. **`parse_retry_after` Hardening (Task 2):**
+   - In `src/broker/error_taxonomy.py`: Enforced a positive minimum floor (`min_s=5.0`) so `Retry-After: 0`, missing headers, or negative values never trigger immediate retries.
+   - Added bounded exponential backoff across attempts (`2^attempt`) and optional jitter (`add_jitter=True`).
+   - In `src/broker/providers/fyers/live_auth.py`: Updated `_UrllibTransport` to pass `min_s=5.0`.
+3. **Auto-Auth Throttling on HTTP 429 (Task 3):**
+   - In `src/broker/providers/fyers/auto_auth.py`: `_run_auto_auth` inspects caught exceptions via `classify_exception(exc)`. If `RATE_LIMITED` or `429` is detected, logs a warning and immediately breaks, preventing OTP endpoint hammering on attempt 2.
+4. **FyersSessionAdapter Profile Caching & Pacing (Task 4):**
+   - In `src/broker/providers/fyers/session_adapter.py`: Added 5.0s TTL `_profile_cache` with `_get_profile()`. `connect()` populates cache, `health()` and `account()` share cached profile without duplicate REST requests. Cache cleared on `disconnect()`.
+   - In `src/app/services/broker_manager.py`: Added 50ms pacing between consecutive REST queries in `_job_health` to prevent burst spikes.
+5. **Session Preservation & Honest Degradation (Task 5):**
+   - In `src/app/services/broker_manager.py`: Segregated session-level rate limits (`health()`/`account()`) from sub-read rate limits (`positions()`/`orders()`).
+   - If account authentication is verified but `/orders` or `/positions` receives HTTP 429, preserved authenticated session identity while transitioning to `BrokerStatus.EXECUTION_NOT_READY` with armed backoff cooldown, never claiming unverified order access is healthy and never tearing down session state.
+6. **Regression Test Suite (Task 6):**
+   - Created `src/broker/tests/test_fyers_rate_limit_resilience.py` with 10 comprehensive tests covering floor enforcement, backoff, jitter, single-attempt 429 abort, profile caching, honest degraded state preservation, and session-level error transitions. All 10 passed.
+   - Impact validation and full broker/app suites passed (100%).
+
+**Previous update (fyers-production-deployment-20261017):** PRODUCTION DEPLOYMENT TO GITHUB & EC2 COMPLETED (Commit c802460).
+- Local branch `main` committed with `c802460: fix(broker): harden FYERS authentication recovery` and pushed to `origin/main`.
+- EC2 instance (`ip-172-31-12-198.taila678c5.ts.net` / `100.75.185.37`) safely updated via `git merge --ff-only origin/main` to `c802460`. Pre-deploy archive created at `/home/ubuntu/vayren-core-pre-deploy-20261017.tar.gz`.
+- Test suite on EC2 passed cleanly: 32 tests in 0.74s (`test_fyers_auth_resilience.py` and `test_unified_session.py`).
+- `vayren-remote.service` restarted (PID 619611) and active.
+- Live verification via remote gateway over Tailscale TLS confirmed:
+  - System trading state DISARMED: Strategy `BLOCKED`, Worker `STOPPED`, Execution ready `False`.
+  - Zero live orders (count=0), zero positions (count=0), zero fills (count=0).
+  - Broker session state cleanly set to `LOGIN_REQUIRED` (error kind: `RATE_LIMITED` from venue HTTP 429), never hanging at `Connecting...` or looping indefinitely.
+
+**Previous update (fyers-permanent-auth-reliability-fix-20261017):** PERMANENT FYERS AUTHENTICATION RELIABILITY FIX & COMPREHENSIVE FAILURE-INJECTION SUITE COMPLETE.
 1. **Root Cause Resolution & Error Classification Layer:**
    - Fixed `live_auth.py` HTTP layer: `AuthError` now stores `code` and `http_status: int | None = None`. `_read_json` parses JSON error messages, detects HTTP 400 token expiration (`"Token is Invalid or Expired"`), HTTP 401 (`AUTH_EXPIRED`), HTTP 429 (`RATE_LIMITED` with `Retry-After`), HTTP 408/504 (`TIMEOUT`), and HTTP 500+ (`VENUE`).
    - `error_taxonomy.py`: Structured HTTP status codes and exception types are inspected first. High-priority keyword classification guarantees that token expiration and auth errors take precedence over misleading prefixes such as `"venue unreachable:"`.

@@ -214,7 +214,7 @@ class _UrllibTransport:
                 headers: dict[str, Any] = {}
                 with contextlib.suppress(Exception):
                     headers = dict(exc.headers.items()) if exc.headers else {}
-                delay = parse_retry_after(headers, default_s=5.0)
+                delay = parse_retry_after(headers, default_s=5.0, min_s=5.0)
                 raise AuthError(
                     f"rate limited by venue (HTTP 429, retry in {delay:.0f}s)",
                     code="RATE_LIMITED",
