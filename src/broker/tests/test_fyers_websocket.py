@@ -995,3 +995,25 @@ def test_paper_mode_does_not_call_live_websocket() -> None:
     )
     assert session.mode == ExecutionMode.PAPER
     assert session._broker is None or type(session._broker).__name__ != "FyersSessionAdapter"
+
+
+def test_fyers_session_adapter_health_preserves_auth_error() -> None:
+    """Expired or invalid token AuthError must not be disguised as venue unreachable."""
+    from unittest.mock import MagicMock
+
+    from broker.providers.fyers.live_auth import AuthError
+
+    mock_http = MagicMock()
+    mock_http.get_json.side_effect = AuthError(
+        "Token is Invalid or Expired (HTTP 400)", code="VENUE"
+    )
+    adapter = FyersSessionAdapter(
+        app_id="APP123",
+        access_token="EXPIRED_TOKEN",
+        transport=mock_http,
+        enable_order_ws=False,
+    )
+    healthy, reason = adapter.health()
+    assert not healthy
+    assert reason == "Token is Invalid or Expired (HTTP 400)"
+    assert not reason.startswith("venue unreachable:")

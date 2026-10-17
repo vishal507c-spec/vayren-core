@@ -224,6 +224,17 @@ class FyersAutoAuthEngine:
                 "FYERS TOTP Secret is invalid. Enter your 32-character External 2FA "
                 "secret key from the FYERS portal",
             )
+        import base64
+
+        clean_totp = totp_sec.strip().replace(" ", "").upper()
+        pad = (-len(clean_totp)) % 8
+        try:
+            base64.b32decode(clean_totp + "=" * pad, casefold=True)
+        except Exception:
+            return (
+                False,
+                "FYERS TOTP Secret is invalid: must be a valid Base32 key from FYERS portal",
+            )
         return True, "ready"
 
     def ensure_session(self, session_store: Any) -> tuple[bool, str]:
@@ -239,7 +250,12 @@ class FyersAutoAuthEngine:
             if ok:
                 log.info("[FyersAutoAuth] Saved session valid.")
                 return True, f"session live ({detail})"
-            if "unreachable" in detail:
+            d_lower = detail.lower()
+            is_auth_issue = any(
+                k in d_lower
+                for k in ("token", "expired", "invalid", "session", "unauthorized", "400", "401")
+            )
+            if "unreachable" in d_lower and not is_auth_issue:
                 return False, detail
             log.warning("[FyersAutoAuth] Stored session expired — re-authenticating …")
         possible, why = self.auto_login_possible()
@@ -269,10 +285,14 @@ class FyersAutoAuthEngine:
         for attempt in (1, 2):
             log.info(f"[FyersAutoAuth] Login attempt {attempt}/2 …")
             try:
+                log.info("[FyersAutoAuth] Step 1/5: Requesting login OTP key")
                 otp_key = request_otp_key(self._http, creds.client_id)
+                log.info("[FyersAutoAuth] Step 2/5: Verifying TOTP")
                 totp_code = pyotp.TOTP(creds.totp_secret).now()
                 pin_key = verify_totp_key(self._http, otp_key, totp_code)
+                log.info("[FyersAutoAuth] Step 3/5: Verifying PIN")
                 trade_token = verify_pin_token(self._http, pin_key, creds.pin)
+                log.info("[FyersAutoAuth] Step 4/5: Fetching authorization code")
                 auth_code = fetch_auth_code(
                     self._http,
                     fy_id=creds.client_id,
@@ -280,6 +300,7 @@ class FyersAutoAuthEngine:
                     redirect_uri=creds.redirect_uri,
                     trade_token=trade_token,
                 )
+                log.info("[FyersAutoAuth] Step 5/5: Exchanging auth code for access token")
                 session = flow.exchange(creds.app_id, auth_code, creds.secret)
                 token = str(session.get("access_token", "") or "")
                 if not token:

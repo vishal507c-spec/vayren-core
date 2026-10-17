@@ -184,6 +184,8 @@ class FyersSessionAdapter:
             return False, "CREDENTIALS not ready"
         try:
             body = self._get("profile")
+        except AuthError as exc:
+            return False, str(exc)
         except Exception as exc:
             return False, f"venue unreachable: {exc}"
         if not isinstance(body, dict) or body.get("s") != "ok":

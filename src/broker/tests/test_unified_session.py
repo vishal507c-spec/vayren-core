@@ -30,6 +30,7 @@ from broker import BrokerStatus
 from broker.audit import SessionAudit
 from broker.error_taxonomy import (
     backoff_with_jitter,
+    classify_exception,
     classify_http_error,
     redact,
 )
@@ -318,6 +319,22 @@ def test_10_http_errors_classified() -> None:
     kind, _ = classify_http_error(400, "Invalid parameter symbol")
     assert kind == "BAD_REQUEST"
     kind, _ = classify_http_error(400, "Token is expired, session invalid")
+    assert kind == "AUTH_EXPIRED"
+    kind, _ = classify_http_error(400, "Token is Invalid or Expired")
+    assert kind == "AUTH_EXPIRED"
+    kind, _ = classify_http_error(400, "token is invalid")
+    assert kind == "AUTH_EXPIRED"
+    kind, _ = classify_exception(Exception("Token is Invalid or Expired (HTTP 400)"))
+    assert kind == "AUTH_EXPIRED"
+    kind, _ = classify_exception(
+        Exception("venue unreachable: Token is Invalid or Expired (HTTP 400)")
+    )
+    assert kind == "AUTH_EXPIRED"
+    kind, _ = BrokerManager._classify_validate_reason("Token is Invalid or Expired (HTTP 400)")
+    assert kind == "AUTH_EXPIRED"
+    kind, _ = BrokerManager._classify_validate_reason(
+        "venue unreachable: Token is Invalid or Expired (HTTP 400)"
+    )
     assert kind == "AUTH_EXPIRED"
     kind, _ = classify_http_error(429, "too many requests")
     assert kind == "RATE_LIMITED"

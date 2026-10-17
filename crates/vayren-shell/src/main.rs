@@ -272,19 +272,27 @@ fn sync_broker_ui(
         let account_id = b.get("account_id").and_then(|a| a.as_str()).unwrap_or("");
         let name = b.get("name").and_then(|n| n.as_str()).unwrap_or("FYERS");
         let r_lower = reason.to_lowercase();
-        let is_timeout = r_lower.contains("timeout")
-            || r_lower.contains("timed out")
-            || r_lower.contains("unreachable");
         let is_auth_fail = r_lower.contains("auth")
             || r_lower.contains("credential")
             || r_lower.contains("expired")
-            || r_lower.contains("rejected");
+            || r_lower.contains("rejected")
+            || r_lower.contains("mismatch")
+            || r_lower.contains("invalid")
+            || r_lower.contains("unauthorized")
+            || r_lower.contains("token")
+            || r_lower.contains("failed");
+        let is_timeout = (r_lower.contains("timeout")
+            || r_lower.contains("timed out")
+            || r_lower.contains("unreachable"))
+            && !is_auth_fail;
 
         if is_timeout {
             ui.set_conn_pill_label("Connection Failed (Timeout)".into());
             ui.set_conn_pill_tone(3);
             ui.set_conn_is_connected(false);
             ui.set_conn_is_failed(true);
+            ui.set_conn_form_enabled(true);
+            ui.set_conn_cta_enabled(true);
             ui.set_conn_error_message(reason.into());
             ui.set_conn_status_message(
                 format!("Connection timed out: {reason}. Check network/venue status and retry.")
@@ -347,6 +355,8 @@ fn sync_broker_ui(
             ui.set_conn_pill_tone(3);
             ui.set_conn_is_connected(false);
             ui.set_conn_is_failed(true);
+            ui.set_conn_form_enabled(true);
+            ui.set_conn_cta_enabled(true);
             ui.set_conn_error_message(reason.into());
             ui.set_conn_status_message(
                 format!("Authentication failed: {reason}. Check your credentials and try again.")

@@ -7,7 +7,80 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (cargo-build-ci-acceleration-20261015):** CARGO BUILD & CI PIPELINE ACCELERATED (BUILD-TEST DROPPED BY 7+ MINUTES, REDUNDANT SHELL COMPILATION ELIMINATED, AND RUST DEPENDENCIES STREAMLINED).
+**Latest update (fyers-permanent-auth-reliability-fix-20261017):** PERMANENT FYERS AUTHENTICATION RELIABILITY FIX & COMPREHENSIVE FAILURE-INJECTION SUITE COMPLETE.
+1. **Root Cause Resolution & Error Classification Layer:**
+   - Fixed `live_auth.py` HTTP layer: `AuthError` now stores `code` and `http_status: int | None = None`. `_read_json` parses JSON error messages, detects HTTP 400 token expiration (`"Token is Invalid or Expired"`), HTTP 401 (`AUTH_EXPIRED`), HTTP 429 (`RATE_LIMITED` with `Retry-After`), HTTP 408/504 (`TIMEOUT`), and HTTP 500+ (`VENUE`).
+   - `error_taxonomy.py`: Structured HTTP status codes and exception types are inspected first. High-priority keyword classification guarantees that token expiration and auth errors take precedence over misleading prefixes such as `"venue unreachable:"`.
+   - `session_adapter.py`: `health()` captures `AuthError` separately and preserves `str(exc)` without prepending `"venue unreachable:"`.
+   - `auto_auth.py`: `ensure_session` validates that `"unreachable"` only aborts if there is no underlying token expiry/auth error; if expired, it cleanly triggers automatic re-login with TOTP and PIN. Added Base32 pre-validation for `totp_secret` and step-by-step progress logging (`request_otp_key`, `verify_totp`, `verify_pin`, `fetch_auth_code`, `exchange`).
+2. **Explicit Authentication State Machine & Timeout Watchdog:**
+   - Updated `broker/session_state.py` with explicit states: `DISCONNECTED`, `CHECKING`, `VALIDATING_SESSION`, `CONNECTING`, `AUTHENTICATING`, `FETCHING_TOKEN`, `VERIFYING`, `VERIFYING_CONNECTION`, `CONNECTED`, `DEGRADED`, `RATE_LIMITED`, `RETRY_WAIT`, `AUTH_REQUIRED`, `LOGIN_REQUIRED`, `RECONNECTING`, `ERROR`, `FAILED`, `UNKNOWN`.
+   - Updated `_BROKER_STATUS_MAP` and `next_action_for` with deterministic mapping and actionable operator instructions.
+   - Integrated `AUTH_TIMEOUT_S = 30.0` operation watchdog in `BrokerManager`: stuck in-progress attempts automatically transition to `BrokerStatus.ERROR` after 30s, allowing clean recovery and re-login rather than hanging indefinitely at `Connecting...`.
+   - Added startup crash reset: any stale in-progress states (`AUTHENTICATING`, `CONFIGURING`) from previous process interruptions are safely reset to `LOGIN_REQUIRED` or `DISCONNECTED` on initialization.
+   - Generation epochs (`self._generations`) prevent race conditions; `DISCONNECT` during authentication reliably wins and discards stale activation.
+3. **Resilience to EC2 Worker & Network Lifecycle:**
+   - Decoupled broker authentication from `LiveTradingService` strategy worker (`Worker: STOPPED` is normal for live strategy execution until armed and does not block broker authentication).
+   - In `_job_health`, transient REST health failures (consecutive failures < 3) mark the REST leg `DEGRADED` (`BrokerStatus.MARKET_DATA_NOT_READY`) without disconnecting the adapter or setting `adapter._connected = False`. Only on 3 consecutive failures or true `AUTH_EXPIRED` is the connection torn down.
+   - Broker connection recovery guarantees `live_armed = False` and never places trades or alters positions automatically.
+4. **Rust UI & Domain Parity:**
+   - `crates/vayren-domain/src/broker_connection.rs`: Added support for explicit intermediate states; priority matching ensures auth failures are never disguised as timeouts.
+   - `crates/vayren-shell/src/main.rs`: Guarded `is_timeout` with `&& !is_auth_fail`.
+   - `crates/vayren-shell/src/remote_live.rs`: Sanitized `BrokerVerdict` so in-progress states never leak `"all checks passed"` and error reasons render in red.
+   - `crates/vayren-shell/ui/broker_connection.slint`: Removed conflicting CTA button and widened column to 270px with wrapped subtitles.
+5. **Testing & Failure-Injection Verification:**
+   - Created `src/broker/tests/test_fyers_auth_resilience.py` covering all 16 scenarios: expired tokens (HTTP 400), revoked sessions (HTTP 401), genuine network failures, rate limiting (HTTP 429), server errors, invalid credentials/Base32, redirect URI mismatches, malformed responses, token persistence refusal of empty tokens, duplicate/concurrent attempts, startup crash reset & watchdog, EC2 decoupling, transient network recovery, UI/backend state consistency, bounded jitter backoff, live order prevention, and regression for `"venue unreachable: Token is Invalid or Expired"`.
+   - All 32 targeted tests passed in 0.85s.
+   - All 286 tests in `cargo test -p vayren-domain` passed in 0.18s.
+   - `cargo check -p vayren-shell` passed in 16.01s.
+   - All 230 broker tests and 305 app tests passed 100%.
+   - Static validators (`validate_language_ownership`, `validate_repo_graph --fix`, `validate_routes`) passed 100%.
+   - `ruff check` and `ruff format` passed with 0 errors across all touched files.
+
+**Previous update (fyers-expired-token-taxonomy-fix-20261015):** RESOLVED FYERS TOKEN EXPIRY MISCLASSIFICATION (TIMEOUT/VENUE UNREACHABLE POISONING) & RESTORED SEAMLESS AUTO-AUTH.
+1. **Root Cause Analysis (Why login worked before, but broke next day):**
+   - FYERS access tokens expire daily as per regulatory session life limits.
+   - On the next day, the stored session token is naturally expired. A validation check against `https://api-t1.fyers.in/api/v3/profile` returns HTTP 400: `{"message": "Token is Invalid or Expired"}`.
+   - `FyersSessionAdapter.health()` unconditionally wrapped any exception as `False, f"venue unreachable: {exc}"`.
+   - `_classify_validate_reason` in `broker_manager.py` and `classify_exception` in `error_taxonomy.py` checked for `"unreachable"` before checking for `"expired"` or `"invalid token"`, falsely classifying the HTTP 400 as a `NETWORK` / `TIMEOUT` issue rather than `AUTH_EXPIRED`.
+   - When classified as `NETWORK`, `broker_manager` transitioned the status to `DISCONNECTED` and immediately aborted, completely bypassing `_try_auto_auth(spec, config)`!
+   - In `auto_auth.py`, `ensure_session` checked `if "unreachable" in detail: return False, detail`, preventing automated re-login via TOTP/Pin.
+   - In `crates/vayren-shell/src/main.rs`, `is_timeout` checked `r_lower.contains("unreachable")` ahead of `!is_auth_fail`, causing the UI to show `🔴 Connection Failed (Timeout)` and `Broker API timed out / venue unreachable. Check network connectivity and retry.`
+2. **Surgical Fixes Applied:**
+   - **`src/broker/providers/fyers/session_adapter.py`:** `health()` catches `AuthError` separately and preserves `str(exc)` without prepending `venue unreachable:`.
+   - **`src/broker/error_taxonomy.py`:** `classify_exception` and `classify_http_error` now check auth/token expiration keywords (`"token is invalid"`, `"invalid token"`, `"expired"`, `"session expired"`, `"unauthorized"`) *before* network/unreachable checks, and correctly identify HTTP 400 with token invalid/expired messages as `AUTH_EXPIRED`.
+   - **`src/app/services/broker_manager.py`:** `_classify_validate_reason` prioritizes expired/invalid token checks before network timeout keywords, ensuring expired sessions flow into `self._try_auto_auth(spec, config)` for automatic re-login.
+   - **`src/broker/providers/fyers/auto_auth.py`:** `ensure_session` ensures that `unreachable` only halts execution if it is NOT an authentication/token issue, allowing seamless automatic re-authentication.
+   - **`crates/vayren-shell/src/main.rs`:** `is_timeout` in the shell is guarded by `&& !is_auth_fail`, preventing authentication rejections from ever masquerading as network timeouts.
+3. **Verification & Tests:**
+   - Added unit tests in `src/broker/tests/test_unified_session.py` covering taxonomy classifications for `"Token is Invalid or Expired (HTTP 400)"` and `"venue unreachable: Token is Invalid or Expired (HTTP 400)"`.
+   - Added `test_fyers_session_adapter_health_preserves_auth_error` in `src/broker/tests/test_fyers_websocket.py`.
+   - All 535 tests in `src/broker/tests/` and `src/app/tests/` passed 100%.
+   - `cargo check -p vayren-domain -p vayren-shell` passed in 2.87s.
+   - All static validators passed (`validate_language_ownership`, `validate_architecture_gate`, `validate_imports`, `validate_authority`, `validate_repo_graph`, `validate_routes`, `validate_structure`).
+
+**Previous update (broker-connection-ux-neuroscience-and-mismatch-fix-20261015):** BROKER CONNECTION UX & NEUROSCIENCE COGNITIVE OVERLOAD RESOLVED & FYERS MISMATCH RESOLUTION IMPLEMENTED.
+1. **Cognitive Neuroscience & UX Confusion Elimination in `broker_connection.slint`:**
+   - **Eliminated Conflicting Stacked Status & Action:** When authenticating, the UI previously rendered a prominent teal card saying "🟡 all checks passed" directly on top of a disabled button saying "Authenticating…". In cognitive neuroscience (Gestalt continuity & cognitive load theory), dual competing focal points with contradictory status semantic signals create immediate user dissonance.
+   - **Unified Mutually-Exclusive CTA:** Transformed the CTA slot so that when authenticating (`!form-enabled`), ONLY a single, smooth in-progress status card renders. The `VButton` is conditionally hidden (`root.form-enabled`), eliminating stacked duplicate boxes.
+   - **Resolved Status Contradiction ("all checks passed" leak):** Sanitized `BrokerVerdict` in `remote_live.rs` so that in-progress/connecting states never leak stale `"all checks passed"` status messages.
+   - **Fixed Truncated Text in Right Column:** Expanded right column width from `248px` to `270px` and isolated `session-origin` ("EC2 gateway authoritative session") onto its own dedicated wrapping subtitle line, completely eliminating text clipping (`EC2 gateway authoritative se...`).
+2. **Fyers Connection Hanging & "Mismatch" Root Cause Fixed:**
+   - **Un-swallowed Error & Failure States:** When Fyers returned a "mismatch" (e.g. Redirect URI mismatch, appIdHash mismatch, or TOTP mismatch), `_try_auto_auth` classified the broker status as `LOGIN_REQUIRED`. `remote_live.rs` and `main.rs` previously treated `LOGIN_REQUIRED` as non-failed (`failed: false`), which suppressed the red error banner and overwrote the actual error reason with generic `next_action` text ("Complete FYERS login from SYSTEM → BROKERS").
+   - **Promoted Mismatch/Auth Failures to ConnectionState::Failed:** In `remote_live.rs`, `main.rs`, and `vayren-domain::broker_connection`, any `LOGIN_REQUIRED` or disconnect carrying failure keywords (`mismatch`, `invalid`, `rejected`, `unauthorized`, `failed`) now surfaces as `failed: true` with tone 3 (red), displays the exact actionable reason in the red banner, and keeps the credential form unlocked (`form_enabled: true`) so the user can immediately correct the mismatch without being locked out.
+   - **Clear Actionable Guidance for Redirect URI:** In `src/app/services/broker_manager.py`, enriched redirect URI mismatch messages with clear instructions: `"Redirect URI mismatch: Ensure the Redirect URI in VAYREN matches the Redirect URL in your FYERS Developer App (myapi.fyers.in)."`
+   - **Prevented Infinite "VERIFYING" Hang:** Fixed `broker_manager.py:648` where `unified_state` was flipped from `CONNECTED` to `VERIFYING` if `not self._adapter_verified(broker_id)`, but no verification task was queued. Now it queues `submit_check(broker_id)` and transitions safely through `CHECKING`. Also allowed `connect_broker` to proceed when credentials are provided even if previous status was in-progress.
+3. **Validation & Verification:**
+   - `cargo check -p vayren-domain -p vayren-shell` passed (1.51s).
+   - `cargo test -p vayren-domain` passed all 286 tests (0.44s).
+   - `python -m pytest tools/tests/test_desktop.py` passed (4s).
+   - `python -m pytest src/broker/tests/` passed all 229 tests.
+   - `python -m pytest src/app/tests/test_broker*` passed all 57 tests.
+   - `python tools/validate_language_ownership.py` passed (405 files).
+   - `python tools/validate_repo_graph.py --fix` auto-synced (5,947 entities, 13,367 relationships, 0 unresolved).
+   - All 7 static architecture and structure validators passed 100%.
+
+**Previous update (cargo-build-ci-acceleration-20261015):** CARGO BUILD & CI PIPELINE ACCELERATED (BUILD-TEST DROPPED BY 7+ MINUTES, REDUNDANT SHELL COMPILATION ELIMINATED, AND RUST DEPENDENCIES STREAMLINED).
 1. **Redundant 7-Minute Slint Compilation Eliminated in CI `build-test`:**
    - Profiling of CI run `38653135552` (10m 52s total) revealed that `build-test` spent 420.1s (7.0 minutes) executing `tools/build_rust.py --lean-build` to compile `vayren-shell` (debug mode, compiling 190,000+ lines of Slint code).
    - In parallel on an isolated runner, `test-shard-rust-shell` was ALREADY compiling and running all 85 tests for `vayren-shell` (6m 33s).

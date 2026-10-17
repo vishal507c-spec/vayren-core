@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import secrets
 import threading
 from collections.abc import Callable
 from datetime import datetime
@@ -112,6 +113,8 @@ class _Worker(WorkerThread):
 class BrokerManager:
     """Owns broker configuration/auth/state. UI reads snapshots only."""
 
+    AUTH_TIMEOUT_S: float = 30.0
+
     state_changed = Signal(str)  # broker_id
     message = Signal(str)  # user-safe log line (never secrets)
 
@@ -141,6 +144,7 @@ class BrokerManager:
         self._worker = _Worker(self._run_job)
         self._worker.start()
         self._stopping = False
+        self._auth_started_at: dict[str, float] = {}
         # ── unified EC2 session lifecycle (one authoritative manager) ──
         # desired: operator intent (CONNECT vs DISCONNECT), persisted.
         # generation: monotonic per-broker epoch; a late auth completion from
@@ -188,6 +192,36 @@ class BrokerManager:
                 "token_reused": False,
             }
         self._load_intents()
+        # Startup crash reset: reset any stale in-progress status from an interrupted process
+        for state in self._states.values():
+            if state.get("status") in (BrokerStatus.AUTHENTICATING, BrokerStatus.CONFIGURING):
+                configured = bool(state.get("configured", False))
+                state["status"] = (
+                    BrokerStatus.LOGIN_REQUIRED if configured else BrokerStatus.DISCONNECTED
+                )
+                state["reason"] = "session reset after restart"
+
+    def _check_auth_timeout(self, broker_id: str) -> None:
+        """Watchdog: transition stuck in-progress auth attempts to ERROR after AUTH_TIMEOUT_S."""
+        import time as _time
+
+        with self._lock:
+            state = self._states.get(broker_id, {})
+            status = state.get("status")
+            if status in (BrokerStatus.AUTHENTICATING, BrokerStatus.CONFIGURING):
+                started = self._auth_started_at.get(broker_id)
+                if started is not None and (_time.monotonic() - started > self.AUTH_TIMEOUT_S):
+                    self._auth_started_at.pop(broker_id, None)
+                    state["status"] = BrokerStatus.ERROR
+                    state["reason"] = "authentication timed out after 30s — please retry"
+                    self._touch_error(broker_id, "TIMEOUT", state["reason"])
+                    self._audit.record(
+                        broker_id=broker_id,
+                        action="auth timeout",
+                        result="ERROR",
+                        reason="operation exceeded 30s watchdog",
+                    )
+                    self._bump_version(broker_id)
 
     @staticmethod
     def _default_specs() -> dict[str, BrokerSpec]:
@@ -206,6 +240,7 @@ class BrokerManager:
         return spec.display_name if spec else str(broker_id)
 
     def state(self, broker_id: str) -> dict[str, Any]:
+        self._check_auth_timeout(broker_id)
         with self._lock:
             current = dict(self._states.get(broker_id, {}))
         details = current.get("details")
@@ -507,9 +542,13 @@ class BrokerManager:
                     str(cached["message"]),
                     self.get_session_snapshot(broker_id),
                 )
+        self._check_auth_timeout(broker_id)
         with self._lock:
             current_status = self._states.get(broker_id, {}).get("status")
-        if current_status in (BrokerStatus.AUTHENTICATING, BrokerStatus.CONFIGURING):
+        if (
+            current_status in (BrokerStatus.AUTHENTICATING, BrokerStatus.CONFIGURING)
+            and not credentials
+        ):
             self._audit.record(
                 request_id=request_id,
                 broker_id=broker_id,
@@ -518,6 +557,8 @@ class BrokerManager:
                 reason="connect already running",
             )
             return True, "connection already in progress", self.get_session_snapshot(broker_id)
+        attempt_id = secrets.token_hex(4)
+        logging.getLogger(__name__).info(f"[Auth {attempt_id}] Connect initiated for {broker_id}")
         # Rate-limited: refuse a retry storm while backoff is armed.
         if self._retry_armed(broker_id):
             snap = self.get_session_snapshot(broker_id)
@@ -614,6 +655,7 @@ class BrokerManager:
 
     def get_session_snapshot(self, broker_id: str) -> dict[str, Any]:
         """One authoritative backend snapshot for SYSTEM/LIVE/dashboard/health."""
+        self._check_auth_timeout(broker_id)
         with self._lock:
             state = dict(self._states.get(broker_id, {}))
             uni = self._unified.get(broker_id, {})
@@ -646,7 +688,9 @@ class BrokerManager:
         if self._retry_armed(broker_id):
             unified_state = "RATE_LIMITED"
         if unified_state == "CONNECTED" and not self._adapter_verified(broker_id):
-            unified_state = "VERIFYING"
+            if not self._retry_armed(broker_id):
+                self.submit_check(broker_id)
+            unified_state = "CHECKING"
         funds = {
             "available": details.get("funds_available"),
             "used": details.get("funds_used"),
@@ -866,17 +910,30 @@ class BrokerManager:
             return "RATE_LIMITED", text
         if any(
             k in lowered
-            for k in ("unreachable", "timeout", "timed out", "oserror", "connection refused")
+            for k in (
+                "token is invalid",
+                "invalid token",
+                "token expired",
+                "expired",
+                "session expired",
+            )
         ):
-            kind = "TIMEOUT" if "timeout" in lowered or "timed out" in lowered else "NETWORK"
-            return kind, text
+            return "AUTH_EXPIRED", text
         if "http 400" in lowered:
             return classify_http_error(400, text)
         if "http 401" in lowered or "http 403" in lowered:
             code = 401 if "401" in lowered else 403
             return classify_http_error(code, text)
-        if any(k in lowered for k in ("expired", "invalid", "unauthorized", "session")):
+        if "mismatch" in lowered:
+            return "AUTH_INVALID", text
+        if any(k in lowered for k in ("invalid", "unauthorized", "session")):
             return "AUTH_EXPIRED", text
+        if any(
+            k in lowered
+            for k in ("unreachable", "timeout", "timed out", "oserror", "connection refused")
+        ):
+            kind = "TIMEOUT" if "timeout" in lowered or "timed out" in lowered else "NETWORK"
+            return kind, text
         return "UNKNOWN", text
 
     def _try_auto_auth(
@@ -920,13 +977,20 @@ class BrokerManager:
         self._note(spec.broker_id, message)
         if not ok:
             kind, safe = self._classify_validate_reason(message)
-            self._set_status(spec.broker_id, BrokerStatus.LOGIN_REQUIRED, redact(safe))
-            self._touch_error(spec.broker_id, kind, safe)
+            safe_text = redact(safe)
+            if "mismatch" in safe_text.lower() and "redirect" in safe_text.lower():
+                safe_text = (
+                    "Redirect URI mismatch: Ensure the Redirect URI in VAYREN matches "
+                    "the Redirect URL in your FYERS Developer App (myapi.fyers.in). "
+                    f"Detail: {safe_text}"
+                )
+            self._set_status(spec.broker_id, BrokerStatus.LOGIN_REQUIRED, safe_text)
+            self._touch_error(spec.broker_id, kind, safe_text)
             self._audit.record(
                 broker_id=spec.broker_id,
                 action="authorization required",
                 result="LOGIN_REQUIRED",
-                reason=safe,
+                reason=safe_text,
             )
             self._bump_version(spec.broker_id)
             return True
@@ -1147,12 +1211,25 @@ class BrokerManager:
                     with contextlib.suppress(Exception):
                         adapter._connected = False
             elif checks.get("connection") != "READY":
-                live["status"] = BrokerStatus.DISCONNECTED
-                live["reason"] = redact(checks.get("connection", "connection check failed"))
-                self._touch_error(spec.broker_id, "NETWORK", live["reason"])
-                if adapter is not None:
-                    with contextlib.suppress(Exception):
-                        adapter._connected = False
+                rest_failures = int(
+                    self._unified.get(spec.broker_id, {})
+                    .get("legs", {})
+                    .get("rest", {})
+                    .get("consecutive_failures", 0)
+                    or 0
+                )
+                if rest_failures < 3:
+                    conn_err = redact(checks.get("connection", ""))
+                    live["status"] = BrokerStatus.MARKET_DATA_NOT_READY
+                    live["reason"] = f"REST leg degraded ({rest_failures}/3): {conn_err}"
+                    self._touch_error(spec.broker_id, "NETWORK", live["reason"])
+                else:
+                    live["status"] = BrokerStatus.DISCONNECTED
+                    live["reason"] = redact(checks.get("connection", "connection check failed"))
+                    self._touch_error(spec.broker_id, "NETWORK", live["reason"])
+                    if adapter is not None:
+                        with contextlib.suppress(Exception):
+                            adapter._connected = False
             elif checks.get("account") != "READY":
                 live["status"] = BrokerStatus.ACCOUNT_NOT_READY
                 live["reason"] = redact(checks.get("account", "account check failed"))
@@ -1599,10 +1676,16 @@ class BrokerManager:
         return "••••"
 
     def _set_status(self, broker_id: str, status: BrokerStatus, reason: str) -> None:
+        import time as _time
+
         with self._lock:
             state = self._states.setdefault(broker_id, {})
             state["status"] = status
             state["reason"] = reason
+            if status in (BrokerStatus.AUTHENTICATING, BrokerStatus.CONFIGURING):
+                self._auth_started_at[broker_id] = _time.monotonic()
+            else:
+                self._auth_started_at.pop(broker_id, None)
             if status is BrokerStatus.NOT_CONFIGURED:
                 spec = self._specs.get(broker_id)
                 if spec is not None:

@@ -387,25 +387,32 @@ impl BrokerWorkspace {
             ConnectionState::Failed => {
                 let r = self.reason.trim();
                 let r_lower = r.to_lowercase();
+                let is_auth = r_lower.contains("auth")
+                    || r_lower.contains("credential")
+                    || r_lower.contains("expired")
+                    || r_lower.contains("invalid")
+                    || r_lower.contains("401")
+                    || r_lower.contains("400")
+                    || r_lower.contains("token")
+                    || r_lower.contains("rejected");
                 if r.is_empty() {
                     "Connection failed. Please retry.".to_string()
+                } else if r_lower.contains("mismatch") {
+                    format!(
+                        "Configuration mismatch: {}. Verify that your Redirect URI, App ID and secrets match your broker portal exactly.",
+                        r
+                    )
+                } else if is_auth {
+                    format!(
+                        "Authentication failed: {}. Check your credentials and try again.",
+                        r
+                    )
                 } else if r_lower.contains("timeout")
                     || r_lower.contains("timed out")
                     || r_lower.contains("unreachable")
                 {
                     format!(
                         "Connection timed out: {}. Check network/venue status and retry.",
-                        r
-                    )
-                } else if r_lower.contains("auth")
-                    || r_lower.contains("credential")
-                    || r_lower.contains("expired")
-                    || r_lower.contains("invalid")
-                    || r_lower.contains("401")
-                    || r_lower.contains("rejected")
-                {
-                    format!(
-                        "Authentication failed: {}. Check your credentials and try again.",
                         r
                     )
                 } else {
@@ -439,7 +446,18 @@ impl BrokerWorkspace {
             }
             ConnectionState::Failed => {
                 let r = self.reason.trim().to_lowercase();
-                if r.contains("timeout") || r.contains("timed out") || r.contains("unreachable") {
+                let is_auth = r.contains("auth")
+                    || r.contains("credential")
+                    || r.contains("expired")
+                    || r.contains("invalid")
+                    || r.contains("401")
+                    || r.contains("400")
+                    || r.contains("token")
+                    || r.contains("rejected")
+                    || r.contains("mismatch");
+                if (r.contains("timeout") || r.contains("timed out") || r.contains("unreachable"))
+                    && !is_auth
+                {
                     "Broker API timed out / venue unreachable. Check network connectivity and retry.".to_string()
                 } else {
                     "Connection failed. Review the details and retry.".to_string()
@@ -634,7 +652,18 @@ impl BrokerWorkspace {
             }
         }
 
-        let state = connection_state(&status_raw, configured);
+        let mut state = connection_state(&status_raw, configured);
+        let r_lower = reason.to_lowercase();
+        let has_failure = r_lower.contains("mismatch")
+            || r_lower.contains("failed")
+            || r_lower.contains("invalid")
+            || r_lower.contains("rejected")
+            || r_lower.contains("unauthorized")
+            || r_lower.contains("error");
+        if has_failure && state != ConnectionState::Connected {
+            state = ConnectionState::Failed;
+        }
+
         // The CTA is enabled when the backend affords a login attempt, or
         // when nothing is configured yet (the form itself is the action).
         // Authenticating/working states never accept another attempt.
@@ -647,7 +676,8 @@ impl BrokerWorkspace {
         let can_connect = !working
             && (can_login
                 || state == ConnectionState::NotConfigured
-                || state == ConnectionState::Ready);
+                || state == ConnectionState::Ready
+                || state == ConnectionState::Failed);
 
         Self {
             brokers,

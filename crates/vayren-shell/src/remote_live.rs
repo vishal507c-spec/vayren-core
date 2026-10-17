@@ -367,36 +367,71 @@ pub fn session_verdict(authority: &BrokerAuthority) -> BrokerVerdict {
             },
         },
         "CHECKING" | "CONNECTING" | "VERIFYING" | "RECONNECTING" | "RATE_LIMITED"
-        | "AUTHENTICATING" | "CONFIGURING" | "CHECKING SESSION" | "RATE LIMITED" => BrokerVerdict {
-            connected: false,
-            failed: false,
-            in_progress: true,
-            pill_label: "Connecting…".to_string(),
-            pill_tone: 2,
-            status_message: status_or("Authentication in progress…"),
-            description: if next_action.is_empty() {
-                format!("Waiting on {venue}…")
+        | "AUTHENTICATING" | "CONFIGURING" | "CHECKING SESSION" | "RATE LIMITED" => {
+            let msg = {
+                let m = status_or("Authentication in progress…");
+                if m.to_lowercase().contains("all checks passed") {
+                    "Authenticating with broker API…".to_string()
+                } else {
+                    m
+                }
+            };
+            BrokerVerdict {
+                connected: false,
+                failed: false,
+                in_progress: true,
+                pill_label: "Connecting…".to_string(),
+                pill_tone: 2,
+                status_message: msg,
+                description: if next_action.is_empty() {
+                    format!("Waiting on {venue}…")
+                } else {
+                    next_action.clone()
+                },
+            }
+        }
+        "LOGIN_REQUIRED" => {
+            let r_lower = reason.to_lowercase();
+            let is_fail = r_lower.contains("mismatch")
+                || r_lower.contains("failed")
+                || r_lower.contains("invalid")
+                || r_lower.contains("unauthorized")
+                || r_lower.contains("rejected")
+                || r_lower.contains("error");
+            if is_fail {
+                BrokerVerdict {
+                    connected: false,
+                    failed: true,
+                    in_progress: false,
+                    pill_label: "Connection Failed".to_string(),
+                    pill_tone: 3,
+                    status_message: format!("Authentication failed: {reason}"),
+                    description: if !next_action.is_empty() {
+                        next_action.clone()
+                    } else {
+                        "Review credential details below and retry.".to_string()
+                    },
+                }
             } else {
-                next_action.clone()
-            },
-        },
-        "LOGIN_REQUIRED" => BrokerVerdict {
-            connected: false,
-            failed: false,
-            in_progress: false,
-            pill_label: "Login Required".to_string(),
-            pill_tone: 2,
-            status_message: if next_action.is_empty() {
-                status_or("Broker login required.")
-            } else {
-                next_action.clone()
-            },
-            description: if reason.is_empty() {
-                format!("{venue} saved session is missing or expired.")
-            } else {
-                reason.clone()
-            },
-        },
+                BrokerVerdict {
+                    connected: false,
+                    failed: false,
+                    in_progress: false,
+                    pill_label: "Login Required".to_string(),
+                    pill_tone: 2,
+                    status_message: if next_action.is_empty() {
+                        status_or("Broker login required.")
+                    } else {
+                        next_action.clone()
+                    },
+                    description: if reason.is_empty() {
+                        format!("{venue} saved session is missing or expired.")
+                    } else {
+                        reason.clone()
+                    },
+                }
+            }
+        }
         "DISCONNECTED" => BrokerVerdict {
             connected: false,
             failed: false,

@@ -77,9 +77,12 @@ _EXPIRED_CODES = {-8, -15, -16, -17}
 class AuthError(RuntimeError):
     """Normalized authentication failure (reasons carry no secret values)."""
 
-    def __init__(self, message: str, code: str = "AUTH_ERROR") -> None:
+    def __init__(
+        self, message: str, code: str = "AUTH_ERROR", http_status: int | None = None
+    ) -> None:
         super().__init__(message)
         self.code = code
+        self.http_status = http_status
 
 
 def default_redirect_url(port: int = DEFAULT_CALLBACK_PORT) -> str:
@@ -215,6 +218,7 @@ class _UrllibTransport:
                 raise AuthError(
                     f"rate limited by venue (HTTP 429, retry in {delay:.0f}s)",
                     code="RATE_LIMITED",
+                    http_status=429,
                 ) from None
             # FYERS POST /api/v3/token returns HTTP 308 with the auth_code
             # inside the response body's ``Url`` field — not a real redirect.
@@ -243,9 +247,30 @@ class _UrllibTransport:
                         err_msg = str(message).strip()
             except Exception:
                 pass
+
+            lower_msg = err_msg.lower()
+            if exc.code in (401, 403):
+                code = "AUTH_EXPIRED" if exc.code == 401 else "AUTH_INVALID"
+            elif exc.code == 400 and any(
+                k in lower_msg for k in ("token", "expired", "invalid", "auth", "session")
+            ):
+                code = "AUTH_EXPIRED"
+            elif exc.code in (408, 504):
+                code = "TIMEOUT"
+            elif exc.code >= 500:
+                code = "VENUE"
+            else:
+                code = "VENUE"
+
             if err_msg:
-                raise AuthError(f"{err_msg} (HTTP {exc.code})", code="VENUE") from None
-            raise AuthError(f"venue request failed (HTTP {exc.code})", code="NETWORK") from None
+                raise AuthError(
+                    f"{err_msg} (HTTP {exc.code})", code=code, http_status=exc.code
+                ) from None
+            raise AuthError(
+                f"venue request failed (HTTP {exc.code})", code=code, http_status=exc.code
+            ) from None
+        except TimeoutError as exc:
+            raise AuthError(f"venue timeout: {exc}", code="TIMEOUT", http_status=408) from None
         except OSError as exc:
             raise AuthError(f"venue unreachable: {exc}", code="NETWORK") from None
         try:
@@ -439,6 +464,8 @@ class FyersAuthFlow:
                 headers={"Authorization": f"{app_id}:{access_token}"},
             )
         except AuthError as exc:
+            if exc.code == "AUTH_EXPIRED" or (exc.http_status and exc.http_status in (400, 401)):
+                return False, f"session expired or invalid: {exc}"
             return False, str(exc)
         if not isinstance(response, dict):
             return False, "venue returned an unreadable profile"

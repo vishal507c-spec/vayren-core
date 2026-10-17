@@ -966,7 +966,7 @@ field-input := TextInput {
                                 }
                             }
 
-                            if !root.is-connected && !(root.is-failed && root.show-error): VButton {
+                            if !root.is-connected && !(root.is-failed && root.show-error) && root.form-enabled: VButton {
                                 label: root.cta-arrow ? root.cta-label + "   →" : root.cta-label;
                                 variant: 0;
                                 enabled: root.cta-enabled;
@@ -1033,7 +1033,7 @@ field-input := TextInput {
 
                         // Connection progress.
                         VerticalLayout {
-                            width: 248px;
+                            width: 270px;
                             spacing: VayrenDesign.sp-md;
                             alignment: start;
 
@@ -1119,6 +1119,7 @@ field-input := TextInput {
                                     spacing: 4px;
                                     HorizontalLayout {
                                         spacing: VayrenDesign.sp-sm;
+                                        alignment: start;
                                         VStatusDot { tone: root.is-connected ? 1 : root.is-failed ? 3 : !root.form-enabled ? 2 : 0; }
                                         Text {
                                             text: root.is-connected ? "Connected & Verified" : root.is-failed ? "Connection Failed" : !root.form-enabled ? "Authenticating…" : "Ready to Connect";
@@ -1127,17 +1128,17 @@ field-input := TextInput {
                                             font-weight: 700;
                                             vertical-alignment: center;
                                         }
-                                        if root.session-origin != "": Text {
-                                            text: root.session-origin;
-                                            color: VayrenPalette.faint;
-                                            font-size: VayrenDesign.fs-label;
-                                            vertical-alignment: center;
-                                        }
+                                    }
+                                    if root.session-origin != "": Text {
+                                        text: root.session-origin;
+                                        color: VayrenPalette.faint;
+                                        font-size: 10px;
+                                        wrap: word-wrap;
                                     }
                                     Text {
                                         text: root.is-connected ? (root.status-message != "" ? root.status-message : "Session active & verified. Ready to trade.")
                                             : root.is-failed ? (root.error-message != "" ? root.error-message : "Authentication failed. Check credentials and retry.")
-                                            : !root.form-enabled ? "Verifying 2FA and establishing secure session…"
+                                            : !root.form-enabled ? "Verifying credentials, 2FA and establishing secure session…"
                                             : "Enter your credentials and click connect.";
                                         color: VayrenPalette.muted;
                                         font-size: VayrenDesign.fs-label;

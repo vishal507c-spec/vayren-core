@@ -48,7 +48,16 @@ def classify_http_error(status: int, message: str = "") -> tuple[str, str]:
         return "AUTH_INVALID", f"venue rejected authorization: {msg or f'HTTP {status}'}"
     if status == 400:
         if any(
-            k in lowered for k in ("expired", "invalid token", "session", "unauthorized", "auth")
+            k in lowered
+            for k in (
+                "expired",
+                "invalid token",
+                "token is invalid",
+                "session",
+                "unauthorized",
+                "auth",
+                "token",
+            )
         ):
             return "AUTH_EXPIRED", f"session expired or invalid: {msg or 'HTTP 400'}"
         return "BAD_REQUEST", f"venue rejected the request: {msg or 'HTTP 400'}"
@@ -82,21 +91,72 @@ def backoff_with_jitter(attempt: int, base_s: float = 1.0, cap_s: float = 60.0) 
 
 
 def classify_exception(exc: BaseException) -> tuple[str, str]:
-    """Classify a transport exception into (kind, safe_reason)."""
+    """Classify a transport exception into (kind, safe_reason).
+
+    Inspects structured HTTP status codes and exception types first, then falls back
+    to robust keyword analysis where token expiry always takes precedence over
+    incidental network/unreachable framing.
+    """
+    import socket
+    import urllib.error
+
+    # 1. Structured HTTP status code if present on exception object
+    http_code = (
+        getattr(exc, "http_status", None)
+        or getattr(exc, "code", None)
+        or getattr(exc, "status_code", None)
+    )
+    if isinstance(http_code, int) and 100 <= http_code <= 599:
+        return classify_http_error(http_code, str(exc))
+
+    # 2. Structured Python exception types
+    if isinstance(exc, (socket.timeout, TimeoutError)):
+        return "TIMEOUT", f"venue timed out: {redact(str(exc))}"
+    if isinstance(exc, ConnectionRefusedError):
+        return "NETWORK", "venue unreachable: connection refused"
+    if isinstance(exc, urllib.error.URLError):
+        reason = getattr(exc, "reason", exc)
+        if isinstance(reason, (socket.timeout, TimeoutError)):
+            return "TIMEOUT", f"venue timed out: {redact(str(reason))}"
+        return "NETWORK", f"venue unreachable: {redact(str(reason))}"
+
+    # 3. String content analysis with strict priority
     text = redact(str(exc) or type(exc).__name__)
     lowered = text.lower()
     if any(k in lowered for k in ("429", "rate limit", "too many requests")):
         return "RATE_LIMITED", f"rate limited by venue: {text}"
+    if any(
+        k in lowered
+        for k in (
+            "token is invalid",
+            "invalid token",
+            "token expired",
+            "expired",
+            "unauthorized",
+            "401",
+            "session expired",
+        )
+    ):
+        return "AUTH_EXPIRED", f"session expired or invalid: {text}"
+    if any(
+        k in lowered
+        for k in (
+            "mismatch",
+            "invalid pin",
+            "invalid totp",
+            "bad credentials",
+            "rejected authorization",
+        )
+    ):
+        return "AUTH_INVALID", f"venue rejected credentials: {text}"
+    if "400" in lowered:
+        return classify_http_error(400, text)
     if any(k in lowered for k in ("timeout", "timed out")):
         return "TIMEOUT", f"venue timed out: {text}"
     if any(
         k in lowered for k in ("unreachable", "connection refused", "oserror", "network", "socket")
     ):
         return "NETWORK", f"venue unreachable: {text}"
-    if any(k in lowered for k in ("expired", "invalid token", "unauthorized", "401")):
-        return "AUTH_EXPIRED", f"session expired or invalid: {text}"
-    if "400" in lowered:
-        return classify_http_error(400, text)
     return "UNKNOWN", text
 
 
