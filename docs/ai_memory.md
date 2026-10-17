@@ -7,7 +7,20 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (fyers-capital-reporting-and-safety-gate-20261017):** PERMANENT FIX FOR FYERS REPORTED CAPITAL AND LIVE SAFETY GATE BLOCKER.
+**Latest update (fyers-market-data-candle-sync-20261017):** CANDLE SYNC PACING, HTTP 429 RETRY BACKOFF, AND UNIVERSE AUTO-SYNC IMPLEMENTED AND VERIFIED.
+1. **Root Causes Resolved:**
+   - In `src/app/services/candle_sync_service.py`: `sync_candles` called `adapter.history()` in a tight loop with zero delay. FYERS burst rate limiting returned HTTP 429 after ~10 calls, failing remaining universe symbols with `FAILED` and leaving local candle stores absent.
+   - Added inter-symbol pacing (`pacing_s=0.35s`), exponential backoff retry on HTTP 429 / rate limits (extracting `retry in Xs` or falling back to `retry_delay_s=5.0s`, max 3 attempts).
+   - In `src/app/headless.py`: In the `setup` action handler, when `broker_manager` is connected and has an active adapter, missing symbols in the strategy universe are automatically backfilled via `sync_candles`, refreshing the quote cache and invalidating the validation cache.
+2. **Safety & Integrity Preserved:**
+   - No synthetic or mock candles; all 22 OBR C1C4 universe symbols backed by genuine 30-minute bars from FYERS.
+   - Live trading remains fail-closed; zero live orders placed.
+3. **Verification:**
+   - Python: 13/13 unit tests passed in `src/app/tests/test_candle_sync_service.py`, 5/5 in `test_sync_candles_validation_cache.py`, 11/11 in `test_live_actions.py`. `ruff check` passed clean.
+   - Rust: `cargo check -p vayren-shell` passed clean.
+   - Language ownership: `python tools/validate_language_ownership.py` PASSED (407 files checked).
+
+**Previous update (fyers-capital-reporting-and-safety-gate-20261017):** PERMANENT FIX FOR FYERS REPORTED CAPITAL AND LIVE SAFETY GATE BLOCKER.
 1. **Root Causes Resolved:**
    - In `src/app/services/live_trading_service.py`: `_live_available_funds` treated `0.0` as `None` (`available > 0`). When FYERS reported ₹0.00 balance, this caused `_start_blockers` to claim `"broker capital unavailable (funds not reported)"`. Fixed to return `0.0` when funds are zero, and produce the honest blocker: `"insufficient broker capital (₹0.00 reported) — live sizing requires positive available funds"`.
    - In `crates/vayren-shell/src/remote_live.rs`: Ingestion searched for `"capital_source"` instead of `"source"` and `"available"` instead of `"available_margin"`. This left `state.capital.available_margin` as `None`, rendering `REPORTED CAPITAL: Unavailable` in the LIVE modal. Fixed to support both keys, accurately mapping `available_margin`, `used_margin`, `configured_capital`, and `currency`.

@@ -128,3 +128,80 @@ def test_selection_falls_back_to_the_configured_venue(tmp_path: Path, broker_id:
     adapter = FakeAdapter({"KAYNES": _rows()})
     report = sync_candles(str(tmp_path), ["NSE:KAYNES"], FakeManager(adapter, broker_id))
     assert report["results"][0]["status"] == "STORED"
+
+
+def test_rate_limit_retry_succeeds(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    slept: list[float] = []
+    monkeypatch.setattr("time.sleep", slept.append)
+
+    class RateLimitedAdapter:
+        def __init__(self) -> None:
+            self.attempts = 0
+
+        def history(
+            self, symbol: str, resolution: str, start: int, end: int  # noqa: ARG002
+        ) -> list[tuple]:
+            self.attempts += 1
+            if self.attempts == 1:
+                raise RuntimeError("HTTP 429: Too Many Requests: rate limit exceeded, retry in 2s")
+            return _rows()
+
+    adapter = RateLimitedAdapter()
+    report = sync_candles(
+        str(tmp_path),
+        ["NSE:KAYNES"],
+        FakeManager(adapter),
+        max_retries=3,
+        retry_delay_s=1.0,
+    )
+    assert adapter.attempts == 2
+    assert report["written_total"] == 2
+    assert report["results"][0]["status"] == "STORED"
+    assert slept == [2.0]  # parsed "retry in 2s"
+
+
+def test_rate_limit_retry_exhausted_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    slept: list[float] = []
+    monkeypatch.setattr("time.sleep", slept.append)
+
+    class PersistentRateLimitAdapter:
+        def __init__(self) -> None:
+            self.attempts = 0
+
+        def history(
+            self, symbol: str, resolution: str, start: int, end: int  # noqa: ARG002
+        ) -> list[tuple]:
+            self.attempts += 1
+            raise RuntimeError("HTTP 429: rate limit exceeded, retry in 3s")
+
+    adapter = PersistentRateLimitAdapter()
+    report = sync_candles(
+        str(tmp_path),
+        ["NSE:KAYNES"],
+        FakeManager(adapter),
+        max_retries=3,
+        retry_delay_s=1.0,
+    )
+    assert adapter.attempts == 3
+    assert report["written_total"] == 0
+    assert report["results"][0]["status"] == "FAILED"
+    assert "429" in report["results"][0]["detail"]
+    assert slept == [3.0, 3.0]
+
+
+def test_pacing_between_symbols(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    slept: list[float] = []
+    monkeypatch.setattr("time.sleep", slept.append)
+
+    adapter = FakeAdapter({"KAYNES": _rows(), "ZEEL": _rows()})
+    report = sync_candles(
+        str(tmp_path),
+        ["NSE:KAYNES", "NSE:ZEEL"],
+        FakeManager(adapter),
+        pacing_s=0.35,
+    )
+    assert report["written_total"] == 4
+    assert slept == [0.35]  # Slept once between 1st and 2nd symbol
+

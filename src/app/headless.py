@@ -498,6 +498,34 @@ def _live_action(
             # Consent binds to the reviewed setup: any setup edit voids it.
             _ARMED[0] = False
             service.note_armed(False)
+
+            if broker_manager is not None:
+                try:
+                    configured_symbols = list(service.config.symbols or ())
+                    timeframe = str(service.config.timeframe or "30m")
+                    missing = [
+                        s
+                        for s in configured_symbols
+                        if not service._repository.get_candles_timeframe(
+                            s.split(":")[-1].strip().upper(), timeframe, 1
+                        )
+                    ]
+                    if missing:
+                        from app.services.candle_sync_service import sync_candles
+                        from app.services.market_data_service import MarketDataService
+
+                        report = sync_candles(
+                            data_dir,
+                            missing,
+                            broker_manager,
+                            timeframe=timeframe,
+                        )
+                        if int(report.get("written_total") or 0) > 0:
+                            service._quotes_reader = MarketDataService(data_dir)
+                            service._quotes_reader.refresh()
+                            service.invalidate_validation_cache()
+                except Exception as sync_exc:  # noqa: BLE001
+                    logger.warning("auto candle sync during setup failed: %s", sync_exc)
         elif name == "mode":
             requested = _opt_str(action.get("mode"))
             service.configure(mode=requested)

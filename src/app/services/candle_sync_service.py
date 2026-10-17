@@ -15,6 +15,7 @@ strategy would change the bars an in-flight decision is standing on).
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Any
 
@@ -56,6 +57,9 @@ def sync_candles(
     timeframe: str = "30m",
     days: int = 60,
     now_epoch: float | None = None,
+    pacing_s: float = 0.35,
+    max_retries: int = 3,
+    retry_delay_s: float = 5.0,
 ) -> dict[str, Any]:
     """Backfill real candles for ``symbols``; returns what actually happened.
 
@@ -94,15 +98,46 @@ def sync_candles(
 
     now = float(now_epoch if now_epoch is not None else time.time())
     start = now - float(days) * 86400.0
-    for symbol in wanted:
-        try:
-            rows = adapter.history(symbol, report["resolution"], int(start), int(now))
-        except Exception as exc:  # noqa: BLE001
+    for idx, symbol in enumerate(wanted):
+        if idx > 0 and pacing_s > 0:
+            time.sleep(pacing_s)
+
+        rows = None
+        last_exc: Exception | None = None
+        for attempt in range(max(1, max_retries)):
+            try:
+                rows = adapter.history(symbol, report["resolution"], int(start), int(now))
+                break
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+                exc_str = str(exc).lower()
+                is_rate_limit = (
+                    "429" in exc_str
+                    or "rate limit" in exc_str
+                    or "too many requests" in exc_str
+                )
+                if is_rate_limit and attempt + 1 < max_retries:
+                    delay = retry_delay_s
+                    match = re.search(r"retry in (\d+)s", str(exc), re.IGNORECASE)
+                    if match:
+                        delay = max(float(match.group(1)), delay)
+                    logger.warning(
+                        "Rate limited syncing candles for %s (attempt %d/%d), sleeping %.1fs",
+                        symbol,
+                        attempt + 1,
+                        max_retries,
+                        delay,
+                    )
+                    time.sleep(delay)
+                    continue
+                break
+
+        if rows is None:
             report["results"].append(
                 {
                     "symbol": symbol,
                     "status": "FAILED",
-                    "detail": f"{type(exc).__name__}: {exc}",
+                    "detail": f"{type(last_exc).__name__}: {last_exc}",
                 }
             )
             continue
