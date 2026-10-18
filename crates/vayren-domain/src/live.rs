@@ -1427,6 +1427,12 @@ impl LiveState {
             self.action_note = Some("start requested — awaiting backend".into());
             return;
         }
+        if self.mode == ExecMode::Live && !self.live_confirmed {
+            self.confirm_dialog_open = true;
+            self.action_note =
+                Some("live confirmation required (explicit operator consent)".into());
+            return;
+        }
         match self.start_blockers().first() {
             Some(reason) => self.action_note = Some(reason.clone()),
             None => {
@@ -7389,6 +7395,69 @@ mod tests {
         assert_eq!(view.bar.broker_tone, 3);
         assert_eq!(view.bar.conn_label, "○ Timeout (Venue Unreachable)");
         assert_eq!(view.bar.conn_tone, 3);
+    }
+
+    #[test]
+    fn test_start_with_unconfirmed_live_opens_modal_and_cancelling_does_not_authorize() {
+        let mut st = configured(LiveState::default());
+        st.bridge_wired = true;
+        st.host_mode = true;
+        st.mode = ExecMode::Live;
+        st.live_confirmed = false;
+        st.gates = all_ready_gates();
+
+        // 1. Initial state: not confirmed, dialog closed, no action queued
+        assert!(!st.confirm_dialog_open);
+        assert!(!st.live_confirmed);
+        assert!(st.take_action().is_none());
+
+        // 2. Pressing START in LIVE without prior confirmation opens modal
+        st.start();
+        assert!(st.confirm_dialog_open);
+        assert!(!st.live_confirmed);
+        assert!(st.take_action().is_none()); // NO START dispatched yet
+
+        // 3. Cancelling modal closes dialog without granting live authorization
+        st.close_confirm_dialog();
+        assert!(!st.confirm_dialog_open);
+        assert!(!st.live_confirmed);
+        assert!(st.take_action().is_none());
+
+        // 4. Repeated clicks cannot bypass confirmation or leak actions
+        st.start();
+        assert!(st.confirm_dialog_open);
+        assert!(!st.live_confirmed);
+        assert!(st.take_action().is_none());
+    }
+
+    #[test]
+    fn test_confirmed_start_authorizes_and_dispatches_with_readiness_checks() {
+        let mut st = configured(LiveState::default());
+        st.bridge_wired = true;
+        st.host_mode = true;
+        st.mode = ExecMode::Live;
+        st.live_confirmed = false;
+        st.gates = all_ready_gates();
+
+        // Trigger START -> modal opens
+        st.start();
+        assert!(st.confirm_dialog_open);
+
+        // Operator explicitly confirms in modal -> dispatches confirmed start action
+        st.confirm_live();
+        assert!(!st.confirm_dialog_open);
+        assert!(st.live_confirmed);
+
+        let action = st.take_action();
+        assert!(action.is_some());
+        let val: serde_json::Value = serde_json::from_str(&action.unwrap()).unwrap();
+        assert_eq!(val["action"], "start");
+        assert_eq!(val["confirmed"], true);
+
+        // Receiving a non-LIVE snapshot from backend clears live authorization
+        st.apply_snapshot(&serde_json::json!({"mode": "BACKTEST"}));
+        assert_eq!(st.mode, ExecMode::Backtest);
+        assert!(!st.live_confirmed);
     }
 
     // ── runtime timer tests ──────────────────────────────────────────────

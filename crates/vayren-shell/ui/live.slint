@@ -934,7 +934,7 @@ component LiveConfirmModal inherits Rectangle {
                         alignment: center;
                         VStatusDot { tone: 1; }
                         Text {
-                            text: "All venue safety gates and readiness checks satisfied. Review the parameters above and confirm to arm LIVE execution.";
+                            text: "All venue safety gates and readiness checks satisfied. Review the parameters above and confirm to START LIVE execution.";
                             color: VayrenPalette.pos;
                             font-size: VayrenDesign.fs-label;
                             font-weight: 600;
@@ -956,8 +956,8 @@ component LiveConfirmModal inherits Rectangle {
                     }
 
                     VButton {
-                        width: 180px;
-                        label: "CONFIRM & ARM LIVE";
+                        width: 190px;
+                        label: "CONFIRM & START LIVE";
                         variant: 0;
                         enabled: root.can-confirm;
                         clicked => { root.confirm(); }
@@ -2575,38 +2575,6 @@ export component LiveScreen inherits Rectangle {
                                         font-weight: 600;
                                         overflow: elide;
                                     }
-                                }
-
-                                HorizontalLayout {
-                                    height: 30px;
-                                    spacing: 8px;
-                                    alignment: center;
-
-                                    VButton {
-                                        width: 120px;
-                                        label: root.setup.confirmed-live ? "ARMED ✓" : "ARM LIVE";
-                                        variant: 3;
-                                        enabled: root.setup.can-arm;
-                                        clicked => { root.arm-requested(); }
-                                    }
-
-                                    Text {
-                                        horizontal-stretch: 1;
-                                        text: root.setup.can-arm
-                                            ? "Arming records the operator's ceremony with the backend."
-                                            : (root.setup.confirmed-live ? "Confirmed for LIVE this session." : "Connect the broker and clear the verdict to arm.");
-                                        color: VayrenPalette.muted;
-                                        font-size: 9.5px;
-                                        vertical-alignment: center;
-                                        overflow: elide;
-                                    }
-                                }
-
-                                if root.arm-note != "": Text {
-                                    text: root.arm-note;
-                                    color: VayrenPalette.amber;
-                                    font-size: 9.5px;
-                                    overflow: elide;
                                 }
 
                                 if root.gates.length == 0: VEmptyState {

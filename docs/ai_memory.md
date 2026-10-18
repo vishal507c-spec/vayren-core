@@ -7,7 +7,28 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (remote-broker-ui-regression-fix-20261018):** REMOTE BROKER UI REGRESSION RESOLVED (NO ORDERS, NO ARMING, NO DEPLOY, NO REMOTE PUSH) — Diagnosed and corrected desktop UI regression where Fyers broker displayed `Connection Failed`, blank credential inputs, and false `Authenticate Failed` in `--remote-ui` mode:
+**Latest update (live-startup-simplification-20261018):** LIVE STARTUP SIMPLIFIED & DEDICATED ARM LIVE BUTTON ELIMINATED (NO ORDERS, NO DEPLOY, NO REMOTE PUSH) — Streamlined operator workflow to direct unified flow: `LIVE → START → Confirm Live Trading → Automatic Readiness Checks → ENGINE RUNNING → Genuine Strategy Signals → Actual FYERS Orders`:
+- Dedicated ARM LIVE UI Button Removed:
+  - Eliminated the separate `ARM LIVE` button and arming ceremony message/notes from the LIVE READINESS card in `crates/vayren-shell/ui/live.slint`. No dead clickable areas or ghost buttons remain.
+  - Updated `LiveConfirmDialog`: title and confirm button now state `CONFIRM & START LIVE`, ensuring operator consent directly triggers the confirmed start request upon passing venue readiness.
+- Integrated START & Explicit Confirmation Lifecycle:
+  - In `crates/vayren-domain/src/live.rs`, clicking `START` in LIVE mode without prior operator consent displays the exact consent blocker and opens the `LiveConfirmDialog`.
+  - Operator confirmation inside the dialog validates venue gates, sets `live_confirmed = true`, closes the modal, and automatically dispatches `{"action": "start", "confirmed": true}` to the backend.
+  - Cancelling the dialog safely closes the modal without granting live authorization or dispatching orders.
+  - In `src/app/services/live_trading_service.py`, `start(confirmed=True)` records operator consent, validates broker connection, account ID, market data, strategy, and risk limits, automatically checks and reconciles account state, arms the live session, and starts the trading engine.
+- Reconciliation Readiness Clarified:
+  - Verified that `Reconciliation Synced: no session to reconcile` (`NOT CONFIGURED`) was an informational status in stopped state with `blocks_live=false` that never blocked startup; upon START, session build invokes `reconcile_now()` against broker open orders/positions before arming.
+- Safety & Verification:
+  - Added unit tests in `crates/vayren-domain/src/live.rs`: `test_start_with_unconfirmed_live_opens_modal_and_cancelling_does_not_authorize` and `test_confirmed_start_authorizes_and_dispatches_with_readiness_checks`.
+  - All 300 tests in `vayren-domain` passed.
+  - All 65 shell unit tests, 14 binary tests, and 7 off-screen Slint rasterization snapshot tests passed 100%.
+  - Full suite of 201 execution tests and app tests passed 100%.
+  - Impact benchmark validation passed in 146.62s.
+  - Rebuilt Windows desktop executable [`target/release/vayren-shell.exe`](file:///c:/Users/visha/Desktop/vayren-core/target/release/vayren-shell.exe).
+  - Desktop shortcut `C:\Users\visha\Desktop\VAYREN.lnk` verified pointing to fresh release executable with `--remote-ui`.
+  - ZERO live orders placed; zero simulated fallback paths introduced; two-mode (`BACKTEST` / `LIVE`) architecture strictly preserved.
+
+**Previous update (remote-broker-ui-regression-fix-20261018):** REMOTE BROKER UI REGRESSION RESOLVED (NO ORDERS, NO ARMING, NO DEPLOY, NO REMOTE PUSH) — Diagnosed and corrected desktop UI regression where Fyers broker displayed `Connection Failed`, blank credential inputs, and false `Authenticate Failed` in `--remote-ui` mode:
 - Root cause:
   1. `apply_authoritative_broker_ui()` did not call `ui.set_conn_saved_sentinel` and left form input fields blank even when `auth.fields_configured` was true on EC2.
   2. `main()` was allocating a throwaway `RemoteBrokerForm::default()` inside the gateway sync closure on each tick, causing form state and action bindings to lose remote configuration.
