@@ -18,7 +18,8 @@
 3. **Verification:**
    - `cargo check -p vayren-domain -p vayren-live-view -p vayren-shell` clean; workspace tests green (domain 293 incl. the 4 clock tests, shell 63 incl. both remote tests, live-view 5, `live_render_snapshot` 7/7, `live_event_time_column` 2/2).
    - Python: `test_snapshot.py` (worker epoch present/absent) + `test_live_runtime_timer.py` (epoch stable across ticks; start/tick/reconnect/stop/restart) green; ruff + pyright clean on touched files; full `make check` gate green.
-   - Deployed path: EC2 pulls the same commit; the EXE reads `worker.start_epoch` through the new translation, so the timer ticks from the gateway's authoritative clock and survives reconnects (same epoch) and restarts (new epoch).
+   - Deployed 2026-10-18: `fc2d104` pushed to `main`; EC2 fast-forwarded and `vayren-remote.service` restarted on the new code (05:31:50 UTC; the store was backed up to `live_session.json.pre-timer-deploy` first). Packaged EXE rebuilt (40.0 MB, packaged-remote), deployed to `C:\Users\visha\Desktop\vayren-shell.exe` with the Desktop shortcut re-synced.
+   - Real LIVE UI verified against the restarted gateway (screenshot): BROKER/EC2/WS pills connected, restored operator surfaces live, ACTIVE STRATEGY card shows `ENGINE STOPPED` — honest, since no engine is running (the store's stale `RUNNING` row from the 10:42 run never fakes a clock). `ENGINE RUNNING: HH:MM:SS` ticking starts with the operator's next run on the same 1s re-apply loop; the tick math is covered by the domain + render tests.
 
 **Previous update (live-ui-bugfix-restore-20261018):** LIVE UI BUGFIX PASS — RESTORED OPERATOR SURFACES + FIXED EMBED HOST WIRING.
 1. **Scope (`crates/vayren-shell/ui/live.slint`, shared by both hosts):**
