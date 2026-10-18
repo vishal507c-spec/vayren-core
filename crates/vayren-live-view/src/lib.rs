@@ -317,6 +317,7 @@ fn apply_view(ui: &LiveHostWindow, state: &LiveState) {
             .into_iter()
             .map(|e| LiveEventRow {
                 timestamp: e.timestamp.into(),
+                time: e.time.into(),
                 strategy: e.strategy.into(),
                 symbol: e.symbol.into(),
                 event: e.event.into(),

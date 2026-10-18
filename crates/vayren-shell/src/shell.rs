@@ -3587,6 +3587,7 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
                 .into_iter()
                 .map(|e| LiveEventRow {
                     timestamp: e.timestamp.into(),
+                    time: e.time.into(),
                     strategy: e.strategy.into(),
                     symbol: e.symbol.into(),
                     event: e.event.into(),

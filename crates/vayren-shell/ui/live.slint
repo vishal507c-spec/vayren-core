@@ -148,6 +148,7 @@ export struct LiveFill {
 
 export struct LiveEventRow {
     timestamp: string,
+    time: string,
     strategy: string,
     symbol: string,
     event: string,
@@ -1783,7 +1784,7 @@ export component LiveScreen inherits Rectangle {
                                     background: VayrenPalette.bg1;
                                     HorizontalLayout {
                                         padding-left: 6px; padding-right: 6px; spacing: 6px;
-                                        Text { width: 62px; text: "Time"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
+                                        Text { width: 72px; text: "Time"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
                                         Text { width: 44px; text: "Level"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
                                         Text { horizontal-stretch: 1; text: "Event"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
                                         Text { width: 80px; text: "Symbol"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
@@ -1807,7 +1808,9 @@ export component LiveScreen inherits Rectangle {
                                     background: VayrenPalette.live-panel-deep;
                                     HorizontalLayout {
                                         padding-left: 6px; padding-right: 6px; spacing: 6px; alignment: center;
-                                        Text { width: 62px; text: ev.timestamp; color: VayrenPalette.muted; font-size: 10px; vertical-alignment: center; }
+                                        Text { width: 72px; text: ev.time; color: VayrenPalette.muted; font-size: 10px; vertical-alignment: center;
+                                            Tooltip { text: @markdown("\{ev.timestamp}"); }
+                                        }
                                         Text { width: 44px; text: ev.level; color: LiveTone.ink(ev.status-tone); font-size: 10px; font-weight: 700; vertical-alignment: center; }
                                         Text { horizontal-stretch: 1; text: ev.event; color: ev.status-tone == 3 ? VayrenPalette.neg : VayrenPalette.live-ink; font-size: 11px; vertical-alignment: center; overflow: elide; }
                                         Text { width: 80px; text: ev.symbol; color: VayrenPalette.text-bright; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }

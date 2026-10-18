@@ -2738,6 +2738,7 @@ pub struct FillRowView {
 #[derive(Debug, Clone, PartialEq)]
 pub struct EventRowView {
     pub timestamp: String,
+    pub time: String,
     pub strategy: String,
     pub symbol: String,
     pub event: String,
@@ -3301,44 +3302,160 @@ fn format_elapsed(secs: u64) -> String {
     format!("{:02}h {:02}m {:02}s", h, m, s)
 }
 
-/// Parse an IST ISO-8601 string and reformat for human display (best-effort, no chrono dep).
-/// Input:  `"2026-10-13T10:25:33+05:30"`
-/// Output: `"13 Oct 2026, 10:25:33 IST"`
-/// Falls back to returning the input string unchanged on parse failure.
-fn format_ist_display(iso: &str) -> String {
-    if iso.len() < 10 {
-        return iso.to_string();
+/// Convert an ISO-8601 timestamp into Asia/Kolkata civil components.
+/// Returns `(year, month, day, hour, minute, second)` in IST, or `None`
+/// when the input cannot be parsed as a date (legacy `HH:MM:SS` strings).
+fn ist_components(iso: &str) -> Option<(i64, u32, u32, u32, u32, u32)> {
+    let trimmed = iso.trim();
+    if trimmed.is_empty() {
+        return None;
     }
-    // Strip the timezone suffix (everything after the last '+' or '-' after position 10)
-    let date_time_part = if let Some(pos) = iso[10..].find('+') {
-        &iso[..10 + pos]
-    } else if let Some(pos) = iso[10..].rfind('-') {
-        &iso[..10 + pos]
+    // Split off a trailing timezone offset.
+    let (naive, offset_secs) = if trimmed.ends_with('Z') || trimmed.ends_with('z') {
+        (&trimmed[..trimmed.len() - 1], 0i64)
+    } else if trimmed.len() >= 6 {
+        let sign_pos = trimmed.len() - 6;
+        let c = trimmed.as_bytes()[sign_pos];
+        if (c == b'+' || c == b'-')
+            && trimmed[sign_pos + 1..].contains(':')
+            && trimmed[sign_pos + 1..sign_pos + 3]
+                .chars()
+                .all(|ch| ch.is_ascii_digit())
+        {
+            let hh: i64 = trimmed[sign_pos + 1..sign_pos + 3].parse().ok()?;
+            let mm: i64 = trimmed[sign_pos + 4..sign_pos + 6].parse().ok()?;
+            let off = hh * 3600 + mm * 60;
+            let off = if c == b'-' { -off } else { off };
+            (&trimmed[..sign_pos], off)
+        } else {
+            (trimmed, 0i64)
+        }
     } else {
-        iso
+        (trimmed, 0i64)
     };
-    let parts: Vec<&str> = date_time_part.splitn(2, 'T').collect();
-    if parts.len() != 2 {
-        return iso.to_string();
-    }
-    let date_parts: Vec<&str> = parts[0].splitn(3, '-').collect();
-    let time_part = parts[1];
+
+    // Split date and time.
+    let (date_str, time_str) = if let Some(pos) = naive.find('T') {
+        (&naive[..pos], &naive[pos + 1..])
+    } else if let Some(pos) = naive.find(' ') {
+        (&naive[..pos], &naive[pos + 1..])
+    } else {
+        return None;
+    };
+
+    let date_parts: Vec<&str> = date_str.split('-').collect();
     if date_parts.len() != 3 {
-        return iso.to_string();
+        return None;
     }
-    const MONTHS: [&str; 12] = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-    ];
-    let month_num: usize = date_parts[1].parse().unwrap_or(0);
-    let month_name = if month_num >= 1 && month_num <= 12 {
-        MONTHS[month_num - 1]
+    let y: i64 = date_parts[0].parse().ok()?;
+    let mo: u32 = date_parts[1].parse().ok()?;
+    let d: u32 = date_parts[2].parse().ok()?;
+    if !(1..=12).contains(&mo) || !(1..=31).contains(&d) {
+        return None;
+    }
+
+    // Time part: HH:MM:SS, ignore fractional seconds.
+    let time_core = time_str.split('.').next().unwrap_or(time_str);
+    let time_parts: Vec<&str> = time_core.split(':').collect();
+    if time_parts.len() < 2 {
+        return None;
+    }
+    let hh: u32 = time_parts[0].parse().ok()?;
+    let mm: u32 = time_parts[1].parse().ok()?;
+    let ss: u32 = if time_parts.len() >= 3 {
+        time_parts[2].parse().ok()?
     } else {
-        date_parts[1]
+        0
     };
-    format!(
-        "{} {} {}, {} IST",
-        date_parts[2], month_name, date_parts[0], time_part
-    )
+    if hh > 23 || mm > 59 || ss > 59 {
+        return None;
+    }
+
+    // Civil date -> days since Unix epoch.
+    let days = days_from_civil(y, mo as i64, d as i64);
+    let total_secs = days * 86400 + (hh as i64) * 3600 + (mm as i64) * 60 + (ss as i64);
+    // Convert source offset -> UTC -> IST (+05:30).
+    let utc = total_secs - offset_secs;
+    let ist = utc + 5 * 3600 + 30 * 60;
+    let (iy, im, id) = civil_from_days(ist.div_euclid(86400));
+    let rem = ist.rem_euclid(86400);
+    Some((
+        iy,
+        im as u32,
+        id as u32,
+        (rem / 3600) as u32,
+        ((rem % 3600) / 60) as u32,
+        (rem % 60) as u32,
+    ))
+}
+
+fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let mp = if m > 2 { m - 3 } else { m + 9 };
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146097 + doe - 719468
+}
+
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    (y, m as u32, d as u32)
+}
+
+/// Parse an IST/UTC ISO-8601 string and reformat for human display (best-effort, no chrono dep).
+/// Input:  `"2026-10-13T10:25:33+05:30"` or `"2026-10-18T03:57:15Z"`
+/// Output: `"13 Oct 2026, 10:25:33 IST"` (timestamp converted to Asia/Kolkata).
+/// Falls back to returning the input string unchanged on parse failure.
+pub fn format_ist_display(iso: &str) -> String {
+    if let Some((y, mo, d, hh, mm, ss)) = ist_components(iso) {
+        const MONTHS: [&str; 12] = [
+            "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+        ];
+        let month_name = if (1..=12).contains(&mo) {
+            MONTHS[(mo - 1) as usize]
+        } else {
+            // Should not happen; keep raw month token.
+            return iso.to_string();
+        };
+        format!(
+            "{:02} {} {}, {:02}:{:02}:{:02} IST",
+            d, month_name, y, hh, mm, ss
+        )
+    } else {
+        iso.to_string()
+    }
+}
+
+/// Format an event timestamp as readable local time `HH:MM:SS` (Asia/Kolkata).
+/// Keeps the (full) original timestamp untouched in the caller; this only
+/// changes UI presentation.
+pub fn format_event_time(iso: &str) -> String {
+    format_event_timestamp(iso)
+}
+
+/// Alias kept for callers/tests that use the longer name.
+pub fn format_event_timestamp(iso: &str) -> String {
+    if let Some((_y, _mo, _d, hh, mm, ss)) = ist_components(iso) {
+        format!("{:02}:{:02}:{:02}", hh, mm, ss)
+    } else {
+        // Legacy HH:MM:SS (or any unparseable) string passes through unchanged.
+        iso.trim().to_string()
+    }
+}
+
+pub fn format_live_event_time(iso: &str) -> String {
+    format_event_timestamp(iso)
 }
 
 fn position_rows(state: &LiveState) -> Vec<KvRow> {
@@ -4154,6 +4271,7 @@ pub fn project(state: &LiveState) -> LiveView {
         .take(BLOTTER_VIEW_CAP)
         .map(|e| EventRowView {
             timestamp: e.timestamp.clone(),
+            time: format_event_time(&e.timestamp),
             strategy: e.strategy.clone(),
             symbol: e.symbol.clone(),
             event: e.event.clone(),
@@ -7285,6 +7403,25 @@ mod tests {
         // Pre-feature HH:MM:SS strings should pass through unchanged
         let legacy = "10:25:33";
         assert_eq!(format_ist_display(legacy), legacy);
+    }
+
+    #[test]
+    fn test_format_event_time_converts_utc_to_ist() {
+        assert_eq!(format_event_time("2026-10-18T03:57:15Z"), "09:27:15");
+        assert_eq!(format_event_time("2026-10-18T03:57:15+00:00"), "09:27:15");
+        assert_eq!(format_event_time("2026-10-18T09:27:15+05:30"), "09:27:15");
+    }
+
+    #[test]
+    fn test_format_event_time_keeps_legacy_time_string() {
+        assert_eq!(format_event_time("13:00:02"), "13:00:02");
+        assert_eq!(format_event_time("10:25:33"), "10:25:33");
+    }
+
+    #[test]
+    fn test_format_event_time_handles_date_rollover() {
+        // 20:00 UTC -> 01:30 IST next day
+        assert_eq!(format_event_time("2026-10-18T20:00:00Z"), "01:30:00");
     }
 
     #[test]
