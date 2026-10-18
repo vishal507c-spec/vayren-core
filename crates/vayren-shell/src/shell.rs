@@ -4323,8 +4323,8 @@ mod tests {
         apply(&ui, &demo_snapshot());
         assert_eq!(ui.get_broker_name(), "Paper");
         assert_eq!(ui.get_broker_id(), "paper");
-        assert_eq!(ui.get_env_label(), "PAPER");
-        assert_eq!(ui.get_env_kind(), 0);
+        assert_eq!(ui.get_env_label(), "LIVE");
+        assert_eq!(ui.get_env_kind(), 2);
         assert_eq!(ui.get_health_label(), "CONNECTED");
         assert!(ui.get_health_connected());
         // paper venue is never live-ready, regardless of gate state

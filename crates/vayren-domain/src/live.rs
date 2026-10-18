@@ -53,7 +53,7 @@ impl ExecMode {
     }
     pub fn from_kind(kind: i32) -> Self {
         match kind {
-            1 => ExecMode::Live,
+            1 | 2 => ExecMode::Live,
             _ => ExecMode::Backtest,
         }
     }
