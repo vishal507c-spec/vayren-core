@@ -452,6 +452,14 @@ pub fn zip_broker_credentials(keys: &[String], values: &[String]) -> serde_json:
     serde_json::Value::Object(map)
 }
 
+/// Format an uptime-seconds count as `HH:MM:SS` for the runtime line.
+fn format_hms(secs: u64) -> String {
+    let h = secs / 3600;
+    let m = (secs % 3600) / 60;
+    let s = secs % 60;
+    format!("{h:02}:{m:02}:{s:02}")
+}
+
 /// Translate gateway sections into the LOCAL live-snapshot shape, then apply
 /// through the existing [`LiveState::apply_snapshot`].
 ///
@@ -758,6 +766,45 @@ pub fn apply_remote_sections(state: &mut LiveState, sections: &serde_json::Value
             "start_blockers".to_string(),
             serde_json::Value::Array(honest),
         );
+    }
+
+    // Authoritative worker timing → the local `session_timing` shape. The
+    // gateway ships uptime/start facts under `worker`; without this mapping a
+    // remote session could never compute elapsed time, so the LIVE card read
+    // "Start time unavailable" no matter what the backend reported.
+    if let Some(worker) = sections.get("worker").filter(|v| v.is_object()) {
+        let mut timing = serde_json::Map::new();
+        let started = text_at(sections, "worker", "started_at");
+        if !started.is_empty() {
+            timing.insert("started_at".to_string(), serde_json::Value::String(started));
+        }
+        let stopped = text_at(sections, "worker", "stopped_at");
+        if !stopped.is_empty() {
+            timing.insert("stopped_at".to_string(), serde_json::Value::String(stopped));
+        }
+        // The client ticks locally from the backend epoch; only a positive
+        // finite value is accepted — a missing/zero epoch is never invented.
+        if let Some(epoch) = worker.get("start_epoch").and_then(|v| v.as_f64()) {
+            if epoch > 0.0 && epoch.is_finite() {
+                timing.insert("start_epoch".to_string(), serde_json::json!(epoch));
+            }
+        }
+        // Terminal display duration derives from the backend's own uptime
+        // count, never from the client clock.
+        if let Some(uptime) = worker.get("uptime_seconds").and_then(|v| v.as_u64()) {
+            if uptime > 0 {
+                timing.insert(
+                    "duration".to_string(),
+                    serde_json::Value::String(format_hms(uptime)),
+                );
+            }
+        }
+        if !timing.is_empty() {
+            translated.insert(
+                "session_timing".to_string(),
+                serde_json::Value::Object(timing),
+            );
+        }
     }
 
     state.apply_snapshot(&serde_json::Value::Object(translated));
@@ -1488,6 +1535,58 @@ mod tests {
         // Without a granted role the controls stay inert even while RUNNING.
         assert!(!state.bridge_wired);
         assert!(!state.can_start());
+    }
+
+    #[test]
+    fn remote_worker_timing_feeds_the_engine_uptime_timer() {
+        let mut state = init_remote_state();
+        let sections = json!({
+            "strategy": {"status": "RUNNING", "mode": "PAPER", "id": "OBR", "name": "OBR"},
+            "worker": {
+                "status": "RUNNING",
+                "running": true,
+                "uptime_seconds": 755,
+                "started_at": "2026-10-13T10:25:33+05:30",
+                "stopped_at": "",
+                "start_epoch": 1760415933.0_f64
+            }
+        });
+        apply_remote_sections(&mut state, &sections, false);
+        assert_eq!(state.session, vayren_domain::live::SessionStatus::Running);
+        assert_eq!(state.start_epoch_secs, Some(1760415933.0));
+        assert_eq!(state.started_at, "2026-10-13T10:25:33+05:30");
+        assert_eq!(state.session_duration, "00:12:35");
+        let view = vayren_domain::live::project(&state);
+        assert!(view.active_strat.engine_running);
+        assert!(
+            !view.active_strat.engine_clock.is_empty(),
+            "the timer must have an uptime once the epoch arrives"
+        );
+    }
+
+    #[test]
+    fn remote_worker_without_epoch_never_invents_one() {
+        let mut state = init_remote_state();
+        apply_remote_sections(
+            &mut state,
+            &json!({"worker": {"status": "RUNNING", "running": true, "start_epoch": 0.0_f64}}),
+            false,
+        );
+        assert!(
+            state.start_epoch_secs.is_none(),
+            "zero epoch must not be accepted"
+        );
+
+        // A stopped worker still reports the run's final duration from the
+        // backend's own uptime count — and still no invented epoch.
+        apply_remote_sections(
+            &mut state,
+            &json!({"worker": {"status": "STOPPED", "running": false,
+                               "uptime_seconds": 120, "start_epoch": null}}),
+            false,
+        );
+        assert!(state.start_epoch_secs.is_none());
+        assert_eq!(state.session_duration, "00:02:00");
     }
 
     #[test]

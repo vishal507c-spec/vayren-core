@@ -207,3 +207,24 @@ def test_backend_restart_new_epoch_overrides_old(service: LiveTradingService) ->
     snap = service.snapshot()
     assert snap["session_timing"]["start_epoch"] == second_epoch
     assert snap["session_timing"]["started_at"] == second_started_at
+
+
+def test_snapshots_keep_the_same_epoch_and_tick_elapsed(service: LiveTradingService) -> None:
+    """UI refreshes during one engine run must reuse the SAME start epoch
+    (so the timer persists across refreshes/reconnects) while the elapsed
+    count advances every second (so the timer ticks)."""
+    _setup_mock_strategy(service)
+    service.start()
+    start_epoch = service._session_start_epoch
+    assert start_epoch is not None
+
+    with patch("time.time", return_value=start_epoch + 10.0):
+        first = service.snapshot()["session_timing"]
+    with patch("time.time", return_value=start_epoch + 11.0):
+        second = service.snapshot()["session_timing"]
+
+    assert first["start_epoch"] == start_epoch
+    assert second["start_epoch"] == start_epoch, "refresh must not move the epoch"
+    assert first["elapsed_seconds"] == 10
+    assert second["elapsed_seconds"] == 11, "each refresh must tick by one second"
+    assert first["status"] == second["status"] == "RUNNING"

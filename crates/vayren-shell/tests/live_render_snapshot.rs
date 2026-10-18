@@ -444,6 +444,10 @@ fn live_state_matrix_renders_at_the_primary_target_viewport() {
     // The demo fixture ships an empty watchlist (it is an idle desktop shape),
     // so the matrix seeds its OWN rows. Building the base here keeps the shared
     // fixture untouched and makes every case differ from it in exactly one way.
+    let wall_now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs_f64();
     let base = move || {
         let mut s = shell::demo_live_state();
         s.watchlist_rows = vec![watchlist_row("KAYNES"), watchlist_row("TATASTEEL")];
@@ -465,6 +469,10 @@ fn live_state_matrix_renders_at_the_primary_target_viewport() {
                 s.mode = mode;
                 if running {
                     s.session = vayren_shell::live::SessionStatus::Running;
+                    // A backend start epoch: the rendered card must show the
+                    // engine uptime clock, not a placeholder or an invented
+                    // render-time start.
+                    s.start_epoch_secs = Some(wall_now - 755.0);
                 }
                 s
             }),

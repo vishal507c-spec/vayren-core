@@ -79,6 +79,14 @@ def test_running_connected_snapshot() -> None:
     snap = build_snapshot(
         make_live(
             session_status="RUNNING",
+            session_timing={
+                "status": "RUNNING",
+                "started_at": "2026-10-13T10:25:33+05:30",
+                "stopped_at": "—",
+                "duration": "Running for: 00:12:35",
+                "elapsed_seconds": 755,
+                "start_epoch": 1760415933.0,
+            },
             feed="live",
             start_blockers=[],
             broker={
@@ -136,6 +144,35 @@ def test_running_connected_snapshot() -> None:
     assert snap["stops"]["status"] == "PROTECTED"
     assert snap["reconciliation"]["status"] == "SYNCED"
     assert len(snap["positions"]) == 1 and len(snap["orders"]) == 1
+    # The worker section carries the authoritative start epoch so a remote
+    # client can run the engine uptime timer without inventing anything.
+    worker = snap["worker"]
+    assert worker["status"] == "RUNNING"
+    assert worker["running"] is True
+    assert worker["uptime_seconds"] == 755
+    assert worker["started_at"] == "2026-10-13T10:25:33+05:30"
+    assert worker["start_epoch"] == 1760415933.0
+
+
+def test_worker_epoch_is_absent_when_backend_has_none() -> None:
+    """No session_timing → honest None, never an invented epoch."""
+    snap = build_snapshot(make_live())
+    assert snap["worker"]["start_epoch"] is None
+
+    stopped = build_snapshot(
+        make_live(
+            session_timing={
+                "status": "STOPPED",
+                "started_at": "2026-10-13T10:25:33+05:30",
+                "stopped_at": "2026-10-13T10:33:53+05:30",
+                "duration": "Total runtime: 00:08:20",
+                "elapsed_seconds": 500,
+                "start_epoch": None,
+            }
+        )
+    )
+    assert stopped["worker"]["start_epoch"] is None
+    assert stopped["worker"]["uptime_seconds"] == 500
 
 
 def test_kill_halted_running_maps_to_error() -> None:

@@ -9,7 +9,7 @@
 // the HOST WINDOW size (platform-owned input — never the screen's own
 // width, which would feed layout implicit sizes) using the same LiveTiers
 // functions production uses.
-import { LiveScreen, LiveTiers, LiveBar, LiveSetup, LiveMarket, LiveSymbolRow, LiveGate, LiveKv, LiveStat, LivePosition, LiveOrder, LiveFill, LiveEventRow, LiveWatchlistRow } from "../../vayren-shell/ui/live.slint";
+import { LiveScreen, LiveTiers, LiveBar, LiveSetup, LiveMarket, LiveSymbolRow, LiveGate, LiveKv, LiveStat, LivePosition, LiveOrder, LiveFill, LiveEventRow, LiveWatchlistRow, LiveWebSocket, LiveMarketData, LiveRemoteGateway, LiveActiveStrategy } from "../../vayren-shell/ui/live.slint";
 
 export component LiveHostWindow inherits Window {
     title: "VAYREN — Live";
@@ -36,6 +36,15 @@ export component LiveHostWindow inherits Window {
     in-out property <[LiveGate]> gates;
     in-out property <string> arm-note: "";
     in-out property <[string]> blockers;
+    // Venue safety gates, distinct from the start `blockers`: the confirm
+    // modal's green "all gates satisfied" panel keys off THIS list, so an
+    // empty default here would tell the operator the venue is safe when the
+    // backend never said so.
+    in-out property <[string]> venue-blockers;
+    in-out property <LiveWebSocket> ws;
+    in-out property <LiveMarketData> md;
+    in-out property <LiveRemoteGateway> gateway;
+    in-out property <LiveActiveStrategy> active-strat;
     in-out property <[LiveKv]> strategy-rows;
     in-out property <[LiveKv]> position-rows;
     in-out property <[LiveKv]> risk-rows;
@@ -63,6 +72,7 @@ export component LiveHostWindow inherits Window {
     callback mode-picked(int);
     callback strategy-picked(string);
     callback symbol-toggled(int);
+    callback universe-save();
     callback symbol-filter-changed(string);
     callback timeframe-picked(string);
     callback quantity-edited(string);
@@ -71,6 +81,8 @@ export component LiveHostWindow inherits Window {
     callback arm-requested();
     callback halt-requested();
     callback confirm-requested();
+    callback confirm-open-requested();
+    callback confirm-cancel-requested();
     callback event-filter-changed(string);
     callback event-type-picked(string);
     callback clear-events();
@@ -79,6 +91,7 @@ export component LiveHostWindow inherits Window {
     callback watchlist-selected(string);
     callback filter-chip-picked(int);
     callback watchlist-search-changed(string);
+    callback refresh-stocks();
     callback broker-capital-refresh();
 
     LiveScreen {
@@ -96,6 +109,11 @@ export component LiveHostWindow inherits Window {
         gates: root.gates;
         arm-note: root.arm-note;
         blockers: root.blockers;
+        venue-blockers: root.venue-blockers;
+        ws: root.ws;
+        md: root.md;
+        gateway: root.gateway;
+        active-strat: root.active-strat;
         strategy-rows: root.strategy-rows;
         position-rows: root.position-rows;
         risk-rows: root.risk-rows;
@@ -126,6 +144,7 @@ export component LiveHostWindow inherits Window {
         mode-picked(k) => { root.mode-picked(k); }
         strategy-picked(v) => { root.strategy-picked(v); }
         symbol-toggled(i) => { root.symbol-toggled(i); }
+        universe-save() => { root.universe-save(); }
         symbol-filter-changed(t) => { root.symbol-filter-changed(t); }
         timeframe-picked(v) => { root.timeframe-picked(v); }
         quantity-edited(t) => { root.quantity-edited(t); }
@@ -134,6 +153,8 @@ export component LiveHostWindow inherits Window {
         arm-requested() => { root.arm-requested(); }
         halt-requested() => { root.halt-requested(); }
         confirm-requested() => { root.confirm-requested(); }
+        confirm-open-requested() => { root.confirm-open-requested(); }
+        confirm-cancel-requested() => { root.confirm-cancel-requested(); }
         event-filter-changed(t) => { root.event-filter-changed(t); }
         event-type-picked(v) => { root.event-type-picked(v); }
         clear-events() => { root.clear-events(); }
@@ -142,6 +163,7 @@ export component LiveHostWindow inherits Window {
         watchlist-selected(s) => { root.watchlist-selected(s); }
         filter-chip-picked(i) => { root.filter-chip-picked(i); }
         watchlist-search-changed(t) => { root.watchlist-search-changed(t); }
+        refresh-stocks() => { root.refresh-stocks(); }
         broker-capital-refresh() => { root.broker-capital-refresh(); }
     }
 }

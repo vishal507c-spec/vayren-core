@@ -2875,6 +2875,15 @@ pub struct ActiveStrategyView {
     pub started_at: String,
     pub stopped_at: String,
     pub duration: String,
+    /// True while the backend reports the engine RUNNING — the lamp the
+    /// `ENGINE RUNNING` / `ENGINE STOPPED` line keys off.
+    pub engine_running: bool,
+    /// Live engine uptime clock `HH:MM:SS` derived from the backend start
+    /// epoch. Empty while stopped or when no authoritative epoch is held
+    /// (the UI prints its own placeholder — never an invented time). Hosts
+    /// re-apply the projection every second while RUNNING, so this ticks
+    /// without any UI-local counter.
+    pub engine_clock: String,
     pub symbols_count: String,
     pub today_signals: String,
     pub current_position: String,
@@ -3300,6 +3309,15 @@ fn format_elapsed(secs: u64) -> String {
     let m = (secs % 3600) / 60;
     let s = secs % 60;
     format!("{:02}h {:02}m {:02}s", h, m, s)
+}
+
+/// Format elapsed seconds as the engine uptime clock `HH:MM:SS`
+/// (e.g. `00:12:35`). Hours grow past two digits on long sessions.
+fn format_hms(secs: u64) -> String {
+    let h = secs / 3600;
+    let m = (secs % 3600) / 60;
+    let s = secs % 60;
+    format!("{h:02}:{m:02}:{s:02}")
 }
 
 /// Convert an ISO-8601 timestamp into Asia/Kolkata civil components.
@@ -4383,6 +4401,14 @@ pub fn project(state: &LiveState) -> LiveView {
         "{} submitted · {} filled · {} rejected · {} pending",
         state.orders_submitted, state.orders_filled, state.orders_rejected, state.orders_pending,
     );
+    // One wall-clock reading per projection: the engine uptime clock and the
+    // running duration must agree and reset together — and both derive from
+    // the backend's authoritative start epoch, never from render time.
+    let wall_now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0);
+    let engine_running = matches!(state.session, SessionStatus::Running);
     let active_strat = ActiveStrategyView {
         name: strategy_label.clone(),
         status: active_strat_status.into(),
@@ -4405,10 +4431,6 @@ pub fn project(state: &LiveState) -> LiveView {
         },
         duration: match state.session {
             SessionStatus::Running => {
-                let wall_now_secs = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_secs_f64())
-                    .unwrap_or(0.0);
                 if let Some(elapsed) = state.elapsed_secs_since_start(wall_now_secs) {
                     format_elapsed(elapsed)
                 } else if !state.session_duration.is_empty() && state.session_duration != "—" {
@@ -4425,6 +4447,15 @@ pub fn project(state: &LiveState) -> LiveView {
                 }
             }
             _ => "—".into(),
+        },
+        engine_running,
+        engine_clock: if engine_running {
+            state
+                .elapsed_secs_since_start(wall_now_secs)
+                .map(format_hms)
+                .unwrap_or_default()
+        } else {
+            String::new()
         },
         symbols_count: state
             .strategy_facts
@@ -7384,6 +7415,117 @@ mod tests {
         assert_eq!(format_elapsed(755), "00h 12m 35s");
         assert_eq!(format_elapsed(3661), "01h 01m 01s");
         assert_eq!(format_elapsed(36000), "10h 00m 00s");
+    }
+
+    #[test]
+    fn test_format_hms_formats_the_engine_clock() {
+        assert_eq!(format_hms(0), "00:00:00");
+        assert_eq!(format_hms(755), "00:12:35");
+        assert_eq!(format_hms(3661), "01:01:01");
+        assert_eq!(format_hms(36000), "10:00:00");
+    }
+
+    // ── engine uptime clock tests ───────────────────────────────────────
+
+    #[test]
+    fn test_active_strategy_engine_clock_ticks_from_the_backend_epoch() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+        let mut st = LiveState::default();
+        st.apply_snapshot(&serde_json::json!({
+            "session_status": "RUNNING",
+            "session_timing": {
+                "started_at": "2026-10-13T10:25:33+05:30",
+                "start_epoch": now - 755.0
+            }
+        }));
+        let view = project(&st);
+        assert!(view.active_strat.engine_running);
+        let clock = &view.active_strat.engine_clock;
+        assert!(
+            clock == "00:12:35" || clock == "00:12:36",
+            "clock must be HH:MM:SS elapsed from the backend epoch, got {clock}"
+        );
+    }
+
+    #[test]
+    fn test_active_strategy_engine_clock_never_invents_a_start_time() {
+        let mut st = LiveState::default();
+        st.apply_snapshot(&serde_json::json!({
+            "session_status": "RUNNING",
+            "session_timing": {"started_at": "2026-10-13T10:25:33+05:30"}
+        }));
+        let view = project(&st);
+        assert!(view.active_strat.engine_running);
+        assert_eq!(
+            view.active_strat.engine_clock, "",
+            "no backend epoch → no clock (the UI shows its placeholder)"
+        );
+    }
+
+    #[test]
+    fn test_active_strategy_engine_clock_stops_and_resets_on_restart() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+        let mut st = LiveState::default();
+        st.apply_snapshot(&serde_json::json!({
+            "session_status": "RUNNING",
+            "session_timing": {
+                "started_at": "2026-10-13T10:25:33+05:30",
+                "start_epoch": now - 500.0
+            }
+        }));
+        let running = project(&st).active_strat;
+        assert!(running.engine_running);
+        assert!(
+            running.engine_clock.starts_with("00:08:"),
+            "got {}",
+            running.engine_clock
+        );
+
+        // Backend confirms the stop: the timer halts and the stale epoch is
+        // dropped (terminal status), never carried into the stopped state.
+        st.apply_snapshot(&serde_json::json!({
+            "session_status": "STOPPED",
+            "session_timing": {
+                "started_at": "2026-10-13T10:25:33+05:30",
+                "stopped_at": "2026-10-13T10:33:53+05:30",
+                "duration": "Total runtime: 00:08:20",
+                "start_epoch": null
+            }
+        }));
+        let stopped = project(&st).active_strat;
+        assert!(
+            !stopped.engine_running,
+            "stopped engine drops the RUNNING lamp"
+        );
+        assert_eq!(
+            stopped.engine_clock, "",
+            "timer must stop when the engine stops"
+        );
+
+        // A restart ships a NEW epoch: the clock re-derives from it, never
+        // resumes the previous run's value.
+        st.apply_snapshot(&serde_json::json!({
+            "session_status": "RUNNING",
+            "session_timing": {
+                "started_at": "2026-10-13T10:40:00+05:30",
+                "start_epoch": now - 12.0
+            }
+        }));
+        let restarted = project(&st).active_strat;
+        assert!(restarted.engine_running);
+        assert!(
+            restarted.engine_clock == "00:00:12" || restarted.engine_clock == "00:00:13",
+            "restart must re-derive from the new epoch, got {}",
+            restarted.engine_clock
+        );
     }
 
     #[test]

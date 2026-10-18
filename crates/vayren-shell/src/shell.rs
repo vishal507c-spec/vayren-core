@@ -3643,6 +3643,8 @@ pub fn apply_live(ui: &AppWindow, state: &LiveState) {
         started_at: view.active_strat.started_at.into(),
         stopped_at: view.active_strat.stopped_at.into(),
         duration: view.active_strat.duration.into(),
+        engine_running: view.active_strat.engine_running,
+        engine_clock: view.active_strat.engine_clock.into(),
         symbols_count: view.active_strat.symbols_count.into(),
         today_signals: view.active_strat.today_signals.into(),
         current_position: view.active_strat.current_position.into(),
@@ -4837,6 +4839,31 @@ mod tests {
         let ws_card = ui.get_live_ws();
         assert_eq!(ws_card.status, "DISCONNECTED");
         assert_eq!(ws_card.tone, 3);
+
+        // Engine uptime timer: the clock derives ONLY from the backend's
+        // authoritative start epoch — a new run ships a new epoch and the
+        // clock re-derives from it; no epoch, no invented time.
+        let mut timed = demo_live_state_running();
+        let wall_now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+        timed.start_epoch_secs = Some(wall_now - 755.0);
+        apply_live(&ui, &timed);
+        let strat = ui.get_live_active_strat();
+        assert!(strat.engine_running);
+        assert!(
+            strat.engine_clock == "00:12:35" || strat.engine_clock == "00:12:36",
+            "uptime must be HH:MM:SS from the backend epoch, got {}",
+            strat.engine_clock
+        );
+        // Stop drops the lamp and the clock in ONE projection.
+        timed.session = live::SessionStatus::Stopped;
+        timed.start_epoch_secs = None;
+        apply_live(&ui, &timed);
+        let strat = ui.get_live_active_strat();
+        assert!(!strat.engine_running);
+        assert_eq!(strat.engine_clock, "", "a stopped engine carries no clock");
 
         // LIVE mode intent is fail-closed while venue gates block (non-host
         // path says so outright; the host path asks the backend instead).

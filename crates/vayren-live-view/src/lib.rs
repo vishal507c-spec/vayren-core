@@ -233,6 +233,11 @@ fn apply_view(ui: &LiveHostWindow, state: &LiveState) {
     ));
     ui.set_arm_note(view.arm_note.into());
     ui.set_blockers(strings(view.setup.blockers));
+    // Venue blockers are a DIFFERENT list from the start blockers: the
+    // confirm modal's green "all gates satisfied" panel keys off this one, so
+    // dropping the setter made the modal assert a satisfied venue it never
+    // verified.
+    ui.set_venue_blockers(strings(view.setup.venue_blockers));
     let kv = |rows: Vec<live::KvRow>| {
         model(
             rows.into_iter()
@@ -331,6 +336,50 @@ fn apply_view(ui: &LiveHostWindow, state: &LiveState) {
     ui.set_event_types(strings(view.event_types));
     ui.set_event_type_index(view.event_type_index);
     ui.set_event_filter(view.event_filter.into());
+    // Link/stream cards. `live::project` computes all four; without these
+    // setters the EC2 + WS cards read DISCONNECTED and Active Strategy read
+    // STOPPED forever in the embed, no matter what the backend reported.
+    ui.set_ws(LiveWebSocket {
+        status: view.ws.status.into(),
+        tone: view.ws.tone,
+        latency: view.ws.latency.into(),
+        sub: view.ws.sub.into(),
+        last_tick: view.ws.last_tick.into(),
+        last_error: view.ws.last_error.into(),
+    });
+    ui.set_md(LiveMarketData {
+        status: view.md.status.into(),
+        tone: view.md.tone,
+        sub: view.md.sub.into(),
+        last_tick: view.md.last_tick.into(),
+        freshness: view.md.freshness.into(),
+    });
+    ui.set_gateway(LiveRemoteGateway {
+        status: view.gateway.status.into(),
+        tone: view.gateway.tone,
+        conn_state: view.gateway.conn_state.into(),
+        rtt: view.gateway.rtt.into(),
+        last_heartbeat: view.gateway.last_heartbeat.into(),
+        detail: view.gateway.detail.into(),
+    });
+    ui.set_active_strat(LiveActiveStrategy {
+        name: view.active_strat.name.into(),
+        status: view.active_strat.status.into(),
+        status_tone: view.active_strat.status_tone,
+        mode: view.active_strat.mode.into(),
+        mode_tone: view.active_strat.mode_tone,
+        started_at: view.active_strat.started_at.into(),
+        stopped_at: view.active_strat.stopped_at.into(),
+        duration: view.active_strat.duration.into(),
+        engine_running: view.active_strat.engine_running,
+        engine_clock: view.active_strat.engine_clock.into(),
+        symbols_count: view.active_strat.symbols_count.into(),
+        today_signals: view.active_strat.today_signals.into(),
+        current_position: view.active_strat.current_position.into(),
+        orders_today: view.active_strat.orders_today.into(),
+        orders_detail: view.active_strat.orders_detail.into(),
+        strategy_logic: view.active_strat.strategy_logic.into(),
+    });
     // Watchlist + execution filter chips. `live::project` already computes
     // both (real rows, real per-bucket counts); binding them here is what
     // makes the table and the nine chips mean anything. Without these four
@@ -442,11 +491,15 @@ fn wire_view(ui: &LiveHostWindow, state: Rc<RefCell<LiveState>>, refresh: Rc<Cel
         s.set_filter_chip(i.max(0) as usize);
     });
     wire_text!(on_watchlist_search_changed, LiveState::set_watchlist_search);
+    wire_unit!(on_universe_save, LiveState::save_universe);
+    wire_unit!(on_refresh_stocks, LiveState::refresh_universe);
     wire_unit!(on_start_requested, LiveState::start);
     wire_unit!(on_stop_requested, LiveState::stop);
     wire_unit!(on_arm_requested, LiveState::arm);
     wire_unit!(on_halt_requested, LiveState::halt);
     wire_unit!(on_confirm_requested, LiveState::confirm_live);
+    wire_unit!(on_confirm_open_requested, LiveState::open_confirm_dialog);
+    wire_unit!(on_confirm_cancel_requested, LiveState::close_confirm_dialog);
     wire_unit!(on_inspector_toggled, LiveState::toggle_inspector);
     wire_unit!(on_broker_capital_refresh, LiveState::refresh_broker_capital);
     {
@@ -903,6 +956,7 @@ pub extern "C" fn vayren_live_view_ack_refresh(view: *mut LiveView) -> c_int {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use slint::Model as _;
 
     const IDLE: &str = r#"{
         "mode": "PAPER",
@@ -1041,6 +1095,65 @@ mod tests {
         );
         vayren_live_view_destroy(view);
         vayren_live_view_destroy(std::ptr::null_mut());
+    }
+
+    #[test]
+    fn host_mirrors_link_cards_and_venue_blockers_from_the_projection() {
+        // The embed must bind what `live::project` reports — not with default
+        // empty structs. Before this wiring existed the WS + EC2 cards read
+        // DISCONNECTED and Active Strategy read STOPPED forever, and the
+        // confirm modal's venue gate panel keyed off an always-empty list.
+        let view = make_view();
+        snapshot(view, RUNNING);
+        let wall_now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+        with_view(view, |v| {
+            let mut state = v.state.borrow_mut();
+            state.websocket.status = "CONNECTED".into();
+            state.gateway.status = "CONNECTING".into();
+            state.gateway.url = "wss://gateway.vayren.internal/v1".into();
+            // A backed-epoch RUNNING session: the embed must mirror the
+            // engine uptime clock, not default-empty structs.
+            state.start_epoch_secs = Some(wall_now - 755.0);
+            apply_view(&v._ui, &state);
+            let projected = live::project(&state);
+            assert!(
+                !projected.ws.status.is_empty(),
+                "fixture must be non-trivial"
+            );
+            assert!(
+                !projected.active_strat.status.is_empty(),
+                "fixture must be non-trivial"
+            );
+            assert_eq!(v._ui.get_ws().status.as_str(), projected.ws.status.as_str());
+            assert_eq!(
+                v._ui.get_gateway().status.as_str(),
+                projected.gateway.status.as_str()
+            );
+            assert_eq!(
+                v._ui.get_active_strat().status.as_str(),
+                projected.active_strat.status.as_str()
+            );
+            assert_eq!(
+                v._ui.get_active_strat().engine_running,
+                projected.active_strat.engine_running
+            );
+            assert_eq!(
+                v._ui.get_active_strat().engine_clock.as_str(),
+                projected.active_strat.engine_clock.as_str()
+            );
+            assert!(
+                !projected.active_strat.engine_clock.is_empty(),
+                "a live backend epoch must project a real clock"
+            );
+            assert_eq!(
+                v._ui.get_venue_blockers().row_count(),
+                projected.setup.venue_blockers.len()
+            );
+        });
+        vayren_live_view_destroy(view);
     }
 
     #[test]

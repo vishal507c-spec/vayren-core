@@ -284,6 +284,9 @@ def build_snapshot(live: dict[str, Any]) -> dict[str, Any]:
             "uptime_seconds": int(timing.get("elapsed_seconds", 0) or 0),
             "started_at": str(timing.get("started_at", "") or ""),
             "stopped_at": str(timing.get("stopped_at", "") or ""),
+            # Authoritative start epoch for the client-side elapsed timer.
+            # None (never invented) when the session never ran or is terminal.
+            "start_epoch": timing.get("start_epoch"),
             "strategy": str(strategy.get("name", "") if isinstance(strategy, dict) else ""),
             "symbols_count": len(live.get("selected_symbols", []) or []),
             "broker": str(broker.get("name", "") or ""),

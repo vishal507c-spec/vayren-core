@@ -7,7 +7,56 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (release-v1.36.0-20261017):** RELEASE v1.36.0 — MARKET TIMEFRAME OVERFLOW UI, CANDLE SYNC RESILIENCE, CI GOVERNANCE & DESKTOP EXE.
+**Latest update (live-engine-uptime-timer-20261018):** LIVE TAB ENGINE UPTIME TIMER (HH:MM:SS) DRIVEN BY THE BACKEND START EPOCH.
+1. **Why:** the ACTIVE STRATEGY card showed `Strategy Started At: Start time unavailable` in remote mode — the gateway `worker` section never carried the authoritative start epoch and the remote client never translated `worker` timing into the local `session_timing` shape, so no client could derive elapsed runtime from the backend clock.
+2. **Scope:**
+   - `src/remote/snapshot.py`: `worker` gains `start_epoch` (absent stays `None` — a start time is never invented).
+   - `crates/vayren-shell/src/remote_live.rs`: `apply_remote_sections` maps `worker` → local `session_timing` (`started_at`/`stopped_at`, `start_epoch` only when positive + finite, `duration` = HH:MM:SS from backend `uptime_seconds` when > 0). New tests: `remote_worker_timing_feeds_the_engine_uptime_timer`, `remote_worker_without_epoch_never_invents_one`.
+   - `crates/vayren-domain/src/live.rs`: `ActiveStrategyView` gains `engine_running: bool` + `engine_clock: String` (HH:MM:SS via new `format_hms`, derived from `start_epoch_secs` with ONE wall-clock read shared with `duration`; empty when no epoch — the card prints `--:--:--`, never a render-time start). 4 new tests (ticks from epoch, no-epoch honesty, stop clears, restart re-derives).
+   - `crates/vayren-shell/ui/live.slint` (shared by both hosts): the `Strategy Started At` + `Running For` lines are replaced by ONE `ENGINE RUNNING: HH:MM:SS` / `ENGINE STOPPED` line; `Last Runtime Duration` now gates on `!engine-running` (the old `status != "RUNNING"` compare never matched the `● RUNNING` label). Ticking is the existing 1s live re-apply loop (`main.rs`, both hosts: `session == Running && start_epoch_secs.is_some()`); no UI-local counter.
+   - Hosts set the new fields: `shell::apply_live` + `crates/vayren-live-view::apply_view`; the shell binding test asserts a backend epoch (`now-755s` → `00:12:3x`) and clears on stop; the embed mirror test asserts both fields; the render matrix's `live_running` case carries a real epoch.
+3. **Verification:**
+   - `cargo check -p vayren-domain -p vayren-live-view -p vayren-shell` clean; workspace tests green (domain 293 incl. the 4 clock tests, shell 63 incl. both remote tests, live-view 5, `live_render_snapshot` 7/7, `live_event_time_column` 2/2).
+   - Python: `test_snapshot.py` (worker epoch present/absent) + `test_live_runtime_timer.py` (epoch stable across ticks; start/tick/reconnect/stop/restart) green; ruff + pyright clean on touched files; full `make check` gate green.
+   - Deployed path: EC2 pulls the same commit; the EXE reads `worker.start_epoch` through the new translation, so the timer ticks from the gateway's authoritative clock and survives reconnects (same epoch) and restarts (new epoch).
+
+**Previous update (live-ui-bugfix-restore-20261018):** LIVE UI BUGFIX PASS — RESTORED OPERATOR SURFACES + FIXED EMBED HOST WIRING.
+1. **Scope (`crates/vayren-shell/ui/live.slint`, shared by both hosts):**
+   - Re-rendered the STRATEGY WATCHLIST panel that was declared + fed but never drawn: full LTP/CHG/REF/BREAK/ENTRY/STOP/RISK-PLAN/STATUS/ELIG/SIGNAL/ORDER/POSITION/P&L columns (h-scroll from 1360px), the nine execution filter chips (inline above the tier, own scrollable strip below), the search box, and the universe-editor fallback (SAVE UNIVERSE + symbol toggles + empty state) when no rows exist. Row click sends `full-symbol` (backend stores `NSE:XXX` identities).
+   - Re-rendered LIVE READINESS card: verdict badge, blockers list, ARM LIVE button (`arm-requested`), `arm-note`, and per-gate rows via new `LiveGateRow` component (backend verdict + reason only).
+   - Restored the PAPER | SANDBOX | LIVE segmented mode selector (both wide + narrow bars) showing the backend's current mode; the hardcoded single red LIVE chip was a regression from the UI cleanup.
+   - Restored ORDER & SESSION card (QUANTITY LineEdit committing on Enter, TIMEFRAME cycler) so `quantity-edited` / `timeframe-picked` are reachable; added the events filter box (`event-filter-changed`); added READ-ONLY badge + refresh button to the LIVE TRADE STOCKS band (`refresh-stocks`).
+   - Minor: capital card renders `capital-status`; action banner tone follows `start-reason-tone` when no note; `bar-extended()` is no longer an exact clone of `bar-secondary()` (now the reserved one-extra-card headroom tier at 1651px, still true at 1920x1080); removed dead `watchlist-columns-wide` property + unused `VCell` import. HALT button + IST clock stay removed (intentional, commits 4537f34 / b1f7825).
+2. **Embed host (`crates/vayren-live-view`):**
+   - `ui/live_host.slint`: forwards `universe-save`, `confirm-open-requested`, `confirm-cancel-requested`, `refresh-stocks`; passes `venue-blockers`, `ws`, `md`, `gateway`, `active-strat` through to LiveScreen (previously the confirm-modal CANCEL was dead, the venue gate panel always claimed "satisfied", and WS/EC2 cards + Active Strategy read DISCONNECTED/STOPPED forever).
+   - `src/lib.rs`: `apply_view` sets all five properties from `live::project`; `wire_view` wires the four callbacks to `save_universe` / `refresh_universe` / `open_confirm_dialog` / `close_confirm_dialog`. New regression test `host_mirrors_link_cards_and_venue_blockers_from_the_projection`.
+3. **Verification:**
+   - `cargo check -p vayren-shell -p vayren-live-view` clean; `cargo test -p vayren-live-view` 5/5 pass.
+   - Full `cargo test -p vayren-shell` suite green (61 lib + 12 main + all integration suites, 0 failed) — it caught the `bar_extended` tier contract (`ui_bindings_and_navigation`) and the tier was corrected to the reserved one-extra-card headroom at 1651px (still true at 1920x1080, strictly above `bar-secondary`'s 1493px).
+   - Shell live suites: `live_render_snapshot` 7/7, `live_stock_row_render` 1/1, `live_watchlist_from_saved_universe` 1/1 pass.
+   - Validators: language ownership (407 files), imports, structure, repo graph (auto-fix rebuilt: 5991 entities, 13501 relationships) all PASS. Impact tool: level 2 (rust-ui), full gate required = False.
+
+**Previous update (packaged-remote-feature-release-20261018):** PRODUCTION REMOTE FEATURE PACKAGE (PACKAGED-REMOTE) COMPILED AND DESKTOP SHORTCUT & EXE SYNCED.
+1. **Scope:**
+   - Compiled production release binary `target/release/vayren-shell.exe` using `cargo build --release -p vayren-shell --features packaged-remote` (38.1 MB binary).
+   - Synced official Windows Desktop shortcut `C:\Users\visha\Desktop\VAYREN.lnk` to point directly to `target/release/vayren-shell.exe` with canonical arguments and custom desktop icon.
+   - Deployed executable directly to `C:\Users\visha\Desktop\vayren-shell.exe`.
+   - Confirmed production startup mode: defaults to Remote gateway `wss://ip-172-31-12-198.taila678c5.ts.net/vayren/v1`.
+2. **Verification:**
+   - Desktop test suite: `pytest tools/tests/test_desktop.py` PASSED 100% (7 passed, 0 skipped, 0 failed in 1.25s).
+   - Startup verification: `.\target\release\vayren-shell.exe --help` confirms `VAYREN starting (PRODUCTION REMOTE DESKTOP CLIENT)... Gateway: wss://ip-172-31-12-198.taila678c5.ts.net/vayren/v1`.
+
+**Previous update (desktop-shortcut-generation-20261018):** NATIVE DESKTOP EXECUTABLE COMPILED AND VAYREN.LNK SHORTCUT CREATED ON WINDOWS DESKTOP.
+1. **Scope:**
+   - Compiled `target/debug/vayren-shell.exe` using `cargo build -p vayren-shell` (76.7 MB binary).
+   - Created official Windows Desktop shortcut `C:\Users\visha\Desktop\VAYREN.lnk` using canonical `tools/build_rust.py` synchronization logic.
+   - Shortcut points to `C:\Users\visha\Desktop\vayren-core\target\debug\vayren-shell.exe` with canonical flags `--data-dir D:\ZerodhaTradingData --strategy-dir D:\VAYREN_STRATEGIES`, working directory `C:\Users\visha\Desktop\vayren-core`, and icon `tools/assets/vayren_desktop.ico`.
+2. **Verification:**
+   - Desktop test suite: `pytest tools/tests/test_desktop.py` PASSED 100% (7 passed, 0 skipped, 0 failed in 0.67s).
+   - Binary verification: `.\target\debug\vayren-shell.exe --help` executed cleanly and confirmed startup in local mode.
+   - Impact gate: `python tools/benchmark.py impact --run` PASSED in 321.78s.
+
+**Previous update (release-v1.36.0-20261017):** RELEASE v1.36.0 — MARKET TIMEFRAME OVERFLOW UI, CANDLE SYNC RESILIENCE, CI GOVERNANCE & DESKTOP EXE.
 1. **Scope:**
    - Released `v1.36.0` (`pyproject.toml` bumped from `1.35.0`).
    - Cleaned CI pipeline gates: formatted python files (`ruff format .`), regenerated `docs/repo_graph.json` (`repo_graph.py --build`), fixed pyright typing in `src/app/headless.py` and `candle_sync_service.py` (`pyright --threads` reports 0 errors).
