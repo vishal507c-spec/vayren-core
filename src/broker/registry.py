@@ -151,4 +151,5 @@ def default_registry() -> BrokerRegistry:
     assert _default_registry is not None
     return _default_registry
 
+
 # phase7 stale-index probe

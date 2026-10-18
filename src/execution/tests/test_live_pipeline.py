@@ -21,11 +21,10 @@ if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
 from execution.broker.adapter import BrokerError  # noqa: E402
-from execution.broker.factory import resolve_broker  # noqa: E402
 from execution.events import CandleEvent  # noqa: E402
 from execution.models.contract import StrategyRuntimeContract  # noqa: E402
 from execution.models.order import Fill, OrderPlan, OrderState  # noqa: E402
-from execution.modes import ExecutionMode, LiveArm, ModeGates  # noqa: E402
+from execution.modes import ExecutionMode, LiveArm  # noqa: E402
 from execution.runtime.lifecycle import LifecycleState  # noqa: E402
 from execution.runtime.session import LiveSession, SessionConfig  # noqa: E402
 from execution.runtime.strategy_runtime import StrategyContext  # noqa: E402

@@ -231,3 +231,48 @@ def test_snapshots_keep_the_same_epoch_and_tick_elapsed(service: LiveTradingServ
     assert first["elapsed_seconds"] == 10
     assert second["elapsed_seconds"] == 11, "each refresh must tick by one second"
     assert first["status"] == second["status"] == "RUNNING"
+
+
+def test_stale_stored_running_status_corrected_to_stopped(tmp_path: Path) -> None:
+    """If a previously terminated session left 'status: RUNNING' in the JSON store,
+    opening the service must immediately correct it to STOPPED both in memory and on disk."""
+    import json
+
+    data_dir = tmp_path / "data"
+    strat_dir = tmp_path / "strategies"
+    data_dir.mkdir(parents=True)
+    strat_dir.mkdir(parents=True)
+
+    store_file = data_dir / "live" / "live_session.json"
+    store_file.parent.mkdir(parents=True, exist_ok=True)
+    store_file.write_text(
+        json.dumps(
+            {
+                "session_timing": {
+                    "status": "RUNNING",
+                    "started_at": "2026-10-18T10:00:00+05:30",
+                    "stopped_at": "",
+                    "elapsed_seconds": 120,
+                    "start_epoch": 1776500000.0,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    svc = LiveTradingService(data_dir=data_dir, strategy_dir=strat_dir)
+    assert svc.status == "STOPPED"
+    snap = svc.snapshot()
+    assert snap["session_timing"]["status"] == "STOPPED"
+    assert snap["session_timing"]["start_epoch"] is None
+
+    # Disk store must be updated immediately
+    saved_data = json.loads(store_file.read_text(encoding="utf-8"))
+    assert saved_data["session_timing"]["status"] == "STOPPED"
+    assert saved_data["session_timing"]["start_epoch"] is None
+    assert saved_data["session_timing"]["stopped_at"] != ""
+
+    # Subsequent configure / persist_config must never revert it to RUNNING
+    svc.configure(quantity=2.0)
+    re_saved = json.loads(store_file.read_text(encoding="utf-8"))
+    assert re_saved["session_timing"]["status"] == "STOPPED"

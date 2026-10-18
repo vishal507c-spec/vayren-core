@@ -20,6 +20,7 @@ from math import floor
 from pathlib import Path
 from typing import Any
 
+from broker.error_taxonomy import classify_exception
 from execution.adaptive.attention import AttentionConfig, AttentionFilter
 from execution.adaptive.confidence import ConfidenceInput, ConfidencePolicy
 from execution.adaptive.memory import Incident, LongTermMemory, WorkingMemory
@@ -55,7 +56,13 @@ from execution.native_execution import (
 from execution.native_order_state import TERMINAL_STATES
 from execution.planner import ExecutionPreferences, OrderPlanner
 from execution.portfolio.ledger import PositionLedger
-from execution.portfolio.reconcile import ReconciliationState, reconcile_orders, reconcile_positions
+from execution.portfolio.reconcile import (
+    ReconciliationMismatch,
+    ReconciliationReport,
+    ReconciliationState,
+    reconcile_orders,
+    reconcile_positions,
+)
 from execution.recovery import RecoveryCoordinator
 from execution.regime import StatisticalRegimeDetector
 from execution.replay import LiveEventRecorder
@@ -237,6 +244,10 @@ class LiveSession:
         # Per-strategy initialization failures (see register_strategy): a
         # failed strategy is excluded from ticking, never from reporting.
         self._init_blockers: dict[str, str] = {}
+        # Deduplication and periodic reconciliation tracking
+        self._processed_signals: set[tuple[str, int]] = set()
+        self._seen_candle_stamps: dict[str, str] = {}
+        self._last_reconcile_epoch: float = 0.0
 
     # ── wiring ──────────────────────────────────────────────────
 
@@ -356,14 +367,21 @@ class LiveSession:
         self._mode = mode
         for note in notes:
             self._journal.record("MODE_DOWNGRADE", reason=note)
-        if recovering:
-            # FINAL §K/§L: rebuilt idempotency state reconciles against broker
+        if recovering or self._mode == ExecutionMode.LIVE:
+            # Rebuilt idempotency and live state reconciles against broker
             # truth BEFORE validation — unresolved mismatch blocks (never
-            # blind-resubmit). A fresh broker after a crash reports nothing:
-            # restored open orders then fail closed until the operator
-            # clears the checkpoint for a clean restart.
+            # blind-resubmit).
             self.reconcile_now()
-            self._lifecycle.transition(LifecycleState.VALIDATING, reason="reconciled, validating")
+            if self._reconciliation.blocks_live:
+                reasons = self._reconciliation.verdict().reasons or (
+                    "reconciliation mismatch blocks live",
+                )
+                self._journal.record("NOT_LIVE_READY", reasons=list(reasons))
+                return ReadinessReport(ready=False, reasons=reasons)
+            if recovering:
+                self._lifecycle.transition(
+                    LifecycleState.VALIDATING, reason="reconciled, validating"
+                )
         for context in self._contexts.values():
             lifecycle = context.lifecycle
             if lifecycle.state == LifecycleState.CREATED:
@@ -429,8 +447,25 @@ class LiveSession:
         """Poll once; drive every deliverable event through the pipeline."""
         if self._broker is None:
             raise RuntimeError("session not started")
+        # Periodic broker reconciliation in LIVE mode
+        if self._mode == ExecutionMode.LIVE and (now_epoch - self._last_reconcile_epoch >= 30.0):
+            self._last_reconcile_epoch = now_epoch
+            self.reconcile_now()
         delivered = 0
-        for raw in self._provider.poll():
+        raw_events = self._provider.poll()
+        under_load = len(raw_events) > 1000
+        if under_load:
+            self._journal.record("PIPELINE_LOAD_WARNING", pending_events=len(raw_events))
+        # Preserve strict event ordering by (timestamp, symbol, seq)
+        sorted_raw = sorted(
+            raw_events,
+            key=lambda e: (
+                getattr(e, "timestamp", ""),
+                getattr(e, "symbol", ""),
+                getattr(e, "seq", 0),
+            ),
+        )
+        for raw in sorted_raw:
             self._recorder.record(raw)
             if isinstance(raw, HeartbeatEvent):
                 self._normalizer.observe(raw, now_epoch)
@@ -442,7 +477,7 @@ class LiveSession:
                 self._journal.record("STALE_DATA", symbol=raw.symbol, seq=raw.seq)
                 continue
             for event in self._normalizer.observe(raw, now_epoch):
-                decision = self._attention.observe(event, under_load=False)
+                decision = self._attention.observe(event, under_load=under_load)
                 if not decision.process:
                     continue
                 self._working_memory.note_event(type(event).__name__, event.symbol, event.seq)
@@ -457,6 +492,16 @@ class LiveSession:
                 return
             self._update_market_state(event)
             return
+        last_ts = self._seen_candle_stamps.get(event.symbol)
+        if last_ts is not None and event.timestamp <= last_ts:
+            self._journal.record(
+                "CANDLE_DUPLICATE_SKIPPED",
+                symbol=event.symbol,
+                timestamp=event.timestamp,
+                seq=event.seq,
+            )
+            return
+        self._seen_candle_stamps[event.symbol] = event.timestamp
         regime = self._regime.update(event.close, float(event.volume))
         self._working_memory.regime = regime.value
         for context in self._contexts.values():
@@ -521,6 +566,18 @@ class LiveSession:
     def _handle_signal(
         self, context: StrategyContext, signal: StrategySignal, now_epoch: float
     ) -> None:
+        sig_key = (signal.strategy_id, signal.event_seq)
+        if sig_key in self._processed_signals:
+            self._journal.record(
+                "SIGNAL_DUPLICATE_SKIPPED",
+                strategy_id=signal.strategy_id,
+                event_seq=signal.event_seq,
+                signal_id=signal.signal_id,
+            )
+            return
+        if len(self._processed_signals) >= 10000:
+            self._processed_signals.clear()
+        self._processed_signals.add(sig_key)
         ledger_qty, side, _ = self._ledger.strategy_state_for(signal.symbol)
         raw_side = str(signal.side).upper()
         if raw_side == "BUY" and ledger_qty > 0:
@@ -774,7 +831,15 @@ class LiveSession:
             return ("ORDER_BLOCKED", "invalid symbol")
         if live and plan.side == "BUY" and intent.intent_id not in self._sized_risk:
             return ("ORDER_BLOCKED", "risk not validated for live order")
+        if self._engine.by_intent(intent.intent_id) is not None:
+            return ("ORDER_BLOCKED", f"duplicate intent: {intent.intent_id}")
         for open_order in self._engine.open_orders():
+            if open_order.state == OrderState.UNKNOWN:
+                return (
+                    "ORDER_BLOCKED",
+                    f"unresolved UNKNOWN order {open_order.client_order_id} "
+                    "requires reconciliation",
+                )
             if open_order.intent_id.startswith("sl:"):
                 continue  # protective stops never block strategy orders
             if open_order.symbol == plan.symbol and open_order.side == plan.side:
@@ -878,17 +943,30 @@ class LiveSession:
             # recorded as a rejection: the order becomes UNKNOWN and exits
             # only via broker reconciliation. Deterministic refusals stay
             # REJECTED with the venue's own reason.
-            if getattr(exc, "code", "") in ("NETWORK_ERROR", "NETWORK", "TIMEOUT"):
+            kind, safe_reason = classify_exception(exc)
+            if (
+                kind in ("TIMEOUT", "NETWORK", "RATE_LIMITED")
+                or getattr(exc, "code", "") in ("NETWORK_ERROR", "NETWORK", "TIMEOUT")
+                or isinstance(exc, (TimeoutError, ConnectionError, OSError))
+                or any(
+                    k in str(exc).lower()
+                    for k in ("timeout", "timed out", "unreachable", "network")
+                )
+            ):
                 self._engine.transition(
-                    tracked.client_order_id, OrderState.UNKNOWN, reason=str(exc)
+                    tracked.client_order_id, OrderState.UNKNOWN, reason=safe_reason
                 )
                 self._journal.record(
-                    "ORDER_UNKNOWN", client_order_id=client_order_id, reason=str(exc)
+                    "ORDER_UNKNOWN", client_order_id=client_order_id, reason=safe_reason
                 )
                 return
-            self._engine.transition(tracked.client_order_id, OrderState.REJECTED, reason=str(exc))
-            self._journal.record("ORDER_REJECTED", client_order_id=client_order_id, reason=str(exc))
-            self._emit(OrderRejected(self._request_id, client_order_id, str(exc)))
+            self._engine.transition(
+                tracked.client_order_id, OrderState.REJECTED, reason=safe_reason
+            )
+            self._journal.record(
+                "ORDER_REJECTED", client_order_id=client_order_id, reason=safe_reason
+            )
+            self._emit(OrderRejected(self._request_id, client_order_id, safe_reason))
             return
         self._broker_calls += 1
         tracked = self._engine.transition(
@@ -1171,9 +1249,14 @@ class LiveSession:
             return
         try:
             if kind == "ack":
-                updated = self._engine.transition(
-                    client_order_id, OrderState.ACKNOWLEDGED, reason="broker ack"
-                )
+                if tracked.state == OrderState.UNKNOWN:
+                    updated = self._engine.reconcile(
+                        client_order_id, OrderState.ACKNOWLEDGED.value, reason="broker ack"
+                    )
+                else:
+                    updated = self._engine.transition(
+                        client_order_id, OrderState.ACKNOWLEDGED, reason="broker ack"
+                    )
                 self._journal.record(
                     "ORDER_ACK",
                     client_order_id=client_order_id,
@@ -1189,6 +1272,10 @@ class LiveSession:
                 _ = updated
                 self._note_sl_event(client_order_id, kind, event)
             elif kind == "fill":
+                if tracked.state == OrderState.UNKNOWN:
+                    tracked = self._engine.reconcile(
+                        client_order_id, OrderState.ACKNOWLEDGED.value, reason="pre-fill reconcile"
+                    )
                 fill = event.get("fill")
                 if fill is None:
                     self._journal.record(
@@ -1200,16 +1287,26 @@ class LiveSession:
                 self._note_sl_event(client_order_id, kind, event)
             elif kind == "reject":
                 reason = str(event.get("reason", "venue reject"))
-                self._engine.transition(client_order_id, OrderState.REJECTED, reason=reason)
+                if tracked.state == OrderState.UNKNOWN:
+                    self._engine.reconcile(
+                        client_order_id, OrderState.REJECTED.value, reason=reason
+                    )
+                else:
+                    self._engine.transition(client_order_id, OrderState.REJECTED, reason=reason)
                 self._journal.record(
                     "ORDER_REJECTED", client_order_id=client_order_id, reason=reason
                 )
                 self._emit(OrderRejected(self._request_id, client_order_id, reason))
                 self._note_sl_event(client_order_id, kind, event)
             elif kind == "cancel":
-                self._engine.transition(
-                    client_order_id, OrderState.CANCELLED, reason="venue cancel"
-                )
+                if tracked.state == OrderState.UNKNOWN:
+                    self._engine.reconcile(
+                        client_order_id, OrderState.CANCELLED.value, reason="venue cancel"
+                    )
+                else:
+                    self._engine.transition(
+                        client_order_id, OrderState.CANCELLED, reason="venue cancel"
+                    )
                 self._journal.record("ORDER_CANCELLED", client_order_id=client_order_id)
                 self._note_sl_event(client_order_id, kind, event)
             else:
@@ -1552,13 +1649,71 @@ class LiveSession:
     def reconcile_now(self) -> ReconciliationState:
         """Compare ledger vs broker truth; live stays blocked on mismatch."""
         if self._broker is None:
+            if self._mode == ExecutionMode.LIVE:
+                orders = ReconciliationReport(
+                    matched=False,
+                    mismatches=(
+                        ReconciliationMismatch(
+                            kind="orders",
+                            symbol_or_id="all",
+                            local="missing_broker",
+                            broker="no broker attached in LIVE mode",
+                        ),
+                    ),
+                )
+                self._reconciliation = ReconciliationState(orders=orders)
             return self._reconciliation
         try:
             broker_positions = self._broker.positions()
-            broker_open = [o.get("client_order_id", "") for o in self._broker.open_orders()]
+            broker_orders_raw = self._broker.open_orders()
+            broker_open = [
+                str(o.get("client_order_id", ""))
+                for o in broker_orders_raw
+                if isinstance(o, dict) and o.get("client_order_id")
+            ]
         except Exception as exc:
             self._journal.record("RECONCILE_ERROR", reason=str(exc))
+            if self._mode == ExecutionMode.LIVE:
+                orders = ReconciliationReport(
+                    matched=False,
+                    mismatches=(
+                        ReconciliationMismatch(
+                            kind="orders",
+                            symbol_or_id="all",
+                            local="transport_error",
+                            broker=f"reconcile transport error: {exc}",
+                        ),
+                    ),
+                )
+                self._reconciliation = ReconciliationState(orders=orders)
             return self._reconciliation
+
+        # Reconcile any UNKNOWN local orders against confirmed broker open orders
+        for raw_o in broker_orders_raw:
+            if not isinstance(raw_o, dict):
+                continue
+            cid = str(raw_o.get("client_order_id", ""))
+            if not cid:
+                continue
+            tracked = self._engine.get(cid)
+            if tracked is not None and tracked.state == OrderState.UNKNOWN:
+                status = str(raw_o.get("status", "ACKNOWLEDGED")).upper()
+                if status in ("OPEN", "TRIGGER_PENDING", "ACCEPTED", "SUBMITTED"):
+                    target_status = "ACKNOWLEDGED"
+                elif status in ("FILLED", "REJECTED", "CANCELLED", "CANCELED"):
+                    target_status = "CANCELLED" if status == "CANCELED" else status
+                else:
+                    target_status = "ACKNOWLEDGED"
+                with suppress(Exception):
+                    self._engine.reconcile(
+                        cid,
+                        target_status,
+                        broker_filled_qty=float(
+                            raw_o.get("filled_quantity", raw_o.get("filled_qty", 0.0))
+                        ),
+                        reason="reconciled from broker open orders",
+                    )
+
         positions = reconcile_positions(tuple(self._ledger.all_positions()), broker_positions)
         orders = reconcile_orders(
             tuple(o.client_order_id for o in self._engine.open_orders()), tuple(broker_open)

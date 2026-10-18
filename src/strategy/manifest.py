@@ -46,7 +46,6 @@ def strategy_manifest() -> dict[str, Any]:
         "events_produced": (
             "StrategiesListed",
             "StrategySelected",
-
             "LabReset",
         ),
         "invariants": ("no fabricated signals", "logic state isolated per run"),

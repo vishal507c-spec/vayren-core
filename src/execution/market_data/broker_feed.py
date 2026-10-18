@@ -21,6 +21,7 @@ underlying face's poll cadence — never confused with tick streaming.
 from __future__ import annotations
 
 import contextlib
+import math
 import time
 from collections.abc import Callable
 from typing import Any
@@ -185,6 +186,11 @@ class BrokerFeedProvider(MarketDataProvider):
         if self._open:
             self._dropped = False
             self._last_error = ""
+            if self._subscribed:
+                try:
+                    self._face.subscribe(tuple(self._subscribed))
+                except Exception as exc:
+                    self._last_error = f"feed resubscribe failed: {exc}"
 
     # ── internals ───────────────────────────────────────────────
 
@@ -205,11 +211,13 @@ class BrokerFeedProvider(MarketDataProvider):
             price = float(quote.get("price", 0.0) or 0.0)
         except (TypeError, ValueError):
             return None
-        if price <= 0:
+        if not math.isfinite(price) or price <= 0:
             return None
         try:
             dayvol = int(quote.get("volume", 0) or 0)
         except (TypeError, ValueError):
+            dayvol = 0
+        if not math.isfinite(dayvol) or dayvol < 0:
             dayvol = 0
         size_s = self._size_s()
         if not size_s:

@@ -198,6 +198,32 @@ The DREDGECORP START block is **not** missing data and **not** a faulty validato
 
 - **Verification**: `cargo test --workspace` **749 passed, 0 failed**; full pytest **0 failures, 0 errors**; ruff clean on all touched files; `pyright --threads` 0 errors; all validators PASSED (structure, imports, language ownership, architecture, authority, routes, repo-graph auto-fixed, scope, context). `make check` canonical `rust` step blocked by running desktop app holding `vayren_core.dll` (PID 12388) — scratch-target kernel build, debug shell build, workspace tests, fmt all pass as supplementary evidence.
 
-- **Prepared for increment 7**: reconciler wiring, dedup/ordering/bounded queues, live adapter validation/recovery.
+**6.7 Phase 5 increments 7–8 — live reliability hardening, reconciler wiring, and session timing correction (implemented & verified, local code only; nothing deployed, nothing armed, no order placed).**
 
-- **Still open**: stale cosmetic `session_timing.status="RUNNING"` store text; reconciler not wired into `LiveSession`.
+- **Broker reconciliation wiring into `LiveSession` (`src/execution/runtime/session.py`)**:
+  - `start()` fails closed if broker reconciliation cannot complete.
+  - `step()` performs periodic 30-second cadence broker reconciliation via `reconcile_now()`.
+  - Ambiguous submission handling: `classify_exception(exc)` maps transport uncertainties (`TIMEOUT`, `NETWORK`, `RATE_LIMITED`) to `OrderState.UNKNOWN` without blind retries; deterministic refusals stay `REJECTED`.
+  - Duplicate intent blocking: `_pre_order_checks()` blocks if `intent_id` exists in engine or if any `UNKNOWN` orders are unresolved.
+  - Legal `UNKNOWN` transitions: `_dispatch_broker_event()` uses `self._engine.reconcile(...)` to legally resolve `UNKNOWN` orders when broker confirmations arrive.
+  - Reconciler fails closed (`matched=False`) if broker is None in LIVE mode or on transport error.
+
+- **Event pipeline hardening (`src/execution/runtime/session.py`)**:
+  - Event ordering: Raw events in `step()` sorted deterministically by `(timestamp, symbol, seq)`.
+  - Deduplication: Candles deduplicated by `(symbol, timestamp)`; signals deduplicated by `(strategy_id, event_seq)`.
+  - Bounded queue monitoring: `PIPELINE_LOAD_WARNING` logged if backlog exceeds 1,000 raw events.
+
+- **Live feed adapter validation & recovery (`src/execution/market_data/broker_feed.py`)**:
+  - Validates `math.isfinite(price) and price > 0`; clamps negative volume to 0.
+  - `reconnect()` automatically restores active symbol subscriptions via `self._face.subscribe(tuple(self._subscribed))`.
+
+- **Stale session timing corrected (`src/app/services/live_trading_service.py`)**:
+  - Authoritative lifecycle state updates: `_restore_config()` and `_persist_config()` immediately correct persisted `"RUNNING"` to `"STOPPED"`, clear `start_epoch`, and set `stopped_at`.
+
+- **Verification**:
+  - 13/13 new live reliability tests in `src/execution/tests/test_live_reliability_hardening.py` passed 100%.
+  - Full pytest execution: 201 tests in `src/execution/tests/` passed 100%; app tests passed 100%.
+  - All workspace crates compile cleanly (`cargo check -p vayren-shell` 0 warnings).
+  - All repository validators (routes, architecture, authority, imports, structure, language ownership, repo graph, scope) PASSED.
+  - Desktop shortcut `C:\Users\visha\Desktop\VAYREN.lnk` verified.
+

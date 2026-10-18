@@ -458,7 +458,11 @@ fn live_state_matrix_renders_at_the_primary_target_viewport() {
 
     // 1-3: mode x status independence.
     for (label, mode, running) in [
-        ("paper_stopped", vayren_shell::live::ExecMode::Backtest, false),
+        (
+            "paper_stopped",
+            vayren_shell::live::ExecMode::Backtest,
+            false,
+        ),
         ("live_stopped", vayren_shell::live::ExecMode::Live, false),
         ("live_running", vayren_shell::live::ExecMode::Live, true),
     ] {

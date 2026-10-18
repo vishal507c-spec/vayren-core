@@ -105,9 +105,7 @@ def test_broker_bound_ref_rejects_wrong_broker() -> None:
 
 
 def test_scope_mismatch_fails_closed() -> None:
-    refs = (
-        CredentialRef(key="K", scope=CredentialScope.HISTORICAL, environment=Environment.LIVE),
-    )
+    refs = (CredentialRef(key="K", scope=CredentialScope.HISTORICAL, environment=Environment.LIVE),)
     ok, reasons = validate_refs(
         refs,
         _MapResolver({"K": "v"}),
@@ -237,9 +235,7 @@ def test_market_data_face_lifecycle_methods() -> None:
 
 
 def test_surface_status_config_awareness() -> None:
-    sel = BrokerSelection(
-        name="skeleton", environment=Environment.LIVE, selected_at=TS, reason="t"
-    )
+    sel = BrokerSelection(name="skeleton", environment=Environment.LIVE, selected_at=TS, reason="t")
     status, _ = surface_status(sel, CapabilitySet(), Domain.TRADING)
     assert status is CapabilityStatus.NOT_CONFIGURED
     status, _ = surface_status(None, CapabilitySet(), Domain.TRADING)

@@ -23,7 +23,6 @@ from core.ai.intent import (  # noqa: E402
 )
 from core.ai.plan import Plan, validate_plan  # noqa: E402
 from core.ai.providers import AiProviderRegistry, OfflineProvider  # noqa: E402
-from core.ai.sandbox import Sandbox, SandboxError  # noqa: E402
 
 
 def test_request_rejects_non_action_without_crashing() -> None:

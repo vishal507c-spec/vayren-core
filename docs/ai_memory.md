@@ -7,7 +7,41 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (phases3-6-complete-20261018):** PHASE 5 INCREMENTS 3–6 COMPLETE — UNIVERSAL STRATEGY CONTRACT, REGISTRY FAILURE ISOLATION, FABRICATED STRATEGY LIST REMOVAL, AND FULL TWO-MODE CLEANUP (BACKTEST|LIVE ONLY). ALL VERIFIED, NO ORDERS, NO ARMING, NO DEPLOY, NO PUSH.
+**Latest update (paper-sandbox-final-elimination-20261018):** COMPLETE ELIMINATION OF PAPER & SANDBOX ACROSS UI & BACKEND — Slint mode selectors (wide & narrow) replaced with dedicated static LIVE indicator chip; broker connection defaults updated to LIVE; active strategy mode fallback updated to LIVE; domain mode tone mapping cleaned; dead FFI exports cleaned; cargo build -p vayren-shell succeeded; desktop binary refreshed; pyright 0 errors, ruff clean, all 201 execution tests and desktop tests passing 100%.
+
+**Previous update (live-reliability-hardening-20261018):** PHASE 5 INCREMENTS 7–8 COMPLETE — BROKER RECONCILIATION WIRING, LIVE PIPELINE HARDENING (DEDUP, BOUNDED QUEUES, STRICT ORDERING), LIVE ADAPTER VALIDATION & RECOVERY, AND STALE SESSION TIMING CORRECTION. ALL VERIFIED, NO ORDERS, NO ARMING, NO DEPLOY, NO PUSH.
+
+1. **Broker reconciliation wiring into `LiveSession` (`src/execution/runtime/session.py`)**:
+   - `start()`: Pre-validation broker reconciliation check that fails closed (`blocks_live=True`) if broker state cannot be reconciled.
+   - `step()`: Periodic 30-second cadence broker reconciliation in LIVE mode via `reconcile_now()`.
+   - `_submit()`: Transport uncertainty classification (`classify_exception(exc)`: `TIMEOUT`, `NETWORK`, `RATE_LIMITED`) marks order as `OrderState.UNKNOWN` without blind retries; deterministic refusals stay `REJECTED`.
+   - `_pre_order_checks()`: Blocks submissions if identical `intent_id` exists or if any `UNKNOWN` order remains unresolved.
+   - `_dispatch_broker_event()`: Legally transitions `UNKNOWN` orders via `ExecutionEngine.reconcile(client_order_id, target_state, ...)` when broker acks, fills, rejects, or cancels arrive.
+   - `reconcile_now()`: Fails closed (`matched=False`) if broker is absent or transport throws; reconciles open orders against broker confirmed state and re-arms protective stop-loss orders only once aligned.
+
+2. **Live pipeline hardening & ordering**:
+   - Event ordering: In `step()`, incoming raw events are sorted deterministically by `(timestamp, symbol, seq)` before ingestion.
+   - Deduplication: Candle deduplication per `(symbol, timestamp)` via `_seen_candle_stamps`; signal deduplication per `(strategy_id, event_seq)` via `_processed_signals`.
+   - Bounded queues & capacity controls: Emits `PIPELINE_LOAD_WARNING` when backlog exceeds 1,000 raw events; never silently drops critical events.
+
+3. **Live adapter validation & recovery (`BrokerFeedProvider`)**:
+   - Input sanity: Validates prices are finite and strictly positive (`math.isfinite(price) and price > 0`); clamps negative volumes to 0.
+   - Safe recovery: In `reconnect()`, restores all active symbol subscriptions via `self._face.subscribe(tuple(self._subscribed))` before marking feed ready.
+
+4. **Stale session timing corrected (`LiveTradingService`)**:
+   - In `_restore_config()` and `_persist_config()`, whenever engine status is not running, any persisted `"RUNNING"` text in `session_timing.status` is immediately corrected to `"STOPPED"`, `start_epoch` cleared to `None`, and `stopped_at` set.
+
+5. **Desktop shortcut & executable verified**:
+   - `C:\Users\visha\Desktop\VAYREN.lnk` verified and points directly to `vayren-shell.exe` with canonical flags `--data-dir D:\ZerodhaTradingData --strategy-dir D:\VAYREN_STRATEGIES`.
+
+6. **Verification**:
+   - 13/13 new live reliability tests in `src/execution/tests/test_live_reliability_hardening.py` passed 100%.
+   - Full pytest execution: 201 tests in `src/execution/tests/` passed 100%; app tests passed 100%.
+   - `cargo check -p vayren-shell` passed with 0 warnings and 0 errors.
+   - All repository validators (routes, architecture, authority, imports, structure, language ownership, repo graph, scope) PASSED.
+   - Two-mode architecture (`BACKTEST | LIVE` only) strictly maintained; zero live orders placed; consent DISARMED; ₹100 risk limit intact.
+
+**Previous update (phases3-6-complete-20261018):** PHASE 5 INCREMENTS 3–6 COMPLETE — UNIVERSAL STRATEGY CONTRACT, REGISTRY FAILURE ISOLATION, FABRICATED STRATEGY LIST REMOVAL, AND FULL TWO-MODE CLEANUP (BACKTEST|LIVE ONLY). ALL VERIFIED, NO ORDERS, NO ARMING, NO DEPLOY, NO PUSH.
 
 1. **Universal strategy contract (Phase 1, §12.1)**: `StrategyDefinition` +5 additive defaulted fields — `supported_timeframes=()`, `required_warmup_bars=0`, `required_capabilities=()`, `supported_modes=("BACKTEST","LIVE")`, `last_error=""`. `__post_init__` validates warmup≥0, modes⊆("BACKTEST","LIVE"), sanitized tuples. `with_*` copies use `dataclasses.replace`; `inspect_strategy()` precedence: non-empty declaration > legacy `LIVE_*`, empty falls back. `supports_live` stays capability, not readiness.
 

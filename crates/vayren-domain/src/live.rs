@@ -4407,8 +4407,7 @@ pub fn project(state: &LiveState) -> LiveView {
         mode: mode_str.into(),
         mode_tone: match mode_str {
             "LIVE" => 3,
-            "PAPER" => 4,
-            _ => 2,
+            _ => 1,
         },
         started_at: if !state.started_at.is_empty() && state.started_at != "—" {
             format_ist_display(&state.started_at)
@@ -6630,7 +6629,10 @@ mod tests {
 
         // An explicit empty list means the registry holds none.
         st.apply_snapshot(&serde_json::json!({"available_strategies": []}));
-        assert!(st.strategies.is_empty(), "an explicit empty list must clear the picker");
+        assert!(
+            st.strategies.is_empty(),
+            "an explicit empty list must clear the picker"
+        );
         assert_eq!(st.selected_strategy(), None);
     }
 

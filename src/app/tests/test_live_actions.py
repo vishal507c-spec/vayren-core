@@ -69,7 +69,8 @@ def test_setup_still_accepts_the_legacy_strategy_key(dirs: tuple[str, str]) -> N
 def test_unsupported_mode_is_refused_honestly(dirs: tuple[str, str]) -> None:
     snap = _act(dirs, {"action": "mode", "mode": "SANDBOX"})
     assert _service(dirs)._config.mode == "BACKTEST"
-    assert "not supported" in str(snap.get("action_note", "")) or "refused" in str(snap.get("action_note", ""))
+    note = str(snap.get("action_note", ""))
+    assert "not supported" in note or "refused" in note
 
 
 def _live_venue_stubs(service: LiveTradingService):

@@ -102,11 +102,9 @@ pub fn initial_screen(argv: &[String]) -> ShellScreen {
     ShellScreen::Lab
 }
 
-/// Environment badge kind: 0 = paper, 1 = sandbox, 2 = live.
+/// Environment badge kind: 2 = live.
 pub fn env_kind(environment: Environment) -> i32 {
     match environment {
-        Environment::Live => 2,
-        Environment::Live => 2,
         Environment::Live => 2,
     }
 }

@@ -16,7 +16,7 @@ import { LineEdit, ScrollView, ComboBox } from "std-widgets.slint";
 // ── projected shapes (mirror domain live.rs) ──────────────────────────────────
 
 export struct LiveBar {
-    mode: int, // 0 PAPER, 1 SANDBOX, 2 LIVE
+    mode: int, // always 1 (LIVE is the only supported execution mode)
     broker-label: string,
     broker-tone: int,
     conn-label: string,
@@ -347,7 +347,7 @@ export global LiveTiers {
 
     // ── command bar: computed from the widgets, never guessed ──
     // Width each command-bar region needs to render un-elided: one status
-    // card, the PAPER|SANDBOX|LIVE selector and the START/STOP/HALT group.
+    // card, the LIVE mode indicator and the START/STOP/HALT group.
     public pure function bar-card-width() -> length { return 150px; }
     public pure function bar-mode-width() -> length { return 168px; }
     public pure function bar-transport-width() -> length { return 264px; }
@@ -1285,10 +1285,9 @@ export component LiveScreen inherits Rectangle {
                     }
                 }
 
-                // Segmented Mode Selector: PAPER | SANDBOX | LIVE. The current
-                // mode is highlighted from the backend's own value; a click
-                // asks the backend to switch (which may legitimately refuse
-                // while a session is running).
+                // Execution mode indicator: LIVE only. PAPER and SANDBOX
+                // are not supported — the indicator is static and
+                // non-interactive. The backend can only operate in LIVE mode.
                 Rectangle {
                     height: 34px;
                     width: LiveTiers.bar-mode-width();
@@ -1300,57 +1299,16 @@ export component LiveScreen inherits Rectangle {
                     HorizontalLayout {
                         padding: 3px;
                         spacing: 2px;
+                        alignment: center;
 
-                        // PAPER
+                        // LIVE indicator (only supported execution mode)
                         Rectangle {
                             horizontal-stretch: 1;
                             border-radius: 4px;
-                            background: root.bar.mode == 0 ? VayrenPalette.live-teal : transparent;
-                            TouchArea {
-                                enabled: !root.setup.can-stop;
-                                clicked => { root.mode-picked(0); }
-                            }
-                            Text {
-                                text: "PAPER";
-                                color: root.bar.mode == 0 ? VayrenPalette.accent-text : VayrenPalette.live-ink-faint;
-                                font-size: 10px;
-                                font-weight: 700;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
-                            }
-                        }
-
-                        // SANDBOX
-                        Rectangle {
-                            horizontal-stretch: 1;
-                            border-radius: 4px;
-                            background: root.bar.mode == 1 ? VayrenPalette.amber : transparent;
-                            TouchArea {
-                                enabled: !root.setup.can-stop;
-                                clicked => { root.mode-picked(1); }
-                            }
-                            Text {
-                                text: "SANDBOX";
-                                color: root.bar.mode == 1 ? VayrenPalette.accent-text : VayrenPalette.live-ink-faint;
-                                font-size: 10px;
-                                font-weight: 700;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
-                            }
-                        }
-
-                        // LIVE
-                        Rectangle {
-                            horizontal-stretch: 1;
-                            border-radius: 4px;
-                            background: root.bar.mode == 2 ? VayrenPalette.neg : transparent;
-                            TouchArea {
-                                enabled: !root.setup.can-stop;
-                                clicked => { root.mode-picked(2); }
-                            }
+                            background: VayrenPalette.neg;
                             Text {
                                 text: "LIVE";
-                                color: root.bar.mode == 2 ? VayrenPalette.text-bright : VayrenPalette.neg;
+                                color: VayrenPalette.text-bright;
                                 font-size: 10px;
                                 font-weight: 700;
                                 horizontal-alignment: center;
@@ -1483,9 +1441,9 @@ export component LiveScreen inherits Rectangle {
                         }
                     }
 
-                    // Segmented Mode Selector: PAPER | SANDBOX | LIVE (narrow
-                    // row — the backend's value is the highlight, a click is
-                    // only a request).
+                    // Execution mode indicator: LIVE only. PAPER and SANDBOX
+                    // are not supported — the indicator is static and
+                    // non-interactive. The backend can only operate in LIVE mode.
                     Rectangle {
                         height: 34px;
                         width: LiveTiers.bar-mode-width();
@@ -1497,57 +1455,16 @@ export component LiveScreen inherits Rectangle {
                         HorizontalLayout {
                             padding: 3px;
                             spacing: 2px;
+                            alignment: center;
 
-                            // PAPER
+                            // LIVE indicator (only supported execution mode)
                             Rectangle {
                                 horizontal-stretch: 1;
                                 border-radius: 4px;
-                                background: root.bar.mode == 0 ? VayrenPalette.live-teal : transparent;
-                                TouchArea {
-                                    enabled: !root.setup.can-stop;
-                                    clicked => { root.mode-picked(0); }
-                                }
-                                Text {
-                                    text: "PAPER";
-                                    color: root.bar.mode == 0 ? VayrenPalette.accent-text : VayrenPalette.live-ink-faint;
-                                    font-size: 10px;
-                                    font-weight: 700;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
-                                }
-                            }
-
-                            // SANDBOX
-                            Rectangle {
-                                horizontal-stretch: 1;
-                                border-radius: 4px;
-                                background: root.bar.mode == 1 ? VayrenPalette.amber : transparent;
-                                TouchArea {
-                                    enabled: !root.setup.can-stop;
-                                    clicked => { root.mode-picked(1); }
-                                }
-                                Text {
-                                    text: "SANDBOX";
-                                    color: root.bar.mode == 1 ? VayrenPalette.accent-text : VayrenPalette.live-ink-faint;
-                                    font-size: 10px;
-                                    font-weight: 700;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
-                                }
-                            }
-
-                            // LIVE
-                            Rectangle {
-                                horizontal-stretch: 1;
-                                border-radius: 4px;
-                                background: root.bar.mode == 2 ? VayrenPalette.neg : transparent;
-                                TouchArea {
-                                    enabled: !root.setup.can-stop;
-                                    clicked => { root.mode-picked(2); }
-                                }
+                                background: VayrenPalette.neg;
                                 Text {
                                     text: "LIVE";
-                                    color: root.bar.mode == 2 ? VayrenPalette.text-bright : VayrenPalette.neg;
+                                    color: VayrenPalette.text-bright;
                                     font-size: 10px;
                                     font-weight: 700;
                                     horizontal-alignment: center;
@@ -2369,8 +2286,8 @@ export component LiveScreen inherits Rectangle {
                                     }
 
                                     VBadge {
-                                        text: root.active-strat.mode != "" ? root.active-strat.mode : (root.bar.mode == 2 ? "LIVE" : root.bar.mode == 1 ? "SANDBOX" : "PAPER");
-                                        tone: root.active-strat.mode-tone != 0 ? root.active-strat.mode-tone : (root.bar.mode == 2 ? 3 : 0);
+                                        text: root.active-strat.mode != "" ? root.active-strat.mode : "LIVE";
+                                        tone: root.active-strat.mode-tone != 0 ? root.active-strat.mode-tone : 3;
                                         vertical-alignment: center;
                                     }
 

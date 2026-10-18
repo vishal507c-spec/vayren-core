@@ -3057,6 +3057,7 @@ class LiveTradingService:
 
         # Restored config NEVER auto-starts (real-money safety + paper hygiene).
         timing = data.get("session_timing")
+        store_dirty = False
         if isinstance(timing, dict):
             self._started_at = str(timing.get("started_at", ""))
             self._stopped_at = str(timing.get("stopped_at", ""))
@@ -3068,8 +3069,23 @@ class LiveTradingService:
                 self._status_reason = "operator halt"
             else:
                 self._status = "STOPPED"
+            if saved_status == "RUNNING":
+                # Stale persisted status corrected: a restored session never starts as RUNNING.
+                timing["status"] = "STOPPED"
+                timing["start_epoch"] = None
+                if not self._stopped_at:
+                    tz_ist = timezone(timedelta(hours=5, minutes=30))
+                    self._stopped_at = datetime.fromtimestamp(time.time(), tz=tz_ist).isoformat(
+                        timespec="seconds"
+                    )
+                timing["stopped_at"] = self._stopped_at
+                store_dirty = True
         else:
             self._status = "STOPPED"
+
+        if store_dirty:
+            with contextlib.suppress(Exception):
+                self._store.save(data)
 
     def _persist_config(self) -> None:
         data = self._store.load()
@@ -3084,6 +3100,14 @@ class LiveTradingService:
             "account_confirmed": self._account_confirmed,
             "confirmed_account_id": self._confirmed_account_id,
         }
+        if (
+            "session_timing" in data
+            and isinstance(data["session_timing"], dict)
+            and data["session_timing"].get("status") == "RUNNING"
+            and self._status != "RUNNING"
+        ):
+            data["session_timing"]["status"] = self._status
+            data["session_timing"]["start_epoch"] = None
         try:
             self._store.save(data)
         except Exception as exc:  # noqa: BLE001

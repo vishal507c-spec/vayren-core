@@ -387,9 +387,36 @@ PAPER/SANDBOX removed end-to-end:
   `init_blockers()`, `degraded` property; engine RUNNING requires a started
   session with a resolved venue.
 
-### 12.6 Known remaining
+### 12.6 Live reliability, event pipeline hardening & broker reconciliation wiring (Increment 7–8)
 
-- Reconciler wiring into `LiveSession` (increment 6), dedup/ordering/bounded
-  queues (increment 6), live adapter validation/recovery (increment 7).
-- `make check`'s canonical `rust` step cannot replace the release DLL while the
-  desktop app holds it (scratch-target build used as supplementary evidence).
+Completed and verified end-to-end:
+
+1. **Broker Reconciliation Wiring (`LiveSession`)**:
+   - `start()`: Pre-validation broker reconciliation check that fails closed (`blocks_live=True`) if broker state cannot be reconciled.
+   - `step()`: Periodic 30-second cadence broker reconciliation in LIVE mode via `reconcile_now()`.
+   - `_submit()`: Transport uncertainty classification (`classify_exception(exc)`: `TIMEOUT`, `NETWORK`, `RATE_LIMITED`) marks order as `OrderState.UNKNOWN` without blind retries; deterministic refusals stay `REJECTED`.
+   - `_pre_order_checks()`: Blocks submissions if identical `intent_id` exists or if any `UNKNOWN` order remains unresolved.
+   - `_dispatch_broker_event()`: Legally transitions `UNKNOWN` orders via `ExecutionEngine.reconcile(client_order_id, target_state, ...)` when broker acks, fills, rejects, or cancels arrive.
+   - `reconcile_now()`: Fails closed (`matched=False`) if broker is absent or transport throws; reconciles open orders against broker confirmed state and re-arms protective stop-loss orders only once aligned.
+
+2. **Live Pipeline Hardening & Ordering**:
+   - Event ordering: In `step()`, incoming raw events are sorted deterministically by `(timestamp, symbol, seq)` before ingestion.
+   - Deduplication: Candle deduplication per `(symbol, timestamp)` via `_seen_candle_stamps`; signal deduplication per `(strategy_id, event_seq)` via `_processed_signals`.
+   - Bounded queues & capacity controls: Emits `PIPELINE_LOAD_WARNING` when backlog exceeds 1,000 raw events; never silently drops critical events.
+
+3. **Live Adapter Validation & Recovery (`BrokerFeedProvider`)**:
+   - Input sanity: Validates prices are finite and strictly positive (`math.isfinite(price) and price > 0`); clamps negative volumes to 0.
+   - Safe recovery: In `reconnect()`, restores all active symbol subscriptions via `self._face.subscribe(tuple(self._subscribed))` before marking feed ready.
+
+4. **Stale Session Timing Correction (`LiveTradingService`)**:
+   - Authoritative synchronization: In `_restore_config()` and `_persist_config()`, whenever engine status is not running, any persisted `"RUNNING"` text in `session_timing.status` is immediately corrected to `"STOPPED"`, `start_epoch` cleared to `None`, and `stopped_at` set.
+
+### 12.7 Known remaining / Environment status
+
+- `make check`'s canonical `rust` step cannot replace the release DLL while a running
+  desktop app holds it (PID 12388) — the equivalent decomposed steps (release kernel build
+  to a scratch `--target-dir`, debug shell build, workspace tests, fmt check) all pass.
+- Desktop shortcut `C:\Users\visha\Desktop\VAYREN.lnk` verified and points to `vayren-shell.exe`.
+- Strict two-mode architecture (`BACKTEST | LIVE` only) fully maintained; zero live orders
+  placed; consent DISARMED; ₹100 risk limit intact.
+
