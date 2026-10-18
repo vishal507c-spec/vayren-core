@@ -1,12 +1,389 @@
-import { LiveScreen } from "live.slint";
+import { LiveScreen, LiveBar, LiveSetup, LiveMarket, LiveGate, LivePosition, LiveOrder, LiveFill, LiveEventRow, LiveWebSocket, LiveRemoteGateway, LiveActiveStrategy, LiveWatchlistRow } from "live.slint";
+import { VayrenPalette } from "palette.slint";
 
 export component LivePreview inherits Window {
-    preferred-width: 1600px;
-    preferred-height: 900px;
-    title: "VAYREN LIVE PREVIEW";
+    width: 1600px;
+    height: 900px;
+    title: "VAYREN — LIVE WORKSTATION PREVIEW";
+    background: VayrenPalette.bg;
 
     LiveScreen {
-        width: parent.width;
-        height: parent.height;
+        width: 1600px;
+        height: 900px;
+
+        bar: {
+            mode: 1,
+            broker-label: "FYERS",
+            broker-tone: 1,
+            conn-label: "CONNECTED (EC2)",
+            conn-tone: 1,
+            strategy-label: "OBR C1C4",
+            strategy-tone: 1,
+            strategy-sub: "15m timeframe",
+            risk-label: "PASS",
+            risk-tone: 1,
+            risk-sub: "Max Risk ₹100",
+            recon-label: "RECONCILED",
+            recon-tone: 1,
+            recon-sub: "Orders Aligned",
+            exec-label: "LIVE ARMED",
+            exec-tone: 1,
+            halted: false,
+            halt-enabled: true,
+            inspector-open: true,
+            note: "",
+            note-tone: 0,
+            capital-broker-name: "FYERS",
+            capital-value: "₹5,40,250.00",
+            capital-sub: "Available margin",
+            capital-status: "CONNECTED",
+            capital-tone: 1,
+            capital-last-updated: "15:30:00",
+        };
+
+        gateway: {
+            status: "CONNECTED",
+            tone: 1,
+            conn-state: "ESTABLISHED",
+            rtt: "24ms",
+            last-heartbeat: "1s ago",
+            detail: "EC2 Gateway Active",
+        };
+
+        ws: {
+            status: "CONNECTED",
+            tone: 1,
+            latency: "18ms",
+            sub: "22 symbols",
+            last-tick: "Just now",
+            last-error: "",
+        };
+
+        setup: {
+            quantity: "50",
+            session-label: "LIVE REGULAR",
+            session-tone: 1,
+            can-start: true,
+            start-clickable: true,
+            can-stop: false,
+            can-arm: true,
+            needs-live-confirm: false,
+            confirmed-live: true,
+            confirm-dialog-open: false,
+            symbol-total: "22",
+            stock-universe: [
+                "NSE:ABB", "NSE:ADANIENT", "NSE:APOLLOHOSP", "NSE:BAJAJ-AUTO", "NSE:BHARTIARTL",
+                "NSE:CIPLA", "NSE:HCLTECH", "NSE:HDFCBANK", "NSE:INFY", "NSE:RELIANCE",
+                "NSE:TCS", "NSE:WIPRO", "NSE:ICICIBANK", "NSE:KOTAKBANK", "NSE:LT"
+            ],
+            universe-exchange: "NSE",
+            pending-start: false,
+            pending-stop: false,
+            pending-halt: false,
+        };
+
+        strategy-names: ["OBR C1C4", "EMA Crossover 9/21", "VWAP Mean Reversion"];
+        strategy-selected: 0;
+
+        timeframe-names: ["1m", "5m", "15m", "1h"];
+        timeframe-selected: 2;
+
+        filter-chips: ["ALL (15)", "READY (10)", "SIGNAL (2)", "ORDER (1)", "IN POSITION (1)", "WAITING (1)", "NO DATA (0)", "RISK BLOCKED (0)", "REJECTED (0)"];
+        filter-chip-selected: 0;
+
+        watchlist: [
+            {
+                index: 0,
+                symbol: "RELIANCE",
+                full-symbol: "NSE:RELIANCE",
+                ltp: "2,462.80",
+                change: "+1.45%",
+                change-tone: 1,
+                ref-high: "2,455.00",
+                ref-low: "2,420.00",
+                break-low: "2,425.00",
+                entry: "2,456.00",
+                stop: "2,430.00",
+                risk-share: "26.00",
+                qty: "3",
+                max-allowed-risk: "100.00",
+                planned-risk: "78.00",
+                risk-util: "78%",
+                risk-util-tone: 1,
+                position: "FLAT",
+                status: "SIGNAL READY",
+                status-tone: 1,
+                signal: "BUY",
+                signal-tone: 1,
+                order: "SUBMITTED",
+                order-tone: 2,
+                pnl: "+₹0.00",
+                pnl-tone: 0,
+                last-update: "15:29:58",
+                selected: true,
+                eligibility: "ELIGIBLE",
+                eligibility-tone: 1,
+            },
+            {
+                index: 1,
+                symbol: "HDFCBANK",
+                full-symbol: "NSE:HDFCBANK",
+                ltp: "1,695.50",
+                change: "+0.92%",
+                change-tone: 1,
+                ref-high: "1,682.00",
+                ref-low: "1,665.00",
+                break-low: "1,668.00",
+                entry: "1,680.00",
+                stop: "1,665.00",
+                risk-share: "15.00",
+                qty: "6",
+                max-allowed-risk: "100.00",
+                planned-risk: "90.00",
+                risk-util: "90%",
+                risk-util-tone: 1,
+                position: "LONG 6",
+                status: "IN POSITION",
+                status-tone: 1,
+                signal: "HOLD",
+                signal-tone: 0,
+                order: "FILLED",
+                order-tone: 1,
+                pnl: "+₹93.00",
+                pnl-tone: 1,
+                last-update: "15:29:55",
+                selected: false,
+                eligibility: "IN POSITION",
+                eligibility-tone: 1,
+            },
+            {
+                index: 2,
+                symbol: "TCS",
+                full-symbol: "NSE:TCS",
+                ltp: "3,812.40",
+                change: "+0.65%",
+                change-tone: 1,
+                ref-high: "3,825.00",
+                ref-low: "3,780.00",
+                break-low: "3,785.00",
+                entry: "3,826.00",
+                stop: "3,790.00",
+                risk-share: "36.00",
+                qty: "2",
+                max-allowed-risk: "100.00",
+                planned-risk: "72.00",
+                risk-util: "72%",
+                risk-util-tone: 1,
+                position: "FLAT",
+                status: "WAITING BREAKOUT",
+                status-tone: 0,
+                signal: "NONE",
+                signal-tone: 0,
+                order: "NONE",
+                order-tone: 0,
+                pnl: "—",
+                pnl-tone: 0,
+                last-update: "15:29:50",
+                selected: false,
+                eligibility: "ELIGIBLE",
+                eligibility-tone: 1,
+            },
+            {
+                index: 3,
+                symbol: "INFY",
+                full-symbol: "NSE:INFY",
+                ltp: "1,512.10",
+                change: "-0.45%",
+                change-tone: 3,
+                ref-high: "1,530.00",
+                ref-low: "1,505.00",
+                break-low: "1,508.00",
+                entry: "1,531.00",
+                stop: "1,510.00",
+                risk-share: "21.00",
+                qty: "4",
+                max-allowed-risk: "100.00",
+                planned-risk: "84.00",
+                risk-util: "84%",
+                risk-util-tone: 1,
+                position: "FLAT",
+                status: "MONITORING",
+                status-tone: 0,
+                signal: "NONE",
+                signal-tone: 0,
+                order: "NONE",
+                order-tone: 0,
+                pnl: "—",
+                pnl-tone: 0,
+                last-update: "15:29:48",
+                selected: false,
+                eligibility: "ELIGIBLE",
+                eligibility-tone: 1,
+            },
+            {
+                index: 4,
+                symbol: "ICICIBANK",
+                full-symbol: "NSE:ICICIBANK",
+                ltp: "1,128.90",
+                change: "+1.15%",
+                change-tone: 1,
+                ref-high: "1,125.00",
+                ref-low: "1,110.00",
+                break-low: "1,112.00",
+                entry: "1,126.00",
+                stop: "1,112.00",
+                risk-share: "14.00",
+                qty: "7",
+                max-allowed-risk: "100.00",
+                planned-risk: "98.00",
+                risk-util: "98%",
+                risk-util-tone: 1,
+                position: "FLAT",
+                status: "SIGNAL GENERATED",
+                status-tone: 1,
+                signal: "BUY",
+                signal-tone: 1,
+                order: "PENDING",
+                order-tone: 2,
+                pnl: "—",
+                pnl-tone: 0,
+                last-update: "15:29:45",
+                selected: false,
+                eligibility: "ELIGIBLE",
+                eligibility-tone: 1,
+            },
+        ];
+
+        positions: [
+            {
+                symbol: "NSE:HDFCBANK",
+                side: "BUY",
+                side-tone: 1,
+                qty: "6",
+                entry: "₹1,680.00",
+                current: "₹1,695.50",
+                pnl: "+₹93.00",
+                pnl-tone: 1,
+                pnl-pct: "+0.92%",
+                status: "OPEN (IN PROFIT)",
+            }
+        ];
+
+        orders: [
+            {
+                order-id: "ORD-948102",
+                strategy: "OBR C1C4",
+                symbol: "NSE:RELIANCE",
+                side: "BUY",
+                side-tone: 1,
+                qty: "3",
+                order-type: "LIMIT",
+                price: "₹2,456.00",
+                status: "PENDING",
+                time: "15:28:12",
+                broker: "FYERS",
+                status-tone: 2,
+                reason: "",
+            },
+            {
+                order-id: "ORD-948011",
+                strategy: "OBR C1C4",
+                symbol: "NSE:HDFCBANK",
+                side: "BUY",
+                side-tone: 1,
+                qty: "6",
+                order-type: "LIMIT",
+                price: "₹1,680.00",
+                status: "TRADED",
+                time: "14:15:02",
+                broker: "FYERS",
+                status-tone: 1,
+                reason: "",
+            }
+        ];
+
+        fills: [
+            {
+                time: "14:15:02",
+                symbol: "NSE:HDFCBANK",
+                side: "BUY",
+                qty: "6",
+                price: "₹1,680.00",
+                order-id: "ORD-948011",
+                strategy: "OBR C1C4",
+                side-tone: 1,
+            }
+        ];
+
+        events: [
+            {
+                time: "15:28:12",
+                timestamp: "2026-10-18T15:28:12Z",
+                strategy: "OBR C1C4",
+                symbol: "NSE:RELIANCE",
+                event: "Limit Order submitted for 3 shares @ 2,456.00",
+                status: "SUBMITTED",
+                status-tone: 2,
+                level: "INFO",
+                category: "EXECUTION",
+            },
+            {
+                time: "15:28:01",
+                timestamp: "2026-10-18T15:28:01Z",
+                strategy: "OBR C1C4",
+                symbol: "NSE:RELIANCE",
+                event: "Signal BUY triggered (Breakout above 2,455.00)",
+                status: "SIGNAL",
+                status-tone: 1,
+                level: "INFO",
+                category: "STRATEGY",
+            },
+            {
+                time: "14:15:02",
+                timestamp: "2026-10-18T14:15:02Z",
+                strategy: "OBR C1C4",
+                symbol: "NSE:HDFCBANK",
+                event: "Order executed: 6 shares filled @ 1,680.00",
+                status: "FILLED",
+                status-tone: 1,
+                level: "INFO",
+                category: "EXECUTION",
+            }
+        ];
+
+        stats: [
+            { label: "REALIZED P&L", value: "+₹0.00", tone: 0 },
+            { label: "UNREALIZED P&L", value: "+₹93.00", tone: 1 },
+            { label: "TOTAL TRADES", value: "1", tone: 0 },
+            { label: "WIN RATE", value: "100%", tone: 1 },
+            { label: "CAPITAL UTILIZED", value: "₹10,080.00", tone: 0 }
+        ];
+
+        active-strat: {
+            name: "OBR C1C4",
+            status: "RUNNING",
+            status-tone: 1,
+            mode: "LIVE",
+            mode-tone: 1,
+            started-at: "09:15:00",
+            stopped-at: "—",
+            duration: "06:15:00",
+            engine-running: true,
+            engine-clock: "06:15:00",
+            symbols-count: "15",
+            today-signals: "2",
+            current-position: "1 Open",
+            orders-today: "2",
+            orders-detail: "1 filled, 1 pending",
+            strategy-logic: "Opening Breakout Range C1C4",
+        };
+
+        gates: [
+            { name: "Broker Link", status: "READY", tone: 1, reason: "FYERS EC2 session active" },
+            { name: "Market Stream", status: "READY", tone: 1, reason: "WebSocket ticking 18ms" },
+            { name: "Risk Engine", status: "READY", tone: 1, reason: "₹100 limit active" },
+            { name: "Order Reconciler", status: "READY", tone: 1, reason: "Orders aligned with broker" },
+            { name: "Universe", status: "READY", tone: 1, reason: "15 stocks tracked" },
+        ];
     }
 }

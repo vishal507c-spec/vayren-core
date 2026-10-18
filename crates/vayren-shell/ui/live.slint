@@ -477,8 +477,8 @@ component LiveTopCard inherits Rectangle {
 
             if root.label != "": Text {
                 text: root.label;
-                color: VayrenPalette.live-ink-faint;
-                font-size: 9px;
+                color: VayrenPalette.muted;
+                font-size: 9.5px;
                 font-weight: 700;
                 overflow: elide;
             }
@@ -486,7 +486,7 @@ component LiveTopCard inherits Rectangle {
             Text {
                 text: root.value-text;
                 color: LiveTone.ink(root.tone);
-                font-size: 11px;
+                font-size: 11.5px;
                 font-weight: 700;
                 overflow: elide;
             }
@@ -494,7 +494,7 @@ component LiveTopCard inherits Rectangle {
             if root.sub-text != "": Text {
                 text: root.sub-text;
                 color: LiveTone.ink(root.sub-tone);
-                font-size: 9px;
+                font-size: 9.5px;
                 font-weight: 500;
                 overflow: elide;
             }
@@ -540,8 +540,8 @@ component LiveBrokerCapitalCard inherits Rectangle {
 
                 Text {
                     text: "BROKER CAPITAL";
-                    color: VayrenPalette.live-ink-faint;
-                    font-size: 8.5px;
+                    color: VayrenPalette.muted;
+                    font-size: 9px;
                     font-weight: 800;
                     vertical-alignment: center;
                 }
@@ -569,8 +569,8 @@ component LiveBrokerCapitalCard inherits Rectangle {
             // Main value: Capital amount formatted in INR
             Text {
                 text: root.value-text;
-                color: root.tone == 1 ? VayrenPalette.live-teal : (root.tone == 3 ? VayrenPalette.neg : (root.tone == 2 ? VayrenPalette.amber : VayrenPalette.live-ink-dim));
-                font-size: 13px;
+                color: root.tone == 1 ? VayrenPalette.live-teal : (root.tone == 3 ? VayrenPalette.neg : (root.tone == 2 ? VayrenPalette.amber : VayrenPalette.muted));
+                font-size: 13.5px;
                 font-weight: 800;
                 overflow: elide;
             }
@@ -582,8 +582,8 @@ component LiveBrokerCapitalCard inherits Rectangle {
                 text: (root.sub-text != "" ? root.sub-text : "Available margin")
                     + (root.last-updated != "" ? (" · " + root.last-updated) : "")
                     + (root.status-text != "" ? (" · " + root.status-text) : "");
-                color: VayrenPalette.live-ink-dim;
-                font-size: 8.5px;
+                color: VayrenPalette.muted;
+                font-size: 9px;
                 font-weight: 500;
                 overflow: elide;
             }
@@ -606,7 +606,7 @@ component LiveBrokerCapitalCard inherits Rectangle {
 
                 Text {
                     text: "↻";
-                    color: refresh-touch.has-hover ? VayrenPalette.live-teal : VayrenPalette.live-ink-dim;
+                    color: refresh-touch.has-hover ? VayrenPalette.live-teal : VayrenPalette.muted;
                     font-size: 13px;
                     font-weight: 700;
                     horizontal-alignment: center;
@@ -625,7 +625,7 @@ component LiveTabHeader inherits Rectangle {
     background: transparent;
     height: 32px;
 
-    TouchArea {
+    ta := TouchArea {
         clicked => { root.clicked(); }
     }
 
@@ -640,9 +640,9 @@ component LiveTabHeader inherits Rectangle {
 
         Text {
             text: root.label;
-            color: root.active ? VayrenPalette.live-teal : VayrenPalette.live-ink-mute;
+            color: root.active ? VayrenPalette.live-teal : (ta.has-hover ? VayrenPalette.text : VayrenPalette.muted);
             font-size: 12px;
-            font-weight: root.active ? 700 : 500;
+            font-weight: root.active ? 700 : 600;
             horizontal-alignment: center;
             vertical-alignment: center;
         }
@@ -654,7 +654,8 @@ component LiveTabHeader inherits Rectangle {
 
         Rectangle {
             height: 2px;
-            background: root.active ? VayrenPalette.live-teal : transparent;
+            border-radius: 1px;
+            background: root.active ? VayrenPalette.live-teal : (ta.has-hover ? VayrenPalette.live-line-soft : transparent);
         }
     }
 }
@@ -678,9 +679,9 @@ component LiveGateRow inherits Rectangle {
     VerticalLayout {
         padding-left: 8px;
         padding-right: 8px;
-        padding-top: 4px;
-        padding-bottom: 4px;
-        spacing: 2px;
+        padding-top: 5px;
+        padding-bottom: 5px;
+        spacing: 3px;
 
         HorizontalLayout {
             height: 18px;
@@ -694,9 +695,9 @@ component LiveGateRow inherits Rectangle {
             Text {
                 horizontal-stretch: 1;
                 text: root.name;
-                color: VayrenPalette.live-ink;
-                font-size: 10px;
-                font-weight: 600;
+                color: VayrenPalette.text;
+                font-size: 11px;
+                font-weight: 700;
                 vertical-alignment: center;
                 overflow: elide;
             }
@@ -710,8 +711,9 @@ component LiveGateRow inherits Rectangle {
 
         if root.show-reason && root.reason != "": Text {
             text: root.reason;
-            color: VayrenPalette.live-ink-dim;
-            font-size: 9px;
+            color: root.tone == 3 ? VayrenPalette.neg : VayrenPalette.muted;
+            font-size: 10px;
+            font-weight: 500;
             overflow: elide;
         }
     }
@@ -1798,40 +1800,42 @@ export component LiveScreen inherits Rectangle {
 
                                     // Column header
                                     Rectangle {
-                                        height: 22px;
+                                        height: 24px;
                                         background: VayrenPalette.bg1;
+                                        border-radius: 4px;
                                         HorizontalLayout {
                                             padding-left: 6px; padding-right: 6px; spacing: 4px; alignment: center;
-                                            Text { width: 14px; text: ""; color: VayrenPalette.live-ink-dim; font-size: 9px; font-weight: 600; }
-                                            Text { width: 84px; text: "SYMBOL"; color: VayrenPalette.live-ink-dim; font-size: 9px; font-weight: 600; }
-                                            Text { width: 65px; text: "LTP"; color: VayrenPalette.live-ink-dim; font-size: 9px; font-weight: 600; }
-                                            Text { width: 54px; text: "CHG%"; color: VayrenPalette.live-ink-dim; font-size: 9px; font-weight: 600; }
-                                            Text { width: 58px; text: "REF HI"; color: VayrenPalette.live-ink-dim; font-size: 9px; font-weight: 600; }
-                                            Text { width: 58px; text: "REF LO"; color: VayrenPalette.live-ink-dim; font-size: 9px; font-weight: 600; }
-                                            Text { width: 68px; text: "BREAK LOW"; color: VayrenPalette.live-ink-dim; font-size: 9px; font-weight: 600; }
-                                            Text { width: 65px; text: "ENTRY"; color: VayrenPalette.live-ink-dim; font-size: 9px; font-weight: 600; }
-                                            Text { width: 65px; text: "STOP"; color: VayrenPalette.live-ink-dim; font-size: 9px; font-weight: 600; }
-                                            Text { width: 58px; text: "RISK/SH"; color: VayrenPalette.live-ink-dim; font-size: 9px; font-weight: 600; }
-                                            Text { width: 44px; text: "QTY"; color: VayrenPalette.live-ink-dim; font-size: 9px; font-weight: 600; }
-                                            Text { width: 70px; text: "MAX RISK"; color: VayrenPalette.live-ink-dim; font-size: 9px; font-weight: 600; }
-                                            Text { width: 72px; text: "PLANNED"; color: VayrenPalette.live-ink-dim; font-size: 9px; font-weight: 600; }
-                                            Text { width: 54px; text: "UTIL"; color: VayrenPalette.live-ink-dim; font-size: 9px; font-weight: 600; }
-                                            Text { width: 78px; text: "STATUS"; color: VayrenPalette.live-ink-dim; font-size: 9px; font-weight: 600; }
-                                            Text { width: 86px; text: "ELIG"; color: VayrenPalette.live-ink-dim; font-size: 9px; font-weight: 600; }
-                                            Text { width: 58px; text: "SIGNAL"; color: VayrenPalette.live-ink-dim; font-size: 9px; font-weight: 600; }
-                                            Text { width: 72px; text: "ORDER"; color: VayrenPalette.live-ink-dim; font-size: 9px; font-weight: 600; }
-                                            Text { width: 72px; text: "POSITION"; color: VayrenPalette.live-ink-dim; font-size: 9px; font-weight: 600; }
-                                            Text { width: 68px; text: "P&L"; color: VayrenPalette.live-ink-dim; font-size: 9px; font-weight: 600; }
+                                            Text { width: 14px; text: ""; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                            Text { width: 84px; text: "SYMBOL"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                            Text { width: 65px; text: "LTP"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                            Text { width: 54px; text: "CHG%"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                            Text { width: 58px; text: "REF HI"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                            Text { width: 58px; text: "REF LO"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                            Text { width: 68px; text: "BREAK LOW"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                            Text { width: 65px; text: "ENTRY"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                            Text { width: 65px; text: "STOP"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                            Text { width: 58px; text: "RISK/SH"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                            Text { width: 44px; text: "QTY"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                            Text { width: 70px; text: "MAX RISK"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                            Text { width: 72px; text: "PLANNED"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                            Text { width: 54px; text: "UTIL"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                            Text { width: 78px; text: "STATUS"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                            Text { width: 86px; text: "ELIG"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                            Text { width: 58px; text: "SIGNAL"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                            Text { width: 72px; text: "ORDER"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                            Text { width: 72px; text: "POSITION"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                            Text { width: 68px; text: "P&L"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
                                         }
                                     }
 
                                     if root.watchlist.length > 0: VerticalLayout {
                                         spacing: 1px;
                                         for row in root.watchlist: Rectangle {
-                                            height: 26px;
+                                            height: 28px;
+                                            border-radius: 4px;
                                             background: row.selected ? VayrenPalette.live-row-checked : (wl-row-touch.has-hover ? VayrenPalette.hover : transparent);
                                             border-width: 1px;
-                                            border-color: row.selected ? VayrenPalette.live-teal-deep : transparent;
+                                            border-color: row.selected ? VayrenPalette.live-teal-deep : (wl-row-touch.has-hover ? VayrenPalette.live-line-soft : transparent);
 
                                             wl-row-touch := TouchArea {
                                                 clicked => { root.watchlist-selected(row.full-symbol != "" ? row.full-symbol : row.symbol); }
@@ -1840,25 +1844,25 @@ export component LiveScreen inherits Rectangle {
                                             HorizontalLayout {
                                                 padding-left: 6px; padding-right: 6px; spacing: 4px; alignment: center;
                                                 Rectangle { width: 10px; height: 10px; border-radius: 5px; background: LiveTone.ink(row.status-tone); }
-                                                Text { width: 84px; text: row.symbol; color: row.selected ? VayrenPalette.live-teal : VayrenPalette.text-bright; font-size: 11px; font-weight: 700; vertical-alignment: center; overflow: elide; }
-                                                Text { width: 65px; text: row.ltp; color: VayrenPalette.text; font-size: 11px; vertical-alignment: center; }
-                                                Text { width: 54px; text: row.change; color: LiveTone.ink(row.change-tone); font-size: 11px; font-weight: 600; vertical-alignment: center; }
-                                                Text { width: 58px; text: row.ref-high; color: VayrenPalette.live-ink-soft; font-size: 10px; vertical-alignment: center; }
-                                                Text { width: 58px; text: row.ref-low; color: VayrenPalette.live-ink-soft; font-size: 10px; vertical-alignment: center; }
-                                                Text { width: 68px; text: row.break-low; color: VayrenPalette.live-ink-soft; font-size: 10px; vertical-alignment: center; }
-                                                Text { width: 65px; text: row.entry; color: VayrenPalette.text; font-size: 10px; vertical-alignment: center; }
-                                                Text { width: 65px; text: row.stop; color: VayrenPalette.text; font-size: 10px; vertical-alignment: center; }
-                                                Text { width: 58px; text: row.risk-share; color: VayrenPalette.live-ink-soft; font-size: 10px; vertical-alignment: center; }
-                                                Text { width: 44px; text: row.qty; color: VayrenPalette.text; font-size: 10px; vertical-alignment: center; }
-                                                Text { width: 70px; text: row.max-allowed-risk; color: VayrenPalette.live-ink-soft; font-size: 10px; vertical-alignment: center; }
-                                                Text { width: 72px; text: row.planned-risk; color: VayrenPalette.text; font-size: 10px; vertical-alignment: center; }
-                                                Text { width: 54px; text: row.risk-util; color: LiveTone.ink(row.risk-util-tone); font-size: 10px; font-weight: 600; vertical-alignment: center; }
-                                                Text { width: 78px; text: row.status; color: LiveTone.ink(row.status-tone); font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
-                                                Text { width: 86px; text: row.eligibility; color: LiveTone.ink(row.eligibility-tone); font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
-                                                Text { width: 58px; text: row.signal; color: LiveTone.ink(row.signal-tone); font-size: 10px; font-weight: 600; vertical-alignment: center; }
-                                                Text { width: 72px; text: row.order; color: LiveTone.ink(row.order-tone); font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
-                                                Text { width: 72px; text: row.position; color: VayrenPalette.text; font-size: 10px; vertical-alignment: center; overflow: elide; }
-                                                Text { width: 68px; text: row.pnl; color: LiveTone.ink(row.pnl-tone); font-size: 10px; font-weight: 600; vertical-alignment: center; }
+                                                Text { width: 84px; text: row.symbol; color: row.selected ? VayrenPalette.live-teal : VayrenPalette.text-bright; font-size: 11.5px; font-weight: 700; vertical-alignment: center; overflow: elide; }
+                                                Text { width: 65px; text: row.ltp; color: VayrenPalette.text; font-size: 11px; font-weight: 600; vertical-alignment: center; }
+                                                Text { width: 54px; text: row.change; color: LiveTone.ink(row.change-tone); font-size: 11px; font-weight: 700; vertical-alignment: center; }
+                                                Text { width: 58px; text: row.ref-high; color: VayrenPalette.text; font-size: 10.5px; vertical-alignment: center; }
+                                                Text { width: 58px; text: row.ref-low; color: VayrenPalette.text; font-size: 10.5px; vertical-alignment: center; }
+                                                Text { width: 68px; text: row.break-low; color: VayrenPalette.text; font-size: 10.5px; vertical-alignment: center; }
+                                                Text { width: 65px; text: row.entry; color: VayrenPalette.text; font-size: 10.5px; vertical-alignment: center; }
+                                                Text { width: 65px; text: row.stop; color: VayrenPalette.text; font-size: 10.5px; vertical-alignment: center; }
+                                                Text { width: 58px; text: row.risk-share; color: VayrenPalette.muted; font-size: 10.5px; vertical-alignment: center; }
+                                                Text { width: 44px; text: row.qty; color: VayrenPalette.text; font-size: 10.5px; font-weight: 600; vertical-alignment: center; }
+                                                Text { width: 70px; text: row.max-allowed-risk; color: VayrenPalette.muted; font-size: 10.5px; vertical-alignment: center; }
+                                                Text { width: 72px; text: row.planned-risk; color: VayrenPalette.text; font-size: 10.5px; vertical-alignment: center; }
+                                                Text { width: 54px; text: row.risk-util; color: LiveTone.ink(row.risk-util-tone); font-size: 10.5px; font-weight: 700; vertical-alignment: center; }
+                                                Text { width: 78px; text: row.status; color: LiveTone.ink(row.status-tone); font-size: 10.5px; font-weight: 700; vertical-alignment: center; overflow: elide; }
+                                                Text { width: 86px; text: row.eligibility; color: LiveTone.ink(row.eligibility-tone); font-size: 10.5px; font-weight: 700; vertical-alignment: center; overflow: elide; }
+                                                Text { width: 58px; text: row.signal; color: LiveTone.ink(row.signal-tone); font-size: 10.5px; font-weight: 700; vertical-alignment: center; }
+                                                Text { width: 72px; text: row.order; color: LiveTone.ink(row.order-tone); font-size: 10.5px; font-weight: 700; vertical-alignment: center; overflow: elide; }
+                                                Text { width: 72px; text: row.position; color: VayrenPalette.text; font-size: 10.5px; font-weight: 600; vertical-alignment: center; overflow: elide; }
+                                                Text { width: 68px; text: row.pnl; color: LiveTone.ink(row.pnl-tone); font-size: 10.5px; font-weight: 700; vertical-alignment: center; }
                                             }
                                         }
                                     }
@@ -2000,16 +2004,17 @@ export component LiveScreen inherits Rectangle {
                                 Rectangle {
                                     height: 24px;
                                     background: VayrenPalette.bg1;
+                                    border-radius: 4px;
                                     HorizontalLayout {
-                                        padding-left: 8px; padding-right: 8px; spacing: 8px;
-                                        Text { width: 90px; text: "SYMBOL"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { width: 50px; text: "SIDE"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { width: 50px; text: "QTY"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { width: 80px; text: "ENTRY"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { width: 80px; text: "LTP"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { width: 80px; text: "P&L"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { width: 70px; text: "P&L %"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { horizontal-stretch: 1; text: "STATUS"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
+                                        padding-left: 8px; padding-right: 8px; spacing: 8px; alignment: center;
+                                        Text { width: 90px; text: "SYMBOL"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                        Text { width: 50px; text: "SIDE"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                        Text { width: 50px; text: "QTY"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                        Text { width: 80px; text: "ENTRY"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                        Text { width: 80px; text: "LTP"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                        Text { width: 80px; text: "P&L"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                        Text { width: 70px; text: "P&L %"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                        Text { horizontal-stretch: 1; text: "STATUS"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
                                     }
                                 }
 
@@ -2017,7 +2022,7 @@ export component LiveScreen inherits Rectangle {
                                     vertical-stretch: 1;
                                     Text {
                                         text: "No open positions (SOURCE: BROKER / RECONCILIATION)";
-                                        color: VayrenPalette.live-ink-dim;
+                                        color: VayrenPalette.muted;
                                         font-size: 11px;
                                         horizontal-alignment: center;
                                         vertical-alignment: center;
@@ -2026,17 +2031,21 @@ export component LiveScreen inherits Rectangle {
 
                                 for pos in root.positions: Rectangle {
                                     height: 28px;
-                                    background: VayrenPalette.live-panel-deep;
+                                    border-radius: 4px;
+                                    background: pos-touch.has-hover ? VayrenPalette.hover : VayrenPalette.live-panel-deep;
+                                    border-width: 1px;
+                                    border-color: pos-touch.has-hover ? VayrenPalette.live-line-soft : transparent;
+                                    pos-touch := TouchArea {}
                                     HorizontalLayout {
                                         padding-left: 8px; padding-right: 8px; spacing: 8px; alignment: center;
-                                        Text { width: 90px; text: pos.symbol; color: VayrenPalette.text-bright; font-size: 11px; font-weight: 700; vertical-alignment: center; overflow: elide; }
+                                        Text { width: 90px; text: pos.symbol; color: VayrenPalette.text-bright; font-size: 11.5px; font-weight: 700; vertical-alignment: center; overflow: elide; }
                                         Text { width: 50px; text: pos.side; color: LiveTone.ink(pos.side-tone); font-size: 11px; font-weight: 700; vertical-alignment: center; }
-                                        Text { width: 50px; text: pos.qty; color: VayrenPalette.text; font-size: 11px; vertical-alignment: center; }
+                                        Text { width: 50px; text: pos.qty; color: VayrenPalette.text; font-size: 11px; font-weight: 600; vertical-alignment: center; }
                                         Text { width: 80px; text: pos.entry; color: VayrenPalette.text; font-size: 11px; vertical-alignment: center; }
                                         Text { width: 80px; text: pos.current; color: VayrenPalette.text; font-size: 11px; vertical-alignment: center; }
-                                        Text { width: 80px; text: pos.pnl; color: LiveTone.ink(pos.pnl-tone); font-size: 11px; font-weight: 700; vertical-alignment: center; }
+                                        Text { width: 80px; text: pos.pnl; color: LiveTone.ink(pos.pnl-tone); font-size: 11.5px; font-weight: 700; vertical-alignment: center; }
                                         Text { width: 70px; text: pos.pnl-pct; color: LiveTone.ink(pos.pnl-tone); font-size: 11px; font-weight: 700; vertical-alignment: center; }
-                                        Text { horizontal-stretch: 1; text: pos.status; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; vertical-alignment: center; }
+                                        Text { horizontal-stretch: 1; text: pos.status; color: VayrenPalette.muted; font-size: 10.5px; font-weight: 600; vertical-alignment: center; }
                                     }
                                 }
                             }
@@ -2048,16 +2057,17 @@ export component LiveScreen inherits Rectangle {
                                 Rectangle {
                                     height: 24px;
                                     background: VayrenPalette.bg1;
+                                    border-radius: 4px;
                                     HorizontalLayout {
-                                        padding-left: 8px; padding-right: 8px; spacing: 8px;
-                                        Text { width: 70px; text: "TIME"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { width: 90px; text: "ORDER ID"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { width: 80px; text: "STRATEGY"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { width: 80px; text: "SYMBOL"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { width: 50px; text: "SIDE"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { width: 50px; text: "QTY"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { width: 80px; text: "PRICE"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { horizontal-stretch: 1; text: "STATUS"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
+                                        padding-left: 8px; padding-right: 8px; spacing: 8px; alignment: center;
+                                        Text { width: 70px; text: "TIME"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                        Text { width: 90px; text: "ORDER ID"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                        Text { width: 80px; text: "STRATEGY"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                        Text { width: 80px; text: "SYMBOL"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                        Text { width: 50px; text: "SIDE"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                        Text { width: 50px; text: "QTY"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                        Text { width: 80px; text: "PRICE"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                        Text { horizontal-stretch: 1; text: "STATUS"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
                                     }
                                 }
 
@@ -2065,7 +2075,7 @@ export component LiveScreen inherits Rectangle {
                                     vertical-stretch: 1;
                                     Text {
                                         text: "No orders submitted yet";
-                                        color: VayrenPalette.live-ink-dim;
+                                        color: VayrenPalette.muted;
                                         font-size: 11px;
                                         horizontal-alignment: center;
                                         vertical-alignment: center;
@@ -2074,18 +2084,22 @@ export component LiveScreen inherits Rectangle {
 
                                 for ord in root.orders: Rectangle {
                                     height: 28px;
-                                    background: VayrenPalette.live-panel-deep;
+                                    border-radius: 4px;
+                                    background: ord-touch.has-hover ? VayrenPalette.hover : VayrenPalette.live-panel-deep;
+                                    border-width: 1px;
+                                    border-color: ord-touch.has-hover ? VayrenPalette.live-line-soft : transparent;
+                                    ord-touch := TouchArea {}
                                     HorizontalLayout {
                                         padding-left: 8px; padding-right: 8px; spacing: 8px; alignment: center;
-                                        Text { width: 70px; text: ord.time; color: VayrenPalette.muted; font-size: 10px; vertical-alignment: center; }
+                                        Text { width: 70px; text: ord.time; color: VayrenPalette.muted; font-size: 10.5px; vertical-alignment: center; }
                                         Text { width: 90px; text: ord.order-id; color: VayrenPalette.text; font-size: 11px; vertical-alignment: center; overflow: elide; }
                                         Text { width: 80px; text: ord.strategy; color: VayrenPalette.text; font-size: 11px; vertical-alignment: center; overflow: elide; }
-                                        Text { width: 80px; text: ord.symbol; color: VayrenPalette.text-bright; font-size: 11px; font-weight: 700; vertical-alignment: center; overflow: elide; }
+                                        Text { width: 80px; text: ord.symbol; color: VayrenPalette.text-bright; font-size: 11.5px; font-weight: 700; vertical-alignment: center; overflow: elide; }
                                         Text { width: 50px; text: ord.side; color: LiveTone.ink(ord.side-tone); font-size: 11px; font-weight: 700; vertical-alignment: center; }
-                                        Text { width: 50px; text: ord.qty; color: VayrenPalette.text; font-size: 11px; vertical-alignment: center; }
+                                        Text { width: 50px; text: ord.qty; color: VayrenPalette.text; font-size: 11px; font-weight: 600; vertical-alignment: center; }
                                         Text { width: 80px; text: ord.price; color: VayrenPalette.text; font-size: 11px; vertical-alignment: center; }
                                         Text { width: 70px; text: ord.status; color: LiveTone.ink(ord.status-tone); font-size: 11px; font-weight: 700; vertical-alignment: center; }
-                                        Text { horizontal-stretch: 1; text: ord.reason != "" ? " · " + ord.reason : ""; color: VayrenPalette.neg; font-size: 10px; vertical-alignment: center; overflow: elide; }
+                                        Text { horizontal-stretch: 1; text: ord.reason != "" ? " · " + ord.reason : ""; color: VayrenPalette.neg; font-size: 10.5px; vertical-alignment: center; overflow: elide; }
                                     }
                                 }
                             }
@@ -2097,15 +2111,16 @@ export component LiveScreen inherits Rectangle {
                                 Rectangle {
                                     height: 24px;
                                     background: VayrenPalette.bg1;
+                                    border-radius: 4px;
                                     HorizontalLayout {
-                                        padding-left: 8px; padding-right: 8px; spacing: 8px;
-                                        Text { width: 70px; text: "TIME"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { width: 80px; text: "SYMBOL"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { width: 50px; text: "SIDE"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { width: 50px; text: "QTY"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { width: 80px; text: "PRICE"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { width: 80px; text: "STRATEGY"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { horizontal-stretch: 1; text: "ORDER ID"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
+                                        padding-left: 8px; padding-right: 8px; spacing: 8px; alignment: center;
+                                        Text { width: 70px; text: "TIME"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                        Text { width: 80px; text: "SYMBOL"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                        Text { width: 50px; text: "SIDE"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                        Text { width: 50px; text: "QTY"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                        Text { width: 80px; text: "PRICE"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                        Text { width: 80px; text: "STRATEGY"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                        Text { horizontal-stretch: 1; text: "ORDER ID"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
                                     }
                                 }
 
@@ -2113,7 +2128,7 @@ export component LiveScreen inherits Rectangle {
                                     vertical-stretch: 1;
                                     Text {
                                         text: "No order fills (SOURCE: ORDER / TRADE WS)";
-                                        color: VayrenPalette.live-ink-dim;
+                                        color: VayrenPalette.muted;
                                         font-size: 11px;
                                         horizontal-alignment: center;
                                         vertical-alignment: center;
@@ -2122,16 +2137,20 @@ export component LiveScreen inherits Rectangle {
 
                                 for fill in root.fills: Rectangle {
                                     height: 28px;
-                                    background: VayrenPalette.live-panel-deep;
+                                    border-radius: 4px;
+                                    background: fill-touch.has-hover ? VayrenPalette.hover : VayrenPalette.live-panel-deep;
+                                    border-width: 1px;
+                                    border-color: fill-touch.has-hover ? VayrenPalette.live-line-soft : transparent;
+                                    fill-touch := TouchArea {}
                                     HorizontalLayout {
                                         padding-left: 8px; padding-right: 8px; spacing: 8px; alignment: center;
-                                        Text { width: 70px; text: fill.time; color: VayrenPalette.muted; font-size: 10px; vertical-alignment: center; }
-                                        Text { width: 80px; text: fill.symbol; color: VayrenPalette.text-bright; font-size: 11px; font-weight: 700; vertical-alignment: center; overflow: elide; }
+                                        Text { width: 70px; text: fill.time; color: VayrenPalette.muted; font-size: 10.5px; vertical-alignment: center; }
+                                        Text { width: 80px; text: fill.symbol; color: VayrenPalette.text-bright; font-size: 11.5px; font-weight: 700; vertical-alignment: center; overflow: elide; }
                                         Text { width: 50px; text: fill.side; color: LiveTone.ink(fill.side-tone); font-size: 11px; font-weight: 700; vertical-alignment: center; }
-                                        Text { width: 50px; text: fill.qty; color: VayrenPalette.text; font-size: 11px; vertical-alignment: center; }
+                                        Text { width: 50px; text: fill.qty; color: VayrenPalette.text; font-size: 11px; font-weight: 600; vertical-alignment: center; }
                                         Text { width: 80px; text: fill.price; color: VayrenPalette.text; font-size: 11px; vertical-alignment: center; }
                                         Text { width: 80px; text: fill.strategy; color: VayrenPalette.text; font-size: 11px; vertical-alignment: center; overflow: elide; }
-                                        Text { horizontal-stretch: 1; text: fill.order-id; color: VayrenPalette.live-ink-dim; font-size: 11px; vertical-alignment: center; overflow: elide; }
+                                        Text { horizontal-stretch: 1; text: fill.order-id; color: VayrenPalette.muted; font-size: 10.5px; vertical-alignment: center; overflow: elide; }
                                     }
                                 }
                             }
@@ -2145,17 +2164,17 @@ export component LiveScreen inherits Rectangle {
                                     height: 22px;
                                     spacing: 6px;
                                     for cat[idx] in root.event-types: Rectangle {
-                                        height: 20px;
-                                        border-radius: 10px;
-                                        background: root.event-type-index == idx ? VayrenPalette.live-teal-deep : VayrenPalette.live-panel-deep;
+                                        height: 22px;
+                                        border-radius: 11px;
+                                        background: root.event-type-index == idx ? VayrenPalette.live-teal-deep : (cat-touch.has-hover ? VayrenPalette.hover : VayrenPalette.live-panel-deep);
                                         border-width: 1px;
-                                        border-color: root.event-type-index == idx ? VayrenPalette.live-teal : VayrenPalette.live-line-soft;
-                                        TouchArea { clicked => { root.event-type-picked(cat); } }
+                                        border-color: root.event-type-index == idx ? VayrenPalette.live-teal : (cat-touch.has-hover ? VayrenPalette.muted : VayrenPalette.live-line-soft);
+                                        cat-touch := TouchArea { clicked => { root.event-type-picked(cat); } }
                                         HorizontalLayout {
                                             padding-left: 8px; padding-right: 8px; alignment: center;
                                             Text {
                                                 text: cat;
-                                                color: root.event-type-index == idx ? VayrenPalette.live-teal : VayrenPalette.live-ink-mute;
+                                                color: root.event-type-index == idx ? VayrenPalette.live-teal : (cat-touch.has-hover ? VayrenPalette.text : VayrenPalette.muted);
                                                 font-size: 10px;
                                                 font-weight: root.event-type-index == idx ? 700 : 600;
                                                 vertical-alignment: center;
@@ -2177,15 +2196,16 @@ export component LiveScreen inherits Rectangle {
                                 }
 
                                 Rectangle {
-                                    height: 20px;
+                                    height: 22px;
                                     background: VayrenPalette.bg1;
+                                    border-radius: 4px;
                                     HorizontalLayout {
-                                        padding-left: 6px; padding-right: 6px; spacing: 6px;
-                                        Text { width: 72px; text: "Time"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { width: 44px; text: "Level"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { horizontal-stretch: 1; text: "Event"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { width: 80px; text: "Symbol"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                        Text { width: 70px; text: "Source"; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
+                                        padding-left: 6px; padding-right: 6px; spacing: 6px; alignment: center;
+                                        Text { width: 72px; text: "Time"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                        Text { width: 44px; text: "Level"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                        Text { horizontal-stretch: 1; text: "Event"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                        Text { width: 80px; text: "Symbol"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
+                                        Text { width: 70px; text: "Source"; color: VayrenPalette.muted; font-size: 10px; font-weight: 700; }
                                     }
                                 }
 
@@ -2193,7 +2213,7 @@ export component LiveScreen inherits Rectangle {
                                     vertical-stretch: 1;
                                     Text {
                                         text: "No system events logged";
-                                        color: VayrenPalette.live-ink-dim;
+                                        color: VayrenPalette.muted;
                                         font-size: 11px;
                                         horizontal-alignment: center;
                                         vertical-alignment: center;
@@ -2202,16 +2222,20 @@ export component LiveScreen inherits Rectangle {
 
                                 for ev in root.events: Rectangle {
                                     height: 24px;
-                                    background: VayrenPalette.live-panel-deep;
+                                    border-radius: 4px;
+                                    background: ev-touch.has-hover ? VayrenPalette.hover : VayrenPalette.live-panel-deep;
+                                    border-width: 1px;
+                                    border-color: ev-touch.has-hover ? VayrenPalette.live-line-soft : transparent;
+                                    ev-touch := TouchArea {}
                                     HorizontalLayout {
                                         padding-left: 6px; padding-right: 6px; spacing: 6px; alignment: center;
                                         Text { width: 72px; text: ev.time; color: VayrenPalette.muted; font-size: 10px; vertical-alignment: center;
                                             Tooltip { text: @markdown("\{ev.timestamp}"); }
                                         }
                                         Text { width: 44px; text: ev.level; color: LiveTone.ink(ev.status-tone); font-size: 10px; font-weight: 700; vertical-alignment: center; }
-                                        Text { horizontal-stretch: 1; text: ev.event; color: ev.status-tone == 3 ? VayrenPalette.neg : VayrenPalette.live-ink; font-size: 11px; vertical-alignment: center; overflow: elide; }
-                                        Text { width: 80px; text: ev.symbol; color: VayrenPalette.text-bright; font-size: 10px; font-weight: 600; vertical-alignment: center; overflow: elide; }
-                                        Text { width: 70px; text: ev.category; color: VayrenPalette.live-ink-soft; font-size: 10px; vertical-alignment: center; overflow: elide; }
+                                        Text { horizontal-stretch: 1; text: ev.event; color: ev.status-tone == 3 ? VayrenPalette.neg : VayrenPalette.text; font-size: 11px; vertical-alignment: center; overflow: elide; }
+                                        Text { width: 80px; text: ev.symbol; color: VayrenPalette.text-bright; font-size: 10.5px; font-weight: 600; vertical-alignment: center; overflow: elide; }
+                                        Text { width: 70px; text: ev.category; color: VayrenPalette.muted; font-size: 10px; vertical-alignment: center; overflow: elide; }
                                     }
                                 }
                             }
@@ -2223,13 +2247,13 @@ export component LiveScreen inherits Rectangle {
                                 alignment: center;
                                 if root.stats.length == 0: Text {
                                     text: "No P&L data";
-                                    color: VayrenPalette.live-ink-dim;
+                                    color: VayrenPalette.muted;
                                     font-size: 11px;
                                 }
                                 for stat in root.stats: VerticalLayout {
                                     spacing: 4px;
-                                    Text { text: stat.label; color: VayrenPalette.live-ink-dim; font-size: 10px; font-weight: 600; }
-                                    Text { text: stat.value; color: stat.tone == 1 ? VayrenPalette.pos : stat.tone == 3 ? VayrenPalette.neg : VayrenPalette.text; font-size: 14px; font-weight: 700; }
+                                    Text { text: stat.label; color: VayrenPalette.muted; font-size: 10.5px; font-weight: 700; }
+                                    Text { text: stat.value; color: stat.tone == 1 ? VayrenPalette.pos : stat.tone == 3 ? VayrenPalette.neg : VayrenPalette.text; font-size: 15px; font-weight: 800; }
                                 }
                             }
                         }
@@ -2313,15 +2337,15 @@ export component LiveScreen inherits Rectangle {
                                 Text {
                                     text: root.active-strat.name != "" ? root.active-strat.name : (root.bar.strategy-label != "" ? root.bar.strategy-label : "None Selected");
                                     color: VayrenPalette.live-teal;
-                                    font-size: 13px;
-                                    font-weight: 700;
+                                    font-size: 14px;
+                                    font-weight: 800;
                                 }
 
                                 Text {
                                     text: "Runtime Status: " + (root.active-strat.status != "" ? root.active-strat.status : "STOPPED");
                                     color: LiveTone.ink(root.active-strat.status-tone);
-                                    font-size: 10px;
-                                    font-weight: 600;
+                                    font-size: 11px;
+                                    font-weight: 700;
                                 }
 
                                 // Engine uptime — the ONE elapsed reading. The
@@ -2335,40 +2359,43 @@ export component LiveScreen inherits Rectangle {
                                     text: root.active-strat.engine-running
                                         ? "ENGINE RUNNING: " + (root.active-strat.engine-clock != "" ? root.active-strat.engine-clock : "--:--:--")
                                         : "ENGINE STOPPED";
-                                    color: root.active-strat.engine-running ? VayrenPalette.live-teal : VayrenPalette.live-ink;
-                                    font-size: 10px;
-                                    font-weight: 700;
+                                    color: root.active-strat.engine-running ? VayrenPalette.live-teal : VayrenPalette.muted;
+                                    font-size: 11px;
+                                    font-weight: 800;
                                 }
 
                                 if root.active-strat.stopped-at != "" && root.active-strat.stopped-at != "—": Text {
                                     text: "Last Stopped At: " + root.active-strat.stopped-at;
-                                    color: VayrenPalette.live-ink;
-                                    font-size: 10px;
+                                    color: VayrenPalette.muted;
+                                    font-size: 10.5px;
                                 }
 
                                 if !root.active-strat.engine-running && root.active-strat.duration != "" && root.active-strat.duration != "—": Text {
                                     text: "Last Runtime Duration: " + root.active-strat.duration;
-                                    color: VayrenPalette.live-ink;
-                                    font-size: 10px;
+                                    color: VayrenPalette.muted;
+                                    font-size: 10.5px;
                                     font-weight: 600;
                                 }
 
                                 Text {
                                     text: "Signals generated: " + root.active-strat.today-signals;
-                                    color: VayrenPalette.live-ink-dim;
-                                    font-size: 10px;
+                                    color: VayrenPalette.muted;
+                                    font-size: 10.5px;
+                                    font-weight: 600;
                                 }
 
                                 if root.active-strat.orders-detail != "": Text {
                                     text: "Orders: " + root.active-strat.orders-detail;
-                                    color: VayrenPalette.live-ink-dim;
-                                    font-size: 10px;
+                                    color: VayrenPalette.muted;
+                                    font-size: 10.5px;
+                                    font-weight: 600;
                                 }
 
                                 Text {
                                     text: "Universe: " + root.setup.symbol-total;
-                                    color: VayrenPalette.live-ink-dim;
-                                    font-size: 10px;
+                                    color: VayrenPalette.muted;
+                                    font-size: 10.5px;
+                                    font-weight: 600;
                                 }
                             }
                         }
@@ -2404,9 +2431,9 @@ export component LiveScreen inherits Rectangle {
                                     Text {
                                         width: 96px;
                                         text: "QUANTITY";
-                                        color: VayrenPalette.live-ink-dim;
+                                        color: VayrenPalette.muted;
                                         font-size: 10px;
-                                        font-weight: 600;
+                                        font-weight: 700;
                                         vertical-alignment: center;
                                     }
 
@@ -2434,9 +2461,9 @@ export component LiveScreen inherits Rectangle {
                                     Text {
                                         width: 96px;
                                         text: "TIMEFRAME";
-                                        color: VayrenPalette.live-ink-dim;
+                                        color: VayrenPalette.muted;
                                         font-size: 10px;
-                                        font-weight: 600;
+                                        font-weight: 700;
                                         vertical-alignment: center;
                                     }
 
@@ -2514,15 +2541,16 @@ export component LiveScreen inherits Rectangle {
                                     Text {
                                         width: 96px;
                                         text: "SESSION";
-                                        color: VayrenPalette.live-ink-dim;
-                                        font-size: 10px;
+                                        color: VayrenPalette.muted;
+                                        font-size: 10.5px;
+                                        font-weight: 600;
                                         vertical-alignment: center;
                                     }
 
                                     Text {
                                         text: root.setup.session-label != "" ? root.setup.session-label : "—";
                                         color: LiveTone.ink(root.setup.session-tone);
-                                        font-size: 10px;
+                                        font-size: 10.5px;
                                         font-weight: 700;
                                         vertical-alignment: center;
                                     }
@@ -2531,9 +2559,9 @@ export component LiveScreen inherits Rectangle {
 
                                     Text {
                                         text: "SIZE " + (root.setup.quantity != "" ? root.setup.quantity : "—");
-                                        color: VayrenPalette.live-ink;
-                                        font-size: 10px;
-                                        font-weight: 600;
+                                        color: VayrenPalette.text;
+                                        font-size: 10.5px;
+                                        font-weight: 700;
                                         vertical-alignment: center;
                                     }
                                 }
@@ -2543,7 +2571,8 @@ export component LiveScreen inherits Rectangle {
                                     for b in root.blockers: Text {
                                         text: "✕ " + b;
                                         color: VayrenPalette.neg;
-                                        font-size: 10px;
+                                        font-size: 10.5px;
+                                        font-weight: 600;
                                         overflow: elide;
                                     }
                                 }
@@ -2566,8 +2595,8 @@ export component LiveScreen inherits Rectangle {
                                         text: root.setup.can-arm
                                             ? "Arming records the operator's ceremony with the backend."
                                             : (root.setup.confirmed-live ? "Confirmed for LIVE this session." : "Connect the broker and clear the verdict to arm.");
-                                        color: VayrenPalette.live-ink-dim;
-                                        font-size: 9px;
+                                        color: VayrenPalette.muted;
+                                        font-size: 9.5px;
                                         vertical-alignment: center;
                                         overflow: elide;
                                     }
@@ -2576,7 +2605,7 @@ export component LiveScreen inherits Rectangle {
                                 if root.arm-note != "": Text {
                                     text: root.arm-note;
                                     color: VayrenPalette.amber;
-                                    font-size: 9px;
+                                    font-size: 9.5px;
                                     overflow: elide;
                                 }
 
@@ -2619,14 +2648,15 @@ export component LiveScreen inherits Rectangle {
                                     Text {
                                         text: "Broker:";
                                         width: 112px;
-                                        color: VayrenPalette.live-ink-dim;
-                                        font-size: 10px;
+                                        color: VayrenPalette.muted;
+                                        font-size: 10.5px;
+                                        font-weight: 600;
                                     }
                                     Text {
                                         text: root.bar.broker-label != "" ? root.bar.broker-label : "FYERS";
-                                        color: VayrenPalette.text;
-                                        font-size: 11px;
-                                        font-weight: 600;
+                                        color: VayrenPalette.text-bright;
+                                        font-size: 11.5px;
+                                        font-weight: 700;
                                     }
                                 }
 
@@ -2635,14 +2665,15 @@ export component LiveScreen inherits Rectangle {
                                     Text {
                                         text: "Available Capital:";
                                         width: 112px;
-                                        color: VayrenPalette.live-ink-dim;
-                                        font-size: 10px;
+                                        color: VayrenPalette.muted;
+                                        font-size: 10.5px;
+                                        font-weight: 600;
                                     }
                                     Text {
                                         text: root.bar.capital-value != "" ? root.bar.capital-value : "₹0.00";
                                         color: VayrenPalette.live-teal;
-                                        font-size: 12px;
-                                        font-weight: 700;
+                                        font-size: 12.5px;
+                                        font-weight: 800;
                                     }
                                 }
 
@@ -2651,14 +2682,15 @@ export component LiveScreen inherits Rectangle {
                                     Text {
                                         text: "Status:";
                                         width: 112px;
-                                        color: VayrenPalette.live-ink-dim;
-                                        font-size: 10px;
+                                        color: VayrenPalette.muted;
+                                        font-size: 10.5px;
+                                        font-weight: 600;
                                     }
                                     Text {
                                         text: root.bar.conn-label != "" ? root.bar.conn-label : "DISCONNECTED";
                                         color: LiveTone.ink(root.bar.conn-tone);
-                                        font-size: 10px;
-                                        font-weight: 600;
+                                        font-size: 11px;
+                                        font-weight: 700;
                                     }
                                 }
                             }

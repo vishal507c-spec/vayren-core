@@ -7,7 +7,36 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (paper-sandbox-final-elimination-20261018):** COMPLETE ELIMINATION OF PAPER & SANDBOX ACROSS UI & BACKEND — Slint mode selectors (wide & narrow) replaced with dedicated static LIVE indicator chip; broker connection defaults updated to LIVE; active strategy mode fallback updated to LIVE; domain mode tone mapping cleaned; dead FFI exports cleaned; cargo build -p vayren-shell succeeded; desktop binary refreshed; pyright 0 errors, ruff clean, all 201 execution tests and desktop tests passing 100%.
+**Latest update (remote-broker-ui-regression-fix-20261018):** REMOTE BROKER UI REGRESSION RESOLVED (NO ORDERS, NO ARMING, NO DEPLOY, NO REMOTE PUSH) — Diagnosed and corrected desktop UI regression where Fyers broker displayed `Connection Failed`, blank credential inputs, and false `Authenticate Failed` in `--remote-ui` mode:
+- Root cause:
+  1. `apply_authoritative_broker_ui()` did not call `ui.set_conn_saved_sentinel` and left form input fields blank even when `auth.fields_configured` was true on EC2.
+  2. `main()` was allocating a throwaway `RemoteBrokerForm::default()` inside the gateway sync closure on each tick, causing form state and action bindings to lose remote configuration.
+  3. `FetchResult::System` in local host background loop unconditionally overwrote `live_state.borrow_mut().broker` with disconnected local workspace data whenever any local fetch completed.
+  4. Connect, login, and disconnect callbacks relied on `cur_ws.selected_id` which was empty in `--remote-ui` mode; now they resolve broker ID & form keys via persistent `form_state` and dispatch authenticated gateway commands (`broker_connect`, `broker_login`, `broker_disconnect`).
+  5. False "Authentication failed" diagnostic: in fallback string checking, `r_lower.contains("failed")` was matching operational market-data heartbeat warnings (e.g. `FAILED: stale — no market data for 1096s`). Added guard to distinguish genuine auth failures from weekend market-data warnings.
+- Fixes applied in `crates/vayren-shell/src/main.rs`:
+  - Added persistent `broker_form` in `main()` with `timer_broker_form` handle for snapshot sync.
+  - Guarded `FetchResult::System` so local workspace does not overwrite remote broker state when `has_gateway_link` is active.
+  - Pre-filled `SAVED_CREDENTIAL_SENTINEL` and set `conn_saved_sentinel: true` when `auth.fields_configured` is true.
+  - Updated remote connect/login/disconnect actions to use `send_remote_broker_command` with sanitized credentials via `zip_broker_credentials`.
+  - Guarded `on_broker_select_requested` and `on_broker_refresh_requested` from triggering local fetch in remote mode.
+- Verification & Integrity:
+  - Added unit regression tests: `authoritative_paint_prefills_saved_sentinel_when_configured` and `degraded_market_data_does_not_paint_auth_failure` (14/14 tests in `main.rs` passed).
+  - All 65 shell unit tests, 298 domain tests, and Slint render snapshot tests passed 100%.
+  - Impact benchmark validation passed in 26.98s (`Level 2: single-domain rust change (rust-ui)`).
+  - Both debug and release executables (`target/release/vayren-shell.exe`) rebuilt.
+  - Desktop shortcut `C:\Users\visha\Desktop\VAYREN.lnk` verified pointing to `vayren-shell.exe` with `--remote-ui`.
+  - Zero live orders placed, LIVE disarmed, EC2 production services untouched.
+
+**Previous update (live-ui-visual-polish-20261018):** LIVE UI VISUAL POLISH & UX ENHANCEMENT COMPLETE — Contrast, typography hierarchy, and interactive UX substantially upgraded across the native Slint LIVE workstation without breaking tests or layout constraints:
+- Top Status Cards (`LiveTopCard`, `LiveBrokerCapitalCard`): Bumped font-size to 9.5px–11.5px, enhanced contrast with `VayrenPalette.muted` for secondary labels/status, capital value styled with 13.5px font-weight 800, and refresh buttons equipped with hover micro-interactions.
+- Live Tabs & Navigation (`LiveTabHeader`): Active tab text highlighted in `live-teal` with 700 weight, inactive tabs given responsive hover feedback (`VayrenPalette.text`), and active tab underline rendered with smooth rounded indicator.
+- Strategy Watchlist Table: Upgraded table header height to 24px with high-contrast `VayrenPalette.muted` 10px bold text; rows given 28px height with 4px border radius and clean hover/selection borders; all data cells upgraded with crisp `VayrenPalette.text` and bold semantic tones; filter chip pills enhanced with responsive hover states and active glow.
+- Blotter Panels (Positions, Orders, Fills, Live Events, Daily P&L): Headers upgraded to 24px–26px with crisp `muted` 10px bold typography; rows equipped with hover effects and clear hierarchy; Daily P&L KPI metrics enlarged to 15px bold.
+- Inspector & Readiness: Upgraded Active Strategy name to 14px bold, runtime status to 11px bold, engine clock to 11px teal; input labels and broker info given high-contrast readable styling; `LiveGateRow` reasons rendered in semantic neg/warn tone for instant visibility of any blocker.
+- Verification: `cargo test -p vayren-shell` passed 100% (including all `live_render_snapshot` 7 off-screen rasterization tests, `live_event_time_column`, `live_stock_row_render`, and `live_watchlist_from_saved_universe`). Impact validation passed in 308.10s.
+
+**Previous update (paper-sandbox-final-elimination-20261018):** COMPLETE ELIMINATION OF PAPER & SANDBOX ACROSS UI & BACKEND — Slint mode selectors (wide & narrow) replaced with dedicated static LIVE indicator chip; broker connection defaults updated to LIVE; active strategy mode fallback updated to LIVE; domain mode tone mapping cleaned; dead FFI exports cleaned; cargo build -p vayren-shell succeeded; desktop binary refreshed; pyright 0 errors, ruff clean, all 201 execution tests and desktop tests passing 100%.
 
 **Previous update (live-reliability-hardening-20261018):** PHASE 5 INCREMENTS 7–8 COMPLETE — BROKER RECONCILIATION WIRING, LIVE PIPELINE HARDENING (DEDUP, BOUNDED QUEUES, STRICT ORDERING), LIVE ADAPTER VALIDATION & RECOVERY, AND STALE SESSION TIMING CORRECTION. ALL VERIFIED, NO ORDERS, NO ARMING, NO DEPLOY, NO PUSH.
 
