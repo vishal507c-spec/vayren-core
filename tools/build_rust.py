@@ -115,13 +115,32 @@ def _failure_summary(output: str, limit: int = 40) -> list[str]:
 
 def _run(argv: list[str]) -> int:
     print(f"+ {' '.join(argv)}", flush=True)
-    proc = subprocess.run(argv, cwd=ROOT, capture_output=True, text=True)
-    if proc.returncode != 0:
-        tail = (proc.stderr or proc.stdout or "")[-3000:]
-        print(f"cargo failed (rc={proc.returncode}):\n{tail}")
-        for line in _failure_summary(proc.stderr or proc.stdout or ""):
+    # Stream live and decode as UTF-8 with replacement: cargo speaks UTF-8
+    # while the Windows locale default is cp1252, and one undecodable byte
+    # must never kill the driver mid-build (observed: rc=1, empty log tail).
+    # Live streaming also keeps long silent compiles visible to the caller.
+    proc = subprocess.Popen(
+        argv,
+        cwd=ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    assert proc.stdout is not None  # Popen with stdout=PIPE guarantees it
+    lines: list[str] = []
+    for line in proc.stdout:
+        lines.append(line)
+        sys.stdout.write(line)
+        sys.stdout.flush()
+    rc = proc.wait()
+    if rc != 0:
+        output = "".join(lines)
+        print(f"cargo failed (rc={rc}):\n{output[-3000:]}")
+        for line in _failure_summary(output):
             print(f"  ! {line.strip()[:200]}", flush=True)
-    return proc.returncode
+    return rc
 
 
 def _phase(name: str) -> None:
@@ -350,4 +369,11 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    # Cargo output carries UTF-8; the Windows console/pipe default is cp1252.
+    # Reconfigure the write side too so progress glyphs can never raise.
+    # `getattr` keeps this pyright-clean: `sys.stdout` is typed as TextIO,
+    # which has no static `reconfigure` even though real streams do.
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if reconfigure is not None:
+        reconfigure(encoding="utf-8", errors="replace")
     raise SystemExit(main())

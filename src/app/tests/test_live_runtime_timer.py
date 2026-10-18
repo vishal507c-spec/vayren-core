@@ -41,7 +41,7 @@ def _setup_mock_strategy(service: LiveTradingService) -> None:
         strategy_name="sma-crossover",
         symbols=("NSE:RELIANCE",),
         timeframe="30m",
-        mode="PAPER",
+        mode="LIVE",
         quantity=1.0,
     )
 
@@ -74,6 +74,9 @@ def _setup_mock_strategy(service: LiveTradingService) -> None:
     )
     service._compiled = lambda _rec: compiled_mock  # type: ignore[assignment]
     service._build_sessions = lambda: None  # type: ignore[assignment]
+    # Timer tests mock the session build and validation — the start must
+    # proceed so the epoch/IST bookkeeping under test can run.
+    service.validate = lambda: ()  # type: ignore[assignment]
 
 
 def test_initial_start_records_authoritative_epoch_and_ist(service: LiveTradingService) -> None:
@@ -82,7 +85,7 @@ def test_initial_start_records_authoritative_epoch_and_ist(service: LiveTradingS
     assert service._started_at == ""
 
     t0 = time.time()
-    ok, blockers = service.start()
+    ok, blockers = service.start(confirmed=True)
     assert ok, f"Expected start to succeed, blockers: {blockers}"
 
     # Verify session start epoch is authoritative (matches wall time)
@@ -106,7 +109,7 @@ def test_initial_start_records_authoritative_epoch_and_ist(service: LiveTradingS
 
 def test_elapsed_time_calculation(service: LiveTradingService) -> None:
     _setup_mock_strategy(service)
-    service.start()
+    service.start(confirmed=True)
     start_epoch = service._session_start_epoch
     assert start_epoch is not None
 
@@ -121,7 +124,7 @@ def test_elapsed_time_calculation(service: LiveTradingService) -> None:
 
 def test_reconnect_persistence(service: LiveTradingService, tmp_path: Path) -> None:
     _setup_mock_strategy(service)
-    service.start()
+    service.start(confirmed=True)
     start_epoch = service._session_start_epoch
     started_at = service._started_at
 
@@ -144,7 +147,7 @@ def test_reconnect_persistence(service: LiveTradingService, tmp_path: Path) -> N
 
 def test_stop_halts_running_timer_and_records_last_duration(service: LiveTradingService) -> None:
     _setup_mock_strategy(service)
-    service.start()
+    service.start(confirmed=True)
     start_epoch = service._session_start_epoch
     assert start_epoch is not None
 
@@ -170,7 +173,7 @@ def test_stop_halts_running_timer_and_records_last_duration(service: LiveTrading
 
 def test_error_state_halts_running_timer(service: LiveTradingService) -> None:
     _setup_mock_strategy(service)
-    service.start()
+    service.start(confirmed=True)
     assert service._status == "RUNNING"
 
     # Simulate an error transition
@@ -186,7 +189,7 @@ def test_error_state_halts_running_timer(service: LiveTradingService) -> None:
 
 def test_backend_restart_new_epoch_overrides_old(service: LiveTradingService) -> None:
     _setup_mock_strategy(service)
-    service.start()
+    service.start(confirmed=True)
     first_epoch = service._session_start_epoch
     first_started_at = service._started_at
     assert first_epoch is not None
@@ -196,7 +199,7 @@ def test_backend_restart_new_epoch_overrides_old(service: LiveTradingService) ->
 
     # Restart session with advanced time (simulating backend restart at a later time)
     with patch("time.time", return_value=first_epoch + 10.0):
-        service.start()
+        service.start(confirmed=True)
     second_epoch = service._session_start_epoch
     second_started_at = service._started_at
 
@@ -214,7 +217,7 @@ def test_snapshots_keep_the_same_epoch_and_tick_elapsed(service: LiveTradingServ
     (so the timer persists across refreshes/reconnects) while the elapsed
     count advances every second (so the timer ticks)."""
     _setup_mock_strategy(service)
-    service.start()
+    service.start(confirmed=True)
     start_epoch = service._session_start_epoch
     assert start_epoch is not None
 

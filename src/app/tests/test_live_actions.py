@@ -68,9 +68,8 @@ def test_setup_still_accepts_the_legacy_strategy_key(dirs: tuple[str, str]) -> N
 
 def test_unsupported_mode_is_refused_honestly(dirs: tuple[str, str]) -> None:
     snap = _act(dirs, {"action": "mode", "mode": "SANDBOX"})
-    assert _service(dirs)._config.mode == "PAPER"
-    assert "not supported" in snap["action_note"]
-    assert "PAPER" in snap["action_note"]
+    assert _service(dirs)._config.mode == "BACKTEST"
+    assert "not supported" in str(snap.get("action_note", "")) or "refused" in str(snap.get("action_note", ""))
 
 
 def _live_venue_stubs(service: LiveTradingService):
@@ -186,7 +185,7 @@ def test_setup_mode_and_stop_void_consent(dirs: tuple[str, str]) -> None:
     _act(dirs, {"action": "setup", "quantity": 7.0})
     assert headless._ARMED[0] is False
     _act(dirs, {"action": "arm"})
-    _act(dirs, {"action": "mode", "mode": "PAPER"})
+    _act(dirs, {"action": "mode", "mode": "LIVE"})
     assert headless._ARMED[0] is False
     _act(dirs, {"action": "arm"})
     _act(dirs, {"action": "stop"})

@@ -574,8 +574,16 @@ class MarketDataService:
             seconds = native_timeframe.seconds_of(wanted)
         except Exception as exc:
             raise MarketDataError(f"Unsupported timeframe {wanted!r} for {symbol}: {exc}") from exc
-        if seconds is None:
-            valid = ", ".join(native_timeframe.available_timeframes(base))
+        frames = native_timeframe.available_timeframes(base)
+        if seconds is None or seconds not in {
+            native_timeframe.seconds_of(frame) for frame in frames
+        }:
+            # Ladder authority (Rust): only the base duration and its whole
+            # multiples produce honest bars. Without this gate a finer request
+            # (e.g. "3m" against 30m stores — the 2026-10-18 drift) read base
+            # rows under the requested label, and a non-aligned multiple would
+            # be bucket-approximated.
+            valid = ", ".join(frames)
             raise MarketDataError(
                 f"Unsupported timeframe {wanted!r} for {symbol} (available: {valid or base_label})"
             )

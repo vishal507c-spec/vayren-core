@@ -22,7 +22,7 @@ TS = "2026-09-06T14:00:00+05:30"
 
 def _selection(name: str = "zerodha") -> BrokerSelection:
     return BrokerSelection(
-        name=name, environment=Environment.PAPER, selected_at=TS, reason="user-selected"
+        name=name, environment=Environment.LIVE, selected_at=TS, reason="user-selected"
     )
 
 
@@ -32,7 +32,7 @@ def test_roundtrip(tmp_path: Path) -> None:
     loaded = store.load()
     assert loaded is not None
     assert loaded.name == "sandbox"
-    assert loaded.environment is Environment.PAPER
+    assert loaded.environment is Environment.LIVE
     assert loaded.reason == "user-selected"
 
 

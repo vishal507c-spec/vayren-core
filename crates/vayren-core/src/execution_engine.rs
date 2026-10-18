@@ -521,19 +521,18 @@ pub fn plan_order(
 
 // ── modes.py ──────────────────────────────────────────────────────────────
 
-/// Execution venue mode. Default is PAPER, always.
+/// Execution venue mode. Exactly two: BACKTEST (historical replay, no venue)
+/// and LIVE (real broker). Simulated venues (PAPER/SANDBOX) no longer exist.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExecutionMode {
-    Paper,
-    Sandbox,
+    Backtest,
     Live,
 }
 
 impl ExecutionMode {
     pub fn as_str(&self) -> &'static str {
         match self {
-            Self::Paper => "PAPER",
-            Self::Sandbox => "SANDBOX",
+            Self::Backtest => "BACKTEST",
             Self::Live => "LIVE",
         }
     }
@@ -541,8 +540,7 @@ impl ExecutionMode {
     /// Mode for its wire label (`as_str` round trip); `None` if unknown.
     pub fn from_label(name: &str) -> Option<Self> {
         match name {
-            "PAPER" => Some(Self::Paper),
-            "SANDBOX" => Some(Self::Sandbox),
+            "BACKTEST" => Some(Self::Backtest),
             "LIVE" => Some(Self::Live),
             _ => None,
         }
@@ -670,14 +668,15 @@ pub fn gates_from_env(get: &dyn Fn(&str) -> String) -> ModeGates {
     }
 }
 
-/// Effective mode: LIVE without all gates degrades to PAPER (never silent).
+/// Effective mode: LIVE runs only when all gates are satisfied; otherwise it
+/// is refused (no downgrade target exists — simulated venues are gone).
 pub fn resolve_mode(requested: ExecutionMode, gates: &ModeGates) -> (ExecutionMode, Vec<String>) {
-    if requested == ExecutionMode::Live && gates.all_satisfied() {
-        return (ExecutionMode::Live, Vec::new());
-    }
     if requested == ExecutionMode::Live {
+        if gates.all_satisfied() {
+            return (ExecutionMode::Live, Vec::new());
+        }
         return (
-            ExecutionMode::Paper,
+            ExecutionMode::Backtest,
             gates
                 .missing()
                 .iter()
@@ -685,10 +684,7 @@ pub fn resolve_mode(requested: ExecutionMode, gates: &ModeGates) -> (ExecutionMo
                 .collect(),
         );
     }
-    if requested == ExecutionMode::Sandbox {
-        return (ExecutionMode::Sandbox, Vec::new());
-    }
-    (ExecutionMode::Paper, Vec::new())
+    (ExecutionMode::Backtest, Vec::new())
 }
 
 /// One gate value counts as ON only when it reads exactly `"true"`
@@ -1627,13 +1623,9 @@ mod tests {
             (ExecutionMode::Live, vec![])
         );
         let (mode, reasons) = resolve_mode(ExecutionMode::Live, &ModeGates::default());
-        assert_eq!(mode, ExecutionMode::Paper);
+        assert_eq!(mode, ExecutionMode::Backtest);
         assert_eq!(reasons.len(), 5);
         assert_eq!(reasons[0], "live gate off: LIVE_TRADING_ENABLED");
-        assert_eq!(
-            resolve_mode(ExecutionMode::Sandbox, &ModeGates::default()).0,
-            ExecutionMode::Sandbox
-        );
     }
 
     #[test]
@@ -1649,7 +1641,7 @@ mod tests {
         );
         assert!(missing_gates(0b1_1111).is_empty());
         let (mode, reasons) = resolve_mode_mask("LIVE", 0b0_0011).unwrap();
-        assert_eq!(mode, ExecutionMode::Paper);
+        assert_eq!(mode, ExecutionMode::Backtest);
         assert_eq!(
             reasons,
             vec![
@@ -1662,14 +1654,8 @@ mod tests {
             resolve_mode_mask("LIVE", 0b1_1111).unwrap(),
             (ExecutionMode::Live, vec![])
         );
-        assert_eq!(
-            resolve_mode_mask("PAPER", 0).unwrap().0,
-            ExecutionMode::Paper
-        );
-        assert_eq!(
-            resolve_mode_mask("SANDBOX", 0).unwrap().0,
-            ExecutionMode::Sandbox
-        );
+        assert!(resolve_mode_mask("PAPER", 0).is_none());
+        assert!(resolve_mode_mask("SANDBOX", 0).is_none());
         assert!(resolve_mode_mask("DESKTOP", 0).is_none());
     }
 

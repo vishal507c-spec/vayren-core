@@ -54,7 +54,7 @@ NO_READY_BROKER = "no ready broker"
 
 _VALID_SIDES = ("BUY", "SELL")
 _VALID_TYPES = ("MARKET", "LIMIT", "STOP_MARKET", "STOP_LIMIT")
-_VALID_MODES = ("PAPER", "SANDBOX", "LIVE")
+_VALID_MODES = ("BACKTEST", "LIVE")
 
 
 def _utcnow_iso() -> str:
@@ -79,7 +79,7 @@ class OrderIntent:
         strategy_id: Owning strategy (isolation key).
         client_order_id: VAYREN-level idempotency key (auto uuid4-hex
             when empty — unique per intent, never reused).
-        mode: PAPER | SANDBOX | LIVE (venue selector, never bypassed).
+        mode: BACKTEST | LIVE (venue selector, never bypassed).
         risk_approved: Must be True (set only after the existing
             risk/safety pipeline passes) or routing refuses.
         created_at: ISO-8601 UTC creation stamp.
@@ -95,7 +95,7 @@ class OrderIntent:
     time_in_force: str = "DAY"
     strategy_id: str = ""
     client_order_id: str = ""
-    mode: str = "PAPER"
+    mode: str = "BACKTEST"
     risk_approved: bool = False
     created_at: str = ""
 
@@ -160,7 +160,7 @@ class OrderIntent:
         ):
             return f"{INVALID_INTENT}: stop price must be positive for {order_type}"
         if str(self.mode or "").strip().upper() not in _VALID_MODES:
-            return f"{INVALID_INTENT}: mode must be PAPER/SANDBOX/LIVE"
+            return f"{INVALID_INTENT}: mode must be BACKTEST/LIVE"
         if not isinstance(self.strategy_id, str) or not self.strategy_id.strip():
             return f"{INVALID_INTENT}: strategy_id missing"
         if not isinstance(self.client_order_id, str) or not self.client_order_id.strip():

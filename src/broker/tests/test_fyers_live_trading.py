@@ -343,32 +343,6 @@ def test_missing_credentials_fails_closed() -> None:
     assert len(transport.calls) == 0
 
 
-def test_paper_cannot_call_live_endpoint() -> None:
-    from execution.broker.paper import PaperBroker
-    from execution.models.order import OrderPlan
-
-    paper = PaperBroker()
-    paper.connect()
-    plan = OrderPlan(intent_id="test-paper-1", symbol="SBIN", side="BUY", quantity=10.0)
-    broker_id = paper.place_order(plan, "PAPER_1")
-    # Paper uses simulated order ids, never network transport
-    assert broker_id.startswith("PAPER-")
-    assert paper.name == "paper"
-
-
-def test_sandbox_cannot_call_live_endpoint() -> None:
-    from execution.broker.sandbox import SandboxBroker
-    from execution.models.order import OrderPlan
-
-    sandbox = SandboxBroker()
-    sandbox.connect()
-    plan = OrderPlan(intent_id="test-sandbox-1", symbol="SBIN", side="BUY", quantity=10.0)
-    broker_id = sandbox.place_order(plan, "SANDBOX_1")
-    # Sandbox uses simulated order ids, never network transport
-    assert broker_id.startswith("SANDBOX-")
-    assert sandbox.name == "sandbox"
-
-
 def test_adapter_environment_is_live() -> None:
     adapter = FyersSessionAdapter("A", "B")
     assert adapter.environment == Environment.LIVE

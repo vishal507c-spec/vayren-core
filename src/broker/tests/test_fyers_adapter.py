@@ -94,7 +94,7 @@ def test_selection_resolves_and_history_surface_is_served() -> None:
 
     selection = BrokerSelection(
         name=BROKER_ID,
-        environment=Environment.PAPER,
+        environment=Environment.LIVE,
         selected_at=TS,
         reason="user-selected",
     )

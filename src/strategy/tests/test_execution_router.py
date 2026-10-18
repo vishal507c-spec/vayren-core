@@ -417,25 +417,6 @@ def test_21_duplicate_protection_intact() -> None:
     assert "duplicate" in second.rejection_reason
 
 
-def test_22_paper_stays_paper() -> None:
-    paper = FakeBroker("PAPER")
-    live = FakeBroker("ZERODHA")
-    router = ExecutionRouter(_mappings(), brokers={"PAPER": paper, "ZERODHA": live})
-    result = router.route(_intent(mode="PAPER"))
-    assert result.broker == "PAPER"
-    assert result.status == "SUBMITTED"
-    assert live.calls == []
-
-
-def test_23_sandbox_never_touches_live() -> None:
-    sandbox = FakeBroker("SANDBOX")
-    live = FakeBroker("FYERS")
-    router = ExecutionRouter(_mappings(), brokers={"SANDBOX": sandbox, "FYERS": live})
-    result = router.route(_intent(mode="SANDBOX"))
-    assert result.broker == "SANDBOX"
-    assert live.calls == []
-
-
 def test_24_live_uses_configured_adapters() -> None:
     router, zerodha, fyers = _router()
     result = router.route(_intent(mode="LIVE"))

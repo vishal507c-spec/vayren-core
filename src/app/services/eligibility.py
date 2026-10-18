@@ -188,7 +188,7 @@ def build_eligibility_engine(
         broker_name = str(service.broker_name() or "").strip().upper()
     except Exception:  # noqa: BLE001
         broker_name = ""
-    brokers = (broker_name,) if broker_name and broker_name != "PAPER" else ()
+    brokers = (broker_name,) if broker_name else ()
     market = _ServiceMarketView(service, quotes)
     execution = _ServiceExecutionView(service, brokers)
 
@@ -245,7 +245,7 @@ def order_gate_for(service: Any) -> Any:
             canonical_id = canonical_id_for(symbol)
             if not canonical_id:
                 return f"cannot resolve {symbol!r} to a canonical instrument"
-            mode = str(getattr(service._config, "mode", "") or "PAPER").strip().upper()
+            mode = str(getattr(service._config, "mode", "") or "BACKTEST").strip().upper()
             verdict = build_eligibility_engine(service).evaluate(
                 canonical_id, strategy_name, trading_mode=mode
             )

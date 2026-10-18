@@ -46,7 +46,7 @@ from execution.market_data.provider import MarketDataProvider
 from execution.models.contract import StrategyRuntimeContract
 from execution.models.intent import ExecutionIntent, StrategySignal, make_intent_id
 from execution.models.order import BrokerOrder, Fill, OrderPlan, OrderState
-from execution.modes import ExecutionMode, LiveArm, ModeGates, arm_transition
+from execution.modes import ExecutionMode, LiveArm, LiveModeError, ModeGates, arm_transition
 from execution.native_execution import (
     native_check_live_readiness_basic,
     native_default_quantity,
@@ -85,9 +85,8 @@ class StrategyRegistration:
 
 @dataclass
 class SessionConfig:
-    mode: ExecutionMode = ExecutionMode.PAPER
+    mode: ExecutionMode = ExecutionMode.LIVE
     gates: ModeGates = field(default_factory=ModeGates)
-    paper_capital: float = 1_000_000.0
     slippage_pct: float = 0.02
     commission_pct: float = 0.03
     journal_path: str | None = None
@@ -198,7 +197,7 @@ class LiveSession:
         self._confidence = ConfidencePolicy()
         self._regime = StatisticalRegimeDetector()
         self._recorder = LiveEventRecorder()
-        self._ledger = PositionLedger(config.paper_capital)
+        self._ledger = PositionLedger(1_000_000.0)
         self._reconciliation = ReconciliationState()
         self._contexts: dict[str, StrategyContext] = {}
         self._registrations: dict[str, StrategyRegistration] = {}
@@ -208,7 +207,7 @@ class LiveSession:
         # Returns None to allow or a refusal reason to block. A raising gate
         # fails closed at the call site — the tick loop never sees it.
         self._order_gate = order_gate
-        self._mode = ExecutionMode.PAPER
+        self._mode = ExecutionMode.BACKTEST
         self._armed = LiveArm.DISARMED
         self._broker_calls = 0
         self._broker_stream_errors = 0
@@ -235,6 +234,9 @@ class LiveSession:
         # Fill ids already folded (venue retransmissions must never double
         # a position or an order's filled quantity).
         self._seen_fills: set[tuple[str, float, float]] = set()
+        # Per-strategy initialization failures (see register_strategy): a
+        # failed strategy is excluded from ticking, never from reporting.
+        self._init_blockers: dict[str, str] = {}
 
     # ── wiring ──────────────────────────────────────────────────
 
@@ -250,8 +252,22 @@ class LiveSession:
         params: StrategyParameters,
         definition: Any = None,
     ) -> StrategyRuntimeContract:
-        """Register one isolated strategy instance; returns its contract."""
-        logic = logic_factory()
+        """Register one isolated strategy instance; returns its contract.
+
+        **Failure isolation.** A ``logic_factory`` that raises does NOT abort
+        the session: the strategy is left unregistered (so it can never tick),
+        the reason is journaled and exposed through :meth:`init_blockers`, and
+        every other strategy registers normally. The returned contract carries
+        ``missing=("logic_creation_failed: …",)`` so every existing caller that
+        checks ``contract.missing`` stays fail-closed.
+
+        Shared critical defects still raise — an empty identity would break
+        every strategy, so it is never downgraded to a per-strategy gap.
+        """
+        if not isinstance(definition_id, str) or not definition_id.strip():
+            raise ValueError("strategy registration needs a non-empty strategy id")
+        if not isinstance(version, str) or not version.strip():
+            raise ValueError(f"strategy {definition_id!r} registration needs a non-empty version")
         stub = (
             definition
             if definition is not None
@@ -263,6 +279,19 @@ class LiveSession:
                 params=params,
             )
         )
+        key = f"{definition_id}:{version}"
+        try:
+            logic = logic_factory()
+        except Exception as exc:
+            reason = f"logic_creation_failed: {str(exc).strip() or exc.__class__.__name__}"
+            self._init_blockers[key] = reason
+            self._journal.record(
+                "STRATEGY_INIT_FAILED",
+                strategy_id=definition_id,
+                version=version,
+                reason=reason,
+            )
+            return replace(inspect_strategy(stub, None), missing=(reason,))
         contract = inspect_strategy(stub, logic)
         context = StrategyContext(
             strategy_id=definition_id,
@@ -271,7 +300,6 @@ class LiveSession:
             params=params,
             contract=contract,
         )
-        key = f"{definition_id}:{version}"
         self._contexts[key] = context
         self._registrations[key] = StrategyRegistration(
             definition_id=definition_id,
@@ -280,7 +308,22 @@ class LiveSession:
             params=params,
             contract=contract,
         )
+        self._init_blockers.pop(key, None)
         return contract
+
+    def init_blockers(self) -> dict[str, str]:
+        """Per-strategy initialization failures (``{id:version: reason}``).
+
+        An entry means that strategy never registered and can never tick; it
+        never means the session as a whole is ready.
+        """
+        return dict(self._init_blockers)
+
+    @property
+    def degraded(self) -> bool:
+        """True when at least one strategy failed to initialize. Engine-wide
+        execution stays live for the strategies that did register."""
+        return bool(self._init_blockers)
 
     # ── startup sequence: RECOVER → RECONCILE → VALIDATE → WARMUP → READY ──
 
@@ -300,9 +343,15 @@ class LiveSession:
             raise LifecycleError(
                 f"start requires CREATED or RECOVERING, found {self._lifecycle.state.value}"
             )
-        broker, mode, notes = resolve_broker(
-            self._config.mode, self._config.gates, adapter_name=self._config.adapter_name
-        )
+        from execution.broker.adapter import NotConfiguredError
+
+        try:
+            broker, mode, notes = resolve_broker(
+                self._config.mode, self._config.gates, adapter_name=self._config.adapter_name
+            )
+        except (NotConfiguredError, LiveModeError) as exc:
+            self._journal.record("VENUE_REFUSED", reason=str(exc))
+            return ReadinessReport(ready=False, reasons=(f"live venue unavailable: {exc}",))
         self._broker = broker
         self._mode = mode
         for note in notes:
@@ -363,6 +412,13 @@ class LiveSession:
                 for_live=self._mode == ExecutionMode.LIVE,
             )
             reasons.extend(f"{key}: {reason}" for reason in report.reasons)
+        # A strategy that failed to initialize never ticks and its reason is
+        # always named. START blocks outright only when NO strategy is left to
+        # run — an engine with nothing to execute must never report ready.
+        for key, reason in self._init_blockers.items():
+            reasons.append(f"{key}: {reason}")
+        if not self._contexts and self._init_blockers:
+            reasons.append("no strategy could be initialized")
         if self._mode == ExecutionMode.LIVE and self._reconciliation.blocks_live:
             reasons.append("reconciliation mismatch blocks live")
         return ReadinessReport(ready=not reasons, reasons=tuple(reasons))

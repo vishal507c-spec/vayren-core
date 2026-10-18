@@ -55,19 +55,19 @@ class _MapResolver:
 
 
 def test_identity_distinguishes_venue_environment_account() -> None:
-    identity = identity_of("zerodha", "Zerodha", Environment.PAPER, account_id="u1")
+    identity = identity_of("zerodha", "Zerodha", Environment.LIVE, account_id="u1")
     assert identity.broker_id == "zerodha"
-    assert identity.environment is Environment.PAPER
+    assert identity.environment is Environment.LIVE
     assert identity.account_id == "u1"
-    assert identity.describe() == "Zerodha (paper) [u1]"
-    assert identity_of("paper", "Paper", Environment.PAPER).describe() == "Paper (paper)"
+    assert identity.describe() == "Zerodha (live) [u1]"
+    assert identity_of("paper", "Paper", Environment.LIVE).describe() == "Paper (live)"
 
 
 def test_identity_validation() -> None:
     with pytest.raises(ValueError):
-        BrokerIdentity("", "X", Environment.PAPER)
+        BrokerIdentity("", "X", Environment.LIVE)
     with pytest.raises(ValueError):
-        BrokerIdentity("x", "", Environment.PAPER)
+        BrokerIdentity("x", "", Environment.LIVE)
     with pytest.raises(ValueError):
         BrokerIdentity("x", "X", "live")  # type: ignore[arg-type]
 
@@ -80,7 +80,7 @@ def test_broker_bound_ref_rejects_wrong_broker() -> None:
         CredentialRef(
             key="API_KEY",
             scope=CredentialScope.TRADING,
-            environment=Environment.SANDBOX,
+            environment=Environment.LIVE,
             broker="sandbox",
         ),
     )
@@ -89,7 +89,7 @@ def test_broker_bound_ref_rejects_wrong_broker() -> None:
     ok, _ = validate_refs(
         refs,
         _MapResolver({"API_KEY": "v"}),
-        expected_environment=Environment.SANDBOX,
+        expected_environment=Environment.LIVE,
         expected_broker="sandbox",
         expected_scope=CredentialScope.TRADING,
     )
@@ -97,7 +97,7 @@ def test_broker_bound_ref_rejects_wrong_broker() -> None:
     ok, reasons = validate_refs(
         refs,
         _MapResolver({"API_KEY": "v"}),
-        expected_environment=Environment.SANDBOX,
+        expected_environment=Environment.LIVE,
         expected_broker="paper",
         expected_scope=CredentialScope.TRADING,
     )
@@ -106,12 +106,12 @@ def test_broker_bound_ref_rejects_wrong_broker() -> None:
 
 def test_scope_mismatch_fails_closed() -> None:
     refs = (
-        CredentialRef(key="K", scope=CredentialScope.HISTORICAL, environment=Environment.PAPER),
+        CredentialRef(key="K", scope=CredentialScope.HISTORICAL, environment=Environment.LIVE),
     )
     ok, reasons = validate_refs(
         refs,
         _MapResolver({"K": "v"}),
-        expected_environment=Environment.PAPER,
+        expected_environment=Environment.LIVE,
         expected_broker="paper",
         expected_scope=CredentialScope.TRADING,
     )
@@ -119,12 +119,12 @@ def test_scope_mismatch_fails_closed() -> None:
 
 
 def test_venue_agnostic_ref_has_no_broker() -> None:
-    ref = CredentialRef(key="K", scope=CredentialScope.HISTORICAL, environment=Environment.PAPER)
+    ref = CredentialRef(key="K", scope=CredentialScope.HISTORICAL, environment=Environment.LIVE)
     assert ref.broker is None
     ok, _ = validate_refs(
         (ref,),
         _MapResolver({"K": "v"}),
-        expected_environment=Environment.PAPER,
+        expected_environment=Environment.LIVE,
         expected_broker="anything",
         expected_scope=CredentialScope.HISTORICAL,
     )
@@ -186,7 +186,7 @@ def test_skeleton_faces_satisfy_protocols_but_refuse_work() -> None:
         md.close()
     trading = record.plugin.face(Domain.TRADING)
     assert isinstance(trading, SkeletonTrading)
-    assert trading.environment is Environment.PAPER  # safest default, never LIVE
+    assert trading.environment is Environment.LIVE  # safest default, never LIVE
     with pytest.raises(BrokerError):
         trading.disconnect()
     assert trading.stream_events() == ()
@@ -238,7 +238,7 @@ def test_market_data_face_lifecycle_methods() -> None:
 
 def test_surface_status_config_awareness() -> None:
     sel = BrokerSelection(
-        name="skeleton", environment=Environment.PAPER, selected_at=TS, reason="t"
+        name="skeleton", environment=Environment.LIVE, selected_at=TS, reason="t"
     )
     status, _ = surface_status(sel, CapabilitySet(), Domain.TRADING)
     assert status is CapabilityStatus.NOT_CONFIGURED

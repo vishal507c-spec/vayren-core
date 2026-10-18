@@ -528,16 +528,25 @@ def _live_action(
                     logger.warning("auto candle sync during setup failed: %s", sync_exc)
         elif name == "mode":
             requested = _opt_str(action.get("mode"))
-            service.configure(mode=requested)
-            # A mode switch voids any earlier consent (fresh ARM per setup).
-            _ARMED[0] = False
-            service.note_armed(False)
-            if requested is not None and requested not in ("PAPER", "LIVE"):
-                # configure() only accepts PAPER/LIVE; saying "mode set to
-                # PAPER" here posed as an accepted SANDBOX switch.
-                note = f"mode {requested} not supported — mode stays {service.config.mode}"
+            if requested is None:
+                note = "mode unchanged — see Live Readiness"
             else:
-                note = f"mode set to {service.config.mode} — see Live Readiness"
+                try:
+                    from execution.modes import parse_mode
+
+                    parse_mode(requested)
+                except Exception:
+                    note = f"mode {requested} not supported — mode stays {service.config.mode}"
+                else:
+                    try:
+                        service.configure(mode=requested)
+                    except Exception:  # noqa: BLE001
+                        note = f"mode {requested} not supported — mode stays {service.config.mode}"
+                    else:
+                        # A mode switch voids any earlier consent (fresh ARM per setup).
+                        _ARMED[0] = False
+                        service.note_armed(False)
+                        note = f"mode set to {service.config.mode} — see Live Readiness"
         elif name == "start":
             confirmed = bool(action.get("confirmed")) or _ARMED[0]
             ok, reasons = service.start(confirmed=confirmed)
@@ -637,11 +646,11 @@ def _live_action(
             if broker_manager is not None:
                 bview = getattr(service, "_broker_view", lambda: {})()
                 current_broker = bview.get("id") or service.broker_name()
-                if not current_broker or current_broker == "paper":
+                if not current_broker:
                     active = (broker_manager.snapshot() or {}).get("active_broker")
-                    if active and active != "paper":
+                    if active:
                         current_broker = active
-                if current_broker and current_broker != "paper":
+                if current_broker:
                     refresh_targets = [current_broker]
                 elif hasattr(broker_manager, "broker_ids"):
                     refresh_targets = list(broker_manager.broker_ids())

@@ -8,10 +8,11 @@ instances) are registered explicitly — no scanning, no magic.
 
 import math
 from collections.abc import Callable
+from dataclasses import replace
 from logging import getLogger
 from threading import RLock
 
-from strategy.models.definition import StrategyDefinition
+from strategy.models.definition import EXECUTION_MODE_LABELS, StrategyDefinition
 from strategy.models.parameters import ParameterSpec, StrategyParameters
 from strategy.runtime import StrategyLogic
 
@@ -41,6 +42,30 @@ class StrategyRegistry:
         self._kinds: dict[str, StrategyFactory] = {}
         self._specs: dict[str, tuple[ParameterSpec, ...]] = {}
         self._definitions: dict[str, StrategyDefinition] = {}
+        # Load-path failures, keyed by strategy identity (storage ``id``, or
+        # the built-in name when the record never parsed). Isolation surface:
+        # a strategy that cannot be loaded stays VISIBLE with a reason instead
+        # of silently vanishing from the list.
+        self._load_errors: dict[str, str] = {}
+
+    def load_errors(self) -> dict[str, str]:
+        """Per-strategy load/compile failures from :meth:`sync_storage`.
+
+        Read-only copy of ``{identity: actionable reason}``. An empty map means
+        every discovered strategy loaded cleanly.
+        """
+        with self._lock:
+            return dict(self._load_errors)
+
+    def _record_load_error(self, identity: str, operation: str, exc: BaseException) -> None:
+        """Record one isolated load failure (identity + operation + reason).
+
+        Only the exception's own message is kept — never a payload — so no
+        strategy source or secret can leak into the registry state.
+        """
+        reason = str(exc).strip() or exc.__class__.__name__
+        self._load_errors[identity] = f"{operation}: {reason}"
+        logger.warning("Strategy %s failed to load (%s): %s", identity, operation, reason)
 
     # ── kinds ─────────────────────────────────────────────────────────
 
@@ -236,24 +261,15 @@ class StrategyRegistry:
                 candidate = f"{source.id}-copy"
                 while candidate in self._definitions:
                     candidate = f"{candidate}-copy"
-            copy = StrategyDefinition(
+            copy = replace(
+                source,
                 id=candidate,
-                name=source.name,
-                version=source.version,
-                kind=source.kind,
-                params=source.params,
-                allocation_pct=source.allocation_pct,
                 enabled=False,
-                status=source.status,
-                timeframe=source.timeframe,
-                direction=source.direction,
-                symbols=source.symbols,
-                runtime_state=source.runtime_state,
-                description=source.description,
-                metadata=source.metadata,
-                source_code=source.source_code,
+                runtime_state="IDLE",
+                last_error="",
             )
             self._definitions[copy.id] = copy
+            self._load_errors.pop(copy.id, None)
             logger.info("Strategy duplicated: %s → %s", source.id, copy.id)
             return copy
 
@@ -278,6 +294,10 @@ class StrategyRegistry:
         direction: str = "",
         status: str = "ACTIVE",
         symbols: tuple[str, ...] = (),
+        supported_timeframes: tuple[str, ...] = (),
+        required_warmup_bars: int = 0,
+        required_capabilities: tuple[str, ...] = (),
+        supported_modes: tuple[str, ...] = EXECUTION_MODE_LABELS,
     ) -> StrategyDefinition:
         """Create or update a strategy in the registry with automatic compiler registration."""
         from strategy.language.compiler import compile_strategy
@@ -320,8 +340,21 @@ class StrategyRegistry:
                 runtime_state=existing.runtime_state if existing else "IDLE",
                 description=description or (existing.description if existing else ""),
                 source_code=code,
+                supported_timeframes=supported_timeframes
+                or (existing.supported_timeframes if existing else ()),
+                required_warmup_bars=max(
+                    required_warmup_bars,
+                    existing.required_warmup_bars if existing else 0,
+                ),
+                required_capabilities=required_capabilities
+                or (existing.required_capabilities if existing else ()),
+                supported_modes=supported_modes
+                if supported_modes != EXECUTION_MODE_LABELS
+                else (existing.supported_modes if existing else EXECUTION_MODE_LABELS),
+                last_error="",
             )
             self._definitions[strat_id] = definition
+            self._load_errors.pop(strat_id, None)
             return definition
 
     def archive(self, strategy_id: str) -> StrategyDefinition:
@@ -333,7 +366,13 @@ class StrategyRegistry:
             return updated
 
     def sync_storage(self, data_dir=None) -> None:
-        """Synchronize file-backed storage and built-in strategies into canonical registry."""
+        """Synchronize file-backed storage and built-in strategies into canonical registry.
+
+        Failure isolation: one unloadable strategy never blocks the others.
+        Each failure is recorded per identity (see :meth:`load_errors`) instead
+        of being logged and lost, so the operator can see exactly which
+        strategy is broken and why.
+        """
         from strategy.builtins import builtin_source, list_builtins
         from strategy.language.storage import list_strategy_records
 
@@ -352,24 +391,28 @@ class StrategyRegistry:
                         status="ACTIVE",
                     )
                 except Exception as exc:
-                    logger.warning("Could not sync built-in strategy %s: %s", b.name, exc)
+                    self._record_load_error(b.name, "builtin load", exc)
 
         # 2. Sync file records
         try:
             records = list_strategy_records(data_dir)
-            for rec in records:
-                if not self.contains(rec.id) and not self.contains(rec.name):
-                    try:
-                        self.create_or_update(
-                            name=rec.name,
-                            code=rec.code,
-                            version=rec.version,
-                            status=rec.status,
-                        )
-                    except Exception as exc:
-                        logger.warning("Could not sync stored strategy %s: %s", rec.name, exc)
         except Exception as exc:
-            logger.warning("Error reading stored strategy records: %s", exc)
+            # The whole listing is unavailable — one global load failure,
+            # reported under an explicit identity (never swallowed).
+            self._record_load_error("*", "strategy storage read", exc)
+            return
+        for rec in records:
+            if self.contains(rec.id) or self.contains(rec.name):
+                continue
+            try:
+                self.create_or_update(
+                    name=rec.name,
+                    code=rec.code,
+                    version=rec.version,
+                    status=rec.status,
+                )
+            except Exception as exc:
+                self._record_load_error(rec.id or rec.name, "strategy record load", exc)
 
 
 # ── Canonical OBR C1C4 Authority ──────────────────────────────────────

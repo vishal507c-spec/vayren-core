@@ -466,7 +466,7 @@ impl SystemView {
         let empty = BrokerPanel {
             broker_id: String::new(),
             display_name: "NOT CONFIGURED".to_string(),
-            environment: Environment::Paper,
+            environment: Environment::Live,
             capabilities: Vec::new(),
             health: HealthState::Unknown,
             live_gates_ready: false,
@@ -919,9 +919,9 @@ mod tests {
     use slint::Model;
 
     const CONNECTED: &str = r#"{
-        "broker_id": "paper",
-        "display_name": "Paper",
-        "environment": "paper",
+        "broker_id": "fyers",
+        "display_name": "FYERS",
+        "environment": "live",
         "health": "CONNECTED",
         "status_raw": "CONNECTED",
         "live_ready": false,

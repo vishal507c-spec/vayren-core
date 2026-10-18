@@ -30,7 +30,8 @@ class StrategyRuntimeContract:
     stateful: bool = True
     persistence_required: bool = True
     supports_live: bool = False
-    supports_paper: bool = True
+    supports_backtest: bool = True
+    supported_modes: tuple[str, ...] = ("BACKTEST", "LIVE")
     required_broker_capabilities: tuple[str, ...] = ()
     entry_description: str = ""
     exit_description: str = ""

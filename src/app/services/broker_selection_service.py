@@ -139,7 +139,7 @@ class BrokerSelectionService:
             raise SelectionError(f"compatibility default broker {chosen!r} is not registered")
         return BrokerSelection(
             name=chosen,
-            environment=Environment.PAPER,
+            environment=Environment.LIVE,
             selected_at=datetime.now().astimezone().isoformat(timespec="seconds"),
             reason=_COMPAT_REASON,
         )
@@ -169,7 +169,7 @@ class BrokerSelectionService:
         record = self._registry.get(name)
         env = environment
         if env is None:
-            env = Environment.SANDBOX if Domain.TRADING in record.faces else Environment.PAPER
+            env = Environment.LIVE
         selection = BrokerSelection(
             name=name,
             environment=env,

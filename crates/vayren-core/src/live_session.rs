@@ -323,7 +323,7 @@ pub struct SessionConfig {
 impl Default for SessionConfig {
     fn default() -> Self {
         Self {
-            mode: ExecutionMode::Paper,
+            mode: ExecutionMode::Backtest,
             gates: ModeGates::default(),
             paper_capital: 1_000_000.0,
             slippage_pct: 0.02,
@@ -568,8 +568,10 @@ impl LiveSession {
         self.broker = Some(resolved.venue);
         self.mode = resolved.mode;
         for note in &resolved.notes {
+            // No downgrade exists any more: notes now carry refusal reasons
+            // (e.g. "live gates unmet"), never a simulated fallback.
             self.journal.record(
-                "MODE_DOWNGRADE",
+                "MODE_REFUSED",
                 vec![("reason".to_string(), field_str(note.clone()))],
             );
         }
@@ -2090,7 +2092,7 @@ mod tests {
                 &warmup,
                 ResolvedVenue {
                     venue: Box::new(broker),
-                    mode: ExecutionMode::Paper,
+                    mode: ExecutionMode::Backtest,
                     notes: Vec::new(),
                 },
             )
@@ -2171,7 +2173,7 @@ mod tests {
                 &warmup,
                 ResolvedVenue {
                     venue: Box::new(FakeBroker::paper()),
-                    mode: ExecutionMode::Paper,
+                    mode: ExecutionMode::Backtest,
                     notes: Vec::new(),
                 },
             )
@@ -2221,12 +2223,12 @@ mod tests {
                 &warmup,
                 ResolvedVenue {
                     venue: Box::new(FakeBroker::paper()),
-                    mode: ExecutionMode::Paper,
+                    mode: ExecutionMode::Backtest,
                     notes: vec!["live gates unmet".to_string()],
                 },
             )
             .unwrap();
-        assert!(journal.borrow().has("MODE_DOWNGRADE"));
+        assert!(journal.borrow().has("MODE_REFUSED"));
     }
 
     // ── pipeline ──────────────────────────────────────────────────────
@@ -2640,7 +2642,7 @@ mod tests {
         );
         start_ready(&mut session, warmup, FakeBroker::paper());
         let checkpoint = session.checkpoint();
-        assert_eq!(checkpoint.mode, "PAPER");
+        assert_eq!(checkpoint.mode, "BACKTEST");
         assert_eq!(checkpoint.orders_today, 0);
         session.stop();
         assert_eq!(session.lifecycle_state(), LifecycleState::Stopped);
@@ -2704,7 +2706,7 @@ mod tests {
         );
         start_ready(&mut session, warmup, FakeBroker::paper());
         let view = session.state_view();
-        assert_eq!(view.mode, "PAPER");
+        assert_eq!(view.mode, "BACKTEST");
         assert_eq!(view.armed, "DISARMED");
         assert_eq!(view.lifecycle, "RUNNING");
         assert!(view.broker_connected);

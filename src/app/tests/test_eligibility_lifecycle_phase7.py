@@ -109,7 +109,7 @@ class _Venue:
 def _session(gate: object = None) -> tuple[LiveSession, _Venue]:
     venue = _Venue()
     session = LiveSession(
-        SessionConfig(mode=ExecutionMode.PAPER, journal_path=None, memory_path=None),
+        SessionConfig(mode=ExecutionMode.BACKTEST, journal_path=None, memory_path=None),
         SimpleNamespace(),  # provider unused by _submit  # pyright: ignore[reportArgumentType]
         RiskPolicy(),
         request_id="test-phase7",
@@ -225,31 +225,6 @@ def test_06_risk_denial_still_prevents_submission() -> None:
     session._submit(_intent(quantity=100.0), _plan(quantity=100.0), 1.0)
     assert venue.placed == []
     assert "RISK_DENIED" in _journal_kinds(session)
-
-
-def test_07_paper_and_sandbox_unaffected() -> None:
-    for mode in (ExecutionMode.PAPER, ExecutionMode.SANDBOX):
-        venue = _Venue()
-        session = LiveSession(
-            SessionConfig(mode=mode, journal_path=None, memory_path=None),
-            SimpleNamespace(),  # pyright: ignore[reportArgumentType]
-            RiskPolicy(),
-            request_id="test-phase7",
-            order_gate=lambda _i, _p: None,
-        )
-        session._broker = venue  # pyright: ignore[reportAttributeAccessIssue]
-        for target in (
-            LifecycleState.VALIDATING,
-            LifecycleState.WARMING_UP,
-            LifecycleState.READY,
-            LifecycleState.RUNNING,
-        ):
-            session._lifecycle.transition(target, reason="test")
-        session._submit(_intent(), _plan(), 1.0)
-        assert venue.placed == [(SYMBOL, 10.0)], mode
-
-
-# ── 8-10: service-truth gating (LIVE posture) ───────────────────────
 
 
 def test_08_live_not_armed_blocks(dirs: tuple[str, str]) -> None:

@@ -146,12 +146,6 @@
       "migration_target": "crates/vayren-core/src/resilience.rs",
       "migration_condition": "Terminal bridge state: retained as the FFI projection (no rule lives here)."
     },
-    "src/execution/broker/paper.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "reason": "Restored 2026-10-02 from d0cc3f9^ (the v1.21.0 'ownership purity' release deleted the live execution subsystem, which left the LIVE page importing a module that no longer existed). Session/engine/venue/ledger/journal orchestration is Python again; every numeric decision still crosses into Rust (risk gates via risk.native_engine, order lifecycle via execution.native_order_state, fill/position math via execution.native_positions, metrics via backtest.native_metrics). Tracked debt, not an exemption: migrate the orchestration layer to Rust and delete this file.",
-      "migration_target": "crates/vayren-core/src/execution_engine.rs",
-      "migration_condition": "Rust session runtime (session lifecycle, journal, ledger, reconcile, arming) exists and is proven by the restored parity/safety suite; until then this file is the only live path."
-    },
     "src/execution/broker/readonly.py": {
       "state": "TEMPORARILY_RETAINED",
       "reason": "Restored 2026-10-02 from d0cc3f9^ (the v1.21.0 'ownership purity' release deleted the live execution subsystem, which left the LIVE page importing a module that no longer existed). Session/engine/venue/ledger/journal orchestration is Python again; every numeric decision still crosses into Rust (risk gates via risk.native_engine, order lifecycle via execution.native_order_state, fill/position math via execution.native_positions, metrics via backtest.native_metrics). Tracked debt, not an exemption: migrate the orchestration layer to Rust and delete this file.",
@@ -159,12 +153,6 @@
       "migration_condition": "Rust session runtime (session lifecycle, journal, ledger, reconcile, arming) exists and is proven by the restored parity/safety suite; until then this file is the only live path."
     },
     "src/execution/broker/resilience.py": {
-      "state": "TEMPORARILY_RETAINED",
-      "reason": "Restored 2026-10-02 from d0cc3f9^ (the v1.21.0 'ownership purity' release deleted the live execution subsystem, which left the LIVE page importing a module that no longer existed). Session/engine/venue/ledger/journal orchestration is Python again; every numeric decision still crosses into Rust (risk gates via risk.native_engine, order lifecycle via execution.native_order_state, fill/position math via execution.native_positions, metrics via backtest.native_metrics). Tracked debt, not an exemption: migrate the orchestration layer to Rust and delete this file.",
-      "migration_target": "crates/vayren-core/src/execution_engine.rs",
-      "migration_condition": "Rust session runtime (session lifecycle, journal, ledger, reconcile, arming) exists and is proven by the restored parity/safety suite; until then this file is the only live path."
-    },
-    "src/execution/broker/sandbox.py": {
       "state": "TEMPORARILY_RETAINED",
       "reason": "Restored 2026-10-02 from d0cc3f9^ (the v1.21.0 'ownership purity' release deleted the live execution subsystem, which left the LIVE page importing a module that no longer existed). Session/engine/venue/ledger/journal orchestration is Python again; every numeric decision still crosses into Rust (risk gates via risk.native_engine, order lifecycle via execution.native_order_state, fill/position math via execution.native_positions, metrics via backtest.native_metrics). Tracked debt, not an exemption: migrate the orchestration layer to Rust and delete this file.",
       "migration_target": "crates/vayren-core/src/execution_engine.rs",

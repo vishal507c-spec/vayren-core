@@ -244,7 +244,7 @@ class ExecutionRouter:
         if get_instrument_registry().get(intent.instrument_id) is None:
             return self._refuse(intent, "", INSTRUMENT_NOT_FOUND)
         mode = str(intent.mode or "").strip().upper()
-        if mode in ("PAPER", "SANDBOX"):
+        if mode == "BACKTEST":
             return self._route_venue(intent, mode)
         return self._route_live(intent)
 

@@ -55,26 +55,18 @@ impl HealthState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Environment {
-    Paper,
-    Sandbox,
     Live,
 }
 
 impl Environment {
     pub fn label(self) -> &'static str {
-        match self {
-            Environment::Paper => "PAPER",
-            Environment::Sandbox => "SANDBOX",
-            Environment::Live => "LIVE",
-        }
+        "LIVE"
     }
 }
 
-/// Environment badge kind: 0 = paper, 1 = sandbox, 2 = live.
+/// Environment badge kind: 0 = not configured, 2 = live.
 pub fn env_kind(environment: Environment) -> i32 {
     match environment {
-        Environment::Paper => 0,
-        Environment::Sandbox => 1,
         Environment::Live => 2,
     }
 }
@@ -124,7 +116,7 @@ impl Default for BrokerPanel {
         Self {
             broker_id: String::new(),
             display_name: "NOT CONFIGURED".to_string(),
-            environment: Environment::Paper,
+            environment: Environment::Live,
             capabilities: Vec::new(),
             health: HealthState::Unknown,
             live_gates_ready: false,
@@ -175,8 +167,7 @@ impl BrokerPanel {
         };
         let environment = match str_of("environment").as_str() {
             "live" => Environment::Live,
-            "sandbox" => Environment::Sandbox,
-            _ => Environment::Paper,
+            _ => Environment::Live,
         };
         let health = match str_of("health").as_str() {
             "DISCONNECTED" => HealthState::Disconnected,
@@ -699,23 +690,21 @@ mod tests {
     fn connection_only_from_health() {
         assert!(panel(Environment::Live, HealthState::Connected, true).connected());
         assert!(!panel(Environment::Live, HealthState::Degraded, true).connected());
-        assert!(!panel(Environment::Paper, HealthState::Unknown, false).connected());
+        assert!(!panel(Environment::Live, HealthState::Unknown, false).connected());
     }
 
     #[test]
     fn live_ready_requires_environment_and_gates() {
         assert!(panel(Environment::Live, HealthState::Connected, true).live_ready());
-        // healthy + gates green but NOT live environment -> never live ready
-        assert!(!panel(Environment::Sandbox, HealthState::Connected, true).live_ready());
         // live environment but gates failing -> not ready
         assert!(!panel(Environment::Live, HealthState::Connected, false).live_ready());
     }
 
     #[test]
     fn summary_is_deterministic_and_labels_honestly() {
-        let lines = panel(Environment::Paper, HealthState::Disconnected, false).summary_lines();
+        let lines = panel(Environment::Live, HealthState::Disconnected, false).summary_lines();
         let blob = lines.join("\n");
-        assert!(blob.contains("PAPER"));
+        assert!(blob.contains("LIVE"));
         assert!(blob.contains("DISCONNECTED (not connected)"));
         assert!(blob.contains("LIVE     NOT READY"));
         assert!(blob.contains("historical_data.candles SUPPORTED"));
@@ -733,7 +722,7 @@ mod tests {
     fn card(status: &str) -> BrokerPanel {
         BrokerPanel {
             status_raw: status.to_string(),
-            ..panel(Environment::Paper, HealthState::Unknown, false)
+            ..panel(Environment::Live, HealthState::Unknown, false)
         }
     }
 

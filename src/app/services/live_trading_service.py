@@ -227,7 +227,7 @@ class LiveTradeConfig:
     strategy_name: str = ""
     symbols: tuple[str, ...] = ()
     timeframe: str = ""
-    mode: str = "PAPER"
+    mode: str = "BACKTEST"
     quantity: float = 1.0
     capital: float = 1_000_000.0
 
@@ -609,6 +609,41 @@ class LiveTradingService:
         except Exception:
             return ()
 
+    def _require_servable_timeframe(self, timeframe: str) -> None:
+        """Write-time gate: refuse a timeframe no configured store can serve.
+
+        Server-authoritative ladder: the value must appear (compared by
+        seconds, so label case never lies) in every configured symbol's
+        detected ladder — the Rust ``available_timeframes`` of that symbol's
+        base rows. A symbol with no detectable ladder yet (no store, too few
+        bars) is skipped here; START's validator still gates it with an exact
+        per-symbol blocker. Raised BEFORE the new value is assigned or
+        persisted, so a client-origin value can never drift the stored config
+        into a state the data cannot serve (the 2026-10-18 "3m"-against-30m
+        incident class).
+        """
+        if not timeframe:
+            return
+        from market.native_timeframe import seconds_of
+
+        try:
+            wanted = seconds_of(timeframe)
+        except Exception:
+            wanted = None
+        if wanted is None:
+            raise LiveConfigError(f"unknown timeframe {timeframe!r}")
+        if not self._config.symbols:
+            return
+        for symbol in self._config.symbols:
+            frames = self.available_timeframes(symbol)
+            if not frames:
+                continue
+            if wanted not in {seconds_of(frame) for frame in frames}:
+                raise LiveConfigError(
+                    f"timeframe {timeframe} not available for {symbol} "
+                    f"(supported: {', '.join(frames)})"
+                )
+
     # ── configuration (UI writes here; nothing starts implicitly) ──────
 
     @property
@@ -680,8 +715,20 @@ class LiveTradingService:
             self._config.symbols = self._universes.symbols_for(self._config.strategy_name)
 
         if timeframe is not None:
-            self._config.timeframe = str(timeframe)
-        if mode is not None and mode in ("PAPER", "LIVE"):
+            cleaned_timeframe = str(timeframe).strip()
+            # Empty/whitespace is "no change intent" — the Rust picker sends
+            # "" only while the server ladder offers no selected value, and a
+            # wipe of the stored config must never come out of it.
+            if cleaned_timeframe:
+                self._require_servable_timeframe(cleaned_timeframe)
+                self._config.timeframe = cleaned_timeframe
+        if mode is not None:
+            from execution.modes import ExecutionModeError, parse_mode
+
+            try:
+                mode = parse_mode(mode).value
+            except ExecutionModeError as exc:
+                raise LiveConfigError(str(exc)) from exc
             if mode != self._config.mode:
                 self._confirmed_live_at = ""
                 self._record_activity(
@@ -741,7 +788,7 @@ class LiveTradingService:
                 self, quotes=quotes, recon_blocks=recon_blocks, recon_reason=recon_reason
             )
             strategy = self._config.strategy_name
-            mode = str(self._config.mode or "PAPER").strip().upper() or "PAPER"
+            mode = str(self._config.mode or "BACKTEST").strip().upper() or "BACKTEST"
             instruments: dict[str, Any] = {}
             for symbol in self._config.symbols:
                 canonical_id = canonical_id_for(symbol)
@@ -810,7 +857,7 @@ class LiveTradingService:
             selection = None
         name = str(getattr(selection, "name", "") or "") if selection is not None else ""
         reason = str(getattr(selection, "reason", "") or "") if selection is not None else ""
-        return name or "paper", reason == "user-selected"
+        return name, reason == "user-selected"
 
     def broker_name(self) -> str:
         """User-selected broker (display only; venue resolves inside sessions)."""
@@ -889,13 +936,13 @@ class LiveTradingService:
         # market data somewhere the operator never chose. A disconnected
         # selection is reported disconnected (fail-closed).
         snap_active = str(snap.get("active_broker", "") or "")
-        if not authoritative or name == "paper":
+        if not authoritative:
             # No explicit choice on record (first run / no selection stack):
             # prefer the manager's active venue, then the first CONNECTED
             # venue, then the first CONFIGURED one. This is the migration
             # path only — it never overrides a real selection.
             name = ""
-            if snap_active and snap_active != "paper":
+            if snap_active:
                 name = snap_active
             if not name:
                 connected_entry = next((e for e in brokers if e.get("connected")), None)
@@ -906,7 +953,7 @@ class LiveTradingService:
                 if configured_entry:
                     name = str(configured_entry.get("id", "") or "")
 
-        if not name or name == "paper":
+        if not name:
             return view
 
         view["id"] = name
@@ -999,9 +1046,10 @@ class LiveTradingService:
     def validate(self) -> tuple[str, ...]:
         """Blockers for START. Empty = ready (LIVE still needs confirmation).
 
-        Cached on the config tuple: the UI polls this every second while
-        idle, but a re-check is only needed when the setup actually
-        changes (or after a run). ``force=True`` bypasses the cache.
+        Cached on the config tuple plus the candle-store fingerprints: the
+        UI polls this every second while idle, but a re-check is only
+        needed when the setup changes or the rows it was computed from
+        change.
         """
         # Activation must happen BEFORE the key is built: the venue id is part
         # of the key, so resolving it first is what makes the first cached
@@ -1021,6 +1069,11 @@ class LiveTradingService:
             # invalidated and START stayed blocked forever. Resolve the venue
             # every call and let it ride the key.
             self._resolve_live_venue_id(self.broker_name()),
+            # Store state rides the key too: a "no market data" verdict must
+            # retire the moment rows land — through the sync path (which also
+            # invalidates explicitly) or any other writer. Fingerprints are
+            # cheap stats, never re-reads.
+            self._store_fingerprints(),
         )
         if key == self._validate_key and self._validate_cache is not None:
             return self._validate_cache
@@ -1114,12 +1167,34 @@ class LiveTradingService:
         self._validate_key = None
         self._validate_cache = None
 
+    def _store_fingerprints(self) -> tuple[tuple[str, tuple[int, int] | None], ...]:
+        """Per-symbol `(mtime_ns, size)` of the candle stores, for the cache key.
+
+        The verdict must never outlive the rows it was computed from. A
+        repository without the method (test stub) contributes nothing and the
+        key keeps its previous semantics; explicit invalidation still applies.
+        """
+        from collections.abc import Callable
+        from typing import cast
+
+        fingerprint = getattr(self._repository, "store_fingerprint", None)
+        if not callable(fingerprint):
+            return ()
+        signature_of = cast("Callable[[str], tuple[int, int] | None]", fingerprint)
+        out: list[tuple[str, tuple[int, int] | None]] = []
+        for symbol in self._config.symbols:
+            try:
+                out.append((symbol, signature_of(symbol)))
+            except Exception:
+                out.append((symbol, None))
+        return tuple(out)
+
     def _live_blockers(self) -> list[str]:
         """Venue + gate truth for real-money mode (fail-closed, exact reasons)."""
         blockers: list[str] = []
         self._ensure_live_venues()
         name = self.broker_name()
-        if name in ("", "paper"):
+        if not name:
             blockers.append("no live broker selected (configure in SYSTEM → BROKERS)")
             return blockers
         # Centralized broker state: SYSTEM → BROKERS owns authentication;
@@ -1901,26 +1976,28 @@ class LiveTradingService:
             compiled = self._compiled(record)
         except Exception as exc:
             raise LiveConfigError(f"strategy does not compile: {exc}") from exc
-        if self._config.mode == "LIVE":
-            mode = ExecutionMode.LIVE
-        elif self._config.mode == "SANDBOX":
-            mode = ExecutionMode.SANDBOX
-        else:
-            mode = ExecutionMode.PAPER
+        from execution.modes import ExecutionModeError, parse_mode
+
+        try:
+            mode = parse_mode(self._config.mode)
+        except ExecutionModeError as exc:
+            raise LiveConfigError(str(exc)) from exc
+        if mode is not ExecutionMode.LIVE:
+            raise LiveConfigError(
+                "live service requires mode LIVE (BACKTEST runs in the backtest "
+                "engine, not the live session)"
+            )
         self._ensure_live_venues()
         md_faces: dict[str, Any] = {}
         self._feed_kind = "local"
         self._live_venue_id = ""
         self._account_state = {"ready": False, "reason": "session not running"}
-        if mode == ExecutionMode.LIVE:
-            self._live_venue_id = self._resolve_live_venue_id(self.broker_name()) or ""
-            if not self._live_venue_id:
-                raise LiveConfigError(f"no live trading venue for broker {self.broker_name()!r}")
-            md_faces = self._probe_live_venue(self._live_venue_id)
-            if md_faces:
-                self._feed_kind = "live"
-        elif mode == ExecutionMode.SANDBOX:
-            self._live_venue_id = self._resolve_live_venue_id(self.broker_name()) or "sandbox"
+        self._live_venue_id = self._resolve_live_venue_id(self.broker_name()) or ""
+        if not self._live_venue_id:
+            raise LiveConfigError(f"no live trading venue for broker {self.broker_name()!r}")
+        md_faces = self._probe_live_venue(self._live_venue_id)
+        if md_faces:
+            self._feed_kind = "live"
         base_dir = self._data_dir / "live" / "sessions"
         sessions: dict[str, LiveSession] = {}
         try:
@@ -1965,7 +2042,7 @@ class LiveTradingService:
                     max_position_qty=self._config.quantity,
                     allowed_symbols=(symbol,),
                 )
-                is_live_venue = mode in (ExecutionMode.LIVE, ExecutionMode.SANDBOX)
+                is_live_venue = mode is ExecutionMode.LIVE
                 adapter = self._live_venue_id if is_live_venue else ""
                 gates = ModeGates()
                 if mode == ExecutionMode.LIVE:
@@ -1986,7 +2063,6 @@ class LiveTradingService:
                     SessionConfig(
                         mode=mode,
                         gates=gates,
-                        paper_capital=self._config.capital,
                         journal_path=str(session_dir / "journal.jsonl"),
                         memory_path=str(session_dir / "memory.json"),
                         kill_switch_path=str(session_dir / "kill.json"),
@@ -2012,13 +2088,9 @@ class LiveTradingService:
                 report = session.start((symbol,), self._config.timeframe, {record.id: warmup})
                 if not report.ready:
                     raise LiveConfigError("; ".join(report.reasons))
-                if session.mode != mode:
-                    # NEVER silently fall back: a downgraded session must not
-                    # trade under the wrong mode label (fail-closed here).
-                    raise LiveConfigError(
-                        f"venue refused {mode.value}: running {session.mode.value} "
-                        "instead — refusing to start"
-                    )
+                # No silent downgrade is possible any more: resolve_broker
+                # raises instead of returning a simulated venue, so a session
+                # that reported ready already holds the requested mode.
                 with contextlib.suppress(Exception):
                     session.reconcile_now()
                 if mode == ExecutionMode.LIVE:
@@ -2518,7 +2590,7 @@ class LiveTradingService:
             available = self._live_available_funds(view)
             if available is not None:
                 capital = BrokerCapital(available=available, fetched_epoch=now, source="broker")
-        elif self._config.mode == "PAPER":
+        elif self._config.mode == "BACKTEST":
             paper = _as_float(self._config.capital)
             if paper is not None and paper > 0:
                 capital = BrokerCapital(available=paper, fetched_epoch=now, source="paper")
@@ -2937,7 +3009,7 @@ class LiveTradingService:
                     strategy_name=str(config.get("strategy_name", "")),
                     symbols=tuple(config.get("symbols", ())),
                     timeframe=str(config.get("timeframe", "")),
-                    mode=str(config.get("mode", "PAPER")),
+                    mode=str(config.get("mode", "BACKTEST")),
                     quantity=quantity,
                     capital=capital,
                 )
@@ -2945,8 +3017,8 @@ class LiveTradingService:
                 self._config = LiveTradeConfig()
         else:
             self._config = LiveTradeConfig()
-        if self._config.mode not in ("PAPER", "LIVE"):
-            self._config.mode = "PAPER"
+        if self._config.mode not in ("BACKTEST", "LIVE"):
+            self._config.mode = "BACKTEST"
         if isinstance(config, dict):
             self._eligibility_enforcement = bool(config.get("eligibility_enabled", False))
             self._account_confirmed = bool(config.get("account_confirmed", False))

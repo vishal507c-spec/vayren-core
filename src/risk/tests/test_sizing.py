@@ -178,33 +178,6 @@ def test_live_rejects_non_broker_capital_source() -> None:
     assert verdict.reason == BROKER_CAPITAL_UNAVAILABLE
 
 
-def test_paper_uses_simulated_capital() -> None:
-    verdict = size_position(
-        broker_capital=_capital(1_000_000.0, source="paper"),
-        entry_price=1218.50,
-        stop_price=1245.00,
-        mode="PAPER",
-        now_epoch=NOW,
-    )
-    assert verdict.ready
-    assert verdict.max_risk_per_stock == 1_000_000.0 * 4.0 * 0.0015
-
-
-def test_sandbox_uses_sandbox_capital() -> None:
-    verdict = size_position(
-        broker_capital=_capital(500_000.0, source="sandbox"),
-        entry_price=100.0,
-        stop_price=106.0,
-        mode="SANDBOX",
-        now_epoch=NOW,
-    )
-    assert verdict.ready
-    assert verdict.max_risk_per_stock == 500_000.0 * 4.0 * 0.0015
-
-
-# ── stale capital ────────────────────────────────────────────────────────
-
-
 def test_stale_capital_blocks() -> None:
     verdict = size_position(
         broker_capital=_capital(100_000.0, fetched=NOW - 3600.0),

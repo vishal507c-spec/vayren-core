@@ -1,4 +1,8 @@
-"""Execution domain — live/paper strategy execution with safety gates.
+"""Execution domain — LIVE strategy execution with safety gates.
+
+Exactly two operating modes: BACKTEST (historical replay, owned by the
+backtest engine) and LIVE (real broker execution). Simulated venues,
+simulated fills and mode-downgrade fallbacks do not exist.
 
 Depends on: core, market, strategy, risk.
 
@@ -35,13 +39,11 @@ from execution.broker import (
     GateResult,
     LiveGatesReport,
     NotConfiguredError,
-    PaperBroker,
     RateLimiter,
     ReadOnlyBroker,
     ReconnectPolicy,
     ResilienceState,
     RetryKind,
-    SandboxBroker,
     TimeoutPolicy,
     adapter_supports,
     classify_retry,
@@ -151,11 +153,15 @@ from execution.models import (
     make_intent_id,
 )
 from execution.modes import (
+    RETIRED_MODE_LABELS,
     ExecutionMode,
+    ExecutionModeError,
     LiveArm,
+    LiveModeError,
     ModeGates,
     arm_transition,
     gates_from_env,
+    parse_mode,
     resolve_mode,
 )
 from execution.planner import ExecutionPreferences, OrderPlanner
@@ -298,8 +304,6 @@ __all__ = [
     "funds_snapshot_from_face",
     "funds_valid_for_live",
     "risk_capital_from_funds",
-    "PaperBroker",
-    "SandboxBroker",
     "ReadOnlyBroker",
     "ResilienceState",
     "RateLimiter",
@@ -325,10 +329,14 @@ __all__ = [
     "risk_configuration_valid",
     "resolve_broker",
     "ExecutionMode",
+    "ExecutionModeError",
+    "RETIRED_MODE_LABELS",
     "LiveArm",
+    "LiveModeError",
     "ModeGates",
     "arm_transition",
     "gates_from_env",
+    "parse_mode",
     "resolve_mode",
     "PositionLedger",
     "ReconcileStatus",

@@ -187,7 +187,7 @@ def build_snapshot(live: dict[str, Any]) -> dict[str, Any]:
         order_stream = {"status": "DISCONNECTED", "detail": "broker not connected"}
 
     strategy = _strategy_status(live)
-    strategy["mode"] = str(live.get("mode", "PAPER") or "PAPER")
+    strategy["mode"] = str(live.get("mode", "BACKTEST") or "BACKTEST")
     strategy["source"] = "live session lifecycle + start blockers"
     # Authoritative session timing (nested). Used for worker uptime/started_at.
     raw_timing = live.get("session_timing")
@@ -290,7 +290,7 @@ def build_snapshot(live: dict[str, Any]) -> dict[str, Any]:
             "strategy": str(strategy.get("name", "") if isinstance(strategy, dict) else ""),
             "symbols_count": len(live.get("selected_symbols", []) or []),
             "broker": str(broker.get("name", "") or ""),
-            "mode": str(live.get("mode", "PAPER") or "PAPER"),
+            "mode": str(live.get("mode", "BACKTEST") or "BACKTEST"),
             "source": "server-side trading runtime",
         },
         "system": {

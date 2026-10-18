@@ -185,8 +185,3 @@ def test_final_gate_passes_sized_quantity() -> None:
     assert broker.placed == ["i1:o1"]
 
 
-def test_paper_submit_unchanged_without_sizing_record() -> None:
-    broker = _Broker()
-    session = _session(mode=ExecutionMode.PAPER, broker=broker)
-    session._submit(_intent(), _plan(quantity=10.0), 1_700_000_000.0)
-    assert broker.placed == ["i1:o1"]

@@ -22,11 +22,30 @@ class Domain(StrEnum):
 
 
 class Environment(StrEnum):
-    """Account environment carried by trading faces and selections."""
+    """Account environment carried by trading faces and selections.
 
-    PAPER = "paper"
-    SANDBOX = "sandbox"
+    Exactly two environments ever mattered to this architecture: a real
+    LIVE broker, and the (now retired) simulated venues. Simulated venues are
+    gone, so only LIVE remains; legacy ``paper``/``sandbox`` values are
+    refused explicitly instead of being reinterpreted.
+    """
+
     LIVE = "live"
+
+    @classmethod
+    def parse(cls, value: object) -> Environment:
+        text = str(value or "").strip().lower()
+        if text in ("paper", "sandbox"):
+            raise ValueError(
+                f"environment {text!r} was retired with simulated execution; "
+                "only 'live' is supported"
+            )
+        try:
+            return cls(text)
+        except ValueError as exc:
+            raise ValueError(
+                f"unknown environment {value!r}; valid: {[e.value for e in cls]}"
+            ) from exc
 
 
 class ErrorCode(StrEnum):

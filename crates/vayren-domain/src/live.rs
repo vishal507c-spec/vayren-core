@@ -34,38 +34,33 @@ pub const NO_BACKEND_NOTE: &str = "No execution backend attached.";
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ExecMode {
     #[default]
-    Paper,
-    Sandbox,
+    Backtest,
     Live,
 }
 
 impl ExecMode {
     pub fn kind(self) -> i32 {
         match self {
-            ExecMode::Paper => 0,
-            ExecMode::Sandbox => 1,
-            ExecMode::Live => 2,
+            ExecMode::Backtest => 0,
+            ExecMode::Live => 1,
         }
     }
     pub fn label(self) -> &'static str {
         match self {
-            ExecMode::Paper => "PAPER",
-            ExecMode::Sandbox => "SANDBOX",
+            ExecMode::Backtest => "BACKTEST",
             ExecMode::Live => "LIVE",
         }
     }
     pub fn from_kind(kind: i32) -> Self {
         match kind {
-            1 => ExecMode::Sandbox,
-            2 => ExecMode::Live,
-            _ => ExecMode::Paper,
+            1 => ExecMode::Live,
+            _ => ExecMode::Backtest,
         }
     }
     /// Badge tone (§3.1 semantics): PAPER accent, SANDBOX warn, LIVE bad.
     pub fn badge(self) -> i32 {
         match self {
-            ExecMode::Paper => 4,
-            ExecMode::Sandbox => 2,
+            ExecMode::Backtest => 1,
             ExecMode::Live => 3,
         }
     }
@@ -685,7 +680,7 @@ pub struct LiveState {
 impl Default for LiveState {
     fn default() -> Self {
         Self {
-            mode: ExecMode::Paper,
+            mode: ExecMode::Backtest,
             broker: BrokerFacts::default(),
             gates: Vec::new(),
             risk_status: RiskStatus::Ready,
@@ -1589,8 +1584,7 @@ impl LiveState {
         if let Some(mode) = v.get("mode").and_then(|m| m.as_str()) {
             self.mode = match mode {
                 "LIVE" => ExecMode::Live,
-                "SANDBOX" => ExecMode::Sandbox,
-                _ => ExecMode::Paper,
+                _ => ExecMode::Backtest,
             };
             if self.mode != ExecMode::Live {
                 self.live_confirmed = false;
@@ -1841,20 +1835,17 @@ impl LiveState {
         }
 
         // ── session setup (selection = service config, the single source) ──
+        // Server-authoritative strategy list, same rule as the timeframe
+        // ladder: an explicit empty list means "the registry holds none", a
+        // payload without the key leaves the previous server-stated list in
+        // place, and NOTHING is synthesized here — a hardcoded list claimed
+        // strategies the backend registry may not contain.
         if let Some(list) = v.get("available_strategies").and_then(|a| a.as_array()) {
-            let options: Vec<String> = list.iter().map(value_to_text).collect();
-            if !options.is_empty() {
-                self.strategies = options;
-            }
-        }
-        if self.strategies.is_empty() {
-            self.strategies = vec![
-                "EMA Crossover".into(),
-                "OBR".into(),
-                "OBR C1C4".into(),
-                "SMA Crossover".into(),
-                "RSI Strategy".into(),
-            ];
+            self.strategies = list
+                .iter()
+                .map(value_to_text)
+                .filter(|s| !s.is_empty())
+                .collect();
         }
         let active_strategy = v
             .get("strategy")
@@ -1900,27 +1891,19 @@ impl LiveState {
                 .collect();
             self.store_total = Some(self.symbols.len());
         }
+        // The backend's `available_timeframes` is the ONLY ladder source. An
+        // explicit empty list means "nothing supported yet" and is honored as
+        // such; a payload WITHOUT the key leaves the previous ladder in place.
+        // The client never synthesizes a fallback ladder — a fabricated "3m"
+        // was cycled into setups the candle stores could not serve
+        // (2026-10-18 drift class).
+        let previous_timeframe = self.selected_timeframe().map(str::to_string);
         if let Some(list) = v.get("available_timeframes").and_then(|a| a.as_array()) {
-            let parsed: Vec<String> = list
+            self.timeframes = list
                 .iter()
                 .map(value_to_text)
                 .filter(|s| !s.is_empty())
                 .collect();
-            if !parsed.is_empty() {
-                self.timeframes = parsed;
-            }
-        }
-        if self.timeframes.is_empty() {
-            self.timeframes = vec![
-                "1m".into(),
-                "3m".into(),
-                "5m".into(),
-                "15m".into(),
-                "30m".into(),
-                "45m".into(),
-                "1h".into(),
-                "1d".into(),
-            ];
         }
         let tf_candidate = v
             .get("selected_timeframe")
@@ -1944,18 +1927,26 @@ impl LiveState {
                     .filter(|s| !s.is_empty())
             });
 
+        // Server values only: the backend's `selected_timeframe` selects when
+        // — and only when — its ladder can serve it. A server-unknown value
+        // is NEVER appended to the cycle list; the picker simply stays
+        // unselected until the operator picks a supported value.
         if let Some(tf) = tf_candidate {
-            if !self.timeframes.iter().any(|t| t == tf) {
-                self.timeframes.push(tf.to_string());
-            }
-            if let Some(pos) = self.timeframes.iter().position(|t| t == tf) {
-                self.timeframe_index = Some(pos);
-            }
+            self.timeframe_index = self.timeframes.iter().position(|t| t == tf);
+        } else if let Some(prev) = previous_timeframe {
+            // A replaced ladder invalidates indices, never values: re-resolve
+            // the previous selection in the new list (None when it is gone).
+            self.timeframe_index = self.timeframes.iter().position(|t| *t == prev);
         } else if self.timeframe_index.is_none() && !self.timeframes.is_empty() {
             if let Some(pos) = self.timeframes.iter().position(|t| t == "15m") {
                 self.timeframe_index = Some(pos);
             } else {
                 self.timeframe_index = Some(0);
+            }
+        }
+        if let Some(i) = self.timeframe_index {
+            if i >= self.timeframes.len() {
+                self.timeframe_index = None;
             }
         }
         if let Some(q) = v.get("quantity").and_then(|q| q.as_f64()) {
@@ -5216,7 +5207,7 @@ mod tests {
     #[test]
     fn defaults_are_fail_closed_and_honest() {
         let st = LiveState::default();
-        assert_eq!(st.mode, ExecMode::Paper);
+        assert_eq!(st.mode, ExecMode::Backtest);
         assert_eq!(st.session, SessionStatus::Stopped);
         assert!(!st.venue_gates_ready());
         assert!(!st.can_start());
@@ -5295,7 +5286,7 @@ mod tests {
         let mut st = configured(LiveState::default());
         st.gates = failed_gates();
         st.set_mode(ExecMode::Live);
-        assert_eq!(st.mode, ExecMode::Paper); // fail-closed, never silent
+        assert_eq!(st.mode, ExecMode::Backtest); // fail-closed, never silent
         assert!(st.action_note.as_deref().unwrap().contains("LIVE refused"));
         st.gates = all_ready_gates();
         st.set_mode(ExecMode::Live);
@@ -5317,7 +5308,7 @@ mod tests {
         assert!(st.live_confirmed);
         assert!(st.can_start());
         // Leaving LIVE mode clears consent.
-        st.set_mode(ExecMode::Paper);
+        st.set_mode(ExecMode::Backtest);
         assert!(!st.live_confirmed);
     }
 
@@ -5345,7 +5336,7 @@ mod tests {
         st.session = SessionStatus::Running;
         st.gates = all_ready_gates();
         st.set_mode(ExecMode::Live);
-        assert_eq!(st.mode, ExecMode::Paper);
+        assert_eq!(st.mode, ExecMode::Backtest);
         assert_eq!(
             st.action_note.as_deref(),
             Some("stop the running session before changing mode")
@@ -6001,10 +5992,34 @@ mod tests {
         assert_eq!(action["symbols"], serde_json::json!(["RELIANCE", "TCS"]));
         // Mode changes are requests; the backend snapshot decides.
         st.set_mode(ExecMode::Live);
-        assert_eq!(st.mode, ExecMode::Paper); // not applied locally
+        assert_eq!(st.mode, ExecMode::Backtest); // not applied locally
         let action: serde_json::Value = serde_json::from_str(&st.take_action().unwrap()).unwrap();
         assert_eq!(action["mode"], "LIVE");
         assert_eq!(action["action"], "mode");
+    }
+
+    #[test]
+    fn host_setup_never_submits_an_unsupported_timeframe() {
+        let mut st = configured(LiveState::default());
+        st.apply_snapshot(&serde_json::json!({
+            "mode": "LIVE",
+            "session_status": "STOPPED",
+            "selected_timeframe": "3m",
+            "available_timeframes": ["30m", "1h"],
+        }));
+        assert!(st.host_mode);
+        assert_eq!(st.selected_timeframe(), None);
+        st.toggle_symbol(1);
+        let action: serde_json::Value = serde_json::from_str(&st.take_action().unwrap()).unwrap();
+        assert_eq!(action["action"], "setup");
+        assert_ne!(
+            action["timeframe"], "3m",
+            "the drift value must never be submitted"
+        );
+        assert_eq!(
+            action["timeframe"], "",
+            "no selection submits the no-op marker"
+        );
     }
 
     #[test]
@@ -6540,6 +6555,86 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_ladder_is_server_authoritative_and_never_synthesized() {
+        let mut st = LiveState::default();
+        st.apply_snapshot(&serde_json::json!({
+            "selected_timeframe": "30m",
+            "available_timeframes": [],
+        }));
+        assert!(
+            st.timeframes.is_empty(),
+            "an explicit empty ladder is honored"
+        );
+        assert_eq!(
+            st.selected_timeframe(),
+            None,
+            "no ladder value may be invented"
+        );
+
+        st.apply_snapshot(&serde_json::json!({
+            "selected_timeframe": "30m",
+            "available_timeframes": ["30m", "1h"],
+        }));
+        assert_eq!(st.timeframes, vec!["30m".to_string(), "1h".to_string()]);
+        assert_eq!(st.selected_timeframe(), Some("30m"));
+
+        // A payload without the key keeps the last server-stated ladder.
+        st.apply_snapshot(&serde_json::json!({"selected_timeframe": "1h"}));
+        assert_eq!(st.timeframes, vec!["30m".to_string(), "1h".to_string()]);
+        assert_eq!(st.selected_timeframe(), Some("1h"));
+    }
+
+    #[test]
+    fn snapshot_never_appends_an_unsupported_selected_timeframe() {
+        let mut st = LiveState::default();
+        st.apply_snapshot(&serde_json::json!({
+            "selected_timeframe": "3m",
+            "available_timeframes": ["30m", "1h"],
+        }));
+        assert_eq!(
+            st.timeframes,
+            vec!["30m".to_string(), "1h".to_string()],
+            "a server-unknown value must never be appended to the ladder"
+        );
+        assert_eq!(
+            st.selected_timeframe(),
+            None,
+            "an unservable value cannot be selected"
+        );
+    }
+
+    #[test]
+    fn snapshot_ladder_replacement_reselects_by_value_not_position() {
+        let mut st = LiveState::default();
+        st.apply_snapshot(&serde_json::json!({
+            "selected_timeframe": "1m",
+            "available_timeframes": ["1m", "5m"],
+        }));
+        assert_eq!(st.selected_timeframe(), Some("1m"));
+
+        st.apply_snapshot(&serde_json::json!({
+            "available_timeframes": ["15m", "5m", "1m"],
+        }));
+        assert_eq!(st.selected_timeframe(), Some("1m"));
+    }
+
+    #[test]
+    fn snapshot_strategy_list_is_server_authoritative_and_never_synthesized() {
+        let mut st = LiveState::default();
+        st.apply_snapshot(&serde_json::json!({"available_strategies": ["OBR C1C4"]}));
+        assert_eq!(st.strategies, vec!["OBR C1C4".to_string()]);
+
+        // A payload without the key keeps the last server-stated list.
+        st.apply_snapshot(&serde_json::json!({"session_status": "STOPPED"}));
+        assert_eq!(st.strategies, vec!["OBR C1C4".to_string()]);
+
+        // An explicit empty list means the registry holds none.
+        st.apply_snapshot(&serde_json::json!({"available_strategies": []}));
+        assert!(st.strategies.is_empty(), "an explicit empty list must clear the picker");
+        assert_eq!(st.selected_strategy(), None);
+    }
+
+    #[test]
     fn snapshot_halt_fact_and_flat_position_are_truthful() {
         let mut st = LiveState::default();
         st.apply_snapshot(&serde_json::json!({
@@ -6727,7 +6822,7 @@ mod tests {
         assert_eq!(view.bar.strategy_sub, "30m");
         // A configured-but-stopped session reads STOPPED, never ACTIVE.
         assert_eq!(view.active_strat.status, "● STOPPED");
-        assert_eq!(view.active_strat.mode, "PAPER");
+        assert_eq!(view.active_strat.mode, "BACKTEST");
         // Recon card: bare status + counts sub-line.
         assert_eq!(view.bar.recon_label, "CLEAN");
         assert_eq!(view.bar.recon_sub, "Positions: 0 | Orders: 0");

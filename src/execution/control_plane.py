@@ -933,7 +933,7 @@ class ControlPlaneController:
             gates_kill_switch_off=True,
             broker_connected=True,
             broker_name="FYERS",
-            broker_environment="PAPER",
+            broker_environment="LIVE",
             broker_health_reason="ok",
             reconciliation_healthy=True,
             reconciliation_status="MATCHED",

@@ -978,25 +978,6 @@ def test_broker_disconnect_blocks_live_order() -> None:
     assert not any("orders/sync" in c["url"] for c in transport.calls)
 
 
-def test_paper_mode_does_not_call_live_websocket() -> None:
-    """PAPER mode remains isolated and never initiates LIVE sockets."""
-    from unittest.mock import MagicMock
-
-    from execution.market_data.provider import MarketDataProvider
-    from execution.modes import ExecutionMode
-    from execution.runtime.session import LiveSession, SessionConfig
-    from risk import RiskPolicy
-
-    provider = MagicMock(spec=MarketDataProvider)
-    session = LiveSession(
-        config=SessionConfig(mode=ExecutionMode.PAPER),
-        provider=provider,
-        risk_policy=RiskPolicy(),
-    )
-    assert session.mode == ExecutionMode.PAPER
-    assert session._broker is None or type(session._broker).__name__ != "FyersSessionAdapter"
-
-
 def test_fyers_session_adapter_health_preserves_auth_error() -> None:
     """Expired or invalid token AuthError must not be disguised as venue unreachable."""
     from unittest.mock import MagicMock

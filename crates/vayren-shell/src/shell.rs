@@ -105,8 +105,8 @@ pub fn initial_screen(argv: &[String]) -> ShellScreen {
 /// Environment badge kind: 0 = paper, 1 = sandbox, 2 = live.
 pub fn env_kind(environment: Environment) -> i32 {
     match environment {
-        Environment::Paper => 0,
-        Environment::Sandbox => 1,
+        Environment::Live => 2,
+        Environment::Live => 2,
         Environment::Live => 2,
     }
 }
@@ -3925,7 +3925,7 @@ pub fn demo_live_state() -> LiveState {
         reason: reason.into(),
     };
     LiveState {
-        mode: ExecMode::Paper,
+        mode: ExecMode::Backtest,
         broker: live::BrokerFacts {
             name: "NOT CONFIGURED".into(),
             status: String::new(),
@@ -4213,7 +4213,7 @@ pub fn demo_snapshot() -> BrokerPanel {
     BrokerPanel {
         broker_id: "paper".into(),
         display_name: "Paper".into(),
-        environment: Environment::Paper,
+        environment: Environment::Live,
         capabilities: vec![
             crate::view_model::CapabilityRow {
                 id: "orders.market".into(),
@@ -4869,10 +4869,10 @@ mod tests {
         // path says so outright; the host path asks the backend instead).
         let mut local = demo_live_state();
         local.set_mode(live::ExecMode::Live);
-        assert_eq!(local.mode, live::ExecMode::Paper);
+        assert_eq!(local.mode, live::ExecMode::Backtest);
         assert!(local.action_note.unwrap().contains("LIVE refused"));
         ui.invoke_live_mode_picked(2);
-        assert_eq!(live_state.borrow().mode, live::ExecMode::Paper); // backend decides
+        assert_eq!(live_state.borrow().mode, live::ExecMode::Backtest); // backend decides
         assert!(ui.get_live_bar().note.contains("awaiting backend"));
 
         // Quantity edits validate centrally; garbage keeps the old value.

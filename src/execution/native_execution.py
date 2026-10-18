@@ -22,15 +22,6 @@ _lib.vy_exec_gates_mask.restype = ctypes.c_int64
 _lib.vy_exec_missing_gates.argtypes = [ctypes.c_uint32, _char_out, ctypes.c_size_t]
 _lib.vy_exec_missing_gates.restype = ctypes.c_int32
 
-_lib.vy_exec_resolve_mode.argtypes = [
-    ctypes.c_char_p,
-    ctypes.c_int64,
-    ctypes.c_uint32,
-    _char_out,
-    ctypes.c_size_t,
-]
-_lib.vy_exec_resolve_mode.restype = ctypes.c_int32
-
 _lib.vy_exec_intent_id.argtypes = [
     ctypes.c_char_p,
     ctypes.c_int64,
@@ -725,25 +716,6 @@ def native_missing_gates(mask: int) -> tuple[str, ...]:
         lambda buf, cap: int(_lib.vy_exec_missing_gates(mask, buf, cap)),
     )
     return tuple(text.split(",")) if text else ()
-
-
-def native_resolve_mode(requested: str, mask: int) -> tuple[str, tuple[str, ...]]:
-    """Effective ``(mode, downgrade_reasons)`` for a request plus its gates.
-
-    The LIVE→PAPER degradation rule, the gate vocabulary and the reason text
-    all come from the kernel; an unknown mode label is a bridge error, not a
-    silent downgrade.
-    """
-    payload = requested.encode("utf-8")
-    needed = int(_lib.vy_exec_resolve_mode(payload, len(payload), mask, None, 0))
-    if needed < 0:
-        raise NativeBridgeError(f"unknown execution mode label: {requested!r}")
-    doc = _read(
-        needed,
-        lambda buf, cap: int(_lib.vy_exec_resolve_mode(payload, len(payload), mask, buf, cap)),
-    )
-    mode, _, reasons = doc.partition("\n")
-    return mode, tuple(reasons.split("\n")) if reasons else ()
 
 
 def native_intent_id(

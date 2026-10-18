@@ -175,7 +175,7 @@ def _get_worker_runtime_status(data_dir: str, strategy_dir: str) -> dict[str, An
 
         snap = _trading_service_snapshot(data_dir, strategy_dir)
         session_status = str(snap.get("session_status", "STOPPED") or "STOPPED").upper()
-        mode = str(snap.get("mode", "PAPER") or "PAPER").upper()
+        mode = str(snap.get("mode", "BACKTEST") or "BACKTEST").upper()
         strat = snap.get("strategy", {})
         strat_name = str(strat.get("id", "") or "") if isinstance(strat, dict) else ""
         symbols = snap.get("selected_symbols", []) or []
@@ -198,7 +198,7 @@ def _get_worker_runtime_status(data_dir: str, strategy_dir: str) -> dict[str, An
         return {
             "worker_status": "UNKNOWN",
             "running": False,
-            "mode": "PAPER",
+            "mode": "BACKTEST",
             "strategy": "",
             "symbols_count": 0,
             "broker_name": "",

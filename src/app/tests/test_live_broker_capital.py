@@ -194,11 +194,11 @@ def test_refresh_capital_without_a_broker_says_so(dirs: tuple[str, str]) -> None
     mock_mgr = MagicMock(spec=BrokerManager)
     mock_mgr.broker_ids.return_value = []
     mock_mgr.snapshot.return_value = {"active_broker": ""}
-    # No venue resolvable at all: the service still reports a paper broker,
-    # so the handler must take the registry path (which is empty here).
+    # No venue resolvable at all: the service reports no broker, so the
+    # handler takes the registry path (which is empty here).
     service = MagicMock()
     service._broker_view.return_value = {}
-    service.broker_name.return_value = "paper"
+    service.broker_name.return_value = ""
     service.snapshot.return_value = {"capital": {"source": "configured", "available_margin": None}}
     service.is_live_confirmed.return_value = False
 

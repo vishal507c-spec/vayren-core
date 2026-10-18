@@ -9,10 +9,18 @@ safe defaults apply and gaps are reported, never invented):
 - ``LIVE_ORDER_TYPES``: default ``("MARKET",)``
 - ``LIVE_POSITION_MODEL``: default ``"single"``
 - ``LIVE_MAX_POSITION_SIZE``: default None
-- ``SUPPORTS_LIVE`` / ``SUPPORTS_PAPER``: default False / True
+- ``SUPPORTS_LIVE``: default False — capability, NOT readiness
+- ``SUPPORTS_BACKTEST`` (legacy name ``SUPPORTS_PAPER``): default True
 - ``LIVE_ENTRY`` / ``LIVE_EXIT``: human-readable condition text, default ""
 - ``LIVE_RISK_ASSUMPTIONS``: default ()
 - ``LIVE_EXPECTED_SIGNALS_PER_DAY`` / ``LIVE_LATENCY_SENSITIVE``: defaults
+
+Precedence between a strategy's explicit declaration on
+:class:`~strategy.models.definition.StrategyDefinition` and these legacy class
+attributes is deterministic: **a non-empty declaration wins; an empty
+declaration falls back to the legacy attribute** — so a strategy that declares
+nothing behaves exactly as before, and a strategy that declares something can
+never be overridden by a stale class attribute.
 """
 
 from __future__ import annotations
@@ -21,6 +29,9 @@ from typing import Any
 
 from execution.models.contract import StrategyRuntimeContract
 from strategy import StrategyDefinition, StrategyLogic
+
+#: Mode label a strategy must declare support for before LIVE may use it.
+LIVE_MODE = "LIVE"
 
 
 def _attr(logic: Any, name: str, default: Any) -> Any:
@@ -49,12 +60,29 @@ def inspect_strategy(
         params = tuple(str(k) for k in dict(definition.params))
     except Exception:
         missing.append("parameters")
+
+    # ── declaration first, legacy attribute second ──────────────────
+    timeframes = tuple(definition.supported_timeframes) or tuple(
+        str(t) for t in _attr(logic, "LIVE_TIMEFRAMES", ())
+    )
+    warmup = max(warmup, max(0, int(definition.required_warmup_bars)))
+    capabilities = tuple(definition.required_capabilities) or tuple(
+        str(c) for c in _attr(logic, "LIVE_BROKER_CAPABILITIES", ())
+    )
+    supports_backtest = _attr(logic, "SUPPORTS_BACKTEST", None)
+    if supports_backtest is None:
+        supports_backtest = _attr(logic, "SUPPORTS_PAPER", True)
     indicators = tuple(str(i) for i in _attr(logic, "LIVE_INDICATORS", ()))
+    supported_modes = tuple(definition.supported_modes)
+    if LIVE_MODE not in supported_modes:
+        missing.append(
+            f"strategy declares no {LIVE_MODE} support (supported: {list(supported_modes)})"
+        )
     return StrategyRuntimeContract(
         strategy_id=definition.id,
         strategy_version=definition.version,
         instruments=tuple(str(s) for s in _attr(logic, "LIVE_INSTRUMENTS", ())),
-        timeframes=tuple(str(t) for t in _attr(logic, "LIVE_TIMEFRAMES", ())),
+        timeframes=timeframes,
         data_requirements=("candle-close",),
         indicators_required=indicators,
         warmup_bars=warmup,
@@ -67,13 +95,12 @@ def inspect_strategy(
         stateful=True,
         persistence_required=True,
         supports_live=bool(_attr(logic, "SUPPORTS_LIVE", False)),
-        supports_paper=bool(_attr(logic, "SUPPORTS_PAPER", True)),
-        required_broker_capabilities=tuple(
-            str(c) for c in _attr(logic, "LIVE_BROKER_CAPABILITIES", ())
-        ),
+        supports_backtest=bool(supports_backtest),
+        supported_modes=supported_modes,
+        required_broker_capabilities=capabilities,
         entry_description=str(_attr(logic, "LIVE_ENTRY", "")),
         exit_description=str(_attr(logic, "LIVE_EXIT", "")),
-        risk_assumptions=tuple(str(r) for r in _attr(logic, "LIVE_RISK_ASSUMPTIONS", ())),
+        risk_assumptions=tuple(str(a) for a in _attr(logic, "LIVE_RISK_ASSUMPTIONS", ())),
         missing=tuple(missing),
     )
 
@@ -90,7 +117,8 @@ def describe_requirements(contract: StrategyRuntimeContract) -> str:
         f"  parameters: {', '.join(contract.parameters) or 'none'}",
         f"  position model: {contract.position_model}; "
         f"order types: {', '.join(contract.order_types)}",
-        f"  live: {contract.supports_live}; paper: {contract.supports_paper}",
+        f"  modes: {', '.join(contract.supported_modes)}",
+        f"  live capable: {contract.supports_live}; backtest capable: {contract.supports_backtest}",
         f"  broker capabilities: {', '.join(contract.required_broker_capabilities) or 'none'}",
     ]
     if contract.missing:
@@ -106,4 +134,4 @@ def evaluate_signal_requirements(contract: StrategyRuntimeContract) -> tuple[str
     return tuple(requirements)
 
 
-__all__ = ["inspect_strategy", "describe_requirements", "evaluate_signal_requirements"]
+__all__ = ["inspect_strategy", "describe_requirements", "evaluate_signal_requirements", "LIVE_MODE"]

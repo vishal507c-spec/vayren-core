@@ -63,6 +63,20 @@ class SymbolRepository:
             logger.warning("Symbol discovery failed for %s: %s", self._directory, exc)
             return ()
 
+    def store_fingerprint(self, symbol: str) -> tuple[int, int] | None:
+        """`(mtime_ns, size)` of the symbol's store file, or None when absent.
+
+        A cheap change signal for caches that must never outlive the rows they
+        were computed from: existence alone misses new bars landing in an
+        existing file, and re-reading the store is exactly the cost the cache
+        exists to avoid.
+        """
+        try:
+            stat = self._path(symbol).stat()
+        except OSError:
+            return None
+        return (stat.st_mtime_ns, stat.st_size)
+
     def _rows(
         self,
         symbol: str,
@@ -227,6 +241,20 @@ class SymbolRepository:
             if detected is None:
                 return []
             base, anchor = detected
+        frames = available_timeframes(base)
+        if seconds not in {seconds_of(frame) for frame in frames}:
+            # Server-authoritative ladder (Rust `available_timeframes`): only
+            # the base duration itself and its whole multiples are servable.
+            # A finer request must NOT come back as base rows wearing the
+            # requested label (the 2026-10-18 "3m"-against-30m relabel), and a
+            # non-aligned multiple would be bucket-approximated — refuse both.
+            logger.warning(
+                "%s: timeframe %s is not servable from the %ss base; returning no candles",
+                symbol,
+                timeframe,
+                base,
+            )
+            return []
         plan = fetch_plan(timeframe, base, limit)
         if plan.plain:
             rows = self._rows(symbol, limit, start, end)

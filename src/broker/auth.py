@@ -128,7 +128,7 @@ class AccountIdentity:
     broker_id: str
     account_id: str
     display_name: str = ""
-    environment: Environment = Environment.PAPER
+    environment: Environment = Environment.LIVE
 
     def __post_init__(self) -> None:
         if not self.broker_id or not self.broker_id.strip():

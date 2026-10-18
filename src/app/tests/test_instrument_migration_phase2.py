@@ -159,4 +159,4 @@ def test_headless_setup_refusal_keeps_snapshot(dirs: tuple[str, str]) -> None:
     assert "not found in NSE Equity registry" in snap.get("action_note", "")
     # Refusal keeps the live book — never a degraded blank page.
     assert "error" not in snap
-    assert snap["mode"] in ("PAPER", "LIVE")
+    assert snap["mode"] in ("BACKTEST", "LIVE")

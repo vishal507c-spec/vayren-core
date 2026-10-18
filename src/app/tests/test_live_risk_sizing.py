@@ -63,15 +63,6 @@ def test_live_without_funds_is_not_ready_and_zeroed(tmp_path: Path) -> None:
     assert service._risk_reason == "BROKER_CAPITAL_UNAVAILABLE"
 
 
-def test_paper_uses_simulated_basis(tmp_path: Path) -> None:
-    service = _service(tmp_path)
-    service.configure(mode="PAPER")
-    service._refresh_risk_capital(_view(connected=False))
-    assert service._risk_capital is not None
-    assert service._risk_capital.source == "paper"
-    assert service._risk_status == "READY"
-
-
 def test_live_blocker_names_missing_capital(tmp_path: Path) -> None:
     service = _service(tmp_path)
     service.configure(

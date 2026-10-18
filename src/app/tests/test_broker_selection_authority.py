@@ -47,7 +47,7 @@ def _service(tmp_path: Path, *, selected: str, brokers: list[dict[str, Any]]) ->
     svc = LiveTradingService(data_dir=tmp_path)
     svc._selection = MagicMock()
     svc._selection.current.return_value = SimpleNamespace(
-        name=selected, environment="paper", reason="user-selected"
+        name=selected, environment="live", reason="user-selected"
     )
     manager = MagicMock(spec=BrokerManager)
     manager.snapshot.return_value = {"active_broker": selected, "brokers": brokers}
@@ -152,7 +152,7 @@ def test_compatibility_default_does_not_outrank_a_connected_venue(
     svc._selection = MagicMock()
     svc._selection.current.return_value = SimpleNamespace(
         name="zerodha",
-        environment="paper",
+        environment="live",
         reason="compatibility-default (no explicit selection yet)",
     )
     manager = MagicMock(spec=BrokerManager)
@@ -192,7 +192,7 @@ def test_no_selection_still_degrades_honestly_rather_than_inventing(
     svc = LiveTradingService(data_dir=tmp_path)
     svc._selection = MagicMock()
     svc._selection.current.return_value = SimpleNamespace(
-        name="paper", environment="paper", reason="user-selected"
+        name="", environment="live", reason="user-selected"
     )
     manager = MagicMock(spec=BrokerManager)
     manager.snapshot.return_value = {"active_broker": "", "brokers": []}

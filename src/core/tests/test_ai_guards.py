@@ -77,16 +77,6 @@ def test_plan_id_length_capped() -> None:
     assert any("128" in error for error in errors)
 
 
-def test_sandbox_terminal_advance_is_sandbox_error() -> None:
-    sandbox = Sandbox.__new__(Sandbox)
-    from core.ai.sandbox import SandboxStage
-
-    sandbox._stage = SandboxStage.DEPLOY
-    sandbox._history = [stage.value for stage in SandboxStage]
-    with pytest.raises(SandboxError, match="terminal"):
-        sandbox._advance()
-
-
 def test_ai_context_frozen_with_section_copy() -> None:
     first = AiContext()
     second = first.with_section("components", "x")

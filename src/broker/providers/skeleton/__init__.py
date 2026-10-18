@@ -135,7 +135,7 @@ class SkeletonTrading:
     """Trading face with no transport: every mutation fails closed."""
 
     name = BROKER_ID
-    environment = Environment.PAPER
+    environment = Environment.LIVE
 
     def capabilities(self) -> CapabilitySet:
         return _TRADING_SHAPE

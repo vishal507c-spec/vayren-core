@@ -1,12 +1,19 @@
-"""Execution modes and live safety gates. Default is PAPER, always.
+"""Execution modes and live safety gates. Exactly two modes, no third.
 
-LIVE requires every gate explicitly satisfied; any failure forces PAPER.
-There is no path from default configuration to real orders.
+- **BACKTEST** replays stored candles through the backtest engine and never
+  touches a venue.
+- **LIVE** trades the real broker with real money: explicit operator consent,
+  mandatory risk checks, broker reconciliation.
 
-Which gate names are missing, what counts as an ON flag, and when a LIVE
-request degrades to PAPER are decided by Rust (`execution_engine::modes`,
-bridged through :mod:`execution.native_execution`). What stays here is the
-vocabulary Python callers pass around and the plain five-flag holder.
+There is no simulated venue any more. A LIVE request whose gates are not all
+satisfied is **refused** with the exact missing gate names — it is never
+downgraded to another mode, because the only other mode (BACKTEST) executes no
+orders at all and would silently pretend the engine was running.
+
+Which gate names count as ON, and the gate order, are decided by Rust
+(`execution_engine::modes`, bridged through :mod:`execution.native_execution`).
+What stays here is the vocabulary Python callers pass around and the plain
+five-flag holder.
 """
 
 from __future__ import annotations
@@ -21,14 +28,56 @@ from execution.native_execution import (
     native_gates_mask,
     native_mask_to_flags,
     native_missing_gates,
-    native_resolve_mode,
 )
 
 
 class ExecutionMode(Enum):
-    PAPER = "PAPER"
-    SANDBOX = "SANDBOX"
+    """The only two operating modes. PAPER/SANDBOX no longer exist."""
+
+    BACKTEST = "BACKTEST"
     LIVE = "LIVE"
+
+
+#: Retired labels kept only to produce an actionable refusal, never to run.
+RETIRED_MODE_LABELS: tuple[str, ...] = ("PAPER", "SANDBOX")
+
+
+class ExecutionModeError(ValueError):
+    """An unknown or retired execution mode was requested."""
+
+
+class LiveModeError(RuntimeError):
+    """LIVE requested without the mandatory gates it requires.
+
+    Fail-closed: the caller reports NOT READY / SAFE STOP with these reasons.
+    There is no fallback mode to switch into.
+    """
+
+    def __init__(self, reasons: tuple[str, ...]) -> None:
+        self.reasons = tuple(reasons)
+        super().__init__("LIVE unavailable — missing gates: " + ", ".join(self.reasons))
+
+
+def parse_mode(value: object) -> ExecutionMode:
+    """Parse a persisted/remote mode label into one of the two modes.
+
+    Legacy ``PAPER``/``SANDBOX`` values are REFUSED with an explicit reason
+    instead of being reinterpreted — a stored simulated mode must never
+    silently become LIVE.
+    """
+    text = str(value or "").strip().upper()
+    if text in RETIRED_MODE_LABELS:
+        raise ExecutionModeError(
+            f"execution mode {text!r} was retired — simulated execution no longer "
+            "exists; select LIVE explicitly (or BACKTEST for historical replay)"
+        )
+    try:
+        return ExecutionMode(text)
+    except ValueError as exc:
+        raise ExecutionModeError(
+            f"unknown execution mode {value!r}; valid modes are "
+            f"{[mode.value for mode in ExecutionMode]}"
+        ) from exc
 
 
 class LiveArm(Enum):
@@ -117,11 +166,17 @@ def gates_from_env(env: dict[str, str] | None = None) -> ModeGates:
 def resolve_mode(
     requested: ExecutionMode, gates: ModeGates
 ) -> tuple[ExecutionMode, tuple[str, ...]]:
-    """Resolve the effective mode. LIVE without all gates degrades to PAPER.
+    """Resolve the effective mode, or refuse.
 
-    Returns (effective_mode, downgrade_reasons). Downgrade is never silent:
-    every missing gate is reported. The kernel owns the decision and the
-    reason text.
+    BACKTEST resolves to itself and needs no venue. LIVE resolves only when
+    every gate is satisfied; otherwise :class:`LiveModeError` is raised
+    with the kernel's own missing-gate names. There is no downgrade target —
+    degrading LIVE to a simulated venue is exactly what this architecture
+    removed.
     """
-    mode, reasons = native_resolve_mode(requested.value, gates.mask)
-    return ExecutionMode(mode), reasons
+    if requested is ExecutionMode.BACKTEST:
+        return ExecutionMode.BACKTEST, ()
+    missing = gates.missing()
+    if missing:
+        raise LiveModeError(missing)
+    return ExecutionMode.LIVE, ()

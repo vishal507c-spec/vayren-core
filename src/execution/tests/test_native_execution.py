@@ -32,12 +32,6 @@ def test_gates_mask_and_missing() -> None:
     assert "KILL_SWITCH_OFF" in missing0
 
 
-def test_resolve_mode_falls_back_to_paper() -> None:
-    mode, reasons = ne.native_resolve_mode("LIVE", mask=0)
-    assert mode == "PAPER"
-    assert len(reasons) > 0
-
-
 def test_intent_id_format() -> None:
     intent = ne.native_intent_id(
         strategy_id="strat-1",

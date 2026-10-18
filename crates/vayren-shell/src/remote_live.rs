@@ -739,12 +739,11 @@ pub fn apply_remote_sections(state: &mut LiveState, sections: &serde_json::Value
             serde_json::Value::String(stf.to_string()),
         );
     }
-    if !translated.contains_key("available_timeframes") {
-        translated.insert(
-            "available_timeframes".to_string(),
-            serde_json::json!(["1m", "3m", "5m", "15m", "30m", "45m", "1h", "1d"]),
-        );
-    }
+    // `available_timeframes` is forwarded ONLY when the gateway states it.
+    // The client never fabricates a fallback ladder: a synthesized list let
+    // the picker offer values no candle store could serve (the 2026-10-18
+    // "3m"-against-30m drift class). An absent key leaves the previous
+    // server-stated ladder in place downstream.
     if let Some(qty) = sections.get("quantity").and_then(|v| v.as_f64()) {
         translated.insert("quantity".to_string(), serde_json::json!(qty));
     }
@@ -820,15 +819,13 @@ pub fn apply_remote_sections(state: &mut LiveState, sections: &serde_json::Value
     if !state.has_valid_capital() {
         state.risk_status = RiskStatus::NotReady;
     }
-    if state.strategies.is_empty() {
-        state.strategies = vec![
-            "EMA Crossover".to_string(),
-            "OBR".to_string(),
-            "OBR C1C4".to_string(),
-            "SMA Crossover".to_string(),
-            "RSI Strategy".to_string(),
-        ];
-    }
+    // No strategy list is ever fabricated here. `available_strategies` is
+    // forwarded only when the gateway states it (see the translation loop
+    // above), an explicitly empty list means "the server registered none",
+    // and an absent key leaves the last server-stated list untouched — the
+    // picker simply stays empty until the server names a strategy. A
+    // hardcoded list here once claimed strategies existed that the backend
+    // registry may not have.
 
     // Order-stream fact rides as a readiness gate (extra gates never affect
     // the five named venue gates; the backend's own `start_blockers` verdict
@@ -909,13 +906,9 @@ pub fn init_remote_state() -> LiveState {
     let mut state = LiveState::default();
     state.host_mode = true;
     state.bridge_wired = false;
-    state.strategies = vec![
-        "EMA Crossover".to_string(),
-        "OBR".to_string(),
-        "OBR C1C4".to_string(),
-        "SMA Crossover".to_string(),
-        "RSI Strategy".to_string(),
-    ];
+    // No strategy names are seeded: before the first server snapshot the
+    // backend's registry list is UNKNOWN, and an empty picker says exactly
+    // that. A fabricated list would claim strategies the server may not have.
     // Unknown venue funds ⇒ sizing NOT READY, never the default basis.
     state.capital.source = "broker".to_string();
     state.capital.broker_capital = None;
@@ -1460,7 +1453,7 @@ mod tests {
         apply_remote_sections(&mut state, &sections(), false);
         assert_eq!(state.broker.status, "DISCONNECTED");
         assert_eq!(state.broker.connected, Some(false));
-        assert_eq!(state.mode, vayren_domain::live::ExecMode::Paper);
+        assert_eq!(state.mode, vayren_domain::live::ExecMode::Backtest);
         // BLOCKED strategy ⇒ stopped session with the backend reason kept.
         assert_eq!(state.session, vayren_domain::live::SessionStatus::Stopped);
         assert_eq!(state.status_reason, "no strategy selected");
@@ -1521,6 +1514,61 @@ mod tests {
         let before = state.clone();
         apply_remote_sections(&mut state, &json!({}), false);
         assert_eq!(state, before);
+    }
+
+    #[test]
+    fn remote_sections_never_synthesize_a_timeframe_ladder() {
+        let mut state = init_remote_state();
+        apply_remote_sections(&mut state, &sections(), false);
+        assert!(
+            state.timeframes.is_empty(),
+            "the gateway did not state a ladder — none may be invented"
+        );
+        assert_eq!(
+            state.selected_timeframe(),
+            None,
+            "a selected value outside the (absent) ladder cannot be selected"
+        );
+
+        let mut live = sections();
+        live["available_timeframes"] = json!(["30m", "1h"]);
+        live["selected_timeframe"] = json!("30m");
+        apply_remote_sections(&mut state, &live, false);
+        assert_eq!(state.timeframes, vec!["30m".to_string(), "1h".to_string()]);
+        assert_eq!(state.selected_timeframe(), Some("30m"));
+    }
+
+    #[test]
+    fn remote_sections_never_fabricate_a_strategy_list() {
+        let mut state = init_remote_state();
+        assert!(
+            state.strategies.is_empty(),
+            "a pre-snapshot state must not claim strategies exist"
+        );
+        apply_remote_sections(&mut state, &sections(), false);
+        assert!(
+            state.strategies.is_empty(),
+            "the gateway stated no strategy list — none may be invented"
+        );
+
+        let mut live = sections();
+        live["available_strategies"] = json!(["OBR C1C4", "SMA Crossover"]);
+        apply_remote_sections(&mut state, &live, false);
+        assert_eq!(
+            state.strategies,
+            vec!["OBR C1C4".to_string(), "SMA Crossover".to_string()],
+            "server values are authoritative and shown verbatim"
+        );
+
+        // An explicitly empty list means "the server registered none": it
+        // replaces the previous server-stated list instead of keeping it.
+        let mut none = sections();
+        none["available_strategies"] = json!([]);
+        apply_remote_sections(&mut state, &none, false);
+        assert!(
+            state.strategies.is_empty(),
+            "an explicit empty list must clear the picker"
+        );
     }
 
     #[test]

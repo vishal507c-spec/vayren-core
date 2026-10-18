@@ -78,7 +78,7 @@ def test_typed_errors_carry_normalized_codes() -> None:
 
 def test_domain_and_environment_enums() -> None:
     assert [d.value for d in Domain] == ["historical_data", "market_data", "trading"]
-    assert [e.value for e in Environment] == ["paper", "sandbox", "live"]
+    assert [e.value for e in Environment] == ["live"]
 
 
 # ── M1: capability model ──────────────────────────────────────────────────
@@ -129,7 +129,7 @@ def test_legacy_translation_maps() -> None:
 
 class _FakeTrading:
     name = "fake"
-    environment = Environment.PAPER
+    environment = Environment.LIVE
 
     def capabilities(self) -> CapabilitySet:
         return trading_set_from_legacy(("orders.market",))
@@ -283,20 +283,20 @@ def test_registry_record_rejects_faces_without_capabilities() -> None:
 
 def _selection(name: str = "venue") -> BrokerSelection:
     return BrokerSelection(
-        name=name, environment=Environment.SANDBOX, selected_at=TS, reason="user-selected"
+        name=name, environment=Environment.LIVE, selected_at=TS, reason="user-selected"
     )
 
 
 def test_broker_selection_validation() -> None:
     assert _selection().name == "venue"
     with pytest.raises(SelectionError):
-        BrokerSelection("", Environment.PAPER, TS, "r")
+        BrokerSelection("", Environment.LIVE, TS, "r")
     with pytest.raises(SelectionError):
         BrokerSelection("x", "live", TS, "r")  # type: ignore[arg-type]
     with pytest.raises(SelectionError):
-        BrokerSelection("x", Environment.PAPER, "not-a-date", "r")
+        BrokerSelection("x", Environment.LIVE, "not-a-date", "r")
     with pytest.raises(SelectionError):
-        BrokerSelection("x", Environment.PAPER, TS, "  ")
+        BrokerSelection("x", Environment.LIVE, TS, "  ")
 
 
 def test_selection_store_roundtrip_and_clear() -> None:

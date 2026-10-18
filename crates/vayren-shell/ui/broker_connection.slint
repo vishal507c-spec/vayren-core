@@ -223,9 +223,10 @@ export component BrokerConnectionWorkspace inherits Rectangle {
 
             Text {
                 text: "BROKERS";
-                color: VayrenPalette.text;
-                font-size: VayrenDesign.fs-small;
+                color: VayrenPalette.muted;
+                font-size: VayrenDesign.fs-label;
                 font-weight: 700;
+                letter-spacing: 0.6px;
             }
             if root.brokers.length == 0: VEmptyState {
                 title: "No brokers registered";
@@ -234,7 +235,7 @@ export component BrokerConnectionWorkspace inherits Rectangle {
             Rectangle { height: VayrenDesign.sp-sm; background: transparent; }
 
             for row in root.brokers: Rectangle {
-                height: 56px;
+                height: 58px;
                 border-radius: VayrenDesign.radius-lg;
                 background: row.selected ? VayrenPalette.selected
                     : row-ta.pressed ? VayrenPalette.pressed
@@ -246,6 +247,15 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                     : VayrenPalette.hairline;
                 animate background { duration: 120ms; easing: ease-out; }
                 animate border-color { duration: 120ms; easing: ease-out; }
+
+                if row.selected: Rectangle {
+                    x: 0px;
+                    y: 10px;
+                    width: 3px;
+                    height: 38px;
+                    border-radius: 1.5px;
+                    background: VayrenPalette.accent;
+                }
 
                 row-ta := TouchArea {
                     mouse-cursor: pointer;
@@ -260,10 +270,12 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                     spacing: VayrenDesign.sp-md;
 
                     Rectangle {
-                        width: 36px;
-                        height: 36px;
+                        width: 38px;
+                        height: 38px;
                         border-radius: VayrenDesign.radius;
                         background: VayrenPalette.bg1;
+                        border-width: 1px;
+                        border-color: VayrenPalette.hairline;
                         clip: true;
                         if row.id == "zerodha": Image {
                             width: 100%;
@@ -294,7 +306,7 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                         horizontal-stretch: 1;
                         Text {
                             text: row.display-name;
-                            color: VayrenPalette.text;
+                            color: row.selected ? VayrenPalette.text-bright : VayrenPalette.text;
                             font-size: VayrenDesign.fs-small;
                             font-weight: 700;
                             vertical-alignment: center;
@@ -311,6 +323,7 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                                     : row.status-tone == 3 ? VayrenPalette.neg
                                     : VayrenPalette.muted;
                                 font-size: VayrenDesign.fs-label;
+                                font-weight: 600;
                                 vertical-alignment: center;
                                 overflow: elide;
                             }
@@ -327,8 +340,8 @@ export component BrokerConnectionWorkspace inherits Rectangle {
             }
 
             Rectangle {
-                height: 44px;
-                border-radius: VayrenDesign.radius-lg;
+                height: 40px;
+                border-radius: VayrenDesign.radius;
                 background: add-ta.pressed ? VayrenPalette.pressed : add-ta.has-hover ? VayrenPalette.hover : transparent;
                 border-width: 1px;
                 border-color: add-ta.has-hover ? VayrenPalette.accent-dim : VayrenPalette.hairline;
@@ -341,10 +354,11 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                 HorizontalLayout {
                     padding-left: VayrenDesign.sp-md;
                     spacing: VayrenDesign.sp-md;
+                    alignment: center;
                     Text {
                         text: "+";
                         color: add-ta.has-hover ? VayrenPalette.accent : VayrenPalette.muted;
-                        font-size: VayrenDesign.fs-metric-sm;
+                        font-size: VayrenDesign.fs-body;
                         font-weight: 700;
                         vertical-alignment: center;
                         animate color { duration: 120ms; easing: ease-out; }
@@ -378,16 +392,18 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                         spacing: VayrenDesign.sp-xs;
                         alignment: space-between;
                         Text {
-                            text: "EC2 ENGINE";
-                            color: VayrenPalette.text;
+                            text: "EC2 GATEWAY";
+                            color: VayrenPalette.muted;
                             font-size: VayrenDesign.fs-label;
                             font-weight: 700;
+                            letter-spacing: 0.5px;
                             vertical-alignment: center;
                         }
                         Text {
-                            text: "vayren";
-                            color: VayrenPalette.muted;
+                            text: "ip-172-31";
+                            color: VayrenPalette.faint;
                             font-size: VayrenDesign.fs-label;
+                            font-weight: 600;
                             vertical-alignment: center;
                         }
                     }
@@ -425,11 +441,26 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                     }
 
                     // System Metrics
-                    Text {
-                        text: root.server-metrics != "" ? root.server-metrics : "RAM: 41% · Disk: 88%";
-                        color: VayrenPalette.muted;
-                        font-size: VayrenDesign.fs-label;
-                        overflow: elide;
+                    Rectangle {
+                        height: 24px;
+                        border-radius: 4px;
+                        background: VayrenPalette.bg1;
+                        border-width: 1px;
+                        border-color: VayrenPalette.hairline;
+                        HorizontalLayout {
+                            padding-left: 8px;
+                            padding-right: 8px;
+                            alignment: center;
+                            Text {
+                                text: root.server-metrics != "" ? root.server-metrics : "RAM: 41% · Disk: 88%";
+                                color: VayrenPalette.muted;
+                                font-size: VayrenDesign.fs-label;
+                                font-weight: 600;
+                                letter-spacing: 0.3px;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                        }
                     }
 
                     if root.server-op-feedback != "": Text {
@@ -503,10 +534,12 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                     HorizontalLayout {
                         spacing: VayrenDesign.sp-xl;
                         Rectangle {
-                            width: 52px;
-                            height: 52px;
+                            width: 56px;
+                            height: 56px;
                             border-radius: VayrenDesign.radius-lg;
                             background: VayrenPalette.bg1;
+                            border-width: 1px;
+                            border-color: VayrenPalette.hairline;
                             clip: true;
                             if root.broker-id == "zerodha": Image {
                                 width: 100%;
@@ -532,12 +565,13 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                             }
                         }
                         VerticalLayout {
-                            spacing: 2px;
+                            spacing: 4px;
                             Text {
                                 text: root.broker-display-name;
-                                color: VayrenPalette.text;
-                                font-size: VayrenDesign.fs-title;
+                                color: VayrenPalette.text-bright;
+                                font-size: 20px;
                                 font-weight: 700;
+                                letter-spacing: 0.2px;
                                 vertical-alignment: center;
                             }
                             Text {
@@ -555,13 +589,15 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                         // WHICH broker VAYREN defaults to; it never connects,
                         // authenticates, or changes PAPER/LIVE.
                         Rectangle {
-                            height: 26px;
+                            height: 28px;
                             horizontal-stretch: 0;
-                            border-radius: 13px;
-                            background: root.is-default-broker() ? VayrenPalette.hover : transparent;
+                            border-radius: 14px;
+                            background: root.is-default-broker() ? VayrenPalette.pos-dim : (default-ta.has-hover ? VayrenPalette.hover : transparent);
                             border-width: 1px;
-                            border-color: VayrenPalette.accent-dim;
+                            border-color: root.is-default-broker() ? VayrenPalette.pos : (default-ta.has-hover ? VayrenPalette.accent : VayrenPalette.hairline);
                             opacity: root.default-saving ? 0.6 : 1.0;
+                            animate background { duration: 120ms; easing: ease-out; }
+                            animate border-color { duration: 120ms; easing: ease-out; }
                             HorizontalLayout {
                                 padding-left: VayrenDesign.sp-md;
                                 padding-right: VayrenDesign.sp-md;
@@ -569,8 +605,8 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                                 Text {
                                     text: root.default-label();
                                     color: root.is-default-broker()
-                                        ? VayrenPalette.accent
-                                        : VayrenPalette.accent-dim;
+                                        ? VayrenPalette.pos
+                                        : (default-ta.has-hover ? VayrenPalette.accent : VayrenPalette.muted);
                                     font-size: VayrenDesign.fs-label;
                                     font-weight: 700;
                                     vertical-alignment: center;
@@ -578,7 +614,7 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                                 // Clickable only when it would actually
                                 // change something, and never while a save
                                 // is already in flight (no duplicate submits).
-                                ta := TouchArea {
+                                default-ta := TouchArea {
                                     enabled: !root.is-default-broker() && !root.default-saving && root.broker-id != "";
                                     clicked => { root.set-default-requested(root.broker-id); }
                                 }
@@ -590,9 +626,9 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                         HorizontalLayout {
                             spacing: VayrenDesign.sp-md;
                             Rectangle {
-                                height: 26px;
+                                height: 28px;
                                 horizontal-stretch: 0;
-                                border-radius: 13px;
+                                border-radius: 14px;
                                 background: root.pill-surface();
                                 border-width: 1px;
                                 border-color: root.pill-color();
@@ -613,9 +649,9 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                                 }
                             }
                             Rectangle {
-                                height: 26px;
+                                height: 28px;
                                 horizontal-stretch: 0;
-                                border-radius: 13px;
+                                border-radius: 14px;
                                 background: VayrenPalette.hover;
                                 border-width: 1px;
                                 border-color: VayrenPalette.accent-dim;
@@ -716,15 +752,16 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                             Rectangle { height: VayrenDesign.sp-xs; background: transparent; }
 
                             for f[i] in root.fields: HorizontalLayout {
-                                height: 36px;
+                                height: 38px;
                                 spacing: VayrenDesign.sp-md;
 
                                 HorizontalLayout {
-                                    width: 112px;
+                                    width: 120px;
                                     Text {
                                         text: f.label;
                                         color: VayrenPalette.muted;
                                         font-size: VayrenDesign.fs-table;
+                                        font-weight: 600;
                                         vertical-alignment: center;
                                         overflow: elide;
                                         horizontal-stretch: 1;
@@ -733,6 +770,7 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                                         text: "*";
                                         color: VayrenPalette.neg;
                                         font-size: VayrenDesign.fs-small;
+                                        font-weight: 700;
                                         vertical-alignment: center;
                                     }
                                 }
@@ -751,7 +789,7 @@ export component BrokerConnectionWorkspace inherits Rectangle {
                                         x: 12px;
                                         y: 0px;
                                         width: field-box.width - (f.secret ? 130px : 72px);
-                                        height: 36px;
+                                        height: 38px;
                                         text: f.placeholder;
                                         color: VayrenPalette.faint;
                                         font-size: VayrenDesign.fs-table;
@@ -823,7 +861,7 @@ field-input := TextInput {
 
                                         // Dedicated PASTE button for instant clipboard paste
                                         Rectangle {
-                                            width: 54px;
+                                            width: 56px;
                                             height: 24px;
                                             y: (field-box.height - 24px) / 2;
                                             border-radius: 4px;
@@ -836,6 +874,7 @@ field-input := TextInput {
                                                 color: paste-ta.has-hover ? VayrenPalette.accent-text : VayrenPalette.muted;
                                                 font-size: 10px;
                                                 font-weight: 700;
+                                                letter-spacing: 0.4px;
                                                 vertical-alignment: center;
                                                 horizontal-alignment: center;
                                             }
@@ -851,7 +890,7 @@ field-input := TextInput {
 
                                         // SHOW / HIDE toggle for password fields
                                         if f.secret: Rectangle {
-                                            width: 48px;
+                                            width: 50px;
                                             height: 24px;
                                             y: (field-box.height - 24px) / 2;
                                             border-radius: 4px;
@@ -864,6 +903,7 @@ field-input := TextInput {
                                                 color: root.field-shown(i) ? VayrenPalette.accent : show-ta.has-hover ? VayrenPalette.text : VayrenPalette.faint;
                                                 font-size: 10px;
                                                 font-weight: 700;
+                                                letter-spacing: 0.4px;
                                                 vertical-alignment: center;
                                                 horizontal-alignment: center;
                                                 animate color { duration: 120ms; easing: ease-out; }
@@ -1038,10 +1078,11 @@ field-input := TextInput {
                             alignment: start;
 
                             Text {
-                                text: "Connection Progress";
-                                color: VayrenPalette.text;
-                                font-size: VayrenDesign.fs-body;
+                                text: "CONNECTION PROGRESS";
+                                color: VayrenPalette.muted;
+                                font-size: VayrenDesign.fs-label;
                                 font-weight: 700;
+                                letter-spacing: 0.6px;
                             }
                             Rectangle { height: VayrenDesign.sp-sm; background: transparent; }
 
@@ -1050,10 +1091,10 @@ field-input := TextInput {
                                 HorizontalLayout {
                                     spacing: VayrenDesign.sp-md;
                                     Rectangle {
-                                        width: 24px;
-                                        height: 24px;
-                                        border-radius: 12px;
-                                        background: s.state == 2 ? VayrenPalette.pos-dim : s.state == 3 ? VayrenPalette.neg-dim : s.state == 1 ? (root.pulse ? VayrenPalette.focus-ring : transparent) : transparent;
+                                        width: 26px;
+                                        height: 26px;
+                                        border-radius: 13px;
+                                        background: s.state == 2 ? VayrenPalette.pos-dim : s.state == 3 ? VayrenPalette.neg-dim : s.state == 1 ? (root.pulse ? VayrenPalette.focus-ring : transparent) : VayrenPalette.bg1;
                                         border-width: 1px;
                                         border-color: root.step-ink(s.state);
                                         animate background { duration: 900ms; easing: ease-in-out; }
@@ -1087,18 +1128,18 @@ field-input := TextInput {
                                     }
                                 }
                                 if si < root.progress.length - 1: Rectangle {
-                                    height: 14px;
+                                    height: 16px;
                                     background: transparent;
                                     HorizontalLayout {
                                         spacing: VayrenDesign.sp-md;
                                         Rectangle {
-                                            width: 24px;
+                                            width: 26px;
                                             background: transparent;
                                             VerticalLayout {
                                                 alignment: center;
                                                 Rectangle {
                                                     width: 2px;
-                                                    height: 14px;
+                                                    height: 16px;
                                                     background: s.state == 2 ? VayrenPalette.pos : VayrenPalette.hairline;
                                                 }
                                             }

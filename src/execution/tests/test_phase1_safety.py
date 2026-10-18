@@ -25,7 +25,7 @@ import time
 
 import pytest
 
-from execution.broker.sandbox import SandboxBroker
+# SandboxBroker (simulated venue) was removed in the two-mode cleanup.
 from execution.engine import ExecutionEngine, IllegalTransitionError
 from execution.market_data.replay import ReplayProvider, bars_to_candles
 from execution.models.order import BrokerOrder, Fill, OrderState
@@ -52,9 +52,9 @@ from strategy import StrategyParameters
 
 
 def _sma_logic():
-    from strategy.strategies.sma import SmaCrossover
-
-    return SmaCrossover(StrategyParameters({"fast_period": 2, "slow_period": 3}))
+    # LIVE-only: every test strategy declares live support through the
+    # _LiveSma wrapper (real strategy code is never modified).
+    return _LiveSma()
 
 
 class _LiveSma:
@@ -92,7 +92,79 @@ def _warmup(n: int = 25) -> dict:
 
 
 def _paper_session(candles, **config_overrides) -> LiveSession:
-    config = SessionConfig(**config_overrides)
+    overrides = dict(config_overrides)
+    overrides.setdefault("mode", ExecutionMode.LIVE)
+    overrides.setdefault("gates", ModeGates(True, True, True, True, True))
+    overrides.setdefault("adapter_name", "test-fake")
+    from broker.capabilities import CapabilitySet, Caps, Domain
+    from broker.faces import FactoryPlugin
+    from broker.registry import BrokerRecord, default_registry
+
+    class _FakeBroker:
+        name = "test-fake"
+        capabilities = ("orders.market", "account.funds")
+
+        def connect(self) -> None:
+            pass
+
+        def disconnect(self) -> None:
+            pass
+
+        def health(self):
+            return (True, "ok")
+
+        def funds(self):
+            return {"available": 10_000.0, "used": 0.0, "equity": 10_000.0, "currency": "INR"}
+
+        def account(self):
+            return {"equity": 10_000.0, "currency": "INR"}
+
+        def place_order(self, plan, client_order_id: str) -> str:  # noqa: ANN001, ARG002
+            return "BROKER-1"
+
+        def cancel_order(self, broker_order_id: str) -> bool:  # noqa: ARG002
+            return False
+
+        def modify_order(self, broker_order_id: str, quantity=None, price=None) -> bool:  # noqa: ANN001, ARG002
+            return False
+
+        def stream_events(self):
+            return ()
+
+        def on_market_price(self, symbol: str, price: float, timestamp: str) -> None:  # noqa: ANN001, ARG002
+            pass
+
+        def reference_spread(self, symbol: str) -> float | None:  # noqa: ARG002
+            return 0.0
+
+        def positions(self):
+            return []
+
+        def open_orders(self):
+            return []
+
+    registry = default_registry()
+    if "test-fake" in registry:
+        registry.unregister("test-fake")
+    registry.register(
+        BrokerRecord(
+            name="test-fake",
+            display_name="test-fake",
+            plugin=FactoryPlugin(
+                name="test-fake",
+                display_name="test-fake",
+                factories={Domain.TRADING: lambda: _FakeBroker()},
+                capabilities=CapabilitySet(
+                    domains=(Domain.TRADING,), items=frozenset([Caps.ORDERS_MARKET])
+                ),
+            ),
+            capabilities=CapabilitySet(
+                domains=(Domain.TRADING,), items=frozenset([Caps.ORDERS_MARKET])
+            ),
+            faces=(Domain.TRADING,),
+        )
+    )
+    config = SessionConfig(**overrides)
     provider = ReplayProvider(candles, chunk_size=1000)
     session = LiveSession(config, provider, RiskPolicy())
     session.register_strategy("sma", "1.0", _sma_logic, StrategyParameters({}))
@@ -146,7 +218,16 @@ def test_kill_switch_on_blocks_session_start() -> None:
     kill.engage("safety test")
     candles = bars_to_candles(make_bars("TEST", 40), "15m")
     provider = ReplayProvider(candles, chunk_size=1000)
-    session = LiveSession(SessionConfig(kill_switch_path=path), provider, RiskPolicy())
+    session = LiveSession(
+        SessionConfig(
+            mode=ExecutionMode.LIVE,
+            gates=ModeGates(True, True, True, True, True),
+            adapter_name="test-fake",
+            kill_switch_path=path,
+        ),
+        provider,
+        RiskPolicy(),
+    )
     session.register_strategy("sma", "1.0", _sma_logic, StrategyParameters({}))
     report = session.start(("TEST",), "15m", _warmup())
     assert not report.ready
@@ -186,8 +267,8 @@ def test_live_gate_live_trading_enabled_blocks() -> None:
     session = LiveSession(config, provider, RiskPolicy())
     session.register_strategy("sma", "1.0", _sma_logic, StrategyParameters({}))
     session.start(("TEST",), "15m", _warmup())
-    assert session.mode == ExecutionMode.PAPER  # downgraded
-    assert session.journal.of_kind("MODE_DOWNGRADE")
+    assert session.mode == ExecutionMode.BACKTEST  # refused, never LIVE
+    assert session.journal.of_kind("VENUE_REFUSED")
 
 
 def test_live_gate_broker_live_enabled_blocks() -> None:
@@ -201,8 +282,8 @@ def test_live_gate_broker_live_enabled_blocks() -> None:
     session = LiveSession(config, provider, RiskPolicy())
     session.register_strategy("sma", "1.0", _sma_logic, StrategyParameters({}))
     session.start(("TEST",), "15m", _warmup())
-    assert session.mode == ExecutionMode.PAPER
-    assert session.journal.of_kind("MODE_DOWNGRADE")
+    assert session.mode == ExecutionMode.BACKTEST
+    assert session.journal.of_kind("VENUE_REFUSED")
 
 
 def test_live_gate_account_confirmed_blocks() -> None:
@@ -220,8 +301,8 @@ def test_live_gate_account_confirmed_blocks() -> None:
     session = LiveSession(config, provider, RiskPolicy())
     session.register_strategy("sma", "1.0", _sma_logic, StrategyParameters({}))
     session.start(("TEST",), "15m", _warmup())
-    assert session.mode == ExecutionMode.PAPER
-    assert session.journal.of_kind("MODE_DOWNGRADE")
+    assert session.mode == ExecutionMode.BACKTEST
+    assert session.journal.of_kind("VENUE_REFUSED")
 
 
 def test_live_gate_risk_limits_valid_blocks() -> None:
@@ -240,8 +321,8 @@ def test_live_gate_risk_limits_valid_blocks() -> None:
     session = LiveSession(config, provider, RiskPolicy())
     session.register_strategy("sma", "1.0", _sma_logic, StrategyParameters({}))
     session.start(("TEST",), "15m", _warmup())
-    assert session.mode == ExecutionMode.PAPER
-    assert session.journal.of_kind("MODE_DOWNGRADE")
+    assert session.mode == ExecutionMode.BACKTEST
+    assert session.journal.of_kind("VENUE_REFUSED")
 
 
 def test_live_gate_kill_switch_off_blocks() -> None:
@@ -261,8 +342,8 @@ def test_live_gate_kill_switch_off_blocks() -> None:
     session = LiveSession(config, provider, RiskPolicy())
     session.register_strategy("sma", "1.0", _sma_logic, StrategyParameters({}))
     session.start(("TEST",), "15m", _warmup())
-    assert session.mode == ExecutionMode.PAPER
-    assert session.journal.of_kind("MODE_DOWNGRADE")
+    assert session.mode == ExecutionMode.BACKTEST
+    assert session.journal.of_kind("VENUE_REFUSED")
 
 
 def test_live_gates_all_off_blocks_and_reports_all_missing() -> None:
@@ -669,6 +750,7 @@ def test_healthy_path_submits_exactly_one_order_per_signal() -> None:
     candles = bars_to_candles(make_bars("TEST", 60), "15m")
     session = _paper_session(candles)
     assert session.start(("TEST",), "15m", _warmup()).ready
+    session.arm("test operator")
     _drain(session)
 
     submitted = session.journal.of_kind("ORDER_SUBMITTED")
@@ -920,7 +1002,7 @@ def test_safety_gate_failure_never_falls_through_to_live() -> None:
     session.start(("TEST",), "15m", _warmup())
     # Must be downgraded to PAPER — never LIVE with no gates.
     assert session.mode != ExecutionMode.LIVE
-    assert session.mode == ExecutionMode.PAPER
+    assert session.mode == ExecutionMode.BACKTEST
 
 
 def test_live_unarmed_blocks_order_submission() -> None:
@@ -929,26 +1011,75 @@ def test_live_unarmed_blocks_order_submission() -> None:
     from broker.faces import FactoryPlugin
     from broker.registry import BrokerRecord, default_registry
 
+    class _FakeLiveBroker:
+        name = "unarmed-live"
+        capabilities = ("orders.market", "account.funds")
+
+        def __init__(self) -> None:
+            self.placed: list[str] = []
+
+        def connect(self) -> None:
+            pass
+
+        def disconnect(self) -> None:
+            pass
+
+        def health(self):
+            return (True, "ok")
+
+        def funds(self):
+            return {"available": 10_000.0, "used": 0.0, "equity": 10_000.0, "currency": "INR"}
+
+        def account(self):
+            return {"equity": 10_000.0, "currency": "INR"}
+
+        def place_order(self, plan, client_order_id: str) -> str:  # noqa: ANN001, ARG002
+            self.placed.append(client_order_id)
+            return "BROKER-1"
+
+        def cancel_order(self, broker_order_id: str) -> bool:  # noqa: ARG002
+            return False
+
+        def modify_order(self, broker_order_id: str, quantity=None, price=None) -> bool:  # noqa: ANN001, ARG002
+            return False
+
+        def stream_events(self):
+            return ()
+
+        def on_market_price(self, symbol: str, price: float, timestamp: str) -> None:  # noqa: ANN001, ARG002
+            pass
+
+        def reference_spread(self, symbol: str) -> float | None:  # noqa: ARG002
+            return 0.0
+
+        def positions(self):
+            return []
+
+        def open_orders(self):
+            return []
+
     candles = bars_to_candles(make_bars("TEST", 60), "15m")
     provider = ReplayProvider(candles, chunk_size=1000)
     gates = ModeGates(True, True, True, True, True)
     session = LiveSession(
-        SessionConfig(mode=ExecutionMode.LIVE, gates=gates, adapter_name="unarmed-sandbox"),
+        SessionConfig(mode=ExecutionMode.LIVE, gates=gates, adapter_name="unarmed-live"),
         provider,
         RiskPolicy(max_order_qty=5000.0, max_position_qty=5000.0),
     )
     registry = default_registry()
-    if "unarmed-sandbox" in registry:
-        registry.unregister("unarmed-sandbox")
+    if "unarmed-live" in registry:
+        registry.unregister("unarmed-live")
     registry.register(
         BrokerRecord(
-            name="unarmed-sandbox",
-            display_name="unarmed-sandbox",
+            name="unarmed-live",
+            display_name="unarmed-live",
             plugin=FactoryPlugin(
-                name="unarmed-sandbox",
-                display_name="unarmed-sandbox",
-                factories={Domain.TRADING: lambda: SandboxBroker(account_id="ua-test")},
-                capabilities=None,
+                name="unarmed-live",
+                display_name="unarmed-live",
+                factories={Domain.TRADING: lambda: _FakeLiveBroker()},
+                capabilities=CapabilitySet(
+                    domains=(Domain.TRADING,), items=frozenset([Caps.ORDERS_MARKET])
+                ),
             ),
             capabilities=CapabilitySet(
                 domains=(Domain.TRADING,), items=frozenset([Caps.ORDERS_MARKET])
@@ -962,6 +1093,6 @@ def test_live_unarmed_blocks_order_submission() -> None:
     _drain(session)
     blocked = session.journal.of_kind("ORDER_BLOCKED_UNARMED")
     broker = session._broker
-    assert broker is not None and isinstance(broker, SandboxBroker)
-    assert broker.fills == ()
+    assert broker is not None
+    assert getattr(broker, "placed", []) == []
     assert blocked, "Unarmed LIVE mode must block order submission"

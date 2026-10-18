@@ -677,7 +677,7 @@ class RemoteServer:
             allowed = ("strategy_name", "strategy", "symbols", "timeframe", "mode", "quantity")
             return {"action": "setup", **{k: v for k, v in args.items() if k in allowed}}
         if action == "mode":
-            if args.get("mode") not in ("PAPER", "LIVE"):
+            if args.get("mode") not in ("BACKTEST", "LIVE"):
                 return None
             return {"action": "mode", "mode": args["mode"]}
         if action in ("stop", "halt", "arm", "tick", "confirm_live"):

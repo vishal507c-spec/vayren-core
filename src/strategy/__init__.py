@@ -5,7 +5,7 @@ Depends on: core, market.
 
 from strategy.eligibility_engine import GATE_ORDER, EligibilityEngine, EligibilityEngineError
 from strategy.events.lab_reset import LabReset
-from strategy.events.paper_trade_requested import PaperTradeRequested
+
 from strategy.events.strategies_listed import StrategiesListed
 from strategy.events.strategy_selected import StrategySelected
 from strategy.execution_router import (
@@ -238,6 +238,5 @@ __all__ = [
     "strategy_manifest",
     "StrategiesListed",
     "StrategySelected",
-    "PaperTradeRequested",
     "LabReset",
 ]

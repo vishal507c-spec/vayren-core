@@ -546,27 +546,6 @@ def test_restart_blocks_until_reconciled() -> None:
 # ── §22.20–21: mode isolation ────────────────────────────────────────────
 
 
-def test_paper_resolution_never_touches_live_venue() -> None:
-    broker, mode, _notes = resolve_broker(
-        ExecutionMode.PAPER, ModeGates(), adapter_name="fyers-live"
-    )
-    assert mode == ExecutionMode.PAPER
-    assert type(broker).__name__ == "PaperBroker"
-
-
-def test_sandbox_without_adapter_is_not_configured() -> None:
-    from execution.broker.adapter import NotConfiguredError
-
-    try:
-        resolve_broker(ExecutionMode.SANDBOX, ModeGates(), adapter_name="no-such-venue")
-    except NotConfiguredError:
-        return
-    raise AssertionError("sandbox must not resolve without a registered venue")
-
-
-# ── §20/§21: journal coverage + state exposure ───────────────────────────
-
-
 def test_journal_covers_lifecycle_and_state_exposes_pipeline() -> None:
     venue, provider = _Venue(), _Provider()
     session = _session(venue, provider)

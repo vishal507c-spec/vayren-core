@@ -27,7 +27,8 @@ import time
 import pytest
 
 from execution.broker.resilience import BackoffPolicy
-from execution.broker.sandbox import SandboxBroker
+
+# SandboxBroker (simulated venue) removed — use a minimal live broker fake.
 from execution.engine import ExecutionEngine, IllegalTransitionError
 from execution.journal import ExecutionJournal
 from execution.models.order import BrokerOrder, Fill, OrderState
@@ -717,7 +718,27 @@ def test_extended_safety_snapshot_to_dict_json_safe_no_secrets() -> None:
 
 def test_livesession_exposes_recovery_and_enriched_snapshot() -> None:
     """LiveSession has .recovery coordinator and produces enriched safety snapshots."""
-    session = LiveSession(SessionConfig(), SandboxBroker(), None)  # type: ignore[arg-type]
+
+    class _FakeLiveBroker:
+        def connect(self):
+            pass
+
+        def health(self):
+            return (True, "ok")
+
+        def funds(self):
+            return {"available": 1.0, "used": 0.0, "equity": 1.0, "currency": "INR"}
+
+        def place_order(self, _plan: object, _client_order_id: str) -> str:
+            return "BROKER-1"
+
+        def positions(self):
+            return []
+
+        def open_orders(self):
+            return []
+
+    session = LiveSession(SessionConfig(), _FakeLiveBroker(), None)  # type: ignore[arg-type]
     assert hasattr(session, "recovery")
     assert isinstance(session.recovery, RecoveryCoordinator)
 

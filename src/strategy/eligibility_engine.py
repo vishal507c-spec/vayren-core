@@ -504,15 +504,15 @@ class EligibilityEngine:
     def _gate_market_data(
         self, instrument_id: str, _strategy_id: str, trading_mode: str
     ) -> tuple[EligibilityCheck, ...]:
-        # PAPER/SANDBOX do not require live data (existing mode semantics).
+        # BACKTEST does not require live data (existing mode semantics).
         if self._market is None:
             return (
                 EligibilityCheck(
-                    "" if trading_mode in ("PAPER", "SANDBOX") else MARKET_DATA_UNAVAILABLE,
-                    READY if trading_mode in ("PAPER", "SANDBOX") else BLOCKED,
-                    WARNING if trading_mode in ("PAPER", "SANDBOX") else BLOCKING,
+                    "" if trading_mode == "BACKTEST" else MARKET_DATA_UNAVAILABLE,
+                    READY if trading_mode == "BACKTEST" else BLOCKED,
+                    WARNING if trading_mode == "BACKTEST" else BLOCKING,
                     "no market-data router attached"
-                    if trading_mode in ("PAPER", "SANDBOX")
+                    if trading_mode == "BACKTEST"
                     else "market-data router not attached",
                     "MARKET_DATA",
                 ),
@@ -614,7 +614,7 @@ class EligibilityEngine:
                         "EXECUTION",
                     ),
                 )
-        if trading_mode in ("PAPER", "SANDBOX"):
+        if trading_mode == "BACKTEST":
             # Paper/sandbox venues are local simulation: no provider mapping
             # exists or is required, and availability is the venue's own
             # health (checked per order by the session's existing gates).
