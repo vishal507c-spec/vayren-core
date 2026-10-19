@@ -7,7 +7,44 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (live-startup-simplification-20261018):** LIVE STARTUP SIMPLIFIED & DEDICATED ARM LIVE BUTTON ELIMINATED (NO ORDERS, NO DEPLOY, NO REMOTE PUSH) — Streamlined operator workflow to direct unified flow: `LIVE → START → Confirm Live Trading → Automatic Readiness Checks → ENGINE RUNNING → Genuine Strategy Signals → Actual FYERS Orders`:
+**Latest update (live-reconciliation-blocker-fix-20261019):** RECONCILIATION LIVE BLOCKER FIXED & DEPLOYED TO EC2 (NO LIVE ORDERS SUBMITTED) — Resolved blocker where idle/stopped session falsely displayed `START BLOCKED — reconciliation blocks live`:
+- Root Cause:
+  1. `src/execution/runtime/session.py`: `reconcile_now()` unconditionally marked `matched=False` with `local="missing_broker"` when `self._broker is None` in LIVE mode, even when the session was un-started / stopped.
+  2. `src/remote/snapshot.py`: `_strategy_status()` checked `bool(recon.get("blocks_live"))` even when `status == "STOPPED"`, turning a clean empty stopped state into `status: "BLOCKED"` with reason `"reconciliation blocks live"`.
+  3. `src/app/services/live_trading_service.py`: `stop()` did not call `_teardown_sessions()`, leaving inactive sessions with disconnected brokers in memory whose reconciliation verdict reported `blocks_live: True` into subsequent snapshots; also `snapshot()` now ensures `blocks_live` only blocks when `running` is True.
+- Fixes Applied:
+  1. `src/execution/runtime/session.py`: `reconcile_now()` only reports `missing_broker` mismatch when `self._lifecycle.state == LifecycleState.RUNNING`.
+  2. `src/remote/snapshot.py`: `_strategy_status()` evaluates start blockers from `validate()` and kill switch when stopped; reconciliation status only blocks live when actively RUNNING.
+  3. `src/app/services/live_trading_service.py`: `stop()` invokes `self._teardown_sessions()` to clear inactive sessions, and `snapshot()` reports `blocks_live: recon_blocks if running else False`.
+- Deployment & Verification:
+  - All 201 execution tests and 90 remote tests passed on both local Windows tree and EC2 virtualenv.
+  - Fixes deployed to EC2 gateway at `/home/ubuntu/vayren-core`.
+  - `vayren-remote.service` restarted and confirmed healthy (PID 659166, FYERS Order WS & Market WS connected).
+  - Local desktop binary `target/release/vayren-shell.exe` rebuilt (39.9MB, fresh timestamp).
+  - Language ownership validation: 407 files checked and PASSED.
+  - Zero live orders placed; zero real-money transactions; 2-mode architecture strictly preserved.
+
+**Previous update (live-consent-state-sync-20261018):** LIVE CONSENT STATE SYNCHRONIZATION FIXED (NO ORDERS, NO DEPLOY, NO REMOTE PUSH) — Resolved UI mismatch where LIVE screen showed `start confirmed by backend` + `RUNNING` alongside stale `✕ live confirmation required (explicit operator consent)`:
+- Root cause:
+  - When backend session transitioned to `RUNNING` in LIVE mode, client-side `LiveState::apply_snapshot` updated `self.session = SessionStatus::Running`, but never synchronized `self.live_confirmed = true` from the backend's authoritative running/armed state or `broker_session.live_armed`.
+  - When `LiveState::start_blockers()` was evaluated in host mode, if `self.live_confirmed` remained `false` locally (or if `backend_start_blockers` momentarily retained a pre-start consent blocker), it rendered `"✕ live confirmation required (explicit operator consent)"` under `blockers` despite the session actively running.
+- Fixes applied:
+  1. `crates/vayren-domain/src/live.rs`:
+     - In `apply_snapshot`, whenever backend reports `session_status: RUNNING` in LIVE mode or `live_armed: true`, `self.live_confirmed` is synchronized to `true`.
+     - Whenever session becomes `STOPPED`, `HALTED`, or `ERROR`, `self.live_confirmed` is explicitly reset to `false` to prevent silent re-arming without operator ceremony on subsequent starts.
+     - In `start_blockers`, confirmation blockers are filtered out if `self.live_confirmed || self.session == SessionStatus::Running`.
+  2. `crates/vayren-shell/src/remote_live.rs`:
+     - In `apply_remote_sections`, mapped `sections.get("broker_session").get("live_armed")` directly into `translated["live_armed"]`.
+  3. Added regression test in `crates/vayren-domain/src/live.rs`: `test_live_confirmed_synchronizes_with_running_backend_snapshot_and_resets_on_stop`.
+- Validation:
+  - `cargo test -p vayren-domain live`: 101 tests passed (0 failures).
+  - `cargo test -p vayren-shell remote_live`: 27 tests passed (0 failures).
+  - `pytest src/app/tests/test_live_account_confirmation.py src/execution/tests -q`: 201 tests passed (0 failures).
+  - `python tools/benchmark.py impact --run`: PASSED in 42.94s.
+  - Rebuilt Windows desktop binary: `target/release/vayren-shell.exe` (39.9MB, fresh timestamp).
+  - Zero live orders placed; zero remote deployment or push.
+
+**Previous update (live-startup-simplification-20261018):** LIVE STARTUP SIMPLIFIED & DEDICATED ARM LIVE BUTTON ELIMINATED (NO ORDERS, NO DEPLOY, NO REMOTE PUSH) — Streamlined operator workflow to direct unified flow: `LIVE → START → Confirm Live Trading → Automatic Readiness Checks → ENGINE RUNNING → Genuine Strategy Signals → Actual FYERS Orders`:
 - Dedicated ARM LIVE UI Button Removed:
   - Eliminated the separate `ARM LIVE` button and arming ceremony message/notes from the LIVE READINESS card in `crates/vayren-shell/ui/live.slint`. No dead clickable areas or ghost buttons remain.
   - Updated `LiveConfirmDialog`: title and confirm button now state `CONFIRM & START LIVE`, ensuring operator consent directly triggers the confirmed start request upon passing venue readiness.

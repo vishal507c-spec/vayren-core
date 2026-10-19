@@ -1411,6 +1411,7 @@ class LiveTradingService:
                 session.disarm(f"stop: {reason}")
             with contextlib.suppress(Exception):
                 session.stop()
+        self._teardown_sessions()
         self._drain_activity()
         halted = "halt" in str(reason).lower()
         self._status = "HALTED" if halted else "STOPPED"
@@ -1682,7 +1683,11 @@ class LiveTradingService:
         execution_ready = running and not recon_blocks and not kill_halted
         execution_reason = ""
         if not running:
-            execution_reason = self._status_reason or "session not running"
+            execution_reason = (
+                self._status_reason
+                if self._status_reason and self._status_reason != "reconciliation blocks live"
+                else "session not running"
+            )
         elif recon_blocks:
             execution_reason = "reconciliation blocks live"
         elif kill_halted:
@@ -1873,12 +1878,12 @@ class LiveTradingService:
                 "decisions": [],
             },
             "reconciliation": {
-                "status": recon_status,
+                "status": recon_status if running else ("SYNCED" if not recon_blocks else recon_status),
                 "positions": len(positions),
                 "orders": open_count,
                 "last_check": "",
                 "mismatches": [],
-                "blocks_live": recon_blocks,
+                "blocks_live": recon_blocks if running else False,
             },
             "kill": {"halted": kill_halted, "level": ""},
             "account": account,

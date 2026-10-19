@@ -1649,7 +1649,7 @@ class LiveSession:
     def reconcile_now(self) -> ReconciliationState:
         """Compare ledger vs broker truth; live stays blocked on mismatch."""
         if self._broker is None:
-            if self._mode == ExecutionMode.LIVE:
+            if self._lifecycle.state == LifecycleState.RUNNING and self._mode == ExecutionMode.LIVE:
                 orders = ReconciliationReport(
                     matched=False,
                     mismatches=(

@@ -1038,7 +1038,7 @@ impl LiveState {
         if self.host_mode {
             if let Some(blockers) = &self.backend_start_blockers {
                 let mut list = blockers.clone();
-                if self.live_confirmed {
+                if self.live_confirmed || self.session == SessionStatus::Running {
                     list.retain(|b| !Self::is_confirmation_blocker(b));
                 }
                 return list;
@@ -1663,7 +1663,26 @@ impl LiveState {
                         self.pending_action = None;
                         self.pending_since = None;
                     }
+                    if self.mode == ExecMode::Live {
+                        if ns == SessionStatus::Running {
+                            self.live_confirmed = true;
+                        } else if matches!(
+                            ns,
+                            SessionStatus::Stopped | SessionStatus::Halted | SessionStatus::Error
+                        ) {
+                            self.live_confirmed = false;
+                        }
+                    }
                 }
+            }
+        }
+        if self.mode == ExecMode::Live {
+            if v.get("live_armed") == Some(&serde_json::Value::Bool(true)) {
+                self.live_confirmed = true;
+            } else if v.get("live_armed") == Some(&serde_json::Value::Bool(false))
+                && !matches!(self.session, SessionStatus::Running)
+            {
+                self.live_confirmed = false;
             }
         }
         if v.get("status_reason").is_some() {
@@ -7458,6 +7477,68 @@ mod tests {
         st.apply_snapshot(&serde_json::json!({"mode": "BACKTEST"}));
         assert_eq!(st.mode, ExecMode::Backtest);
         assert!(!st.live_confirmed);
+    }
+
+    #[test]
+    fn test_live_confirmed_synchronizes_with_running_backend_snapshot_and_resets_on_stop() {
+        let mut st = configured(LiveState::default());
+        st.bridge_wired = true;
+        st.host_mode = true;
+        st.mode = ExecMode::Live;
+        st.live_confirmed = false;
+        st.gates = all_ready_gates();
+
+        // 1. Initial stopped state in host mode with backend confirmation blocker
+        st.backend_start_blockers = Some(vec![
+            "live confirmation required (explicit operator consent)".to_string(),
+        ]);
+        assert_eq!(st.start_blockers().len(), 1);
+        let proj_initial = project(&st);
+        assert_eq!(proj_initial.setup.blockers.len(), 1);
+        assert_eq!(
+            proj_initial.setup.blockers[0],
+            "live confirmation required (explicit operator consent)"
+        );
+
+        // 2. Authoritative backend snapshot reports session RUNNING in LIVE mode
+        st.apply_snapshot(&serde_json::json!({
+            "mode": "LIVE",
+            "session_status": "RUNNING",
+            "start_blockers": []
+        }));
+        assert_eq!(st.session, SessionStatus::Running);
+        assert!(st.live_confirmed, "RUNNING snapshot in LIVE mode must synchronize live_confirmed = true");
+        assert!(st.start_blockers().is_empty(), "RUNNING session must not report consent blocker");
+        let proj_running = project(&st);
+        assert!(proj_running.setup.blockers.is_empty(), "Projected blockers must be empty while RUNNING");
+        assert!(proj_running.setup.can_stop);
+        assert!(!proj_running.setup.needs_live_confirm);
+
+        // 3. Even if backend start_blockers momentarily retains stale consent during RUNNING,
+        // start_blockers() and projection must filter it out
+        st.backend_start_blockers = Some(vec![
+            "live confirmation required (explicit operator consent)".to_string(),
+        ]);
+        assert!(st.start_blockers().is_empty());
+        let proj_running_filtered = project(&st);
+        assert!(proj_running_filtered.setup.blockers.is_empty());
+
+        // 4. Session STOPPED resets authorization to prevent silent re-arming
+        st.apply_snapshot(&serde_json::json!({
+            "mode": "LIVE",
+            "session_status": "STOPPED",
+            "start_blockers": ["live confirmation required (explicit operator consent)"]
+        }));
+        assert_eq!(st.session, SessionStatus::Stopped);
+        assert!(!st.live_confirmed, "STOPPED snapshot must reset live_confirmed = false");
+        assert_eq!(st.start_blockers().len(), 1);
+        let proj_stopped = project(&st);
+        assert_eq!(proj_stopped.setup.blockers.len(), 1);
+        assert_eq!(
+            proj_stopped.setup.blockers[0],
+            "live confirmation required (explicit operator consent)"
+        );
+        assert!(proj_stopped.setup.needs_live_confirm);
     }
 
     // ── runtime timer tests ──────────────────────────────────────────────

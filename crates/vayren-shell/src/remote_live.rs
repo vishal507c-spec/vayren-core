@@ -514,6 +514,14 @@ pub fn apply_remote_sections(state: &mut LiveState, sections: &serde_json::Value
         );
     }
 
+    if let Some(armed) = sections
+        .get("broker_session")
+        .and_then(|b| b.get("live_armed"))
+        .and_then(|v| v.as_bool())
+    {
+        translated.insert("live_armed".to_string(), serde_json::Value::Bool(armed));
+    }
+
     if let Some(auth) = authoritative_broker(sections) {
         // Authoritative EC2 session first: the same snapshot SYSTEM reads.
         // Legacy `broker` stays as the fallback below for older gateways.

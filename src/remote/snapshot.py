@@ -102,7 +102,7 @@ def _strategy_status(live: dict[str, Any]) -> dict[str, Any]:
             "status": "ERROR",
             "reason": str(live.get("status_reason", "") or "backend error"),
         }
-    if blockers or bool(recon.get("blocks_live")) or bool(kill.get("halted")):
+    if blockers or bool(kill.get("halted")):
         reason = "; ".join(blockers) if blockers else str(live.get("status_reason", ""))
         return {"status": "BLOCKED", "reason": reason}
     return {"status": "STOPPED", "reason": str(live.get("status_reason", "") or "")}
