@@ -1,0 +1,52 @@
+# VAYREN gateway restart helper — systemd unit template (EC2).
+#
+# The ONLY privileged operation available to the sandboxed gateway:
+# vayren-remote-restart.path watches the gateway's data directory for a
+# restart request and activates this unit.
+#
+# Security boundary (do not weaken):
+# - The gateway keeps NoNewPrivileges=true and receives no sudo/root.
+# - The gateway can only create <data-dir>/restart.request (data only).
+# - This unit runs one fixed command: restart vayren-remote.service.
+# - The request file is never parsed or executed; it is copied for audit.
+# - No shell, no caller-supplied arguments, no other unit can be controlled.
+# - No [Install] section: only the path unit can activate this service.
+#
+# The paths below are the production EC2 layout. For a different layout,
+# adjust BOTH these units and the gateway's canonical data-dir check — the
+# gateway fails closed (RESTART_UNAVAILABLE) until they agree.
+#
+# Install (see deploy/EC2-REMOTE-ENDPOINT-RUNBOOK.md §5):
+#   sudo cp deploy/vayren-remote-restart.service.example /etc/systemd/system/vayren-remote-restart.service
+#   sudo cp deploy/vayren-remote-restart.path.example    /etc/systemd/system/vayren-remote-restart.path
+#   sudo systemd-analyze verify /etc/systemd/system/vayren-remote-restart.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now vayren-remote-restart.path
+
+[Unit]
+Description=VAYREN remote gateway restart helper (operator-requested)
+Documentation=file:/home/ubuntu/vayren-core/deploy/EC2-REMOTE-ENDPOINT-RUNBOOK.md
+
+[Service]
+Type=oneshot
+# Runs as root (systemd default): restarting vayren-remote.service is the
+# entire job. Everything except the data directory is read-only here.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/ubuntu/.vayren/data
+PrivateTmp=yes
+# Root-only audit directory. The gateway can write only its own data dir, so
+# it cannot replace the audit copy with a symlink between the unlink and copy.
+# StateDirectory is created root:root 0700 and is writable under ProtectSystem.
+StateDirectory=vayren-restart
+StateDirectoryMode=0700
+# Preserve the request (caller/timestamp/unit) for audit, then remove it so
+# the path unit rearms. The copy is symlink-safe: a previous .applied is
+# unlinked first (no write-through to its target) and -P never follows a
+# symlinked request (no root-file read via the audit copy).
+ExecStartPre=-/bin/rm -f /var/lib/vayren-restart/restart.request.applied
+ExecStartPre=-/bin/cp -P -f /home/ubuntu/.vayren/data/restart.request /var/lib/vayren-restart/restart.request.applied
+ExecStartPre=-/bin/rm -f /home/ubuntu/.vayren/data/restart.request
+ExecStart=/bin/systemctl restart vayren-remote.service
+ExecStartPost=-/usr/bin/logger -t vayren-restart "operator-requested restart of vayren-remote.service completed"

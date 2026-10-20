@@ -1,0 +1,22 @@
+# VAYREN gateway restart helper — trigger unit template (EC2).
+#
+# Watches for the request marker the sandboxed gateway may write into its own
+# data directory. The marker is DATA ONLY: this unit names exactly one unit
+# to activate, and that unit runs one fixed command. The gateway process
+# itself never gains sudo/root and stays under NoNewPrivileges=true.
+#
+# Install (see deploy/EC2-REMOTE-ENDPOINT-RUNBOOK.md §5):
+#   sudo cp deploy/vayren-remote-restart.path.example /etc/systemd/system/vayren-remote-restart.path
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now vayren-remote-restart.path
+#   systemctl status vayren-remote-restart.path --no-pager   # active (waiting)
+
+[Unit]
+Description=VAYREN remote gateway restart request watcher (operator-authorized)
+
+[Path]
+PathExists=/home/ubuntu/.vayren/data/restart.request
+Unit=vayren-remote-restart.service
+
+[Install]
+WantedBy=multi-user.target

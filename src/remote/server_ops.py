@@ -23,10 +23,24 @@ import re
 import shutil
 import subprocess
 import tarfile
+import threading
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger("remote.server_ops")
+
+SERVICE_NAME = "vayren-remote"
+# Root-owned systemd path unit (installed from deploy/). It grants exactly one
+# operation: restart vayren-remote.service when the gateway writes a request
+# marker into its own data directory. The gateway never gains sudo/root.
+RESTART_HELPER_PATH_UNIT = Path("/etc/systemd/system/vayren-remote-restart.path")
+# The helper watches ONLY the production data directory. A gateway started
+# against another directory fails closed instead of writing a marker that
+# will never be actioned.
+RESTART_HELPER_DATA_DIR = Path("/home/ubuntu/.vayren/data")
+# Wait briefly so the command result reaches the client before the service
+# (and therefore the WebSocket) is restarted.
+RESTART_REQUEST_DELAY_S = 0.75
 
 APPROVED_OPERATIONS = frozenset(
     {
@@ -348,11 +362,169 @@ def op_create_backup(data_dir: str, strategy_dir: str) -> dict[str, Any]:
         return {"ok": False, "error": f"backup creation failed: {exc}"}
 
 
+def _no_new_privileges() -> bool:
+    """True when this process runs under the systemd NoNewPrivileges sandbox.
+
+    ``PR_SET_NO_NEW_PRIVS`` is irreversible and visible in
+    ``/proc/self/status``. Inside that sandbox a setuid ``sudo`` can never
+    elevate, so the direct path is skipped instead of producing misleading
+    sudo stderr.
+    """
+    try:
+        with open("/proc/self/status", encoding="utf-8") as handle:
+            for line in handle:
+                if line.startswith("NoNewPrivs:"):
+                    return line.split(":", 1)[1].strip() == "1"
+    except OSError:
+        return False
+    return False
+
+
+def _restart_helper_available(data_dir: str) -> bool:
+    """The root helper exists AND watches this exact data directory."""
+    try:
+        return (
+            RESTART_HELPER_PATH_UNIT.is_file()
+            and Path(data_dir).resolve() == RESTART_HELPER_DATA_DIR.resolve()
+        )
+    except OSError:
+        return False
+
+
+def _restart_marker(data_dir: str) -> Path:
+    return Path(data_dir) / "restart.request"
+
+
+def _request_helper_restart(
+    data_dir: str, caller: str, delay_s: float | None = None
+) -> dict[str, Any]:
+    """Publish an operator-auditable restart request for the root helper.
+
+    The payload is data only: the helper unit has a fixed ExecStart and never
+    parses or executes this file. Writing the temp file synchronously proves
+    the gateway may write the marker; publishing it is delayed so the command
+    acknowledgement leaves the socket before systemd restarts the service.
+    """
+    wait = RESTART_REQUEST_DELAY_S if delay_s is None else max(0.0, float(delay_s))
+    marker = _restart_marker(data_dir)
+    payload = {
+        "requested_at": datetime.datetime.now(datetime.UTC).isoformat(),
+        "caller": str(caller or "operator"),
+        "operation": "restart",
+        "unit": f"{SERVICE_NAME}.service",
+    }
+    temp = marker.with_name(marker.name + ".tmp")
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        temp.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+    except OSError as exc:
+        return {
+            "ok": False,
+            "error": f"RESTART_UNAVAILABLE: cannot write restart request {marker}: {exc}",
+        }
+
+    def _publish() -> None:
+        try:
+            os.replace(temp, marker)
+        except OSError:
+            logger.exception("failed to publish restart request %s", marker)
+
+    if wait > 0:
+        timer = threading.Timer(wait, _publish)
+        timer.daemon = True
+        timer.start()
+    else:
+        _publish()
+    return {
+        "ok": True,
+        "status": "RESTART_REQUESTED",
+        "helper": "vayren-remote-restart.path",
+        "unit": f"{SERVICE_NAME}.service",
+        "request": str(marker),
+        "detail": (
+            "operator-authorized restart requested; the gateway restarts "
+            "within ~1s and clients reconnect automatically"
+        ),
+    }
+
+
+def _direct_restart() -> dict[str, Any]:
+    """Restart via the operator's own sudo rights (SSH/ops-cli path only)."""
+    try:
+        proc = subprocess.run(
+            ["sudo", "-n", "systemctl", "restart", SERVICE_NAME],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=20,
+        )
+    except Exception as exc:  # noqa: BLE001 - reported as the real cause
+        return {"ok": False, "error": f"sudo/systemctl could not run: {exc}"}
+    if proc.returncode != 0:
+        cause = (proc.stderr or proc.stdout or "").strip()
+        return {
+            "ok": False,
+            "error": scrub_sensitive_text(cause)
+            or f"sudo systemctl restart exited {proc.returncode}",
+        }
+    verify = _get_service_status(SERVICE_NAME)
+    if not verify.get("active"):
+        return {
+            "ok": False,
+            "error": (
+                "restart command succeeded but the service is not active "
+                f"(status: {verify.get('status', 'UNKNOWN')})"
+            ),
+            "service": verify,
+        }
+    return {"ok": True, "status": "RESTARTED", "service": verify}
+
+
+def _restart_gateway_service(data_dir: str, caller: str) -> dict[str, Any]:
+    """Authorized restart: direct operator privilege first, helper second.
+
+    - Operator SSH/CLI: the caller already has the host's sudo policy; a
+      non-interactive ``sudo -n systemctl restart`` works and is verified.
+    - Sandboxed gateway (NoNewPrivileges): sudo is impossible by design. If
+      the narrowly scoped root helper is installed, publish its request
+      marker; otherwise fail with the exact cause and the operator command.
+    """
+    sandboxed = _no_new_privileges()
+    direct_error = ""
+    if not sandboxed:
+        direct = _direct_restart()
+        if direct.get("ok"):
+            return direct
+        direct_error = str(direct.get("error", "") or "direct restart failed")
+
+    if _restart_helper_available(data_dir):
+        requested = _request_helper_restart(data_dir, caller)
+        if direct_error and requested.get("ok"):
+            requested["direct_error"] = direct_error
+        return requested
+
+    cause = (
+        "gateway is sandboxed (NoNewPrivileges=1)"
+        if sandboxed
+        else f"direct restart failed: {direct_error}"
+    )
+    return {
+        "ok": False,
+        "error": (
+            f"RESTART_UNAVAILABLE: {cause} and the vayren-remote-restart.path "
+            "helper is not installed for this data directory; restart from an "
+            "operator SSH session: sudo systemctl restart "
+            f"{SERVICE_NAME}.service"
+        ),
+    }
+
+
 def op_deploy_approved(
     data_dir: str,
     strategy_dir: str,
     repo_dir: str = "/home/ubuntu/vayren-core",
     confirmed: bool = False,
+    caller: str = "operator",
 ) -> dict[str, Any]:
     """Safe deployment: active session check, backup, git, and restart."""
     if not confirmed:
@@ -411,35 +583,32 @@ def op_deploy_approved(
             ["git", "rev-parse", "HEAD"], cwd=repo_dir, capture_output=True, text=True, check=True
         ).stdout.strip()
 
-        # Restart gateway service
-        restart_proc = subprocess.run(
-            ["sudo", "systemctl", "restart", "vayren-remote"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if restart_proc.returncode != 0:
+        # Restart gateway service through the authorized mechanism
+        restart = _restart_gateway_service(data_dir, caller)
+        if not restart.get("ok"):
             return {
                 "ok": False,
-                "error": (
-                    "RESTART_UNAVAILABLE: the gateway cannot restart itself from "
-                    "inside its sandbox (NoNewPrivileges); restart from an "
-                    "operator SSH session: sudo systemctl restart "
-                    "vayren-remote.service"
-                ),
+                "error": str(restart.get("error", "restart failed")),
                 "rollback_backup": backup_result.get("archive_path"),
             }
 
-        # Post-deployment health verification
-        post_health = op_health_check(data_dir, strategy_dir)
+        # Post-deployment health verification. An async helper request cannot
+        # be verified from this process (it is about to be restarted); the
+        # client reconnects and the fresh process reports its own health.
+        post_health = (
+            op_health_check(data_dir, strategy_dir)
+            if restart.get("status") == "RESTARTED"
+            else None
+        )
 
         return {
             "ok": True,
             "deployed_revision": rev_after,
             "previous_revision": rev_before,
             "backup_created": backup_result.get("archive_path"),
+            "restart": restart,
             "post_deploy_health": post_health,
-            "status": "DEPLOYED_AND_VERIFIED",
+            "status": "DEPLOYED_AND_VERIFIED" if post_health else "DEPLOYED_RESTART_REQUESTED",
         }
     except Exception as exc:
         return {
@@ -449,7 +618,9 @@ def op_deploy_approved(
         }
 
 
-def op_restart_gateway(data_dir: str, strategy_dir: str, confirmed: bool = False) -> dict[str, Any]:
+def op_restart_gateway(
+    data_dir: str, strategy_dir: str, confirmed: bool = False, caller: str = "operator"
+) -> dict[str, Any]:
     """Safely restart the vayren-remote service with active-session protection."""
     if not confirmed:
         return {
@@ -464,34 +635,7 @@ def op_restart_gateway(data_dir: str, strategy_dir: str, confirmed: bool = False
             "error": "RESTART_BLOCKED: live trading session is RUNNING. Stop before restart.",
         }
 
-    try:
-        proc = subprocess.run(
-            ["sudo", "systemctl", "restart", "vayren-remote"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=15,
-        )
-        if proc.returncode != 0:
-            # The gateway service runs sandboxed (NoNewPrivileges=true), so a
-            # restart issued from inside the service can never sudo — by
-            # design, not by misconfiguration. Restarts stay an operator-SSH
-            # action; no privilege is granted or weakened here.
-            return {
-                "ok": False,
-                "error": (
-                    "RESTART_UNAVAILABLE: the gateway cannot restart itself from "
-                    "inside its sandbox (NoNewPrivileges); restart from an "
-                    "operator SSH session: sudo systemctl restart "
-                    "vayren-remote.service"
-                ),
-            }
-
-        # Verify active
-        verify = _get_service_status("vayren-remote")
-        return {"ok": True, "service": verify, "status": "RESTARTED"}
-    except Exception as exc:
-        return {"ok": False, "error": f"restart failed: {exc}"}
+    return _restart_gateway_service(data_dir, caller)
 
 
 def record_audit_log(data_dir: str, op_name: str, caller: str, outcome: dict[str, Any]) -> None:
@@ -544,10 +688,10 @@ def execute_server_op(
         res = op_create_backup(data_dir, strategy_dir)
     elif op == "deploy":
         confirmed = bool(args.get("confirmed", False))
-        res = op_deploy_approved(data_dir, strategy_dir, confirmed=confirmed)
+        res = op_deploy_approved(data_dir, strategy_dir, confirmed=confirmed, caller=caller)
     elif op == "restart":
         confirmed = bool(args.get("confirmed", False))
-        res = op_restart_gateway(data_dir, strategy_dir, confirmed=confirmed)
+        res = op_restart_gateway(data_dir, strategy_dir, confirmed=confirmed, caller=caller)
     else:
         res = {"ok": False, "error": f"unhandled operation {op}"}
 

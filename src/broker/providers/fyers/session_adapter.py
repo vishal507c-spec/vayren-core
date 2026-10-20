@@ -125,6 +125,9 @@ class FyersSessionAdapter:
         # stop that loop instead of spinning for hours.
         self._order_ws_connected_at: float | None = None
         self._order_ws_flaps = 0
+        # One connection may emit several error/close callbacks. Count it
+        # once so a single failure cannot trip the breaker by itself.
+        self._order_ws_flap_counted = False
         # Order-update delivery evidence, tracked apart from socket state.
         self._order_ws_messages_received = 0
         self._order_ws_last_message_at: float | None = None
@@ -353,6 +356,7 @@ class FyersSessionAdapter:
         self._order_ws_error_count = 0
         self._order_ws_last_error = ""
         self._order_ws_connected_at = time.monotonic()
+        self._order_ws_flap_counted = False
         logger.info("ORDER_WS_CONNECTED broker=FYERS")
         if self._order_ws is not None and hasattr(self._order_ws, "subscribe"):
             try:
@@ -386,6 +390,9 @@ class FyersSessionAdapter:
             return
         if connected_at is None:
             return  # never actually connected: not a flap, just a failure
+        if self._order_ws_flap_counted:
+            return  # this connection already counted once
+        self._order_ws_flap_counted = True
         self._order_ws_flaps += 1
         if self._order_ws_flaps < ORDER_WS_FLAP_LIMIT:
             return
@@ -412,6 +419,12 @@ class FyersSessionAdapter:
         """
         self._order_ws_state = STATE_ERROR
         text = str(message)
+        # Count the failed connection BEFORE the log-dedup branch. The vendor
+        # alternates "host lost" / "Handshake 403" and every new connect
+        # resets ``_order_ws_last_error``, so the old placement only counted
+        # repeated identical strings and let an expired-token 403 loop run
+        # for hours (144k log lines).
+        self._note_ws_flap()
         if text != self._order_ws_last_error:
             self._order_ws_last_error = text
             self._order_ws_error_count = 1
@@ -427,7 +440,6 @@ class FyersSessionAdapter:
                 text,
                 self._order_ws_error_count,
             )
-        self._note_ws_flap()
 
     def _on_ws_orders(self, msg: Any) -> None:
         """Handle normalized order update from FyersOrderSocket."""

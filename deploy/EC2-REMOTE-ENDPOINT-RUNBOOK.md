@@ -53,7 +53,69 @@ sudo systemctl status vayren-remote --no-pager   # must be active (running), idl
 sudo ss -tlnp | grep 8765                        # must show 127.0.0.1:8765 ONLY
 ```
 
-## 5. SAFE connectivity test (no trading — read + rejected-write only)
+## 5. Operator-authorized gateway restart (sandbox-safe helper)
+
+The gateway runs with `NoNewPrivileges=true` (see §4), so it can never
+`sudo`. A restart command therefore answers `RESTART_UNAVAILABLE: gateway is
+sandboxed (NoNewPrivileges=1) ...` unless the narrowly scoped helper below
+is installed. Two authorized restart paths exist; no other privilege is
+granted or weakened either way:
+
+1. **Operator SSH / ops CLI** — the operator's own sudo policy:
+   `sudo systemctl restart vayren-remote.service`
+2. **Client restart command** (optional, auditable) — install the helper
+   units so the sandboxed gateway can *request* exactly one operation:
+
+```bash
+cd /home/ubuntu/vayren-core
+sudo cp deploy/vayren-remote-restart.service.example /etc/systemd/system/vayren-remote-restart.service
+sudo cp deploy/vayren-remote-restart.path.example    /etc/systemd/system/vayren-remote-restart.path
+sudo systemd-analyze verify /etc/systemd/system/vayren-remote-restart.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now vayren-remote-restart.path
+systemctl status vayren-remote-restart.path --no-pager   # active (waiting)
+# Upgrading an existing install: re-copy the service unit (symlink-safe,
+# root-only audit copy) and `sudo systemctl daemon-reload`; the path unit is
+# unchanged. The StateDirectory is created automatically on first run.
+```
+
+Security boundary (do not weaken):
+
+- The gateway still runs with `NoNewPrivileges=true` and no sudo rights.
+- It can only write `<data-dir>/restart.request` (data only). The path unit
+  watches exactly `PathExists=/home/ubuntu/.vayren/data/restart.request`.
+- The helper service (`vayren-remote-restart.service`) has one fixed
+  `ExecStart`: `systemctl restart vayren-remote.service`. It has no shell,
+  takes no caller input, and can control no other unit. The request file is
+  never parsed or executed — it is copied for audit, then removed so the path
+  unit rearms. The copy is symlink-safe and stored in a root-only
+  `StateDirectory` (`/var/lib/vayren-restart`, mode 0700): any previous
+  `.applied` is unlinked first, source symlinks are not followed, and the
+  gateway cannot race/replace the destination because it cannot write there.
+- A gateway started against any other data directory fails closed: it
+  refuses to write a marker the helper would never action.
+- Active-session protection is unchanged: a RUNNING live session blocks
+  restart with `RESTART_BLOCKED` before any request is written.
+
+Verification after install (marker is data only; safe to repeat):
+
+```bash
+printf '{"source":"operator-ssh-check"}\n' | sudo tee /home/ubuntu/.vayren/data/restart.request
+sleep 3
+systemctl is-active vayren-remote                     # active
+journalctl -t vayren-restart -n 5 --no-pager          # completion line
+sudo cat /var/lib/vayren-restart/restart.request.applied
+```
+
+Audit trail: the client command is recorded in
+`/home/ubuntu/.vayren/data/audit_ops.log` (caller role + connection id), and
+the applied request is kept in
+`/var/lib/vayren-restart/restart.request.applied` (root-only). To remove the
+helper entirely: `sudo systemctl disable --now vayren-remote-restart.path &&
+sudo rm /etc/systemd/system/vayren-remote-restart.{path,service} &&
+sudo systemctl daemon-reload`.
+
+## 6. SAFE connectivity test (no trading — read + rejected-write only)
 
 From any machine with `python3` (no VAYREN code needed), open a WebSocket to
 `wss://<domain>/vayren/v1`:
@@ -69,7 +131,7 @@ From any machine with `python3` (no VAYREN code needed), open a WebSocket to
 5. STOP. Do not send `start`. Do not touch orders. Confirm the service log
    shows no session start.
 
-## 6. EXE/APK client requirements (remaining work, client side)
+## 7. EXE/APK client requirements (remaining work, client side)
 
 - Target `wss://<domain>/vayren/v1`, schema `v: 1`.
 - Safe smoke test from any terminal (Windows EXE or this repo), read-only,
@@ -85,7 +147,7 @@ From any machine with `python3` (no VAYREN code needed), open a WebSocket to
   reuse the SAME id (server replays the cached result).
 - Keep the token in OS secure storage; never log it; never ship broker keys.
 
-## 7. Rollback
+## 8. Rollback
 
 `sudo systemctl stop vayren-remote`; remove the 443 SG rule. The backend,
 strategies, risk, and broker adapters are untouched by this entire setup,

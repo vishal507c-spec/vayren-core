@@ -312,6 +312,10 @@ class LiveTradingService:
         self._last_signal: dict[str, str] = {}
         self._status = "STOPPED"
         self._status_reason = ""
+        # Failed-START blockers are stored separately from genuine stop/error
+        # reasons so they can be retired the moment the live validation no
+        # longer reports them (broker reconnect, venue activation, data sync).
+        self._blocked_start_reason = ""
         self._confirmed_live_at = ""
         self._strategy_version = ""
         self._feed_kind = "none"
@@ -1069,6 +1073,12 @@ class LiveTradingService:
             # invalidated and START stayed blocked forever. Resolve the venue
             # every call and let it ride the key.
             self._resolve_live_venue_id(self.broker_name()),
+            # The SYSTEM-owned unified session (CONNECTING -> CONNECTED ->
+            # DISCONNECTED, with its monotonically increasing version) is the
+            # authoritative authentication fact. Riding the key means a
+            # verdict computed while the manager was still CONFIGURING can
+            # never outlive the completed authentication.
+            self._authoritative_session_key(),
             # Store state rides the key too: a "no market data" verdict must
             # retire the moment rows land — through the sync path (which also
             # invalidates explicitly) or any other writer. Fingerprints are
@@ -1167,6 +1177,30 @@ class LiveTradingService:
         self._validate_key = None
         self._validate_cache = None
 
+    def _reconcile_blocked_start_reason(self, blockers: tuple[str, ...]) -> None:
+        """Retire a failed-START reason once its blockers are no longer true.
+
+        ``_status_reason`` is the reason for the CURRENT lifecycle state, not
+        a history log. A refused START stores its blocker text there; when the
+        broker later authenticates, the venue registers, or candle data lands,
+        the same text must not keep contradicting the live validation (that is
+        how SYSTEM showed FYERS connected while LIVE still claimed
+        ``broker status: CONFIGURING`` / ``no live trading venue``).
+
+        Genuine stop/ERROR reasons are left untouched: only the reason that
+        came from a blocked START is reconciled here.
+        """
+        if not self._blocked_start_reason:
+            return
+        if blockers:
+            # The blocker set changed (or is still present): report the fresh
+            # validation, never the stale text from the earlier attempt.
+            self._status_reason = "; ".join(blockers)
+            return
+        if self._status == "STOPPED":
+            self._status_reason = ""
+            self._blocked_start_reason = ""
+
     def _store_fingerprints(self) -> tuple[tuple[str, tuple[int, int] | None], ...]:
         """Per-symbol `(mtime_ns, size)` of the candle stores, for the cache key.
 
@@ -1189,6 +1223,28 @@ class LiveTradingService:
                 out.append((symbol, None))
         return tuple(out)
 
+    def _authoritative_session(self, name: str) -> dict[str, Any]:
+        """SYSTEM's unified broker session — the one auth truth LIVE consumes."""
+        manager = self._broker_manager
+        if manager is None or not name:
+            return {}
+        try:
+            session = manager.get_session_snapshot(name)
+        except Exception:
+            return {}
+        return dict(session) if isinstance(session, dict) else {}
+
+    def _authoritative_session_key(self) -> tuple[str, str, bool, int]:
+        """Cheap cache key: unified auth state + monotonic session version."""
+        name = self.broker_name()
+        session = self._authoritative_session(name)
+        return (
+            name,
+            str(session.get("state", "") or ("NO_MANAGER" if not session else "UNKNOWN")),
+            bool(session.get("auth_valid", False)),
+            int(session.get("version", 0) or 0),
+        )
+
     def _live_blockers(self) -> list[str]:
         """Venue + gate truth for real-money mode (fail-closed, exact reasons)."""
         blockers: list[str] = []
@@ -1198,17 +1254,26 @@ class LiveTradingService:
             blockers.append("no live broker selected (configure in SYSTEM → BROKERS)")
             return blockers
         # Centralized broker state: SYSTEM → BROKERS owns authentication;
-        # LIVE only consumes it. LOGIN_REQUIRED/ERROR here means NO start.
+        # LIVE only consumes it. The unified session snapshot is the same
+        # authoritative fact SYSTEM renders (raw BrokerStatus values such as
+        # CONFIGURING are transient internal steps, not a second truth).
         manager = self._broker_manager
         if manager is not None:
+            session = self._authoritative_session(name)
+            session_state = str(session.get("state", "") or "UNKNOWN")
+            auth_valid = bool(session.get("auth_valid", False))
+            adapter_connected = False
             with contextlib.suppress(Exception):
-                state = manager.state(name) or {}
-                status = str(getattr(state.get("status"), "value", "") or "")
-                if status and status not in ("CONNECTED", "LIVE_READY"):
-                    blockers.append(
-                        f"{name} is not authenticated (broker status: {status}) — "
-                        "open SYSTEM → BROKERS to log in"
-                    )
+                adapter_connected = bool(manager.is_connected(name))
+            if session_state != "CONNECTED" or not auth_valid:
+                blockers.append(
+                    f"{name} is not authenticated (broker session: {session_state}) — "
+                    "open SYSTEM → BROKERS to log in"
+                )
+            elif not adapter_connected:
+                blockers.append(
+                    f"{name} broker adapter is not connected — reconnect in SYSTEM → BROKERS"
+                )
         venue_id = self._resolve_live_venue_id(name)
         if venue_id is None:
             blockers.append(
@@ -1286,7 +1351,13 @@ class LiveTradingService:
 
     @staticmethod
     def _resolve_live_venue_id(name: str) -> str | None:
-        """Registered venue id serving TRADING for a broker selection."""
+        """Registered venue id that can actually accept LIVE orders.
+
+        A DOMAIN advertisement is not capability: a data-only registration
+        must never satisfy live readiness. The candidate must expose a
+        TRADING face that satisfies the order interface and is connectable;
+        the deep connect/health/account probe still runs at START.
+        """
         try:
             from broker.registry import default_registry
             from broker.vocab import Domain
@@ -1298,8 +1369,19 @@ class LiveTradingService:
             except Exception:
                 continue
             try:
-                record.plugin.face(Domain.TRADING)
+                face = record.plugin.face(Domain.TRADING)
             except Exception:
+                continue
+            try:
+                from execution import BrokerAdapter  # pyright: ignore[reportAttributeAccessIssue]
+
+                if not isinstance(face, BrokerAdapter):
+                    continue
+            except ImportError:
+                pass
+            if not callable(getattr(face, "connect", None)):
+                continue
+            if not callable(getattr(face, "health", None)):
                 continue
             return candidate
         return None
@@ -1333,6 +1415,7 @@ class LiveTradingService:
         if blockers:
             self._status = "STOPPED"
             self._status_reason = "; ".join(blockers)
+            self._blocked_start_reason = self._status_reason
             self._record_activity(
                 self._config.strategy_name or "session",
                 "",
@@ -1347,6 +1430,7 @@ class LiveTradingService:
             self._teardown_sessions()
             self._status = "ERROR"
             self._status_reason = str(exc)
+            self._blocked_start_reason = ""
             self.state_changed.emit()
             return False, (str(exc),)
         now = time.time()
@@ -1360,6 +1444,7 @@ class LiveTradingService:
         self._signals_generated = 0
         self._status = "RUNNING"
         self._status_reason = ""
+        self._blocked_start_reason = ""
         self._timer.start()
         self._record_session_start()
         self._persist()
@@ -1416,6 +1501,7 @@ class LiveTradingService:
         halted = "halt" in str(reason).lower()
         self._status = "HALTED" if halted else "STOPPED"
         self._status_reason = reason if reason != "operator stop" else ""
+        self._blocked_start_reason = ""
         # Consent is per start, not per service lifetime: without this the
         # snapshot keeps hiding the consent blocker after a STOP, so START
         # renders enabled and the service then refuses it. Fresh ARM per run.
@@ -1514,6 +1600,10 @@ class LiveTradingService:
         with contextlib.suppress(Exception):
             pump_events(allow_any_thread=True)
         blockers = self.validate() if self._status != "RUNNING" else ()
+        if self._status != "RUNNING":
+            # A previous failed START must not keep describing a state that
+            # no longer exists (see _reconcile_blocked_start_reason).
+            self._reconcile_blocked_start_reason(blockers)
         broker_name = self.broker_name()
         connected = False
         broker_reason = "not started"
@@ -1683,11 +1773,12 @@ class LiveTradingService:
         execution_ready = running and not recon_blocks and not kill_halted
         execution_reason = ""
         if not running:
-            execution_reason = (
-                self._status_reason
-                if self._status_reason and self._status_reason != "reconciliation blocks live"
-                else "session not running"
-            )
+            if blockers:
+                # Fresh live validation is the current truth; a stale
+                # failed-START string must never outrank it.
+                execution_reason = "; ".join(blockers)
+            else:
+                execution_reason = self._status_reason or "session not running"
         elif recon_blocks:
             execution_reason = "reconciliation blocks live"
         elif kill_halted:
@@ -1878,7 +1969,9 @@ class LiveTradingService:
                 "decisions": [],
             },
             "reconciliation": {
-                "status": recon_status if running else ("SYNCED" if not recon_blocks else recon_status),
+                "status": recon_status
+                if running
+                else ("SYNCED" if not recon_blocks else recon_status),
                 "positions": len(positions),
                 "orders": open_count,
                 "last_check": "",

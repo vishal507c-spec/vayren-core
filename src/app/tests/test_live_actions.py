@@ -277,3 +277,41 @@ def test_session_timing_persists_across_reopen(dirs: tuple[str, str]) -> None:
     assert snap["session_timing"]["started_at"] == orig_started
     assert snap["session_timing"]["stopped_at"] == orig_stopped
     assert "Total runtime:" in snap["session_timing"]["duration"]
+
+
+def test_stale_start_refusal_is_not_echoed_once_blockers_clear(
+    dirs: tuple[str, str],
+) -> None:
+    """A recorded START refusal is history, not state: once the live verdict
+    no longer reports its blockers, the snapshot must not keep repeating it
+    (the EC2 'CONFIGURING while SYSTEM shows connected' incident)."""
+    service = _service(dirs)
+    stale = (
+        "fyers is not authenticated (broker status: CONFIGURING) — "
+        "open SYSTEM → BROKERS to log in; no live trading venue for broker 'fyers'"
+    )
+    headless._LIVE_ACTION_ERRORS["start"] = stale
+    try:
+        with patch.object(service, "validate", return_value=()):
+            snap = _act(dirs, {"action": "arm"})
+        assert "CONFIGURING" not in str(snap.get("status_reason", ""))
+        assert "no live trading venue" not in str(snap.get("status_reason", ""))
+        assert headless._LIVE_ACTION_ERRORS.get("start") is None
+    finally:
+        headless._LIVE_ACTION_ERRORS.pop("start", None)
+
+
+def test_recorded_start_refusal_is_replaced_by_fresh_blockers(dirs: tuple[str, str]) -> None:
+    """When the blocker set changed, the fresh verdict is the reason — the
+    earlier refusal text never outranks it."""
+    service = _service(dirs)
+    headless._LIVE_ACTION_ERRORS["start"] = (
+        "fyers is not authenticated (broker status: CONFIGURING) — open SYSTEM → BROKERS to log in"
+    )
+    fresh = "no market data for NSE:RELIANCE 30m"
+    try:
+        with patch.object(service, "validate", return_value=(fresh,)):
+            snap = _act(dirs, {"action": "arm"})
+        assert str(snap.get("status_reason", "")) == fresh
+    finally:
+        headless._LIVE_ACTION_ERRORS.pop("start", None)

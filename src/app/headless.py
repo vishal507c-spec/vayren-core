@@ -810,7 +810,17 @@ def _live_action(
     snapshot = _trading_service_snapshot(data_dir, strategy_dir, broker_manager)
     reason = _LIVE_ACTION_ERRORS.get("start")
     if reason and snapshot.get("session_status") != "RUNNING":
-        snapshot["status_reason"] = reason
+        fresh_blockers = tuple(str(b) for b in (snapshot.get("start_blockers", []) or []))
+        if fresh_blockers and set(reason.split("; ")) == set(fresh_blockers):
+            snapshot["status_reason"] = reason
+        elif fresh_blockers:
+            # The blocker set changed (broker reconnected, venue activated,
+            # data landed): the fresh validation owns the status reason.
+            snapshot["status_reason"] = "; ".join(fresh_blockers)
+        else:
+            # No current blocker — the recorded refusal is history, not state.
+            _LIVE_ACTION_ERRORS.pop("start", None)
+            snapshot["status_reason"] = str(snapshot.get("status_reason", "") or "")
     if (_ARMED[0] or getattr(service, "is_live_confirmed", lambda: False)()) and snapshot.get(
         "session_status"
     ) != "RUNNING":

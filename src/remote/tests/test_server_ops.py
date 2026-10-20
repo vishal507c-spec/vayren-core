@@ -142,8 +142,9 @@ def test_execute_op_restart_requires_confirm(tmp_path):
 
 
 def test_restart_failure_points_to_ssh_without_new_privilege(tmp_path, monkeypatch):
-    """Sandboxed gateway can never sudo-restart itself: the error must say
-    so and direct the operator to SSH instead of echoing sudo stderr."""
+    """Sandboxed gateway can never sudo-restart itself: with no helper
+    installed the error must name the sandbox and the operator SSH command,
+    never echo sudo's stderr."""
     import subprocess
 
     from remote import server_ops
@@ -158,14 +159,194 @@ def test_restart_failure_points_to_ssh_without_new_privilege(tmp_path, monkeypat
         stderr = "sudo: The 'no new privileges' flag is set"
 
     monkeypatch.setattr(server_ops, "_get_worker_runtime_status", lambda *_args: {"running": False})
+    monkeypatch.setattr(server_ops, "_no_new_privileges", lambda: True)
+    monkeypatch.setattr(server_ops, "_restart_helper_available", lambda _dir: False)
     monkeypatch.setattr(subprocess, "run", lambda *_args, **_kwargs: _Proc())
     res = execute_server_op(
         "restart", params={"confirmed": True}, data_dir=str(data_dir), strategy_dir=str(strat_dir)
     )
     assert res["ok"] is False
     assert "RESTART_UNAVAILABLE" in res["error"]
+    assert "NoNewPrivileges=1" in res["error"]
     assert "sudo systemctl restart vayren-remote.service" in res["error"]
-    assert "no new privileges" not in res["error"]
+    assert "no new privileges' flag" not in res["error"]
+
+
+def test_restart_direct_sudo_path_verifies_service_active(tmp_path, monkeypatch):
+    """Operator CLI/SSH path: a successful sudo restart is verified active."""
+    import subprocess
+
+    from remote import server_ops
+
+    data_dir = tmp_path / "data"
+    strat_dir = tmp_path / "strategies"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    strat_dir.mkdir(parents=True, exist_ok=True)
+
+    class _Proc:
+        returncode = 0
+        stderr = ""
+
+    monkeypatch.setattr(server_ops, "_get_worker_runtime_status", lambda *_args: {"running": False})
+    monkeypatch.setattr(server_ops, "_no_new_privileges", lambda: False)
+    monkeypatch.setattr(subprocess, "run", lambda *_args, **_kwargs: _Proc())
+    monkeypatch.setattr(
+        server_ops,
+        "_get_service_status",
+        lambda name: {"name": name, "active": True, "status": "ACTIVE", "main_pid": 123},
+    )
+    res = execute_server_op(
+        "restart", params={"confirmed": True}, data_dir=str(data_dir), strategy_dir=str(strat_dir)
+    )
+    assert res["ok"] is True
+    assert res["status"] == "RESTARTED"
+    assert res["service"]["active"] is True
+
+
+def test_restart_direct_sudo_denied_reports_real_cause(tmp_path, monkeypatch):
+    """Non-sandboxed denial (missing sudo rule): the real sudo cause is the
+    error, with the operator SSH command as the fallback."""
+    import subprocess
+
+    from remote import server_ops
+
+    data_dir = tmp_path / "data"
+    strat_dir = tmp_path / "strategies"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    strat_dir.mkdir(parents=True, exist_ok=True)
+
+    class _Proc:
+        returncode = 1
+        stderr = "sudo: a password is required"
+
+    monkeypatch.setattr(server_ops, "_get_worker_runtime_status", lambda *_args: {"running": False})
+    monkeypatch.setattr(server_ops, "_no_new_privileges", lambda: False)
+    monkeypatch.setattr(server_ops, "_restart_helper_available", lambda _dir: False)
+    monkeypatch.setattr(subprocess, "run", lambda *_args, **_kwargs: _Proc())
+    res = execute_server_op(
+        "restart", params={"confirmed": True}, data_dir=str(data_dir), strategy_dir=str(strat_dir)
+    )
+    assert res["ok"] is False
+    assert "RESTART_UNAVAILABLE" in res["error"]
+    # The sudo cause is surfaced (secret scrubber may redact the value, the
+    # cause stays readable).
+    assert "direct restart failed" in res["error"]
+    assert "required" in res["error"]
+    assert "sudo systemctl restart vayren-remote.service" in res["error"]
+
+
+def test_restart_blocked_while_session_running(tmp_path, monkeypatch):
+    """A RUNNING live session blocks restart before any privilege is used."""
+    import subprocess
+
+    from remote import server_ops
+
+    data_dir = tmp_path / "data"
+    strat_dir = tmp_path / "strategies"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    strat_dir.mkdir(parents=True, exist_ok=True)
+
+    def _boom(*_args, **_kwargs):
+        raise AssertionError("no restart may be attempted while a session is RUNNING")
+
+    monkeypatch.setattr(server_ops, "_get_worker_runtime_status", lambda *_args: {"running": True})
+    monkeypatch.setattr(subprocess, "run", _boom)
+    res = execute_server_op(
+        "restart", params={"confirmed": True}, data_dir=str(data_dir), strategy_dir=str(strat_dir)
+    )
+    assert res["ok"] is False
+    assert "RESTART_BLOCKED" in res["error"]
+
+
+def test_sandboxed_restart_requests_helper_marker(tmp_path, monkeypatch):
+    """Sandboxed gateway + installed helper: one audit-ready request marker,
+    then the root path unit restarts the service. No sudo is attempted."""
+    import json
+    import subprocess
+
+    from remote import server_ops
+
+    data_dir = tmp_path / "data"
+    strat_dir = tmp_path / "strategies"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    strat_dir.mkdir(parents=True, exist_ok=True)
+    path_unit = tmp_path / "vayren-remote-restart.path"
+    path_unit.write_text("[Path]\nPathExists=x\n", encoding="utf-8")
+
+    def _boom(*_args, **_kwargs):
+        raise AssertionError("sudo must not run inside the sandbox")
+
+    monkeypatch.setattr(server_ops, "_get_worker_runtime_status", lambda *_args: {"running": False})
+    monkeypatch.setattr(server_ops, "_no_new_privileges", lambda: True)
+    monkeypatch.setattr(server_ops, "RESTART_HELPER_PATH_UNIT", path_unit)
+    monkeypatch.setattr(server_ops, "RESTART_HELPER_DATA_DIR", data_dir)
+    monkeypatch.setattr(server_ops, "RESTART_REQUEST_DELAY_S", 0.0)
+    monkeypatch.setattr(subprocess, "run", _boom)
+    res = execute_server_op(
+        "restart",
+        params={
+            "confirmed": True,
+            # Unauthorized/ignored fields: the helper payload is fixed and
+            # must never echo caller-supplied executable input.
+            "unit": "evil.service",
+            "command": "rm -rf /",
+            "path": "/etc/shadow",
+        },
+        data_dir=str(data_dir),
+        strategy_dir=str(strat_dir),
+        caller="operator:test-conn",
+    )
+    assert res["ok"] is True
+    assert res["status"] == "RESTART_REQUESTED"
+    marker = data_dir / "restart.request"
+    assert marker.is_file()
+    payload = json.loads(marker.read_text(encoding="utf-8"))
+    assert payload["operation"] == "restart"
+    assert payload["unit"] == "vayren-remote.service"
+    assert payload["caller"] == "operator:test-conn"
+    assert "command" not in payload and "path" not in payload
+    assert not (data_dir / "restart.request.tmp").exists()
+
+
+def test_helper_availability_requires_canonical_data_dir(tmp_path, monkeypatch):
+    """The helper is usable only for the exact data directory it watches;
+    any other gateway fails closed instead of writing a dead marker."""
+    from remote import server_ops
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    other_dir = tmp_path / "other"
+    other_dir.mkdir(parents=True, exist_ok=True)
+    path_unit = tmp_path / "vayren-remote-restart.path"
+    path_unit.write_text("[Path]\nPathExists=x\n", encoding="utf-8")
+
+    monkeypatch.setattr(server_ops, "RESTART_HELPER_PATH_UNIT", path_unit)
+    monkeypatch.setattr(server_ops, "RESTART_HELPER_DATA_DIR", data_dir)
+    assert server_ops._restart_helper_available(str(data_dir)) is True
+    assert server_ops._restart_helper_available(str(other_dir)) is False
+
+    path_unit.unlink()
+    assert server_ops._restart_helper_available(str(data_dir)) is False
+
+
+def test_helper_restart_publishes_marker_after_delay(tmp_path):
+    """Delayed publish: the command acknowledgement can leave the socket
+    before systemd restarts the gateway (the marker appears afterwards)."""
+    import json
+    import time
+
+    from remote import server_ops
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    res = server_ops._request_helper_restart(str(data_dir), "operator:cli", delay_s=0.05)
+    assert res["ok"] is True
+    marker = data_dir / "restart.request"
+    deadline = time.monotonic() + 3.0
+    while not marker.is_file() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert marker.is_file()
+    assert json.loads(marker.read_text(encoding="utf-8"))["caller"] == "operator:cli"
 
 
 def test_execute_op_deploy_requires_confirm(tmp_path):

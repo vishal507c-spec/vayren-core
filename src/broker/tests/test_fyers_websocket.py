@@ -758,6 +758,47 @@ def test_order_ws_abandons_a_socket_the_venue_keeps_closing() -> None:
     assert len(created) == 2, "connect() clears the suspension"
 
 
+def test_order_ws_counts_one_flap_per_connection() -> None:
+    """Alternating error/close callbacks on one connection count once."""
+    adapter, _created = _vendor_adapter(None)
+    adapter.connect()
+
+    adapter._on_ws_error("Handshake status 403 Forbidden")
+    adapter._on_ws_error("Connection to remote host was lost.")
+    adapter._on_ws_close({"code": 1006})
+
+    assert adapter._order_ws_flaps == 1
+    assert adapter._order_ws is not None
+    adapter.disconnect()
+
+
+def test_order_ws_abandons_alternating_403_errors(caplog: Any) -> None:
+    """Expired-token 403s alternate with 'host lost' and used to reconnect
+    forever because the error-dedup branch returned before the flap breaker.
+
+    A new connection resets the dedup key, so every new error string looked
+    unique. The breaker must still stop after ORDER_WS_FLAP_LIMIT short-lived
+    connections, even when no two consecutive errors are identical.
+    """
+    import logging
+
+    adapter, created = _vendor_adapter(None)
+    adapter.connect()
+    with caplog.at_level(logging.WARNING, logger="broker.providers.fyers.session_adapter"):
+        for _ in range(ORDER_WS_FLAP_LIMIT):
+            adapter._on_ws_error("Handshake status 403 Forbidden")
+            if adapter._order_ws is None:
+                break
+            adapter._on_ws_connect()
+
+    assert adapter._order_ws is None
+    assert adapter.order_ws_state == STATE_DISCONNECTED
+    assert adapter._order_ws_suspended_until > time.monotonic()
+    assert len(created) == 1, "the breaker must stop the vendor's own reconnect loop"
+    abandoned = [r for r in caplog.records if "ORDER_WS_ABANDONED" in r.getMessage()]
+    assert len(abandoned) == 1
+
+
 def test_order_ws_stable_connection_resets_the_flap_counter() -> None:
     adapter, _created = _vendor_adapter(None)
     adapter.connect()
