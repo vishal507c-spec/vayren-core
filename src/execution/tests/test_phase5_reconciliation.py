@@ -604,6 +604,61 @@ def test_partial_fill_ingested_accurately() -> None:
     assert aligned_ord.filled_qty == 70.0
 
 
+def test_order_status_sync_keeps_expired_distinct_from_cancelled() -> None:
+    """The self-heal syncs the broker's own order state.
+
+    An expired order is EXPIRED, not a cancelled one — the venue ended its
+    validity, it did not cancel it. The local state has to say the same.
+    """
+    cases = (
+        ("CANCELED", OrderState.CANCELLED),
+        ("CANCELLED", OrderState.CANCELLED),
+        ("FILLED", OrderState.FILLED),
+        ("REJECTED", OrderState.REJECTED),
+        ("EXPIRED", OrderState.EXPIRED),
+    )
+    for broker_status, expected in cases:
+        journal = ExecutionJournal()
+        healer = SelfHealingCoordinator(journal=journal)
+        engine = ExecutionEngine()
+        ledger = PositionLedger(starting_capital=100_000.0)
+        sm = ExecutionStateMachine(initial=ExecutionState.RECONCILING)
+        engine._orders["cid-sync-1"] = _make_sample_order(
+            "cid-sync-1", quantity=10.0, filled_qty=0.0
+        )
+
+        bo_truth = BrokerOrderTruth(
+            order_id="venue-sync-1",
+            client_order_id="cid-sync-1",
+            symbol="NSE:INFY-EQ",
+            side="BUY",
+            quantity=10.0,
+            filled_quantity=0.0,
+            status=broker_status,
+        )
+        truth = BrokerTruthSnapshot(orders=(bo_truth,))
+        mismatch = InstitutionalMismatch(
+            mismatch_type=MismatchType.ORDER_STATUS_MISMATCH,
+            symbol_or_id="cid-sync-1",
+            local_value="SUBMITTED",
+            broker_value=f"status={broker_status}",
+        )
+
+        res = healer.heal_mismatch(
+            mismatch=mismatch,
+            engine=engine,
+            ledger=ledger,
+            sl_tracker=SlProtectionTracker(),
+            broker_truth=truth,
+            state_machine=sm,
+        )
+
+        assert res.action == HealingActionKind.SYNC_ORDER_STATE, broker_status
+        aligned = engine.get("cid-sync-1")
+        assert aligned is not None, broker_status
+        assert aligned.state == expected, broker_status
+
+
 # ── 7. Stop-Loss Verification (§7) ───────────────────────────────────────────
 
 

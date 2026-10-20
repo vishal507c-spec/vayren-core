@@ -77,6 +77,10 @@ class MockTransport:
         self.calls.append({"method": "GET", "url": url, "headers": headers})
         if self.get_exc:
             raise self.get_exc
+        if url.endswith("/orders"):
+            return {"s": "ok", "code": 200, "orderBook": []}
+        if url.endswith("/positions"):
+            return {"s": "ok", "code": 200, "netPositions": []}
         return self.get_response
 
     def put_json(

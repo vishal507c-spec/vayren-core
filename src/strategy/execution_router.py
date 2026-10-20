@@ -56,6 +56,7 @@ from strategy.models.execution import (
     BROKER_UNAVAILABLE,
     CANCELLED,
     DUPLICATE_INTENT,
+    EXPIRED,
     FILLED,
     INSTRUMENT_NOT_FOUND,
     INVALID_INTENT,
@@ -106,6 +107,9 @@ _STATUS_TABLE = (
     ({"FILLED", "COMPLETE", "TRADED", "DONE"}, FILLED),
     ({"REJECTED", "REJECT"}, REJECTED),
     ({"CANCELLED", "CANCEL"}, CANCELLED),
+    # An expired order is FINISHED, not cancelled: the venue ended its
+    # validity, it did not cancel it.
+    ({"EXPIRED", "EXPIRE"}, EXPIRED),
     ({"MODIFIED", "MODIFY"}, MODIFIED),
     ({"PARTIALLY_FILLED", "PARTIAL", "PART"}, PARTIALLY_FILLED),
     (
@@ -114,7 +118,20 @@ _STATUS_TABLE = (
     ),
     ({"SUBMITTED", "SENT", "NEW"}, SUBMITTED),
 )
-_FYERS_NUMERIC_STATUS = {1: CANCELLED, 5: REJECTED, 6: CANCELLED}
+#: FYERS order-status codes (the venue's own table) → OrderState values.
+#: Mirrors the map in ``broker/providers/fyers/session_adapter.py``:
+#: 1 Cancelled · 2 Traded/Filled · 3 (unused) · 4 Transit · 5 Rejected ·
+#: 6 Pending · 7 Expired. Status 6 is PENDING — the venue still works such
+#: an order — so it maps to ACKNOWLEDGED, never to CANCELLED. Status 7 is
+#: EXPIRED and keeps its own state: an expired order is not a cancelled one.
+_FYERS_NUMERIC_STATUS = {
+    1: CANCELLED,
+    2: FILLED,
+    4: ACKNOWLEDGED,
+    5: REJECTED,
+    6: ACKNOWLEDGED,
+    7: EXPIRED,
+}
 
 #: Structured routing event names (bounded journal + logging).
 BROKER_CONNECTED = "BROKER_CONNECTED"

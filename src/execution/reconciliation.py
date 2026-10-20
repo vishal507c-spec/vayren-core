@@ -565,11 +565,19 @@ class SelfHealingCoordinator:
         if mtype in (MismatchType.ORDER_STATUS_MISMATCH, MismatchType.MISSING_LOCAL_ORDER):
             bo = broker_truth.find_order(target)
             if bo is not None:
-                target_state = "CANCELED"
-                if bo.status.upper() == "FILLED":
+                broker_status = bo.status.upper()
+                # The engine's own vocabulary (Rust OrderState values): an
+                # expired order is EXPIRED, not a cancelled one, and the
+                # spelling has to be the engine's or the reconcile is refused.
+                target_state = "CANCELLED"
+                if broker_status == "FILLED":
                     target_state = "FILLED"
-                elif bo.status.upper() == "REJECTED":
+                elif broker_status == "REJECTED":
                     target_state = "REJECTED"
+                elif broker_status == "EXPIRED":
+                    target_state = "EXPIRED"
+                elif broker_status in ("CANCELLED", "CANCELED"):
+                    target_state = "CANCELLED"
                 try:
                     engine.reconcile(
                         client_order_id=target,

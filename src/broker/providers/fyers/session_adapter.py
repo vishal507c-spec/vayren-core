@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import queue
+import re
 import threading
 import time
 import urllib.parse
@@ -19,6 +20,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from broker.capabilities import CapabilitySet, Caps, Domain, capability_set
+from broker.common.api_governance import APIGovernor, BrokerGateway, CallClass, CircuitOpenError
 from broker.providers.fyers.live_auth import (
     API_BASE,
     MARKET_DATA_BASE,
@@ -45,10 +47,124 @@ TRADING_CAPABILITIES: CapabilitySet = capability_set(
     }
 )
 
-_TERMINAL_STATUSES = frozenset({2, 5, 6})  # 2: Filled, 5: Cancelled, 6: Rejected
-# FYERS order statuses:
-# 1: Cancelled, 2: Traded/Filled, 4: Transit, 5: Rejected, 6: Pending
-# We handle both numeric statuses and string representations gracefully.
+#: FYERS order status codes — the venue's own order-status table:
+#: ``1`` Cancelled · ``2`` Traded/Filled · ``3`` (not used) · ``4`` Transit ·
+#: ``5`` Rejected · ``6`` Pending · ``7`` Expired.
+#:
+#: The mapping is used by BOTH the order socket and the REST order book, so
+#: the two surfaces can never disagree about the same order. ``6`` is
+#: PENDING — the venue still works such an order — and ``7`` EXPIRED is
+#: terminal. The previous reading (``6`` as cancelled) contradicted the
+#: order-socket parser and made a pending order look finished, which hid a
+#: live order from the duplicate check and from the protective-stop
+#: cancellation evidence.
+_STATUS_CANCELLED = 1
+_STATUS_TRADED = 2
+_STATUS_TRANSIT = 4
+_STATUS_REJECTED = 5
+_STATUS_PENDING = 6
+_STATUS_EXPIRED = 7
+
+#: Venue-neutral order status names, used by every surface that reports an
+#: order's state (REST order book, order socket, cancellation evidence).
+STATUS_OPEN = "OPEN"
+STATUS_CANCELLED = "CANCELLED"
+STATUS_FILLED = "FILLED"
+STATUS_REJECTED = "REJECTED"
+STATUS_EXPIRED = "EXPIRED"
+STATUS_UNKNOWN = "UNKNOWN"
+
+#: THE table: venue status code → venue-neutral name. Every surface reads
+#: this one, so the order socket and the REST order book can never disagree
+#: about the same order.
+_ORDER_STATUS_BY_CODE: dict[int, str] = {
+    _STATUS_CANCELLED: STATUS_CANCELLED,
+    _STATUS_TRADED: STATUS_FILLED,
+    _STATUS_TRANSIT: STATUS_OPEN,
+    _STATUS_REJECTED: STATUS_REJECTED,
+    _STATUS_PENDING: STATUS_OPEN,
+    _STATUS_EXPIRED: STATUS_EXPIRED,
+}
+
+#: Statuses where the order is FINISHED at the venue: cancelled, traded,
+#: rejected or expired. Everything else (4 transit, 6 pending) means the
+#: venue still works the order.
+_TERMINAL_STATUSES = frozenset(
+    {_STATUS_CANCELLED, _STATUS_TRADED, _STATUS_REJECTED, _STATUS_EXPIRED}
+)
+
+#: The same set in venue-neutral names — derived, so the two can never drift.
+_TERMINAL_STATUS_NAMES = frozenset(_ORDER_STATUS_BY_CODE[code] for code in _TERMINAL_STATUSES)
+
+#: FYERS prefixes a user order tag with ``1:`` (and its own tags with
+#: ``2:``). The prefix is stripped when the tag is reported back, so the
+#: engine can match a venue order with its own client order id.
+_VENUE_TAG_PREFIXES = ("1:", "2:")
+
+
+def _client_order_id(venue_tag: Any) -> str:
+    """Our client order id behind a venue order tag (``1:tag`` -> ``tag``)."""
+    text = str(venue_tag or "")
+    for prefix in _VENUE_TAG_PREFIXES:
+        if text.startswith(prefix):
+            return text[len(prefix) :]
+    return text
+
+
+def _order_status(raw: Any) -> str:
+    """The venue-neutral status of one venue order.
+
+    Numeric FYERS codes and their string forms map onto the same names the
+    engine and the strategy router already use, so every surface reports an
+    order identically.
+    """
+    if isinstance(raw, bool):
+        return STATUS_UNKNOWN
+    if isinstance(raw, int):
+        return _ORDER_STATUS_BY_CODE.get(raw, STATUS_UNKNOWN)
+    text = str(raw or "").strip().upper()
+    if text in ("CANCELLED", "CANCELED", "CANCEL"):
+        return STATUS_CANCELLED
+    if text in ("FILLED", "TRADED", "COMPLETE"):
+        return STATUS_FILLED
+    if text in ("REJECTED", "REJECT"):
+        return STATUS_REJECTED
+    if text in ("EXPIRED", "EXPIRE"):
+        return STATUS_EXPIRED
+    if text in ("OPEN", "PENDING", "TRANSIT", "ACKNOWLEDGED", "ACK", "WORKING", "PLACED"):
+        return STATUS_OPEN
+    if text.isdigit():
+        return _order_status(int(text))
+    return STATUS_UNKNOWN
+
+
+#: FYERS envelope codes that prove the session/token is no longer usable.
+#: These must become AuthError, never an empty successful-looking read.
+_AUTH_ERROR_CODES = frozenset({-8, -15, -16, -17, -99})
+
+#: The execution engine marks its stop-protection orders with an ``sl:``
+#: intent id (``sl:<symbol>:<seq>``) and a matching client order id
+#: (``sl:<symbol>:<seq>:o1``) — see ``execution/runtime/session.py``
+#: (``_place_protective_stop``). The engine itself routes protective-stop
+#: fills by ``intent_id.startswith("sl:")``. The adapter reuses that SAME
+#: convention to recognise a protective exit, so the intent comes from the
+#: existing execution logic instead of a new, parallel signal.
+#:
+#: The shape is deliberately narrow. A strategy plan never matches it: the
+#: execution planner only emits MARKET/LIMIT plans and never sets a stop
+#: price, the strategy router's plan carries no intent id at all, and the
+#: operator order-path test uses ``order-path-test:`` ids. Only the engine's
+#: own protective order produces ``sl:<symbol>:<seq>`` + a STOP type + a
+#: stop price + the matching client order id.
+_PROTECTIVE_INTENT_RE = re.compile(r"^sl:(?P<symbol>.+):(?P<seq>\d+)$")
+#: Order types the engine uses for a protective stop. A strategy entry is
+#: MARKET/LIMIT, so a stop type alone never qualifies an order.
+_PROTECTIVE_ORDER_TYPES = frozenset({"STOP_MARKET", "STOP_LIMIT", "STOP"})
+
+#: Upper bound for the order-intent memory. The oldest intents are dropped
+#: first; a dropped intent only means a later cancel of that order is
+#: treated as ambiguous — the safe direction (it stays circuit-gated).
+_ORDER_INTENT_MEMORY_LIMIT = 2000
 
 #: Vendor order-socket subscription keys (``FyersOrderSocket.socket_type``).
 #: The SDK splits ``data_type`` on "," and looks each token up in
@@ -114,11 +230,21 @@ class FyersSessionAdapter:
         self._app_id = str(app_id or "")
         self._token = str(access_token or "")
         self._http = transport if transport is not None else _UrllibTransport()
+        # One authenticated adapter is shared by every per-symbol LiveSession.
+        # Its governor, token bucket, circuit, historical cache and in-flight
+        # coordination are therefore shared by the whole symbol fleet too.
+        self._governor = APIGovernor(log=logger)
+        self._gateway = BrokerGateway(self._governor)
         self._connected = False
         self._poll_interval_s = max(0.0, float(poll_interval_s))
         self._last_poll_epoch = 0.0
         self._last_orders: dict[str, dict[str, Any]] = {}
         self._seen_client_ids: dict[str, str] = {}
+        #: broker order id -> "protective" | "entry". The intent of every order
+        #: this adapter placed, so a later cancel/modify of a KNOWN order can
+        #: be recognised as risk-reducing. An unknown id stays ambiguous and
+        #: is treated as an ordinary (gated) operation.
+        self._order_intent: dict[str, str] = {}
         self._cached_snapshot: tuple[dict[str, Any], ...] = ()
 
         # Short-lived profile cache to avoid duplicate burst requests to /profile
@@ -192,6 +318,15 @@ class FyersSessionAdapter:
         """True when the adapter has an active, verified session."""
         return self._connected
 
+    @property
+    def governor(self) -> APIGovernor:
+        """The one API governor shared by every session using this adapter."""
+        return self._governor
+
+    def api_metrics(self) -> dict[str, Any]:
+        """Current call/error/latency/throttle/cache counters (read-only copy)."""
+        return self._governor.metrics.snapshot()
+
     # ── lifecycle ──────────────────────────────────────────────────────
 
     def _get_profile(self, force: bool = False) -> dict[str, Any]:
@@ -200,7 +335,9 @@ class FyersSessionAdapter:
         if not force and self._profile_cache is not None:
             cached_at, cached_body = self._profile_cache
             if now - cached_at < self._profile_cache_ttl_s:
+                self._governor.metrics.record_cache_hit()
                 return cached_body
+        self._governor.metrics.record_cache_miss()
         body = self._get("profile")
         if isinstance(body, dict) and body.get("s") == "ok":
             self._profile_cache = (now, body)
@@ -213,7 +350,7 @@ class FyersSessionAdapter:
             if not isinstance(body, dict) or body.get("s") != "ok":
                 msg = body.get("message") if isinstance(body, dict) else "session check failed"
                 raise AuthError(f"FYERS session rejected: {msg}", code="AUTH")
-        except AuthError:
+        except (AuthError, BrokerError, CircuitOpenError):
             raise
         except Exception as exc:
             raise AuthError(f"FYERS session rejected: {exc}", code="AUTH") from None
@@ -436,6 +573,9 @@ class FyersSessionAdapter:
         self._order_ws_last_error = ""
         self._order_ws_connected_at = time.monotonic()
         self._order_ws_flap_counted = False
+        # A reconnect may have missed order/position transitions: never let a
+        # snapshot taken before the gap satisfy the next reconciliation.
+        self._invalidate_account_snapshot()
         logger.info("ORDER_WS_CONNECTED broker=FYERS")
         if self._order_ws is not None and hasattr(self._order_ws, "subscribe"):
             try:
@@ -533,6 +673,9 @@ class FyersSessionAdapter:
         # delivered an update proves nothing about order-update flow.
         self._order_ws_messages_received += 1
         self._order_ws_last_message_at = time.monotonic()
+        if events:
+            # Broker truth changed; the shared account snapshot is now stale.
+            self._invalidate_account_snapshot()
         for ev in events:
             try:
                 self._order_event_queue.put_nowait(ev)
@@ -551,6 +694,9 @@ class FyersSessionAdapter:
         self._order_ws_messages_received += 1
         self._order_ws_last_message_at = time.monotonic()
         if ev is not None:
+            # A fill changes account truth; invalidate the shared snapshot
+            # immediately, not only when the app next drains stream_events().
+            self._invalidate_account_snapshot()
             try:
                 self._order_event_queue.put_nowait(ev)
             except queue.Full:
@@ -559,7 +705,7 @@ class FyersSessionAdapter:
     def _parse_ws_order_event(self, order: dict[str, Any]) -> list[dict[str, Any]]:
         """Parse FYERS WebSocket order dict into VAYREN events."""
         events: list[dict[str, Any]] = []
-        tag = str(order.get("orderTag") or order.get("ordertag") or "")
+        tag = _client_order_id(order.get("orderTag") or order.get("ordertag") or "")
         order_id = str(order.get("id") or order.get("id_fyers") or "")
         if not tag and order_id in self._seen_client_ids.values():
             # Invert lookup
@@ -572,9 +718,10 @@ class FyersSessionAdapter:
             return []
 
         status = order.get("status")
-        # 1: Cancelled, 2: Traded/Filled, 4: Transit, 5: Rejected, 6: Pending/Open
-        # Check ACK/Open
-        if status in (6, "PENDING", "OPEN", 4, "TRANSIT"):
+        state = _order_status(status)
+        # The order socket and the REST order book read the SAME status table:
+        # 4 transit and 6 pending mean the venue still works the order.
+        if state == STATUS_OPEN:
             events.append(
                 {
                     "type": "ack",
@@ -603,7 +750,7 @@ class FyersSessionAdapter:
                     price = 0.0
                 side_val = order.get("side") or order.get("tran_side")
                 side = "BUY" if side_val in (1, "BUY") else "SELL"
-                partial = status not in _TERMINAL_STATUSES
+                partial = state not in _TERMINAL_STATUS_NAMES
                 events.append(
                     {
                         "type": "fill",
@@ -625,7 +772,7 @@ class FyersSessionAdapter:
                     }
                 )
 
-        if status in (5, "REJECTED"):
+        if state == STATUS_REJECTED:
             events.append(
                 {
                     "type": "reject",
@@ -634,12 +781,21 @@ class FyersSessionAdapter:
                     "reason": str(order.get("message") or order.get("oms_msg") or "order rejected"),
                 }
             )
-        elif status in (1, "CANCELLED"):
+        elif state == STATUS_CANCELLED:
             events.append(
                 {
                     "type": "cancel",
                     "client_order_id": tag,
                     "broker_order_id": order_id,
+                }
+            )
+        elif state == STATUS_EXPIRED:
+            events.append(
+                {
+                    "type": "expired",
+                    "client_order_id": tag,
+                    "broker_order_id": order_id,
+                    "reason": str(order.get("message") or order.get("oms_msg") or "order expired"),
                 }
             )
 
@@ -649,7 +805,7 @@ class FyersSessionAdapter:
         """Parse FYERS WebSocket trade/execution print into a VAYREN fill event."""
         order_id = str(trade.get("orderNumber") or trade.get("id") or "")
         trade_id = str(trade.get("tradeNumber") or trade.get("id_fill") or "")
-        tag = str(trade.get("orderTag") or trade.get("ordertag") or "")
+        tag = _client_order_id(trade.get("orderTag") or trade.get("ordertag") or "")
 
         if not tag and order_id in self._seen_client_ids.values():
             for k, v in self._seen_client_ids.items():
@@ -776,8 +932,13 @@ class FyersSessionAdapter:
         return self._read_positions()
 
     def open_orders(self) -> list[dict[str, Any]]:
-        """Open order book rows (empty when none)."""
-        return self._read_orders()
+        """The venue's WORKING orders (empty when none).
+
+        FYERS' order book holds every order of the trading day — cancelled,
+        filled, rejected and expired ones included — so only the orders the
+        venue still works are "open".
+        """
+        return [row for row in self._read_orders() if row["status"] == STATUS_OPEN]
 
     def reconciliation_snapshot(self) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """One account snapshot shared by every per-symbol reconciliation.
@@ -826,23 +987,52 @@ class FyersSessionAdapter:
             return positions, orders
 
     def _invalidate_account_snapshot(self) -> None:
-        """Drop the shared snapshot after any account-changing operation."""
+        """Drop the shared account snapshot after any account-changing operation.
+
+        Only account truth (positions/orders) is invalidated. Historical
+        candles are venue history and stay valid until their own 60 s TTL.
+        """
         with self._account_snapshot_lock:
             self._account_snapshot_cache = None
 
+    def _required_rows(self, body: dict[str, Any], key: str, context: str) -> list[Any]:
+        """A missing/!list account field is an unreadable response, not \"flat\"."""
+        rows = body.get(key)
+        if not isinstance(rows, list):
+            raise BrokerError(f"{context} response missing {key}", code=ErrorCode.NETWORK_ERROR)
+        return rows
+
     def _read_positions(self) -> list[dict[str, Any]]:
         body = self._get("positions")
-        rows = body.get("netPositions", []) if isinstance(body, dict) else []
-        if not isinstance(rows, list):
-            return []
+        rows = self._required_rows(body, "netPositions", "positions")
         return [row for row in rows if isinstance(row, dict)]
 
     def _read_orders(self) -> list[dict[str, Any]]:
-        body = self._get("orders")
-        rows = body.get("orderBook", []) if isinstance(body, dict) else []
-        if not isinstance(rows, list):
-            return []
-        return [row for row in rows if isinstance(row, dict)]
+        """The venue's order book, normalized (client id, broker id, status).
+
+        Every row keeps the venue's own status AND its venue-neutral name, so
+        the reconciliation can match a broker order with the client order id
+        it belongs to, and every surface agrees on what "still working" means.
+        """
+        return self._order_snapshot()
+
+    def _normalized_order(self, row: dict[str, Any]) -> dict[str, Any]:
+        """One venue order row in the broker-neutral shape."""
+        venue_status = row.get("status")
+        return {
+            "client_order_id": _client_order_id(row.get("orderTag") or row.get("ordertag") or ""),
+            "broker_order_id": str(row.get("id") or row.get("id_fyers") or ""),
+            "status": _order_status(venue_status),
+            "venue_status": venue_status,
+            "symbol": str(row.get("symbol", "")),
+            "side": row.get("side", 1),
+            "quantity": row.get("qty", 0),
+            "filled_qty": _safe_amount(row.get("filledQty")),
+            "remaining_qty": row.get("remainingQuantity", 0),
+            "traded_price": _safe_amount(row.get("tradedPrice")),
+            "order_date_time": str(row.get("orderDateTime", "")),
+            "message": str(row.get("message", "") or ""),
+        }
 
     # ── market data (read-only, /data base) ───────────────────────────
 
@@ -899,45 +1089,66 @@ class FyersSessionAdapter:
         Rows come back exactly as the venue reports them, as
         ``(epoch, open, high, low, close, volume)``. Nothing is interpolated,
         forward-filled or re-stamped: a gap in the venue's data stays a gap.
+
+        Requests are parameter-keyed through the shared governor. Concurrent
+        callers for the same symbol/interval/window wait for one real fetch
+        instead of each hitting the venue; successful pages live for 60 s.
+        A failed fetch is re-raised to every waiter and is never cached.
         """
         venue = self.to_venue_symbol(symbol)
         if not venue:
             raise BrokerError("history symbol required", code=ErrorCode.INVALID_SYMBOL)
-        query = urllib.parse.urlencode(
-            {
-                "symbol": venue,
-                "resolution": str(resolution),
-                "date_format": "0",
-                "range_from": int(range_from_epoch),
-                "range_to": int(range_to_epoch),
-                "cont_flag": "1",
-            }
-        )
-        body = self._get_data(f"history?{query}")
-        if body.get("s") not in (None, "ok"):
-            raise BrokerError(
-                f"history rejected by venue: {body.get('message', '')}",
-                code=ErrorCode.NETWORK_ERROR,
+        resolution_text = str(resolution)
+
+        def _fetch(
+            venue_symbol: str,
+            from_epoch: int,
+            to_epoch: int,
+            interval: str,
+        ) -> list[tuple[int, float, float, float, float, int]]:
+            query = urllib.parse.urlencode(
+                {
+                    "symbol": venue_symbol,
+                    "resolution": interval,
+                    "date_format": "0",
+                    "range_from": int(from_epoch),
+                    "range_to": int(to_epoch),
+                    "cont_flag": "1",
+                }
             )
-        rows = body.get("candles") or []
-        out: list[tuple[int, float, float, float, float, int]] = []
-        for row in rows if isinstance(rows, list) else []:
-            if not isinstance(row, (list, tuple)) or len(row) < 6:
-                continue
-            try:
-                out.append(
-                    (
-                        int(row[0]),
-                        float(row[1]),
-                        float(row[2]),
-                        float(row[3]),
-                        float(row[4]),
-                        int(row[5]),
-                    )
+            body = self._raw_get_data(f"history?{query}")
+            if body.get("s") not in (None, "ok"):
+                raise BrokerError(
+                    f"history rejected by venue: {body.get('message', '')}",
+                    code=ErrorCode.NETWORK_ERROR,
                 )
-            except (TypeError, ValueError):
-                continue
-        return out
+            rows = body.get("candles") or []
+            out: list[tuple[int, float, float, float, float, int]] = []
+            for row in rows if isinstance(rows, list) else []:
+                if not isinstance(row, (list, tuple)) or len(row) < 6:
+                    continue
+                try:
+                    out.append(
+                        (
+                            int(row[0]),
+                            float(row[1]),
+                            float(row[2]),
+                            float(row[3]),
+                            float(row[4]),
+                            int(row[5]),
+                        )
+                    )
+                except (TypeError, ValueError):
+                    continue
+            return out
+
+        return self._gateway.historical(
+            _fetch,
+            venue,
+            int(range_from_epoch),
+            int(range_to_epoch),
+            resolution_text,
+        )
 
     def market_status(self) -> dict[str, str]:
         """Provider market status per exchange segment (authoritative)."""
@@ -951,17 +1162,38 @@ class FyersSessionAdapter:
             out[key] = str(row.get("status") or "")
         return out
 
-    def _get_data(self, path: str) -> dict[str, Any]:
-        """GET under the market-data base; a 404 is surfaced, never hidden."""
+    def _get_data(
+        self,
+        path: str,
+        *,
+        call_class: CallClass = CallClass.READ,
+        bypass_circuit: bool = False,
+    ) -> dict[str, Any]:
+        """Governed GET under the market-data base; a 404 is surfaced, never hidden."""
+        metric_name = f"GET data {path.split('?', 1)[0]}"
+        return self._gateway.call(
+            metric_name,
+            self._raw_get_data,
+            path,
+            call_class=call_class,
+            bypass_circuit=bypass_circuit,
+        )
+
+    def _raw_get_data(self, path: str) -> dict[str, Any]:
         url = f"{MARKET_DATA_BASE}/{path}"
         try:
             body = self._http.get_json(url, headers=self._headers())
+        except (AuthError, BrokerError):
+            # Keep a 429/auth failure classified as such; only generic
+            # transport failures are wrapped as a network error.
+            raise
         except Exception as exc:
             raise BrokerError(
                 f"market data request failed: {exc}", code=ErrorCode.NETWORK_ERROR
             ) from None
         if not isinstance(body, dict):
             raise BrokerError("market data response unreadable", code=ErrorCode.NETWORK_ERROR)
+        self._raise_on_venue_error(body, "market data request")
         code = body.get("code")
         if isinstance(code, int) and code >= 400:
             raise BrokerError(
@@ -980,6 +1212,12 @@ class FyersSessionAdapter:
         Duplicate ``client_order_id`` adopts existing broker order.
         Timeouts reconcile by tag before raising.
         Structured logging records requests and responses without secrets.
+
+        The order's INTENT decides how the API circuit treats it. A protective
+        exit (the execution engine's own stop-protection order) is a
+        risk-reducing operation and is always ATTEMPTED, even while the read
+        circuit is open. Everything else is a new entry and stays gated by
+        both circuits — an entry may only be sent when the venue is healthy.
         """
         _ = idempotency_key
         self._require_usable()
@@ -988,14 +1226,22 @@ class FyersSessionAdapter:
         if not client_order_id:
             raise BrokerError("client order id required", code=ErrorCode.INVALID_REQUEST)
 
+        protective = self._is_protective_exit(plan, client_order_id)
+        call_class = CallClass.RISK_REDUCING if protective else CallClass.ENTRY
+
         # Idempotency check 1: in-memory cache
         if client_order_id in self._seen_client_ids:
             return self._seen_client_ids[client_order_id]
 
-        # Idempotency check 2: active open orders tag scan
-        adopted = self._find_by_tag(client_order_id)
+        # Idempotency check 2: active open orders tag scan. The scan is a
+        # read: for a protective exit it is attempted even when the read
+        # circuit is open (bypass_circuit), because the duplicate check must
+        # not silently disappear — an unreadable order book still fails the
+        # protective order, it just gets the chance to be sent.
+        adopted = self._find_by_tag(client_order_id, bypass_circuit=protective)
         if adopted is not None:
             self._seen_client_ids[client_order_id] = adopted
+            self._remember_order_intent(adopted, "protective" if protective else "entry")
             return adopted
 
         # Format and validate parameters
@@ -1032,16 +1278,17 @@ class FyersSessionAdapter:
         }
 
         try:
-            resp = self._post("orders/sync", payload)
+            resp = self._post("orders/sync", payload, call_class=call_class)
         except Exception as exc:
             # Check if order landed despite network timeout
-            resolved = self._resolve_unknown_tag(client_order_id, exc)
+            resolved = self._resolve_unknown_tag(client_order_id, exc, bypass_circuit=protective)
             if resolved is not None:
                 self._invalidate_account_snapshot()
+                self._remember_order_intent(resolved, "protective" if protective else "entry")
                 return resolved
 
             logger.error("ORDER_REJECTED broker=FYERS reason=%s", str(exc))
-            if isinstance(exc, BrokerError):
+            if isinstance(exc, (BrokerError, CircuitOpenError)):
                 raise
             raise self._mapped(exc, "order submission failed") from None
 
@@ -1072,11 +1319,19 @@ class FyersSessionAdapter:
         )
 
         self._seen_client_ids[client_order_id] = broker_id
+        self._remember_order_intent(broker_id, "protective" if protective else "entry")
         self._invalidate_account_snapshot()
         return broker_id
 
     def cancel_order(self, broker_order_id: str) -> bool:
-        """Cancel an open order on FYERS API v3."""
+        """Cancel an open order on FYERS API v3.
+
+        A cancellation never increases exposure, so it is a risk-reducing
+        operation and is ATTEMPTED even while a circuit is open — for the
+        orders this adapter placed (a pending entry or a protective stop).
+        A cancellation of an order this adapter did NOT place (unknown
+        broker id) is ambiguous, so it stays gated by the circuits.
+        """
         self._require_usable()
         if not broker_order_id:
             raise BrokerError("broker order id required", code=ErrorCode.INVALID_REQUEST)
@@ -1084,10 +1339,17 @@ class FyersSessionAdapter:
 
         payload = {"id": str(broker_order_id)}
         try:
-            resp = self._delete("orders/sync", payload)
+            resp = self._delete(
+                "orders/sync",
+                payload,
+                call_class=self._cancel_call_class(broker_order_id),
+            )
         except Exception as exc:
             if self._is_terminal_miss(exc):
                 return False
+            if isinstance(exc, CircuitOpenError):
+                # Refused by the circuit, not by the venue: nothing was sent.
+                raise
             raise self._mapped(exc, "cancel failed") from None
 
         if isinstance(resp, dict) and resp.get("s") == "ok":
@@ -1098,10 +1360,68 @@ class FyersSessionAdapter:
             return False
         raise self._error_from_fyers_response(resp)
 
+    def order_state(self, broker_order_id: str) -> dict[str, Any]:
+        """The venue's own view of one order — the evidence a cancel needs.
+
+        Venue-neutral, normalized result:
+
+        ``broker_order_id``
+            the id that was asked about;
+        ``client_order_id``
+            our client order id (empty when the venue does not report one);
+        ``status``
+            the venue's own status, in the shared vocabulary: ``OPEN`` (the
+            venue still works the order), ``CANCELLED``, ``FILLED``,
+            ``REJECTED``, ``EXPIRED`` or ``UNKNOWN`` (not in the order book);
+        ``venue_status``
+            the raw status code the venue reported;
+        ``listed``
+            True while the venue still works the order;
+        ``filled_qty``
+            the venue's filled quantity for that order.
+
+        The status is the evidence, not the absence of the order: FYERS'
+        order book holds the whole trading day, so an order that is not
+        listed may simply not be in today's book at all. A status of
+        ``CANCELLED`` is what proves a cancellation; ``OPEN`` proves the
+        venue still works it.
+
+        Raises when the venue cannot be asked: the answer is then UNKNOWN and
+        the caller must not read it as "not working". The check is attempted
+        even while the read circuit is open (it is still rate limited),
+        because its only purpose is to settle a cancel decision.
+        """
+        order_id = str(broker_order_id)
+        for row in self._order_snapshot(bypass_circuit=True):
+            if row["broker_order_id"] != order_id:
+                continue
+            return {
+                "broker_order_id": order_id,
+                "client_order_id": str(row.get("client_order_id", "")),
+                "status": str(row.get("status", STATUS_UNKNOWN)),
+                "venue_status": row.get("venue_status"),
+                "listed": row.get("status") == STATUS_OPEN,
+                "filled_qty": float(row.get("filled_qty", 0.0) or 0.0),
+            }
+        return {
+            "broker_order_id": order_id,
+            "client_order_id": "",
+            "status": STATUS_UNKNOWN,
+            "venue_status": None,
+            "listed": False,
+            "filled_qty": 0.0,
+        }
+
     def modify_order(
         self, broker_order_id: str, quantity: float | None, price: float | None
     ) -> bool:
-        """Modify an active order on FYERS API v3."""
+        """Modify an active order on FYERS API v3.
+
+        A modify of a PROTECTIVE order is protective maintenance (it keeps
+        or corrects the stop that reduces risk) and is attempted even while a
+        circuit is open. A modify of anything else can INCREASE exposure, so
+        it stays gated by the circuits like any other new exposure.
+        """
         self._require_usable()
         if not broker_order_id:
             raise BrokerError("broker order id required", code=ErrorCode.INVALID_REQUEST)
@@ -1122,11 +1442,19 @@ class FyersSessionAdapter:
             payload["limitPrice"] = float(price)
             payload["type"] = 1  # Limit
 
+        call_class = (
+            CallClass.RISK_REDUCING
+            if self._order_intent.get(str(broker_order_id)) == "protective"
+            else CallClass.ENTRY
+        )
         try:
-            resp = self._put("orders/sync", payload)
+            resp = self._put("orders/sync", payload, call_class=call_class)
         except Exception as exc:
             if self._is_terminal_miss(exc):
                 return False
+            if isinstance(exc, CircuitOpenError):
+                # Refused by the circuit, not by the venue: nothing was sent.
+                raise
             raise self._mapped(exc, "modify failed") from None
 
         if isinstance(resp, dict) and resp.get("s") == "ok":
@@ -1164,7 +1492,7 @@ class FyersSessionAdapter:
         except Exception:
             return ()
 
-        snapshot = {order["order_id"]: order for order in raw_orders}
+        snapshot = {order["broker_order_id"]: order for order in raw_orders}
         events: list[dict[str, Any]] = []
         for order_id, order in snapshot.items():
             previous = self._last_orders.get(order_id)
@@ -1301,48 +1629,107 @@ class FyersSessionAdapter:
             return "MARGIN"
         return "INTRADAY"
 
-    def _order_snapshot(self) -> list[dict[str, Any]]:
-        body = self._get("orders")
-        rows = body.get("orderBook", []) if isinstance(body, dict) else []
-        if not isinstance(rows, list):
-            return []
-        normalized = []
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            normalized.append(
-                {
-                    "order_id": str(row.get("id", "")),
-                    "tag": str(row.get("orderTag", "") or ""),
-                    "status": row.get("status", 0),
-                    "symbol": str(row.get("symbol", "")),
-                    "side": row.get("side", 1),
-                    "qty": row.get("qty", 0),
-                    "filled_qty": row.get("filledQty", 0),
-                    "remaining_qty": row.get("remainingQuantity", 0),
-                    "traded_price": row.get("tradedPrice", 0.0),
-                    "order_date_time": str(row.get("orderDateTime", "")),
-                    "message": str(row.get("message", "") or ""),
-                }
-            )
-        return normalized
+    def _order_snapshot(self, *, bypass_circuit: bool = False) -> list[dict[str, Any]]:
+        """Every order of the trading day, in the broker-neutral shape.
 
-    def _find_by_tag(self, tag: str) -> str | None:
-        try:
-            for order in self._order_snapshot():
-                if order["tag"] == tag and order["status"] not in _TERMINAL_STATUSES:
-                    return order["order_id"]
-        except Exception:
-            return None
+        The venue's order book is the whole day (cancelled, filled, rejected
+        and expired orders included) — it is NOT a working-orders list, so
+        every consumer decides for itself what "still working" means.
+        """
+        body = self._get("orders", bypass_circuit=bypass_circuit)
+        rows = self._required_rows(body, "orderBook", "orders")
+        return [self._normalized_order(row) for row in rows if isinstance(row, dict)]
+
+    def _find_by_tag(self, tag: str, *, bypass_circuit: bool = False) -> str | None:
+        """Return an active broker order for ``tag``; read failures propagate.
+
+        This is the pre-submit duplicate check. Treating an unreadable order
+        book as "no existing order" could submit a second order after a
+        timeout; fail closed instead and let the caller decide.
+
+        An order counts as existing unless the venue says it is FINISHED. A
+        pending order (status 6) is still worked by the venue, so it is
+        found here — the previous status mapping treated it as terminal and
+        let a duplicate order through.
+
+        ``bypass_circuit`` is used only for a risk-reducing order: its
+        duplicate check must still run (and still fail loudly), it just may
+        not be refused by an already-open read circuit.
+        """
+        for order in self._order_snapshot(bypass_circuit=bypass_circuit):
+            if order["client_order_id"] != tag:
+                continue
+            if order["status"] in _TERMINAL_STATUS_NAMES:
+                continue
+            return order["broker_order_id"]
         return None
 
-    def _resolve_unknown_tag(self, tag: str, cause: Exception) -> str | None:
+    def _is_protective_exit(self, plan: Any, client_order_id: str) -> bool:
+        """True when this order is the execution engine's protective stop.
+
+        The engine builds its stop-protection orders as
+        ``intent_id = "sl:<symbol>:<seq>"`` with the matching client order id
+        ``"sl:<symbol>:<seq>:o1"`` and a STOP order type carrying the
+        strategy's own stop price. All of it must be present:
+
+        * a strategy entry never carries the engine's ``sl:`` intent id;
+        * the intent's symbol must be the order's own symbol;
+        * a strategy entry is MARKET/LIMIT, not a stop order, and the
+          execution planner never sets a stop price;
+        * an ambiguous order is treated as an ordinary entry (fail safe).
+
+        A protective stop reduces risk, so it is allowed past an open read
+        circuit; a new entry is not.
+        """
+        intent_id = str(getattr(plan, "intent_id", "") or "")
+        match = _PROTECTIVE_INTENT_RE.match(intent_id)
+        if match is None:
+            return False
+        symbol = str(getattr(plan, "symbol", "") or "")
+        if symbol and match.group("symbol") != symbol:
+            return False
+        if str(client_order_id or "") != f"{intent_id}:o1":
+            return False
+        order_type = str(getattr(plan, "order_type", "") or "").upper()
+        if order_type not in _PROTECTIVE_ORDER_TYPES:
+            return False
+        stop_price = getattr(plan, "stop_price", None)
+        if stop_price is None:
+            return False
+        try:
+            return float(stop_price) > 0.0
+        except (TypeError, ValueError):
+            return False
+
+    def _cancel_call_class(self, broker_order_id: str) -> CallClass:
+        """A cancel of a KNOWN order is risk-reducing; an unknown one is not.
+
+        The adapter remembers the intent of every order it placed. Cancelling
+        a pending entry removes pending exposure and cancelling a protective
+        stop is protective maintenance — neither may be refused by an open
+        circuit. A broker id this adapter never placed is ambiguous, so it
+        keeps the ordinary (gated) class.
+        """
+        if str(broker_order_id) in self._order_intent:
+            return CallClass.RISK_REDUCING
+        return CallClass.ENTRY
+
+    def _remember_order_intent(self, broker_order_id: str, intent: str) -> None:
+        """Record what kind of order this broker id is (bounded memory)."""
+        self._order_intent[str(broker_order_id)] = intent
+        while len(self._order_intent) > _ORDER_INTENT_MEMORY_LIMIT:
+            oldest = next(iter(self._order_intent))
+            del self._order_intent[oldest]
+
+    def _resolve_unknown_tag(
+        self, tag: str, cause: Exception, *, bypass_circuit: bool = False
+    ) -> str | None:
         name = type(cause).__name__
         msg = str(cause).lower()
         if "timeout" not in msg and "network" not in name.lower() and "oserror" not in name.lower():
             return None
         try:
-            found = self._find_by_tag(tag)
+            found = self._find_by_tag(tag, bypass_circuit=bypass_circuit)
         except Exception:
             return None
         if found is not None:
@@ -1353,9 +1740,9 @@ class FyersSessionAdapter:
         self, previous: dict[str, Any] | None, order: dict[str, Any]
     ) -> list[dict[str, Any]]:
         events: list[dict[str, Any]] = []
-        tag = order["tag"]
+        tag = order["client_order_id"]
         if not tag:
-            self._last_orders[order["order_id"]] = order
+            self._last_orders[order["broker_order_id"]] = order
             return events
 
         prev_filled = float(previous.get("filled_qty", 0) or 0) if previous else 0.0
@@ -1370,15 +1757,15 @@ class FyersSessionAdapter:
             except (TypeError, ValueError):
                 price = 0.0
             side = "BUY" if order.get("side") == 1 else "SELL"
-            partial = order.get("status") not in _TERMINAL_STATUSES
+            partial = order.get("status") not in _TERMINAL_STATUS_NAMES
             events.append(
                 {
                     "type": "fill",
                     "client_order_id": tag,
-                    "broker_order_id": order["order_id"],
+                    "broker_order_id": order["broker_order_id"],
                     "fill": SimpleNamespace(
                         client_order_id=tag,
-                        broker_order_id=order["order_id"],
+                        broker_order_id=order["broker_order_id"],
                         symbol=order["symbol"],
                         side=side,
                         fill_qty=filled - prev_filled,
@@ -1390,27 +1777,36 @@ class FyersSessionAdapter:
                 }
             )
 
+        # The REST order book uses the SAME status table as the order socket:
+        # 6 is PENDING (the venue still works the order), 1 is CANCELLED and
+        # 7 is EXPIRED. Reading 6 as "cancelled" made a live pending order
+        # look finished and produced a cancel event that never happened.
         status = order.get("status")
-        # 5: Rejected, 6: Pending/Cancelled depending on venue
-        if status in (5, "REJECTED") and (
-            previous is None or previous.get("status") not in (5, "REJECTED")
-        ):
+        prev_status = previous.get("status") if previous else None
+        if status == STATUS_REJECTED and prev_status != STATUS_REJECTED:
             events.append(
                 {
                     "type": "reject",
                     "client_order_id": tag,
-                    "broker_order_id": order["order_id"],
+                    "broker_order_id": order["broker_order_id"],
                     "reason": order.get("message", "venue rejected order"),
                 }
             )
-        if status in (1, 6, "CANCELLED") and (
-            previous is None or previous.get("status") not in (1, 6, "CANCELLED")
-        ):
+        if status == STATUS_CANCELLED and prev_status != STATUS_CANCELLED:
             events.append(
                 {
                     "type": "cancel",
                     "client_order_id": tag,
-                    "broker_order_id": order["order_id"],
+                    "broker_order_id": order["broker_order_id"],
+                }
+            )
+        if status == STATUS_EXPIRED and prev_status != STATUS_EXPIRED:
+            events.append(
+                {
+                    "type": "expired",
+                    "client_order_id": tag,
+                    "broker_order_id": order["broker_order_id"],
+                    "reason": order.get("message", "venue expired the order"),
                 }
             )
         return events
@@ -1474,13 +1870,40 @@ class FyersSessionAdapter:
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"{self._app_id}:{self._token}"}
 
-    def _get(self, path: str) -> dict[str, Any]:
+    def _get(
+        self,
+        path: str,
+        *,
+        call_class: CallClass = CallClass.READ,
+        bypass_circuit: bool = False,
+    ) -> dict[str, Any]:
+        metric_name = f"GET {path.split('?', 1)[0]}"
+        return self._gateway.call(
+            metric_name,
+            self._raw_get,
+            path,
+            call_class=call_class,
+            bypass_circuit=bypass_circuit,
+        )
+
+    def _raw_get(self, path: str) -> dict[str, Any]:
         body = self._http.get_json(f"{API_BASE}/{path}", headers=self._headers())
         if not isinstance(body, dict):
             raise AuthError(f"venue returned an unreadable {path} response", code="NETWORK")
+        self._raise_on_venue_error(body, f"FYERS {path} request")
         return body
 
-    def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    def _post(
+        self,
+        path: str,
+        payload: dict[str, Any],
+        *,
+        call_class: CallClass = CallClass.ENTRY,
+    ) -> dict[str, Any]:
+        metric_name = f"POST {path}"
+        return self._gateway.call(metric_name, self._raw_post, path, payload, call_class=call_class)
+
+    def _raw_post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         body = self._http.post_json(f"{API_BASE}/{path}", payload=payload, headers=self._headers())
         if not isinstance(body, dict):
             raise BrokerError(
@@ -1488,7 +1911,17 @@ class FyersSessionAdapter:
             )
         return body
 
-    def _put(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    def _put(
+        self,
+        path: str,
+        payload: dict[str, Any],
+        *,
+        call_class: CallClass = CallClass.ENTRY,
+    ) -> dict[str, Any]:
+        metric_name = f"PUT {path}"
+        return self._gateway.call(metric_name, self._raw_put, path, payload, call_class=call_class)
+
+    def _raw_put(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         body = self._http.put_json(f"{API_BASE}/{path}", payload=payload, headers=self._headers())
         if not isinstance(body, dict):
             raise BrokerError(
@@ -1496,7 +1929,19 @@ class FyersSessionAdapter:
             )
         return body
 
-    def _delete(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    def _delete(
+        self,
+        path: str,
+        payload: dict[str, Any],
+        *,
+        call_class: CallClass = CallClass.ENTRY,
+    ) -> dict[str, Any]:
+        metric_name = f"DELETE {path}"
+        return self._gateway.call(
+            metric_name, self._raw_delete, path, payload, call_class=call_class
+        )
+
+    def _raw_delete(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         body = self._http.delete_json(
             f"{API_BASE}/{path}", payload=payload, headers=self._headers()
         )
@@ -1505,6 +1950,27 @@ class FyersSessionAdapter:
                 f"venue returned an unreadable {path} response", code=ErrorCode.NETWORK_ERROR
             )
         return body
+
+    def _raise_on_venue_error(self, body: dict[str, Any], context: str) -> None:
+        """Never let an explicit venue error envelope look like empty account truth."""
+        if body.get("s") != "error":
+            return
+        message = str(body.get("message") or "venue rejected the request")
+        lowered = message.lower()
+        code = body.get("code")
+        if code in _AUTH_ERROR_CODES or any(
+            token in lowered
+            for token in (
+                "token is invalid",
+                "invalid token",
+                "token expired",
+                "unauthorized",
+                "session expired",
+                "authentication",
+            )
+        ):
+            raise AuthError(f"{context}: {message}", code="AUTH_EXPIRED", http_status=401)
+        raise BrokerError(f"{context}: {message}", code=ErrorCode.NETWORK_ERROR)
 
 
 def _safe_amount(value: Any) -> float:

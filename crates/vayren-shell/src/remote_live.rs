@@ -506,11 +506,20 @@ pub fn apply_remote_sections(state: &mut LiveState, sections: &serde_json::Value
             );
         }
     }
-    let reason = text_at(sections, "strategy", "reason");
-    if !reason.is_empty() {
+    // Forward the reason VERBATIM whenever the gateway states it, including
+    // the empty string. Clearing matters: a pre-START reason such as
+    // "live confirmation required (explicit operator consent)" is appended
+    // to the displayed blockers, so leaving it behind made a RUNNING session
+    // keep showing the already-satisfied consent line even though the backend
+    // had cleared it and `start_blockers` was empty.
+    if let Some(reason) = sections
+        .get("strategy")
+        .and_then(|s| s.get("reason"))
+        .and_then(|r| r.as_str())
+    {
         translated.insert(
             "status_reason".to_string(),
-            serde_json::Value::String(reason),
+            serde_json::Value::String(reason.to_string()),
         );
     }
 
@@ -1591,6 +1600,91 @@ mod tests {
         // Without a granted role the controls stay inert even while RUNNING.
         assert!(!state.bridge_wired);
         assert!(!state.can_start());
+    }
+
+    #[test]
+    fn running_live_session_with_recorded_consent_filters_stale_start_consent_blocker() {
+        let mut state = init_remote_state();
+        apply_role(&mut state, "trade");
+
+        // 1. Pre-START: the backend reason names the consent gate, so the
+        // client stores it beside the blocker list.
+        let stopped_before = json!({
+            "strategy": {
+                "status": "BLOCKED",
+                "mode": "LIVE",
+                "id": "OBR C1C4",
+                "name": "OBR C1C4",
+                "reason": "live confirmation required (explicit operator consent)"
+            },
+            "broker_session": {"live_armed": false},
+            "blockers": ["live confirmation required (explicit operator consent)"]
+        });
+        apply_remote_sections(&mut state, &stopped_before, false);
+        assert_eq!(
+            state.status_reason,
+            "live confirmation required (explicit operator consent)"
+        );
+        let stopped_view = vayren_domain::live::project(&state);
+        assert_eq!(
+            stopped_view.setup.blockers,
+            vec!["live confirmation required (explicit operator consent)".to_string()]
+        );
+
+        // 2. START is confirmed and the backend is RUNNING with recorded
+        // arming. The empty backend reason must CLEAR the stale pre-START
+        // reason; RUNNING + consent is authoritative, so the obsolete blocker
+        // must not survive into the running readiness display.
+        let running = json!({
+            "strategy": {
+                "status": "RUNNING",
+                "mode": "LIVE",
+                "id": "OBR C1C4",
+                "name": "OBR C1C4",
+                "reason": ""
+            },
+            "broker_session": {"live_armed": true},
+            "worker": {"status": "RUNNING", "running": true},
+            "blockers": []
+        });
+        apply_remote_sections(&mut state, &running, false);
+        assert!(
+            state.status_reason.is_empty(),
+            "an explicit empty backend reason must clear the stale START reason"
+        );
+        assert_eq!(state.session, vayren_domain::live::SessionStatus::Running);
+        assert!(
+            state.live_confirmed,
+            "recorded backend consent must synchronize live_confirmed"
+        );
+        assert!(
+            state.start_blockers().is_empty(),
+            "RUNNING must filter the stale START-time consent blocker"
+        );
+        let view = vayren_domain::live::project(&state);
+        assert!(view.setup.blockers.is_empty());
+        assert!(view.setup.can_stop);
+        assert!(!view.setup.needs_live_confirm);
+
+        // STOP resets consent; the next START must explicitly confirm again.
+        let stopped = json!({
+            "strategy": {"status": "STOPPED", "mode": "LIVE", "reason": ""},
+            "broker_session": {"live_armed": false},
+            "blockers": ["live confirmation required (explicit operator consent)"]
+        });
+        apply_remote_sections(&mut state, &stopped, false);
+        assert_eq!(state.session, vayren_domain::live::SessionStatus::Stopped);
+        assert!(!state.live_confirmed);
+        assert_eq!(
+            state.start_blockers(),
+            vec!["live confirmation required (explicit operator consent)".to_string()]
+        );
+        let stopped_view = vayren_domain::live::project(&state);
+        assert_eq!(
+            stopped_view.setup.blockers,
+            vec!["live confirmation required (explicit operator consent)".to_string()]
+        );
+        assert!(stopped_view.setup.needs_live_confirm);
     }
 
     #[test]

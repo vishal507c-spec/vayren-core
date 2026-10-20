@@ -202,9 +202,38 @@ def net_position_qty(adapter: Any, symbol: str) -> float:
 def _order_by_tag(adapter: Any, tag: str) -> dict[str, Any]:
     """The venue's own row for ``tag``, or an empty dict when it is not open."""
     for row in adapter.open_orders() or []:
-        if isinstance(row, dict) and str(row.get("orderTag", "") or "") == tag:
+        if not isinstance(row, dict):
+            continue
+        # Normalized venue rows carry ``client_order_id``; raw venue rows
+        # carry ``orderTag``. FYERS prefixes a user tag with "1:".
+        venue_tag = str(row.get("client_order_id") or row.get("orderTag", "") or "")
+        if venue_tag.removeprefix("1:") == tag.removeprefix("1:"):
             return row
     return {}
+
+
+def _row_status(row: dict[str, Any]) -> str:
+    """The venue's status for a row, normalized name or raw code."""
+    if not row:
+        return ""
+    status = str(row.get("status", "") or "")
+    if status:
+        return status
+    venue_status = row.get("venue_status")
+    return str(venue_status) if venue_status is not None else ""
+
+
+def _row_filled_qty(row: dict[str, Any]) -> float:
+    """The venue's filled quantity for a row (normalized or raw field)."""
+    if not row:
+        return 0.0
+    raw = row.get("filled_qty")
+    if raw is None:
+        raw = row.get("filledQty", 0)
+    try:
+        return float(raw or 0)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 # ── risk (never bypassed) ───────────────────────────────────────────────────
@@ -396,14 +425,10 @@ def submit_buy(
         )
 
     row = _order_by_tag(adapter, cid)
-    status = str(row.get("status", "")) if row else ""
-    filled = row.get("filledQty", 0) if row else 0
-    try:
-        filled_qty = float(filled or 0)
-    except (TypeError, ValueError):
-        filled_qty = 0.0
+    status = _row_status(row)
+    filled_qty = _row_filled_qty(row)
 
-    if status == str(_STATUS_FILLED) or filled_qty > 0:
+    if status in ("FILLED", str(_STATUS_FILLED)) or filled_qty > 0:
         outcome, detail = OUTCOME_FILLED, f"venue reports filled qty {filled_qty}"
     elif row:
         outcome = OUTCOME_SUBMITTED
@@ -503,7 +528,7 @@ def submit_exit(
         )
 
     row = _order_by_tag(adapter, cid)
-    status = str(row.get("status", "")) if row else ""
+    status = _row_status(row)
 
     deadline = monotonic() + max(0.0, float(poll_timeout_s))
     after = before

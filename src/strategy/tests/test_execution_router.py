@@ -374,18 +374,48 @@ def test_18_statuses_normalize() -> None:
         ("COMPLETE", "FILLED"),
         ("REJECTED", "REJECTED"),
         ("CANCELLED", "CANCELLED"),
+        ("EXPIRED", "EXPIRED"),
         ("OPEN", "ACKNOWLEDGED"),
         ("TRIGGER PENDING", "ACKNOWLEDGED"),
         ("SUBMITTED", "SUBMITTED"),
+        # FYERS numeric order statuses: 1 cancelled · 2 traded · 4 transit ·
+        # 5 rejected · 6 PENDING (the venue still works it) · 7 expired.
         (5, "REJECTED"),
         (1, "CANCELLED"),
-        (6, "CANCELLED"),
+        (2, "FILLED"),
+        (4, "ACKNOWLEDGED"),
+        (6, "ACKNOWLEDGED"),
+        (7, "EXPIRED"),
         ("SOMETHING_WEIRD", "UNKNOWN"),
         ("", "UNKNOWN"),
     ]
     for raw, expected in cases:
         zerodha.query_status = raw
         assert router.query_order(placed.client_order_id).status == expected, raw
+
+
+def test_18b_fyers_terminal_statuses_keep_their_own_state() -> None:
+    """1 cancelled · 2 filled · 5 rejected · 7 expired stay distinguishable.
+
+    An expired order is finished, not cancelled: reporting it as cancelled
+    would claim a cancellation the venue never made.
+    """
+    router, zerodha, _ = _router()
+    placed = router.route(_intent())
+
+    zerodha.query_status = 1
+    assert router.query_order(placed.client_order_id).status == "CANCELLED"
+
+    zerodha.query_status = 2
+    assert router.query_order(placed.client_order_id).status == "FILLED"
+
+    zerodha.query_status = 5
+    assert router.query_order(placed.client_order_id).status == "REJECTED"
+
+    zerodha.query_status = 7
+    expired = router.query_order(placed.client_order_id).status
+    assert expired == "EXPIRED"
+    assert expired != "CANCELLED"
 
 
 def test_19_broker_order_ids_stay_isolated() -> None:

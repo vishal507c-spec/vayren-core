@@ -80,6 +80,32 @@ from risk.sizing import (
 )
 from strategy import StrategyDefinition, StrategyLogic, StrategyParameters, StrategyState
 
+#: Broker-reported order states that mean the order is FINISHED at the venue.
+#: A row with any other (or no) status is still worked by the venue and
+#: therefore belongs to the broker's OPEN order set.
+_BROKER_CLOSED_STATUSES = frozenset(
+    {"FILLED", "TRADED", "COMPLETE", "REJECTED", "REJECT", "CANCELLED", "CANCELED", "EXPIRED"}
+)
+
+
+def _reconciled_order_state(status: str) -> str:
+    """The local order state that matches a broker-reported status.
+
+    The broker's word is kept — a filled order is FILLED, a rejected one is
+    REJECTED, an expired one is EXPIRED. Only a status the engine cannot
+    name becomes ACKNOWLEDGED (the venue still works that order).
+    """
+    text = str(status or "").strip().upper()
+    if text in ("FILLED", "TRADED", "COMPLETE"):
+        return OrderState.FILLED.value
+    if text in ("REJECTED", "REJECT"):
+        return OrderState.REJECTED.value
+    if text in ("CANCELLED", "CANCELED"):
+        return OrderState.CANCELLED.value
+    if text == "EXPIRED":
+        return OrderState.EXPIRED.value
+    return OrderState.ACKNOWLEDGED.value
+
 
 @dataclass
 class StrategyRegistration:
@@ -1082,8 +1108,17 @@ class LiveSession:
             and self._sl_order_open(str(existing.get("client_order_id", "")))
         ):
             return  # correctly sized protection already working
-        if existing is not None:
-            self._cancel_stop_protection(symbol, "resize")
+        # A replacement is only placed after the old stop's cancellation is
+        # CONFIRMED. An unconfirmed cancel would leave the venue working the
+        # old stop while a new one goes on top — the position hedged twice —
+        # so the engine waits for broker evidence instead of assuming the old
+        # order is gone.
+        if (
+            existing is not None
+            and existing.get("state") != "CANCELLED"
+            and not self._cancel_stop_protection(symbol, "resize")
+        ):
+            return
         side = "SELL" if position.quantity > 0 else "BUY"
         self._sl_seq += 1
         intent_id = f"sl:{symbol}:{self._sl_seq}"
@@ -1150,32 +1185,200 @@ class LiveSession:
             "SL_FAILED", symbol=symbol, client_order_id=client_order_id, reason=reason
         )
 
-    def _cancel_stop_protection(self, symbol: str, reason: str) -> None:
-        """Best-effort venue cancel of the working stop (never raises)."""
+    def _cancel_stop_protection(self, symbol: str, reason: str) -> bool:
+        """Cancel the working protective stop. True ONLY when the venue confirmed it.
+
+        Local state follows broker EVIDENCE, never the attempt:
+
+        * the venue confirmed the cancel  -> the order IS cancelled;
+        * the venue declined it            -> the order is still working, so it
+          stays live (the old stop still protects the position);
+        * the venue's answer is unknown   -> the order stays UNRESOLVED until
+          a broker-state check or reconciliation proves it.
+
+        The broker's error is never suppressed into a fake success, and the
+        record never claims a cancellation that did not happen.
+        """
         prot = self._stop_protection.get(symbol)
         if prot is None:
-            return
-        broker_id = prot.get("broker_order_id")
-        if broker_id and self._broker is not None:
-            cancel = getattr(self._broker, "cancel_order", None)
-            if callable(cancel):
-                with suppress(Exception):
-                    cancel(str(broker_id))
-        with suppress(Exception):
-            self._engine.transition(
-                str(prot.get("client_order_id", "")), OrderState.CANCELLED, reason=reason
+            return True
+        client_id = str(prot.get("client_order_id", ""))
+        broker_id = str(prot.get("broker_order_id") or "")
+        cancel = getattr(self._broker, "cancel_order", None) if self._broker is not None else None
+        if not broker_id or not callable(cancel):
+            # No order is working at the venue under this id: there is no
+            # cancellation left to prove.
+            self._record_stop_state(symbol, "CANCELLED")
+            return True
+
+        confirmed = False
+        outcome_unknown = False
+        failure = ""
+        try:
+            confirmed = bool(cancel(broker_id))
+        except Exception as exc:  # noqa: BLE001 - unknown outcome, never a success
+            outcome_unknown = True
+            failure = f"cancel outcome unknown: {exc}"
+
+        if confirmed:
+            self._mark_stop_cancelled(symbol, client_id, reason)
+            return True
+
+        # Not confirmed. Only a broker-state check may turn this into a
+        # proven cancellation: the venue's own status is the evidence (its
+        # order book holds the whole trading day, so a missing order proves
+        # nothing), and only while no fill was reported for it.
+        state = self._broker_order_state(broker_id)
+        venue_status = str(state.get("status", "")).upper() if state else ""
+        if venue_status == OrderState.CANCELLED.value or (
+            state is not None and not venue_status and not bool(state.get("listed", True))
+        ):
+            # The venue says the order is cancelled: proven.
+            if self._stop_order_filled(client_id):
+                # It filled instead — the fill owns that state.
+                self._record_stop_state(symbol, "SAFE")
+            else:
+                self._mark_stop_cancelled(symbol, client_id, reason)
+            return True
+        if venue_status == OrderState.FILLED.value:
+            # It filled: the fill owns that state, not a cancellation.
+            self._record_stop_state(symbol, "SAFE")
+            return True
+        if venue_status in (OrderState.REJECTED.value, OrderState.EXPIRED.value):
+            # Finished at the venue, but not cancelled: align the local order
+            # with that truth and keep the symbol flagged.
+            self._mark_stop_finished(symbol, client_id, venue_status, reason)
+            return True
+        if venue_status == "OPEN" or (state is None and not outcome_unknown):
+            # The venue refused the cancel and still works the order: the old
+            # stop is still protecting the position.
+            self._mark_stop_cancel_declined(
+                symbol, client_id, reason, failure or "venue declined the cancel"
             )
-        self._journal.record(
-            "SL_CANCELLED",
-            symbol=symbol,
-            reason=reason,
+            return False
+
+        # Neither the cancel nor the venue's order book proved the order is
+        # gone: the order's state stays unresolved until the venue says so.
+        self._mark_stop_cancel_unconfirmed(
+            symbol, client_id, reason, failure or "cancel outcome unknown"
         )
+        return False
+
+    def _mark_stop_cancelled(self, symbol: str, client_id: str, reason: str) -> None:
+        """The venue confirmed the cancellation: align the local order state."""
+        if client_id and not self._stop_order_filled(client_id):
+            with suppress(Exception):
+                self._engine.reconcile(
+                    client_id,
+                    OrderState.CANCELLED.value,
+                    reason=f"venue confirmed cancel: {reason}",
+                )
+        self._record_stop_state(symbol, "CANCELLED")
+        self._journal.record("SL_CANCELLED", symbol=symbol, reason=reason)
+
+    def _mark_stop_finished(
+        self, symbol: str, client_id: str, venue_status: str, reason: str
+    ) -> None:
+        """The venue finished the order without cancelling it (rejected/expired).
+
+        The local order state follows the venue's word; the protection is
+        gone, so the symbol stays flagged.
+        """
+        if client_id:
+            with suppress(Exception):
+                self._engine.reconcile(
+                    client_id,
+                    venue_status,
+                    reason=f"venue reported {venue_status.lower()}: {reason}",
+                )
+        self._record_stop_state(symbol, "FAILED")
+        self._sl_attention.add(symbol)
+        self._journal.record(
+            # No "CANCEL" in the kind: the remote classifies journal kinds by
+            # keyword, and this order was NOT cancelled — it was rejected or
+            # expired at the venue.
+            "SL_FINISHED_AT_VENUE",
+            symbol=symbol,
+            reason=f"venue reported {venue_status.lower()}",
+            cause=reason,
+        )
+
+    def _mark_stop_cancel_declined(
+        self, symbol: str, client_id: str, reason: str, detail: str
+    ) -> None:
+        """The venue declined the cancel: the order is still working.
+
+        The local order state stays live (that is the venue's truth) and the
+        protection keeps its working state — the old stop still protects the
+        position. The symbol is flagged because that protection may no longer
+        be the right size.
+        """
+        _ = client_id
+        self._sl_attention.add(symbol)
+        self._journal.record("SL_CANCEL_DECLINED", symbol=symbol, reason=detail, cause=reason)
+
+    def _mark_stop_cancel_unconfirmed(
+        self, symbol: str, client_id: str, reason: str, detail: str
+    ) -> None:
+        """The cancellation is NOT proven: keep the order unresolved.
+
+        The order goes to UNKNOWN — the state the engine reserves for
+        "sent-but-unconfirmed" — and leaves it only through reconciliation.
+        It is never marked CANCELLED without broker evidence.
+        """
+        if client_id:
+            with suppress(Exception):
+                self._engine.transition(
+                    client_id, OrderState.UNKNOWN, reason=f"cancel unconfirmed: {detail}"
+                )
+        self._record_stop_state(symbol, "CANCEL_UNCONFIRMED")
+        self._sl_attention.add(symbol)
+        self._journal.record("SL_CANCEL_UNCONFIRMED", symbol=symbol, reason=detail, cause=reason)
+
+    def _record_stop_state(self, symbol: str, state: str) -> None:
+        prot = self._stop_protection.get(symbol)
+        if prot is not None:
+            prot["state"] = state
+
+    def _stop_order_filled(self, client_order_id: str) -> bool:
+        """True when the engine already holds a fill for this order."""
+        if not client_order_id:
+            return False
+        tracked = self._engine.get(client_order_id)
+        return tracked is not None and float(tracked.filled_qty or 0.0) > 0.0
+
+    def _broker_order_state(self, broker_order_id: str) -> dict[str, Any] | None:
+        """Ask the venue about one order. None when the answer is unknown.
+
+        The optional ``order_state`` surface is venue-neutral: the adapter
+        normalises the venue's own view. A venue without that surface — or a
+        failing read — yields None, which means UNKNOWN, never "the order is
+        gone".
+        """
+        if self._broker is None or not broker_order_id:
+            return None
+        query = getattr(self._broker, "order_state", None)
+        if not callable(query):
+            return None
+        try:
+            state = query(str(broker_order_id))
+        except Exception as exc:  # noqa: BLE001 - unknown, not a negative answer
+            self._journal.record("SL_STATE_UNKNOWN", reason=str(exc))
+            return None
+        if not isinstance(state, dict):
+            return None
+        return state
 
     def _clear_stop_protection(self, symbol: str, reason: str) -> None:
         """Drop protection bookkeeping once the position is flat."""
         if symbol not in self._stop_protection:
             return
-        self._cancel_stop_protection(symbol, reason)
+        if not self._cancel_stop_protection(symbol, reason):
+            # The venue may still work this stop on a FLAT position: a
+            # triggered leftover stop would open a short. Keep the record and
+            # the attention flag until the cancellation is confirmed.
+            self._journal.record("SL_CLEAR_DEFERRED", symbol=symbol, reason=reason)
+            return
         self._stop_protection.pop(symbol, None)
         self._sl_attention.discard(symbol)
         self._journal.record("SL_CLEARED", symbol=symbol, reason=reason)
@@ -1205,7 +1408,7 @@ class LiveSession:
                 elif kind == "fill":
                     prot["state"] = "SAFE"
                     self._journal.record("SL_SAFE", symbol=symbol, client_order_id=client_order_id)
-                elif kind in ("reject", "cancel"):
+                elif kind in ("reject", "cancel", "expired"):
                     prot["state"] = "FAILED"
                     self._sl_attention.add(symbol)
                     self._journal.record(
@@ -1299,15 +1502,21 @@ class LiveSession:
                 self._emit(OrderRejected(self._request_id, client_order_id, reason))
                 self._note_sl_event(client_order_id, kind, event)
             elif kind == "cancel":
-                if tracked.state == OrderState.UNKNOWN:
-                    self._engine.reconcile(
-                        client_order_id, OrderState.CANCELLED.value, reason="venue cancel"
-                    )
-                else:
-                    self._engine.transition(
-                        client_order_id, OrderState.CANCELLED, reason="venue cancel"
-                    )
+                # A broker-confirmed cancellation is broker TRUTH: reconcile it
+                # instead of a table transition, which is illegal from
+                # ACKNOWLEDGED (the order's real state) and would silently
+                # leave the local order looking live.
+                self._engine.reconcile(
+                    client_order_id, OrderState.CANCELLED.value, reason="venue cancel"
+                )
                 self._journal.record("ORDER_CANCELLED", client_order_id=client_order_id)
+                self._note_sl_event(client_order_id, kind, event)
+            elif kind == "expired":
+                # The venue expired the order: it is finished, not cancelled.
+                self._engine.reconcile(
+                    client_order_id, OrderState.EXPIRED.value, reason="venue expired"
+                )
+                self._journal.record("ORDER_EXPIRED", client_order_id=client_order_id)
                 self._note_sl_event(client_order_id, kind, event)
             else:
                 self._journal.record("BROKER_EVENT", at=client_order_id)
@@ -1685,7 +1894,9 @@ class LiveSession:
             broker_open = [
                 str(o.get("client_order_id", ""))
                 for o in broker_orders_raw
-                if isinstance(o, dict) and o.get("client_order_id")
+                if isinstance(o, dict)
+                and o.get("client_order_id")
+                and str(o.get("status", "")).upper() not in _BROKER_CLOSED_STATUSES
             ]
         except Exception as exc:
             self._journal.record("RECONCILE_ERROR", reason=str(exc))
@@ -1714,12 +1925,7 @@ class LiveSession:
             tracked = self._engine.get(cid)
             if tracked is not None and tracked.state == OrderState.UNKNOWN:
                 status = str(raw_o.get("status", "ACKNOWLEDGED")).upper()
-                if status in ("OPEN", "TRIGGER_PENDING", "ACCEPTED", "SUBMITTED"):
-                    target_status = "ACKNOWLEDGED"
-                elif status in ("FILLED", "REJECTED", "CANCELLED", "CANCELED"):
-                    target_status = "CANCELLED" if status == "CANCELED" else status
-                else:
-                    target_status = "ACKNOWLEDGED"
+                target_status = _reconciled_order_state(status)
                 with suppress(Exception):
                     self._engine.reconcile(
                         cid,

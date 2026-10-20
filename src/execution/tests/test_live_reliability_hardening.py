@@ -597,6 +597,114 @@ def test_reconciliation_snapshot_failure_still_blocks_live(tmp_path: Any) -> Non
     assert any(entry.kind == "RECONCILE_ERROR" for entry in session.journal.entries)
 
 
+# ── FYERS order rows: normalized matching ──────────────────────────────
+
+
+def test_reconciliation_matches_a_normalized_fyers_order_row(tmp_path: Any) -> None:
+    """A normalized venue row (client id + status) must match the local order.
+
+    FYERS' order book is the whole trading day, so the rows carry a client
+    order id and a status. A row the venue still works must match the local
+    open order instead of showing up as an unknown broker-only order.
+    """
+    session = _make_live_session(tmp_path)
+    broker: _MockBroker = session._broker  # type: ignore[assignment]
+    cid = "sl:NSE:INFY-EQ:1:o1"
+    _make_unknown_order(session._engine, cid, "intent-fyers-1")
+    broker.mock_open_orders = [
+        {
+            "client_order_id": cid,
+            "broker_order_id": "VENUE-1",
+            "status": "OPEN",
+            "filled_qty": 0.0,
+        }
+    ]
+
+    rec = session.reconcile_now()
+
+    tracked = session._engine.get(cid)
+    assert tracked is not None
+    assert tracked.state == OrderState.ACKNOWLEDGED
+    assert rec.orders.matched is True
+    assert rec.blocks_live is False
+
+
+def test_reconciliation_resolves_an_unknown_order_from_a_cancelled_row(
+    tmp_path: Any,
+) -> None:
+    """A closed venue row resolves the order and is not an open order.
+
+    The venue's order book holds cancelled/filled orders of the whole day;
+    counting them as OPEN would report a broker-only order and block live
+    for an order that is already finished.
+    """
+    session = _make_live_session(tmp_path)
+    broker: _MockBroker = session._broker  # type: ignore[assignment]
+    cid = "sl:NSE:INFY-EQ:2:o1"
+    _make_unknown_order(session._engine, cid, "intent-fyers-2")
+    broker.mock_open_orders = [
+        {
+            "client_order_id": cid,
+            "broker_order_id": "VENUE-2",
+            "status": "CANCELLED",
+            "filled_qty": 0.0,
+        }
+    ]
+
+    rec = session.reconcile_now()
+
+    tracked = session._engine.get(cid)
+    assert tracked is not None
+    assert tracked.state == OrderState.CANCELLED
+    assert rec.orders.matched is True
+    assert rec.blocks_live is False
+
+
+def test_broker_cancellation_event_updates_the_local_state_legally(tmp_path: Any) -> None:
+    """A venue-confirmed cancellation must move the local order.
+
+    ``ACKNOWLEDGED -> CANCELLED`` is not an edge of the lifecycle table, so
+    the old transition was rejected and the local order kept looking live.
+    A broker-confirmed cancellation is reconciled instead.
+    """
+    session = _make_live_session(tmp_path)
+    cid = "cid-ack-cancel"
+    _make_submitted_order(session._engine, cid, "intent-ack-cancel")
+    session._dispatch_broker_event(
+        {"type": "ack", "client_order_id": cid, "broker_order_id": "b-ack-cancel"}
+    )
+    tracked = session._engine.get(cid)
+    assert tracked is not None
+    assert tracked.state == OrderState.ACKNOWLEDGED
+
+    session._dispatch_broker_event(
+        {"type": "cancel", "client_order_id": cid, "broker_order_id": "b-ack-cancel"}
+    )
+
+    tracked = session._engine.get(cid)
+    assert tracked is not None
+    assert tracked.state == OrderState.CANCELLED
+    assert any(entry.kind == "ORDER_CANCELLED" for entry in session.journal.entries)
+
+
+def test_broker_expiration_event_updates_the_local_state(tmp_path: Any) -> None:
+    """An expired order is finished, not cancelled."""
+    session = _make_live_session(tmp_path)
+    cid = "cid-ack-expired"
+    _make_submitted_order(session._engine, cid, "intent-ack-expired")
+    session._dispatch_broker_event(
+        {"type": "ack", "client_order_id": cid, "broker_order_id": "b-expired"}
+    )
+
+    session._dispatch_broker_event(
+        {"type": "expired", "client_order_id": cid, "broker_order_id": "b-expired"}
+    )
+
+    tracked = session._engine.get(cid)
+    assert tracked is not None
+    assert tracked.state == OrderState.EXPIRED
+
+
 def test_missing_broker_in_live_fails_closed(tmp_path: Any) -> None:
     session = _make_live_session(tmp_path)
     session._broker = None  # Detached broker

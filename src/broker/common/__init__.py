@@ -1,4 +1,5 @@
-"""Broker common infrastructure — credential stores, credential schemas, and drivers."""
+"""Broker common infrastructure — credential stores, credential schemas, drivers,
+and the shared broker API-governance control plane (``api_governance``)."""
 
 from __future__ import annotations
 

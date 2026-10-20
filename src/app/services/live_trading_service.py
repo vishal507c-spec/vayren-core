@@ -1923,7 +1923,7 @@ class LiveTradingService:
         orders_rejected = sum(
             1
             for o in orders
-            if str(o.get("status", "")).upper() in ("REJECTED", "CANCELLED", "DENIED")
+            if str(o.get("status", "")).upper() in ("REJECTED", "CANCELLED", "EXPIRED", "DENIED")
         )
 
         if isinstance(strategy_state, dict):

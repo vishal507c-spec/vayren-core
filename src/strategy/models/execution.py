@@ -30,6 +30,10 @@ CANCELLED = "CANCELLED"
 MODIFIED = "MODIFIED"
 FILLED = "FILLED"
 PARTIALLY_FILLED = "PARTIALLY_FILLED"
+#: An order the venue expired (end of validity) is FINISHED, not cancelled —
+#: a Rust OrderState value like the others, projected here so an expired
+#: order is never reported as a cancelled one.
+EXPIRED = "EXPIRED"
 UNKNOWN = "UNKNOWN"
 
 #: Routing decisions (router-owned, not order states).
@@ -241,6 +245,7 @@ __all__ = [
     "MODIFIED",
     "FILLED",
     "PARTIALLY_FILLED",
+    "EXPIRED",
     "UNKNOWN",
     "ROUTED_PRIMARY",
     "ROUTED_SECONDARY",
