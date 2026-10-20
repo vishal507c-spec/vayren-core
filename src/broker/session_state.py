@@ -85,8 +85,12 @@ def next_action_for(state: str) -> str:
         "CONNECTING": "Wait — authentication in progress",
         "AUTHENTICATING": "Wait — authentication in progress",
         "FETCHING_TOKEN": "Wait — acquiring session tokens",
-        "LOGIN_REQUIRED": "Complete FYERS login from SYSTEM → BROKERS",
-        "AUTH_REQUIRED": "Complete FYERS login from SYSTEM → BROKERS",
+        "LOGIN_REQUIRED": (
+            "Daily token expired or login required — click CONNECT in SYSTEM → BROKERS"
+        ),
+        "AUTH_REQUIRED": (
+            "Daily token expired or login required — click CONNECT in SYSTEM → BROKERS"
+        ),
         "VERIFYING": "Wait — verifying account with FYERS",
         "VERIFYING_CONNECTION": "Wait — verifying account with FYERS",
         "CONNECTED": "No action needed — session verified",

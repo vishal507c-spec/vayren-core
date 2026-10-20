@@ -21,7 +21,7 @@ from unittest.mock import patch
 
 import pytest
 
-from app.services.live_trading_service import LiveTradingService
+from app.services.live_trading_service import LiveConfigError, LiveTradingService
 from broker.status import BrokerStatus
 from execution.broker.adapter import BrokerAdapter
 from execution.models.order import OrderPlan
@@ -139,6 +139,19 @@ class _TradingFace(BrokerAdapter):
     def on_market_price(self, symbol: str, price: float, timestamp: str) -> None:
         _ = (symbol, price, timestamp)
         return None
+
+
+class _OrderStreamFace(_TradingFace):
+    """Trading face exposing the bounded order-stream proof START requires."""
+
+    def __init__(self, ws_result: tuple[bool, str]) -> None:
+        self.ws_result = ws_result
+        self.verify_calls = 0
+
+    def verify_order_stream(self, timeout_s: float = 5.0) -> tuple[bool, str]:
+        _ = timeout_s
+        self.verify_calls += 1
+        return self.ws_result
 
 
 class _Plugin:
@@ -393,3 +406,37 @@ def test_raw_broker_name_is_accepted_when_it_is_the_trading_face(
         lambda: _Registry({"fyers": _Record(_TradingFace())}),
     )
     assert service._resolve_live_venue_id("fyers") == "fyers"
+
+
+def test_probe_live_venue_blocks_on_unverified_order_stream(
+    service: LiveTradingService, monkeypatch
+) -> None:
+    """REST health alone cannot satisfy START; the order socket is proven."""
+    from broker import registry as broker_registry
+
+    face = _OrderStreamFace((False, "order stream not connected within 0.1s"))
+    monkeypatch.setattr(
+        broker_registry,
+        "default_registry",
+        lambda: _Registry({"fyers-live": _Record(face)}),
+    )
+    with pytest.raises(LiveConfigError, match="order stream not verified"):
+        service._probe_live_venue("fyers-live")
+    assert face.verify_calls == 1
+
+
+def test_probe_live_venue_accepts_a_freshly_verified_order_stream(
+    service: LiveTradingService, monkeypatch
+) -> None:
+    from broker import registry as broker_registry
+
+    face = _OrderStreamFace((True, "connected — no order updates received yet"))
+    monkeypatch.setattr(
+        broker_registry,
+        "default_registry",
+        lambda: _Registry({"fyers-live": _Record(face)}),
+    )
+    md_faces = service._probe_live_venue("fyers-live")
+    assert face.verify_calls == 1
+    assert set(md_faces) == {"NSE:KAYNES"}
+    assert service._account_state["ready"] is True

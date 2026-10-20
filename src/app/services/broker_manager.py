@@ -34,6 +34,7 @@ spec; nothing here changes.
 from __future__ import annotations
 
 import contextlib
+import inspect
 import logging
 import secrets
 import threading
@@ -115,6 +116,12 @@ class BrokerManager:
     """Owns broker configuration/auth/state. UI reads snapshots only."""
 
     AUTH_TIMEOUT_S: float = 30.0
+    #: Bounded proof window for the START-time order-stream check.
+    ORDER_STREAM_VERIFY_TIMEOUT_S: float = 8.0
+    #: Low-noise SYSTEM freshness cadence (one queued check per window).
+    HEALTH_REFRESH_INTERVAL_S: float = 60.0
+    #: Beyond this the verified snapshot is reported stale, never LIVE-ready.
+    VERIFICATION_STALE_AFTER_S: float = 180.0
 
     state_changed = Signal(str)  # broker_id
     message = Signal(str)  # user-safe log line (never secrets)
@@ -146,6 +153,11 @@ class BrokerManager:
         self._worker.start()
         self._stopping = False
         self._auth_started_at: dict[str, float] = {}
+        #: Serializes venue I/O (worker jobs + START-time verification) so a
+        #: health read can never mutate the adapter while START is proving it.
+        self._io_locks: dict[str, threading.RLock] = {}
+        #: Last time a freshness check was QUEUED (not executed).
+        self._health_requested: dict[str, float] = {}
         # ── unified EC2 session lifecycle (one authoritative manager) ──
         # desired: operator intent (CONNECT vs DISCONNECT), persisted.
         # generation: monotonic per-broker epoch; a late auth completion from
@@ -185,6 +197,7 @@ class BrokerManager:
                     },
                 },
                 "last_verified": "",
+                "last_verified_epoch": 0.0,
                 "last_error": "",
                 "last_error_kind": "",
                 "retry_after_s": 0.0,
@@ -412,7 +425,8 @@ class BrokerManager:
                 self._worker.submit(_HEALTH_JOB, broker_id)
         else:
             try:
-                self._job_session_check(spec)
+                with self._io_lock(broker_id):
+                    self._job_session_check(spec)
             except Exception:
                 self._worker.submit(_SESSION_JOB, broker_id)
 
@@ -654,9 +668,94 @@ class BrokerManager:
             return {}
         return dict(facts) if isinstance(facts, dict) else {}
 
+    def _io_lock(self, broker_id: str) -> threading.RLock:
+        """Per-broker lock shared by worker jobs and START-time verification."""
+        with self._lock:
+            lock = self._io_locks.get(broker_id)
+            if lock is None:
+                lock = threading.RLock()
+                self._io_locks[broker_id] = lock
+            return lock
+
+    def _queue_health_refresh(self, broker_id: str, *, force: bool = False) -> bool:
+        """Queue at most one freshness check per window.
+
+        This is deliberately NOT a poller: no request is made until a
+        snapshot is actually read, and repeated snapshot reads cannot enqueue
+        duplicates. ``force=True`` is used once after a successful activation.
+        """
+        if self._stopping or self._desired_state(broker_id) != "CONNECTED":
+            return False
+        if not force and self._retry_armed(broker_id):
+            return False
+        with self._lock:
+            state = self._states.get(broker_id, {})
+            adapter = state.get("adapter")
+            status = state.get("status")
+            epoch = float(self._unified.get(broker_id, {}).get("last_verified_epoch", 0.0) or 0.0)
+        if adapter is None or (not force and epoch <= 0.0):
+            return False
+        # A terminal auth/disconnect verdict needs an operator CONNECT (or a
+        # restart), not a once-per-window venue retry. Only active legs keep
+        # refreshing; this is what makes the expired-token path quiet.
+        if not force and status not in (
+            BrokerStatus.CONNECTED,
+            BrokerStatus.LIVE_READY,
+            BrokerStatus.MARKET_DATA_NOT_READY,
+            BrokerStatus.EXECUTION_NOT_READY,
+        ):
+            return False
+        now = time.monotonic()
+        with self._lock:
+            last = float(self._health_requested.get(broker_id, 0.0) or 0.0)
+            if not force and now - last < self.HEALTH_REFRESH_INTERVAL_S:
+                return False
+            self._health_requested[broker_id] = now
+        self._worker.submit(_HEALTH_JOB, broker_id)
+        return True
+
+    def _sync_order_stream_leg(self, broker_id: str) -> str:
+        """Cheap local order-WS check (no REST) for the visible snapshot.
+
+        The adapter exposes delivery/transport state directly, so a dropped
+        order socket should degrade SYSTEM on the next snapshot instead of
+        waiting for the slower REST health cycle. Returns the failure reason
+        (empty when healthy/unknown).
+        """
+        with self._lock:
+            state = self._states.get(broker_id, {})
+            adapter = state.get("adapter")
+        if adapter is None:
+            return ""
+        probe = getattr(adapter, "order_stream_health", None)
+        if not inspect.ismethod(probe):
+            return ""
+        try:
+            result = probe()
+            ws_ok = bool(result[0])
+            ws_reason = str(result[1] if len(result) > 1 else "")
+        except Exception as exc:  # noqa: BLE001 - reporting must never raise
+            ws_ok, ws_reason = False, f"unreadable ({type(exc).__name__})"
+        new_status = "READY" if ws_ok else f"FAILED: {ws_reason}"
+        with self._lock:
+            uni = self._unified.setdefault(broker_id, {})
+            row = uni.setdefault("legs", {}).setdefault("order_ws", {})
+            changed = str(row.get("status", "")) != new_status
+        if changed:
+            self._set_leg(
+                broker_id,
+                "order_ws",
+                "READY" if ws_ok else "FAILED",
+                "" if ws_ok else ws_reason,
+                success=ws_ok,
+            )
+        return "" if ws_ok else ws_reason
+
     def get_session_snapshot(self, broker_id: str) -> dict[str, Any]:
         """One authoritative backend snapshot for SYSTEM/LIVE/dashboard/health."""
         self._check_auth_timeout(broker_id)
+        self._queue_health_refresh(broker_id)
+        ws_reason = self._sync_order_stream_leg(broker_id)
         with self._lock:
             state = dict(self._states.get(broker_id, {}))
             uni = self._unified.get(broker_id, {})
@@ -664,6 +763,7 @@ class BrokerManager:
             desired = str(self._desired.get(broker_id, "DISCONNECTED"))
             version = int(uni.get("version", 0) or 0)
             last_verified = str(uni.get("last_verified", "") or "")
+            last_verified_epoch = float(uni.get("last_verified_epoch", 0.0) or 0.0)
             last_error = str(uni.get("last_error", "") or "")
             last_error_kind = str(uni.get("last_error_kind", "") or "")
             retry_after_s = float(uni.get("retry_after_s", 0.0) or 0.0)
@@ -686,12 +786,29 @@ class BrokerManager:
             if str(legs.get(leg, {}).get("status", "")).startswith("FAILED")
         ):
             unified_state = "DEGRADED"
+        if unified_state == "CONNECTED" and ws_reason:
+            unified_state = "DEGRADED"
         if self._retry_armed(broker_id):
             unified_state = "RATE_LIMITED"
         if unified_state == "CONNECTED" and not self._adapter_verified(broker_id):
             if not self._retry_armed(broker_id):
                 self.submit_check(broker_id)
             unified_state = "CHECKING"
+        verified_age: float | None = None
+        stale = False
+        if last_verified_epoch > 0.0 and status_raw in (
+            "CONNECTED",
+            "LIVE_READY",
+            "MARKET_DATA_NOT_READY",
+            "EXECUTION_NOT_READY",
+        ):
+            verified_age = max(0.0, time.monotonic() - last_verified_epoch)
+            stale = verified_age > self.VERIFICATION_STALE_AFTER_S
+        reason_text = str(state.get("reason", "") or "")
+        if stale and unified_state == "CONNECTED":
+            # An old "all checks passed" must never be presented as current.
+            unified_state = "CHECKING"
+            reason_text = f"session verification stale ({int(verified_age or 0)}s) — refreshing"
         funds = {
             "available": details.get("funds_available"),
             "used": details.get("funds_used"),
@@ -741,11 +858,14 @@ class BrokerManager:
             version=version,
             live_armed=bool(runtime.get("live_armed", False)),
             strategy_running=bool(runtime.get("strategy_running", False)),
-            reason=redact(str(state.get("reason", "") or "")),
+            reason=redact(reason_text),
         )
         snap["configured"] = configured
         snap["status_raw"] = status_raw
         snap["token_reused"] = token_reused
+        snap["verified_age_s"] = round(verified_age, 1) if verified_age is not None else None
+        snap["verification_stale"] = bool(stale)
+        snap["health_refresh_interval_s"] = float(self.HEALTH_REFRESH_INTERVAL_S)
         snap["can_connect"] = bool(
             state.get("configured")
             and raw_status
@@ -758,6 +878,194 @@ class BrokerManager:
         )
         snap["next_action"] = next_action_for(unified_state)
         return snap
+
+    def verify_live_session(
+        self, broker_id: str, timeout_s: float | None = None
+    ) -> tuple[bool, str]:
+        """Fresh, bounded START-time proof of the broker session + order stream.
+
+        This is the authority LIVE START consults instead of a cached
+        ``CONNECTED`` snapshot:
+
+        * performs one forced read-only profile check (``adapter.connect``),
+        * proves the order WebSocket is connected/usable within ``timeout_s``
+          (the adapter owns the bounded wait, so no reconnect storm),
+        * refreshes account/funds scalars for the visible snapshot.
+
+        All venue I/O is serialized with the manager worker; no order is
+        placed and no token/credential is logged. A failure is written to the
+        authoritative state immediately so SYSTEM and LIVE cannot disagree.
+        """
+        if broker_id not in self._states and broker_id not in self._specs:
+            return False, f"unknown broker: {broker_id}"
+        if self._desired_state(broker_id) != "CONNECTED":
+            return False, "broker is not connected — connect in SYSTEM → BROKERS"
+        timeout = (
+            float(self.ORDER_STREAM_VERIFY_TIMEOUT_S)
+            if timeout_s is None
+            else max(0.0, float(timeout_s))
+        )
+        with self._io_lock(broker_id):
+            # Re-check under the I/O lock: an operator disconnect could have
+            # completed between the fast-path check above and this point.
+            if self._desired_state(broker_id) != "CONNECTED":
+                return False, "broker is not connected — connect in SYSTEM → BROKERS"
+            with self._lock:
+                state = self._states.get(broker_id, {})
+                adapter = state.get("adapter")
+            if adapter is None:
+                return False, "broker adapter is not connected — connect in SYSTEM → BROKERS"
+            connect = getattr(adapter, "connect", None)
+            if not callable(connect):
+                return False, "broker adapter cannot verify a session"
+            try:
+                connect()
+            except Exception as exc:  # noqa: BLE001 - classified below
+                return self._record_probe_failure(broker_id, adapter, exc)
+            # The operator may have disconnected while the profile check was
+            # in flight. Re-check before treating the session as verified and
+            # close anything connect() just started.
+            if self._desired_state(broker_id) != "CONNECTED":
+                with contextlib.suppress(Exception):
+                    adapter.disconnect()
+                return False, "broker is not connected — connect in SYSTEM → BROKERS"
+
+            ws_proven = False
+            verifier = getattr(adapter, "verify_order_stream", None)
+            if inspect.ismethod(verifier):
+                try:
+                    ws_result = verifier(timeout_s=timeout)
+                    if not isinstance(ws_result, (tuple, list)) or len(ws_result) < 2:
+                        raise RuntimeError("order stream health unreadable")
+                    ws_ok, ws_reason = bool(ws_result[0]), str(ws_result[1])
+                except Exception as exc:  # noqa: BLE001 - fail closed below
+                    return self._record_order_stream_failure(broker_id, str(exc))
+                if not ws_ok:
+                    return self._record_order_stream_failure(broker_id, ws_reason)
+                ws_proven = True
+            else:
+                # Legacy/other venues may expose a one-shot leg health only.
+                leg_probe = getattr(adapter, "order_stream_health", None)
+                if inspect.ismethod(leg_probe):
+                    try:
+                        leg_result = leg_probe()
+                        if not isinstance(leg_result, (tuple, list)) or len(leg_result) < 2:
+                            raise RuntimeError("order stream health unreadable")
+                        leg_ok, leg_reason = bool(leg_result[0]), str(leg_result[1])
+                    except Exception as exc:  # noqa: BLE001 - fail closed below
+                        return self._record_order_stream_failure(broker_id, str(exc))
+                    if not leg_ok:
+                        return self._record_order_stream_failure(broker_id, leg_reason)
+                    ws_proven = True
+
+            details = self._empty_details()
+            checks: dict[str, str] = {"connection": "READY"}
+            try:
+                account = adapter.account()
+            except Exception as exc:  # noqa: BLE001 - classified below
+                return self._record_probe_failure(broker_id, adapter, exc)
+            if not isinstance(account, dict):
+                return self._record_probe_failure(
+                    broker_id, adapter, RuntimeError("account response unreadable")
+                )
+            account_id = self._account_id_of(account)
+            if not account_id:
+                return self._record_probe_failure(
+                    broker_id, adapter, RuntimeError("account identity missing")
+                )
+            checks["account"] = "READY"
+            details["account_id"] = account_id
+            try:
+                funds = adapter.funds()
+                checks["funds"] = "READY"
+                if isinstance(funds, dict):
+                    details["funds_available"] = self._safe_float(funds.get("available"))
+                    details["funds_used"] = self._safe_float(funds.get("used"))
+                    total = funds.get("total", funds.get("equity"))
+                    details["funds_total"] = self._safe_float(total)
+            except Exception as exc:  # noqa: BLE001 - capital gate blocks later
+                checks["funds"] = f"FAILED: {type(exc).__name__}"
+
+            with self._lock:
+                live = self._states.get(broker_id)
+                if live is None:
+                    return False, "broker state unavailable"
+                merged = dict(live.get("checks") or {})
+                merged.update(checks)
+                failed = [k for k, v in merged.items() if str(v).startswith("FAILED")]
+                if failed:
+                    if "orders" in failed or "positions" in failed:
+                        live["status"] = BrokerStatus.EXECUTION_NOT_READY
+                    else:
+                        live["status"] = BrokerStatus.MARKET_DATA_NOT_READY
+                    live["reason"] = (
+                        "session verified; degraded leg(s): "
+                        + ", ".join(failed)
+                        + " — "
+                        + redact(str(merged.get(failed[0], "")))
+                    )
+                else:
+                    live["status"] = BrokerStatus.CONNECTED
+                    live["reason"] = "session verified (fresh START check)"
+                live["checks"] = merged
+                live["details"] = details
+                live["last_sync"] = self._now_stamp()
+            self._clear_retry(broker_id)
+            self._set_leg(broker_id, "rest", "READY", success=True)
+            if ws_proven:
+                self._set_leg(broker_id, "order_ws", "READY", success=True)
+            self._touch_verified(broker_id)
+            self._bump_version(broker_id)
+            self.state_changed.emit(broker_id)
+            return True, "session verified"
+
+    def _record_order_stream_failure(self, broker_id: str, reason: str) -> tuple[bool, str]:
+        """Fail LIVE START closed while keeping the verified REST session."""
+        safe = redact(str(reason or "order stream not connected"))
+        with self._lock:
+            live = self._states.get(broker_id)
+            if live is not None:
+                live["status"] = BrokerStatus.MARKET_DATA_NOT_READY
+                live["reason"] = f"order stream not verified: {safe}"
+        self._set_leg(broker_id, "order_ws", "FAILED", safe)
+        self._touch_error(broker_id, "ORDER_STREAM", safe)
+        self._bump_version(broker_id)
+        self.state_changed.emit(broker_id)
+        return False, f"order stream not verified: {safe}"
+
+    def _record_probe_failure(
+        self, broker_id: str, adapter: Any, exc: BaseException
+    ) -> tuple[bool, str]:
+        """Write an authoritative failed verification (classify, never guess)."""
+        kind, safe = classify_exception(exc)
+        safe = redact(safe or str(exc) or kind)
+        with self._lock:
+            live = self._states.get(broker_id)
+            if live is not None:
+                if kind in ("AUTH_EXPIRED", "AUTH_INVALID"):
+                    live["status"] = BrokerStatus.LOGIN_REQUIRED
+                    live["reason"] = f"session expired — {safe}; click CONNECT in SYSTEM → BROKERS"
+                elif kind == "RATE_LIMITED":
+                    live["status"] = BrokerStatus.ERROR
+                    live["reason"] = "rate limited — retry in SYSTEM → BROKERS"
+                elif kind in ("NETWORK", "TIMEOUT"):
+                    live["status"] = BrokerStatus.DISCONNECTED
+                    live["reason"] = f"venue unreachable: {safe}"
+                else:
+                    live["status"] = BrokerStatus.ERROR
+                    live["reason"] = f"session verification failed: {safe}"
+        if kind == "RATE_LIMITED":
+            delay = backoff_with_jitter(1, base_s=5.0)
+            self._arm_retry(broker_id, delay)
+        if kind in ("AUTH_EXPIRED", "AUTH_INVALID"):
+            with contextlib.suppress(Exception):
+                adapter._connected = False
+        if kind in ("AUTH_EXPIRED", "AUTH_INVALID", "NETWORK", "TIMEOUT"):
+            self._set_leg(broker_id, "rest", "FAILED", safe)
+        self._touch_error(broker_id, kind, safe)
+        self._bump_version(broker_id)
+        self.state_changed.emit(broker_id)
+        return False, f"session could not be verified: {safe}"
 
     def audit_tail(self, limit: int = 50) -> list[dict[str, Any]]:
         """Recent secret-free session operations (diagnostics only)."""
@@ -806,13 +1114,18 @@ class BrokerManager:
         spec = self._specs.get(broker_id)
         if spec is None:
             return
-        if kind == _SESSION_JOB:
-            self._job_session_check(spec)
-        elif kind == _LOGIN_JOB:
-            self._job_login(spec)
-        elif kind == _HEALTH_JOB:
-            self._job_health(spec)
-        elif kind == "__error__":
+        if kind in (_SESSION_JOB, _LOGIN_JOB, _HEALTH_JOB):
+            # Serialize with a START-time verification on the calling thread:
+            # both mutate/read the same adapter and must never overlap.
+            with self._io_lock(broker_id):
+                if kind == _SESSION_JOB:
+                    self._job_session_check(spec)
+                elif kind == _LOGIN_JOB:
+                    self._job_login(spec)
+                else:
+                    self._job_health(spec)
+            return
+        if kind == "__error__":
             with self._lock:
                 current = self._states.get(broker_id, {}).get("status")
             # Never downgrade a specific verdict (LOGIN_REQUIRED/DISCONNECTED/
@@ -1048,6 +1361,11 @@ class BrokerManager:
         self._activate(spec, config, stored.get("access_token", ""), message)
 
     def _job_health(self, spec: BrokerSpec) -> None:
+        """Serialize the read-only health probe against START verification."""
+        with self._io_lock(spec.broker_id):
+            self._run_health_checks(spec)
+
+    def _run_health_checks(self, spec: BrokerSpec) -> None:
         """Read-only checks on the active adapter; never places an order.
 
         Return values are reduced to safe UI scalars (account id, fund
@@ -1396,6 +1714,7 @@ class BrokerManager:
         with self._lock:
             uni = self._unified.setdefault(broker_id, {})
             uni["last_verified"] = self._now_stamp()
+            uni["last_verified_epoch"] = time.monotonic()
             uni["last_error"] = ""
             uni["last_error_kind"] = ""
             uni["token_reused"] = bool(uni.get("token_reused", False))
@@ -1613,7 +1932,9 @@ class BrokerManager:
         self._note(spec.broker_id, "connected")
         self._auto_select_if_unset(spec.broker_id)
         self.state_changed.emit(spec.broker_id)
-        self._worker.submit(_HEALTH_JOB, spec.broker_id)
+        # First freshness check runs once; later checks are throttled by the
+        # snapshot path (no polling thread, no repeated REST bursts).
+        self._queue_health_refresh(spec.broker_id, force=True)
 
     def _auto_select_if_unset(self, broker_id: str) -> None:
         """Record a first-run selection when none exists — never overwrite.

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import queue
+import threading
 import time
 import urllib.parse
 from collections.abc import Callable
@@ -134,6 +135,10 @@ class FyersSessionAdapter:
         # Epoch until which the order socket stays abandoned (venue not
         # serving the stream). Cleared by an explicit connect().
         self._order_ws_suspended_until = 0.0
+        # Serializes socket creation/teardown and bounded START-time proofs so
+        # two callers can never create competing reconnect drivers.
+        self._order_ws_guard = threading.RLock()
+        self._order_ws_verify_lock = threading.Lock()
         self._order_event_queue: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=10_000)
         self._seen_fills: set[str] = set()  # Dedup key: f"{order_id}:{trade_no or fill_qty}"
         self._order_cum_filled: dict[
@@ -257,6 +262,45 @@ class FyersSessionAdapter:
             return False, f"error: {self._order_ws_error}"
         return False, "disconnected"
 
+    def verify_order_stream(self, timeout_s: float = 5.0) -> tuple[bool, str]:
+        """Bounded, authoritative proof that the order stream is usable NOW.
+
+        START must not treat a cached ``CONNECTED`` snapshot as evidence.
+        This waits at most ``timeout_s`` for the existing socket to reach
+        CONNECTED and then applies the same delivery/staleness rules as
+        :meth:`order_stream_health`.
+
+        Reconnect ownership stays with the vendor SDK: an existing socket is
+        never replaced or restarted here, and a cold start happens exactly
+        once when no socket exists. A failure is returned to the caller (which
+        fails closed) instead of triggering an internal retry loop.
+        """
+        if not self._enable_order_ws:
+            return True, "order socket disabled (REST polling fallback active)"
+        timeout = max(0.0, float(timeout_s))
+        with self._order_ws_verify_lock:
+            if self._order_ws_state == STATE_CONNECTED:
+                return self.order_stream_health()
+            if time.monotonic() < self._order_ws_suspended_until:
+                return False, (
+                    "order stream cooldown active — the venue closed it repeatedly; "
+                    "reconnect in SYSTEM → BROKERS"
+                )
+            if self._order_ws is None:
+                # One cold start only. If it fails there is no retry here:
+                # the flap breaker exists precisely to stop that loop.
+                self._start_order_ws()
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                if self._order_ws_state == STATE_CONNECTED:
+                    return self.order_stream_health()
+                if self._order_ws is None:
+                    return False, self._order_ws_error or "order stream unavailable"
+                time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+            return False, (
+                f"order stream not connected within {timeout:.1f}s (state: {self._order_ws_state})"
+            )
+
     @property
     def order_stream_messages_received(self) -> int:
         """Order/trade updates actually delivered (not a connect claim)."""
@@ -270,6 +314,11 @@ class FyersSessionAdapter:
         return max(0.0, time.monotonic() - self._order_ws_last_message_at)
 
     def _start_order_ws(self) -> None:
+        """Create at most one order socket at a time (guarded cold start)."""
+        with self._order_ws_guard:
+            self._start_order_ws_locked()
+
+    def _start_order_ws_locked(self) -> None:
         """Initialize and connect FyersOrderSocket.
 
         Reconnects are OWNED BY THE SDK (its ``On_close`` calls ``connect()``
@@ -338,6 +387,11 @@ class FyersSessionAdapter:
             logger.error("ORDER_WS_INIT_FAILED broker=FYERS reason=%s", exc)
 
     def _stop_order_ws(self) -> None:
+        """Disconnect and cleanup FyersOrderSocket (guarded)."""
+        with self._order_ws_guard:
+            self._stop_order_ws_locked()
+
+    def _stop_order_ws_locked(self) -> None:
         """Disconnect and cleanup FyersOrderSocket."""
         if self._order_ws is not None:
             try:

@@ -53,6 +53,38 @@ sudo systemctl status vayren-remote --no-pager   # must be active (running), idl
 sudo ss -tlnp | grep 8765                        # must show 127.0.0.1:8765 ONLY
 ```
 
+### 4.1 Daily FYERS token lifecycle (read before LIVE START)
+
+FYERS access tokens are **daily** credentials. Recovery differs depending on
+when the token expires:
+
+- **Gateway startup / explicit CONNECT** — the saved token is validated; if
+  it is expired and auto-authentication (PIN/TOTP) is configured for the
+  venue, the manager acquires and verifies a new token automatically. If
+  auto-auth is not configured, the operator completes the venue's own
+  interactive login from SYSTEM → BROKERS.
+- **Gateway already running** — expiry is detected by the bounded health
+  refresh (at most one queued check per ~60 s while snapshots are being
+  read; this is not a continuous poll or an in-process token renewer). The
+  authoritative session moves to `LOGIN_REQUIRED` and LIVE readiness
+  blocks. The operator must click **CONNECT** in SYSTEM → BROKERS (which
+  runs the same auto-auth flow when configured), complete interactive
+  login, or use the authorized restart path in §5 — after which the
+  startup check re-validates the saved token.
+
+Do not claim or assume continuous automatic refresh while the gateway is
+running; no such background token renewal is performed.
+
+LIVE START itself performs a fresh, bounded proof before accepting the
+request: a forced read-only profile check, a bounded order-WebSocket
+verification, and an account/funds refresh. A cached `CONNECTED` snapshot
+is not accepted. If the order stream is disconnected, stale, or cannot be
+proven within the timeout, START fails closed with an exact blocker. An
+explicit START may make one bounded cold-start attempt after a cooldown,
+but it never runs its own retry loop. Outside market hours the venue may
+close the order socket; LIVE START stays blocked until the stream can be
+verified. Token values, PINs and secrets are never printed or logged.
+
 ## 5. Operator-authorized gateway restart (sandbox-safe helper)
 
 The gateway runs with `NoNewPrivileges=true` (see §4), so it can never

@@ -25,6 +25,7 @@ Covers:
 
 from __future__ import annotations
 
+import threading
 import time
 from typing import Any
 
@@ -1039,3 +1040,107 @@ def test_fyers_session_adapter_health_preserves_auth_error() -> None:
     assert not healthy
     assert reason == "Token is Invalid or Expired (HTTP 400)"
     assert not reason.startswith("venue unreachable:")
+
+
+# ── START-time order-stream proof ─────────────────────────────────────
+
+
+class _DelayedOrderSocket(VendorAccurateOrderSocket):
+    """Vendor socket that connects asynchronously (no inline callback)."""
+
+    def connect(self) -> None:
+        self.connected = True
+        threading.Thread(target=self._delayed_connect, daemon=True).start()
+
+    def _delayed_connect(self) -> None:
+        time.sleep(0.05)
+        if self.on_connect:
+            self.on_connect()
+
+
+class _SilentOrderSocket(VendorAccurateOrderSocket):
+    """Vendor socket whose connect never proves a connection."""
+
+    def connect(self) -> None:
+        self.connected = True
+
+
+def test_verify_order_stream_waits_for_bounded_async_connect() -> None:
+    """A healthy fresh stream passes and creates exactly one socket."""
+    created: list[_DelayedOrderSocket] = []
+
+    def factory(**kwargs: Any) -> _DelayedOrderSocket:
+        sock = _DelayedOrderSocket(**kwargs)
+        created.append(sock)
+        return sock
+
+    adapter = FyersSessionAdapter(
+        app_id="APP123",
+        access_token="TOKEN456",
+        transport=MockTransport(),
+        order_socket_factory=factory,
+        enable_order_ws=True,
+    )
+    healthy, reason = adapter.verify_order_stream(timeout_s=1.0)
+    assert healthy, reason
+    assert "connected" in reason
+    assert len(created) == 1
+    assert created[0].subscribed_type == ORDER_WS_SUBSCRIPTION
+    adapter.disconnect()
+
+
+def test_verify_order_stream_times_out_and_never_retries() -> None:
+    """An unverifiable socket fails closed within the bound, once."""
+    created: list[_SilentOrderSocket] = []
+
+    def factory(**kwargs: Any) -> _SilentOrderSocket:
+        sock = _SilentOrderSocket(**kwargs)
+        created.append(sock)
+        return sock
+
+    adapter = FyersSessionAdapter(
+        app_id="APP123",
+        access_token="TOKEN456",
+        transport=MockTransport(),
+        order_socket_factory=factory,
+        enable_order_ws=True,
+    )
+    started = time.monotonic()
+    healthy, reason = adapter.verify_order_stream(timeout_s=0.15)
+    elapsed = time.monotonic() - started
+    assert not healthy
+    assert "not connected within" in reason
+    assert elapsed < 1.0, "the START proof must be bounded"
+    assert len(created) == 1, "verification must not create retry sockets"
+    adapter.disconnect()
+
+
+def test_verify_order_stream_rejects_an_immediate_disconnect() -> None:
+    """A socket that drops just before START cannot pass on cached state."""
+    adapter, created = _vendor_adapter(None)
+    adapter.connect()
+    assert adapter.order_ws_state == STATE_CONNECTED
+    adapter._on_ws_close()
+    assert adapter.order_ws_state == STATE_DISCONNECTED
+
+    healthy, reason = adapter.verify_order_stream(timeout_s=0.15)
+    assert not healthy
+    assert len(created) == 1, "the SDK owns reconnects; no second driver"
+    adapter.disconnect()
+
+
+def test_verify_order_stream_does_not_restart_a_cooldown_socket() -> None:
+    """After the flap breaker abandons a socket, START fails closed."""
+    adapter, created = _vendor_adapter(None)
+    adapter.connect()
+    for _ in range(ORDER_WS_FLAP_LIMIT):
+        adapter._on_ws_connect()
+        adapter._on_ws_close()
+    assert adapter._order_ws is None
+    assert adapter._order_ws_suspended_until > time.monotonic()
+
+    healthy, reason = adapter.verify_order_stream(timeout_s=0.1)
+    assert not healthy
+    assert "cooldown" in reason
+    assert len(created) == 1, "cooldown must not be bypassed by START"
+    adapter.disconnect()

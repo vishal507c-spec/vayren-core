@@ -24,6 +24,7 @@ Safety posture (mirrors the repo's fail-closed layers):
 from __future__ import annotations
 
 import contextlib
+import inspect
 import json
 import logging
 import math
@@ -36,6 +37,7 @@ from pathlib import Path
 from typing import Any
 
 from app.observable import IntervalTimer, Signal
+from broker.error_taxonomy import redact
 from execution import (
     ExecutionMode,  # pyright: ignore[reportAttributeAccessIssue]
     LiveSession,  # pyright: ignore[reportAttributeAccessIssue]
@@ -71,6 +73,8 @@ DEFAULT_STRATEGY_DIR = resolve_strategy_dir(None)
 _WARMUP_BARS = 120
 _ACTIVITY_CAP = 500
 _TICK_MS = 1000
+#: Bounded START-time order-WebSocket proof (the adapter waits, never retries).
+_LIVE_ORDER_STREAM_VERIFY_TIMEOUT_S = 8.0
 
 #: LIVE event categories — the fixed filter vocabulary the native UI renders.
 #: Every activity entry carries exactly one; unknown journal kinds land in
@@ -979,6 +983,21 @@ class LiveTradingService:
                     view["status"] in ("CONNECTED", "LIVE_READY")
                     or (manager is not None and manager.is_connected(name) is True)
                 )
+            # The unified session is the authority for LIVE readiness. Raw
+            # legacy `connected` must not outrank a stale/degraded/unverified
+            # session, otherwise SYSTEM/LIVE can report a broker ready after
+            # its daily token expired.
+            session = entry.get("session")
+            if isinstance(session, dict) and session:
+                sess_state = str(session.get("state", "") or "").upper()
+                auth_valid = bool(session.get("auth_valid", False))
+                stale = bool(session.get("verification_stale", False))
+                if sess_state and sess_state != "UNKNOWN":
+                    view["status"] = sess_state
+                    view["reason"] = str(session.get("reason") or view["reason"] or "")
+                    if stale and view["status"] == "CONNECTED":
+                        view["status"] = "CHECKING"
+                    is_entry_connected = view["status"] == "CONNECTED" and auth_valid
             if not is_entry_connected and view["status"] in ("CONNECTED", "LIVE_READY"):
                 view["status"] = "DISCONNECTED"
             view["configured"] = bool(
@@ -1262,13 +1281,32 @@ class LiveTradingService:
             session = self._authoritative_session(name)
             session_state = str(session.get("state", "") or "UNKNOWN")
             auth_valid = bool(session.get("auth_valid", False))
+            stale = bool(session.get("verification_stale", False))
             adapter_connected = False
             with contextlib.suppress(Exception):
                 adapter_connected = bool(manager.is_connected(name))
-            if session_state != "CONNECTED" or not auth_valid:
+            if stale:
                 blockers.append(
-                    f"{name} is not authenticated (broker session: {session_state}) — "
-                    "open SYSTEM → BROKERS to log in"
+                    f"{name} session verification is stale — wait for the bounded "
+                    "health check or reconnect in SYSTEM → BROKERS"
+                )
+            elif session_state == "DEGRADED":
+                detail = str(session.get("reason", "") or "a required leg is down")
+                blockers.append(
+                    f"{name} broker session is degraded ({detail}) — reconnect in SYSTEM → BROKERS"
+                )
+            elif session_state != "CONNECTED" or not auth_valid:
+                if session_state in ("LOGIN_REQUIRED", "AUTH_REQUIRED"):
+                    guidance = (
+                        "the daily token expiry needs re-authentication; "
+                        "click CONNECT in SYSTEM → BROKERS"
+                    )
+                elif session_state == "DISCONNECTED":
+                    guidance = "broker/network is disconnected; click CONNECT in SYSTEM → BROKERS"
+                else:
+                    guidance = "open SYSTEM → BROKERS and click CONNECT"
+                blockers.append(
+                    f"{name} is not authenticated (broker session: {session_state}) — {guidance}"
                 )
             elif not adapter_connected:
                 blockers.append(
@@ -1323,6 +1361,30 @@ class LiveTradingService:
                     "live sizing requires positive available funds"
                 )
         return blockers
+
+    def _verify_live_session_fresh(self) -> tuple[str, ...]:
+        """Bounded, authoritative broker+order-stream proof for LIVE START.
+
+        A cached ``CONNECTED`` snapshot is deliberately not accepted here.
+        The manager performs one forced profile check and a bounded order-WS
+        wait, updates the unified session immediately, and returns the exact
+        failure. Fake/legacy managers without this bound method keep the
+        existing test seam and are not treated as authoritative.
+        """
+        manager = self._broker_manager
+        name = self.broker_name()
+        if manager is None or not name:
+            return ()
+        verifier = getattr(manager, "verify_live_session", None)
+        if not inspect.ismethod(verifier):
+            return ()
+        try:
+            ok, reason = verifier(name, timeout_s=_LIVE_ORDER_STREAM_VERIFY_TIMEOUT_S)
+        except Exception as exc:  # noqa: BLE001 - fail closed, never leak details
+            return (f"{name} live session could not be verified: {type(exc).__name__}",)
+        if ok:
+            return ()
+        return (f"{name} live session could not be verified: {reason}",)
 
     def _ensure_live_venues(self) -> None:
         """Best-effort explicit activation (idempotent, no network, no orders).
@@ -1399,7 +1461,16 @@ class LiveTradingService:
         if self._config.mode == "LIVE" and confirmed:
             self.confirm_live_execution()
         self.invalidate_validation_cache()
+        # START is the one place a cached CONNECTED snapshot is not evidence.
+        # Only run the venue proof when the operator has consented; without
+        # consent no broker call is made and the existing consent gate below
+        # remains the blocker.
+        fresh_session_blockers: tuple[str, ...] = ()
+        if self._config.mode == "LIVE" and (confirmed or self.is_live_confirmed()):
+            fresh_session_blockers = self._verify_live_session_fresh()
         blockers = self.validate()
+        if fresh_session_blockers:
+            blockers = (*fresh_session_blockers, *blockers)
         if self._config.mode == "LIVE":
             if confirmed or self.is_live_confirmed():
                 # A confirmed start SATISFIES the consent requirement — the
@@ -2245,20 +2316,39 @@ class LiveTradingService:
         except LiveConfigError:
             raise
         except Exception as exc:
-            raise LiveConfigError(f"broker connection failed: {exc}") from None
+            raise LiveConfigError(
+                f"broker connection failed: {redact(str(exc)) or type(exc).__name__}"
+            ) from None
         if isinstance(status, (tuple, list)) and len(status) >= 2:
             healthy, reason = bool(status[0]), str(status[1])
         else:
             raise LiveConfigError("broker health unreadable")
         if not healthy:
-            raise LiveConfigError(f"broker not connected: {reason}")
+            raise LiveConfigError(f"broker not connected: {redact(reason)}")
+        # A REST-healthy broker is not enough for LIVE: the order socket must
+        # be proven usable NOW. The adapter performs one bounded wait and owns
+        # its SDK reconnect; this layer never retries or cold-starts twice.
+        ws_verifier = getattr(face, "verify_order_stream", None)
+        if inspect.ismethod(ws_verifier):
+            try:
+                ws_status = ws_verifier(timeout_s=_LIVE_ORDER_STREAM_VERIFY_TIMEOUT_S)
+            except Exception as exc:  # noqa: BLE001 - converted to an exact blocker
+                raise LiveConfigError(
+                    f"order stream not verified: {redact(str(exc)) or type(exc).__name__}"
+                ) from None
+            if not isinstance(ws_status, (tuple, list)) or len(ws_status) < 2:
+                raise LiveConfigError("order stream not verified: health unreadable")
+            if not bool(ws_status[0]):
+                raise LiveConfigError(f"order stream not verified: {redact(str(ws_status[1]))}")
         try:
             account_fn = getattr(face, "account", None)
             funds_fn = getattr(face, "funds", None)
             account = account_fn() if callable(account_fn) else {}
             funds = funds_fn() if callable(funds_fn) else {}
         except Exception as exc:
-            raise LiveConfigError(f"account not ready: {exc}") from None
+            raise LiveConfigError(
+                f"account not ready: {redact(str(exc)) or type(exc).__name__}"
+            ) from None
         if not isinstance(account, dict):
             raise LiveConfigError("account not ready: unreadable venue response")
         self._account_state = {
