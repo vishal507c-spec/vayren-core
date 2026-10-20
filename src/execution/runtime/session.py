@@ -18,7 +18,7 @@ from contextlib import suppress
 from dataclasses import dataclass, field, replace
 from math import floor
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from broker.error_taxonomy import classify_exception
 from execution.adaptive.attention import AttentionConfig, AttentionFilter
@@ -1664,8 +1664,24 @@ class LiveSession:
                 self._reconciliation = ReconciliationState(orders=orders)
             return self._reconciliation
         try:
-            broker_positions = self._broker.positions()
-            broker_orders_raw = self._broker.open_orders()
+            # One authenticated adapter can serve many per-symbol sessions.
+            # Prefer its coalesced account snapshot so a fleet reconciliation
+            # reads positions/open orders once instead of once per symbol
+            # (an unthrottled burst is answered with HTTP 429). Adapters
+            # without the optional surface keep the direct-read behaviour.
+            snapshot_reader = getattr(self._broker, "reconciliation_snapshot", None)
+            if callable(snapshot_reader):
+                read_snapshot = cast(
+                    Callable[
+                        [],
+                        tuple[list[dict[str, Any]], list[dict[str, Any]]],
+                    ],
+                    snapshot_reader,
+                )
+                broker_positions, broker_orders_raw = read_snapshot()
+            else:
+                broker_positions = self._broker.positions()
+                broker_orders_raw = self._broker.open_orders()
             broker_open = [
                 str(o.get("client_order_id", ""))
                 for o in broker_orders_raw

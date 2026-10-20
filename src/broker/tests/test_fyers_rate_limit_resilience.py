@@ -17,6 +17,9 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
+import pytest
+
+import broker.providers.fyers.session_adapter as session_adapter
 from app.services.broker_manager import BrokerManager
 from broker.error_taxonomy import parse_retry_after
 from broker.providers.fyers.auto_auth import FyersAutoAuthEngine
@@ -149,6 +152,144 @@ def test_fyers_session_adapter_profile_caching() -> None:
     # Disconnect clears cache
     adapter.disconnect()
     assert adapter._profile_cache is None
+
+
+def test_reconciliation_snapshot_coalesces_per_symbol_session_fanout() -> None:
+    """22 per-symbol sessions must not issue 44 account reads in one cycle.
+
+    Regression for the LIVE blocker: every LiveSession reconciles the same
+    account, so an uncached adapter produced positions+orders per symbol
+    inside a sub-second loop and FYERS answered HTTP 429.
+    """
+    calls: list[str] = []
+
+    def get_json(url: str, headers: dict[str, str] | None = None) -> dict[str, Any]:
+        _ = headers
+        calls.append(url)
+        if url.endswith("/positions"):
+            return {"s": "ok", "netPositions": [{"symbol": "NSE:NETWEB-EQ", "quantity": 1}]}
+        if url.endswith("/orders"):
+            return {"s": "ok", "orderBook": []}
+        raise AssertionError(f"unexpected URL: {url}")
+
+    transport = MagicMock()
+    transport.get_json.side_effect = get_json
+    adapter = FyersSessionAdapter(
+        app_id="test_app-100",
+        access_token="test_token",
+        transport=transport,
+        enable_order_ws=False,
+        account_snapshot_cache_s=60.0,
+    )
+
+    snapshots = [adapter.reconciliation_snapshot() for _ in range(22)]
+
+    expected_positions = [{"symbol": "NSE:NETWEB-EQ", "quantity": 1}]
+    assert all(positions == expected_positions for positions, _ in snapshots)
+    assert all(orders == [] for _, orders in snapshots)
+    assert sum(url.endswith("/positions") for url in calls) == 1
+    assert sum(url.endswith("/orders") for url in calls) == 1
+
+
+def test_failed_reconciliation_snapshot_is_shared_and_still_raises() -> None:
+    """A 429 is shared across sessions, never suppressed or retried 22 times."""
+    calls: list[str] = []
+
+    def get_json(url: str, headers: dict[str, str] | None = None) -> dict[str, Any]:
+        _ = headers
+        calls.append(url)
+        raise AuthError(
+            "rate limited by venue (HTTP 429, retry in 5s)",
+            code="RATE_LIMITED",
+            http_status=429,
+        )
+
+    transport = MagicMock()
+    transport.get_json.side_effect = get_json
+    adapter = FyersSessionAdapter(
+        app_id="test_app-100",
+        access_token="test_token",
+        transport=transport,
+        enable_order_ws=False,
+        account_snapshot_cache_s=60.0,
+    )
+
+    for _ in range(22):
+        with pytest.raises(AuthError) as exc_info:
+            adapter.reconciliation_snapshot()
+        assert exc_info.value.code == "RATE_LIMITED"
+        assert exc_info.value.http_status == 429
+
+    assert len(calls) == 1
+
+
+def test_reconciliation_snapshot_cache_expires(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cached snapshot is short-lived; the next window reads broker truth again."""
+    calls: list[str] = []
+
+    def get_json(url: str, headers: dict[str, str] | None = None) -> dict[str, Any]:
+        _ = headers
+        calls.append(url)
+        if url.endswith("/positions"):
+            return {"s": "ok", "netPositions": []}
+        if url.endswith("/orders"):
+            return {"s": "ok", "orderBook": []}
+        raise AssertionError(f"unexpected URL: {url}")
+
+    transport = MagicMock()
+    transport.get_json.side_effect = get_json
+    adapter = FyersSessionAdapter(
+        app_id="test_app-100",
+        access_token="test_token",
+        transport=transport,
+        enable_order_ws=False,
+        account_snapshot_cache_s=5.0,
+    )
+
+    clock = [1000.0]
+    monkeypatch.setattr(session_adapter.time, "monotonic", lambda: clock[0])
+
+    adapter.reconciliation_snapshot()
+    adapter.reconciliation_snapshot()
+    assert len(calls) == 2
+
+    clock[0] += 5.1
+    adapter.reconciliation_snapshot()
+    assert len(calls) == 4
+
+
+def test_generic_account_reads_stay_uncached() -> None:
+    """Only reconciliation shares a snapshot; direct callers still read fresh."""
+    calls: list[str] = []
+
+    def get_json(url: str, headers: dict[str, str] | None = None) -> dict[str, Any]:
+        _ = headers
+        calls.append(url)
+        if url.endswith("/positions"):
+            return {"s": "ok", "netPositions": []}
+        if url.endswith("/orders"):
+            return {"s": "ok", "orderBook": []}
+        raise AssertionError(f"unexpected URL: {url}")
+
+    transport = MagicMock()
+    transport.get_json.side_effect = get_json
+    adapter = FyersSessionAdapter(
+        app_id="test_app-100",
+        access_token="test_token",
+        transport=transport,
+        enable_order_ws=False,
+        account_snapshot_cache_s=60.0,
+    )
+
+    adapter.positions()
+    adapter.positions()
+    adapter.open_orders()
+    adapter.open_orders()
+
+    assert sum(url.endswith("/positions") for url in calls) == 2
+    assert sum(url.endswith("/orders") for url in calls) == 2
 
 
 # ---------------------------------------------------------------------------

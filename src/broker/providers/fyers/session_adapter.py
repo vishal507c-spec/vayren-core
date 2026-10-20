@@ -14,6 +14,7 @@ import threading
 import time
 import urllib.parse
 from collections.abc import Callable
+from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any
 
@@ -77,6 +78,22 @@ STATE_CONNECTED = "CONNECTED"
 STATE_RECONNECTING = "RECONNECTING"
 STATE_ERROR = "ERROR"
 
+#: Account-level reads are shared by every per-symbol LiveSession attached to
+#: this one authenticated adapter. Reconciliation asks each session in turn,
+#: so without coalescing a 22-symbol fleet fires 44 REST reads inside one
+#: sub-second loop and the venue answers HTTP 429. The snapshot is broker truth
+#: from the first caller in the window; failures are cached and re-raised
+#: unchanged (a 429 still blocks every session, it just is not hammered 22x).
+ACCOUNT_SNAPSHOT_CACHE_SECONDS = 5.0
+
+
+@dataclass(frozen=True)
+class _AccountSnapshotCacheEntry:
+    fetched_at: float
+    positions: tuple[dict[str, Any], ...] = ()
+    orders: tuple[dict[str, Any], ...] = ()
+    error: Exception | None = None
+
 
 class FyersSessionAdapter:
     """FYERS trading adapter bound to one verified access token."""
@@ -92,6 +109,7 @@ class FyersSessionAdapter:
         poll_interval_s: float = 1.0,
         order_socket_factory: Callable[..., Any] | None = None,
         enable_order_ws: bool = True,
+        account_snapshot_cache_s: float = ACCOUNT_SNAPSHOT_CACHE_SECONDS,
     ) -> None:
         self._app_id = str(app_id or "")
         self._token = str(access_token or "")
@@ -106,6 +124,11 @@ class FyersSessionAdapter:
         # Short-lived profile cache to avoid duplicate burst requests to /profile
         self._profile_cache: tuple[float, dict[str, Any]] | None = None
         self._profile_cache_ttl_s: float = 5.0
+
+        # One account snapshot serves all per-symbol reconciliation callers.
+        self._account_snapshot_lock = threading.Lock()
+        self._account_snapshot_cache: _AccountSnapshotCacheEntry | None = None
+        self._account_snapshot_cache_s = max(0.0, float(account_snapshot_cache_s))
 
         # Order WebSocket and stream state
         self._order_socket_factory = order_socket_factory
@@ -195,6 +218,7 @@ class FyersSessionAdapter:
         except Exception as exc:
             raise AuthError(f"FYERS session rejected: {exc}", code="AUTH") from None
         self._connected = True
+        self._invalidate_account_snapshot()
         # An explicit (re)connect is the operator saying "try again".
         self._order_ws_suspended_until = 0.0
         self._order_ws_flaps = 0
@@ -204,6 +228,7 @@ class FyersSessionAdapter:
 
     def disconnect(self) -> None:
         self._profile_cache = None
+        self._invalidate_account_snapshot()
         self._stop_order_ws()
         self._connected = False
 
@@ -748,14 +773,71 @@ class FyersSessionAdapter:
 
     def positions(self) -> list[dict[str, Any]]:
         """Net positions (empty when flat; honest failure otherwise)."""
+        return self._read_positions()
+
+    def open_orders(self) -> list[dict[str, Any]]:
+        """Open order book rows (empty when none)."""
+        return self._read_orders()
+
+    def reconciliation_snapshot(self) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """One account snapshot shared by every per-symbol reconciliation.
+
+        The live service runs one ``LiveSession`` per configured symbol against
+        this single authenticated adapter. Each session reconciles the same
+        account independently, so a 22-symbol fleet would otherwise issue 44
+        REST reads (positions + orders) inside one sub-second loop. FYERS
+        rate-limits that burst with HTTP 429, which every later session
+        correctly records as a blocking transport error.
+
+        A short-lived cache makes every session compare the SAME broker truth
+        and lets the venue see at most one pair of reads per window. Failures
+        are cached for the same window and re-raised unchanged: a 429 is
+        shared, never suppressed or converted into a successful reconcile.
+        Generic ``positions()`` / ``open_orders()`` stay uncached so callers
+        that need a fresh read still get one.
+        """
+        if self._account_snapshot_cache_s <= 0:
+            return self._read_positions(), self._read_orders()
+
+        now = time.monotonic()
+        with self._account_snapshot_lock:
+            cached = self._account_snapshot_cache
+            if cached is not None and now - cached.fetched_at < self._account_snapshot_cache_s:
+                if cached.error is not None:
+                    raise cached.error
+                return (
+                    [dict(row) for row in cached.positions],
+                    [dict(row) for row in cached.orders],
+                )
+
+            try:
+                positions = self._read_positions()
+                orders = self._read_orders()
+            except Exception as exc:
+                self._account_snapshot_cache = _AccountSnapshotCacheEntry(
+                    fetched_at=time.monotonic(), error=exc
+                )
+                raise
+            self._account_snapshot_cache = _AccountSnapshotCacheEntry(
+                fetched_at=time.monotonic(),
+                positions=tuple(dict(row) for row in positions),
+                orders=tuple(dict(row) for row in orders),
+            )
+            return positions, orders
+
+    def _invalidate_account_snapshot(self) -> None:
+        """Drop the shared snapshot after any account-changing operation."""
+        with self._account_snapshot_lock:
+            self._account_snapshot_cache = None
+
+    def _read_positions(self) -> list[dict[str, Any]]:
         body = self._get("positions")
         rows = body.get("netPositions", []) if isinstance(body, dict) else []
         if not isinstance(rows, list):
             return []
         return [row for row in rows if isinstance(row, dict)]
 
-    def open_orders(self) -> list[dict[str, Any]]:
-        """Open order book rows (empty when none)."""
+    def _read_orders(self) -> list[dict[str, Any]]:
         body = self._get("orders")
         rows = body.get("orderBook", []) if isinstance(body, dict) else []
         if not isinstance(rows, list):
@@ -901,6 +983,7 @@ class FyersSessionAdapter:
         """
         _ = idempotency_key
         self._require_usable()
+        self._invalidate_account_snapshot()
 
         if not client_order_id:
             raise BrokerError("client order id required", code=ErrorCode.INVALID_REQUEST)
@@ -954,6 +1037,7 @@ class FyersSessionAdapter:
             # Check if order landed despite network timeout
             resolved = self._resolve_unknown_tag(client_order_id, exc)
             if resolved is not None:
+                self._invalidate_account_snapshot()
                 return resolved
 
             logger.error("ORDER_REJECTED broker=FYERS reason=%s", str(exc))
@@ -988,6 +1072,7 @@ class FyersSessionAdapter:
         )
 
         self._seen_client_ids[client_order_id] = broker_id
+        self._invalidate_account_snapshot()
         return broker_id
 
     def cancel_order(self, broker_order_id: str) -> bool:
@@ -995,6 +1080,7 @@ class FyersSessionAdapter:
         self._require_usable()
         if not broker_order_id:
             raise BrokerError("broker order id required", code=ErrorCode.INVALID_REQUEST)
+        self._invalidate_account_snapshot()
 
         payload = {"id": str(broker_order_id)}
         try:
@@ -1005,8 +1091,10 @@ class FyersSessionAdapter:
             raise self._mapped(exc, "cancel failed") from None
 
         if isinstance(resp, dict) and resp.get("s") == "ok":
+            self._invalidate_account_snapshot()
             return True
         if isinstance(resp, dict) and self._is_terminal_miss_msg(str(resp.get("message", ""))):
+            self._invalidate_account_snapshot()
             return False
         raise self._error_from_fyers_response(resp)
 
@@ -1017,6 +1105,7 @@ class FyersSessionAdapter:
         self._require_usable()
         if not broker_order_id:
             raise BrokerError("broker order id required", code=ErrorCode.INVALID_REQUEST)
+        self._invalidate_account_snapshot()
 
         payload: dict[str, Any] = {"id": str(broker_order_id)}
         if quantity is not None:
@@ -1041,8 +1130,10 @@ class FyersSessionAdapter:
             raise self._mapped(exc, "modify failed") from None
 
         if isinstance(resp, dict) and resp.get("s") == "ok":
+            self._invalidate_account_snapshot()
             return True
         if isinstance(resp, dict) and self._is_terminal_miss_msg(str(resp.get("message", ""))):
+            self._invalidate_account_snapshot()
             return False
         raise self._error_from_fyers_response(resp)
 
@@ -1059,6 +1150,7 @@ class FyersSessionAdapter:
                 break
 
         if ws_events:
+            self._invalidate_account_snapshot()
             return tuple(ws_events)
 
         # 2. Polling fallback if order WS not connected or no WS events arrived
@@ -1080,6 +1172,8 @@ class FyersSessionAdapter:
 
         self._last_orders = snapshot
         self._cached_snapshot = tuple(snapshot.values())
+        if events:
+            self._invalidate_account_snapshot()
         return tuple(events)
 
     def on_market_price(self, symbol: str, price: float, timestamp: str) -> None:

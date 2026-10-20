@@ -74,6 +74,10 @@ class _MockBroker(BrokerAdapter):
         self.mock_open_orders: list[dict[str, Any]] = []
         self.mock_positions: list[dict[str, Any]] = []
         self.streamed_events: list[dict[str, Any]] = []
+        self.reconciliation_snapshot_calls = 0
+        self.positions_calls = 0
+        self.open_orders_calls = 0
+        self.snapshot_error: Exception | None = None
 
     @property
     def name(self) -> str:
@@ -101,10 +105,18 @@ class _MockBroker(BrokerAdapter):
         return {"account_id": "ACC123"}
 
     def positions(self) -> list[dict[str, Any]]:
+        self.positions_calls += 1
         return list(self.mock_positions)
 
     def open_orders(self) -> list[dict[str, Any]]:
+        self.open_orders_calls += 1
         return list(self.mock_open_orders)
+
+    def reconciliation_snapshot(self) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        self.reconciliation_snapshot_calls += 1
+        if self.snapshot_error is not None:
+            raise self.snapshot_error
+        return list(self.mock_positions), list(self.mock_open_orders)
 
     def place_order(self, plan: OrderPlan, client_order_id: str) -> str:  # noqa: ARG002
         self.orders_placed.append(client_order_id)
@@ -539,6 +551,50 @@ def test_periodic_reconciliation_in_live_mode(tmp_path: Any) -> None:
     session.step(t0 + 35.0)
     kinds1 = [e.kind for e in session.journal.entries]
     assert "RECONCILED" in kinds1
+
+
+def test_reconciliation_uses_one_coalesced_account_snapshot(tmp_path: Any) -> None:
+    """A session must prefer the adapter's shared snapshot, not two fresh reads."""
+    session = _make_live_session(tmp_path)
+    broker: _MockBroker = session._broker  # type: ignore[assignment]
+    broker.reconciliation_snapshot_calls = 0
+    broker.positions_calls = 0
+    broker.open_orders_calls = 0
+
+    rec = session.reconcile_now()
+
+    assert rec.blocks_live is False
+    assert broker.reconciliation_snapshot_calls == 1
+    assert broker.positions_calls == 0
+    assert broker.open_orders_calls == 0
+
+
+def test_reconciliation_falls_back_without_snapshot_surface(tmp_path: Any) -> None:
+    """Adapters without the optional coalesced surface keep direct reads."""
+    session = _make_live_session(tmp_path)
+    broker: _MockBroker = session._broker  # type: ignore[assignment]
+    broker.reconciliation_snapshot = None  # type: ignore[method-assign]
+
+    rec = session.reconcile_now()
+
+    assert rec.blocks_live is False
+    assert broker.positions_calls == 1
+    assert broker.open_orders_calls == 1
+
+
+def test_reconciliation_snapshot_failure_still_blocks_live(tmp_path: Any) -> None:
+    """Coalescing must never turn a transport/rate-limit failure into SAFE."""
+    session = _make_live_session(tmp_path)
+    broker: _MockBroker = session._broker  # type: ignore[assignment]
+    broker.snapshot_error = RuntimeError("rate limited by venue (HTTP 429, retry in 5s)")
+
+    rec = session.reconcile_now()
+
+    assert rec.blocks_live is True
+    assert rec.orders.matched is False
+    assert rec.orders.mismatches[0].local == "transport_error"
+    assert "rate limited" in rec.orders.mismatches[0].broker
+    assert any(entry.kind == "RECONCILE_ERROR" for entry in session.journal.entries)
 
 
 def test_missing_broker_in_live_fails_closed(tmp_path: Any) -> None:
