@@ -304,220 +304,219 @@ fn sync_broker_ui(
             || (r_lower.contains("failed")
                 && !r_lower.contains("market_data")
                 && !r_lower.contains("market data")));
-        let is_timeout = (r_lower.contains("timeout")
-            || r_lower.contains("timed out")
-            || r_lower.contains("unreachable"))
-            && !is_auth_fail;
+    let is_timeout = (r_lower.contains("timeout")
+        || r_lower.contains("timed out")
+        || r_lower.contains("unreachable"))
+        && !is_auth_fail;
 
-        if is_timeout {
-            ui.set_conn_pill_label("Connection Failed (Timeout)".into());
-            ui.set_conn_pill_tone(3);
-            ui.set_conn_is_connected(false);
-            ui.set_conn_is_failed(true);
-            ui.set_conn_form_enabled(true);
-            ui.set_conn_cta_enabled(true);
-            ui.set_conn_error_message(reason.into());
-            ui.set_conn_status_message(
-                format!("Connection timed out: {reason}. Check network/venue status and retry.")
-                    .into(),
-            );
-            ui.set_conn_description(
-                "Broker API timed out / venue unreachable. Check network connectivity and retry."
-                    .into(),
-            );
-            ui.set_conn_progress(
-                std::rc::Rc::new(slint::VecModel::from(
-                    vayren_domain::broker_connection::progress_steps(
-                        vayren_domain::broker_connection::ConnectionState::Failed,
-                    )
-                    .into_iter()
-                    .map(|s| vayren_shell::ProgressStepView {
-                        index: s.index,
-                        title: s.title.into(),
-                        subtitle: s.subtitle.into(),
-                        state: s.state,
-                    })
-                    .collect::<Vec<_>>(),
-                ))
+    if is_timeout {
+        ui.set_conn_pill_label("Connection Failed (Timeout)".into());
+        ui.set_conn_pill_tone(3);
+        ui.set_conn_is_connected(false);
+        ui.set_conn_is_failed(true);
+        ui.set_conn_form_enabled(true);
+        ui.set_conn_cta_enabled(true);
+        ui.set_conn_error_message(reason.into());
+        ui.set_conn_status_message(
+            format!("Connection timed out: {reason}. Check network/venue status and retry.").into(),
+        );
+        ui.set_conn_description(
+            "Broker API timed out / venue unreachable. Check network connectivity and retry."
                 .into(),
-            );
-        } else if connected && status == "CONNECTED" && !is_auth_fail {
-            ui.set_conn_pill_label("Connected".into());
-            ui.set_conn_pill_tone(1);
-            ui.set_conn_is_connected(true);
-            ui.set_conn_is_failed(false);
-            ui.set_conn_error_message("".into());
-            ui.set_conn_status_message(if !reason.is_empty() {
-                format!("Connection verified: {reason}").into()
-            } else {
-                "Connection verified.".into()
-            });
-            ui.set_conn_description(if !account_id.is_empty() {
-                format!("Connected: authenticated as {account_id}").into()
-            } else {
-                "Account connected and verified. Ready to trade.".into()
-            });
-            ui.set_conn_progress(
-                std::rc::Rc::new(slint::VecModel::from(
-                    vayren_domain::broker_connection::progress_steps(
-                        vayren_domain::broker_connection::ConnectionState::Connected,
-                    )
-                    .into_iter()
-                    .map(|s| vayren_shell::ProgressStepView {
-                        index: s.index,
-                        title: s.title.into(),
-                        subtitle: s.subtitle.into(),
-                        state: s.state,
-                    })
-                    .collect::<Vec<_>>(),
-                ))
-                .into(),
-            );
-        } else if is_auth_fail || status == "ERROR" || status == "CONNECTION FAILED" {
-            ui.set_conn_pill_label("Connection Failed".into());
-            ui.set_conn_pill_tone(3);
-            ui.set_conn_is_connected(false);
-            ui.set_conn_is_failed(true);
-            ui.set_conn_form_enabled(true);
-            ui.set_conn_cta_enabled(true);
-            ui.set_conn_error_message(reason.into());
-            ui.set_conn_status_message(
-                format!("Authentication failed: {reason}. Check your credentials and try again.")
-                    .into(),
-            );
-            ui.set_conn_description("Connection failed. Review the details and retry.".into());
-            ui.set_conn_progress(
-                std::rc::Rc::new(slint::VecModel::from(
-                    vayren_domain::broker_connection::progress_steps(
-                        vayren_domain::broker_connection::ConnectionState::Failed,
-                    )
-                    .into_iter()
-                    .map(|s| vayren_shell::ProgressStepView {
-                        index: s.index,
-                        title: s.title.into(),
-                        subtitle: s.subtitle.into(),
-                        state: s.state,
-                    })
-                    .collect::<Vec<_>>(),
-                ))
-                .into(),
-            );
-        } else if status == "DISCONNECTED" || !connected {
-            ui.set_conn_pill_label("Not Connected".into());
-            ui.set_conn_pill_tone(3);
-            ui.set_conn_is_connected(false);
-            ui.set_conn_is_failed(false);
-            ui.set_conn_error_message(reason.into());
-            ui.set_conn_status_message(if !reason.is_empty() {
-                format!("Disconnected: {reason}").into()
-            } else {
-                "Disconnected. Enter credentials to connect.".into()
-            });
-            ui.set_conn_description(
-                format!(
-                    "Connect your {} account to start trading.",
-                    name.to_uppercase()
+        );
+        ui.set_conn_progress(
+            std::rc::Rc::new(slint::VecModel::from(
+                vayren_domain::broker_connection::progress_steps(
+                    vayren_domain::broker_connection::ConnectionState::Failed,
                 )
+                .into_iter()
+                .map(|s| vayren_shell::ProgressStepView {
+                    index: s.index,
+                    title: s.title.into(),
+                    subtitle: s.subtitle.into(),
+                    state: s.state,
+                })
+                .collect::<Vec<_>>(),
+            ))
+            .into(),
+        );
+    } else if connected && status == "CONNECTED" && !is_auth_fail {
+        ui.set_conn_pill_label("Connected".into());
+        ui.set_conn_pill_tone(1);
+        ui.set_conn_is_connected(true);
+        ui.set_conn_is_failed(false);
+        ui.set_conn_error_message("".into());
+        ui.set_conn_status_message(if !reason.is_empty() {
+            format!("Connection verified: {reason}").into()
+        } else {
+            "Connection verified.".into()
+        });
+        ui.set_conn_description(if !account_id.is_empty() {
+            format!("Connected: authenticated as {account_id}").into()
+        } else {
+            "Account connected and verified. Ready to trade.".into()
+        });
+        ui.set_conn_progress(
+            std::rc::Rc::new(slint::VecModel::from(
+                vayren_domain::broker_connection::progress_steps(
+                    vayren_domain::broker_connection::ConnectionState::Connected,
+                )
+                .into_iter()
+                .map(|s| vayren_shell::ProgressStepView {
+                    index: s.index,
+                    title: s.title.into(),
+                    subtitle: s.subtitle.into(),
+                    state: s.state,
+                })
+                .collect::<Vec<_>>(),
+            ))
+            .into(),
+        );
+    } else if is_auth_fail || status == "ERROR" || status == "CONNECTION FAILED" {
+        ui.set_conn_pill_label("Connection Failed".into());
+        ui.set_conn_pill_tone(3);
+        ui.set_conn_is_connected(false);
+        ui.set_conn_is_failed(true);
+        ui.set_conn_form_enabled(true);
+        ui.set_conn_cta_enabled(true);
+        ui.set_conn_error_message(reason.into());
+        ui.set_conn_status_message(
+            format!("Authentication failed: {reason}. Check your credentials and try again.")
                 .into(),
-            );
-            ui.set_conn_progress(
-                std::rc::Rc::new(slint::VecModel::from(
-                    vayren_domain::broker_connection::progress_steps(
-                        vayren_domain::broker_connection::ConnectionState::NotConfigured,
-                    )
-                    .into_iter()
-                    .map(|s| vayren_shell::ProgressStepView {
-                        index: s.index,
-                        title: s.title.into(),
-                        subtitle: s.subtitle.into(),
-                        state: s.state,
-                    })
-                    .collect::<Vec<_>>(),
-                ))
-                .into(),
-            );
-        }
+        );
+        ui.set_conn_description("Connection failed. Review the details and retry.".into());
+        ui.set_conn_progress(
+            std::rc::Rc::new(slint::VecModel::from(
+                vayren_domain::broker_connection::progress_steps(
+                    vayren_domain::broker_connection::ConnectionState::Failed,
+                )
+                .into_iter()
+                .map(|s| vayren_shell::ProgressStepView {
+                    index: s.index,
+                    title: s.title.into(),
+                    subtitle: s.subtitle.into(),
+                    state: s.state,
+                })
+                .collect::<Vec<_>>(),
+            ))
+            .into(),
+        );
+    } else if status == "DISCONNECTED" || !connected {
+        ui.set_conn_pill_label("Not Connected".into());
+        ui.set_conn_pill_tone(3);
+        ui.set_conn_is_connected(false);
+        ui.set_conn_is_failed(false);
+        ui.set_conn_error_message(reason.into());
+        ui.set_conn_status_message(if !reason.is_empty() {
+            format!("Disconnected: {reason}").into()
+        } else {
+            "Disconnected. Enter credentials to connect.".into()
+        });
+        ui.set_conn_description(
+            format!(
+                "Connect your {} account to start trading.",
+                name.to_uppercase()
+            )
+            .into(),
+        );
+        ui.set_conn_progress(
+            std::rc::Rc::new(slint::VecModel::from(
+                vayren_domain::broker_connection::progress_steps(
+                    vayren_domain::broker_connection::ConnectionState::NotConfigured,
+                )
+                .into_iter()
+                .map(|s| vayren_shell::ProgressStepView {
+                    index: s.index,
+                    title: s.title.into(),
+                    subtitle: s.subtitle.into(),
+                    state: s.state,
+                })
+                .collect::<Vec<_>>(),
+            ))
+            .into(),
+        );
+    }
 
-        // Keep sidebar broker rows in sync with the authoritative backend state
-        let brokers_list: Vec<vayren_shell::BrokerRowView> =
-            if let Some(arr) = sections.get("brokers").and_then(|v| v.as_array()) {
-                arr.iter()
-                    .map(|item| {
-                        let id = item
-                            .get("id")
+    // Keep sidebar broker rows in sync with the authoritative backend state
+    let brokers_list: Vec<vayren_shell::BrokerRowView> =
+        if let Some(arr) = sections.get("brokers").and_then(|v| v.as_array()) {
+            arr.iter()
+                .map(|item| {
+                    let id = item
+                        .get("id")
+                        .and_then(|s| s.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let dname = item
+                        .get("display_name")
+                        .or_else(|| item.get("name"))
+                        .and_then(|s| s.as_str())
+                        .unwrap_or(&id)
+                        .to_string();
+                    let is_conn = item
+                        .get("connected")
+                        .and_then(|c| c.as_bool())
+                        .unwrap_or(false);
+                    let selected = item
+                        .get("selected")
+                        .and_then(|c| c.as_bool())
+                        .unwrap_or(false)
+                        || id.to_lowercase() == name.to_lowercase();
+                    vayren_shell::BrokerRowView {
+                        id: id.clone().into(),
+                        display_name: dname.clone().into(),
+                        mark: dname
+                            .chars()
+                            .next()
+                            .map(|c| c.to_uppercase().to_string())
+                            .unwrap_or_else(|| "?".into())
+                            .into(),
+                        venue_subtitle: item
+                            .get("venue_subtitle")
                             .and_then(|s| s.as_str())
                             .unwrap_or("")
-                            .to_string();
-                        let dname = item
-                            .get("display_name")
-                            .or_else(|| item.get("name"))
-                            .and_then(|s| s.as_str())
-                            .unwrap_or(&id)
-                            .to_string();
-                        let is_conn = item
-                            .get("connected")
-                            .and_then(|c| c.as_bool())
-                            .unwrap_or(false);
-                        let selected = item
-                            .get("selected")
-                            .and_then(|c| c.as_bool())
-                            .unwrap_or(false)
-                            || id.to_lowercase() == name.to_lowercase();
-                        vayren_shell::BrokerRowView {
-                            id: id.clone().into(),
-                            display_name: dname.clone().into(),
-                            mark: dname
-                                .chars()
-                                .next()
-                                .map(|c| c.to_uppercase().to_string())
-                                .unwrap_or_else(|| "?".into())
-                                .into(),
-                            venue_subtitle: item
-                                .get("venue_subtitle")
-                                .and_then(|s| s.as_str())
-                                .unwrap_or("")
-                                .into(),
-                            status_label: (if is_conn {
-                                "Connected"
-                            } else {
-                                "Not Connected"
-                            })
                             .into(),
-                            status_tone: if is_conn { 1 } else { 0 },
-                            selected,
-                            connected: is_conn,
-                        }
-                    })
-                    .collect()
-            } else {
-                vec![
-                    vayren_shell::BrokerRowView {
-                        id: "fyers".into(),
-                        display_name: "FYERS".into(),
-                        mark: "F".into(),
-                        venue_subtitle: "FYERS API v3".into(),
-                        status_label: (if connected {
+                        status_label: (if is_conn {
                             "Connected"
                         } else {
                             "Not Connected"
                         })
                         .into(),
-                        status_tone: if connected { 1 } else { 0 },
-                        selected: true,
-                        connected,
-                    },
-                    vayren_shell::BrokerRowView {
-                        id: "zerodha".into(),
-                        display_name: "Zerodha".into(),
-                        mark: "Z".into(),
-                        venue_subtitle: "Kite Connect".into(),
-                        status_label: "Not Connected".into(),
-                        status_tone: 0,
-                        selected: false,
-                        connected: false,
-                    },
-                ]
-            };
+                        status_tone: if is_conn { 1 } else { 0 },
+                        selected,
+                        connected: is_conn,
+                    }
+                })
+                .collect()
+        } else {
+            vec![
+                vayren_shell::BrokerRowView {
+                    id: "fyers".into(),
+                    display_name: "FYERS".into(),
+                    mark: "F".into(),
+                    venue_subtitle: "FYERS API v3".into(),
+                    status_label: (if connected {
+                        "Connected"
+                    } else {
+                        "Not Connected"
+                    })
+                    .into(),
+                    status_tone: if connected { 1 } else { 0 },
+                    selected: true,
+                    connected,
+                },
+                vayren_shell::BrokerRowView {
+                    id: "zerodha".into(),
+                    display_name: "Zerodha".into(),
+                    mark: "Z".into(),
+                    venue_subtitle: "Kite Connect".into(),
+                    status_label: "Not Connected".into(),
+                    status_tone: 0,
+                    selected: false,
+                    connected: false,
+                },
+            ]
+        };
     ui.set_conn_brokers(std::rc::Rc::new(slint::VecModel::from(brokers_list)).into());
 }
 
@@ -1952,7 +1951,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         (form.broker_id.clone(), form.keys.clone())
                     } else {
                         let cur = cur_ws.borrow().selected_id.clone();
-                        let b_id = if !cur.is_empty() { cur } else { "fyers".to_string() };
+                        let b_id = if !cur.is_empty() {
+                            cur
+                        } else {
+                            "fyers".to_string()
+                        };
                         (b_id, Vec::new())
                     }
                 };
@@ -2086,7 +2089,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         form.broker_id.clone()
                     } else {
                         let cur = cur_ws.borrow().selected_id.clone();
-                        if !cur.is_empty() { cur } else { "fyers".to_string() }
+                        if !cur.is_empty() {
+                            cur
+                        } else {
+                            "fyers".to_string()
+                        }
                     }
                 };
                 send_remote_broker_command(
@@ -2180,7 +2187,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         form.broker_id.clone()
                     } else {
                         let cur = cur_ws.borrow().selected_id.clone();
-                        if !cur.is_empty() { cur } else { "fyers".to_string() }
+                        if !cur.is_empty() {
+                            cur
+                        } else {
+                            "fyers".to_string()
+                        }
                     }
                 };
                 send_remote_broker_command(

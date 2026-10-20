@@ -7,7 +7,12 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (fyers-reconciliation-429-fanout-20261020):** PER-SYMBOL LIVE RECONCILIATION NOW SHARES ONE ACCOUNT SNAPSHOT; DEPLOYED AND RECONCILIATION CLEARED (NO LIVE ORDERS; WORKER STOPPED) —
+**Latest update (ci-rustfmt-green-20261020):** CI `build-test` UNBLOCKED — PRE-EXISTING RUSTFMT DRIFT FIXED (FORMATTING ONLY) —
+- Last four red `main` runs failed in ~43s at `cargo fmt --check`, before build/tests: `crates/vayren-domain/src/live.rs` (long `assert!` lines) and `crates/vayren-shell/src/main.rs` (misindented `sync_broker_ui` block + one-line `if/else` expansions).
+- `cargo fmt --all` applied; `cargo fmt --all -- --check` and `cargo check -p vayren-domain -p vayren-shell` pass. No semantic change; Python suites and live behavior untouched.
+- All other CI jobs (`quality`, `validators`, both test shards, shell shard) were already green on the failing commit.
+
+**Previous update (fyers-reconciliation-429-fanout-20261020):** PER-SYMBOL LIVE RECONCILIATION NOW SHARES ONE ACCOUNT SNAPSHOT; DEPLOYED AND RECONCILIATION CLEARED (NO LIVE ORDERS; WORKER STOPPED) —
 - Root cause confirmed fleet-wide: the live service runs 22 per-symbol `LiveSession`s against one authenticated `FyersSessionAdapter`; every 30 s cycle each session independently called account-wide `positions()` + `open_orders()`, producing ~44 REST reads in under a second. FYERS answered HTTP 429; later sessions correctly recorded `RECONCILE_ERROR` and the readiness aggregator stayed `REQUIRED`. Successful cycles (first ~5–7 symbols) were `SAFE` / `mismatches=0`; no broker/local position or order mismatch existed. `NSE:NETWEB` was only one late symbol in the cycle, not a symbol-specific fault.
 - Fix: `FyersSessionAdapter.reconciliation_snapshot()` coalesces positions+orders behind a 5 s thread-safe cache used only by `LiveSession.reconcile_now()`; `positions()`/`open_orders()` remain uncached. Cache is invalidated on connect/disconnect, order place/cancel/modify and delivered order-stream events. Cached failures are re-raised unchanged: a 429 still blocks every session and is never converted to `SAFE`.
 - Regressions: `src/broker/tests/test_fyers_rate_limit_resilience.py` (+4: 22-session fan-out -> one positions + one orders read; shared 429 re-raised with one HTTP call; expiry refresh; generic reads uncached) and `src/execution/tests/test_live_reliability_hardening.py` (+3: session prefers snapshot, fallback for adapters without it, snapshot failure still blocks with `transport_error`/`RECONCILE_ERROR`). Focused broker+execution **30 passed**; ruff check/format and focused pyright clean.

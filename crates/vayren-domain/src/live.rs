@@ -7507,10 +7507,19 @@ mod tests {
             "start_blockers": []
         }));
         assert_eq!(st.session, SessionStatus::Running);
-        assert!(st.live_confirmed, "RUNNING snapshot in LIVE mode must synchronize live_confirmed = true");
-        assert!(st.start_blockers().is_empty(), "RUNNING session must not report consent blocker");
+        assert!(
+            st.live_confirmed,
+            "RUNNING snapshot in LIVE mode must synchronize live_confirmed = true"
+        );
+        assert!(
+            st.start_blockers().is_empty(),
+            "RUNNING session must not report consent blocker"
+        );
         let proj_running = project(&st);
-        assert!(proj_running.setup.blockers.is_empty(), "Projected blockers must be empty while RUNNING");
+        assert!(
+            proj_running.setup.blockers.is_empty(),
+            "Projected blockers must be empty while RUNNING"
+        );
         assert!(proj_running.setup.can_stop);
         assert!(!proj_running.setup.needs_live_confirm);
 
@@ -7530,7 +7539,10 @@ mod tests {
             "start_blockers": ["live confirmation required (explicit operator consent)"]
         }));
         assert_eq!(st.session, SessionStatus::Stopped);
-        assert!(!st.live_confirmed, "STOPPED snapshot must reset live_confirmed = false");
+        assert!(
+            !st.live_confirmed,
+            "STOPPED snapshot must reset live_confirmed = false"
+        );
         assert_eq!(st.start_blockers().len(), 1);
         let proj_stopped = project(&st);
         assert_eq!(proj_stopped.setup.blockers.len(), 1);
