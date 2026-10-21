@@ -289,6 +289,12 @@ def test_graph_has_no_canonical_prose() -> None:
     6,005 entities, 3,562,234 B) — product code, not narrative. Per-entity
     cost stays ~593 B (budget: 700 B), so the cap moved instead; 3.70MB
     covers the observed size plus headroom.
+    Justification for the 3.70MB -> 3.85MB bump (2026-10-21): the artifact
+    crossed the old cap because live UI defect fixes, reconciliation parity,
+    remote connection reaping hardening, and regression suites joined the tree
+    (6,210 entities, 3,733,475 B) — product code, not narrative. Per-entity
+    cost stays ~601 B (budget: 700 B), so the cap moved instead; 3.85MB
+    covers the observed size plus headroom.
     2. Per-entity budget + a max-string-length budget. These are what make the
        cap safe to raise: prose pasted into any field would blow the string
        budget long before it filled the entity budget, so a future dump cannot
@@ -298,7 +304,7 @@ def test_graph_has_no_canonical_prose() -> None:
     assert "INSERT OR IGNORE" not in text
     graph = json.loads(text)
     size = len(text.encode("utf-8"))
-    assert size < 3_700_000, f"graph artifact grew past the cap: {size} B"
+    assert size < 3_850_000, f"graph artifact grew past the cap: {size} B"
 
     entities = graph["entity_count"]
     assert entities > 0
