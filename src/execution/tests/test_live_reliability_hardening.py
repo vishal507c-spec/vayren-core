@@ -711,3 +711,88 @@ def test_missing_broker_in_live_fails_closed(tmp_path: Any) -> None:
     rec = session.reconcile_now()
     assert rec.blocks_live is True
     assert not rec.orders.matched
+
+
+def test_reconcile_now_reresolves_fresh_broker_when_venue_re_registers(tmp_path: Any) -> None:
+    """When a broker session expires and is re-authenticated under the same venue,
+    reconcile_now() automatically picks up the new adapter from the registry.
+    """
+    from dataclasses import replace
+
+    from broker.capabilities import CapabilitySet, Caps
+    from broker.faces import StaticPlugin
+    from broker.registry import BrokerRecord, default_registry
+    from broker.vocab import Domain
+
+    class _ExpiredBroker(_MockBroker):
+        def reconciliation_snapshot(self) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+            raise RuntimeError("token expired (HTTP 401)")
+
+    class _FreshBroker(_MockBroker):
+        def reconciliation_snapshot(self) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+            return [], []
+
+    expired = _ExpiredBroker()
+    fresh = _FreshBroker()
+    registry = default_registry()
+    venue = "test-re-register-venue"
+    caps = CapabilitySet(
+        domains=(Domain.TRADING,), items=frozenset((Caps.ORDERS_MARKET, Caps.ACCOUNT_FUNDS))
+    )
+
+    def _register(adapter: Any) -> None:
+        if venue in registry:
+            registry.unregister(venue)
+        registry.register(
+            BrokerRecord(
+                name=venue,
+                display_name=venue,
+                plugin=StaticPlugin(
+                    name=venue,
+                    display_name=venue,
+                    face_map={Domain.TRADING: adapter},
+                    capabilities=caps,
+                ),
+                capabilities=caps,
+                faces=(Domain.TRADING,),
+            )
+        )
+
+    try:
+        _register(expired)
+        session = _make_live_session(tmp_path)
+        all_gates = ModeGates(
+            live_trading_enabled=True,
+            broker_live_enabled=True,
+            account_confirmed=True,
+            risk_limits_valid=True,
+            kill_switch_off=True,
+        )
+        session._config = replace(session._config, adapter_name=venue, gates=all_gates)
+        session._broker = expired
+
+        # Expired broker causes reconcile failure
+        rec = session.reconcile_now()
+        assert rec.blocks_live is True
+        assert session._broker is expired
+
+        # Re-register fresh broker under the same venue
+        _register(fresh)
+
+        # Next reconcile_now automatically re-resolves and picks up fresh broker
+        rec2 = session.reconcile_now()
+        assert rec2.blocks_live is False
+        assert session._broker is fresh
+    finally:
+        if venue in registry:
+            registry.unregister(venue)
+
+
+def test_update_broker_explicitly_updates_session_broker(tmp_path: Any) -> None:
+    session = _make_live_session(tmp_path)
+    b1 = _MockBroker()
+    b2 = _MockBroker()
+    session._broker = b1
+    assert session._broker is b1
+    session.update_broker(b2)
+    assert session._broker is b2

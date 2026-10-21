@@ -7,7 +7,57 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (expired-vs-cancelled-20261020):** EXPIRED KEPT DISTINCT FROM CANCELLED IN THE STRATEGY ROUTER (NO DEPLOY, NO PUSH, NO ORDERS) —
+**Latest update (reconciliation-stale-broker-reresolve-20261021):** RECONCILIATION BLOCKER TRACED AND FIXED: LIVE SESSIONS AUTO-RE-RESOLVE FRESH BROKER ON TOKEN RE-AUTHENTICATION (LOCAL ONLY; NO DEPLOY, NO PUSH, ENGINE STOPPED) —
+- Confirmed Root Cause:
+  1. The deployed EC2 service (`vayren-remote`, PID 699535) has been running continuously since 23:28 IST yesterday (`uptime_seconds: 29897`).
+  2. At 06:00 IST (00:30 UTC), FYERS daily access tokens expired. The 22 running `LiveSession` instances in `LiveTradingService._sessions` executed periodic reconciliation (`reconcile_now()`) with the expired token, resulting in HTTP 401 Unauthorized (`FYERS positions request: unauthorized`).
+  3. The API Governor's `read_circuit` recorded consecutive failures and tripped to `OPEN` state.
+  4. At 07:00 IST (01:30 UTC), `BrokerManager` auto-authenticated and successfully saved the fresh access token (`vayren.fyers.session.json`). We confirmed with an isolated live probe that the fresh token connects and reconciles 0 positions / 0 orders in 0.2s without error.
+  5. However, `BrokerManager._activate()` instantiated a NEW `FyersSessionAdapter` and registered it into `default_registry()`, while the 22 existing `LiveSession` instances held references to the OLD `FyersSessionAdapter` created yesterday.
+  6. The 22 sessions never updated their `_broker` reference. Every 30 seconds, the old adapter probed in `HALF_OPEN` with the expired token, failed, and immediately tripped back to `OPEN` (`after 206 failures`), permanently locking `reconciliation.blocks_live = True`.
+  7. Furthermore, `src/remote/snapshot.py:97` mapped `status == "RUNNING"` with `recon.blocks_live = True` to `strategy: {"status": "BLOCKED", "reason": "reconciliation blocks live"}`, which `remote_live.rs` mapped to `"STOPPED"`. The UI thus displayed `Runtime: STOPPED` while the backend worker was actually `RUNNING`, showing a blocked `START` button and preventing the operator from stopping or restarting the session.
+- Surgical Fix:
+  1. `src/execution/runtime/session.py`: `LiveSession.reconcile_now()` now re-resolves the broker adapter from `default_registry()` if `self._config.adapter_name` is set, updating `self._broker` whenever a new adapter has been registered (e.g. following token refresh). Added `update_broker()` method.
+  2. `src/app/services/live_trading_service.py`: `attach_broker_view()` now triggers `s.reconcile_now()` across active sessions whenever `key != self._last_broker_key`, immediately re-binding and reconciling with the fresh broker upon connection or token update.
+  3. `crates/vayren-shell/src/remote_live.rs`: Ensured that a running backend worker (`worker.running == true`) maps `session_status` to `"RUNNING"` even if `strategy.status` is `"BLOCKED"`, ensuring the operator can always see the true runtime state and halt/stop the session.
+- Tests:
+  - `src/execution/tests/test_live_reliability_hardening.py`: 22 passed (new tests `test_reconcile_now_reresolves_fresh_broker_when_venue_re_registers`, `test_update_broker_explicitly_updates_session_broker`).
+  - `src/app/tests/test_live_readiness_authority.py`: 12 passed (new test `test_attach_broker_view_triggers_reconcile_on_active_sessions`).
+  - `cargo test -p vayren-shell --lib`: 67 passed, 0 failed.
+  - Python typing: `pyright` 0 errors. Formatting: `ruff check` / `ruff format --check` clean.
+- Strict Constraints Honored:
+  - Local inspection and fixes only.
+  - No EC2 deployment, no remote service restart, no git push, no live session start, no broker orders.
+
+**Previous update (live-ui-defects-surgical-fix-20261020):** 8 LIVE UI DEFECTS SURGICALLY FIXED AND VERIFIED (LOCAL ONLY; NOT COMMITTED/PUSHED) —
+- Fixed 8 defects identified in `crates/vayren-shell/ui/live.slint`:
+  1. LIVE confirmation banner mode check: changed `root.bar.mode == 2` to `root.bar.mode == 1` (`ExecMode::Live.kind()` returns `1`, `0` is Backtest; `2` was an obsolete check that prevented the banner from displaying).
+  2. Vertical scrolling added: Positions, Orders, Fills, and Live Events blotters wrapped in `ScrollView { vertical-stretch: 1; viewport-width: self.width; vertical-scrollbar-policy: as-needed; ... }` so rows can scroll instead of being clipped by parent layouts.
+  3. Orders table alignment: header given 9 columns matching row cells, with `STATUS` fixed to `70px` and a matching `DETAIL` column (`horizontal-stretch: 1`).
+  4. Selected instrument inspector: added `SELECTED INSTRUMENT & EXECUTION PIPELINE` card to display real-time backend fields from `selected-stock` (LTP, Entry, Stop, Qty, Risk Util, and 4-step pipeline status).
+  5. Compact responsive labels: blotter tab titles adapt (`root.blotters-compact ? "Pos" : "Positions"`, etc.) and Clear button uses compact `"✕"` when space is constrained.
+  6. Safety gate protection: LIVE confirmation button disabled if venue blockers exist (`can-confirm: root.setup.needs-live-confirm && root.venue-blockers.length == 0;`), reinforcing backend consent barriers.
+  7. Visual polish: removed trailing dash artifact in status banner when `start-reason` is empty (`root.start-reason != "" ? (" — " + root.start-reason) : ""`).
+  8. Code cleanliness & layout: corrected outdated blotter tab comments and wired up the orphaned `LiveFooter` at the bottom of `LiveScreen` for persistent venue, latency, and cycle diagnostics.
+- Tests: added dedicated regression suite [`crates/vayren-shell/tests/live_ui_defects_regression.rs`](file:///c:/Users/visha/Desktop/vayren-core/crates/vayren-shell/tests/live_ui_defects_regression.rs) (8 tests, all passed in 0.00s); existing shell regression tests pass.
+- Release build: `cargo build --release --bin vayren-shell`.
+- Strict constraints preserved: no EC2 deployment, no remote restart, no git push, no trading session start, no broker orders.
+
+**Previous update (live-ui-reconciliation-polish-20261020):** LIVE UI POLISHED — THE RECONCILIATION PANEL NOW SAYS WHY (COLOURED BY HEALTH, GATEWAY VOCABULARY INCLUDED) (LOCAL ONLY; NOT COMMITTED/PUSHED) —
+- Found while reading the LIVE surface after the EC2 deploy: the client coloured the reconciliation by LITERAL WORD (`CLEAN` green, `MISMATCH`/`BLOCKED` red, everything else neutral) — but the deployed gateway reports `SAFE` / `SYNCED` / `REQUIRED`. So a **blocking** reconciliation (`REQUIRED`, `blocks_live=true`) rendered in NEUTRAL colour, and the venue's reason was never shown at all (the shell dropped the snapshot's `detail`).
+- Second, worse defect found in the same pass: the gateway's blocker list can be EMPTY while the venue's own reconciliation blocks live (observed live on EC2: `strategy.reason = "reconciliation blocks live"`, `reconciliation = REQUIRED`, `blockers = []`). The LIVE verdict was derived from that empty list, so the screen could read **"✓ READY TO START"** while the venue was blocking the session. The domain now treats the venue's reconciliation verdict as a blocker of its own (with the venue's reason), so the verdict can no longer be green while the venue blocks.
+- Fix (`crates/vayren-domain/src/live.rs`, `crates/vayren-domain/src/portfolio.rs`, `crates/vayren-shell/src/remote_live.rs`, `crates/vayren-shell/src/shell.rs`):
+  - health is now a WORD SET, not one string: `reconciliation_is_healthy()` accepts `CLEAN/SAFE/SYNCED/OK/MATCHED/CLEAR`; the blocking set is `MISMATCH/BLOCKED/REQUIRED/ERROR/FAILED/UNSAFE`; an unknown word falls back to the venue's own `blocks_live` answer (fail-closed → red).
+  - the reconciliation panel gained a **REASON** row carrying the venue's own words (the gateway's `detail`, else `reason`) — the operator now sees *why* live is blocked (e.g. "reconcile transport error: rate limited by venue (HTTP 429)") instead of a bare status word; it alarms only while the reconciliation itself blocks.
+  - the top-bar recon card uses the same health rule, so a blocking reconciliation is red, a synced one green.
+  - the portfolio's "Account Sync" gate accepted only `CLEAN` → a healthy remote reconciliation rendered as a BROKEN gate. It now uses the same word set (`SAFE`/`SYNCED`/`CLEAN` → READY).
+  - the shell now carries the reconciliation `detail` into the live snapshot instead of dropping it.
+  - the domain's `start_blockers()` now adds the venue's reconciliation verdict (with the venue's own reason) when the venue says it blocks live, so the LIVE verdict and the blocker list can never read "READY TO START" while the venue blocks.
+- Known gap left in place: `live.slint` declares the six `[LiveKv]` row lists (strategy/position/risk/broker/recon/account) and renders NONE of them — the details are computed and shipped but never drawn; the LIVE screen shows the readiness panel (gates + blockers) instead. Rendering them is a layout change, not a polish tweak, so it was left for a deliberate pass.
+- Tests: `cargo test -p vayren-domain` **306 passed / 0 failed** (new: a blocking reconciliation is always a visible blocker + blocks START; a healthy one invents no blocker; remote REQUIRED shows the reason + alarms; SYNCED is green and silent; the Account Sync gate accepts SAFE/SYNCED/CLEAN) and `cargo test -p vayren-shell --lib` **67 passed / 0 failed** (new: the reconciliation detail reaches the live state). `cargo fmt --all -- --check` clean. One pre-existing index-based test was made key-based so a new row cannot shift it silently.
+- Not done: NOT committed and NOT pushed (no explicit push instruction for this change); the local packaged-remote client is being rebuilt so the polished LIVE screen is usable locally.
+
+**Previous update (expired-vs-cancelled-20261020):** EXPIRED KEPT DISTINCT FROM CANCELLED IN THE STRATEGY ROUTER (NO DEPLOY, NO PUSH, NO ORDERS) —
 - Remaining inconsistency: FYERS status 7 means EXPIRED in the broker/execution layers but was mapped to `CANCELLED` in `src/strategy/execution_router.py`, so an expired order was reported as a cancelled one.
 - Minimal change: `src/strategy/models/execution.py` now projects the existing Rust `OrderState` value `EXPIRED` (the vocabulary is a projection of the Rust states — no new state was invented) and exports it; the router's `_FYERS_NUMERIC_STATUS` maps 7 → `EXPIRED` and its string table maps `"EXPIRED"/"EXPIRE"` → `EXPIRED`. The router's contract, the broker's status table and the engine's `OrderState` now name the same four terminal states: 1 Cancelled · 2 Traded/Filled · 5 Rejected · 7 Expired.
 - Affected consumer found and fixed: the execution self-healer's order-status sync (`execution/reconciliation.py`) fell back to the string `"CANCELED"` (one L) for any other broker truth — a spelling the engine's `OrderState` does not have, so the reconcile was refused and swallowed, and an EXPIRED truth would have been labelled cancelled. It now uses the engine's vocabulary (`CANCELLED`/`EXPIRED`) and keeps the four terminal states apart. The app's session counters now count an expired order in the closed bucket (like a cancelled one) instead of in none.

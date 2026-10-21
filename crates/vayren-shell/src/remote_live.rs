@@ -662,11 +662,17 @@ pub fn apply_remote_sections(state: &mut LiveState, sections: &serde_json::Value
         translated.insert("capital".to_string(), serde_json::Value::Object(capital));
     }
     if !section(sections, "reconciliation").is_null() {
+        let recon = section(sections, "reconciliation");
+        let detail = text_at(sections, "reconciliation", "detail");
+        let reason = text_at(sections, "reconciliation", "reason");
         translated.insert(
             "reconciliation".to_string(),
             serde_json::json!({
                 "status": text_at(sections, "reconciliation", "status"),
-                "blocks_live": section(sections, "reconciliation")
+                // The venue's own words for WHY it is in this state, so the
+                // LIVE panel can show the reason and not just a status word.
+                "detail": if detail.is_empty() { reason } else { detail },
+                "blocks_live": recon
                     .get("blocks_live").and_then(|v| v.as_bool()).unwrap_or(true),
             }),
         );
@@ -1445,6 +1451,26 @@ mod tests {
             "gates": [],
             "as_of": "2026-10-06T00:00:00",
         })
+    }
+
+    #[test]
+    fn reconciliation_detail_is_carried_to_the_live_panel() {
+        // The venue's own reason must reach the UI: the panel shows WHY the
+        // reconciliation is in its state, not only a status word.
+        let mut sections = sections();
+        sections["reconciliation"] = json!({
+            "status": "REQUIRED",
+            "detail": "reconcile transport error: rate limited by venue (HTTP 429)",
+            "blocks_live": true
+        });
+        let mut state = LiveState::default();
+        apply_remote_sections(&mut state, &sections, false);
+        assert_eq!(state.reconciliation.status, "REQUIRED");
+        assert_eq!(
+            state.reconciliation.reason,
+            "reconcile transport error: rate limited by venue (HTTP 429)"
+        );
+        assert!(state.reconciliation.blocks_live);
     }
 
     #[test]

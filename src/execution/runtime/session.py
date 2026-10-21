@@ -1855,8 +1855,19 @@ class LiveSession:
     def reconciliation(self) -> ReconciliationState:
         return self._reconciliation
 
+    def update_broker(self, broker: BrokerAdapter) -> None:
+        """Update the underlying broker adapter (e.g. after venue re-authentication)."""
+        self._broker = broker
+
     def reconcile_now(self) -> ReconciliationState:
         """Compare ledger vs broker truth; live stays blocked on mismatch."""
+        if self._config.adapter_name:
+            with suppress(Exception):
+                current_broker, _, _ = resolve_broker(
+                    self._config.mode, self._config.gates, adapter_name=self._config.adapter_name
+                )
+                if current_broker is not None and current_broker is not self._broker:
+                    self._broker = current_broker
         if self._broker is None:
             if self._lifecycle.state == LifecycleState.RUNNING and self._mode == ExecutionMode.LIVE:
                 orders = ReconciliationReport(

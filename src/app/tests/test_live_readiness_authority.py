@@ -440,3 +440,16 @@ def test_probe_live_venue_accepts_a_freshly_verified_order_stream(
     assert face.verify_calls == 1
     assert set(md_faces) == {"NSE:KAYNES"}
     assert service._account_state["ready"] is True
+
+
+def test_attach_broker_view_triggers_reconcile_on_active_sessions(
+    service: LiveTradingService,
+) -> None:
+    reconciled = []
+    mock_session = SimpleNamespace(reconcile_now=lambda: reconciled.append(True))
+    service._sessions = {"NSE:KAYNES": mock_session}  # type: ignore[dict-item]
+
+    manager = _FakeManager(session_state="CONNECTED", auth_valid=True, version=10)
+    service.attach_broker_view(manager, SimpleNamespace(active_broker=lambda: "fyers"))
+
+    assert len(reconciled) == 1

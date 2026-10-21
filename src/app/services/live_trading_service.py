@@ -886,6 +886,9 @@ class LiveTradingService:
         if key != self._last_broker_key:
             self._last_broker_key = key
             self.invalidate_validation_cache()
+            for s in self._sessions.values():
+                with contextlib.suppress(Exception):
+                    s.reconcile_now()
 
     def _broker_key(self) -> tuple:
         """Connectivity triple driving cache invalidation (cheap strings).
