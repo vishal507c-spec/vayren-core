@@ -5,14 +5,15 @@ broker-neutral quote dicts ``{symbol, price, timestamp[, volume, ...]}`` —
 the same contract as the Zerodha market-data face, folded exactly once by
 the execution ``BrokerFeedProvider`` into its own closed-candle buckets.
 No execution-domain objects are built here (provider SDKs never import
-execution); tracks transport and heartbeat health, with
-auto-reconnection and subscription memory.
+execution); tracks transport and heartbeat health. Reconnection is owned by
+this adapter (single flight, bounded backoff), never by the vendor socket.
 """
 
 from __future__ import annotations
 
 import logging
 import queue
+import threading
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -46,6 +47,13 @@ STATE_CONNECTED = "CONNECTED"
 STATE_RECONNECTING = "RECONNECTING"
 STATE_ERROR = "ERROR"
 
+#: Bounded reconnect backoff in seconds; the last value repeats.
+RECONNECT_DELAYS: tuple[float, ...] = (2.0, 5.0, 10.0, 30.0)
+#: Attempts scheduled before the adapter stops and reports STATE_ERROR.
+MAX_RECONNECT_ATTEMPTS = 10
+#: A connection that stayed up this long resets the retry budget when it drops.
+RECONNECT_STABLE_SECONDS = 30.0
+
 
 class FyersLiveMarketData:
     """Live FYERS market data adapter implementing MarketDataFace & MarketDataProvider."""
@@ -70,6 +78,21 @@ class FyersLiveMarketData:
         self._last_error_reason: str = ""
         self._ws_client: Any = None
         self._is_closed = False
+        # Reconnection is adapter-owned. The vendor socket's own loop
+        # (``reconnect=True``) re-enters through singleton state, never tells
+        # the adapter that a socket closed, and resets its retry counter on
+        # every open — which produced thousands of overlapping attempts.
+        self._generation = 0
+        self._retry_attempts = 0
+        self._retry_timer: Any = None
+        self._reconnect_suspended = False
+        self._connected_at: float | None = None
+        self._reconnect_lock = threading.Lock()
+        # Serializes teardown+connect so a timer and an explicit connect can
+        # never tear down each other's socket.
+        self._attempt_lock = threading.RLock()
+        # Indirection so tests can drive the schedule deterministically.
+        self._timer_factory: Callable[..., Any] = threading.Timer
         # Data-flow evidence, tracked separately from transport state: a
         # connected socket proves nothing about delivery. These count the
         # messages actually received and when the last one arrived, so a
@@ -86,17 +109,33 @@ class FyersLiveMarketData:
         return self._state
 
     def connect(self) -> None:
-        """Establish WebSocket connection to FYERS data stream (idempotent)."""
+        """Establish WebSocket connection to FYERS data stream (idempotent).
+
+        An explicit connect is also the recovery action: it clears an
+        exhausted retry budget and re-enables automatic reconnection.
+        """
         if self._is_closed:
             raise BrokerError("FyersLiveMarketData is closed", code=ErrorCode.NOT_CONNECTED)
-        if self._state == STATE_CONNECTED and self._ws_client is not None:
-            return
+        with self._attempt_lock:
+            if self._state == STATE_CONNECTED and self._ws_client is not None:
+                return
 
+            self._retry_attempts = 0
+            self._establish()
+
+    def _establish(self) -> None:
+        """Create one socket and connect it; the retry policy belongs to the caller."""
         if not self._app_id or not self._token:
             self._state = STATE_ERROR
             self._last_error_reason = "credentials or session token missing"
             raise BrokerError(self._last_error_reason, code=ErrorCode.CREDENTIALS_NOT_READY)
 
+        self._cancel_retry()
+        self._reconnect_suspended = False
+        # One connection attempt owns one generation: callbacks from an older
+        # socket are ignored instead of overwriting this connection's state.
+        self._generation += 1
+        generation = self._generation
         self._state = STATE_CONNECTING
         logger.info("MARKET_WS_CONNECTING broker=FYERS")
 
@@ -108,37 +147,42 @@ class FyersLiveMarketData:
         )
 
         try:
-            if self._socket_factory is not None:
-                self._ws_client = self._socket_factory(
-                    access_token=token_str,
-                    on_message=self._on_message,
-                    on_error=self._on_error,
-                    on_connect=self._on_connect,
-                    on_close=self._on_close,
-                )
-            else:
-                import importlib
-
-                data_ws_mod = importlib.import_module("fyers_apiv3.FyersWebsocket.data_ws")
-                fyers_data_socket_cls = data_ws_mod.FyersDataSocket
-
-                self._ws_client = fyers_data_socket_cls(
-                    access_token=token_str,
-                    litemode=False,
-                    reconnect=True,
-                    on_message=self._on_message,
-                    on_error=self._on_error,
-                    on_connect=self._on_connect,
-                    on_close=self._on_close,
-                )
-
+            self._ws_client = self._build_socket(token_str, generation)
             if hasattr(self._ws_client, "connect"):
                 self._ws_client.connect()
         except Exception as exc:
-            self._state = STATE_ERROR
             self._last_error_reason = f"websocket connection failure: {exc}"
             logger.error("MARKET_WS_ERROR broker=FYERS reason=%s", exc)
+            self._teardown_socket()
+            self._state = STATE_ERROR
             raise BrokerError(self._last_error_reason, code=ErrorCode.NETWORK_ERROR) from exc
+
+    def _build_socket(self, token_str: str, generation: int) -> Any:
+        """Build the vendor socket with callbacks bound to one generation.
+
+        ``reconnect=False`` is deliberate: the vendor's own loop re-enters
+        through singleton state, never surfaces a usable close event, and
+        resets its retry budget on every open. The adapter owns reconnection.
+        """
+        callbacks: dict[str, Any] = {
+            "on_message": lambda message: self._on_message(message, _gen=generation),
+            "on_error": lambda message: self._on_error(message, _gen=generation),
+            "on_connect": lambda: self._on_connect(_gen=generation),
+            "on_close": lambda *args: self._on_close(*args, _gen=generation),
+        }
+        if self._socket_factory is not None:
+            return self._socket_factory(access_token=token_str, reconnect=False, **callbacks)
+
+        import importlib
+
+        data_ws_mod = importlib.import_module("fyers_apiv3.FyersWebsocket.data_ws")
+        fyers_data_socket_cls = data_ws_mod.FyersDataSocket
+        return fyers_data_socket_cls(
+            access_token=token_str,
+            litemode=False,
+            reconnect=False,
+            **callbacks,
+        )
 
     def open(self, symbols: tuple[str, ...], timeframe: str) -> None:
         """Start streaming for symbols (idempotent)."""
@@ -231,31 +275,100 @@ class FyersLiveMarketData:
         return max(0.0, time.monotonic() - self._last_message_at)
 
     def disconnect(self) -> None:
-        """Drop transport while keeping subscription memory for reconnect."""
-        if self._ws_client is not None:
-            try:
-                if hasattr(self._ws_client, "close_connection"):
-                    self._ws_client.close_connection()
-            except Exception as exc:
-                logger.warning("MARKET_WS_DISCONNECT_WARN broker=FYERS reason=%s", exc)
-        self._state = STATE_DISCONNECTED
+        """Drop transport, cancel any pending retry, stay down until connect().
+
+        Subscription memory survives so an explicit reconnect can restore it.
+        """
+        self._cancel_retry()
+        self._reconnect_suspended = True
+        with self._attempt_lock:
+            self._teardown_socket()
+            self._state = STATE_DISCONNECTED
         logger.info("MARKET_WS_DISCONNECTED broker=FYERS")
 
     def reconnect(self) -> None:
-        """Drop and re-establish transport, resuming subscriptions."""
+        """Explicit recovery: exactly one teardown/connect, subscriptions restore on connect."""
         self._state = STATE_RECONNECTING
         logger.info("MARKET_WS_RECONNECTING broker=FYERS")
         self.disconnect()
         self.connect()
-        # Resubscribe preserved symbols
-        if self._subscriptions and self._ws_client is not None:
+
+    # ── Reconnect scheduler (adapter-owned, single flight) ─────────────
+
+    def _schedule_reconnect(self, reason: str) -> None:
+        """Schedule exactly one bounded retry; never reconnect inside a callback."""
+        with self._reconnect_lock:
+            if self._is_closed or self._reconnect_suspended:
+                return
+            if self._retry_timer is not None:
+                return  # single flight: a retry is already pending
+            if self._retry_attempts >= MAX_RECONNECT_ATTEMPTS:
+                self._state = STATE_ERROR
+                self._last_error_reason = (
+                    f"reconnect attempts exhausted after {MAX_RECONNECT_ATTEMPTS} "
+                    f"attempts: {reason}"
+                )
+                logger.error(
+                    "MARKET_WS_RECONNECT_EXHAUSTED broker=FYERS attempts=%d reason=%s",
+                    MAX_RECONNECT_ATTEMPTS,
+                    reason,
+                )
+                return
+
+            delay = RECONNECT_DELAYS[min(self._retry_attempts, len(RECONNECT_DELAYS) - 1)]
+            self._retry_attempts += 1
+            attempt = self._retry_attempts
+            timer = self._timer_factory(delay, self._run_reconnect, (self._generation,))
+            timer.daemon = True
+            self._retry_timer = timer
+            self._state = STATE_RECONNECTING
+            logger.warning(
+                "MARKET_WS_RECONNECT_SCHEDULED broker=FYERS attempt=%d delay_s=%.0f reason=%s",
+                attempt,
+                delay,
+                reason,
+            )
+        timer.start()
+
+    def _run_reconnect(self, generation: int) -> None:
+        """Timer entry point: one teardown plus one connect attempt."""
+        with self._reconnect_lock:
+            self._retry_timer = None
+            superseded = generation != self._generation
+            stopped = self._is_closed or self._reconnect_suspended
+        if superseded or stopped:
+            return
+
+        with self._attempt_lock:
+            if generation != self._generation:
+                return  # an explicit connect/reconnect superseded this retry
+            self._teardown_socket()
             try:
-                if hasattr(self._ws_client, "subscribe"):
-                    self._ws_client.subscribe(
-                        symbols=list(self._subscriptions), data_type="SymbolUpdate"
-                    )
+                self._establish()
             except Exception as exc:
-                logger.error("MARKET_WS_RESUBSCRIBE_FAILED broker=FYERS reason=%s", exc)
+                self._last_error_reason = str(exc)
+                self._schedule_reconnect("reconnect failed")
+
+    def _cancel_retry(self) -> None:
+        with self._reconnect_lock:
+            timer, self._retry_timer = self._retry_timer, None
+        if timer is not None:
+            cancel = getattr(timer, "cancel", None)
+            if callable(cancel):
+                cancel()
+
+    def _teardown_socket(self) -> None:
+        """Close and forget the current socket, invalidating its callbacks."""
+        self._generation += 1
+        self._connected_at = None
+        client, self._ws_client = self._ws_client, None
+        if client is None:
+            return
+        try:
+            if hasattr(client, "close_connection"):
+                client.close_connection()
+        except Exception as exc:
+            logger.warning("MARKET_WS_DISCONNECT_WARN broker=FYERS reason=%s", exc)
 
     def close(self) -> None:
         """Stop streaming and release all resources."""
@@ -270,11 +383,15 @@ class FyersLiveMarketData:
 
     # ── Socket callbacks ───────────────────────────────────────────────
 
-    def _on_connect(self) -> None:
+    def _on_connect(self, _gen: int | None = None) -> None:
+        if _gen is not None and _gen != self._generation:
+            return  # stale socket opened after a newer one took ownership
+        self._cancel_retry()
         self._state = STATE_CONNECTED
         self._last_error_reason = ""
+        self._connected_at = time.monotonic()
         logger.info("MARKET_WS_CONNECTED broker=FYERS")
-        # Resubscribe any registered symbols
+        # Resubscribe registered symbols exactly once for this connection.
         if self._subscriptions and self._ws_client is not None:
             try:
                 if hasattr(self._ws_client, "subscribe"):
@@ -287,18 +404,38 @@ class FyersLiveMarketData:
             except Exception as exc:
                 logger.error("MARKET_WS_RESUBSCRIBE_ON_CONNECT_FAILED reason=%s", exc)
 
-    def _on_close(self, *args: Any, **_kwargs: Any) -> None:
-        if not self._is_closed:
-            self._state = STATE_DISCONNECTED
+    def _on_close(self, *args: Any, _gen: int | None = None) -> None:
+        if _gen is not None and _gen != self._generation:
+            return  # stale close from a socket that no longer owns the state
         logger.info("MARKET_WS_CLOSED broker=FYERS args=%s", args)
+        if self._is_closed or self._reconnect_suspended:
+            self._connected_at = None
+            if not self._is_closed:
+                self._state = STATE_DISCONNECTED
+            return
 
-    def _on_error(self, message: Any) -> None:
-        self._state = STATE_ERROR
+        connected_at = self._connected_at
+        self._connected_at = None
+        if connected_at is not None and (
+            time.monotonic() - connected_at >= RECONNECT_STABLE_SECONDS
+        ):
+            # Only a connection that actually survived resets the budget; a
+            # socket that opens and drops again keeps counting towards the cap.
+            self._retry_attempts = 0
+        self._schedule_reconnect("socket closed")
+
+    def _on_error(self, message: Any, _gen: int | None = None) -> None:
+        if _gen is not None and _gen != self._generation:
+            return
         self._last_error_reason = str(message)
         logger.error("MARKET_WS_ERROR broker=FYERS error=%s", message)
+        if self._retry_timer is None:
+            self._state = STATE_ERROR
 
-    def _on_message(self, message: Any) -> None:
+    def _on_message(self, message: Any, _gen: int | None = None) -> None:
         """Ingest one raw tick dict from FYERS DataSocket into a normalized quote."""
+        if _gen is not None and _gen != self._generation:
+            return
         if not isinstance(message, dict):
             return
 
@@ -407,6 +544,9 @@ class FyersLiveMarketData:
 __all__ = [
     "FyersLiveMarketData",
     "MARKET_DATA_CAPABILITIES",
+    "MAX_RECONNECT_ATTEMPTS",
+    "RECONNECT_DELAYS",
+    "RECONNECT_STABLE_SECONDS",
     "STATE_CONNECTED",
     "STATE_CONNECTING",
     "STATE_DISCONNECTED",

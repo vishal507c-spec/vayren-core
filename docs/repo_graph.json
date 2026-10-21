@@ -1257,7 +1257,7 @@
       "to": "src/core/native"
     }
   ],
-  "entity_count": 6210,
+  "entity_count": 6229,
   "files": [
     {
       "domain": "CORE",
@@ -3697,6 +3697,16 @@
       "owner": "BROKER_CONTRACT",
       "owner_source": "policy",
       "path": "src/broker/tests/test_fyers_live_trading.py",
+      "retention_state": null
+    },
+    {
+      "domain": "BROKER_CONTRACT",
+      "is_test": true,
+      "language": "PYTHON",
+      "module": "src/broker",
+      "owner": "BROKER_CONTRACT",
+      "owner_source": "policy",
+      "path": "src/broker/tests/test_fyers_market_ws_reconnect.py",
       "retention_state": null
     },
     {
@@ -7121,6 +7131,7 @@
         "src/broker/tests/test_fyers_auto_auth.py",
         "src/broker/tests/test_fyers_live_auth.py",
         "src/broker/tests/test_fyers_live_trading.py",
+        "src/broker/tests/test_fyers_market_ws_reconnect.py",
         "src/broker/tests/test_fyers_order_status.py",
         "src/broker/tests/test_fyers_provider.py",
         "src/broker/tests/test_fyers_rate_limit_resilience.py",
@@ -7966,7 +7977,7 @@
       "required_language": "PYTHON"
     }
   ],
-  "relationship_count": 14301,
+  "relationship_count": 14337,
   "repository": {
     "name": "vayren-core",
     "root": "."
@@ -23519,6 +23530,7 @@
       "called_by": [
         "broker.providers.fyers.live_activation:register_fyers_live",
         "broker.providers.fyers.spec:fyers_management_spec",
+        "broker.tests.test_fyers_market_ws_reconnect:_Harness",
         "broker.tests.test_fyers_websocket:test_market_ws_connection_lifecycle",
         "broker.tests.test_fyers_websocket:test_market_ws_error_handling",
         "broker.tests.test_fyers_websocket:test_market_ws_poll_drains_queue",
@@ -23536,7 +23548,7 @@
       "file": "src/broker/providers/fyers/live_market_data.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 50,
+      "line": 58,
       "module": "src/broker/providers",
       "name": "FyersLiveMarketData",
       "public": true,
@@ -29141,6 +29153,315 @@
       "name": "test_zero_quantity_rejected",
       "public": true,
       "qualified": "broker.tests.test_fyers_live_trading:test_zero_quantity_rejected",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "broker.tests.test_fyers_market_ws_reconnect:_Timers"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "broker.tests.test_fyers_market_ws_reconnect._FakeTimer",
+      "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 29,
+      "module": "src/broker",
+      "name": "_FakeTimer",
+      "public": false,
+      "qualified": "broker.tests.test_fyers_market_ws_reconnect:_FakeTimer",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "broker.tests.test_fyers_market_ws_reconnect:test_concurrent_close_callbacks_schedule_one_retry",
+        "broker.tests.test_fyers_market_ws_reconnect:test_error_and_close_callbacks_share_one_retry",
+        "broker.tests.test_fyers_market_ws_reconnect:test_explicit_disconnect_cancels_pending_retry",
+        "broker.tests.test_fyers_market_ws_reconnect:test_failed_retry_schedules_the_next_backoff",
+        "broker.tests.test_fyers_market_ws_reconnect:test_one_socket_drop_schedules_exactly_one_retry",
+        "broker.tests.test_fyers_market_ws_reconnect:test_reconnect_restores_subscriptions_exactly_once",
+        "broker.tests.test_fyers_market_ws_reconnect:test_retry_exhaustion_reaches_error_and_stops",
+        "broker.tests.test_fyers_market_ws_reconnect:test_retry_tears_down_once_and_connects_once",
+        "broker.tests.test_fyers_market_ws_reconnect:test_retry_that_cannot_connect_schedules_the_next_backoff",
+        "broker.tests.test_fyers_market_ws_reconnect:test_shutdown_cancels_pending_retry",
+        "broker.tests.test_fyers_market_ws_reconnect:test_socket_is_built_without_the_vendor_reconnect_loop",
+        "broker.tests.test_fyers_market_ws_reconnect:test_stable_connection_resets_the_retry_budget",
+        "broker.tests.test_fyers_market_ws_reconnect:test_stale_callbacks_cannot_overwrite_the_new_connection"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "broker.providers.fyers.live_market_data:FyersLiveMarketData",
+        "broker.tests.test_fyers_market_ws_reconnect:_Socket",
+        "broker.tests.test_fyers_market_ws_reconnect:_Timers"
+      ],
+      "dotted": "broker.tests.test_fyers_market_ws_reconnect._Harness",
+      "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 120,
+      "module": "src/broker",
+      "name": "_Harness",
+      "public": false,
+      "qualified": "broker.tests.test_fyers_market_ws_reconnect:_Harness",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "broker.tests.test_fyers_market_ws_reconnect:_Harness",
+        "broker.tests.test_fyers_market_ws_reconnect:test_retry_that_cannot_connect_schedules_the_next_backoff"
+      ],
+      "callers_complete": true,
+      "calls": [],
+      "dotted": "broker.tests.test_fyers_market_ws_reconnect._Socket",
+      "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 69,
+      "module": "src/broker",
+      "name": "_Socket",
+      "public": false,
+      "qualified": "broker.tests.test_fyers_market_ws_reconnect:_Socket",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "broker.tests.test_fyers_market_ws_reconnect:_Harness"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_market_ws_reconnect:_FakeTimer"
+      ],
+      "dotted": "broker.tests.test_fyers_market_ws_reconnect._Timers",
+      "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 52,
+      "module": "src/broker",
+      "name": "_Timers",
+      "public": false,
+      "qualified": "broker.tests.test_fyers_market_ws_reconnect:_Timers",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_market_ws_reconnect:_Harness"
+      ],
+      "dotted": "broker.tests.test_fyers_market_ws_reconnect.test_concurrent_close_callbacks_schedule_one_retry",
+      "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 174,
+      "module": "src/broker",
+      "name": "test_concurrent_close_callbacks_schedule_one_retry",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_market_ws_reconnect:test_concurrent_close_callbacks_schedule_one_retry",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_market_ws_reconnect:_Harness"
+      ],
+      "dotted": "broker.tests.test_fyers_market_ws_reconnect.test_error_and_close_callbacks_share_one_retry",
+      "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 194,
+      "module": "src/broker",
+      "name": "test_error_and_close_callbacks_share_one_retry",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_market_ws_reconnect:test_error_and_close_callbacks_share_one_retry",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_market_ws_reconnect:_Harness"
+      ],
+      "dotted": "broker.tests.test_fyers_market_ws_reconnect.test_explicit_disconnect_cancels_pending_retry",
+      "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 290,
+      "module": "src/broker",
+      "name": "test_explicit_disconnect_cancels_pending_retry",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_market_ws_reconnect:test_explicit_disconnect_cancels_pending_retry",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_market_ws_reconnect:_Harness"
+      ],
+      "dotted": "broker.tests.test_fyers_market_ws_reconnect.test_failed_retry_schedules_the_next_backoff",
+      "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 207,
+      "module": "src/broker",
+      "name": "test_failed_retry_schedules_the_next_backoff",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_market_ws_reconnect:test_failed_retry_schedules_the_next_backoff",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_market_ws_reconnect:_Harness"
+      ],
+      "dotted": "broker.tests.test_fyers_market_ws_reconnect.test_one_socket_drop_schedules_exactly_one_retry",
+      "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 155,
+      "module": "src/broker",
+      "name": "test_one_socket_drop_schedules_exactly_one_retry",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_market_ws_reconnect:test_one_socket_drop_schedules_exactly_one_retry",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_market_ws_reconnect:_Harness"
+      ],
+      "dotted": "broker.tests.test_fyers_market_ws_reconnect.test_reconnect_restores_subscriptions_exactly_once",
+      "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 364,
+      "module": "src/broker",
+      "name": "test_reconnect_restores_subscriptions_exactly_once",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_market_ws_reconnect:test_reconnect_restores_subscriptions_exactly_once",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_market_ws_reconnect:_Harness"
+      ],
+      "dotted": "broker.tests.test_fyers_market_ws_reconnect.test_retry_exhaustion_reaches_error_and_stops",
+      "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 244,
+      "module": "src/broker",
+      "name": "test_retry_exhaustion_reaches_error_and_stops",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_market_ws_reconnect:test_retry_exhaustion_reaches_error_and_stops",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_market_ws_reconnect:_Harness"
+      ],
+      "dotted": "broker.tests.test_fyers_market_ws_reconnect.test_retry_tears_down_once_and_connects_once",
+      "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 313,
+      "module": "src/broker",
+      "name": "test_retry_tears_down_once_and_connects_once",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_market_ws_reconnect:test_retry_tears_down_once_and_connects_once",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_market_ws_reconnect:_Harness",
+        "broker.tests.test_fyers_market_ws_reconnect:_Socket"
+      ],
+      "dotted": "broker.tests.test_fyers_market_ws_reconnect.test_retry_that_cannot_connect_schedules_the_next_backoff",
+      "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 223,
+      "module": "src/broker",
+      "name": "test_retry_that_cannot_connect_schedules_the_next_backoff",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_market_ws_reconnect:test_retry_that_cannot_connect_schedules_the_next_backoff",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_market_ws_reconnect:_Harness"
+      ],
+      "dotted": "broker.tests.test_fyers_market_ws_reconnect.test_shutdown_cancels_pending_retry",
+      "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 328,
+      "module": "src/broker",
+      "name": "test_shutdown_cancels_pending_retry",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_market_ws_reconnect:test_shutdown_cancels_pending_retry",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_market_ws_reconnect:_Harness"
+      ],
+      "dotted": "broker.tests.test_fyers_market_ws_reconnect.test_socket_is_built_without_the_vendor_reconnect_loop",
+      "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 147,
+      "module": "src/broker",
+      "name": "test_socket_is_built_without_the_vendor_reconnect_loop",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_market_ws_reconnect:test_socket_is_built_without_the_vendor_reconnect_loop",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_market_ws_reconnect:_Harness"
+      ],
+      "dotted": "broker.tests.test_fyers_market_ws_reconnect.test_stable_connection_resets_the_retry_budget",
+      "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 271,
+      "module": "src/broker",
+      "name": "test_stable_connection_resets_the_retry_budget",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_market_ws_reconnect:test_stable_connection_resets_the_retry_budget",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_market_ws_reconnect:_Harness"
+      ],
+      "dotted": "broker.tests.test_fyers_market_ws_reconnect.test_stale_callbacks_cannot_overwrite_the_new_connection",
+      "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 342,
+      "module": "src/broker",
+      "name": "test_stale_callbacks_cannot_overwrite_the_new_connection",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_market_ws_reconnect:test_stale_callbacks_cannot_overwrite_the_new_connection",
       "tests": []
     },
     {
@@ -109091,6 +109412,12 @@
       "granularity": "module",
       "module": "src/broker",
       "path": "src/broker/tests/test_fyers_live_trading.py",
+      "targets": []
+    },
+    {
+      "granularity": "module",
+      "module": "src/broker",
+      "path": "src/broker/tests/test_fyers_market_ws_reconnect.py",
       "targets": []
     },
     {
