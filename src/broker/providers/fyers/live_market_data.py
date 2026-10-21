@@ -53,6 +53,8 @@ RECONNECT_DELAYS: tuple[float, ...] = (2.0, 5.0, 10.0, 30.0)
 MAX_RECONNECT_ATTEMPTS = 10
 #: A connection that stayed up this long resets the retry budget when it drops.
 RECONNECT_STABLE_SECONDS = 30.0
+#: One-shot check for a handshake the vendor may swallow without a callback.
+HANDSHAKE_VERIFY_SECONDS = 5.0
 
 
 class FyersLiveMarketData:
@@ -85,6 +87,7 @@ class FyersLiveMarketData:
         self._generation = 0
         self._retry_attempts = 0
         self._retry_timer: Any = None
+        self._handshake_timer: Any = None
         self._reconnect_suspended = False
         self._connected_at: float | None = None
         self._reconnect_lock = threading.Lock()
@@ -130,7 +133,7 @@ class FyersLiveMarketData:
             self._last_error_reason = "credentials or session token missing"
             raise BrokerError(self._last_error_reason, code=ErrorCode.CREDENTIALS_NOT_READY)
 
-        self._cancel_retry()
+        self._cancel_pending_timers()
         self._reconnect_suspended = False
         # One connection attempt owns one generation: callbacks from an older
         # socket are ignored instead of overwriting this connection's state.
@@ -156,6 +159,11 @@ class FyersLiveMarketData:
             self._teardown_socket()
             self._state = STATE_ERROR
             raise BrokerError(self._last_error_reason, code=ErrorCode.NETWORK_ERROR) from exc
+
+        # The vendor's connect() returns without proof of a live socket: it can
+        # swallow a failed token/handshake step and still call on_open. When the
+        # socket exposes no live connection, arm one bounded handshake check.
+        self._watch_handshake(generation)
 
     def _build_socket(self, token_str: str, generation: int) -> Any:
         """Build the vendor socket with callbacks bound to one generation.
@@ -279,7 +287,7 @@ class FyersLiveMarketData:
 
         Subscription memory survives so an explicit reconnect can restore it.
         """
-        self._cancel_retry()
+        self._cancel_pending_timers()
         self._reconnect_suspended = True
         with self._attempt_lock:
             self._teardown_socket()
@@ -349,13 +357,75 @@ class FyersLiveMarketData:
                 self._last_error_reason = str(exc)
                 self._schedule_reconnect("reconnect failed")
 
-    def _cancel_retry(self) -> None:
+    def _watch_handshake(self, generation: int) -> None:
+        """Arm one bounded check for a handshake the vendor may never report.
+
+        The FYERS SDK swallows token/handshake failures inside its own connect
+        path: it can call ``on_open`` (so the adapter looks connected) while no
+        socket exists, and it emits neither ``on_error`` nor ``on_close``. One
+        one-shot probe per attempt turns that silence into a scheduled retry
+        instead of a dead stream; sockets that expose no probe keep the
+        callback-driven behavior unchanged.
+        """
+        if self._socket_is_connected():
+            return
         with self._reconnect_lock:
-            timer, self._retry_timer = self._retry_timer, None
-        if timer is not None:
-            cancel = getattr(timer, "cancel", None)
-            if callable(cancel):
-                cancel()
+            if self._is_closed or self._reconnect_suspended:
+                return
+            if self._handshake_timer is not None:
+                return  # single flight: a check is already pending
+            timer = self._timer_factory(
+                HANDSHAKE_VERIFY_SECONDS, self._verify_handshake, (generation,)
+            )
+            timer.daemon = True
+            self._handshake_timer = timer
+        timer.start()
+
+    def _verify_handshake(self, generation: int) -> None:
+        """One-shot check: still no vendor socket means the handshake failed."""
+        with self._reconnect_lock:
+            self._handshake_timer = None
+            superseded = generation != self._generation
+            stopped = self._is_closed or self._reconnect_suspended
+        if superseded or stopped:
+            return
+        if self._socket_is_connected():
+            return
+        self._last_error_reason = "handshake did not complete (no vendor connection)"
+        logger.warning("MARKET_WS_HANDSHAKE_INCOMPLETE broker=FYERS")
+        self._schedule_reconnect("handshake incomplete")
+
+    def _socket_is_connected(self) -> bool:
+        """Vendor truth about the handshake, when the socket can report it.
+
+        ``FyersDataSocket.is_connected()`` is False while no WebSocket object
+        exists — including the window after a swallowed token/handshake failure
+        in which the SDK still called ``on_open``. Sockets without a probe are
+        trusted via callbacks, exactly as before.
+        """
+        probe = getattr(self._ws_client, "is_connected", None)
+        if not callable(probe):
+            return True
+        try:
+            return bool(probe())
+        except Exception as exc:
+            logger.warning("MARKET_WS_HANDSHAKE_PROBE_WARN broker=FYERS reason=%s", exc)
+            return True
+
+    def _recovery_pending(self) -> bool:
+        """True while a scheduled retry or a handshake check is still pending."""
+        return self._retry_timer is not None or self._handshake_timer is not None
+
+    def _cancel_pending_timers(self) -> None:
+        """Cancel any pending retry or handshake check; never leave either armed."""
+        with self._reconnect_lock:
+            retry, self._retry_timer = self._retry_timer, None
+            handshake, self._handshake_timer = self._handshake_timer, None
+        for timer in (retry, handshake):
+            if timer is not None:
+                cancel = getattr(timer, "cancel", None)
+                if callable(cancel):
+                    cancel()
 
     def _teardown_socket(self) -> None:
         """Close and forget the current socket, invalidating its callbacks."""
@@ -386,7 +456,7 @@ class FyersLiveMarketData:
     def _on_connect(self, _gen: int | None = None) -> None:
         if _gen is not None and _gen != self._generation:
             return  # stale socket opened after a newer one took ownership
-        self._cancel_retry()
+        self._cancel_pending_timers()
         self._state = STATE_CONNECTED
         self._last_error_reason = ""
         self._connected_at = time.monotonic()
@@ -429,7 +499,7 @@ class FyersLiveMarketData:
             return
         self._last_error_reason = str(message)
         logger.error("MARKET_WS_ERROR broker=FYERS error=%s", message)
-        if self._retry_timer is None:
+        if not self._recovery_pending():
             self._state = STATE_ERROR
 
     def _on_message(self, message: Any, _gen: int | None = None) -> None:
@@ -543,6 +613,7 @@ class FyersLiveMarketData:
 
 __all__ = [
     "FyersLiveMarketData",
+    "HANDSHAKE_VERIFY_SECONDS",
     "MARKET_DATA_CAPABILITIES",
     "MAX_RECONNECT_ATTEMPTS",
     "RECONNECT_DELAYS",

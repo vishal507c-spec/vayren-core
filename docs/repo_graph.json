@@ -1257,7 +1257,7 @@
       "to": "src/core/native"
     }
   ],
-  "entity_count": 6229,
+  "entity_count": 6237,
   "files": [
     {
       "domain": "CORE",
@@ -7977,7 +7977,7 @@
       "required_language": "PYTHON"
     }
   ],
-  "relationship_count": 14337,
+  "relationship_count": 14363,
   "repository": {
     "name": "vayren-core",
     "root": "."
@@ -23548,7 +23548,7 @@
       "file": "src/broker/providers/fyers/live_market_data.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 58,
+      "line": 60,
       "module": "src/broker/providers",
       "name": "FyersLiveMarketData",
       "public": true,
@@ -29165,7 +29165,7 @@
       "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 29,
+      "line": 31,
       "module": "src/broker",
       "name": "_FakeTimer",
       "public": false,
@@ -29175,16 +29175,22 @@
     {
       "called_by": [
         "broker.tests.test_fyers_market_ws_reconnect:test_concurrent_close_callbacks_schedule_one_retry",
+        "broker.tests.test_fyers_market_ws_reconnect:test_concurrent_silent_handshake_signals_schedule_one_retry",
+        "broker.tests.test_fyers_market_ws_reconnect:test_disconnect_cancels_silent_handshake_recovery",
         "broker.tests.test_fyers_market_ws_reconnect:test_error_and_close_callbacks_share_one_retry",
         "broker.tests.test_fyers_market_ws_reconnect:test_explicit_disconnect_cancels_pending_retry",
         "broker.tests.test_fyers_market_ws_reconnect:test_failed_retry_schedules_the_next_backoff",
+        "broker.tests.test_fyers_market_ws_reconnect:test_handshake_check_stands_down_when_the_socket_connects_late",
         "broker.tests.test_fyers_market_ws_reconnect:test_one_socket_drop_schedules_exactly_one_retry",
         "broker.tests.test_fyers_market_ws_reconnect:test_reconnect_restores_subscriptions_exactly_once",
         "broker.tests.test_fyers_market_ws_reconnect:test_retry_exhaustion_reaches_error_and_stops",
         "broker.tests.test_fyers_market_ws_reconnect:test_retry_tears_down_once_and_connects_once",
         "broker.tests.test_fyers_market_ws_reconnect:test_retry_that_cannot_connect_schedules_the_next_backoff",
         "broker.tests.test_fyers_market_ws_reconnect:test_shutdown_cancels_pending_retry",
+        "broker.tests.test_fyers_market_ws_reconnect:test_silent_handshake_failure_schedules_exactly_one_retry",
+        "broker.tests.test_fyers_market_ws_reconnect:test_silent_handshake_retries_exhaust_to_error",
         "broker.tests.test_fyers_market_ws_reconnect:test_socket_is_built_without_the_vendor_reconnect_loop",
+        "broker.tests.test_fyers_market_ws_reconnect:test_sockets_without_a_probe_keep_callback_driven_behavior",
         "broker.tests.test_fyers_market_ws_reconnect:test_stable_connection_resets_the_retry_budget",
         "broker.tests.test_fyers_market_ws_reconnect:test_stale_callbacks_cannot_overwrite_the_new_connection"
       ],
@@ -29198,7 +29204,7 @@
       "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 120,
+      "line": 144,
       "module": "src/broker",
       "name": "_Harness",
       "public": false,
@@ -29207,7 +29213,50 @@
     },
     {
       "called_by": [
+        "broker.tests.test_fyers_market_ws_reconnect:_SilentHandshakeSocket"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_market_ws_reconnect:_Socket"
+      ],
+      "dotted": "broker.tests.test_fyers_market_ws_reconnect._ProbeSocket",
+      "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 122,
+      "module": "src/broker",
+      "name": "_ProbeSocket",
+      "public": false,
+      "qualified": "broker.tests.test_fyers_market_ws_reconnect:_ProbeSocket",
+      "tests": []
+    },
+    {
+      "called_by": [
+        "broker.tests.test_fyers_market_ws_reconnect:test_concurrent_silent_handshake_signals_schedule_one_retry",
+        "broker.tests.test_fyers_market_ws_reconnect:test_disconnect_cancels_silent_handshake_recovery",
+        "broker.tests.test_fyers_market_ws_reconnect:test_handshake_check_stands_down_when_the_socket_connects_late",
+        "broker.tests.test_fyers_market_ws_reconnect:test_silent_handshake_failure_schedules_exactly_one_retry",
+        "broker.tests.test_fyers_market_ws_reconnect:test_silent_handshake_retries_exhaust_to_error"
+      ],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_market_ws_reconnect:_ProbeSocket"
+      ],
+      "dotted": "broker.tests.test_fyers_market_ws_reconnect._SilentHandshakeSocket",
+      "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
+      "kind": "class",
+      "language": "PYTHON",
+      "line": 129,
+      "module": "src/broker",
+      "name": "_SilentHandshakeSocket",
+      "public": false,
+      "qualified": "broker.tests.test_fyers_market_ws_reconnect:_SilentHandshakeSocket",
+      "tests": []
+    },
+    {
+      "called_by": [
         "broker.tests.test_fyers_market_ws_reconnect:_Harness",
+        "broker.tests.test_fyers_market_ws_reconnect:_ProbeSocket",
         "broker.tests.test_fyers_market_ws_reconnect:test_retry_that_cannot_connect_schedules_the_next_backoff"
       ],
       "callers_complete": true,
@@ -29216,7 +29265,7 @@
       "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 69,
+      "line": 71,
       "module": "src/broker",
       "name": "_Socket",
       "public": false,
@@ -29235,7 +29284,7 @@
       "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
       "kind": "class",
       "language": "PYTHON",
-      "line": 52,
+      "line": 54,
       "module": "src/broker",
       "name": "_Timers",
       "public": false,
@@ -29252,11 +29301,47 @@
       "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 174,
+      "line": 198,
       "module": "src/broker",
       "name": "test_concurrent_close_callbacks_schedule_one_retry",
       "public": true,
       "qualified": "broker.tests.test_fyers_market_ws_reconnect:test_concurrent_close_callbacks_schedule_one_retry",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_market_ws_reconnect:_Harness",
+        "broker.tests.test_fyers_market_ws_reconnect:_SilentHandshakeSocket"
+      ],
+      "dotted": "broker.tests.test_fyers_market_ws_reconnect.test_concurrent_silent_handshake_signals_schedule_one_retry",
+      "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 258,
+      "module": "src/broker",
+      "name": "test_concurrent_silent_handshake_signals_schedule_one_retry",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_market_ws_reconnect:test_concurrent_silent_handshake_signals_schedule_one_retry",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_market_ws_reconnect:_Harness",
+        "broker.tests.test_fyers_market_ws_reconnect:_SilentHandshakeSocket"
+      ],
+      "dotted": "broker.tests.test_fyers_market_ws_reconnect.test_disconnect_cancels_silent_handshake_recovery",
+      "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 281,
+      "module": "src/broker",
+      "name": "test_disconnect_cancels_silent_handshake_recovery",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_market_ws_reconnect:test_disconnect_cancels_silent_handshake_recovery",
       "tests": []
     },
     {
@@ -29269,7 +29354,7 @@
       "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 194,
+      "line": 218,
       "module": "src/broker",
       "name": "test_error_and_close_callbacks_share_one_retry",
       "public": true,
@@ -29286,7 +29371,7 @@
       "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 290,
+      "line": 429,
       "module": "src/broker",
       "name": "test_explicit_disconnect_cancels_pending_retry",
       "public": true,
@@ -29303,11 +29388,29 @@
       "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 207,
+      "line": 346,
       "module": "src/broker",
       "name": "test_failed_retry_schedules_the_next_backoff",
       "public": true,
       "qualified": "broker.tests.test_fyers_market_ws_reconnect:test_failed_retry_schedules_the_next_backoff",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_market_ws_reconnect:_Harness",
+        "broker.tests.test_fyers_market_ws_reconnect:_SilentHandshakeSocket"
+      ],
+      "dotted": "broker.tests.test_fyers_market_ws_reconnect.test_handshake_check_stands_down_when_the_socket_connects_late",
+      "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 323,
+      "module": "src/broker",
+      "name": "test_handshake_check_stands_down_when_the_socket_connects_late",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_market_ws_reconnect:test_handshake_check_stands_down_when_the_socket_connects_late",
       "tests": []
     },
     {
@@ -29320,7 +29423,7 @@
       "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 155,
+      "line": 179,
       "module": "src/broker",
       "name": "test_one_socket_drop_schedules_exactly_one_retry",
       "public": true,
@@ -29337,7 +29440,7 @@
       "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 364,
+      "line": 503,
       "module": "src/broker",
       "name": "test_reconnect_restores_subscriptions_exactly_once",
       "public": true,
@@ -29354,7 +29457,7 @@
       "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 244,
+      "line": 383,
       "module": "src/broker",
       "name": "test_retry_exhaustion_reaches_error_and_stops",
       "public": true,
@@ -29371,7 +29474,7 @@
       "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 313,
+      "line": 452,
       "module": "src/broker",
       "name": "test_retry_tears_down_once_and_connects_once",
       "public": true,
@@ -29389,7 +29492,7 @@
       "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 223,
+      "line": 362,
       "module": "src/broker",
       "name": "test_retry_that_cannot_connect_schedules_the_next_backoff",
       "public": true,
@@ -29406,11 +29509,47 @@
       "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 328,
+      "line": 467,
       "module": "src/broker",
       "name": "test_shutdown_cancels_pending_retry",
       "public": true,
       "qualified": "broker.tests.test_fyers_market_ws_reconnect:test_shutdown_cancels_pending_retry",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_market_ws_reconnect:_Harness",
+        "broker.tests.test_fyers_market_ws_reconnect:_SilentHandshakeSocket"
+      ],
+      "dotted": "broker.tests.test_fyers_market_ws_reconnect.test_silent_handshake_failure_schedules_exactly_one_retry",
+      "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 231,
+      "module": "src/broker",
+      "name": "test_silent_handshake_failure_schedules_exactly_one_retry",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_market_ws_reconnect:test_silent_handshake_failure_schedules_exactly_one_retry",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_market_ws_reconnect:_Harness",
+        "broker.tests.test_fyers_market_ws_reconnect:_SilentHandshakeSocket"
+      ],
+      "dotted": "broker.tests.test_fyers_market_ws_reconnect.test_silent_handshake_retries_exhaust_to_error",
+      "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 298,
+      "module": "src/broker",
+      "name": "test_silent_handshake_retries_exhaust_to_error",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_market_ws_reconnect:test_silent_handshake_retries_exhaust_to_error",
       "tests": []
     },
     {
@@ -29423,7 +29562,7 @@
       "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 147,
+      "line": 171,
       "module": "src/broker",
       "name": "test_socket_is_built_without_the_vendor_reconnect_loop",
       "public": true,
@@ -29436,11 +29575,28 @@
       "calls": [
         "broker.tests.test_fyers_market_ws_reconnect:_Harness"
       ],
+      "dotted": "broker.tests.test_fyers_market_ws_reconnect.test_sockets_without_a_probe_keep_callback_driven_behavior",
+      "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
+      "kind": "function",
+      "language": "PYTHON",
+      "line": 336,
+      "module": "src/broker",
+      "name": "test_sockets_without_a_probe_keep_callback_driven_behavior",
+      "public": true,
+      "qualified": "broker.tests.test_fyers_market_ws_reconnect:test_sockets_without_a_probe_keep_callback_driven_behavior",
+      "tests": []
+    },
+    {
+      "called_by": [],
+      "callers_complete": true,
+      "calls": [
+        "broker.tests.test_fyers_market_ws_reconnect:_Harness"
+      ],
       "dotted": "broker.tests.test_fyers_market_ws_reconnect.test_stable_connection_resets_the_retry_budget",
       "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 271,
+      "line": 410,
       "module": "src/broker",
       "name": "test_stable_connection_resets_the_retry_budget",
       "public": true,
@@ -29457,7 +29613,7 @@
       "file": "src/broker/tests/test_fyers_market_ws_reconnect.py",
       "kind": "function",
       "language": "PYTHON",
-      "line": 342,
+      "line": 481,
       "module": "src/broker",
       "name": "test_stale_callbacks_cannot_overwrite_the_new_connection",
       "public": true,

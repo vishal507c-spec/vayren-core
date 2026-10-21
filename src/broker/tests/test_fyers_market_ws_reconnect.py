@@ -4,8 +4,9 @@ The FYERS SDK's ``reconnect=True`` loop re-entered through singleton state,
 never surfaced a close to the adapter, and reset its retry budget on every
 open — thousands of overlapping attempts and orphaned threads. These tests
 pin the replacement: single-flight scheduling, bounded backoff, bounded
-attempts, and generation-guarded callbacks. Scheduling is deterministic (a
-fake timer), so nothing here touches a live venue connection.
+attempts, generation-guarded callbacks, and one bounded check for a handshake
+the vendor swallows silently. Scheduling is deterministic (a fake timer), so
+nothing here touches a live venue connection.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ import time
 from typing import Any
 
 from broker.providers.fyers.live_market_data import (
+    HANDSHAKE_VERIFY_SECONDS,
     MAX_RECONNECT_ATTEMPTS,
     RECONNECT_DELAYS,
     RECONNECT_STABLE_SECONDS,
@@ -117,6 +119,28 @@ class _Socket:
             self.on_error(message)
 
 
+class _ProbeSocket(_Socket):
+    """Socket exposing the vendor's ``is_connected()`` handshake probe."""
+
+    def is_connected(self) -> bool:
+        return self.connected
+
+
+class _SilentHandshakeSocket(_ProbeSocket):
+    """Mimics the FYERS SDK swallowing a failed handshake.
+
+    ``connect()`` still calls ``on_connect`` (the vendor calls ``on_open``
+    unconditionally after its own connect path), while ``is_connected()``
+    stays False and neither ``on_error`` nor ``on_close`` ever fires.
+    """
+
+    def connect(self) -> None:
+        self.connect_calls += 1
+        self.connected = False
+        if self.on_connect:
+            self.on_connect()
+
+
 class _Harness:
     def __init__(self, factory: Any = None) -> None:
         self.sockets: list[_Socket] = []
@@ -201,6 +225,121 @@ def test_error_and_close_callbacks_share_one_retry() -> None:
 
     assert len(h.timers.created) == 1
     assert h.md.state == STATE_RECONNECTING
+    h.md.close()
+
+
+def test_silent_handshake_failure_schedules_exactly_one_retry() -> None:
+    """No on_error, no on_close, no vendor socket: one bounded check, one retry."""
+    h = _Harness(factory=_SilentHandshakeSocket)
+    h.connect()
+
+    assert len(h.sockets) == 1
+    assert h.md.state == STATE_CONNECTED  # the vendor's on_open claimed success
+    assert len(h.timers.created) == 1
+    handshake_check = h.timers.created[0]
+    assert handshake_check.interval == HANDSHAKE_VERIFY_SECONDS
+    assert handshake_check.started
+    assert not handshake_check.cancelled
+
+    handshake_check.fire()
+
+    assert len(h.timers.created) == 2
+    retry = h.timers.created[1]
+    assert retry.interval == RECONNECT_DELAYS[0]
+    assert h.md.state == STATE_RECONNECTING
+    assert len(h.sockets) == 1, "scheduling only: the retry needs its own timer"
+
+    # A duplicate failure signal cannot arm a second retry.
+    handshake_check.fire()
+    assert len(h.timers.created) == 2
+    h.md.close()
+
+
+def test_concurrent_silent_handshake_signals_schedule_one_retry() -> None:
+    h = _Harness(factory=_SilentHandshakeSocket)
+    h.connect()
+    handshake_check = h.timers.created[0]
+    socket = h.socket
+    barrier = threading.Barrier(8)
+
+    def fail() -> None:
+        barrier.wait()
+        handshake_check.function(*handshake_check.args)  # the handshake check
+        socket.drop()  # and a close callback for the same failure
+
+    threads = [threading.Thread(target=fail) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert len(h.timers.created) == 2, "check + exactly one retry"
+    assert h.md.state == STATE_RECONNECTING
+    h.md.close()
+
+
+def test_disconnect_cancels_silent_handshake_recovery() -> None:
+    h = _Harness(factory=_SilentHandshakeSocket)
+    h.connect()
+    handshake_check = h.timers.created[0]
+
+    h.md.disconnect()
+
+    assert handshake_check.cancelled
+    assert h.md.state == STATE_DISCONNECTED
+    assert h.md._ws_client is None
+
+    # Even a forced run of the cancelled check must not schedule a retry.
+    handshake_check.function(*handshake_check.args)
+    assert len(h.timers.created) == 1
+    h.md.close()
+
+
+def test_silent_handshake_retries_exhaust_to_error() -> None:
+    h = _Harness(factory=_SilentHandshakeSocket)
+    h.connect()
+
+    for _ in range(MAX_RECONNECT_ATTEMPTS):
+        h.timers.created[-1].fire()  # handshake check → schedules one retry
+        h.timers.created[-1].fire()  # retry → teardown + connect (still silent)
+
+    retries = [t for t in h.timers.created if t.function == h.md._run_reconnect]
+    checks = [t for t in h.timers.created if t.function == h.md._verify_handshake]
+    assert len(checks) == MAX_RECONNECT_ATTEMPTS + 1, "one check per attempt"
+    expected = [RECONNECT_DELAYS[0], RECONNECT_DELAYS[1], RECONNECT_DELAYS[2]]
+    expected += [RECONNECT_DELAYS[-1]] * (MAX_RECONNECT_ATTEMPTS - 3)
+    assert [t.interval for t in retries] == expected
+
+    h.timers.created[-1].fire()  # the 11th silent handshake finds the cap reached
+
+    assert h.md.state == STATE_ERROR
+    assert len(h.timers.created) == 1 + 2 * MAX_RECONNECT_ATTEMPTS, "no 11th attempt"
+    healthy, reason = h.md.health()
+    assert not healthy
+    assert "exhausted" in reason
+    h.md.close()
+
+
+def test_handshake_check_stands_down_when_the_socket_connects_late() -> None:
+    h = _Harness(factory=_SilentHandshakeSocket)
+    h.connect()
+    handshake_check = h.timers.created[0]
+
+    h.socket.connected = True  # the socket finished its handshake after connect() returned
+    handshake_check.fire()
+
+    assert len(h.timers.created) == 1
+    assert h.md.state == STATE_CONNECTED
+    h.md.close()
+
+
+def test_sockets_without_a_probe_keep_callback_driven_behavior() -> None:
+    """A socket that cannot report its handshake is trusted via callbacks."""
+    h = _Harness()  # the default fake exposes no is_connected() probe
+    h.connect()
+
+    assert len(h.timers.created) == 0
+    assert h.md.state == STATE_CONNECTED
     h.md.close()
 
 
