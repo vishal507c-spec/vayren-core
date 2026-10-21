@@ -49,6 +49,8 @@ def resolve_broker(
     mode: ExecutionMode,
     gates: ModeGates,
     adapter_name: str = "",
+    *,
+    connect: bool = True,
 ) -> tuple[BrokerAdapter, ExecutionMode, tuple[str, ...]]:
     """Resolve (adapter, effective_mode, notes) fail-closed.
 
@@ -58,6 +60,12 @@ def resolve_broker(
     (:func:`~execution.modes.resolve_mode` raises with the missing gates
     otherwise). There is no fallback venue: an unavailable LIVE broker is an
     explicit refusal.
+
+    ``connect=False`` returns the registered face WITHOUT the verification
+    probe. The reconciliation path re-resolves on every step and must not
+    issue a profile REST call (nor drop the shared account cache) per session
+    per step: the venue is verified once at registration, and usability of
+    the returned face fails closed on the caller's next read.
     """
     if mode is ExecutionMode.BACKTEST:
         raise NotConfiguredError(
@@ -77,7 +85,8 @@ def resolve_broker(
         raise NotConfiguredError(
             f"registered venue {adapter_name!r} does not provide a trading face"
         )
-    face.connect()
+    if connect:
+        face.connect()
     return face, effective, notes
 
 

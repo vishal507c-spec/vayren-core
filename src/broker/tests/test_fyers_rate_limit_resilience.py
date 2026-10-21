@@ -9,10 +9,15 @@ Covers:
 6. `_job_health` non-fatal degradation to EXECUTION_NOT_READY on sub-read 429.
 7. `_job_health` session-level 429 transition to BrokerStatus.ERROR with armed retry.
 8. Safety: unverified orders access is never claimed healthy.
+9. Single-flight reconciliation snapshot: the shared lock is never held across
+   venue reads, joiners coalesce on one fetch and stay bounded, and an
+   invalidation mid-read wins over the in-flight (possibly pre-op) read.
 """
 
 from __future__ import annotations
 
+import threading
+import time
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
@@ -26,6 +31,7 @@ from broker.providers.fyers.auto_auth import FyersAutoAuthEngine
 from broker.providers.fyers.live_auth import AuthError
 from broker.providers.fyers.session_adapter import FyersSessionAdapter
 from broker.status import BrokerStatus
+from broker.vocab import BrokerError
 
 # ---------------------------------------------------------------------------
 # 1. parse_retry_after Tests
@@ -407,3 +413,185 @@ def test_job_health_session_level_429_transitions_to_error(tmp_path: Any) -> Non
     assert state["status"] is BrokerStatus.ERROR
     assert "rate limited" in state["reason"].lower()
     assert bm._retry_armed("fyers") is True
+
+
+# ---------------------------------------------------------------------------
+# 5. Single-flight account snapshot (no lock across venue reads)
+# ---------------------------------------------------------------------------
+
+
+def _blocking_account_transport(
+    entered: threading.Event, release: threading.Event, calls: list[str]
+) -> MagicMock:
+    """Transport whose positions read blocks until ``release`` is set."""
+
+    def get_json(url: str, headers: dict[str, str] | None = None) -> dict[str, Any]:
+        _ = headers
+        calls.append(url)
+        if url.endswith("/positions"):
+            entered.set()
+            assert release.wait(timeout=10.0)
+            return {"s": "ok", "netPositions": [{"symbol": "NSE:INFY", "quantity": 1}]}
+        if url.endswith("/orders"):
+            return {"s": "ok", "orderBook": []}
+        if url.endswith("/profile"):
+            return {"s": "ok", "data": {"fy_id": "XV29244"}}
+        raise AssertionError(f"unexpected URL: {url}")
+
+    transport = MagicMock()
+    transport.get_json.side_effect = get_json
+    return transport
+
+
+def _snapshot_adapter(transport: MagicMock, **kwargs: Any) -> FyersSessionAdapter:
+    return FyersSessionAdapter(
+        app_id="test_app-100",
+        access_token="test_token",
+        transport=transport,
+        enable_order_ws=False,
+        account_snapshot_cache_s=60.0,
+        **kwargs,
+    )
+
+
+def test_slow_account_read_holds_no_lock_and_blocks_nothing() -> None:
+    """The shared snapshot lock is never held across the venue read.
+
+    Regression for the LIVE lock convoy: one session's positions read used to
+    hold ``_account_snapshot_lock`` across both REST calls while every other
+    caller (the 22-session fleet plus every invalidation path) queued behind
+    the mutex until the network read finished.
+    """
+    entered = threading.Event()
+    release = threading.Event()
+    calls: list[str] = []
+    adapter = _snapshot_adapter(_blocking_account_transport(entered, release, calls))
+
+    results: list[Any] = []
+    reader = threading.Thread(target=lambda: results.append(adapter.reconciliation_snapshot()))
+    reader.start()
+    assert entered.wait(timeout=5.0), "venue read never started"
+
+    # While the venue read is blocked:
+    # - the shared lock is free (the exact wedge mechanism),
+    # - invalidation completes (91 threads queued here on the EC2 wedge),
+    # - an unrelated adapter call still works (gateway stays responsive).
+    assert adapter._account_snapshot_lock.acquire(blocking=False) is True
+    adapter._account_snapshot_lock.release()
+    adapter._invalidate_account_snapshot()
+    ok, reason = adapter.health()
+    assert (ok, reason) == (True, "ok")
+
+    release.set()
+    reader.join(timeout=5.0)
+    assert reader.is_alive() is False
+    assert results == [([{"symbol": "NSE:INFY", "quantity": 1}], [])]
+    assert sum(url.endswith("/positions") for url in calls) == 1
+    assert sum(url.endswith("/orders") for url in calls) == 1
+
+
+def test_concurrent_snapshot_callers_join_one_fetch() -> None:
+    """Concurrent reconciles coalesce on ONE venue read pair (single-flight).
+
+    Before the fix only the TTL cache coalesced callers; on a miss every
+    caller serialized behind the lock while one thread did the reads. Now the
+    first caller owns the read and the rest join its ticket — same result,
+    one REST pair, no queue.
+    """
+    entered = threading.Event()
+    release = threading.Event()
+    calls: list[str] = []
+    adapter = _snapshot_adapter(_blocking_account_transport(entered, release, calls))
+
+    results: list[Any] = []
+    errors: list[BaseException] = []
+
+    def call() -> None:
+        try:
+            results.append(adapter.reconciliation_snapshot())
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=call) for _ in range(8)]
+    threads[0].start()
+    assert entered.wait(timeout=5.0), "owner read never started"
+    for thread in threads[1:]:
+        thread.start()
+    time.sleep(0.05)  # let the other callers join the in-flight ticket
+
+    # The joiners wait on the ticket event, not on a mutex: the lock is free
+    # while the owner is still inside the venue read.
+    assert adapter._account_snapshot_lock.acquire(blocking=False) is True
+    adapter._account_snapshot_lock.release()
+
+    release.set()
+    for thread in threads:
+        thread.join(timeout=5.0)
+        assert thread.is_alive() is False
+
+    assert errors == []
+    expected = ([{"symbol": "NSE:INFY", "quantity": 1}], [])
+    assert results == [expected] * 8
+    assert sum(url.endswith("/positions") for url in calls) == 1
+    assert sum(url.endswith("/orders") for url in calls) == 1
+
+
+def test_snapshot_joiner_times_out_fail_closed_instead_of_hanging() -> None:
+    """A joiner that outlives the wait bound fails closed, never hangs.
+
+    The bound is the difference between "a slow read delays this caller" and
+    "the gateway stops responding": on expiry the joiner raises a blocking
+    transport error (RECONCILE_ERROR upstream) and the dead ticket is
+    deregistered so the next caller can retry.
+    """
+    entered = threading.Event()
+    release = threading.Event()
+    calls: list[str] = []
+    adapter = _snapshot_adapter(
+        _blocking_account_transport(entered, release, calls),
+        account_snapshot_wait_s=0.1,
+    )
+
+    owner_result: list[Any] = []
+    owner = threading.Thread(target=lambda: owner_result.append(adapter.reconciliation_snapshot()))
+    owner.start()
+    assert entered.wait(timeout=5.0), "owner read never started"
+
+    started = time.monotonic()
+    with pytest.raises(BrokerError) as exc_info:
+        adapter.reconciliation_snapshot()
+    assert time.monotonic() - started < 5.0  # bounded, not the 10s transport wait
+    assert "did not complete" in str(exc_info.value)
+    # The dead ticket is deregistered: a later caller owns a fresh fetch.
+    assert adapter._account_snapshot_fetch is None
+
+    release.set()
+    owner.join(timeout=5.0)
+    assert owner_result == [([{"symbol": "NSE:INFY", "quantity": 1}], [])]
+
+
+def test_invalidation_during_inflight_read_discards_the_publish() -> None:
+    """A fetch that began before an account-changing op must not cache.
+
+    The operation invalidated the snapshot; the in-flight read may predate it,
+    so the next caller must read fresh truth instead of the stale window.
+    """
+    entered = threading.Event()
+    release = threading.Event()
+    calls: list[str] = []
+    adapter = _snapshot_adapter(_blocking_account_transport(entered, release, calls))
+
+    results: list[Any] = []
+    reader = threading.Thread(target=lambda: results.append(adapter.reconciliation_snapshot()))
+    reader.start()
+    assert entered.wait(timeout=5.0), "venue read never started"
+
+    adapter._invalidate_account_snapshot()  # an order op lands mid-read
+    release.set()
+    reader.join(timeout=5.0)
+    assert reader.is_alive() is False
+    assert results == [([{"symbol": "NSE:INFY", "quantity": 1}], [])]
+
+    adapter.reconciliation_snapshot()  # must NOT be served by the stale window
+    assert sum(url.endswith("/positions") for url in calls) == 2
+    assert sum(url.endswith("/orders") for url in calls) == 2

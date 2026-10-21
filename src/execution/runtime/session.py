@@ -1863,8 +1863,19 @@ class LiveSession:
         """Compare ledger vs broker truth; live stays blocked on mismatch."""
         if self._config.adapter_name:
             with suppress(Exception):
+                # Identity swap only — no verification probe. A forced
+                # connect() here ran a profile REST call plus a shared account
+                # cache invalidation per session per step (22x/30s), which
+                # saturated the venue rate limiter and convoyed every
+                # snapshot caller behind one lock-held network read. The
+                # venue is verified once at registration (the manager's
+                # activation); a stale token still fails closed at the next
+                # account read as a blocking RECONCILE_ERROR.
                 current_broker, _, _ = resolve_broker(
-                    self._config.mode, self._config.gates, adapter_name=self._config.adapter_name
+                    self._config.mode,
+                    self._config.gates,
+                    adapter_name=self._config.adapter_name,
+                    connect=False,
                 )
                 if current_broker is not None and current_broker is not self._broker:
                     self._broker = current_broker

@@ -201,6 +201,11 @@ STATE_ERROR = "ERROR"
 #: from the first caller in the window; failures are cached and re-raised
 #: unchanged (a 429 still blocks every session, it just is not hammered 22x).
 ACCOUNT_SNAPSHOT_CACHE_SECONDS = 5.0
+#: How long a caller that JOINS an in-flight account read waits for it. The
+#: bound exists so a wedged venue read can never park callers forever: on
+#: expiry the joiner fails closed (blocking transport error) instead of
+#: holding a queue that would otherwise grow without limit.
+ACCOUNT_SNAPSHOT_WAIT_SECONDS = 30.0
 
 
 @dataclass(frozen=True)
@@ -209,6 +214,25 @@ class _AccountSnapshotCacheEntry:
     positions: tuple[dict[str, Any], ...] = ()
     orders: tuple[dict[str, Any], ...] = ()
     error: Exception | None = None
+
+
+class _AccountSnapshotFetch:
+    """In-flight ticket for the one shared account read (single-flight).
+
+    Exactly one caller (the owner) performs the venue reads; every other
+    caller joins this ticket and waits on ``event`` WITHOUT holding
+    ``_account_snapshot_lock``, then reads the owner's published rows (or
+    re-raised failure). The lock therefore only ever guards bookkeeping — it
+    is never held across broker REST, so one slow venue response cannot
+    convoy unrelated callers behind a mutex.
+    """
+
+    def __init__(self) -> None:
+        self.event = threading.Event()
+        self.epoch = 0
+        self.positions: tuple[dict[str, Any], ...] = ()
+        self.orders: tuple[dict[str, Any], ...] = ()
+        self.error: Exception | None = None
 
 
 class FyersSessionAdapter:
@@ -226,6 +250,7 @@ class FyersSessionAdapter:
         order_socket_factory: Callable[..., Any] | None = None,
         enable_order_ws: bool = True,
         account_snapshot_cache_s: float = ACCOUNT_SNAPSHOT_CACHE_SECONDS,
+        account_snapshot_wait_s: float = ACCOUNT_SNAPSHOT_WAIT_SECONDS,
     ) -> None:
         self._app_id = str(app_id or "")
         self._token = str(access_token or "")
@@ -255,6 +280,9 @@ class FyersSessionAdapter:
         self._account_snapshot_lock = threading.Lock()
         self._account_snapshot_cache: _AccountSnapshotCacheEntry | None = None
         self._account_snapshot_cache_s = max(0.0, float(account_snapshot_cache_s))
+        self._account_snapshot_fetch: _AccountSnapshotFetch | None = None
+        self._account_snapshot_epoch = 0
+        self._account_snapshot_wait_s = max(0.1, float(account_snapshot_wait_s))
 
         # Order WebSocket and stream state
         self._order_socket_factory = order_socket_factory
@@ -950,6 +978,12 @@ class FyersSessionAdapter:
         rate-limits that burst with HTTP 429, which every later session
         correctly records as a blocking transport error.
 
+        Single-flight: exactly one caller performs the reads while every other
+        caller joins the in-flight ticket and waits on its event — bounded and
+        WITHOUT holding ``_account_snapshot_lock``. The lock only guards
+        bookkeeping, never a network read, so a slow venue response stalls
+        neither later reconciles nor cache invalidation behind a mutex.
+
         A short-lived cache makes every session compare the SAME broker truth
         and lets the venue see at most one pair of reads per window. Failures
         are cached for the same window and re-raised unchanged: a 429 is
@@ -961,6 +995,8 @@ class FyersSessionAdapter:
             return self._read_positions(), self._read_orders()
 
         now = time.monotonic()
+        owner_fetch: _AccountSnapshotFetch | None = None
+        joined: _AccountSnapshotFetch | None = None
         with self._account_snapshot_lock:
             cached = self._account_snapshot_cache
             if cached is not None and now - cached.fetched_at < self._account_snapshot_cache_s:
@@ -971,29 +1007,96 @@ class FyersSessionAdapter:
                     [dict(row) for row in cached.orders],
                 )
 
-            try:
-                positions = self._read_positions()
-                orders = self._read_orders()
-            except Exception as exc:
-                self._account_snapshot_cache = _AccountSnapshotCacheEntry(
-                    fetched_at=time.monotonic(), error=exc
+            in_flight = self._account_snapshot_fetch
+            if in_flight is None:
+                owner_fetch = _AccountSnapshotFetch()
+                owner_fetch.epoch = self._account_snapshot_epoch
+                self._account_snapshot_fetch = owner_fetch
+            else:
+                joined = in_flight
+
+        if owner_fetch is None:
+            assert joined is not None  # a joiner implies a registered fetch
+            if not joined.event.wait(timeout=self._account_snapshot_wait_s):
+                self._abandon_account_snapshot_fetch(joined)
+                raise BrokerError(
+                    "reconciliation snapshot read did not complete within "
+                    f"{self._account_snapshot_wait_s:.0f}s",
+                    code=ErrorCode.NETWORK_ERROR,
                 )
-                raise
-            self._account_snapshot_cache = _AccountSnapshotCacheEntry(
-                fetched_at=time.monotonic(),
-                positions=tuple(dict(row) for row in positions),
-                orders=tuple(dict(row) for row in orders),
+            if joined.error is not None:
+                raise joined.error
+            return (
+                [dict(row) for row in joined.positions],
+                [dict(row) for row in joined.orders],
             )
-            return positions, orders
+
+        # Owner: run the venue reads with NO lock held, then publish.
+        try:
+            positions = self._read_positions()
+            orders = self._read_orders()
+        except Exception as exc:
+            self._publish_account_snapshot(owner_fetch, error=exc)
+            raise
+        self._publish_account_snapshot(owner_fetch, positions=positions, orders=orders)
+        return positions, orders
+
+    def _publish_account_snapshot(
+        self,
+        fetch: _AccountSnapshotFetch,
+        *,
+        positions: list[dict[str, Any]] | None = None,
+        orders: list[dict[str, Any]] | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        """Hand the owner's verified result (or failure) to the joiners.
+
+        The TTL cache is only touched while this ticket is still the current
+        in-flight fetch AND no account-changing operation invalidated the
+        snapshot mid-read: a read that may predate such an operation must
+        never shadow post-operation truth with a stale window.
+        """
+        rows_positions = tuple(dict(row) for row in positions or ())
+        rows_orders = tuple(dict(row) for row in orders or ())
+        with self._account_snapshot_lock:
+            current = self._account_snapshot_fetch is fetch
+            if current:
+                self._account_snapshot_fetch = None
+            fetch.positions = rows_positions
+            fetch.orders = rows_orders
+            fetch.error = error
+            if current and fetch.epoch == self._account_snapshot_epoch:
+                self._account_snapshot_cache = _AccountSnapshotCacheEntry(
+                    fetched_at=time.monotonic(),
+                    positions=rows_positions,
+                    orders=rows_orders,
+                    error=error,
+                )
+        fetch.event.set()
+
+    def _abandon_account_snapshot_fetch(self, fetch: _AccountSnapshotFetch) -> None:
+        """Deregister a fetch nobody published within the wait bound.
+
+        The next caller becomes a fresh owner instead of joining a dead
+        ticket forever. A late publish from the abandoned owner is refused by
+        the ``is fetch`` guard, so it can neither clear nor overwrite newer
+        truth.
+        """
+        with self._account_snapshot_lock:
+            if self._account_snapshot_fetch is fetch:
+                self._account_snapshot_fetch = None
 
     def _invalidate_account_snapshot(self) -> None:
         """Drop the shared account snapshot after any account-changing operation.
 
         Only account truth (positions/orders) is invalidated. Historical
         candles are venue history and stay valid until their own 60 s TTL.
+        The epoch bump additionally stops an in-flight read that began BEFORE
+        the operation from publishing its (possibly pre-operation) snapshot.
         """
         with self._account_snapshot_lock:
             self._account_snapshot_cache = None
+            self._account_snapshot_epoch += 1
 
     def _required_rows(self, body: dict[str, Any], key: str, context: str) -> list[Any]:
         """A missing/!list account field is an unreadable response, not \"flat\"."""

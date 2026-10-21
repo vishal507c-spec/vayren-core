@@ -70,6 +70,7 @@ class _MockBrokerFace:
 class _MockBroker(BrokerAdapter):
     def __init__(self) -> None:
         self.connected = True
+        self.connect_calls = 0
         self.orders_placed: list[str] = []
         self.mock_open_orders: list[dict[str, Any]] = []
         self.mock_positions: list[dict[str, Any]] = []
@@ -93,6 +94,7 @@ class _MockBroker(BrokerAdapter):
         )
 
     def connect(self) -> None:
+        self.connect_calls += 1
         self.connected = True
 
     def disconnect(self) -> None:
@@ -783,6 +785,13 @@ def test_reconcile_now_reresolves_fresh_broker_when_venue_re_registers(tmp_path:
         rec2 = session.reconcile_now()
         assert rec2.blocks_live is False
         assert session._broker is fresh
+        # The re-resolution is a pure identity swap: no verification probe
+        # (profile REST + shared-cache invalidation) per session per step.
+        assert expired.connect_calls == 0
+        assert fresh.connect_calls == 0
+        session.reconcile_now()
+        assert session._broker is fresh
+        assert fresh.connect_calls == 0
     finally:
         if venue in registry:
             registry.unregister(venue)
@@ -796,3 +805,156 @@ def test_update_broker_explicitly_updates_session_broker(tmp_path: Any) -> None:
     assert session._broker is b1
     session.update_broker(b2)
     assert session._broker is b2
+
+
+def test_reconcile_now_never_probes_an_unchanged_registered_broker(tmp_path: Any) -> None:
+    """Step-wise re-resolution is a pure identity swap, never a probe.
+
+    Regression for the lock convoy: the factory's forced ``face.connect()``
+    ran on EVERY reconcile — a profile REST call plus a shared account-cache
+    invalidation per session per step (22 sessions x every 30s), saturating
+    the venue rate limiter and convoying every snapshot caller behind one
+    lock-held network read.
+    """
+    from dataclasses import replace
+
+    from broker.capabilities import CapabilitySet, Caps
+    from broker.faces import StaticPlugin
+    from broker.registry import BrokerRecord, default_registry
+    from broker.vocab import Domain
+
+    broker = _MockBroker()
+    registry = default_registry()
+    venue = "test-reconcile-no-probe-venue"
+    caps = CapabilitySet(
+        domains=(Domain.TRADING,), items=frozenset((Caps.ORDERS_MARKET, Caps.ACCOUNT_FUNDS))
+    )
+
+    def _register() -> None:
+        if venue in registry:
+            registry.unregister(venue)
+        registry.register(
+            BrokerRecord(
+                name=venue,
+                display_name=venue,
+                plugin=StaticPlugin(
+                    name=venue,
+                    display_name=venue,
+                    face_map={Domain.TRADING: broker},
+                    capabilities=caps,
+                ),
+                capabilities=caps,
+                faces=(Domain.TRADING,),
+            )
+        )
+
+    try:
+        _register()
+        session = _make_live_session(tmp_path)
+        session._config = replace(
+            session._config,
+            adapter_name=venue,
+            gates=ModeGates(
+                live_trading_enabled=True,
+                broker_live_enabled=True,
+                account_confirmed=True,
+                risk_limits_valid=True,
+                kill_switch_off=True,
+            ),
+        )
+        session._broker = broker
+
+        for _ in range(3):
+            rec = session.reconcile_now()
+            assert rec.blocks_live is False
+            assert session._broker is broker
+
+        assert broker.connect_calls == 0
+    finally:
+        if venue in registry:
+            registry.unregister(venue)
+
+
+def test_reconcile_now_swaps_without_probe_and_keeps_failures_fail_closed(
+    tmp_path: Any,
+) -> None:
+    """A re-registered venue is adopted by reference; bad adapters still block.
+
+    The fresh adapter was verified once by the manager at registration; the
+    swap itself runs no probe. If its reads fail, LIVE stays blocked
+    (fail-closed) until a working adapter replaces it.
+    """
+    from dataclasses import replace
+
+    from broker.capabilities import CapabilitySet, Caps
+    from broker.faces import StaticPlugin
+    from broker.registry import BrokerRecord, default_registry
+    from broker.vocab import Domain
+
+    class _FailingBroker(_MockBroker):
+        def reconciliation_snapshot(self) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+            raise RuntimeError("token expired (HTTP 401)")
+
+    first = _MockBroker()
+    failing = _FailingBroker()
+    recovered = _MockBroker()
+    registry = default_registry()
+    venue = "test-reconcile-swap-venue"
+    caps = CapabilitySet(
+        domains=(Domain.TRADING,), items=frozenset((Caps.ORDERS_MARKET, Caps.ACCOUNT_FUNDS))
+    )
+
+    def _register(adapter: Any) -> None:
+        if venue in registry:
+            registry.unregister(venue)
+        registry.register(
+            BrokerRecord(
+                name=venue,
+                display_name=venue,
+                plugin=StaticPlugin(
+                    name=venue,
+                    display_name=venue,
+                    face_map={Domain.TRADING: adapter},
+                    capabilities=caps,
+                ),
+                capabilities=caps,
+                faces=(Domain.TRADING,),
+            )
+        )
+
+    try:
+        _register(first)
+        session = _make_live_session(tmp_path)
+        session._config = replace(
+            session._config,
+            adapter_name=venue,
+            gates=ModeGates(
+                live_trading_enabled=True,
+                broker_live_enabled=True,
+                account_confirmed=True,
+                risk_limits_valid=True,
+                kill_switch_off=True,
+            ),
+        )
+        session._broker = first
+        assert session.reconcile_now().blocks_live is False
+
+        # Re-auth produced a NEW adapter that cannot read yet: swap in, block.
+        _register(failing)
+        rec = session.reconcile_now()
+        assert session._broker is failing
+        assert rec.blocks_live is True
+        assert any(entry.kind == "RECONCILE_ERROR" for entry in session.journal.entries)
+
+        # A working adapter restores truth without a probe storm.
+        _register(recovered)
+        rec2 = session.reconcile_now()
+        assert session._broker is recovered
+        assert rec2.blocks_live is False
+
+        assert first.connect_calls == 0
+        assert failing.connect_calls == 0
+        assert recovered.connect_calls == 0
+    finally:
+        if venue in registry:
+            registry.unregister(venue)

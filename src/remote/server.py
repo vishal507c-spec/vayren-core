@@ -908,21 +908,27 @@ class RemoteServer:
     def _push_snapshot(
         self, conn: _Connection, *, resync: bool, snapshot: dict | None = None
     ) -> None:
-        try:
-            if snapshot is not None:
-                remote = snapshot
-            else:
-                remote = build_snapshot(self._gateway.get_snapshot())
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("remote: snapshot failed: %s", exc)
-            self._send_error(conn, "SERVER_ERROR", "backend snapshot failed")
-            return
+        if snapshot is not None:
+            remote = snapshot
+            try:
+                raw_events = self._gateway.get_snapshot().get("events", [])
+            except Exception:  # noqa: BLE001
+                raw_events = []
+        else:
+            try:
+                # One live build serves both the projection and the event
+                # tail: the second snapshot call here doubled every fresh
+                # connection's backend work (and every queued session step
+                # it pumps), which the connection churn amplified.
+                live = self._gateway.get_snapshot()
+                remote = build_snapshot(live)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("remote: snapshot failed: %s", exc)
+                self._send_error(conn, "SERVER_ERROR", "backend snapshot failed")
+                return
+            raw_events = live.get("events", [])
         wanted = {key: remote[key] for key in sorted(remote) if key in conn.subscriptions}
         conn.last_sections = {key: _stable_hash(value) for key, value in remote.items()}
-        try:
-            raw_events = self._gateway.get_snapshot().get("events", [])
-        except Exception:  # noqa: BLE001
-            raw_events = []
         conn.last_event_tail = list(raw_events[-50:]) if isinstance(raw_events, list) else []
         payload: dict[str, Any] = {"snapshot": wanted, "server_time": utcnow_iso()}
         if resync:
