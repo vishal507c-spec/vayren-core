@@ -367,11 +367,48 @@ pub struct BrokerFacts {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ReconciliationFacts {
     pub status: String,
+    /// Why the venue's reconciliation is in this state (its own words), so the
+    /// LIVE panel can say WHAT blocks live instead of only that something
+    /// does. Empty when the venue reports no reason.
+    pub reason: String,
     pub positions: String,
     pub orders: String,
     pub last_check: String,
     pub mismatches: String,
     pub blocks_live: bool,
+}
+
+/// True when a reconciliation status means "the venue's books agree".
+///
+/// The venues speak several status vocabularies (the gateway reports SAFE /
+/// SYNCED / REQUIRED, the workspace reports CLEAN / MISMATCH / BLOCKED), so
+/// health is decided by the WORD SET, never by one literal string.
+pub fn reconciliation_is_healthy(status: &str) -> bool {
+    const HEALTHY: [&str; 6] = ["CLEAN", "SAFE", "SYNCED", "OK", "MATCHED", "CLEAR"];
+    HEALTHY.contains(&status.trim().to_ascii_uppercase().as_str())
+}
+
+/// Tone of a reconciliation row: 1 = healthy, 3 = blocking, 0 = neutral.
+///
+/// Health is decided by HEALTH, not by one literal word — otherwise a
+/// blocking reconciliation can render in a neutral colour.
+fn reconciliation_tone(status: &str, blocks_live: bool) -> i32 {
+    let text = status.trim().to_ascii_uppercase();
+    const BLOCKING: [&str; 6] = [
+        "MISMATCH", "BLOCKED", "REQUIRED", "ERROR", "FAILED", "UNSAFE",
+    ];
+    if reconciliation_is_healthy(status) {
+        return 1;
+    }
+    if BLOCKING.contains(&text.as_str()) {
+        return 3;
+    }
+    // Unknown word: trust the venue's own "does this block live" answer.
+    if blocks_live {
+        3
+    } else {
+        0
+    }
 }
 
 /// Capital facts for the Account & Risk card (the snapshot `capital`
@@ -1029,6 +1066,37 @@ impl LiveState {
         }
     }
 
+    /// The venue's own reconciliation verdict, as a blocker line.
+    ///
+    /// The venue says whether its books agree (`blocks_live`). When they do
+    /// not, that is a blocker the operator must SEE — with the venue's own
+    /// reason — even when the backend's blocker list did not repeat it.
+    /// `None` when the reconciliation is healthy or was never reported.
+    fn reconciliation_blocker(&self) -> Option<String> {
+        let r = &self.reconciliation;
+        if !r.blocks_live {
+            return None;
+        }
+        let status = r.status.trim();
+        if status.is_empty() || status == "NOT REPORTED" || status == "NOT CONFIGURED" {
+            return None;
+        }
+        let mut text = String::from("reconciliation blocks live");
+        let reason = r.reason.trim();
+        if !reason.is_empty() {
+            // The blocker list renders elided, so the line is bounded: the
+            // reason must fit on one row without cutting the status word.
+            const MAX_REASON: usize = 88;
+            let mut shown: String = reason.chars().take(MAX_REASON).collect();
+            if reason.chars().count() > MAX_REASON {
+                shown.push('…');
+            }
+            text.push_str(" — ");
+            text.push_str(&shown);
+        }
+        Some(text)
+    }
+
     /// Setup + venue validation, mirroring the service `validate()` order.
     /// An unconnected bridge always blocks (no fake enabled states). In host
     /// mode the backend's verdict is authoritative when present (same
@@ -1041,10 +1109,22 @@ impl LiveState {
                 if self.live_confirmed || self.session == SessionStatus::Running {
                     list.retain(|b| !Self::is_confirmation_blocker(b));
                 }
+                // The venue's reconciliation verdict is its OWN truth: a
+                // blocking reconciliation must be visible even when the
+                // backend's list did not repeat it (otherwise the screen can
+                // read "READY TO START" while the venue blocks live).
+                if let Some(line) = self.reconciliation_blocker() {
+                    if !list.iter().any(|b| b.contains("reconciliation")) {
+                        list.push(line);
+                    }
+                }
                 return list;
             }
         }
         let mut blockers: Vec<String> = Vec::new();
+        if let Some(line) = self.reconciliation_blocker() {
+            blockers.push(line);
+        }
         if self.selected_strategy().is_none() {
             blockers.push("no strategy selected".into());
         }
@@ -2147,6 +2227,16 @@ impl LiveState {
         if let Some(r) = v.get("reconciliation") {
             self.reconciliation = ReconciliationFacts {
                 status: str_of(r, "status"),
+                // The venue's own reason for this state ("detail" on the
+                // gateway path, "reason" elsewhere). Empty when it reports none.
+                reason: {
+                    let detail = str_of(r, "detail");
+                    if detail.is_empty() {
+                        str_of(r, "reason")
+                    } else {
+                        detail
+                    }
+                },
                 positions: value_to_text(&r["positions"]),
                 orders: value_to_text(&r["orders"]),
                 last_check: str_of(r, "last_check"),
@@ -3608,10 +3698,16 @@ fn recon_rows(state: &LiveState) -> Vec<KvRow> {
         KvRow {
             key: "STATUS".into(),
             value: text_or_na(&r.status),
-            tone: match r.status.as_str() {
-                "CLEAN" => 1,
-                "MISMATCH" | "BLOCKED" => 3,
-                _ => 0,
+            tone: reconciliation_tone(&r.status, r.blocks_live),
+        },
+        KvRow {
+            key: "REASON".into(),
+            value: text_or_na(&r.reason),
+            // The reason alarms only when the reconciliation itself blocks.
+            tone: if r.blocks_live {
+                reconciliation_tone(&r.status, r.blocks_live)
+            } else {
+                0
             },
         },
         KvRow {
@@ -3986,11 +4082,10 @@ pub fn project(state: &LiveState) -> LiveView {
         risk_tone,
         risk_sub,
         recon_label: text_or_na(&state.reconciliation.status),
-        recon_tone: match state.reconciliation.status.as_str() {
-            "CLEAN" => 1,
-            "MISMATCH" | "BLOCKED" => 3,
-            _ => 0,
-        },
+        recon_tone: reconciliation_tone(
+            &state.reconciliation.status,
+            state.reconciliation.blocks_live,
+        ),
         recon_sub: format!(
             "Positions: {} | Orders: {}",
             text_or_na(&state.reconciliation.positions),
@@ -5449,11 +5544,118 @@ mod tests {
     }
 
     #[test]
+    fn a_blocking_reconciliation_is_always_a_visible_blocker() {
+        // The gateway's blocker list can be EMPTY while the venue's own
+        // reconciliation blocks live. The screen must not then read
+        // "READY TO START": the venue's verdict is the truth.
+        let mut st = configured(LiveState::default());
+        st.host_mode = true;
+        st.bridge_wired = true;
+        st.backend_start_blockers = Some(Vec::new());
+        st.reconciliation = ReconciliationFacts {
+            status: "REQUIRED".into(),
+            reason: "reconcile transport error: rate limited by venue (HTTP 429)".into(),
+            positions: "0".into(),
+            orders: "0".into(),
+            last_check: "t".into(),
+            mismatches: "0".into(),
+            blocks_live: true,
+        };
+
+        let blockers = st.start_blockers();
+        let line = blockers
+            .iter()
+            .find(|b| b.contains("reconciliation"))
+            .expect("a blocking reconciliation must be a blocker");
+        assert!(line.contains("reconcile transport error: rate limited"));
+        assert!(!st.can_start(), "a blocked reconciliation must block START");
+
+        let view = project(&st);
+        assert!(!view.setup.can_start);
+        assert!(
+            view.setup
+                .blockers
+                .iter()
+                .any(|b| b.contains("reconciliation blocks live")),
+            "the LIVE screen must show the reason, not a bare word"
+        );
+    }
+
+    #[test]
+    fn a_healthy_reconciliation_never_blocks_start() {
+        let mut st = configured(LiveState::default());
+        st.host_mode = true;
+        st.bridge_wired = true;
+        st.backend_start_blockers = Some(Vec::new());
+        st.reconciliation = ReconciliationFacts {
+            status: "SYNCED".into(),
+            reason: "SAFE".into(),
+            positions: "0".into(),
+            orders: "0".into(),
+            last_check: "t".into(),
+            mismatches: "0".into(),
+            blocks_live: false,
+        };
+        assert!(
+            !st.start_blockers()
+                .iter()
+                .any(|b| b.contains("reconciliation")),
+            "a healthy reconciliation must not invent a blocker"
+        );
+    }
+
+    #[test]
+    fn remote_reconciliation_shows_the_venue_reason_and_colours_by_health() {
+        // The gateway reports SAFE / SYNCED / REQUIRED, not CLEAN / MISMATCH.
+        // A blocking reconciliation must read as blocking, and the venue's
+        // own reason must be visible instead of a bare status word.
+        let mut st = LiveState::default();
+        st.apply_snapshot(
+            &serde_json::json!({
+                "strategy": {"status": "BLOCKED", "mode": "LIVE", "reason": "reconciliation blocks live"},
+                "reconciliation": {
+                    "status": "REQUIRED",
+                    "detail": "reconcile transport error: rate limited by venue (HTTP 429)",
+                    "blocks_live": true
+                }
+            }),
+        );
+        let view = project(&st);
+        let status = view.recon_rows.iter().find(|r| r.key == "STATUS").unwrap();
+        let reason = view.recon_rows.iter().find(|r| r.key == "REASON").unwrap();
+        assert_eq!(status.value, "REQUIRED");
+        assert_eq!(status.tone, 3, "a blocking reconciliation must alarm");
+        assert_eq!(
+            reason.value,
+            "reconcile transport error: rate limited by venue (HTTP 429)"
+        );
+        assert_eq!(reason.tone, 3);
+        assert_eq!(view.bar.recon_label, "REQUIRED");
+        assert_eq!(view.bar.recon_tone, 3);
+    }
+
+    #[test]
+    fn healthy_remote_reconciliation_is_green_and_never_alarms() {
+        let mut st = LiveState::default();
+        st.apply_snapshot(&serde_json::json!({
+            "strategy": {"status": "RUNNING", "mode": "LIVE", "reason": ""},
+            "reconciliation": {"status": "SYNCED", "detail": "SAFE", "blocks_live": false}
+        }));
+        let view = project(&st);
+        let status = view.recon_rows.iter().find(|r| r.key == "STATUS").unwrap();
+        let reason = view.recon_rows.iter().find(|r| r.key == "REASON").unwrap();
+        assert_eq!(status.tone, 1, "a synced reconciliation is healthy");
+        assert_eq!(reason.tone, 0, "a healthy state's note must not alarm");
+        assert_eq!(view.bar.recon_tone, 1);
+    }
+
+    #[test]
     fn clean_reconciliation_does_not_alarm() {
         // A clean book reports mismatches "0" — the GOOD state, not red.
         let mut st = LiveState::default();
         st.reconciliation = ReconciliationFacts {
             status: "CLEAN".into(),
+            reason: String::new(),
             positions: "2".into(),
             orders: "3".into(),
             last_check: "t".into(),
@@ -6541,7 +6743,14 @@ mod tests {
         assert_eq!(view.positions[0].qty, "10.00");
         assert_eq!(view.positions[0].entry, "2,801.10");
         assert_eq!(view.stats[0].value, "+0.00");
-        assert_eq!(view.recon_rows[5].value, "NO"); // blocks_live false
+        // The panel rows are looked up BY KEY: adding a row (e.g. the
+        // reconciliation REASON) must not silently move another row's index.
+        let blocks = view
+            .recon_rows
+            .iter()
+            .find(|r| r.key == "BLOCKS LIVE")
+            .expect("BLOCKS LIVE row");
+        assert_eq!(blocks.value, "NO"); // blocks_live false
         assert_eq!(view.market.state_label, "READY");
         assert!(view.market.has_data);
         assert_eq!(view.market.feed_label, "FEED: LOCAL TAIL");

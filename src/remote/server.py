@@ -408,9 +408,41 @@ class RemoteServer:
 
     # ── accept ──
 
+    def _reap_stale(self) -> None:
+        """Close connections that outlived the idle policy.
+
+        A connection normally unregisters itself from its own thread, but a
+        thread wedged in a blocked write leaves a dead socket registered
+        forever. Eight such entries permanently fill ``max_connections``: the
+        gateway then refuses every client, the tunnel answers 502, and the
+        desktop reports that the gateway did not respond. This runs on the
+        accept thread, takes no per-connection lock (``send_lock`` may be
+        held by the wedged writer), and makes the state self-healing.
+        """
+        now = time.monotonic()
+        with self._lock:
+            stale = [
+                conn
+                for conn in self._connections.values()
+                if now - conn.last_activity > self._config.idle_timeout_s
+            ]
+        for conn in stale:
+            conn.closed = True
+            logger.warning(
+                "remote: reaping stale connection (%s, idle %.0fs)",
+                conn.connection_id,
+                now - conn.last_activity,
+            )
+            with contextlib.suppress(OSError):
+                conn.sock.shutdown(socket.SHUT_RDWR)
+            with contextlib.suppress(OSError):
+                conn.sock.close()
+            self._unregister(conn)
+
     def _accept_loop(self) -> None:
         assert self._listener is not None
         while not self._stop.is_set():
+            self._reap_stale()
             try:
                 sock, addr = self._listener.accept()
             except (OSError, ssl.SSLError):

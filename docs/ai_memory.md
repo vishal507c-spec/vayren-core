@@ -7,7 +7,27 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (reconciliation-stale-broker-reresolve-20261021):** RECONCILIATION BLOCKER TRACED AND FIXED: LIVE SESSIONS AUTO-RE-RESOLVE FRESH BROKER ON TOKEN RE-AUTHENTICATION (LOCAL ONLY; NO DEPLOY, NO PUSH, ENGINE STOPPED) —
+**Latest update (live-ui-defects-and-ci-green-20261021):** LIVE UI DEFECT FIXES AND FULL CI PRE-FLIGHT VALIDATION PASSED —
+- 8 LIVE UI Defect Fixes & Parity Hardening:
+  1. Live confirmation banner mode check: Corrected `root.bar.mode == 2` to `root.bar.mode == 1` (`ExecMode::Live`).
+  2. Table scroll views: Blotter tables (Positions, Orders, Fills, Live Events) wrapped in `ScrollView` with vertical scrollbars so rows cannot clip offscreen.
+  3. Orders table alignment: Aligned header columns with row data cells, adding explicit `STATUS` (70px) and `DETAIL` stretching column.
+  4. Selected instrument inspector: Rendered live backend facts from `selected-stock` (LTP, Entry, Stop, Qty, Risk Util, 4-step pipeline status).
+  5. Compact blotter tabs: Added responsive labels and compact icon clear button for constrained viewports.
+  6. Live confirmation venue blockers: Disabled confirmation button whenever venue blockers exist (`can-confirm: root.setup.needs-live-confirm && root.venue-blockers.length == 0`).
+  7. Status banner trailing dash: Guarded against dangling dash artifact when `start-reason` is empty.
+  8. Code cleanliness & footer status strip: Corrected outdated comments and wired the bottom `LiveFooter` strip.
+- Regression & Verification:
+  - Added dedicated regression test `crates/vayren-shell/tests/live_ui_defects_regression.rs` (8/8 tests passed).
+  - All 306 domain tests (`cargo test -p vayren-domain`) passed.
+  - All 84 shell tests (`cargo test -p vayren-shell`) passed.
+  - Rust formatting verified (`cargo fmt --manifest-path Cargo.toml --all -- --check`).
+  - Python lint & format verified (`ruff check .`, `ruff format --check .`).
+  - Typecheck verified (`pyright` 0 errors, 0 warnings).
+  - Repo graph synced (`tools/validate_repo_graph.py` passed).
+  - All 9 governance validators passed.
+
+**Previous update (reconciliation-stale-broker-reresolve-20261021):** RECONCILIATION BLOCKER TRACED AND FIXED: LIVE SESSIONS AUTO-RE-RESOLVE FRESH BROKER ON TOKEN RE-AUTHENTICATION (LOCAL ONLY; NO DEPLOY, NO PUSH, ENGINE STOPPED) —
 - Confirmed Root Cause:
   1. The deployed EC2 service (`vayren-remote`, PID 699535) has been running continuously since 23:28 IST yesterday (`uptime_seconds: 29897`).
   2. At 06:00 IST (00:30 UTC), FYERS daily access tokens expired. The 22 running `LiveSession` instances in `LiveTradingService._sessions` executed periodic reconciliation (`reconcile_now()`) with the expired token, resulting in HTTP 401 Unauthorized (`FYERS positions request: unauthorized`).

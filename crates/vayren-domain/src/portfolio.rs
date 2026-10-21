@@ -686,7 +686,10 @@ pub fn project(state: &PortfolioState) -> PortfolioView {
             || ["CONNECTED", "LIVE_READY"]
                 .iter()
                 .any(|s| *s == snapshot.broker.status.as_str());
-        let sync_ok = snapshot.recon_status == "CLEAN";
+        // "CLEAN" is the workspace's word; the gateway reports SAFE / SYNCED.
+        // Health is a word SET, so a healthy remote reconciliation must not
+        // render as a broken Account Sync gate.
+        let sync_ok = crate::live::reconciliation_is_healthy(&snapshot.recon_status);
         let risk_ok = snapshot.risk_status == "READY";
         vec![
             GateView {
@@ -1244,6 +1247,23 @@ mod tests {
         let view = project(&state);
         assert_eq!(view.health_label, "CONCENTRATED");
         assert_eq!(view.health_tone, Tone::Warning);
+    }
+
+    #[test]
+    fn account_sync_gate_accepts_the_gateway_reconciliation_vocabulary() {
+        // The gateway reports SAFE / SYNCED; the workspace reports CLEAN.
+        // A healthy remote reconciliation must not render a broken gate.
+        for status in ["SAFE", "SYNCED", "CLEAN"] {
+            let mut state = configured_state();
+            state.snapshot.recon_status = status.to_string();
+            let view = project(&state);
+            let gate = view
+                .gates
+                .iter()
+                .find(|g| g.label == "Account Sync")
+                .expect("Account Sync gate");
+            assert_eq!(gate.status, "READY", "status {status}");
+        }
     }
 
     #[test]

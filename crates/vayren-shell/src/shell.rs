@@ -3956,6 +3956,7 @@ pub fn demo_live_state() -> LiveState {
         risk_status: live::RiskStatus::Ready,
         reconciliation: live::ReconciliationFacts {
             status: "NOT CONFIGURED".into(),
+            reason: String::new(),
             positions: "N/A".into(),
             orders: "N/A".into(),
             last_check: String::new(),

@@ -729,3 +729,34 @@ def test_idle_timeout_closes_silent_client() -> None:
             client.close()
     finally:
         server.stop()
+
+
+def test_wedged_connection_slot_is_reaped_so_the_gateway_recovers() -> None:
+    """A registered-but-dead connection must not refuse clients forever.
+
+    Field failure: the peer vanished (socket left in CLOSE-WAIT), the
+    connection thread was wedged, and its slot was never released. Eight such
+    entries permanently filled ``max_connections``; every new client was
+    refused and the desktop saw the gateway as offline.
+    """
+    from remote.server import _Connection
+
+    server, _ = start_server(FakeGateway())
+    try:
+        live, peer = socket.socketpair()
+        conn = _Connection(sock=live, address="127.0.0.1")
+        server._register(conn)
+        assert server.connection_count == 1
+
+        # A live connection survives the sweep.
+        server._reap_stale()
+        assert server.connection_count == 1
+
+        # The wedged one is closed and its slot freed without its own thread.
+        conn.last_activity -= server._config.idle_timeout_s * 2
+        server._reap_stale()
+        assert server.connection_count == 0
+        assert live.fileno() == -1
+        peer.close()
+    finally:
+        server.stop()
