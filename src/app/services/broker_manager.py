@@ -53,6 +53,7 @@ from broker.session_state import build_snapshot as build_unified_snapshot
 from broker.session_state import map_broker_status, next_action_for
 
 CALLBACK_PORT = 9474
+_LOGGER = logging.getLogger(__name__)
 _SESSION_JOB = "session-check"
 _LOGIN_JOB = "interactive-login"
 _HEALTH_JOB = "health-check"
@@ -1262,7 +1263,8 @@ class BrokerManager:
         so the caller keeps the legacy LOGIN_REQUIRED path — Zerodha
         behavior is unchanged.
         """
-        if spec.auto_authenticate is None:
+        auto_auth = getattr(spec, "auto_authenticate", None)
+        if auto_auth is None:
             return False
         if generation is None:
             generation = self._generation(spec.broker_id)
@@ -1271,7 +1273,7 @@ class BrokerManager:
         )
         self._bump_version(spec.broker_id)
         try:
-            ok, message = spec.auto_authenticate(config, self._session_store(spec))
+            ok, message = auto_auth(config, self._session_store(spec))
         except Exception as exc:
             kind, safe = classify_exception(exc)
             if kind == "RATE_LIMITED":
@@ -1541,6 +1543,16 @@ class BrokerManager:
                 live["reason"] = redact(f"rate limited — retry in {delay:.0f}s")
                 self._touch_error(spec.broker_id, "RATE_LIMITED", rate_msg or "HTTP 429")
             elif is_auth_error:
+                config = self._config_values(spec)
+                auto_auth = getattr(spec, "auto_authenticate", None)
+                if auto_auth is not None and config:
+                    generation = self._generation(spec.broker_id)
+                    _LOGGER.info(
+                        "AUTH_EXPIRED broker=%s — attempting auto-authentication recovery",
+                        spec.broker_id,
+                    )
+                    if self._try_auto_auth(spec, config, generation=generation):
+                        return
                 live["status"] = BrokerStatus.LOGIN_REQUIRED
                 live["reason"] = f"session expired — {redact(auth_error_msg) or 'login required'}"
                 self._touch_error(spec.broker_id, "AUTH_EXPIRED", auth_error_msg)

@@ -75,6 +75,7 @@ class FyersLiveMarketData:
         self._max_queue_size = max_queue_size
         self._queue: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=max_queue_size)
         self._subscriptions: set[str] = set()
+        self._venue_to_requested: dict[str, str] = {}
         self._timeframe: str = "1m"
         self._state = STATE_DISCONNECTED
         self._last_error_reason: str = ""
@@ -204,6 +205,9 @@ class FyersLiveMarketData:
         to_add = [self._normalize_symbol(s) for s in symbols if s]
         if not to_add:
             return
+        for s in symbols:
+            if s:
+                self._venue_to_requested[self._normalize_symbol(s)] = s
         self._subscriptions.update(to_add)
 
         if self._state == STATE_CONNECTED and self._ws_client is not None:
@@ -219,6 +223,9 @@ class FyersLiveMarketData:
         to_remove = [self._normalize_symbol(s) for s in symbols if s]
         if not to_remove:
             return
+        for s in symbols:
+            if s:
+                self._venue_to_requested.pop(self._normalize_symbol(s), None)
         self._subscriptions.difference_update(to_remove)
 
         if self._state == STATE_CONNECTED and self._ws_client is not None:
@@ -545,9 +552,10 @@ class FyersLiveMarketData:
         A tick without a positive price yields nothing: there is no honest
         quote to fold.
         """
-        symbol = str(msg.get("symbol") or "").strip()
-        if not symbol:
+        raw_sym = str(msg.get("symbol") or "").strip()
+        if not raw_sym:
             return ()
+        symbol = self._venue_to_requested.get(raw_sym, raw_sym)
         ts_str = self._extract_timestamp(msg)
         price = self._safe_float(msg.get("ltp"))
         bid = self._safe_float(msg.get("bid_price") or msg.get("bidPrice1"))

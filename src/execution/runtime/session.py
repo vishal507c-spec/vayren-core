@@ -1435,7 +1435,10 @@ class LiveSession:
         if self._broker is None:
             return
         try:
-            events = self._broker.stream_events()
+            try:
+                events = self._broker.stream_events(consumer_id=self._request_id)
+            except TypeError:
+                events = self._broker.stream_events()
         except Exception as exc:
             self._broker_stream_errors += 1
             self._journal.record("BROKER_STREAM_ERROR", reason=str(exc))

@@ -59,6 +59,7 @@ class BrokerFeedProvider(MarketDataProvider):
         self._emitted: dict[str, str] = {}
         self._last_seen: dict[str, float] = {}
         self._last_dayvol: dict[str, int] = {}
+        self._last_close: dict[str, float] = {}
         self._last_error = ""
 
     @property
@@ -72,6 +73,11 @@ class BrokerFeedProvider(MarketDataProvider):
     @property
     def last_emitted(self) -> dict[str, str]:
         return dict(self._emitted)
+
+    @property
+    def last_close(self) -> dict[str, float]:
+        """Latest seen price per symbol (marks without extra reads)."""
+        return dict(self._last_close)
 
     def open(self, symbols: tuple[str, ...], timeframe: str) -> None:
         self._timeframe = timeframe
@@ -109,6 +115,7 @@ class BrokerFeedProvider(MarketDataProvider):
             self._emitted.pop(symbol, None)
             self._last_seen.pop(symbol, None)
             self._last_dayvol.pop(symbol, None)
+            self._last_close.pop(symbol, None)
         try:
             self._face.unsubscribe(tuple(dropped))
         except Exception as exc:
@@ -167,6 +174,7 @@ class BrokerFeedProvider(MarketDataProvider):
         self._emitted = {}
         self._last_seen = {}
         self._last_dayvol = {}
+        self._last_close = {}
         self._last_error = ""
 
     def disconnect(self) -> None:
@@ -205,7 +213,14 @@ class BrokerFeedProvider(MarketDataProvider):
             return None
         symbol = str(quote.get("symbol", "") or "")
         stamp = str(quote.get("timestamp", "") or "")[:19]
-        if symbol not in self._subscribed or len(stamp) < 19:
+        if symbol not in self._subscribed:
+            if symbol.endswith("-EQ") and symbol[:-3] in self._subscribed:
+                symbol = symbol[:-3]
+            elif f"{symbol}-EQ" in self._subscribed:
+                symbol = f"{symbol}-EQ"
+            else:
+                return None
+        if len(stamp) < 19:
             return None
         try:
             price = float(quote.get("price", 0.0) or 0.0)
@@ -213,6 +228,7 @@ class BrokerFeedProvider(MarketDataProvider):
             return None
         if not math.isfinite(price) or price <= 0:
             return None
+        self._last_close[symbol] = price
         try:
             dayvol = int(quote.get("volume", 0) or 0)
         except (TypeError, ValueError):

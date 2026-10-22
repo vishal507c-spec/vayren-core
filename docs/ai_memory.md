@@ -7,7 +7,30 @@
 **Historical archive:** docs/archive/ai_memory_history.md (all past session logs preserved).
 **Build-performance history:** docs/CARGO_BUILD_EXPERIMENTS.md.
 
-**Latest update (reconcile-convoy-fix-single-flight-20261021):** RECONCILE LOCK-CONVOY ROOT CAUSE FIXED **AND DEPLOYED TO EC2** (GATEWAY RESTARTED 2026-10-21 16:38 UTC AFTER A SAFE-WINDOW GATE; LIVE WORKER WAS STOPPED, VENUE FLAT); THE WINDOWS DESKTOP NOW RECEIVES THE REAL EC2 `welcome` + AUTHORITATIVE `snapshot` (NO PUSH, NO LIVE START, NO ORDERS) —
+**Latest update (final-live-readiness-deployed-20261022):** E2E LIVE READINESS VERIFIED & DEPLOYED TO EC2; MORNING AUTH (06:01 IST) SUCCESSFUL; WINDOWS RELEASE BINARY BUILT; ZERO VENUE ORDERS; WORKER STOPPED/DISARMED FOR MARKET OPEN —
+- **Fix 1: LTP Stale / 2-Day-Old Value Root Causes Fixed:**
+  - *Root Cause A (Symbol Suffix Mismatch):* FyersLiveMarketData normalized symbols with -EQ suffix (NSE:DCW-EQ) while caller subscribed without -EQ (NSE:DCW). Added bidirectional mapping and defense-in-depth suffix matching in BrokerFeedProvider._ingest().
+  - *Root Cause B (Missing last_close in BrokerFeedProvider):* BrokerFeedProvider lacked last_close property needed by _refresh_mark(symbol), leaving marks to fall back to old historical candle closes. Added last_close property and marks updates to BrokerFeedProvider.
+- **Fix 2: Reconcile Rate Limit Saturation / Multi-Session Stream Drain Fixed:**
+  - *Root Cause A (Bypassed poll interval on empty orders):* session_adapter.py stream_events() used 'and self._cached_snapshot', bypassing the rate-limit interval whenever 0 orders were active and flooding REST API calls across all 22 sessions. Removed faulty condition; when Order WS is connected, REST polling is avoided entirely.
+  - *Root Cause B (Multi-session queue race):* In multi-session setup, whichever session polled first drained events for all symbols. Added per-consumer cursor tracking over a ring buffer.
+- **Fix 3: Automated Daily Authentication & Expiry Recovery:**
+  - Token expired at 06:00:00 IST. BrokerManager._verify_health() wired to _try_auto_auth() using stored TOTP credentials. Verified live on EC2 at 08:45 IST: fresh session was auto-issued at 06:01:01 IST (expires tomorrow 2026-10-23 06:00:00 IST).
+- **Safe EC2 Deployment & Validation:**
+  - Stopped vayren-remote.service, backed up to /home/ubuntu/vayren-backup-readiness-20261021, terminated 9 orphan probe processes.
+  - Deployed 5 touched files (broker_manager.py, live_market_data.py, session_adapter.py, broker_feed.py, session.py).
+  - Started vayren-remote.service. Verified: both ORDER_WS_CONNECTED and MARKET_WS_CONNECTED, broker CONNECTED (XV29244, all checks passed), reconciliation SYNCED (blocks_live=False), worker STOPPED (22 symbols configured).
+- **Windows Release Binary:**
+  - Built target/release/vayren-shell.exe (40,891,392 bytes) linked to desktop shortcut VAYREN.lnk.
+- **Pre-Market Status at 08:45 AM IST:**
+  - Broker: CONNECTED
+  - Reconciliation: SYNCED (blocks_live=False)
+  - Order WebSocket: CONNECTED
+  - Market WebSocket: CONNECTED
+  - Worker: STOPPED & DISARMED (single blocker: live confirmation required (explicit operator consent)).
+  - No orders placed; ready for market open.
+
+**Previous update (reconcile-convoy-fix-single-flight-20261021):** RECONCILE LOCK-CONVOY ROOT CAUSE FIXED **AND DEPLOYED TO EC2** (GATEWAY RESTARTED 2026-10-21 16:38 UTC AFTER A SAFE-WINDOW GATE; LIVE WORKER WAS STOPPED, VENUE FLAT); THE WINDOWS DESKTOP NOW RECEIVES THE REAL EC2 `welcome` + AUTHORITATIVE `snapshot` (NO PUSH, NO LIVE START, NO ORDERS) —
 - Root cause (traced end-to-end; matches the 149-thread wedge census): every 30 s each of the 22 `LiveSession`s reconciled via `reconcile_now()` → `resolve_broker()` → forced `face.connect()` (profile REST + `_invalidate_account_snapshot()` + order-WS reset), then `reconciliation_snapshot()` **held `_account_snapshot_lock` across both governor-gated REST reads**. The synchronized fleet burst (~66 calls/30 s vs 2.5 rps cap 3) saturated the token bucket, and every concurrent caller (sessions + invalidation paths + reaper-churned `hello` threads, each synchronously pumping all sessions via `service.snapshot()`) queued behind the one lock-held network read → permanent convoy; `_push_snapshot` additionally built the whole live snapshot twice per fresh connection.
 - Fix A (`src/broker/providers/fyers/session_adapter.py`): `reconciliation_snapshot()` is now single-flight — exactly one owner performs the two reads with NO lock held; joiners wait on the fetch `Event` (no lock), bounded by new `account_snapshot_wait_s` (default `ACCOUNT_SNAPSHOT_WAIT_SECONDS = 30.0`), failing closed (NETWORK_ERROR) and deregistering a dead ticket on expiry; TTL cache + failure-sharing semantics unchanged; an invalidation epoch stops a read that began before an account-changing op from publishing (post-op truth wins); `positions()`/`open_orders()` stay uncached.
 - Fix B (`src/execution/broker/factory.py`, `src/execution/runtime/session.py`): `resolve_broker(..., *, connect=True)`; `reconcile_now()` passes `connect=False` — per-step re-resolution is a pure identity swap (no profile REST, no cache invalidation, no WS reset); `start()` keeps the verification probe. Fresh auth preserved: the manager connects + verifies the adapter once at activation and sessions swap to that exact instance; a bad token still fails closed as a blocking RECONCILE_ERROR. Intentional delta: the per-reconcile order-WS "unsuspend" reset is gone — suspension now holds until a real reconnect (as documented).

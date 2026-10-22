@@ -317,6 +317,12 @@ class FyersSessionAdapter:
         self._order_ws_guard = threading.RLock()
         self._order_ws_verify_lock = threading.Lock()
         self._order_event_queue: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=10_000)
+        self._order_events: list[dict[str, Any]] = []
+        self._order_events_seq = 0
+        self._consumer_cursors: dict[str, int] = {}
+        self._order_event_lock = threading.Lock()
+        self._order_snapshot_cache: tuple[float, tuple[dict[str, Any], ...]] | None = None
+        self._order_snapshot_cache_ttl_s: float = 2.0
         self._seen_fills: set[str] = set()  # Dedup key: f"{order_id}:{trade_no or fill_qty}"
         self._order_cum_filled: dict[
             str, float
@@ -395,6 +401,14 @@ class FyersSessionAdapter:
         self._profile_cache = None
         self._invalidate_account_snapshot()
         self._stop_order_ws()
+        with self._order_event_lock:
+            self._order_events.clear()
+            self._consumer_cursors.clear()
+        while not self._order_event_queue.empty():
+            try:
+                self._order_event_queue.get_nowait()
+            except queue.Empty:
+                break
         self._connected = False
 
     def health(self) -> tuple[bool, str]:
@@ -704,11 +718,17 @@ class FyersSessionAdapter:
         if events:
             # Broker truth changed; the shared account snapshot is now stale.
             self._invalidate_account_snapshot()
-        for ev in events:
-            try:
-                self._order_event_queue.put_nowait(ev)
-            except queue.Full:
-                logger.warning("ORDER_EVENT_QUEUE_FULL dropping event")
+        with self._order_event_lock:
+            for ev in events:
+                self._order_events_seq += 1
+                ev["_stream_seq"] = self._order_events_seq
+                self._order_events.append(dict(ev))
+                if len(self._order_events) > 2000:
+                    self._order_events = self._order_events[-1000:]
+                try:
+                    self._order_event_queue.put_nowait(ev)
+                except queue.Full:
+                    logger.warning("ORDER_EVENT_QUEUE_FULL dropping event")
 
     def _on_ws_trades(self, msg: Any) -> None:
         """Handle normalized trade update from FyersOrderSocket."""
@@ -725,10 +745,16 @@ class FyersSessionAdapter:
             # A fill changes account truth; invalidate the shared snapshot
             # immediately, not only when the app next drains stream_events().
             self._invalidate_account_snapshot()
-            try:
-                self._order_event_queue.put_nowait(ev)
-            except queue.Full:
-                logger.warning("ORDER_EVENT_QUEUE_FULL dropping trade event")
+            with self._order_event_lock:
+                self._order_events_seq += 1
+                ev["_stream_seq"] = self._order_events_seq
+                self._order_events.append(dict(ev))
+                if len(self._order_events) > 2000:
+                    self._order_events = self._order_events[-1000:]
+                try:
+                    self._order_event_queue.put_nowait(ev)
+                except queue.Full:
+                    logger.warning("ORDER_EVENT_QUEUE_FULL dropping trade event")
 
     def _parse_ws_order_event(self, order: dict[str, Any]) -> list[dict[str, Any]]:
         """Parse FYERS WebSocket order dict into VAYREN events."""
@@ -1097,6 +1123,7 @@ class FyersSessionAdapter:
         with self._account_snapshot_lock:
             self._account_snapshot_cache = None
             self._account_snapshot_epoch += 1
+            self._order_snapshot_cache = None
 
     def _required_rows(self, body: dict[str, Any], key: str, context: str) -> list[Any]:
         """A missing/!list account field is an unreadable response, not \"flat\"."""
@@ -1568,25 +1595,42 @@ class FyersSessionAdapter:
             return False
         raise self._error_from_fyers_response(resp)
 
-    def stream_events(self) -> tuple[dict[str, Any], ...]:
+    def stream_events(
+        self, consumer_id: str | None = None
+    ) -> tuple[dict[str, Any], ...]:
         """Drain real-time WebSocket order/trade events first; fallback to REST poll."""
         self._require_usable()
 
         # 1. Drain WebSocket order/trade events
-        ws_events: list[dict[str, Any]] = []
-        while not self._order_event_queue.empty():
-            try:
-                ws_events.append(self._order_event_queue.get_nowait())
-            except queue.Empty:
-                break
+        with self._order_event_lock:
+            if consumer_id is not None:
+                last_seq = self._consumer_cursors.get(consumer_id, 0)
+                ws_events = [
+                    e for e in self._order_events if e.get("_stream_seq", 0) > last_seq
+                ]
+                self._consumer_cursors[consumer_id] = self._order_events_seq
+            else:
+                ws_events = []
+                while not self._order_event_queue.empty():
+                    try:
+                        ws_events.append(self._order_event_queue.get_nowait())
+                    except queue.Empty:
+                        break
+                if not ws_events and self._order_events:
+                    ws_events = [dict(e) for e in self._order_events]
+                self._order_events.clear()
 
         if ws_events:
             self._invalidate_account_snapshot()
             return tuple(ws_events)
 
-        # 2. Polling fallback if order WS not connected or no WS events arrived
+        # When order WS is connected, updates arrive via WebSocket push — no REST polling.
+        if self._enable_order_ws and self._order_ws_state == STATE_CONNECTED:
+            return ()
+
+        # 2. Polling fallback if order WS not connected or disabled
         now = time.time()
-        if now - self._last_poll_epoch < self._poll_interval_s and self._cached_snapshot:
+        if now - self._last_poll_epoch < self._poll_interval_s:
             return ()
         self._last_poll_epoch = now
 

@@ -78,3 +78,5 @@ rust/target/
 crates/target/
 rust/shell_build.log
 rust/shell_build.err
+
+uv.lock
